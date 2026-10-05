@@ -6,24 +6,13 @@ on:
     branches:
       - main
 
-# `contents: write` creates the tag and the release. The other two exist only for
-# provenance and are the minimum `actions/attest-build-provenance` accepts:
-#
-#   id-token: write       mints the OIDC token Sigstore binds the attestation to.
-#                         Without it the action fails at signing rather than
-#                         silently publishing an unattested asset.
-#   attestations: write   writes the attestation to this repository's attestation
-#                         store, which is what `gh attestation verify` later reads.
-#
-# Both were absent from every `permissions:` block in the repository before this
-# change, so no artifact ASH has ever released carries provenance. Note the
-# default token is NOT sufficient even with these two added at the job level if a
-# workflow-level block narrows it further -- this block is workflow-level and is
-# the only one here.
+# Read-only default. The one job below declares everything it needs, and a
+# job-level `permissions:` block REPLACES this one rather than adding to it, so
+# this value never applies to that job. Keeping it at `read` means a job added
+# here later starts with no write access instead of silently inheriting the
+# write scopes that publishing needs.
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
   tag-and-release:
@@ -33,6 +22,21 @@ jobs:
       startsWith(github.event.pull_request.title, 'chore(release):')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # `contents: write` creates the tag and the release and moves the floating
+    # major tag. The other two exist only for provenance and are the minimum
+    # `actions/attest-build-provenance` accepts:
+    #
+    #   id-token: write       mints the OIDC token Sigstore binds the attestation
+    #                         to. Without it the action fails at signing rather
+    #                         than silently publishing an unattested asset. It
+    #                         grants no repository access by itself.
+    #   attestations: write   writes the attestation to this repository's
+    #                         attestation store, which is what
+    #                         `gh attestation verify` later reads.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

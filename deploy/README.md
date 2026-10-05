@@ -151,6 +151,14 @@ is the only implementation of it today, so nothing under `terraform/` reads
 joins the shared parameter surface in `cdk/lib/ash-config.ts` and still needs a
 Terraform counterpart when that module lands.
 
+A quick-create link goes further: it opens the console with the template already chosen and
+its parameters filled in. ASH ships no such links, because CloudFormation accepts only an S3
+URL in one and ASH hosts no bucket — see [Hosting the templates for one-click
+launch](#hosting-the-templates-for-one-click-launch).
+[quick-create-links.md](quick-create-links.md) is how you render your own against a bucket
+you control; it also lists which parameters each link sets and which ones you would still
+have to type.
+
 Scripting the launch is where size does come up. CloudFormation caps an inline
 `--template-body` at 51,200 bytes. `AshAgentCore`, `AshCodeCommitGate` and
 `AshEksOperator` fit;
@@ -241,23 +249,33 @@ parameter that decides whether you actually hold up your end of it.
 
 ## Committed generated artifacts
 
-Two things in this directory are generated and committed, which is a deliberate
-tradeoff: an adopter gets a one-click CloudFormation launch with no build step, at the
-cost of a file that can go stale against the code that produces it.
+Three things in this directory are generated and committed, which is a deliberate
+tradeoff: an adopter deploys straight from this repository with no build step — nobody
+runs `cdk synth` to launch one of these stacks — at the cost of files that can go stale
+against the code that produces them.
+
+No build step is not the same as one click. A console quick-create link additionally needs
+the template sitting in an S3 bucket, which ASH deliberately does not provide. If you want
+such a link, copy the template to a bucket you own and render one:
+[Hosting the templates for one-click launch](#hosting-the-templates-for-one-click-launch)
+explains why there is no upstream bucket, and
+[quick-create-links.md](quick-create-links.md) under "Rendering links for your own bucket"
+is the sequence.
 
 | Artifact | Generated from | Regenerate with |
 | --- | --- | --- |
 | `cdk/templates/<StackName>.template.json` | the CDK app in `cdk/` | `cd deploy/cdk && npm ci && rm -rf cdk.out && npx cdk synth --all --output cdk.out --no-lookups --quiet && find templates -type f -name '*.template.json' -delete && cp cdk.out/*.template.json templates/` |
 | `cdk-constructs/buildspec*.yml` | the construct in `cdk-constructs/` | `cd deploy/cdk-constructs && npm ci && npm run generate:buildspec` |
+| `quick-create-links.md` | `quick-create-links.md.template`, the committed templates' own `Parameters` blocks, and `quick-create-hosting.json` | `python3 scripts/render_quick_create_links.py render` |
 
 One generator run emits several buildspecs, not one: the top-level spec, the
 per-shard spec, and the merge spec that owns the pass/fail verdict for a sharded
 scan. All of them are checked, so drift confined to a sibling file is caught
 rather than passing because the top-level spec happened not to move.
 
-Neither is edited by hand. `.github/workflows/ash-iac-drift.yml` regenerates both on
-every pull request and fails if the result differs from what is committed, so a stale
-artifact is a red build rather than something an adopter discovers at launch time.
+None of the three is edited by hand. `.github/workflows/ash-iac-drift.yml` regenerates all
+of them on every pull request and fails if the result differs from what is committed, so a
+stale artifact is a red build rather than something an adopter discovers at launch time.
 
 The gate also runs `terraform fmt -check -recursive`, initializes and validates every
 Terraform module and example, and requires that the CDK app register cdk-nag as a CDK
@@ -284,6 +302,54 @@ On 2.x a suppression is serialized into the emitted template as
 `Metadata.cdk_nag.rules_to_suppress` on the resource it applies to, so the committed
 templates do carry a record of every one. The reason string travels with it, which
 means an incorrect reason is public — write it for a reviewer, not to silence output.
+
+## Hosting the templates for one-click launch
+
+A CloudFormation quick-create link opens the console with a template and its parameters
+already filled in, and it requires `templateURL` — which CloudFormation accepts only as an
+S3 URL. A link pointing at this repository's raw file URL does not work, so committing the
+templates is not by itself enough to make a one-click launch possible. They have to be in a
+bucket.
+
+**ASH publishes them to no bucket, and will not.** That is the same position it takes on the
+container image, for the same reason, set out in
+[Building your own container image](../docs/content/docs/building-your-own-image.md): ASH
+reads your source code, so anything that scans or provisions on your behalf sits in the
+trust position of your build tooling, and what is in it, when it changed, and who approved
+that should be answerable by the organization running it.
+
+The argument is weaker for a template than for an image, and worth stating as such. A
+template is text, it is committed here, and you can review one in the diff without trusting
+any registry. What an upstream bucket would add is not provenance — it is a permanent
+external dependency in your launch path, and one more artifact whose contents at any moment
+are decided elsewhere.
+
+So [quick-create-links.md](quick-create-links.md) ships with no links in it, permanently,
+and says so. That is its finished state rather than a gap.
+
+**The links are yours to render.** Copy the templates to a bucket you own, set it in
+`quick-create-hosting.json`, and re-render — you get a working link per template, in your
+account, to use or publish on your own runbook. The full sequence is in
+[quick-create-links.md](quick-create-links.md) under "Rendering links for your own bucket",
+and its first step is the same `aws s3 cp` that `cdk/README.md` already documents for
+launching the three templates that exceed CloudFormation's inline size cap. For those three
+the upload is not an extra cost of this feature; it is a step you were already taking.
+
+Two things that were rejected, both for the same reason:
+
+- **Rendering against a guessed or sample bucket name.** It fails in the console with an
+  access error, and the reader spends their time auditing their own permissions before
+  concluding the link was never real. Worse, a sample link is copyable, and a link pointing
+  at a bucket its publisher does not control is a hazard rather than an illustration. The
+  renderer emits an unmistakable `NO-BUCKET-CONFIGURED` instead.
+- **Softening the placeholder into something that looks like a URL.** Same failure, one step
+  removed.
+
+Both are instances of one rule: a placeholder standing in for a security-relevant value
+should be **unusable rather than plausible**, so that a wrong value fails loudly instead of
+resolving to something. A syntactically valid stand-in gets deployed; an obviously broken one
+gets replaced. That holds for a bucket in a launch URL the same way it holds for a checksum,
+a signing identity, or an account id.
 
 ## Constraints and assumptions
 

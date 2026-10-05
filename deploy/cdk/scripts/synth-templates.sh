@@ -7,10 +7,13 @@
 #
 # WHY THE TEMPLATES ARE COMMITTED AT ALL
 # --------------------------------------
-# They are the deliverable. An adopter gets a one-click CloudFormation launch
-# from a URL pointing at a template in this repository; they do not run `cdk`.
-# That only works if what is committed is exactly what this app synthesizes,
-# which is what --check is for.
+# They are the deliverable. An adopter launches one from the CloudFormation
+# console, or from a quick-create URL they render against their own S3 bucket;
+# either way they do not run `cdk`. Note that a URL pointing at this repository
+# will NOT do -- CloudFormation's templateURL accepts only an S3 URL, which is
+# why deploy/quick-create-links.md exists and why it ships with no links in it.
+# Either path only works if what is committed is exactly what this app
+# synthesizes, which is what --check is for.
 #
 # WHAT MAKES THE OUTPUT REPRODUCIBLE
 # ----------------------------------

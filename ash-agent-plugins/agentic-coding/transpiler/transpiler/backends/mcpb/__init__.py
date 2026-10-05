@@ -33,6 +33,7 @@ from pathlib import Path
 import json
 import shutil
 import zipfile
+import zlib
 
 from ...core import (
     BaseBackend,
@@ -77,7 +78,26 @@ class MCPBBackend(BaseBackend):
 
         Stamps the filename with the manifest version (e.g. dist/ash-1.0.0.mcpb).
         The plain ash.mcpb in plugins/mcpb/ stays as the canonical, committed
-        artifact; dist/ is the staging area for release uploads."""
+        artifact; dist/ is the staging area for release uploads.
+
+        READ THIS BEFORE "FIXING" THE VERSION IN THAT FILENAME
+
+        ctx.manifest.version is the *plugin* version from
+        transpiler/_base/manifest.json. It is deliberately not ASH's package
+        version, so a release attaches an asset named after the plugin version.
+        That looks like a bug and is not one: pyproject.toml's
+        [tool.commitizen] version_files matches `_base/manifest.json:ash_version`
+        specifically so that a bump rewrites the ASH tag the manifest pins
+        WITHOUT touching this field. Wiring this filename to the ASH version
+        would mean a version_files entry that matches the plugin `version` key,
+        which is the collision that entry is written to avoid.
+
+        This copy is a plain copy2 of a committed file, so it proves nothing
+        about the archive's contents on its own. What establishes that the
+        attached asset matches _base/ is `agentic-plugins check`, which rebuilds
+        every backend into a sandbox and byte-compares, ash.mcpb included. The
+        release workflow runs that check before calling this phase for exactly
+        that reason; without it, release would publish a hand-edited archive."""
         if ctx.dist_dir is None:
             return
         src = ctx.out / self.MCPB_BUNDLE.archive_path
@@ -92,10 +112,21 @@ class MCPBBackend(BaseBackend):
     def smoke_test(self, ctx: BuildContext) -> dict | None:
         """Validate ash.mcpb archive contains a parseable manifest.json.
 
-        The MCPB spec mandates manifest.json at the archive root with at
-        least `name`, `version`, and `dxt_version` fields. We reach into
-        the ZIP and parse the manifest to confirm Claude Desktop will
-        accept it."""
+        The MCPB spec mandates manifest.json at the archive root. The three
+        fields required below -- `name`, `version`, `manifest_version` -- are
+        the ones this check enforces. `manifest_version` and not
+        `dxt_version`: MCPB was renamed from DXT (Desktop Extensions), and the
+        version key was renamed with it.
+
+        A damaged archive is reported, not raised. zipfile validates the
+        container from the central directory, so a corrupt deflate stream gets
+        past BadZipFile and surfaces from the member read as zlib.error, and a
+        manifest that is not valid UTF-8 raises UnicodeDecodeError, which is not
+        a json.JSONDecodeError. An unsupported compression method
+        (NotImplementedError, a RuntimeError subclass) and a set encryption bit
+        (RuntimeError) also fail only at the member read; catching RuntimeError
+        reports both as an invalid ZIP.
+        validate.validate_mcpb_archive handles the same cases the same way."""
         archive = ctx.out / "ash.mcpb"
         if not archive.exists():
             return {"ok": False, "reason": "ash.mcpb archive missing"}
@@ -110,9 +141,9 @@ class MCPBBackend(BaseBackend):
                     }
                 with zf.open("manifest.json") as f:
                     manifest = json.loads(f.read().decode("utf-8"))
-        except zipfile.BadZipFile as e:
+        except (zipfile.BadZipFile, zlib.error, RuntimeError) as e:
             return {"ok": False, "reason": f"ash.mcpb is not a valid ZIP: {e}"}
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             return {"ok": False, "reason": f"manifest.json inside archive invalid: {e}"}
 
         for required in ("name", "version", "manifest_version"):

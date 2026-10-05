@@ -1,11 +1,13 @@
 # Keeps every committed generated artifact under deploy/ honest.
 #
-# Three trees under deploy/ commit files that a generator produced: the CDK app
-# commits its synthesized CloudFormation templates so adopters get one-click
-# launches without a build step, and the jsii construct package commits the
-# buildspec.yml it generates. A committed generated file is a cache, and a cache
-# with no invalidation check goes stale silently -- an adopter then launches a
-# template that no longer matches the app that was reviewed.
+# Several trees under deploy/ commit files that a generator produced: the CDK app
+# commits its synthesized CloudFormation templates so adopters deploy with no
+# build step, the jsii construct package commits the
+# buildspec.yml it generates, and deploy/quick-create-links.md is rendered from
+# those templates' own parameter blocks. A committed generated file is a cache,
+# and a cache with no invalidation check goes stale silently -- an adopter then
+# launches a template that no longer matches the app that was reviewed, or
+# follows a link whose parameters no longer exist.
 #
 # Every check here is offline. cdk synth, terraform validate and cdk-nag all
 # read local files and never call an AWS API, so this workflow needs no AWS
@@ -48,7 +50,7 @@ on:
   # triggers. In short: the active "Protect main" ruleset requires the merge queue for
   # main and this workflow runs on merge_group, so anything reaching main through the
   # queue is already gated -- but the ruleset also grants one repository role an
-  # always-on bypass, and a merge taken under it lands on main with none of these six
+  # always-on bypass, and a merge taken under it lands on main with none of these seven
   # checks having run. Pull request 565 is the measured instance: no merge_group run of
   # any workflow, and only the docs deploy and the default code-scanning run against
   # its commit on main.
@@ -58,16 +60,16 @@ on:
   # once `["!main"]`, which matches no branch at all rather than every branch but main;
   # this workflow had zero push runs across its whole history as a result.
   #
-  # The duplicate run on a queued merge is real and was accepted: six more single-runner
+  # The duplicate run on a queued merge is real and was accepted: seven more single-runner
   # jobs per merge to cover the merge that skips the queue. The eviction hazard that
   # made an earlier attempt at this trigger unsafe is handled by the per-commit
   # concurrency group below, not by leaving the trigger off.
   #
   # Worth stating for this file specifically, because its jobs are cheap and the
   # temptation to run them everywhere is real: cost is not the argument for keeping the
-  # filter narrow. All six jobs are single-runner and offline -- cdk synth, terraform
-  # validate and cdk-nag read local files only. The argument is that a second verdict on
-  # a tree pull_request already covered is not a second check.
+  # filter narrow. All seven jobs are single-runner and offline -- cdk synth, terraform
+  # validate, cdk-nag and the link renderer read local files only. The argument is that a
+  # second verdict on a tree pull_request already covered is not a second check.
   push:
     branches:
       - main
@@ -142,6 +144,7 @@ jobs:
       cdk: ${{ steps.paths.outputs.cdk }}
       constructs: ${{ steps.paths.outputs.constructs }}
       terraform: ${{ steps.paths.outputs.terraform }}
+      quickcreate: ${{ steps.paths.outputs.quickcreate }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -154,6 +157,7 @@ jobs:
           cdk=false
           constructs=false
           terraform=false
+          quickcreate=false
 
           # Written as explicit if blocks rather than `[ -f x ] && y=true`. Under
           # `set -e` the latter leans on errexit's exemption for non-final
@@ -173,11 +177,19 @@ jobs:
           if [ -d deploy/terraform ] && [ -n "$(find deploy/terraform -type f -name '*.tf' -print -quit)" ]; then
             terraform=true
           fi
+          # The quick-create link document's SOURCE, not its rendered output. Keying on
+          # the template means a deleted or never-committed rendered file is a drift
+          # failure rather than a silent skip -- which is the whole point, since the
+          # rendered file is the artifact an adopter reads.
+          if [ -f deploy/quick-create-links.md.template ] && [ -f scripts/render_quick_create_links.py ]; then
+            quickcreate=true
+          fi
 
           {
             echo "cdk=$cdk"
             echo "constructs=$constructs"
             echo "terraform=$terraform"
+            echo "quickcreate=$quickcreate"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -189,6 +201,7 @@ jobs:
             echo "| cdk-nag | \`deploy/cdk/cdk.json\` | \`$cdk\` |"
             echo "| Generated buildspec drift | \`deploy/cdk-constructs/package.json\` | \`$constructs\` |"
             echo "| Terraform hygiene | \`deploy/terraform/**/*.tf\` | \`$terraform\` |"
+            echo "| Quick-create link drift | \`deploy/quick-create-links.md.template\` | \`$quickcreate\` |"
             echo
             echo "A \`false\` row means that tree has not landed on this ref yet and its"
             echo "check was skipped. It does not mean the check passed."
@@ -212,7 +225,8 @@ jobs:
             deploy/cdk/templates \
             deploy/cdk/templates/Probe.template.json \
             deploy/cdk-constructs/buildspec.yml \
-            deploy/terraform
+            deploy/terraform \
+            deploy/quick-create-links.md
           do
             if git check-ignore -q "$path"; then
               echo "::error file=.gitignore::'$path' is ignored by git, so the drift gate cannot see changes to it. Remove the ignore rule or narrow it."
@@ -1361,9 +1375,130 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
   # ---------------------------------------------------------------------------
+  # Quick-create link drift, and whether the links are even addressable.
+  #
+  # deploy/quick-create-links.md advertises a one-click CloudFormation launch per
+  # committed template. Two separate things can be wrong with it, and only one of
+  # them is drift, so this job checks both.
+  #
+  # DRIFT is the same measurement the two jobs above make: regenerate the file,
+  # ask git. Same reason for using git status --porcelain rather than a diff --
+  # a rendered file git has never heard of reads as a clean tree to a diff.
+  #
+  # The other failure is the one this job exists for, and it is silent by design
+  # in CloudFormation itself. A quick-create link passes parameters as
+  # `param_<Name>` in the URL fragment, and CLOUDFORMATION IGNORES A `param_`
+  # NAME THE TEMPLATE DOES NOT DECLARE. It also ignores any parameter whose
+  # NoEcho is true. So `param_AshVerison` is not an error: the console opens, the
+  # field is absent, the template's default quietly applies, and the adopter
+  # deploys something other than what the link said. Nothing reports it -- not
+  # the console, not CloudFormation, not the stack events. A reviewer reading the
+  # URL is the only thing standing between a typo and a wrong deployment, and a
+  # 400-character URL is not something a reviewer reads.
+  #
+  # `check` therefore re-reads the RENDERED file, parses every link out of it,
+  # and asserts each param_ name against that template's own Parameters block.
+  # It reads the artifact rather than the generator's intent on purpose: a check
+  # that re-derived the links from the templates and compared them to itself
+  # would agree with itself no matter what was committed.
+  #
+  # THE POSITIVE CONTROL, AND WHY IT IS NOT OPTIONAL HERE
+  # ----------------------------------------------------
+  # ASH does not publish these templates to S3 yet, and a quick-create link
+  # REQUIRES an S3 templateURL, so the committed document currently renders no
+  # URLs at all -- a placeholder and a note instead. That means the link
+  # validator has nothing to validate today, and "0 problems over 0 links" is
+  # exactly what a broken validator also reports.
+  #
+  # Two things close that hole. `--self-test` drives the validator with a
+  # misspelled param_ name, a NoEcho parameter, a value disagreeing with the
+  # template, a GitHub raw URL and an illegal stack name, and fails unless every
+  # one is REJECTED -- plus a correct link that must be ACCEPTED, since a
+  # validator that rejected everything would pass all five. And `check` verifies
+  # the parameter PLAN (the names and values the links would carry) against every
+  # template in both modes, so it is asserting something real while the bucket is
+  # empty, and says which mode it ran in rather than reporting a bare pass.
+  #
+  # Ordered self-test first: if the validator cannot catch a planted defect there
+  # is no reason to believe its verdict on the real file, so that failure should
+  # be the one a reader sees.
+  # ---------------------------------------------------------------------------
+  quick-create-link-drift:
+    name: quick-create link drift
+    needs: discover
+    if: needs.discover.outputs.quickcreate == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The renderer uses only the standard library, so there is nothing to
+      # install. The version is pinned anyway rather than taking the runner's
+      # default python3, because "whatever the image ships" is a dependency that
+      # changes without anyone editing this file.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Prove the link validator rejects a planted defect
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/render_quick_create_links.py check --self-test
+
+      - name: Check every param_ name against the template it launches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/render_quick_create_links.py check
+
+      - name: Regenerate the document and let git report the drift
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GEN=deploy/quick-create-links.md
+          # Only ever echoed, never executed -- the command below is written out
+          # literally so that this string cannot drift into being the thing that
+          # runs.
+          REGEN_CMD="python3 scripts/render_quick_create_links.py render"
+
+          # Deleted before regenerating, for the same reason the CDK job clears
+          # its templates: a renderer that stops emitting the file leaves a
+          # stale committed copy that is tracked and unmodified, and nothing
+          # reports it until it is missing.
+          rm -f "$GEN"
+          python3 scripts/render_quick_create_links.py render
+
+          if [ ! -f "$GEN" ]; then
+            echo "::error::$REGEN_CMD did not produce $GEN. Nothing was compared, so this gate proved nothing."
+            exit 1
+          fi
+
+          # --untracked-files=all so a rendered file that was never committed is
+          # reported rather than reading as a clean tree. The pathspec is quoted
+          # so git does the matching, which is what lets it match a file that is
+          # not in the index.
+          changed="$(git status --porcelain --untracked-files=all -- "$GEN")"
+          if [ -z "$changed" ]; then
+            echo "$GEN matches a fresh render byte for byte."
+            exit 0
+          fi
+
+          echo "::error::$GEN is out of date. Regenerate it and commit the result: $REGEN_CMD"
+          echo "git status --porcelain -- $GEN"
+          echo "$changed"
+          echo "::group::diff"
+          git diff -- "$GEN"
+          echo "::endgroup::"
+          exit 1
+
+  # ---------------------------------------------------------------------------
   # One stable name for branch protection to require.
   #
-  # The four checks above are conditional, and a required check that is skipped
+  # The five checks above are conditional, and a required check that is skipped
   # never reports, which parks a pull request instead of passing it. This job
   # always runs, so it always reports, and it turns "skipped because the tree has
   # not landed" into a pass while turning any real failure into a failure.
@@ -1377,6 +1512,7 @@ jobs:
       - generated-buildspec-drift
       - terraform-hygiene
       - cdk-nag
+      - quick-create-link-drift
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
