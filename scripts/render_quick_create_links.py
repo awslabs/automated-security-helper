@@ -86,9 +86,12 @@ THE POSITIVE CONTROL
 --------------------
 ``--self-test`` runs the validator over deliberately broken links -- a misspelled
 parameter, a ``NoEcho`` parameter, a value that disagrees with the template, a GitHub raw
-URL, an illegal stack name -- and fails unless every one is REJECTED. It also runs a
-correct link through and fails unless that one is ACCEPTED, because a validator that
-rejects everything would otherwise pass all five negative cases and prove nothing.
+URL, a dotted bucket addressed virtual-hosted, an illegal stack name, and a declared
+parameter outside the plan -- and fails unless every one is REJECTED. It runs two
+classification cases the same way: a template nobody classified, and a stack classified
+as taking no prepopulated parameters while declaring them. It also runs a correct link
+through and fails unless that one is ACCEPTED, because a validator that rejects
+everything would otherwise pass every negative case and prove nothing.
 """
 
 from __future__ import annotations
@@ -176,9 +179,6 @@ S3_URL_PATTERNS = (
     re.compile(r"^https://s3-[a-z0-9-]+\.amazonaws\.com/[^/]+/.+$"),
 )
 
-# Every console URL the renderer emits, for `check` to find in the rendered document.
-# Deliberately loose about what follows the fragment so that a MALFORMED link is still
-# found and then reported, rather than not matching and reading as absent.
 # S3 general purpose bucket naming rules, from AmazonS3/latest/userguide/bucketnamingrules.html.
 # Checked so that a typo in quick-create-hosting.json fails at render time with a reason,
 # rather than producing a link that opens the console and then cannot fetch its template.
@@ -195,6 +195,9 @@ BUCKET_RESERVED_SUFFIXES = ("-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s
 AWS_PARTITION_REGION_RE = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d+$")
 NON_AWS_PARTITION_PREFIXES = ("cn-", "us-gov-", "us-iso", "eusc-")
 
+# Every console URL the renderer emits, for `check` to find in the rendered document.
+# Deliberately loose about what follows the fragment so that a MALFORMED link is still
+# found and then reported, rather than not matching and reading as absent.
 CONSOLE_URL_RE = re.compile(
     r"https://[a-z0-9-]+\.console\.aws\.amazon\.com/cloudformation/home\?[^\s)\]]+"
 )
@@ -935,7 +938,7 @@ def self_test() -> int:
     failures: list[str] = []
 
     # The negative control for the positive control: a validator that rejected
-    # everything would pass all five cases above and be useless.
+    # everything would pass every case above and be useless.
     accepted = validate_url(good, stacks, plan)
     if accepted:
         failures.append(
