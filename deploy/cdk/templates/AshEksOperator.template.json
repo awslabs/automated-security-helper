@@ -302,6 +302,7 @@
      }
     },
     "MemorySize": 512,
+    "ReservedConcurrentExecutions": 1,
     "Role": {
      "Fn::GetAtt": [
       "InstallerRole13277E70",
@@ -456,7 +457,7 @@
       "Arn"
      ]
     },
-    "ServiceTimeout": "720",
+    "ServiceTimeout": 720,
     "ClusterName": {
      "Ref": "EksClusterName"
     },

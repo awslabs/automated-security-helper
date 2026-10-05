@@ -259,6 +259,7 @@ import {
   CfnCondition,
   CfnOutput,
   CfnParameter,
+  CfnResource,
   CfnRule,
   CustomResource,
   Duration,
@@ -1285,6 +1286,9 @@ export const LAMBDA_VPC_ENI_ACTIONS = [
   'ec2:UnassignPrivateIpAddresses',
 ] as const;
 
+/** The outer bound on the install custom resource; see `serviceTimeout` below. */
+const INSTALL_SERVICE_TIMEOUT = Duration.minutes(12);
+
 // The ServiceAccount names are OPERATOR_SERVICE_ACCOUNT and SCAN_SERVICE_ACCOUNT,
 // declared at the top of this file and interpolated into the applier. There is
 // deliberately no second copy here: a local constant duplicating one of them is how
@@ -1556,6 +1560,10 @@ export class AshEksOperatorStack extends Stack {
       // which is why this one answers CloudFormation itself.
       timeout: Duration.minutes(10),
       memorySize: 512,
+      // One, for the reason ash-image-build.ts gives for its bootstrap starter: a
+      // custom-resource responder for one resource is never invoked twice at once.
+      // It also keeps two applies from racing against the same cluster.
+      reservedConcurrentExecutions: 1,
       logGroup,
       // NO environment variables, deliberately. The group, version, CRD names and
       // RBAC rules used to arrive here as env vars while the rules themselves lived
@@ -1698,7 +1706,7 @@ export class AshEksOperatorStack extends Stack {
        * Longer than the function's own 10-minute timeout so a Lambda that is merely slow
        * reports its own verdict first, and this only fires when nothing answers at all.
        */
-      serviceTimeout: Duration.minutes(12),
+      serviceTimeout: INSTALL_SERVICE_TIMEOUT,
       properties: {
         ClusterName: clusterName.valueAsString,
         Namespace: namespace.valueAsString,
@@ -1708,6 +1716,14 @@ export class AshEksOperatorStack extends Stack {
         OperatorImage: operatorImage.valueAsString,
       },
     });
+
+    // CDK renders ServiceTimeout as the string "720", which CloudFormation coerces
+    // and its validator reports (W9003). The property is an integer, so it is written
+    // as one, from the same Duration the construct validated above.
+    (install.node.defaultChild as CfnResource).addPropertyOverride(
+      'ServiceTimeout',
+      INSTALL_SERVICE_TIMEOUT.toSeconds(),
+    );
 
     /**
      * Without this the access entry and the apply race, and the apply loses: the

@@ -300,6 +300,25 @@ describe('the EC2 grant is usable by the Lambda service only', () => {
   });
 });
 
+describe('the installer function as a custom-resource responder', () => {
+  test('it reserves exactly one concurrent execution', () => {
+    // One responder for one resource; a second slot would only let two applies
+    // race against the same cluster.
+    const fn = Object.values<any>(TEMPLATE.findResources('AWS::Lambda::Function'))[0];
+    expect(fn.Properties.ReservedConcurrentExecutions).toBe(1);
+  });
+
+  test('ServiceTimeout is an integer, longer than the function timeout', () => {
+    // CDK renders it as a string, which CloudFormation coerces and its validator flags.
+    const install = Object.values<any>(JSON_TEMPLATE.Resources).find(
+      (r) => r.Type === 'AWS::CloudFormation::CustomResource',
+    );
+    const fn = Object.values<any>(TEMPLATE.findResources('AWS::Lambda::Function'))[0];
+    expect(typeof install.Properties.ServiceTimeout).toBe('number');
+    expect(install.Properties.ServiceTimeout).toBeGreaterThan(fn.Properties.Timeout);
+  });
+});
+
 describe('the applier stays self-contained', () => {
   test('it imports nothing outside boto3 and the standard library', () => {
     // A kubectl layer or the `kubernetes` package would make this template
