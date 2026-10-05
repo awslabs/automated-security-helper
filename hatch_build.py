@@ -1,5 +1,12 @@
 """
 Custom Hatch build hook to stage build assets.
+
+packaging/assert-paths-filter.py builds the wheel through this hook under an audit
+hook and refuses, among other things, any directory open during the build. A
+descriptor for a directory lets a later open read a file relative to it, which the
+check cannot see. shutil.rmtree and TemporaryDirectory cleanup open the directories
+they remove, so calling either here turns that check, and the deb and rpm workflow
+step that runs it, red. Remove staged files one at a time instead.
 """
 
 import shutil
