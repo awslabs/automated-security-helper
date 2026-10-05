@@ -4,200 +4,338 @@ ASH for JetBrains IDEs
 What this plugin is, and what it deliberately is not
 ----------------------------------------------------
 
-It runs the `ash` command line tool over the open project and turns what ASH reports into
-editor annotations. It contains no scanners, no copy of ASH, and no scanner content of any
-kind. It invokes whatever `ash` is on the user's PATH, or the executable named in
-Settings | Tools | ASH, and reads the SARIF that ASH already writes at
-`<output-dir>/reports/ash.sarif`.
+It runs the ASH command line tool over the open project and turns what ASH reports into editor
+highlights. It contains no scanners, no copy of ASH, and no scanner content of any kind. It
+invokes the ASH CLI the user installed and reads the two files ASH writes into its output
+directory: `reports/ash.sarif` for the findings and `ash_aggregated_results.json` for which
+scanners ran.
+
+Tools | Run ASH Security Scan runs a scan in the background. Findings appear as editor errors,
+warnings and weak warnings, at the file and line the scanner reported, through an inspection
+registered for every file type. The scan ends in a notification that says what was found, what
+could not be read, and whether the scan was complete.
 
 So there is nothing here to keep in step with an ASH release. That is the reason the plugin
 version is not in pyproject.toml's [tool.commitizen] version_files, and build.gradle.kts
 gives the full argument at the point where someone would add it.
 
-Why this lives under editors/ and not under packaging/
-------------------------------------------------------
+The runtime is Kotlin, in src/main/kotlin. It replaced an earlier Java implementation of the
+same plugin; the gates, the CI workflow and the planted-secret fixture were kept, and the rest
+of this file describes the Kotlin runtime.
 
-Everything in packaging/ installs ASH, and every one of those packages bundles exactly one
-wheel -- ASH's own -- which is the mechanical guard keeping them on the permitted side of
-the publishing boundary described in packaging/README.md. This installs nothing and bundles
-nothing. It is a consumer of ASH rather than a distribution of it, and it would be the only
-directory under packaging/ with no wheel to count.
+Which executable runs
+---------------------
 
-editors/<editor>/ also holds a second editor integration without either owning the other's
-tree.
+AshCliLocator decides, in this order:
 
-Zero runtime dependencies, and why that is a requirement rather than a preference
----------------------------------------------------------------------------------
+  1. A path configured in Settings | Tools | ASH is used AS GIVEN. It is not searched for,
+     checked, or replaced by either name below. A value that does not start produces "Could
+     not start", not a quiet substitution.
+  2. Otherwise `ashx` on PATH.
+  3. Otherwise `ash` on PATH, with a notification the first time it happens in an IDE session
+     naming the binary that ran. Once rather than per scan, because a balloon on every scan for
+     a setup the user may have chosen trains them to dismiss balloons.
+  4. Otherwise an error naming both executables and the PATH entries searched, because "not
+     found" and "PATH was empty" have different fixes.
 
-A JetBrains plugin distribution zip bundles its RUNTIME classpath into `lib/`. A single
-`implementation` dependency therefore puts a third party's jar inside an artifact this
-project publishes as a release asset, silently, at package time. packaging/README.md draws
-that line: ASH's own code may ship in a published artifact, third-party code never may.
-
-So this plugin has no runtime dependencies at all. Two consequences worth knowing before
-changing anything:
-
-  * The SARIF reader carries its own JSON parser, written against nothing but the JDK
-    (Json.java). The IntelliJ Platform does bundle JSON libraries in its own lib/, and a
-    compileOnly dependency on one would also keep the zip clean; that was rejected because
-    which libraries the platform ships is not part of the plugin SDK's compatibility
-    contract. A plugin relying on it gets a NoClassDefFoundError on some future IDE, and for
-    a security tool that renders as zero findings.
-  * assert-plugin-zip-contents.py is the enforcement, and it is phrased as a list comparison
-    for the same reason the one-wheel rule is phrased as a count: "no third-party jars" needs
-    a decision per dependency, made by whoever reviewed the build file that day. "Every jar
-    in lib/ is named ash-jetbrains*" is checkable by reading the log.
-
-It also refuses loose .class files in the zip, and refuses a class outside this plugin's own
-package inside our own jar. The .deb and .rpm can only gain third-party code by gaining a
-.whl, so counting wheels is sufficient there. A plugin build could instead shade or shadow
-third-party classes into our jar, which leaves the jar count at one and the boundary crossed
-anyway -- the same extra check packaging/flatpak/build.sh needs for `.dist-info` directories.
-
-Build-time dependencies are a different question and are not the concern: the IntelliJ
-Platform Gradle plugin, Gradle, JaCoCo, JUnit, and the roughly one gigabyte IDE distribution
-resolved from JetBrains' CDN are all thrown away after the build.
+Both names are constants in AshCliLocator and nothing else spells either, so renaming the
+entry point again is a one-line change. On Windows the `.exe`, `.cmd` and `.bat` launcher forms
+are tried as well.
 
 The `ash` name collision on Windows
 -----------------------------------
 
-`ash` is canonical and is what this plugin invokes by default. It is also the name of the
-Almquist shell, which MSYS2 ships on Windows and which has already shadowed ASH's entry
-point in this project's CI, producing `Illegal option --`. JetBrains IDEs run on Windows and
-this plugin spawns a process, so the collision reaches users here.
+`ash` is also the name of the Almquist shell, which MSYS2 ships on Windows and which has
+already shadowed ASH's entry point in this project's CI, producing `Illegal option --`. The
+fallback in step 3 makes that collision reachable from this plugin, so every scan is preceded
+by `<executable> --version`, and the scan is refused unless the output contains
+`awslabs/automated-security-helper`. An exit code cannot distinguish ASH from any other program
+that answers `--version`, so the test is a string in ASH's own output. When the output looks
+like a shell rejecting an option, the error says so, names MSYS2, and recommends
+`automated-security-helper`, ASH's unambiguous entry point.
 
-It cannot be left to fail naturally, because of the SHAPE of the failure. A shell that does
-not understand `scan --source-dir ...` writes an error and exits, ASH writes no SARIF, and a
-plugin that only knew how to read SARIF would put zero annotations on the file. Zero
-annotations is what a clean file looks like. The wrong binary answering would therefore
-render as "ASH found nothing", most confidently in the case where a real secret was present.
+Both child processes get the null device as stdin. A shell invoked in a way it reads as
+interactive READS STDIN, and with a pipe nobody writes or closes it would never exit. The
+probe's 30-second deadline bounds anything that ignores EOF.
 
-Three things address it:
+`--version` and not `-v`: `-v` is `--verbose` in ASH.
 
-  * Every scan is preceded by `ash --version`, and the plugin refuses to proceed unless the
-    output contains `awslabs/automated-security-helper`. An exit code cannot distinguish ASH
-    from any other program that answers `--version`, so the test is a string in ASH's own
-    output. Measured: `ash --version` prints
-    `awslabs/automated-security-helper v3.7.0` and exits 0.
-  * The error names `automated-security-helper` as the fix. That entry point is kept
-    indefinitely by the project for exactly this reason, so recommending it is not
-    recommending something that may be removed. When the output looks like a shell rejecting
-    an option, the message says so and names MSYS2.
-  * The child's stdin is redirected from the null device. A shell invoked in a way it reads
-    as interactive READS STDIN: with stdin inherited from the IDE, that child would never
-    exit and never write anything, and the annotator would wait on a process that is waiting
-    on it. The 30-second probe deadline bounds anything that ignores EOF.
+What each exit code means here
+------------------------------
 
-`--version` and not `-v`: `-v` is `--verbose` in ASH and has been for all of v3, so a probe
-using it would start a verbose scan instead of printing a version. `ashv3` still works and
-warns once on stderr; it is deprecated, so nothing here suggests it, and AshExecutable
-recognizes it only so a user who typed it into the settings field can be told where the
-stderr line came from.
+  0  The scan finished and found nothing actionable. Findings (usually none) are shown.
+  1  ASH's ScanIncompleteExit: the scan finished WITHOUT FULL COVERAGE. A selected scanner was
+     MISSING or ERROR, no scanner reached a verdict, a converter failed, a rule went
+     unevaluated, or a content database was past its bound. fail_on_incomplete_scanners now
+     defaults to true, so this is the ordinary result on a host missing some scanner tools.
+     When a report was written, its findings are SHOWN, as partial results, with a warning
+     titled "ASH scan incomplete" that names the scanners that did not complete. Exit 1 is also
+     what a crash produces; with no report on disk it is reported as a failed scan.
+  2  The scan finished and found actionable findings. Shown.
+  3  Invalid configuration. 4 is a workspace or policy error. Any other code is one this plugin
+     does not know. All are failed scans, even if something is on disk -- the readable set is an
+     allowlist, so a code ASH adds later is refused until someone decides what it means.
+
+Why exit 1 is shown rather than refused: its findings are real, and hiding them because some
+other scanner did not run would make the IDE show less than the command line does. What must
+not happen is the partial set reading as the whole answer, so the notification leads with
+"ASH reported this scan INCOMPLETE (exit 1)" and says findings from the parts that did not run
+are absent.
+
+`coverage_complete`. ASH's MCP server answers "did this scan cover everything" as
+`coverage_complete`, computed from the same ScanIncompleteness object that decides exit 1. The
+CLI does not write that field into ash_aggregated_results.json, so this plugin cannot read it.
+AshScanRunner.Outcome.Completed.coverageComplete answers the same question from what the CLI
+does leave: false when ASH exited 1 (ASH's own verdict), false when the status file names a
+scanner that did not complete or shows that nothing reached a verdict (which catches a project
+that turned fail_on_incomplete_scanners off and so exits 0 over a partial scan), and false when
+the status file could not be read. Anything short of true is a warning. When ASH exited 1 and
+the status file names nothing -- an unevaluated rule and a stale content database have no
+scanner row -- the warning carries the end of ASH's own output, which is where ASH said why.
+
+Both files are deleted before a run, so a report found afterwards was written by this run. If a
+delete fails (a read-only output directory), the file's modification time is recorded and
+checked after the run, failing closed: a report whose time did not move is refused as the
+previous run's, and a stale status file reads as unknown completeness rather than vouching for
+this run.
+
+Where the output goes, and the working directory
+------------------------------------------------
+
+ASH runs with `--output-dir <project>/.ash/ash_output`, which is ASH's own default location,
+so the SARIF a user can open is the one the plugin read. ASH excludes that directory from its
+own scan; measured, two consecutive scans of a directory with the previous run's output still
+inside it both reported the same three findings on leak.py and nothing under .ash/. The cost is
+that the IDE indexes the reports like any other project file. The previous Java implementation
+wrote to a temporary directory to avoid that; the Kotlin runtime chose ASH's default instead.
+
+The working directory is the scanned directory, and that is load-bearing: ASH writes SARIF URIs
+relative to its working directory, not to `--source-dir`. Measured: a run from the project's
+parent recorded `src/leak.py` where a run from the project recorded `leak.py`. Findings are
+keyed against the scanned directory, so any other working directory would misplace all of them.
+
+Zero bundled dependencies, and what the plugin relies on instead
+----------------------------------------------------------------
+
+A JetBrains plugin distribution zip bundles its RUNTIME classpath into `lib/`. A single
+`implementation` dependency therefore puts a third party's jar inside an artifact this project
+publishes as a release asset, silently, at package time. packaging/README.md draws that line:
+ASH's own code may ship in a published artifact, third-party code never may.
+
+So this plugin bundles nothing but its own jar, and assert-plugin-zip-contents.py is the
+enforcement: every jar in lib/ must be named ash-jetbrains*, no loose class files, and no
+foreign class inside our own jar (a shade or shadow step would leave the jar count at one and
+the boundary crossed anyway).
+
+Two things come from the IntelliJ Platform instead of being bundled, and they are not the same
+kind of reliance:
+
+  * The Kotlin standard library. gradle.properties sets kotlin.stdlib.default.dependency=false,
+    so the build compiles against and runs on the stdlib the IDE loads for every plugin, which
+    JetBrains documents as the supported arrangement. Measured: even with the property on, the
+    IntelliJ Platform Gradle plugin left the stdlib out of the zip, so the property is about the
+    classpath and not about the bundle. The zip gate holds the bundle either way; an
+    `implementation` dependency on any library (measured with org.json) puts its jar in lib/ and
+    the gate refuses it by name.
+  * Gson, for reading SARIF and the status file. The platform bundles it, so importing it adds
+    nothing to the zip. That is a coupling to a library the platform ships but does not promise,
+    and it was the reason the Java implementation carried its own JSON parser. Two checks make
+    the coupling visible instead of latent: the IDE tests run the parser inside a booted
+    platform, so the class resolving at runtime is asserted, and the plugin-verifier job in CI
+    resolves every referenced class against the IDE releases recommended() selects, including
+    ones newer than the build target. A future IDE without Gson fails that job. In the IDE
+    itself the failure would be a NoClassDefFoundError reported as an IDE error, not an empty
+    panel that reads as a clean scan.
+
+Build-time dependencies are a different question and are not the concern: the IntelliJ
+Platform Gradle plugin, Kotlin's compiler, Gradle, JaCoCo, JUnit, and the roughly one gigabyte
+IDE distribution resolved from JetBrains' CDN are all thrown away after the build.
 
 Building and verifying
 ----------------------
 
-There is no JDK requirement to state beyond 21, and there is no need to install one: the
-whole verification runs in a container.
+There is no JDK requirement to state beyond 21, and there is no need to install one: the whole
+verification runs in a container.
 
   docker run --rm -v "$PWD":/work -w /work/editors/jetbrains gradle:jdk21 \
       ./verify-in-container.sh
 
-That is the same script .github/workflows/ash-jetbrains-ci.yml runs. A verification that
-exists twice drifts, and the copy in CI is the one nobody runs by hand, which is why the
-steps are in the script rather than in the workflow YAML.
+That is the same script .github/workflows/ash-jetbrains-ci.yml runs. A verification that exists
+twice drifts, and the copy in CI is the one nobody runs by hand, which is why the steps are in
+the script rather than in the workflow YAML.
 
-The image is used for its toolset -- a JDK 21, git, python3 -- and not for its Gradle: the
-build always goes through `./gradlew`, which pins the Gradle version. That pin is
-load-bearing. The wrapper was first generated at 8.14.3 and the IntelliJ Platform Gradle
-plugin refused to apply, with "IntelliJ Platform Gradle Plugin requires Gradle Gradle 9.0.0
-and higher". Gradle 9 also turns the configuration cache on by default, which is why
-gradle.properties turns it back off.
+The image is used for its toolset -- a JDK 21, git, python3, curl -- and not for its Gradle: the
+build always goes through `./gradlew`, which pins Gradle 9.7.1. The IntelliJ Platform Gradle
+plugin refuses to apply on anything older than Gradle 9, and Gradle 9 turns the configuration
+cache on by default, which is why gradle.properties turns it back off.
 
-Expect the first build to be slow. The IntelliJ Platform Gradle plugin resolves an IDE
-distribution of roughly a gigabyte from JetBrains' CDN before it can compile anything.
+The platform is IntelliJ IDEA Community 2025.2.5, which is also the since-build floor (252).
+Not a 2025.3 build: the `ideaIC` artifact is not published from 2025.3 on, because JetBrains
+unified the Community and Ultimate distributions. There is no until-build, so the plugin loads on
+later IDEs; the plugin-verifier CI job is what checks them.
 
 The gates, and where each one lives
 -----------------------------------
 
-All four are Gradle tasks, so `./gradlew check buildPlugin` gates on a developer's machine
+All of these are Gradle tasks, so `./gradlew check buildPlugin` gates on a developer's machine
 exactly as CI does, and each has one place to relax rather than two.
 
   assertTestsRan          Every compiled test suite ran and reported, none was skipped, and
-                          AnnotationCountTest is among them.
-  assertCoverage          Line and branch coverage, the denominator floors, and the exclusion
-                          list audit.
+                          AnnotationCountTest and AshScanIntegrationTest are among them.
+  assertCoverage          Line and branch coverage, the denominator floors, the census, and
+                          the exclusion list audit.
   assertDistributionContents
                           Every jar in the built zip was built here, no loose class files, and
                           no foreign class inside our own jar.
   verifyPluginProjectConfiguration and verifyPluginStructure
-                          The platform's own two checks, provided by the IntelliJ Platform
-                          Gradle plugin and not wired into `check` by it. They are the only
-                          things that read META-INF/plugin.xml the way the platform will, so
-                          nothing else here would notice a misspelled extension point or a
-                          since-build the platform rejects. The full verifyPlugin task -- the
-                          Plugin Verifier's compatibility run, which downloads an additional
-                          IDE per target -- is deliberately not wired in.
-  unitTest's own doLast   A zero test count, reported at the moment of the run.
+                          The platform's own two checks, which read META-INF/plugin.xml the way
+                          the platform will. Nothing else here would notice a misspelled
+                          extension point or a since-build the platform rejects.
+  verifyPlugin            The Plugin Verifier's compatibility run against the recommended IDE
+                          releases. Not part of `check`, because it downloads one IDE per
+                          release; CI runs it as its own job.
+  test's own doLast       A zero test count, reported at the moment of the run. Not the gate:
+                          with the test sources moved aside, Gradle reports the task NO-SOURCE
+                          and runs none of its actions, which is why assertTestsRan is a
+                          separate task that reads artifacts.
 
-The last of those is not the gate, and the distinction was measured. With the test sources
-moved aside, Gradle reported "Task :unitTest NO-SOURCE" and BUILD SUCCESSFUL: a task Gradle
-skips as NO-SOURCE runs none of its own actions, so the in-task guard was never reached in the
-one case it existed for. assertTestsRan is a separate task that reads artifacts, so it fires
-whether or not the test task ran, and it also catches a committed include filter running a
-subset -- which reports green in every summary line.
+The tests, and what is real in them
+-----------------------------------
+
+The suite runs in the IntelliJ Platform test runtime, and the tests that need a platform extend
+BasePlatformTestCase, which boots a real headless Application and Project.
+
+  AshScanIntegrationTest  A scan from the controller (and once from the action, through
+                          Settings and the background task) to the highlights in the editor, in
+                          a project on disk. The CLI is a shell stub on a real PATH, and what it
+                          writes is not hand-written: it replays files a real ASH 3.7.0 run
+                          produced over this test's fixture, for exit 2 and for the exit-1
+                          incomplete case (src/test/resources/real-cli/README.txt says how). It
+                          asserts the planted secret's three findings reach the editor at error
+                          severity, the incomplete warning names cfn-nag (MISSING) while the
+                          partial findings are still shown, a clean SARIF gives zero highlights,
+                          a failed scan clears the previous findings, `ashx` wins over `ash`,
+                          `ash` is used with a once-per-session notice when `ashx` is absent, and
+                          a configured path is run as given without consulting PATH.
+  AnnotationCountTest     The original assertion this plugin exists to make, kept from the Java
+                          implementation: a NON-ZERO number of highlights from real ASH SARIF over
+                          a fixture carrying AWS's published example secret key, and ZERO from a
+                          real clean scan, so an inspection that highlighted unconditionally
+                          could not pass.
+  AshScanRunnerIdeTest    Process launch, the identity probe, every exit-code arm, the freshness
+                          guards, timeouts, and unreadable reports.
+  the rest                The parser, the status reader, the path and range mappers, the
+                          locator, and the notification text, as plain JUnit tests.
+
+Running the real CLI inside the test was the alternative to the replay. It needs ASH and a
+scanner toolchain inside the build container, which would make this suite's verdict depend on
+what that image ships.
 
 Coverage, and why the number is not the whole gate
 --------------------------------------------------
 
-The coverage standard this repository holds itself to names Python and TypeScript, each
-gated independently at 90% and never blended. This plugin is a third language and the
-standard did not mention it. assert-coverage.py applies the same 90% here, to line and
-branch separately, and prints it as this tree's own number. Nothing about it is combined
-with anyone else's figure.
+The coverage standard this repository holds itself to names Python and TypeScript, each gated
+independently at 90% and never blended. This plugin is a third language and the standard did not
+mention it. assert-coverage.py applies the same 90% here, to line and branch separately, and
+prints it as this tree's own number.
 
-The header comment of .github/workflows/ash-typescript-ci.yml explains why a bare percentage
-is insufficient: a threshold can be satisfied by measuring less, and the shrink looks like a
-config tidy-up in review. The mechanism here differs from that workflow's because the tool
-differs, and copying the mechanism rather than the reasoning would have been worse than not
-checking. jest omits source no test imports from its report ENTIRELY, so an unmeasured file
-is invisible; that is the hole assert-coverage-completeness.mjs closes. JaCoCo enumerates
-compiled classes, so an untouched class appears at 0% and is visibly bad.
+The header comment of .github/workflows/ash-typescript-ci.yml explains why a bare percentage is
+insufficient: a threshold can be satisfied by measuring less. The cheap way to game a JaCoCo
+gate is a widened exclusion pattern, one line in coverage-exclusions.json, so that file is what
+the gate audits hardest: every excluded class must be named with a reason, must still be
+tracked, must still match a class in the report, and must be under a declared line budget. The
+census compares `git ls-files` (`.kt` and `.java` under src/main/kotlin) with the report, so a
+source file that is in neither the report nor the exclusion list fails.
 
-The cheap way to game a JaCoCo gate is therefore not a narrowed crawler root but a widened
-exclusion pattern -- one line in coverage-exclusions.json, and the percentage rises with no
-test written. So that file is what the gate audits hardest: every excluded class must be
-named there with a reason, must still be tracked, must still match a class in the report,
-and must be under a declared line budget that is re-measured on every run. The budget is
-what stops an exclusion becoming a place to hide logic.
+The exclusion list is EMPTY, and that is new. The Java implementation excluded its three
+platform-facing classes with line budgets, because its tests ran in a plain JVM: under the
+platform's test task JaCoCo recorded 344 classes and none of the plugin's, a populated report
+whose every value was zero. The cause was that the platform test runtime loads plugin classes
+through its own PathClassLoader with no CodeSource location, and JaCoCo skips such classes unless
+told otherwise. build.gradle.kts now sets includeNoLocationClasses on the test task (with
+jdk.internal.* excluded, the documented pairing), so the inspection, the service, the action and
+the settings page are measured like everything else.
 
-Three classes are excluded, all of them IntelliJ Platform glue whose overrides need a
-PsiFile, an Editor, an AnnotationHolder or the platform's ApplicationManager. Each one is
-written so that every decision it could have made lives in a measured class instead; the
-budget is the mechanical check on that sentence.
+Measured on the revision that added the Kotlin runtime: line 99.18% (727/733), branch 95.64%
+(571/597), 52 classes gated, none excluded. The floors in build.gradle.kts (50 classes, 700
+lines) sit just below, so losing a class fails and a small refactor does not. If JaCoCo ever goes
+back to seeing nothing, the denominator stays full and the ratio collapses to 0%, which fails.
+
+instrumentCode is off in build.gradle.kts for a related reason: it rewrites bytecode after
+compilation, the tests then load the rewritten classes, and JaCoCo reports 0% for classes whose
+bytes do not match the ones the report reads.
+
+What a real ASH report looks like, and defects that came from guessing
+---------------------------------------------------------------------
+
+The Kotlin parser was first written against SARIF authored alongside it, and that cost several
+defects, all invisible to every test because the fixture encoded the same assumptions as the
+code. AshRealReportTest now parses the repository's own tests/test_data/outputs/
+ash_aggregated_results.json, a real 7-scanner, 126-result report, and fails loudly if the file
+is missing. What was measured there:
+
+  tool.driver.name  = "AWS Labs - Automated Security Helper"   (ASH, not the scanner)
+  tool.driver.rules = 0 entries; all 1,264 rules are under tool.extensions[].rules
+  runs = 1, results = 126        (85 kind=informational/level=none, 41 kind=fail)
+  result.properties.scanner_name = the per-result scanner, on all 126
+
+  * Scanner attribution is per result. ASH puts every scanner in ONE run, so a scanner read
+    once per run from the driver labeled every finding with ASH's own name. The driver name is
+    kept only as a fallback for a single-tool SARIF.
+  * Rule defaults are looked up in the extensions as well as the driver. A driver-only lookup
+    was dead code that looked like "this rule declares no default level". Positional lookup
+    stays driver-only, because SARIF 3.27.6 defines ruleIndex relative to its own component.
+  * grype reports scan-root-relative paths WITH a leading slash (`/poetry.lock`). Treated as
+    absolute, such a finding was stored under a key no open file could match: produced,
+    counted, and never shown. AshPathResolver now tries the path as written, then joined onto
+    the scan root, and only returns a path that exists, so a resolution can move from a
+    missing path to an existing one and never the reverse.
+  * Suppression is a state, not a severity. 92 of the 126 results are suppressed but only 85
+    are level=none; the other 7 are kind=fail with real severities and in-source suppressions,
+    which a level filter re-displays. Suppression is checked first, under both the spec's
+    field name (`status`) and ASH's (`state`). An absent status on a non-empty suppressions
+    array counts as suppressed; `rejected` and `underReview` are shown.
+  * Every result lands in exactly one bucket (suppressed, no severity, unlocatable, surfaced),
+    and the notification calls it an internal inconsistency if they ever fail to sum.
+  * A URI that cannot name a file in this project is refused rather than coerced: a non-file
+    scheme, and a file:// URI with a remote authority. One-letter "schemes" are Windows drives.
+  * `level` is read as its value. ASH's Python Level is a (str, Enum) mixin whose str() is
+    "Level.error", which matches no SARIF level and would fall through to the warning default.
+
+What the status file says, and what it does not
+-----------------------------------------------
+
+The per-scanner status is not in the SARIF, and it is not `invocations[].executionSuccessful`.
+Measured on a real ASH 3.7.0 run on a host missing most scanner tools: a FAILED scanner reports a
+successful invocation, and a MISSING one has no invocation at all. The status lives in
+ash_aggregated_results.json, which ASH writes even when `--output-formats sarif` asks for nothing
+else. ASH renamed the roster: 3.7.0 writes top-level `scanner_results`, the committed 3.0.0
+fixture `metadata.scanner_status`, and both are read.
+
+Only `status` is trusted. The roster's `exit_code` was 0 for every scanner in that run, MISSING
+and FAILED included, and `dependencies_satisfied` was true on a MISSING scanner, so neither is
+evidence of anything when it reads as healthy. PASSED, FAILED and SKIPPED are complete per
+scanner (SKIPPED means not selected), matching ASH's _COMPLETE_SCANNER_STATUSES; anything else,
+including a status this plugin cannot read, is incomplete. A run where nothing reached PASSED or
+FAILED is reported separately, because every scanner SKIPPED leaves the incomplete set empty
+while nothing examined the target. An `excluded` scanner is not reported.
 
 Known limitations
 -----------------
 
 A scan is a whole-project scan, not a single-file scan, because several of ASH's scanners are
-about relationships between files. On a large repository that is not something to run on
-every keystroke, and the annotator only proceeds for a file that is on disk.
+about relationships between files. It runs when asked, from the Tools menu, not on every edit.
 
-ASH's output goes to a directory under the JVM's temporary directory, named from a digest of
-the project's absolute path, and never into the project. ASH's own default is
-`.ash/ash_output` under the source directory, which is right for a command line and wrong
-here: the IDE indexes the project tree, so a scan's reports would become source the next scan
-reads and reports on, plus a burst of file-watcher events on every run. AshScanPlan refuses
-an output directory inside the source directory rather than trusting the caller.
-
-Findings with no line-bearing physical location are not shown. Some ASH scanners report about
-a repository or a dependency graph rather than about a place in a file, and an annotation is a
-range in a document. They are counted rather than discarded silently, so a run that shows
-nothing can be told apart from a clean file.
+Findings with no line-bearing physical location are not shown. They are counted and listed in
+the notification, so a run that shows nothing can be told apart from a clean file.
 
 A finding on a line the document no longer has is dropped rather than clamped. The user edits
-after the scan, and clamping to the last line would move a security warning onto unrelated
-code.
+after the scan, and clamping to the last line would move a security warning onto unrelated code.
+
+DaemonCodeAnalyzer.restart() with no arguments is deprecated from build 253 and the Plugin
+Verifier reports it as a deprecated usage there. Its replacement does not exist in 252, the
+floor, so using it would raise the floor to silence a warning. AshScanService says so at the
+call.
 
 Nothing here publishes
 ----------------------

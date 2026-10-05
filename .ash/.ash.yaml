@@ -323,7 +323,7 @@ global_settings:
     # entry guarded nothing, which makes it the stale kind of suppression this file's
     # per-path discipline exists to avoid, and it was removed.
     #
-    # One exact path and not `editors/**`. The rest of that tree is Java, Gradle and Python
+    # One exact path and not `editors/**`. The rest of that tree is Kotlin, Gradle and Python
     # with no business carrying a credential-shaped string, and a glob would stop saying so
     # -- the same argument the three entries above make for naming files individually.
     - rule_id: "SECRET-*"

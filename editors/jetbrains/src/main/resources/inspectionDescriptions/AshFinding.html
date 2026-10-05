@@ -1,0 +1,18 @@
+<html>
+<body>
+Reports findings from the most recent Automated Security Helper (ASH) scan of this
+project.
+<p>
+Findings are not produced by this inspection. They come from running
+<i>Tools &rarr; Run ASH Security Scan</i>, which invokes the ASH CLI you
+have installed and reads the SARIF report it writes. Until a scan has been run, this
+inspection reports nothing.
+</p>
+<p>
+The severity shown for each finding is the SARIF <code>level</code> from the report:
+<code>error</code> is shown as an error, <code>warning</code> as a warning and
+<code>note</code> as a weak warning. Where a result omits its own level, the level is
+taken from the rule's <code>defaultConfiguration</code>, and the tooltip says so.
+</p>
+</body>
+</html>

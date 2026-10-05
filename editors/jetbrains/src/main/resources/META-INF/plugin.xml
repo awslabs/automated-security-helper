@@ -21,38 +21,34 @@
 
   That also keeps this file out of pyproject.toml's [tool.commitizen] version_files, and
   build.gradle.kts explains at length why the plugin version does not track ASH's at all.
-  Worth stating here too, because this is the file someone would reach for: commitizen
-  matches its patterns per LINE and replaces the current version within every matching line,
-  so a pattern aimed at a plugin version in this file would also rewrite the build number
-  range in the idea-version element, which is a completely unrelated number on a completely
-  unrelated schedule.
 
   WHY THERE IS NO depends ON A LANGUAGE PLUGIN
 
-  The annotator is registered for every language below. ASH scans a repository and reports
-  findings in whatever it finds: Python, TypeScript, Terraform, CloudFormation YAML,
-  Dockerfiles, Ruby. Restricting the registration to one language would silently drop
-  findings in every other file type, and a JSON or YAML finding is among the most common
-  things ASH reports. com.intellij.modules.platform is the only dependency, which is what
-  makes this plugin installable in every JetBrains IDE rather than only in IDEA.
+  The inspection is registered without a language attribute, so it runs for every file type.
+  ASH scans a repository and reports findings in whatever it finds: Python, TypeScript,
+  Terraform, CloudFormation YAML, Dockerfiles, Ruby. Restricting the registration to one
+  language would silently drop findings in every other file type. com.intellij.modules.platform
+  is the only dependency, which is what makes this plugin installable in every JetBrains IDE
+  rather than only in IDEA.
 -->
 <idea-plugin>
     <id>io.github.awslabs.ash</id>
     <name>ASH - Automated Security Helper</name>
-    <vendor url="https://github.com/awslabs">Amazon Web Services</vendor>
+    <vendor url="https://github.com/awslabs/automated-security-helper">Amazon Web Services</vendor>
 
     <description><![CDATA[
-    Runs the <code>ash</code> command line tool over the open project and shows what it
-    reports as editor annotations.
+    Runs the <a href="https://github.com/awslabs/automated-security-helper">Automated
+    Security Helper</a> (ASH) command line tool over the open project and shows the findings
+    inline, at the file and line the scanner reported.
     <br/><br/>
-    This plugin contains no scanners and no copy of ASH. It invokes whatever <code>ash</code>
-    is on your PATH, or the executable set in <b>Settings | Tools | ASH</b>, and reads the
-    SARIF that ASH already writes. Install ASH separately, then run
-    <code>ash dependencies install</code> to provision the scanners ASH can install itself.
+    This plugin contains no scanners and no copy of ASH. It invokes the <code>ashx</code>
+    command on your PATH, falls back to <code>ash</code> when <code>ashx</code> is not
+    installed, or runs the executable set in <b>Settings | Tools | ASH</b>, and reads the
+    SARIF report ASH writes.
     <br/><br/>
-    On a host where another program answers to the name <code>ash</code>, and MSYS2 ships an
-    <code>ash</code> shell on Windows, set the executable to
-    <code>automated-security-helper</code>, which is ASH's unambiguous entry point.
+    <b>Usage:</b> <i>Tools | Run ASH Security Scan</i>. Findings appear as editor errors and
+    warnings, with severity taken from the SARIF report. A scan ASH reports as incomplete
+    still shows the findings it produced, and says which scanners did not run.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -67,12 +63,34 @@
                 id="io.github.awslabs.ash.settings"
                 displayName="ASH"/>
 
-        <!--
-          An empty language attribute means every language, including plain text and file
-          types no language plugin claims. See the note above on why this is not scoped.
-        -->
-        <externalAnnotator
-                language=""
-                implementationClass="io.github.awslabs.ash.jetbrains.AshExternalAnnotator"/>
+        <!-- No `language` attribute: the inspection then runs for every file type, which
+             is what ASH scanning a whole repository requires. Naming a language here
+             would silently skip everything not named. -->
+        <localInspection
+                implementationClass="io.github.awslabs.ash.jetbrains.AshFindingInspection"
+                shortName="AshFinding"
+                displayName="ASH security finding"
+                groupName="Security"
+                enabledByDefault="true"
+                level="WARNING"/>
+
+        <notificationGroup
+                id="ASH"
+                displayType="BALLOON"/>
     </extensions>
+
+    <actions>
+        <action
+                id="io.github.awslabs.ash.jetbrains.AshScanAction"
+                class="io.github.awslabs.ash.jetbrains.AshScanAction"
+                text="Run ASH Security Scan"
+                description="Run the installed ASH CLI over this project and show findings inline">
+            <!-- ToolsMenu only. An AnalyzeMenu entry was tried and removed: that group
+                 is not registered in IntelliJ IDEA Community, and the platform logs
+                 "group with id AnalyzeMenu isn't registered so the action won't be added
+                 to it" at error level on every startup. The action stays reachable from
+                 Tools and from Find Action. -->
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

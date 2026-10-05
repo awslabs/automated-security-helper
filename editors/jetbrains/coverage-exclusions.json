@@ -1,6 +1,6 @@
 {
   "README": [
-    "Java classes the coverage threshold does not apply to, each with the reason and a test",
+    "Classes the coverage threshold does not apply to, each with the reason and a test",
     "that makes the reason expire.",
     "",
     "WHY THIS FILE EXISTS",
@@ -31,13 +31,18 @@
     "The kind is not a label; it selects which staleness test runs, so an entry that stops",
     "being true fails the gate instead of being carried forward.",
     "",
-    "  ide-glue -- the class exists only to satisfy an IntelliJ Platform extension point.",
-    "    Measuring it means starting an IDE, which this build deliberately does not do.",
-    "    Every such entry carries maxLines, and the gate re-measures the file: the budget is",
-    "    what stops the exclusion becoming a place to hide logic. All three entries below are",
-    "    written so that each decision they could have made lives in a measured class instead,",
-    "    and the budget is the mechanical check on that claim. Stale once the file stops being",
-    "    tracked, once it exceeds its budget, or once it turns up covered in the report.",
+    "  ide-glue -- the class exists only to satisfy an IntelliJ Platform extension point and",
+    "    cannot be measured. Every such entry carries maxLines, and the gate re-measures the file:",
+    "    the budget is what stops the exclusion becoming a place to hide logic. Stale once the file",
+    "    stops being tracked, once it exceeds its budget, or once it turns up covered in the report.",
+    "",
+    "THE LIST IS EMPTY, AND THAT IS THE EXPECTED STATE",
+    "",
+    "The Java implementation of this plugin excluded three platform-facing classes here, because",
+    "its tests ran in a plain JVM. The Kotlin runtime's tests run in the platform test runtime with",
+    "JaCoCo's includeNoLocationClasses on (see build.gradle.kts), so the inspection, the service,",
+    "the action and the settings page are measured like everything else. A new entry needs a class",
+    "that genuinely cannot be exercised in a booted headless IDE, and the reason has to say why.",
     "",
     "WHAT DOES NOT BELONG HERE",
     "",
@@ -49,27 +54,5 @@
     "JaCoCo report's fully-qualified class name, including any nested class, so a nested class",
     "inside an excluded file is excluded with it."
   ],
-  "exclusions": [
-    {
-      "path": "editors/jetbrains/src/main/java/io/github/awslabs/ash/jetbrains/AshExternalAnnotator.java",
-      "classPattern": "io.github.awslabs.ash.jetbrains.AshExternalAnnotator*",
-      "kind": "ide-glue",
-      "maxLines": 140,
-      "reason": "Implements com.intellij.lang.annotation.ExternalAnnotator. Its three overrides need a PsiFile, an Editor and an AnnotationHolder, none of which can be constructed outside a running IDE, so measuring it means either starting a headless IDE per test run or asserting on mocks of the platform's own classes. Every decision it could make has been moved out: which findings belong to this file and where they land is AshAnnotationPlanner, whether a scan may run and what failed is AshScanService and AshVersionProbe, where output goes is AshOutputDirectory. What remains is field reads, a null guard, a relativize, and a switch from AshSeverity to HighlightSeverity. The 140-line budget is the check on that sentence."
-    },
-    {
-      "path": "editors/jetbrains/src/main/java/io/github/awslabs/ash/jetbrains/AshSettings.java",
-      "classPattern": "io.github.awslabs.ash.jetbrains.AshSettings*",
-      "kind": "ide-glue",
-      "maxLines": 70,
-      "reason": "A PersistentStateComponent. Instantiating it outside an IDE is possible; exercising it is not, because getInstance() goes through ApplicationManager and loadState() through the platform's XmlSerializerUtil, and a test that called neither would be asserting that two public fields hold what was written to them. Everything that could be wrong about the executablePath value is decided in AshExecutable.resolve, which is measured -- including that empty means the default rather than being stored as a literal."
-    },
-    {
-      "path": "editors/jetbrains/src/main/java/io/github/awslabs/ash/jetbrains/AshSettingsConfigurable.java",
-      "classPattern": "io.github.awslabs.ash.jetbrains.AshSettingsConfigurable*",
-      "kind": "ide-glue",
-      "maxLines": 110,
-      "reason": "A Swing settings page built with the platform's FormBuilder and JB* components. createComponent() constructs widgets and the other four methods copy values between those widgets and AshSettings, so a test would be asserting that a JBTextField returns the text it was given. The one thing in it that carries meaning rather than wiring is the hint text naming automated-security-helper for the ash name collision, and AshVersionProbeTest asserts that same recommendation reaches the user through the error path, which is where they will actually meet it."
-    }
-  ]
+  "exclusions": []
 }
