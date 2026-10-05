@@ -82,6 +82,15 @@ mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 
 image_id() { "$OCI" image inspect --format '{{.Id}}' "$1"; }
+image_size() { "$OCI" image inspect --format '{{.Size}}' "$1" | awk '{ printf "%.2f GB", $1 / 1e9 }'; }
+
+# Two full images share a hosted runner's disk at the peak, so each build records what
+# it left free. A run that dies of ENOSPC then says so in its own log.
+disk_report() {
+  local root
+  root="$("$OCI" info --format '{{.DockerRootDir}}')"
+  say "disk after $1: $(df -h --output=avail "$root" | tail -n 1 | tr -d ' ') free under $root; image $(image_size "$2")"
+}
 
 # Exits 0 only when none of the named images exists.
 assert_images_absent() {
@@ -237,6 +246,7 @@ assert_images_absent "$TAG_FRESH" "$TAG_UPGRADE" || fail "could not start from a
 say "build N as $TAG_FRESH"
 build "$CLI" "$SRC_HEAD" "$TAG_FRESH"
 FRESH_ID="$(image_id "$TAG_FRESH")"
+disk_report "the N build" "$TAG_FRESH"
 say "built $TAG_FRESH = $FRESH_ID, target $(in_image "$TAG_FRESH" printenv ASH_TARGET)"
 provenance "$TAG_FRESH" "$SRC_HEAD" fresh || fail "$TAG_FRESH does not carry head's code"
 version_line="$(image_version "$TAG_FRESH")"
@@ -267,6 +277,7 @@ say "N-1 host CLI: $(basename "$PREV_CLI"), $("$PREV_CLI" --version)"
 say "build N-1 as $TAG_UPGRADE"
 build "$PREV_CLI" "$SRC_PREV" "$TAG_UPGRADE" ${PREV_BUILD_ARGS[@]+"${PREV_BUILD_ARGS[@]}"}
 PREV_ID="$(image_id "$TAG_UPGRADE")"
+disk_report "the N-1 build" "$TAG_UPGRADE"
 provenance "$TAG_UPGRADE" "$SRC_PREV" n-1 || fail "$TAG_UPGRADE does not carry N-1's code"
 version_line="$(image_version "$TAG_UPGRADE")"
 case "$version_line" in
@@ -293,6 +304,7 @@ case "$("$UPGRADED_CLI" --version)" in
 esac
 build "$UPGRADED_CLI" "$SRC_HEAD" "$TAG_UPGRADE"
 UPGRADED_ID="$(image_id "$TAG_UPGRADE")"
+disk_report "the N rebuild" "$TAG_UPGRADE"
 [ "$UPGRADED_ID" != "$PREV_ID" ] || fail "the rebuild left $TAG_UPGRADE on the N-1 image $PREV_ID"
 provenance "$TAG_UPGRADE" "$SRC_HEAD" upgraded || fail "after the upgrade $TAG_UPGRADE does not carry head's code"
 version_line="$(image_version "$TAG_UPGRADE")"
