@@ -24,8 +24,8 @@ import os
 import shutil
 import sys
 
-#: The canonical ASH command. ``ashx`` is a deprecated alias of it, and a v3
-#: image ships only ``ashx``; this server always passes a --stateless-http flag,
+#: The canonical ASH command. ``ash`` is a deprecated alias of it, and a v3
+#: image ships only ``ash``; this server always passes a --stateless-http flag,
 #: which v3 has neither form of, so a v3 image could not run it under either name.
 ASH_CLI = "ashx"
 
