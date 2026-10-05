@@ -148,13 +148,15 @@ class TestAshAliasDeprecation:
             cli_main.run_ash_alias()
         fake_app.assert_called_once_with()
 
-    @pytest.mark.parametrize("code", [0, 2, 1])
+    @pytest.mark.parametrize("code", [0, 1, 2, 3, 4])
     def test_exit_codes_pass_through_unchanged(self, capsys, code):
         """Through the real console-script target, ``main_ash``.
 
-        0 is a clean scan, 2 a usage error, 1 an actionable failure (findings or
-        an incomplete scan). The alias must not map, swallow or add to any of
-        them, and the notice must still be one line whatever the outcome.
+        0 is a clean scan, 1 an actionable failure (findings or an incomplete
+        scan), 2 a usage error, 3 an invalid configuration and 4 a workspace
+        definition, policy or confinement error. The alias must not map, swallow
+        or add to any of them, and the notice must still be one line whatever
+        the outcome.
         """
         with mock.patch.object(cli_main, "app", side_effect=SystemExit(code)):
             with pytest.raises(SystemExit) as raised:
@@ -164,7 +166,7 @@ class TestAshAliasDeprecation:
         assert captured.out == ""
         assert captured.err.splitlines() == [deprecated_command_message("ash")]
 
-    @pytest.mark.parametrize("code", [0, 2, 1])
+    @pytest.mark.parametrize("code", [0, 1, 2, 3, 4])
     def test_ashx_passes_the_same_codes_with_no_notice(self, capsys, code):
         """Negative control: the canonical name exits the same way, silently."""
         with mock.patch.object(cli_main, "app", side_effect=SystemExit(code)):

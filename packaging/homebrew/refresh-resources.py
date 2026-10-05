@@ -23,7 +23,7 @@ installs into that venv using `Formula#std_pip_args`:
 installs exactly the sdists Homebrew staged from `resource` stanzas, plus ASH
 itself, and a requirement with no matching stanza is not an error -- it is a
 package that never arrives. `brew install` succeeds, the venv is built, and the
-first `ashx` run dies on `ModuleNotFoundError` naming a module the build never
+first `ash` run dies on `ModuleNotFoundError` naming a module the build never
 mentioned. The formula shipped in exactly that state until this script was
 written: `virtualenv_install_with_resources` with zero resources.
 

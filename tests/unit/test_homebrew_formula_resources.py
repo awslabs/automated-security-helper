@@ -18,7 +18,7 @@ The reason is one flag. Homebrew installs into the virtualenv with
 is handed -- the staged `resource` sdists, then ASH itself -- and a requirement
 in `[project.dependencies]` with no matching `resource` is not an error, it is
 simply a package that never gets installed. So `brew install` reports success,
-the venv is built, and the first `ashx` invocation dies on
+the venv is built, and the first `ash` invocation dies on
 `ModuleNotFoundError`. Nothing in the build says which requirement was missing,
 because pip was never asked to look.
 
@@ -144,7 +144,7 @@ class TestHomebrewFormulaVendorsItsDependencies:
             "Formula/ash.rb calls virtualenv_install_with_resources but declares "
             "no `resource` stanzas. Homebrew installs with --no-deps, so pip will "
             "install ASH and none of its dependencies, `brew install` will still "
-            "report success, and the first `ashx` run will fail on "
+            "report success, and the first `ash` run will fail on "
             "ModuleNotFoundError. Regenerate the block with "
             "`python packaging/homebrew/refresh-resources.py --write`."
         )
