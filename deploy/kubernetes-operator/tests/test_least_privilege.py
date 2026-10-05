@@ -9,15 +9,18 @@ effect.
 
 Two layers, because they fail for different reasons. EXPECTED_RULES and
 EXPECTED_BINDINGS are an exact pin: every (apiGroups, resources, verbs) rule, and
-every binding, as reviewed, read from every file under manifests/ rather than
-rbac.yaml alone. Any change at all, `create` on pods included, goes red there and
-has to be re-pinned by hand. The denylist tests below it name the grants
-that must never be re-pinned, so the reviewer updating the pin is told which kind of
-widening they are looking at.
+every binding, as reviewed, read from every object `kubectl apply -f manifests/`
+would send (.yaml, .yml and .json files, List items expanded) rather than rbac.yaml
+alone, and manifests/ may hold only the reviewed files. Any change at all, `create`
+on pods included, goes red there and has to be re-pinned by hand. The denylist
+tests below it name the grants that must never be re-pinned, so the reviewer
+updating the pin is told which kind of widening they are looking at.
 """
 
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -103,20 +106,58 @@ EXPECTED_BINDINGS = {
 RULE_KEYS = {"apiGroups", "resources", "verbs"}
 RBAC_KINDS = frozenset({"Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding"})
 
+# `kubectl apply -f manifests/` reads every file in the directory (not its
+# subdirectories) whose name ends in one of these, so all of them are manifests.
+KUBECTL_SUFFIXES = (".json", ".yaml", ".yml")
+# Everything manifests/ may hold, as reviewed. A new file is a new set of objects
+# the adopter applies, so adding one changes this set in the same diff.
+EXPECTED_MANIFEST_FILES = frozenset({"operator.yaml", "rbac.yaml"})
 
-def manifest_documents() -> list[tuple[Path, dict]]:
-    # Every shipped manifest, not only rbac.yaml. Adopters and the e2e apply the whole
-    # directory, so a ClusterRoleBinding appended to operator.yaml grants exactly as
+
+def _json_documents(text: str) -> list:
+    # kubectl decodes a .json file as a stream, so it may hold several objects back
+    # to back. json.loads would reject that and hide every object after the first.
+    decoder = json.JSONDecoder()
+    docs = []
+    rest = text.lstrip()
+    while rest:
+        doc, end = decoder.raw_decode(rest)
+        docs.append(doc)
+        rest = rest[end:].lstrip()
+    return docs
+
+
+def _flatten(doc: dict, path: Path) -> list[dict]:
+    # kubectl expands a List (kind List, or any <Kind>List) client-side and applies
+    # each item, so a ClusterRoleBinding inside one grants as much as a top-level one.
+    assert isinstance(doc, dict), f"{path.name}: a document is not a mapping: {doc!r}"
+    if str(doc.get("kind", "")).endswith("List") or "items" in doc:
+        return [item for child in doc.get("items") or [] for item in _flatten(child, path)]
+    return [doc]
+
+
+def manifest_documents(manifests_dir: Path = MANIFESTS_DIR) -> list[tuple[Path, dict]]:
+    # Every object `kubectl apply -f manifests/` would send, not only rbac.yaml's.
+    # Adopters and the e2e apply the whole directory, so a ClusterRoleBinding in
+    # operator.yaml, in a .yml or .json file, or wrapped in a List grants exactly as
     # much as one in rbac.yaml and has to be caught by the same pin.
-    paths = sorted(MANIFESTS_DIR.glob("*.yaml"))
-    assert RBAC_YAML in paths, f"{RBAC_YAML} is missing"
-    docs = [(path, doc) for path in paths for doc in yaml.safe_load_all(path.read_text()) if doc]
+    paths = sorted(
+        path
+        for path in manifests_dir.iterdir()
+        if path.is_file() and path.suffix in KUBECTL_SUFFIXES
+    )
+    assert manifests_dir / "rbac.yaml" in paths, f"{manifests_dir / 'rbac.yaml'} is missing"
+    docs = []
+    for path in paths:
+        text = path.read_text()
+        raw = _json_documents(text) if path.suffix == ".json" else list(yaml.safe_load_all(text))
+        docs.extend((path, obj) for doc in raw if doc for obj in _flatten(doc, path))
     assert docs, "manifests/ yielded no documents"
     return docs
 
 
-def rbac_documents() -> list[dict]:
-    return [doc for _, doc in manifest_documents()]
+def rbac_documents(manifests_dir: Path = MANIFESTS_DIR) -> list[dict]:
+    return [doc for _, doc in manifest_documents(manifests_dir)]
 
 
 def _as_rule(rule: dict) -> Rule:
@@ -164,9 +205,9 @@ def test_every_rule_is_exactly_the_reviewed_rule():
     )
 
 
-def test_every_binding_is_exactly_the_reviewed_binding():
+def actual_bindings(docs: list[dict]) -> set:
     actual = set()
-    for doc in rbac_documents():
+    for doc in docs:
         if doc["kind"] not in ("RoleBinding", "ClusterRoleBinding"):
             continue
         ref = doc["roleRef"]
@@ -184,7 +225,81 @@ def test_every_binding_is_exactly_the_reviewed_binding():
                 subjects,
             )
         )
-    assert actual == EXPECTED_BINDINGS
+    return actual
+
+
+def test_every_binding_is_exactly_the_reviewed_binding():
+    assert actual_bindings(rbac_documents()) == EXPECTED_BINDINGS
+
+
+def test_manifests_dir_holds_only_the_reviewed_files():
+    # Hidden files and subdirectories too: neither is applied today, but a file a
+    # reviewer did not expect is the place a grant would hide.
+    present = {path.name for path in MANIFESTS_DIR.iterdir()}
+    assert present == EXPECTED_MANIFEST_FILES, (
+        f"manifests/ holds {sorted(present - EXPECTED_MANIFEST_FILES)} unreviewed and "
+        f"lacks {sorted(EXPECTED_MANIFEST_FILES - present)}"
+    )
+
+
+ADMIN_BINDING = {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {"name": "ash-operator-admin"},
+    "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "cluster-admin",
+    },
+    "subjects": [{"kind": "ServiceAccount", "name": "ash-operator", "namespace": "ash-system"}],
+}
+ADMIN_ENTRY = (
+    "ClusterRoleBinding/ash-operator-admin",
+    None,
+    "ClusterRole/cluster-admin",
+    (("ServiceAccount", "ash-operator", "ash-system"),),
+)
+
+
+def _write_admin_yml(d: Path) -> None:
+    (d / "extra.yml").write_text(yaml.safe_dump(ADMIN_BINDING))
+
+
+def _write_admin_json(d: Path) -> None:
+    # Two objects back to back, the binding second, as kubectl's stream decoder allows.
+    namespace = {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "x"}}
+    (d / "extra.json").write_text(json.dumps(namespace) + "\n" + json.dumps(ADMIN_BINDING))
+
+
+def _append_admin_list(d: Path) -> None:
+    wrapped = {"apiVersion": "v1", "kind": "List", "items": [ADMIN_BINDING]}
+    with (d / "operator.yaml").open("a") as handle:
+        handle.write("---\n" + yaml.safe_dump(wrapped))
+
+
+def _append_admin_typed_list(d: Path) -> None:
+    wrapped = {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "ClusterRoleBindingList",
+        "items": [{"apiVersion": "v1", "kind": "List", "items": [ADMIN_BINDING]}],
+    }
+    with (d / "operator.yaml").open("a") as handle:
+        handle.write("---\n" + yaml.safe_dump(wrapped))
+
+
+@pytest.mark.parametrize(
+    "inject",
+    [_write_admin_yml, _write_admin_json, _append_admin_list, _append_admin_typed_list],
+    ids=["yml-file", "json-stream", "list-in-operator-yaml", "nested-typed-list"],
+)
+def test_the_pin_sees_a_binding_however_kubectl_would_read_it(tmp_path, inject):
+    # Each of these is a cluster-admin grant that `kubectl apply -f manifests/` would
+    # make and that an earlier version of manifest_documents did not read.
+    shutil.copytree(MANIFESTS_DIR, tmp_path / "manifests")
+    inject(tmp_path / "manifests")
+    assert actual_bindings(rbac_documents(tmp_path / "manifests")) == EXPECTED_BINDINGS | {
+        ADMIN_ENTRY
+    }
 
 
 def test_the_scan_account_has_no_binding():
