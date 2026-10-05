@@ -5,6 +5,11 @@ description = "Automated Security Helper for GitHub Actions"
 requires-python = ">=3.10,<3.15"
 readme = "README.md"
 license = "Apache-2.0"
+# Pinned rather than left to hatchling's default globs (LICEN[CS]E*, COPYING*,
+# NOTICE*, AUTHORS*), which would add any new root file matching them to the
+# wheel's dist-info/licenses/. packaging/assert-paths-filter.py reads this list as
+# wheel inputs and requires the wheel to hold exactly these files.
+license-files = [ "LICENSE", "NOTICE",]
 classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
  "uv>=0.12.19,<0.13",

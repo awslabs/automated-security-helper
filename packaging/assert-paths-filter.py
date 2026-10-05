@@ -17,20 +17,35 @@ list is the same defect as the first. There are two layers, and a real run takes
 the union of both.
 
 The measured layer builds the wheel in this process with hatchling's own PEP 517
-entry point, the one `uv build` calls, under sys.addaudithook. Every file the build
-opens for reading inside the repository is an input, however the hook spelled the
-path. Every process the build starts must be one this script can attribute (only
-the hook's `git rev-parse --abbrev-ref HEAD`, which reads .git and nothing a paths
-entry can name); any other subprocess, os.system, exec, spawn or fork is an error,
-because what a child process reads cannot be seen from here. The installed build
-backend must satisfy pyproject's [build-system] requires, so the build measured is
-the build `uv build` runs.
+entry point, the one `uv build` calls, under sys.addaudithook. Every file the
+build opens for reading inside the repository is an input, however the hook
+spelled the path. Every process the build starts must be one this script can
+attribute (only the hook's `git rev-parse --abbrev-ref HEAD`, run by the git that
+`shutil.which("git")` finds outside the repository and given no environment of its
+own; it reads .git and nothing a paths entry can name). Any other subprocess,
+os.system, exec, spawn or fork is an error, because what a child process reads
+cannot be seen from here. Processes are seen through their audit events and
+through _posixsubprocess.fork_exec, which this script wraps during the build
+because it raises no audit event of its own and multiprocessing's spawn and
+forkserver contexts start their processes through it. Any ctypes audit event is an
+error too, because a foreign call can read a file or start a process with no event
+at all. So is opening a directory for reading: a descriptor from that open lets a
+later open name a file relative to it (`dir_fd=`), and the open event does not
+carry the directory. The installed build backend must satisfy pyproject's
+[build-system] requires, so the build measured is the build `uv build` runs.
 
-The static layer reads what the measured build cannot show, because the build only
-opens the files this one run reaches: a file the hook only tests for (`.exists()`),
-or reads on a branch this build did not take. It reads:
+Of the files the build touches, the measured layer sees only the ones it opens. A
+file the build only tests for, with `os.path.exists`, `Path.exists()`, `os.stat`
+and the like, raises no audit event, so the measured layer cannot see it at all.
+Neither layer sees a file read on a branch this build did not take unless the
+static layer models its spelling. The static layer is the backstop for both, and
+it models only the spellings listed below. It reads:
 
-  - the license files off the built wheel's dist-info/licenses/;
+  - project.license-files from pyproject.toml, which must be set and list files by
+    name (unset, hatchling adds every root file matching its default globs, such as
+    AUTHORS* or LICENSE*, so a new file there would join the wheel with no paths
+    entry naming it), and requires the wheel's dist-info/licenses/ to hold exactly
+    those files;
   - the readme, the build hook, the package's __init__.py, .gitignore, and every
     source the hatch build config names (include, only-include, packages,
     artifacts, and the source keys of force-include, shared-data, shared-scripts
@@ -55,7 +70,9 @@ with hatchling, so a deleted measurement in either layer turns it red.
 
 Usage: assert-paths-filter.py [--repo DIR] [--workflow PATH]
        assert-paths-filter.py --self-test
-Both need hatchling importable, e.g. `uv run --no-project --with hatchling`.
+Both need hatchling importable, e.g. `uv run --isolated --no-project --with
+hatchling` (`--isolated` so that a hatchling already in a discovered .venv is not
+used instead of the newest release).
 """
 
 from __future__ import annotations
@@ -66,10 +83,12 @@ import contextlib
 import importlib.metadata
 import os
 import re
+import shutil
 import sys
 import tempfile
 import tomllib
 import zipfile
+from collections.abc import Iterator
 from typing import Any
 
 DEFAULT_WORKFLOW = ".github/workflows/ash-native-packages.yml"
@@ -203,7 +222,9 @@ def hook_root_files(hook_source: str) -> set[str]:
     part, the name passed to a function) raises Unresolvable rather than being
     skipped, because a skipped use is an input this check does not see. A second
     root spelled `Path(__file__)` is refused the same way. Spellings this does not
-    model at all, such as `Path(self.root)`, are left to the measured layer.
+    model at all, such as `Path(self.root)`, are seen only if the build opens the
+    file; a file reached that way and only tested for (`.exists()`) is seen by
+    neither layer.
 
     Returned paths that stand for a directory end in `/<any>/<any>`; the caller
     turns a resolved path into a directory probe when the repository has a
@@ -376,6 +397,29 @@ def read_pyproject(repo: str) -> dict[str, Any]:
         return tomllib.load(handle)
 
 
+def declared_license_files(pyproject: dict[str, Any]) -> set[str]:
+    """project.license-files, which must be set and name each file literally."""
+    license_files = pyproject["project"].get("license-files")
+    if license_files is None:
+        raise Unresolvable(
+            "project.license-files is not set, so hatchling adds every root file its "
+            "default globs match (LICEN[CS]E*, COPYING*, NOTICE*, AUTHORS*) to the "
+            "wheel, and a new one would join it with no paths entry naming it; list "
+            "the license files"
+        )
+    if not isinstance(license_files, list):
+        raise Unresolvable("project.license-files is not a list")
+    found: set[str] = set()
+    for entry in license_files:
+        if not isinstance(entry, str) or any(c in entry for c in "*?[]!"):
+            raise Unresolvable(
+                f"project.license-files entry {entry!r} is a glob or not a string; "
+                "this check reads only literal file names"
+            )
+        found.add(repo_relative(entry, "project.license-files"))
+    return found
+
+
 def static_config_inputs(repo: str) -> set[str]:
     """The inputs pyproject.toml and the hook's source name. Runs before the build,
     so a config this cannot read is refused without building anything."""
@@ -390,6 +434,7 @@ def static_config_inputs(repo: str) -> set[str]:
     license_ = project.get("license")
     if isinstance(license_, dict) and license_.get("file"):
         inputs.add(repo_relative(license_["file"], "project.license"))
+    inputs |= declared_license_files(pyproject)
 
     build = pyproject.get("tool", {}).get("hatch", {}).get("build", {})
     wheel_target = build.get("targets", {}).get("wheel", {})
@@ -426,20 +471,27 @@ def static_config_inputs(repo: str) -> set[str]:
     return inputs
 
 
-def wheel_license_inputs(wheel: str) -> set[str]:
-    """The license files hatchling actually put in the wheel's dist-info."""
+def check_wheel_licenses(wheel: str, declared: set[str]) -> None:
+    """The license files hatchling actually put in the wheel's dist-info must be
+    exactly the ones project.license-files declares, which static_config_inputs
+    already counts as inputs."""
     with zipfile.ZipFile(wheel) as archive:
-        licenses = [
+        licenses = {
             n.split("/licenses/", 1)[1]
             for n in archive.namelist()
             if re.match(r"^[^/]+\.dist-info/licenses/.+", n)
-        ]
+        }
     if not licenses:
         raise Unresolvable(
             f"{wheel} has no dist-info/licenses/ member, so the license files cannot "
             "be measured. Refusing to report the filter complete without them."
         )
-    return set(licenses)
+    if licenses != declared:
+        raise Unresolvable(
+            "the wheel's dist-info/licenses/ does not hold exactly the files "
+            f"project.license-files declares: only in the wheel {sorted(licenses - declared)}, "
+            f"only declared {sorted(declared - licenses)}"
+        )
 
 
 # The audit events that start another process. What a child reads is invisible to
@@ -457,8 +509,16 @@ SPAWN_EVENTS = frozenset(
     }
 )
 
+# The event this script records for each call to _posixsubprocess.fork_exec, which
+# raises no audit event of its own (see measured_build).
+FORK_EXEC = "_posixsubprocess.fork_exec"
+# The event recorded for a read-open of a directory.
+DIRECTORY_OPEN = "open of a directory"
+
 # Commands the build may run, keyed by (program name, *arguments). Each must read
-# nothing a paths entry could name.
+# nothing a paths entry could name. A command is attributed only when the program
+# that runs is the git shutil.which("git") found before the build, that git lies
+# outside the repository, and the build did not pass it an environment.
 ATTRIBUTED_COMMANDS = {
     ("git", "rev-parse", "--abbrev-ref", "HEAD"): (
         "hatch_build.py records the branch name in ASH_INSTALLED_REVISION; git "
@@ -476,10 +536,65 @@ def _audit(event: str, args: tuple[Any, ...]) -> None:
     if events is None:
         return
     if event == "open":
-        # Resolved later: an audit hook should do as little as it can.
-        events.append(("open", args[0], args[1], args[2], os.getcwd()))
-    elif event in SPAWN_EVENTS:
+        # Resolved later: an audit hook should do as little as it can. A directory
+        # is the exception, because whether a path is one can change by then.
+        cwd = os.getcwd()
+        events.append(("open", args[0], args[1], args[2], cwd))
+        raw = args[0]
+        if (
+            raw is not None
+            and not isinstance(raw, int)
+            and _opened_for_reading(args[1], args[2])
+            and os.path.isdir(os.path.join(cwd, os.fsdecode(raw)))
+        ):
+            events.append((DIRECTORY_OPEN, os.path.join(cwd, os.fsdecode(raw))))
+    elif event == "subprocess.Popen":
+        executable, argv, _cwd, env = args
+        if isinstance(argv, (str, bytes, os.PathLike)):
+            argv = [argv]
+        argv = [os.fsdecode(a) for a in argv]
+        program = os.fsdecode(executable) if executable else (argv[0] if argv else "")
+        if program and os.sep not in program:
+            # Resolved now, against the PATH the child is started with.
+            program = shutil.which(program) or program
+        events.append((event, argv, program, env))
+    elif event in SPAWN_EVENTS or event.startswith("ctypes."):
         events.append((event, args))
+
+
+def _first_executable(candidates: object) -> str | None:
+    """The program fork_exec runs: the first candidate that is an executable file."""
+    for candidate in candidates or ():  # type: ignore[attr-defined]
+        path = os.fsdecode(candidate)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+@contextlib.contextmanager
+def _recording_fork_exec(events: list[tuple[Any, ...]]) -> Iterator[None]:
+    """Records every _posixsubprocess.fork_exec call while the block runs.
+
+    subprocess.Popen raises an audit event before it calls fork_exec, but
+    multiprocessing's spawn and forkserver contexts call fork_exec directly, and it
+    raises none. Both look the function up on the module at call time, so replacing
+    the module attribute is enough.
+    """
+    import _posixsubprocess
+
+    original = _posixsubprocess.fork_exec
+
+    def fork_exec(*args: Any, **kwargs: Any) -> Any:
+        argv = [os.fsdecode(a) for a in args[0]] if args and args[0] else []
+        env = args[5] if len(args) > 5 else kwargs.get("env")
+        events.append((FORK_EXEC, argv, _first_executable(args[1]), env))
+        return original(*args, **kwargs)
+
+    _posixsubprocess.fork_exec = fork_exec
+    try:
+        yield
+    finally:
+        _posixsubprocess.fork_exec = original
 
 
 def check_build_backend(pyproject: dict[str, Any]) -> None:
@@ -512,12 +627,18 @@ def check_build_backend(pyproject: dict[str, Any]) -> None:
             )
 
 
-def measured_build(repo: str, out_dir: str) -> tuple[str, list[tuple[Any, ...]]]:
-    """Builds the wheel in-process under the audit hook; returns its path and the
-    open and spawn events recorded while the build ran."""
+def measured_build(
+    repo: str, out_dir: str
+) -> tuple[str, list[tuple[Any, ...]], str | None]:
+    """Builds the wheel in-process under the audit hook; returns its path, the
+    open and spawn events recorded while the build ran, and the real path of the
+    git found on PATH before the build, which the build cannot have changed."""
     global _recording, _hook_installed
     check_build_backend(read_pyproject(repo))
     import hatchling.build
+
+    git = shutil.which("git")
+    git = os.path.realpath(git) if git else None
 
     if not _hook_installed:
         sys.addaudithook(_audit)
@@ -530,14 +651,16 @@ def measured_build(repo: str, out_dir: str) -> tuple[str, list[tuple[Any, ...]]]
     os.chdir(repo)
     sys.dont_write_bytecode = True
     try:
-        with contextlib.redirect_stdout(sys.stderr):
+        with contextlib.redirect_stdout(sys.stderr), _recording_fork_exec(events):
             _recording = events
-            name = hatchling.build.build_wheel(out_dir)
+            try:
+                name = hatchling.build.build_wheel(out_dir)
+            finally:
+                _recording = None
     finally:
-        _recording = None
         sys.dont_write_bytecode = dont_write_bytecode
         os.chdir(cwd)
-    return os.path.join(out_dir, name), events
+    return os.path.join(out_dir, name), events, git
 
 
 def _opened_for_reading(mode: object, flags: object) -> bool:
@@ -552,6 +675,22 @@ def _environment_roots() -> set[str]:
     return {os.path.realpath(p) for p in (sys.prefix, sys.exec_prefix)}
 
 
+def _inside(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + os.sep)
+
+
+def _attributed(
+    argv: list[str], program: str | None, env: object, repo: str, git: str | None
+) -> bool:
+    """Whether a started process is an ATTRIBUTED_COMMANDS entry run by real git."""
+    key = (os.path.basename(argv[0]), *argv[1:]) if argv else ()
+    if key not in ATTRIBUTED_COMMANDS or env is not None:
+        return False
+    if not program or git is None or _inside(git, repo):
+        return False
+    return os.path.realpath(program) == git
+
+
 def _repo_path(repo: str, out_dir: str, raw: object, cwd: str) -> str | None:
     """The repository-relative path an open event names, or None outside it."""
     if raw is None or isinstance(raw, int):
@@ -560,9 +699,9 @@ def _repo_path(repo: str, out_dir: str, raw: object, cwd: str) -> str | None:
     # The wheel being written, and the interpreter's own environment when it lives
     # in the checkout (a .venv): neither is a file the wheel is built from.
     for skipped in (out_dir, *_environment_roots()):
-        if path == skipped or path.startswith(skipped + os.sep):
+        if _inside(path, skipped):
             return None
-    if path != repo and not path.startswith(repo + os.sep):
+    if not _inside(path, repo):
         return None
     rel = os.path.relpath(path, repo).replace(os.sep, "/")
     parts = rel.split("/")
@@ -573,8 +712,11 @@ def _repo_path(repo: str, out_dir: str, raw: object, cwd: str) -> str | None:
     return rel
 
 
-def measured_inputs(repo: str, out_dir: str, events: list[tuple[Any, ...]]) -> set[str]:
-    """Files the build read inside the repository; refuses unattributed processes."""
+def measured_inputs(
+    repo: str, out_dir: str, events: list[tuple[Any, ...]], git: str | None
+) -> set[str]:
+    """Files the build read inside the repository; refuses unattributed processes,
+    foreign calls and directory opens."""
     repo = os.path.realpath(repo)
     out_dir = os.path.realpath(out_dir)
     found: set[str] = set()
@@ -588,23 +730,25 @@ def measured_inputs(repo: str, out_dir: str, events: list[tuple[Any, ...]]) -> s
             if rel is not None:
                 found.add(rel)
             continue
-        name, args = event
-        if name == "subprocess.Popen":
-            executable, argv = args[0], args[1]
-            if isinstance(argv, (str, bytes, os.PathLike)):
-                argv = [argv]
-            argv = [os.fsdecode(a) for a in argv]
-            program = os.fsdecode(executable) if executable else argv[0]
-            key = (os.path.basename(argv[0]), *argv[1:]) if argv else ()
-            if key in ATTRIBUTED_COMMANDS and os.path.basename(program) == key[0]:
+        name = event[0]
+        if name in ("subprocess.Popen", FORK_EXEC):
+            _, argv, program, env = event
+            if _attributed(argv, program, env, repo, git):
                 continue
-            unattributed.append(f"{name} {argv!r}")
+            unattributed.append(f"{name} {argv!r} running {program!r}")
+        elif name == DIRECTORY_OPEN:
+            unattributed.append(
+                f"{name} {event[1]!r}, whose descriptor can open any file relative to "
+                "it unseen"
+            )
         else:
-            unattributed.append(f"{name} {args!r}")
+            text = f"{name} {event[1]!r}"
+            unattributed.append(text if len(text) <= 200 else text[:200] + "...")
     if unattributed:
         raise Unresolvable(
-            "the build started a process this check cannot attribute, so what it "
-            "read is not measured: " + "; ".join(unattributed)
+            "the build started a process this check cannot attribute, called into C, "
+            "or opened a directory, so what it read is not measured: "
+            + "; ".join(dict.fromkeys(unattributed))
         )
     return found
 
@@ -614,11 +758,11 @@ def wheel_inputs(repo: str, out_dir: str, layers: tuple[str, ...] = LAYERS) -> s
     inputs: set[str] = set()
     if "static" in layers:
         inputs |= static_config_inputs(repo)
-    wheel, events = measured_build(repo, out_dir)
+    wheel, events, git = measured_build(repo, out_dir)
     if "static" in layers:
-        inputs |= wheel_license_inputs(wheel)
+        check_wheel_licenses(wheel, declared_license_files(read_pyproject(repo)))
     if "measured" in layers:
-        inputs |= measured_inputs(repo, out_dir, events)
+        inputs |= measured_inputs(repo, out_dir, events, git)
     return {as_probe(repo, path) for path in inputs}
 
 
@@ -704,6 +848,7 @@ build-backend = "hatchling.build"
 name = "automated-security-helper"
 version = "1.0"
 readme = "README.md"
+license-files = ["LICENSE", "NOTICE"]
 
 [tool.hatch.build.targets.wheel]
 include = ["automated_security_helper"]
@@ -726,6 +871,7 @@ build-backend = "hatchling.build"
 name = "automated-security-helper"
 version = "1.0"
 readme = "README.md"
+license-files = ["LICENSE", "NOTICE"]
 """
 
 # Files every fixture repository has. The ones nothing in the default fixture
@@ -773,6 +919,7 @@ def run_fixture(
     workflow: str | None = None,
     licenses: tuple[str, ...] = ("LICENSE", "NOTICE"),
     files: dict[str, str] | None = None,
+    links: dict[str, str] | None = None,
 ) -> str:
     """Builds a fixture repository under root and a wheel from it with hatchling;
     returns "ok", "problems" or "error: <the Unresolvable message>"."""
@@ -790,6 +937,8 @@ def run_fixture(
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(text)
+    for name, target in (links or {}).items():
+        os.symlink(target, os.path.join(root, *name.split("/")))
     out_dir = root + "-dist"
     os.makedirs(out_dir)
     try:
@@ -798,6 +947,55 @@ def run_fixture(
         return f"error: {error}"
     text = workflow if workflow is not None else fixture_workflow(FIXTURE_FILTER)
     return "problems" if check(read_paths_filters(text), inputs) else "ok"
+
+
+def outcome_matches(expected: str, got: str) -> bool:
+    """An error case names part of its message, so a case cannot pass on an error
+    some other rule raised."""
+    return got == expected or (
+        expected.startswith("error: ")
+        and got.startswith("error: ")
+        and expected[len("error: ") :] in got
+    )
+
+
+def unit_checks(scratch: str) -> list[tuple[str, bool]]:
+    """Checks on single functions that no fixture build can drive; each pair is
+    (label, passed)."""
+    results = [
+        (
+            "the case matcher refuses an error some other rule raised",
+            not outcome_matches("error: os.system", "error: subprocess.Popen ['x']"),
+        ),
+        (
+            "the case matcher accepts the error the case names",
+            outcome_matches("error: os.system", "error: ... os.system ('true',)"),
+        ),
+    ]
+    # The interpreter's own environment is skipped even inside the repository (a
+    # .venv in the checkout): with the skip deleted, its files read as inputs.
+    prefix = os.path.realpath(sys.prefix)
+    results.append(
+        (
+            "a file in the interpreter's environment inside the repository is skipped",
+            _repo_path(
+                os.path.dirname(prefix), scratch, os.path.join(prefix, "x.py"), "/"
+            )
+            is None,
+        )
+    )
+    # A license file hatchling puts in the wheel that license-files does not name.
+    wheel = os.path.join(scratch, "x-1.0-py3-none-any.whl")
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name in ("LICENSE", "AUTHORS"):
+            archive.writestr(f"x-1.0.dist-info/licenses/{name}", "text\n")
+    try:
+        check_wheel_licenses(wheel, {"LICENSE"})
+        refused = False
+    except Unresolvable as error:
+        refused = "only in the wheel ['AUTHORS']" in str(error)
+    results.append(("a wheel license file license-files does not declare", refused))
+    return results
 
 
 def without(*entries: str) -> list[str]:
@@ -843,6 +1041,10 @@ def self_test() -> int:
         'ASH_REPO_ROOT.joinpath("Dockerfile")', 'ASH_REPO_ROOT / "Dockerfile"'
     )
     copy_changelog = 'shutil.copyfile({}, ASH_ASSETS_PATH / "CL.md")'
+    spawn_process = (
+        'import multiprocessing; p = multiprocessing.get_context("{}")'
+        ".Process(target=int); p.start(); p.join()"
+    )
     wheel_cases: list[tuple[str, dict[str, Any], str]] = [
         # Each layer on its own. A case names the layer whose measurement it needs,
         # so deleting that measurement turns it red even where the other layer
@@ -968,7 +1170,11 @@ def self_test() -> int:
         ),
         (
             "static: a wheel with no dist-info/licenses/",
-            {"layers": STATIC, "licenses": ()},
+            {
+                "layers": STATIC,
+                "licenses": (),
+                "pyproject": FIXTURE_PYPROJECT.replace('["LICENSE", "NOTICE"]', "[]"),
+            },
             "error: no dist-info/licenses/",
         ),
         (
@@ -1157,6 +1363,125 @@ def self_test() -> int:
             "error: is not met",
         ),
         (
+            "measured: a symlink in the package tree to a root file",
+            {
+                "layers": MEASURED,
+                "links": {"automated_security_helper/link.md": "../CHANGELOG.md"},
+            },
+            "problems",
+        ),
+        (
+            "measured: the hook starts a process through multiprocessing spawn",
+            {"layers": MEASURED, "build_extra": spawn_process.format("spawn")},
+            "error: _posixsubprocess.fork_exec",
+        ),
+        (
+            "measured: the hook starts a process through multiprocessing forkserver",
+            {"layers": MEASURED, "build_extra": spawn_process.format("forkserver")},
+            "error: _posixsubprocess.fork_exec",
+        ),
+        (
+            "measured: the hook calls into C through ctypes",
+            {
+                "layers": MEASURED,
+                "build_extra": "import ctypes; ctypes.CDLL(None).getpid()",
+            },
+            "error: ctypes.",
+        ),
+        (
+            "measured: the hook runs a `git` from the repository",
+            {
+                "layers": MEASURED,
+                "files": {"automated_security_helper/git": "#!/bin/sh\necho main\n"},
+                "build_extra": (
+                    'fake = ASH_ASSETS_PATH.parent / "git"; os.chmod(fake, 0o755); '
+                    'subprocess.run([str(fake), "rev-parse", "--abbrev-ref", "HEAD"], '
+                    "capture_output=True, check=False)"
+                ),
+            },
+            "error: subprocess.Popen ['",
+        ),
+        (
+            "measured: the hook runs git with its own environment",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    'subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], '
+                    "env=dict(os.environ), capture_output=True, check=False)"
+                ),
+            },
+            "error: subprocess.Popen ['git', 'rev-parse'",
+        ),
+        (
+            "measured: the hook runs os.posix_spawn",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    'os.waitpid(os.posix_spawn("/bin/true", ["true"], dict(os.environ)), 0)'
+                ),
+            },
+            "error: os.posix_spawn",
+        ),
+        (
+            "measured: the hook calls os.execv",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "try:\n            os.execv('/nonexistent/x6', ['x6'])\n"
+                    "        except OSError:\n            pass"
+                ),
+            },
+            "error: os.exec",
+        ),
+        (
+            "measured: the hook opens a directory and reads relative to it",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "dfd = os.open(str(ASH_ASSETS_PATH), os.O_RDONLY); "
+                    'os.close(os.open("../../CHANGELOG.md", os.O_RDONLY, dir_fd=dfd)); '
+                    "os.close(dfd)"
+                ),
+            },
+            "error: open of a directory",
+        ),
+        (
+            "static: license-files is not set",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    'license-files = ["LICENSE", "NOTICE"]\n', ""
+                ),
+            },
+            "error: license-files is not set",
+        ),
+        (
+            "static: a glob in license-files",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    '["LICENSE", "NOTICE"]', '["LICEN[CS]E*", "NOTICE"]'
+                ),
+            },
+            "error: is a glob",
+        ),
+        (
+            "static: a license file license-files names is not listed",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    '["LICENSE", "NOTICE"]', '["LICENSE", "NOTICE", "COPYING"]'
+                ),
+                "files": {"COPYING": "copying\n"},
+            },
+            "problems",
+        ),
+        (
+            "both: a root AUTHORS and LICENSE-THIRD-PARTY stay out of the wheel",
+            {"files": {"AUTHORS": "authors\n", "LICENSE-THIRD-PARTY": "x\n"}},
+            "ok",
+        ),
+        (
             "both: a `!` negation entry",
             {"workflow": fixture_workflow([*FIXTURE_FILTER, "!README.md"])},
             "problems",
@@ -1173,24 +1498,22 @@ def self_test() -> int:
         ("both: the fixture's filter covers the inputs", {}, "ok"),
     ]
     with tempfile.TemporaryDirectory(prefix="paths-filter-") as scratch:
+        units = unit_checks(scratch)
+        for label, passed in units:
+            if not passed:
+                failures += 1
+                print(f"  FAILED {label}")
+            else:
+                print(f"  ok {label}")
         for index, (label, overrides, expected) in enumerate(wheel_cases):
             root = os.path.join(scratch, str(index))
             got = run_fixture(root, **overrides)
-            # An error case names part of its message, so a case cannot pass on an
-            # error some other rule raised.
-            if not (
-                got == expected
-                or (
-                    expected.startswith("error: ")
-                    and got.startswith("error: ")
-                    and expected[7:] in got
-                )
-            ):
+            if not outcome_matches(expected, got):
                 failures += 1
                 print(f"  FAILED {label}: expected {expected}, got {got}")
             else:
                 print(f"  ok {label} ({got.split(':', 1)[0]})")
-    total = len(cases) + len(wheel_cases)
+    total = len(cases) + len(units) + len(wheel_cases)
     print("self-test " + ("FAILED" if failures else f"OK ({total} cases)"))
     return 1 if failures else 0
 
