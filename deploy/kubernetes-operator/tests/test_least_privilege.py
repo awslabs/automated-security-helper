@@ -17,13 +17,22 @@ on pods included, goes red there and has to be re-pinned by hand. The denylist
 tests below it name the grants that must never be re-pinned, so the reviewer
 updating the pin is told which kind of widening they are looking at.
 
-Every pin is keyed by (kind, namespace, name), because that is what identifies an
-object to the API server: a Role keyed by kind and name alone let a same-named copy
-in another namespace stand in for the real one while the real one was widened. And
+Every pin is keyed by (apiVersion, kind, namespace, name), because the API group is
+part of what identifies an object to the API server: a Role keyed by kind and name
+alone let a same-named copy in another namespace stand in for the real one while
+the real one was widened, and a ClusterRoleBinding or Deployment under another
+group (OpenShift's authorization.openshift.io, or any custom resource) is a
+different object with different fields that the pins here never read. And
 a binding pin only means something if the operator runs as the account it binds, so
 EXPECTED_OBJECTS pins every object manifests/ holds, the Deployment's namespace and
 serviceAccountName are pinned, and a Secret or any other workload is refused: each
 of those could run code as, or hand out the token of, an account no pin here reads.
+
+Threat model: this guards against accidental drift and ordinary edits to
+manifests/, the kind a reviewer reads past. It does not try to stop an author who
+already controls the repository's code from defeating it on purpose (editing this
+file, generating manifests at apply time, and the like); code review is the
+control there.
 """
 
 from __future__ import annotations
@@ -71,19 +80,23 @@ SOURCE_VOLUME_KEYS = {"persistentVolumeClaim", "configMap", "secret", "csi"}
 # removing any member is. Keep this in step with the comments in rbac.yaml, which
 # give the reason for each grant.
 Rule = tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]
-# (kind, namespace, name). The namespace is None for a cluster-scoped object.
-ObjectKey = tuple[str, str | None, str]
+# (apiVersion, kind, namespace, name). The namespace is None for a cluster-scoped
+# object. The apiVersion is compared whole, version included, so a move between
+# versions of the same group is re-pinned by hand as well.
+ObjectKey = tuple[str, str, str | None, str]
+
+RBAC_V1 = "rbac.authorization.k8s.io/v1"
 
 OPERATOR_NAMESPACE = "ash-system"
 OPERATOR_ACCOUNT = "ash-operator"
 SCAN_ACCOUNT = "ash-scan"
-OPERATOR_DEPLOYMENT: ObjectKey = ("Deployment", OPERATOR_NAMESPACE, "ash-operator")
+OPERATOR_DEPLOYMENT: ObjectKey = ("apps/v1", "Deployment", OPERATOR_NAMESPACE, "ash-operator")
 
 EXPECTED_RULES: dict[ObjectKey, list[Rule]] = {
-    ("ClusterRole", None, "ash-operator-crd-reader"): [
+    (RBAC_V1, "ClusterRole", None, "ash-operator-crd-reader"): [
         (("apiextensions.k8s.io",), ("customresourcedefinitions",), ("get", "list", "watch")),
     ],
-    ("Role", OPERATOR_NAMESPACE, "ash-operator"): [
+    (RBAC_V1, "Role", OPERATOR_NAMESPACE, "ash-operator"): [
         (
             ("ash.awslabs.github.io",),
             ("ashmcpservers", "ashscans"),
@@ -128,6 +141,10 @@ ROLE_KINDS = ("Role", "ClusterRole")
 # ClusterRole its selectors match, which with the built-in roles' label is
 # cluster-admin.
 ROLE_KEYS = frozenset({"apiVersion", "kind", "metadata", "rules"})
+# The same for bindings. The binding pin compares roleRef and subjects alone, and a
+# field beside them can grant to someone else: OpenShift's legacy bindings carry
+# userNames and groupNames, and groupNames [system:authenticated] is every user.
+BINDING_KEYS = frozenset({"apiVersion", "kind", "metadata", "roleRef", "subjects"})
 # The labels each reviewed role carries, exactly. A label is how aggregation finds a
 # role: rbac.authorization.k8s.io/aggregate-to-admin folds its rules into the
 # built-in admin role, and any label can match some other aggregated ClusterRole's
@@ -148,15 +165,15 @@ EXPECTED_MANIFEST_FILES = frozenset({"operator.yaml", "rbac.yaml"})
 # account, or a token Secret for the operator's, is a change to this set.
 EXPECTED_OBJECTS: frozenset[ObjectKey] = frozenset(
     {
-        ("Namespace", None, OPERATOR_NAMESPACE),
+        ("v1", "Namespace", None, OPERATOR_NAMESPACE),
         OPERATOR_DEPLOYMENT,
-        ("ServiceAccount", OPERATOR_NAMESPACE, OPERATOR_ACCOUNT),
-        ("ServiceAccount", OPERATOR_NAMESPACE, SCAN_ACCOUNT),
+        ("v1", "ServiceAccount", OPERATOR_NAMESPACE, OPERATOR_ACCOUNT),
+        ("v1", "ServiceAccount", OPERATOR_NAMESPACE, SCAN_ACCOUNT),
         # Denies ingress to the operator pod; grants nothing to anyone.
-        ("NetworkPolicy", OPERATOR_NAMESPACE, "ash-operator-ingress"),
+        ("networking.k8s.io/v1", "NetworkPolicy", OPERATOR_NAMESPACE, "ash-operator-ingress"),
         *EXPECTED_RULES,
-        ("ClusterRoleBinding", None, "ash-operator-crd-reader"),
-        ("RoleBinding", OPERATOR_NAMESPACE, "ash-operator"),
+        (RBAC_V1, "ClusterRoleBinding", None, "ash-operator-crd-reader"),
+        (RBAC_V1, "RoleBinding", OPERATOR_NAMESPACE, "ash-operator"),
     }
 )
 # Kinds that run a container, and so run as some ServiceAccount. Only the operator
@@ -224,12 +241,18 @@ def rbac_documents(manifests_dir: Path = MANIFESTS_DIR) -> list[dict]:
 
 def object_key(doc: dict) -> ObjectKey:
     metadata = doc.get("metadata") or {}
-    return (doc.get("kind"), metadata.get("namespace"), metadata.get("name"))
+    return (
+        doc.get("apiVersion"),
+        doc.get("kind"),
+        metadata.get("namespace"),
+        metadata.get("name"),
+    )
 
 
 def describe(key: ObjectKey) -> str:
-    kind, namespace, name = key
-    return f"{kind}/{namespace}/{name}" if namespace else f"{kind}/{name}"
+    api_version, kind, namespace, name = key
+    path = f"{kind}/{namespace}/{name}" if namespace else f"{kind}/{name}"
+    return f"{api_version} {path}"
 
 
 def _as_rule(rule: dict) -> Rule:
@@ -322,8 +345,22 @@ def actual_bindings(docs: list[dict]) -> set:
     return actual
 
 
+def binding_problems(docs: list[dict]) -> list[str]:
+    problems = [
+        f"{describe(object_key(doc))} carries {sorted(set(doc) - BINDING_KEYS)} beside its "
+        f"roleRef and subjects: {doc}"
+        for doc in docs
+        if doc["kind"] in ("RoleBinding", "ClusterRoleBinding") and set(doc) - BINDING_KEYS
+    ]
+    unexpected = actual_bindings(docs) ^ EXPECTED_BINDINGS
+    if unexpected:
+        problems.append(f"bindings differ from the reviewed pin: {sorted(map(repr, unexpected))}")
+    return problems
+
+
 def test_every_binding_is_exactly_the_reviewed_binding():
-    assert actual_bindings(rbac_documents()) == EXPECTED_BINDINGS
+    problems = binding_problems(rbac_documents())
+    assert not problems, "\n".join(problems)
 
 
 def object_problems(docs: list[dict]) -> list[str]:
@@ -337,9 +374,9 @@ def object_problems(docs: list[dict]) -> list[str]:
         # credential committed to the repository, or a service-account-token Secret
         # that mints a token for whatever account its annotation names. Neither is
         # re-pinned.
-        if key[0] == "Secret":
+        if key[1] == "Secret":
             problems.append(f"{describe(key)}: manifests/ must not ship a Secret: {doc}")
-        elif key[0] in WORKLOAD_KINDS and key not in REVIEWED_WORKLOADS:
+        elif key[1] in WORKLOAD_KINDS and key not in REVIEWED_WORKLOADS:
             # A workload runs as the account in its pod spec, in whatever namespace it
             # names, so any account in the cluster is reachable from here.
             problems.append(f"{describe(key)}: a workload other than the operator's: {doc}")
@@ -355,7 +392,7 @@ def object_problems(docs: list[dict]) -> list[str]:
     operators = [doc for doc, key in zip(docs, keys, strict=True) if key == OPERATOR_DEPLOYMENT]
     if not operators:
         problems.append(
-            f"no Deployment ash-operator in namespace {OPERATOR_NAMESPACE}: the bindings are "
+            f"no apps/v1 Deployment ash-operator in namespace {OPERATOR_NAMESPACE}: the bindings are "
             f"pinned to {OPERATOR_NAMESPACE}/{OPERATOR_ACCOUNT}, so the operator must run there"
         )
     for doc in operators:
@@ -376,7 +413,7 @@ def object_problems(docs: list[dict]) -> list[str]:
     scan_accounts = [
         doc
         for doc, key in zip(docs, keys, strict=True)
-        if key == ("ServiceAccount", OPERATOR_NAMESPACE, SCAN_ACCOUNT)
+        if key == ("v1", "ServiceAccount", OPERATOR_NAMESPACE, SCAN_ACCOUNT)
     ]
     for doc in scan_accounts:
         # The pods the operator creates set this false themselves. Pinned on the
@@ -398,11 +435,7 @@ def pin_problems(manifests_dir: Path) -> list[str]:
     # Everything the exact pins above refuse, for a manifests directory other than
     # the committed one, so the tests below can break a copy and watch it fail.
     docs = rbac_documents(manifests_dir)
-    problems = role_problems(docs) + object_problems(docs)
-    unexpected = actual_bindings(docs) ^ EXPECTED_BINDINGS
-    if unexpected:
-        problems.append(f"bindings differ from the reviewed pin: {sorted(map(repr, unexpected))}")
-    return problems
+    return role_problems(docs) + object_problems(docs) + binding_problems(docs)
 
 
 def test_manifests_dir_holds_only_the_reviewed_files():
@@ -514,7 +547,9 @@ def _widen_role_behind_a_same_name_decoy(d: Path) -> None:
     # placed after it, is what a pin keyed by kind and name alone compared instead.
     path = d / "rbac.yaml"
     docs = [doc for doc in yaml.safe_load_all(path.read_text()) if doc]
-    (role,) = [doc for doc in docs if object_key(doc) == ("Role", "ash-system", "ash-operator")]
+    (role,) = [
+        doc for doc in docs if object_key(doc) == (RBAC_V1, "Role", "ash-system", "ash-operator")
+    ]
     decoy = json.loads(json.dumps(role))
     decoy["metadata"]["namespace"] = "default"
     (pods,) = [rule for rule in role["rules"] if rule["resources"] == ["pods"]]
@@ -525,7 +560,9 @@ def _widen_role_behind_a_same_name_decoy(d: Path) -> None:
 def _duplicate_the_role(d: Path) -> None:
     path = d / "rbac.yaml"
     docs = [doc for doc in yaml.safe_load_all(path.read_text()) if doc]
-    (role,) = [doc for doc in docs if object_key(doc) == ("Role", "ash-system", "ash-operator")]
+    (role,) = [
+        doc for doc in docs if object_key(doc) == (RBAC_V1, "Role", "ash-system", "ash-operator")
+    ]
     path.write_text(yaml.safe_dump_all([*docs, role]))
 
 
@@ -583,6 +620,42 @@ def _automount_the_scan_token(d: Path) -> None:
     )
 
 
+def _edit_crd_reader_binding(d: Path, edit) -> None:
+    path = d / "rbac.yaml"
+    docs = [doc for doc in yaml.safe_load_all(path.read_text()) if doc]
+    (binding,) = [doc for doc in docs if doc["kind"] == "ClusterRoleBinding"]
+    edit(binding)
+    path.write_text(yaml.safe_dump_all(docs))
+
+
+def _bind_through_the_openshift_group(d: Path) -> None:
+    # OpenShift's legacy authorization group serves its own ClusterRoleBinding, whose
+    # groupNames grant the role to every authenticated user. Kind, name and subjects
+    # stay as pinned; only the group and the extra field differ.
+    _edit_crd_reader_binding(
+        d,
+        lambda binding: binding.update(
+            apiVersion="authorization.openshift.io/v1",
+            groupNames=["system:authenticated"],
+        ),
+    )
+
+
+def _add_group_names_to_the_binding(d: Path) -> None:
+    # The same field under the reviewed group, so only the key pin can refuse it.
+    _edit_crd_reader_binding(d, lambda binding: binding.update(groupNames=["system:authenticated"]))
+
+
+def _move_the_deployment_to_a_custom_group(d: Path) -> None:
+    # A Deployment in some other group is not the apps/v1 Deployment the cluster runs,
+    # so the operator would not run as the pinned account at all.
+    _replace(
+        d / "operator.yaml",
+        "apiVersion: apps/v1\nkind: Deployment\n",
+        "apiVersion: evil.example.com/v1\nkind: Deployment\n",
+    )
+
+
 def test_the_pin_is_clean_on_an_untouched_copy(tmp_path):
     # The control for the test below: copying the directory alone changes nothing.
     shutil.copytree(MANIFESTS_DIR, tmp_path / "manifests")
@@ -601,10 +674,13 @@ def test_the_pin_is_clean_on_an_untouched_copy(tmp_path):
         (_widen_role_behind_a_same_name_decoy, "Role/ash-system/ash-operator: the grants differ"),
         (_duplicate_the_role, "Role/ash-system/ash-operator is defined more than once"),
         (_run_operator_as_default, "serviceAccountName='default'"),
-        (_move_operator_to_kube_system, "no Deployment ash-operator in namespace ash-system"),
+        (_move_operator_to_kube_system, "no apps/v1 Deployment ash-operator in namespace"),
         (_add_pod_in_kube_system, "Pod/kube-system/ash-helper: a workload other than"),
         (_add_operator_token_secret, "must not ship a Secret"),
         (_automount_the_scan_token, "automountServiceAccountToken=True"),
+        (_bind_through_the_openshift_group, "unreviewed authorization.openshift.io/v1"),
+        (_add_group_names_to_the_binding, "carries ['groupNames']"),
+        (_move_the_deployment_to_a_custom_group, "unreviewed evil.example.com/v1"),
     ],
     ids=[
         "yml-file",
@@ -620,6 +696,9 @@ def test_the_pin_is_clean_on_an_untouched_copy(tmp_path):
         "pod-in-kube-system",
         "token-secret",
         "scan-account-automount",
+        "openshift-group-binding",
+        "binding-group-names",
+        "deployment-custom-group",
     ],
 )
 def test_the_pin_refuses_a_widening_however_kubectl_would_read_it(tmp_path, inject, marker):
