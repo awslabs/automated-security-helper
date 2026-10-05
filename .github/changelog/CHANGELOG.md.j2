@@ -1,0 +1,35 @@
+{#
+  commitizen's stock CHANGELOG.md.j2 (4.19.0), plus one include.
+
+  A release can carry hand-written notes in .github/release-notes/<tag>.md, for
+  example .github/release-notes/v3.8.0.md. When that file exists it is rendered
+  directly under the version heading, ahead of the sections commitizen builds
+  from commits. It exists for releases whose version number understates them:
+  v3.8.0 carries breaking changes in a minor bump, and users pinned to <4 get no
+  semver signal, so the changes have to be stated where they read the changelog.
+
+  The notes file is loaded as a Jinja template, so it must not contain Jinja
+  delimiters. tests/unit/test_release_line_workflow.py renders this template.
+#}
+{% for entry in tree %}
+
+## {{ entry.version }}{% if entry.date %} ({{ entry.date }}){% endif %}
+
+
+{% include ".github/release-notes/" ~ entry.version ~ ".md" ignore missing %}
+
+{% for change_key, changes in entry.changes.items() %}
+
+{% if change_key %}
+### {{ change_key }}
+{% endif %}
+
+{% for change in changes %}
+{% if change.scope %}
+- **{{ change.scope }}**: {{ change.message }}
+{% elif change.message %}
+- {{ change.message }}
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endfor %}
