@@ -35,6 +35,7 @@ from rich._log_render import LogRender
 from rich.text import Text
 from syrupy.assertion import SnapshotAssertion
 
+from tests.snapshot.support.cli import LINUX_AMD64, simulated_host
 from tests.snapshot.support.extensions import (
     NormalizingAmberExtension,
     NormalizingTextFileExtension,
@@ -137,6 +138,24 @@ def _pinned_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     # Handlers are built per get_logger() call and _fresh_ash_loggers drops them
     # between tests, so "first line" is a property of the command, not of test order.
     monkeypatch.setattr(LogRender, "__call__", _log_render_without_clock)
+
+
+@pytest.fixture(autouse=True)
+def _pinned_host(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Render every snapshot as linux-amd64 unless the test simulates another host.
+
+    ASH reads ``platform.system()`` to decide what it prints, so without this a
+    snapshot showed the OS the suite ran on. Measured on windows-latest, where 18 of
+    the 26 snapshot failures came from it: ASH's log console is built with
+    ``legacy_windows=True`` and ``safe_box=True`` on Windows (utils/log.py), which
+    draws panels with square corners and wraps one column early; semgrep and opengrep
+    default to disabled there, which every rendered config and scanner list shows;
+    and cfn-nag's install probe asks for a Ruby DevKit instead of a C compiler. A
+    test that renders a Windows variant says so with ``simulated_host``, which nests
+    inside this one, and then renders it on every OS.
+    """
+    with simulated_host(monkeypatch, LINUX_AMD64):
+        yield
 
 
 #: Where ASH's own plugins live. A fresh ``ash`` process registers these and nothing

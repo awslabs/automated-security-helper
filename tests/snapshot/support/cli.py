@@ -119,16 +119,28 @@ def _set_import_time_defaults(enabled: bool) -> None:
 
 @contextlib.contextmanager
 def simulated_host(monkeypatch: pytest.MonkeyPatch, host: Host) -> Iterator[Host]:
-    """Run the body as if on ``host``; restores the real host's defaults on exit."""
+    """Run the body as if on ``host``; restores the real host's defaults on exit.
+
+    "Real" is whatever ``platform.system()`` answers on entry, so this nests: inside
+    the linux-amd64 host tests/snapshot/conftest.py pins for every snapshot test, a
+    test's own ``simulated_host`` restores linux-amd64, and the conftest pin restores
+    the machine's own host. The import-time defaults are rebuilt only when the
+    simulated host flips them, which on a Linux or macOS machine running a non-Windows
+    host is never.
+    """
     real_enabled = platform.system().lower() != "windows"
+    simulated_enabled = not host.is_windows
+    flips_defaults = simulated_enabled != real_enabled
     with monkeypatch.context() as mp:
         mp.setattr(platform, "system", lambda: host.system)
         mp.setattr(platform, "machine", lambda: host.machine)
-        _set_import_time_defaults(not host.is_windows)
+        if flips_defaults:
+            _set_import_time_defaults(simulated_enabled)
         try:
             yield host
         finally:
-            _set_import_time_defaults(real_enabled)
+            if flips_defaults:
+                _set_import_time_defaults(real_enabled)
 
 
 #: What ``Path.absolute()`` reports under :func:`displayed_cwd`. Same length in its
