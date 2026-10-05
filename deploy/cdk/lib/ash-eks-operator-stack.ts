@@ -1373,8 +1373,9 @@ export class AshEksOperatorStack extends Stack {
       description:
         'Namespace to create and install the operator into. It is created if absent, and it ' +
         'is ALWAYS left in place when the stack is deleted -- deleting a namespace ' +
-        'cascade-deletes everything in it, so this stack never deletes one. The operator, ' +
-        'its RBAC and its CRD are removed on delete; an empty namespace may remain.',
+        'cascade-deletes everything in it. Stack delete removes the Deployment, ' +
+        'ServiceAccounts, Role and RoleBinding; the CRDs, ClusterRole and ClusterRoleBinding ' +
+        'are kept.',
     });
 
     /**

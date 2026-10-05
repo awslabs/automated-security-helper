@@ -478,6 +478,16 @@ describe('REGRESSION: stack deletion must not delete anything cluster-scoped', (
     expect(description).not.toMatch(/occupies/i);
     expect(description).toMatch(/ALWAYS left in place/);
   });
+
+  test('the parameter description says what the delete loop keeps, not the opposite', () => {
+    // The launch form is what an adopter reads before deleting. It once said the CRD
+    // and RBAC "are removed on delete", while the loop above skips every cluster-scoped
+    // document. Pinned to the same split deploy/README.md states.
+    const description: string = JSON_TEMPLATE.Parameters.OperatorNamespace.Description;
+    expect(description).not.toMatch(/(CRD|RBAC|ClusterRole)[^.;]*\bremoved\b/i);
+    expect(description).toMatch(/removes the Deployment, ServiceAccounts, Role and RoleBinding/);
+    expect(description).toMatch(/the CRDs, ClusterRole and ClusterRoleBinding are kept/);
+  });
 });
 
 describe('REGRESSION: the bearer token must not expire mid-install', () => {
