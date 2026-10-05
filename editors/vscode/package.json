@@ -66,7 +66,7 @@
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "Extra arguments appended to `ash scan`, for example `--scanners detect-secrets` or `--offline`. `--output-dir` and `--source-dir` are refused, in either form: the extension sets both, and `ash.outputDirectory` chooses where the scan writes."
+          "markdownDescription": "Extra arguments appended to `ashx scan`, for example `--scanners detect-secrets` or `--offline`. `--output-dir` and `--source-dir` are refused, in either form: the extension sets both, and `ash.outputDirectory` chooses where the scan writes."
         },
         "ash.scanTimeoutSeconds": {
           "type": "number",
