@@ -60,7 +60,7 @@ The offline mode validation system has been enhanced with emoji-prefixed logging
 There is no fallback to the online `p/ci` ruleset when the cache is missing. An
 offline run that silently fetched the registry ruleset would be a different scan
 than the one that was requested, reported as the one that was requested. The
-scanner declines instead: it records the reason above, `ash` reports it as
+scanner declines instead: it records the reason above, `ashx` reports it as
 `MISSING`, and the run fails the completeness gate when
 `--fail-on-incomplete-scanners` is in effect.
 

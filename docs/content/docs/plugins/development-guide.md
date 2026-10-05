@@ -455,7 +455,7 @@ ash_plugin_modules:
 Or specify via command line:
 
 ```bash
-ash --plugin-modules my_ash_plugins
+ashx --plugin-modules my_ash_plugins
 ```
 
 ## Best Practices
@@ -511,7 +511,7 @@ def test_custom_regex_scanner():
 Enable debug logging to troubleshoot plugin issues:
 
 ```bash
-ash --debug
+ashx --debug
 ```
 
 ## Next Steps

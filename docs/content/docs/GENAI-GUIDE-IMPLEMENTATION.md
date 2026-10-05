@@ -29,16 +29,16 @@ This document describes the implementation of the ASH GenAI Integration Guide, a
 
 ### 2. CLI Command for Easy Access
 
-**Command**: `ash get-genai-guide`
+**Command**: `ashx get-genai-guide`
 
 **Usage**:
 ```bash
 # Download to default location
-ash get-genai-guide
+ashx get-genai-guide
 
 # Download to custom location
-ash get-genai-guide -o /path/to/guide.md
-ash get-genai-guide --output custom-name.md
+ashx get-genai-guide -o /path/to/guide.md
+ashx get-genai-guide --output custom-name.md
 ```
 
 **Features**:
@@ -121,7 +121,7 @@ Documents:
 
 ```bash
 # User downloads the guide
-ash get-genai-guide -o ash-guide.md
+ashx get-genai-guide -o ash-guide.md
 
 # User provides it to their AI assistant
 "Here's the ASH integration guide. Please use it when analyzing my scan results."
@@ -132,7 +132,7 @@ ash get-genai-guide -o ash-guide.md
 If the AI assistant has access to the ASH CLI:
 ```bash
 # AI assistant runs the command
-ash get-genai-guide
+ashx get-genai-guide
 
 # AI assistant reads the guide
 # AI assistant follows the guidelines when processing results
@@ -214,13 +214,13 @@ Potential improvements:
 
 ```bash
 # Test command help
-ash get-genai-guide --help
+ashx get-genai-guide --help
 
 # Test default output
-ash get-genai-guide
+ashx get-genai-guide
 
 # Test custom output
-ash get-genai-guide -o /tmp/test.md
+ashx get-genai-guide -o /tmp/test.md
 
 # Verify content
 head -n 50 ash-genai-guide.md
@@ -236,7 +236,7 @@ The guide should be tested with:
 ## Documentation Links
 
 - **Guide Location**: `docs/content/docs/genai-steering-guide.md`
-- **CLI Reference**: `ash get-genai-guide --help`
+- **CLI Reference**: `ashx get-genai-guide --help`
 - **README Section**: "AI Integration with MCP"
 - **Navigation**: "Advanced Usage" → "GenAI Integration Guide"
 

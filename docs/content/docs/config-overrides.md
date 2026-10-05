@@ -5,13 +5,13 @@ ASH supports runtime configuration overrides through the `--config-overrides` CL
 ## Basic Usage
 
 ```bash
-ash --config-overrides 'reporters.markdown.options.include_detailed_findings=true'
+ashx --config-overrides 'reporters.markdown.options.include_detailed_findings=true'
 ```
 
 You can specify multiple overrides by using the parameter multiple times:
 
 ```bash
-ash \
+ashx \
   --config-overrides 'reporters.cloudwatch-logs.options.aws_region=us-west-2' \
   --config-overrides 'global_settings.severity_threshold=LOW'
 ```
@@ -35,7 +35,7 @@ You can append to existing lists by adding a `+` at the end of the key path:
 
 ```bash
 # Add a new plugin module without replacing existing ones
-ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
+ashx --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ```
 
 ### Complex Structures
@@ -44,39 +44,39 @@ For complex structures, you can use JSON syntax:
 
 ```bash
 # Add a new ignore path
-ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
 ### Examples
 
 1. Change severity threshold:
    ```bash
-   ash --config-overrides 'global_settings.severity_threshold=LOW'
+   ashx --config-overrides 'global_settings.severity_threshold=LOW'
    ```
 
 2. Enable a specific scanner:
    ```bash
-   ash --config-overrides 'scanners.bandit.enabled=true'
+   ashx --config-overrides 'scanners.bandit.enabled=true'
    ```
 
 3. Configure AWS region for CloudWatch Logs reporter:
    ```bash
-   ash --config-overrides 'reporters.cloudwatch-logs.options.aws_region=us-west-2'
+   ashx --config-overrides 'reporters.cloudwatch-logs.options.aws_region=us-west-2'
    ```
 
 4. Replace the list of plugin modules:
    ```bash
-   ash --config-overrides 'ash_plugin_modules=["automated_security_helper.plugin_modules.ash_aws_plugins"]'
+   ashx --config-overrides 'ash_plugin_modules=["automated_security_helper.plugin_modules.ash_aws_plugins"]'
    ```
 
 5. Add a plugin module to the existing list:
    ```bash
-   ash --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.custom_plugin"]'
+   ashx --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.custom_plugin"]'
    ```
 
 6. Configure multiple scanner options:
    ```bash
-   ash \
+   ashx \
      --config-overrides 'scanners.bandit.options.confidence_level=high' \
      --config-overrides 'scanners.bandit.options.ignore_nosec=true'
    ```
@@ -128,7 +128,7 @@ ASH provides several commands to manage your configuration:
 Create a new configuration file:
 
 ```bash
-ash config init
+ashx config init
 ```
 
 This creates a default configuration file at `.ash/.ash.yaml`.
@@ -138,13 +138,13 @@ This creates a default configuration file at `.ash/.ash.yaml`.
 View the current configuration:
 
 ```bash
-ash config get
+ashx config get
 ```
 
 You can also apply overrides when viewing the configuration:
 
 ```bash
-ash config get --config-overrides 'scanners.bandit.enabled=false'
+ashx config get --config-overrides 'scanners.bandit.enabled=false'
 ```
 
 #### Update Configuration
@@ -152,17 +152,17 @@ ash config get --config-overrides 'scanners.bandit.enabled=false'
 Update an existing configuration file:
 
 ```bash
-ash config update --set 'scanners.bandit.enabled=false' --set 'global_settings.severity_threshold=LOW'
+ashx config update --set 'scanners.bandit.enabled=false' --set 'global_settings.severity_threshold=LOW'
 ```
 
 You can use the same syntax as `--config-overrides`, including list operations:
 
 ```bash
 # Add a new ignore path
-ash config update --set 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ashx config update --set 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 
 # Preview changes without writing to file
-ash config update --set 'scanners.semgrep.enabled=false' --dry-run
+ashx config update --set 'scanners.semgrep.enabled=false' --dry-run
 ```
 
 #### Validate Configuration
@@ -170,13 +170,13 @@ ash config update --set 'scanners.semgrep.enabled=false' --dry-run
 Validate your configuration file:
 
 ```bash
-ash config validate
+ashx config validate
 ```
 
 You can also validate with overrides:
 
 ```bash
-ash config validate --config-overrides 'scanners.bandit.options.confidence_level=high'
+ashx config validate --config-overrides 'scanners.bandit.options.confidence_level=high'
 ```
 
 ### Custom Plugins
@@ -195,7 +195,7 @@ ash_plugin_modules:
 Or using the override:
 
 ```bash
-ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
+ashx --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ```
 
 ## Notes

@@ -1,5 +1,5 @@
 #
-# This example clones the ASH repo and the repo to be scanned, then runs `ash`
+# This example clones the ASH repo and the repo to be scanned, then runs `ashx`
 # against the repo.
 #
 # This will build the ASH container image, run the scan using the built image,
@@ -36,7 +36,7 @@ jobs:
         run: |
           export PATH="$(pwd)/automated-security-helper:$PATH"
 
-          ash \
+          ashx \
             --source-dir "$(pwd)/repo" \
             --output-dir "${{ env.ASH_OUTPUT_PATH }}"
 

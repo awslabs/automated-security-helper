@@ -146,7 +146,7 @@ Results are published as structured JSON logs:
 
 ```bash
 # Run scan with CloudWatch Logs reporting
-ash /path/to/code --reporters cloudwatch-logs
+ashx /path/to/code --reporters cloudwatch-logs
 ```
 
 ### With Custom Configuration
@@ -154,7 +154,7 @@ ash /path/to/code --reporters cloudwatch-logs
 ```bash
 # Set log group via environment variable
 export ASH_CLOUDWATCH_LOG_GROUP_NAME="/security/ash-scans"
-ash /path/to/code --reporters cloudwatch-logs
+ashx /path/to/code --reporters cloudwatch-logs
 ```
 
 ### CI/CD Integration
@@ -166,7 +166,7 @@ ash /path/to/code --reporters cloudwatch-logs
     AWS_REGION: us-east-1
     ASH_CLOUDWATCH_LOG_GROUP_NAME: "/ci-cd/security-scans"
   run: |
-    ash . --reporters cloudwatch-logs,sarif
+    ashx . --reporters cloudwatch-logs,sarif
 ```
 
 ## CloudWatch Insights Queries
@@ -256,7 +256,7 @@ Enable debug logging to troubleshoot issues:
 
 ```bash
 # Run with debug output
-ash /path/to/code --reporters cloudwatch-logs --log-level DEBUG
+ashx /path/to/code --reporters cloudwatch-logs --log-level DEBUG
 ```
 
 ### Retry Configuration
@@ -283,7 +283,7 @@ Enable debug logging to troubleshoot issues:
 
 ```bash
 # Run with debug output
-ash /path/to/code --reporters cloudwatch-logs --log-level DEBUG
+ashx /path/to/code --reporters cloudwatch-logs --log-level DEBUG
 ```
 
 ## Cost Considerations

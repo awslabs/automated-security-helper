@@ -251,10 +251,10 @@ Test your configuration with representative projects:
 
 ```bash
 # Test with debug logging
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp --debug
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx mcp --debug
 
 # Monitor system resources during scans
-top -p $(pgrep -f "ash mcp")
+top -p $(pgrep -f "ashx mcp")
 ```
 
 ## Troubleshooting Performance Issues

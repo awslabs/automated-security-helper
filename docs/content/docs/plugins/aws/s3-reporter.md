@@ -159,7 +159,7 @@ options:
 # Store reports in S3
 export ASH_S3_BUCKET_NAME="my-security-reports"
 export AWS_REGION="us-east-1"
-ash /path/to/code --reporters s3
+ashx /path/to/code --reporters s3
 ```
 
 ### With Custom Configuration
@@ -168,7 +168,7 @@ ash /path/to/code --reporters s3
 # Set bucket and prefix via environment variables
 export ASH_S3_BUCKET_NAME="security-reports-prod"
 export AWS_REGION="us-east-1"
-ash /path/to/code --reporters s3,sarif
+ashx /path/to/code --reporters s3,sarif
 ```
 
 ### CI/CD Integration
@@ -182,7 +182,7 @@ ash /path/to/code --reporters s3,sarif
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   run: |
-    ash . --reporters s3,sarif
+    ashx . --reporters s3,sarif
 
 - name: Generate Report URL
   run: |
@@ -201,7 +201,7 @@ pipeline {
     stages {
         stage('Security Scan') {
             steps {
-                sh 'ash . --reporters s3,html --'
+                sh 'ashx . --reporters s3,html --'
             }
         }
         stage('Archive Results') {
@@ -267,7 +267,7 @@ The reporter also creates a local copy of the uploaded report in:
 Enable debug logging to see detailed error information:
 
 ```bash
-ash /path/to/code --reporters s3 --log-level DEBUG
+ashx /path/to/code --reporters s3 --log-level DEBUG
 ```
 
 ### Retry Configuration

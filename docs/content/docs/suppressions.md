@@ -191,7 +191,7 @@ suppressions:
 To temporarily ignore all suppressions and see all findings, use the `--ignore-suppressions` flag:
 
 ```bash
-ash --ignore-suppressions
+ashx --ignore-suppressions
 ```
 
 This is useful when you want to:
@@ -293,7 +293,7 @@ Example cleanup workflow:
 
 ```bash
 # 1. Run scan
-ash --mode local
+ashx --mode local
 
 # 2. Check for unused suppressions
 cat .ash/ash_output/reports/ash.unused-suppressions.md
@@ -302,7 +302,7 @@ cat .ash/ash_output/reports/ash.unused-suppressions.md
 vim .ash/.ash.yaml
 
 # 4. Re-run scan to verify
-ash --mode local
+ashx --mode local
 ```
 
 ### Configuration Options

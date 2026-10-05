@@ -4,7 +4,7 @@ extensions:
     cmd: uvx
     args:
       - "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0"
-      - "ash"
+      - "ashx"
       - "mcp"
     enabled: true
     type: stdio

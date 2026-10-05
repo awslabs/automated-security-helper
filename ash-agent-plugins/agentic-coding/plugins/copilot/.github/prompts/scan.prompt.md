@@ -10,7 +10,7 @@ Run a full ASH security scan on the current working directory and report a prior
 
 ## Workflow
 
-1. **Verify installation** — call `check_installation`. If it fails, surface the install command (`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`) and stop.
+1. **Verify installation** — call `check_installation`. If it fails, surface the install command (`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx mcp`) and stop.
 
 2. **Determine source directory** — use `pwd` to get the absolute path. If the user provides an argument, use that instead. For monorepos, confirm with the user whether they want the full repo or a subdirectory before scanning.
 
@@ -19,7 +19,7 @@ Run a full ASH security scan on the current working directory and report a prior
    - `severity_threshold="MEDIUM"` (configurable via user prompt)
    - `clean_output=True`
 
-   Store the returned `scan_id`. Reports land in `<source_dir>/.ash/ash_output/`. The MCP server always runs scans in local mode; for container scans the user needs to invoke the ASH CLI directly (`ash scan --mode container`).
+   Store the returned `scan_id`. Reports land in `<source_dir>/.ash/ash_output/`. The MCP server always runs scans in local mode; for container scans the user needs to invoke the ASH CLI directly (`ashx scan --mode container`).
 
 4. **Poll progress every 5 seconds** — loop on `get_scan_progress(scan_id=<id>)` until `status` is one of `completed`, `failed`, or `cancelled`. Don't rely on `is_complete` alone — it stays `False` for cancelled scans. Show the user a brief status update on each poll: which scanners are running, and `completed_scanners / total_scanners` as the progress fraction (treat `total_scanners == 0` as "initializing").
 

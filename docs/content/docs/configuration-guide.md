@@ -27,7 +27,7 @@ in turn ASH checks the source directory and then its `.ash/` subdirectory, so
 You can also specify a custom configuration file path using the `--config` option:
 
 ```bash
-ash --config /path/to/my-config.yaml
+ashx --config /path/to/my-config.yaml
 ```
 
 ## Creating a Configuration File
@@ -35,7 +35,7 @@ ash --config /path/to/my-config.yaml
 The easiest way to create a configuration file is to use the `config init` command:
 
 ```bash
-ash config init
+ashx config init
 ```
 
 This creates a default configuration file at `.ash/.ash.yaml` with recommended settings.
@@ -353,7 +353,7 @@ name like `another_plugin_module` silently registers nothing.
 To validate your configuration file:
 
 ```bash
-ash config validate
+ashx config validate
 ```
 
 ## Viewing Current Configuration
@@ -361,7 +361,7 @@ ash config validate
 To view the current configuration:
 
 ```bash
-ash config get
+ashx config get
 ```
 
 ## Updating Configuration
@@ -369,8 +369,8 @@ ash config get
 To update configuration values:
 
 ```bash
-ash config update --set 'scanners.bandit.enabled=true'
-ash config update --set 'global_settings.severity_threshold=LOW'
+ashx config update --set 'scanners.bandit.enabled=true'
+ashx config update --set 'global_settings.severity_threshold=LOW'
 ```
 
 ## Configuration Overrides
@@ -379,16 +379,16 @@ You can override configuration values at runtime using the `--config-overrides` 
 
 ```bash
 # Enable a specific scanner
-ash --config-overrides 'scanners.bandit.enabled=true'
+ashx --config-overrides 'scanners.bandit.enabled=true'
 
 # Change severity threshold
-ash --config-overrides 'global_settings.severity_threshold=LOW'
+ashx --config-overrides 'global_settings.severity_threshold=LOW'
 
 # Append to a list
-ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
+ashx --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 
 # Add a complex value
-ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
 ## Scanner-Specific Configuration
@@ -550,7 +550,7 @@ export UV_EXECUTABLE=/custom/path/to/uv
 If you encounter UV tool installation issues:
 
 1. **Check UV availability**: `uv --version`
-2. **Enable verbose logging**: `ash --verbose` for detailed installation logs
+2. **Enable verbose logging**: `ashx --verbose` for detailed installation logs
 3. **Use offline mode**: `ASH_OFFLINE=true` to skip installations
 4. **Pre-install tools manually**:
    ```bash

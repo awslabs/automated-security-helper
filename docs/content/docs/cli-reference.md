@@ -72,12 +72,15 @@ back:
 
 The `-c` case is the one that bites, because it fails quietly rather than erroring:
 an old `-c` is still a valid flag, so it consumes the next argument as a config path
-instead of disabling color. `ash -c --verbose` looks for a config file named
+instead of disabling color. `ashx -c --verbose` looks for a config file named
 `--verbose`. Nothing warns about this, which is why it is written down here.
 
-`ash` is the command. `automated-security-helper` is an alias kept for hosts where a
-bare `ash` resolves to something else -- MSYS2 ships the Almquist shell under that
-name. `ashv3` still works but warns, because the name pins a major version.
+`ashx` is the command. `ash` is a deprecated alias in v4 for pip, Homebrew and the
+container: it prints one warning line on stderr, then runs the same command with the
+same exit codes. The deb and rpm packages ship only `ashx`, because `ash` is the
+Almquist shell on many distributions (BusyBox, Alpine, MSYS2).
+`ashv3` also still works and warns the same way. `automated-security-helper` is a
+silent alias for scripts that cannot depend on either short name.
 
 ### Config Overrides Syntax
 
@@ -85,18 +88,18 @@ The `--config-overrides` parameter allows you to modify configuration values wit
 
 ```bash
 # Basic usage
-ash --config-overrides 'scanners.bandit.enabled=true'
+ashx --config-overrides 'scanners.bandit.enabled=true'
 
 # Multiple overrides
-ash \
+ashx \
   --config-overrides 'scanners.bandit.enabled=true' \
   --config-overrides 'global_settings.severity_threshold=MEDIUM'
 
 # Append to lists
-ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
+ashx --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 
 # Complex values using JSON syntax
-ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
 ## Core Commands
@@ -104,7 +107,7 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 ASH v3 provides several core commands:
 
 ```
-ash [command] [options]
+ashx [command] [options]
 ```
 
 ### Available Commands
@@ -127,7 +130,7 @@ ash [command] [options]
 The `scan` command is the primary command for running security scans. If no command is specified, ASH defaults to the `scan` command.
 
 ```bash
-ash [options]
+ashx [options]
 ```
 
 ### Scan Options
@@ -142,7 +145,7 @@ ash [options]
 | `--ash-plugin-modules`        | List of Python modules to import containing ASH plugins |                       | `ASH_PLUGIN_MODULES`    |
 | `--scanners`                  | Specific scanner names to run                           | All enabled scanners  | `ASH_SCANNERS`          |
 | `--exclude-scanners`          | Specific scanner names to exclude                       | None                  | `ASH_EXCLUDED_SCANNERS` |
-| `--output-formats`, `-f`      | Output formats (comma-separated). Run `ash scan --help` for the list this build accepts; the help text is derived from the code, so it cannot go stale. The reporter names are also tabulated in [Output formats](output-formats.md) | Default formats       |                         |
+| `--output-formats`, `-f`      | Output formats (comma-separated). Run `ashx scan --help` for the list this build accepts; the help text is derived from the code, so it cannot go stale. The reporter names are also tabulated in [Output formats](output-formats.md) | Default formats       |                         |
 | `--strategy`                  | Whether to run scanners in parallel or sequential       | `parallel`            |                         |
 | `--log-level`                 | Set the log level                                       | `INFO`                |                         |
 | `--fail-on-findings`          | Exit with non-zero code if findings are found           | From config           |                         |
@@ -227,7 +230,7 @@ Scanners in `additional_scanners` that a project already enables run under that 
 
 #### What each project gets
 
-Each project is scanned in its own scope: its own directory as the scan root, its own configuration, its own suppressions, and its own severity threshold. A project's findings and its pass/fail verdict are the same as `ash --source-dir <that project>` would produce. A suppression written in one project's config does not apply to another, even for the same rule at the same relative path.
+Each project is scanned in its own scope: its own directory as the scan root, its own configuration, its own suppressions, and its own severity threshold. A project's findings and its pass/fail verdict are the same as `ashx --source-dir <that project>` would produce. A suppression written in one project's config does not apply to another, even for the same rule at the same relative path.
 
 Output is laid out per project, with a workspace-level roll-up beside it:
 
@@ -326,7 +329,7 @@ Comments are not supported in the workspace file. VS Code tolerates them; ASH re
 ```bash
 # Run in each of three parallel CI jobs. SHARD_INDEX comes from the job matrix
 # and is 0, 1, or 2; every job passes the same --shard-count.
-ash --source-dir . --output-dir "./shard-${SHARD_INDEX}" \
+ashx --source-dir . --output-dir "./shard-${SHARD_INDEX}" \
   --shard-index "${SHARD_INDEX}" --shard-count 3
 ```
 
@@ -334,11 +337,11 @@ Each shard scans the whole tree with a disjoint subset of the **scanners**, not 
 
 The partition is a pure function of the scanner names, the index, and the count — names are deduplicated, lowercased, sorted, then dealt round-robin — so executors never coordinate and every shard computes the same partition on its own. It is taken over every *registered* scanner, before the enabled and dependency filters. Partitioning the post-filter set instead would make the split depend on which tools happen to be installed on each runner, so a runner missing semgrep would shift every later scanner onto a different shard than its siblings computed, running some scanners twice and others not at all. As it stands, a tool missing on one runner is reported `MISSING` by the shard that owns it, which is a visible failure rather than a silent gap.
 
-Each shard records the scanners it was assigned in its own `ash_aggregated_results.json`. That record is what `ash merge` verifies coverage from, which is also why merge refuses a results file produced without these flags.
+Each shard records the scanners it was assigned in its own `ash_aggregated_results.json`. That record is what `ashx merge` verifies coverage from, which is also why merge refuses a results file produced without these flags.
 
 #### Per-shard exit codes are not the verdict
 
-A shard that owned only `syft` and `grype` finds nothing and exits 0. Five such shards mean five green CI jobs and a repository full of critical findings that nobody was told about. The verdict for a sharded run belongs to [`ash merge`](#merge-command), computed over the union. Gate CI on that command, not on per-shard success.
+A shard that owned only `syft` and `grype` finds nothing and exits 0. Five such shards mean five green CI jobs and a repository full of critical findings that nobody was told about. The verdict for a sharded run belongs to [`ashx merge`](#merge-command), computed over the union. Gate CI on that command, not on per-shard success.
 
 #### What sharding does and does not buy
 
@@ -352,51 +355,51 @@ A `--shard-count` above the number of scanners leaves the surplus shards with no
 
 Sharding cannot be combined with `--workspace`, and the combination is refused rather than ignored. Both spread one scan over more compute, but only sharding is recombinable: workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from — and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via `--source-dir` and shard that.
 
-In container mode both flags are forwarded to the in-container `ash` invocation rather than dropped.
+In container mode both flags are forwarded to the in-container `ashx` invocation rather than dropped.
 
 ### Examples
 
 ```bash
 # Basic scan in local mode (default)
-ash
+ashx
 
 # Scan with container mode
-ash --mode container
+ashx --mode container
 
 # Scan with specific source and output directories
-ash --source-dir ./my-project --output-dir ./scan-results
+ashx --source-dir ./my-project --output-dir ./scan-results
 
 # Scan with configuration overrides
-ash --config-overrides 'scanners.bandit.enabled=true' --config-overrides 'global_settings.severity_threshold=MEDIUM'
+ashx --config-overrides 'scanners.bandit.enabled=true' --config-overrides 'global_settings.severity_threshold=MEDIUM'
 
 # Scan with specific output formats
-ash --output-formats flat-json,sarif,html,markdown
+ashx --output-formats flat-json,sarif,html,markdown
 
 # Scan in precommit mode (faster)
-ash --mode precommit
+ashx --mode precommit
 
 # Scan with custom plugins
-ash --ash-plugin-modules my_ash_plugins
+ashx --ash-plugin-modules my_ash_plugins
 
 # Inspect the plan for a workspace, without scanning
-ash --workspace ./dev.code-workspace --dry-run
+ashx --workspace ./dev.code-workspace --dry-run
 
 # Use the single .code-workspace file in the current directory
-ash --workspace auto --dry-run
+ashx --workspace auto --dry-run
 
 # Tolerate project folders that have not been cloned on this machine
-ash --workspace ./dev.code-workspace --allow-missing-projects --dry-run
+ashx --workspace ./dev.code-workspace --allow-missing-projects --dry-run
 
 # Run shard 0 of a three-way split; run indices 1 and 2 on other executors
-ash --shard-index 0 --shard-count 3 --output-dir ./shard-0
+ashx --shard-index 0 --shard-count 3 --output-dir ./shard-0
 ```
 
 ## Merge Command
 
-The `merge` command recombines the results of a sharded scan into one unified report. Each executor of `ash --shard-index k --shard-count n` writes its own `ash_aggregated_results.json`. This command checks that the shards given reconstruct exactly one whole scan, merges them, writes the unified results file and every requested report format, and exits with the verdict for the union.
+The `merge` command recombines the results of a sharded scan into one unified report. Each executor of `ashx --shard-index k --shard-count n` writes its own `ash_aggregated_results.json`. This command checks that the shards given reconstruct exactly one whole scan, merges them, writes the unified results file and every requested report format, and exits with the verdict for the union.
 
 ```bash
-ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
+ashx merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 ```
 
 ### Merge Options
@@ -439,9 +442,9 @@ That is the distributed form of the false-clean exit code, and none of the check
 
 This one check is opt-in while the rest are unconditional. The others describe a set of shards that cannot reconstruct one scan whatever the environment; this one describes an environment — four of the ten default scanners are `MISSING` on a machine without their tools — so refusing by default would break merges that have nothing wrong with them. A shard that owned nothing is never an offender: a shard count above the scanner count leaves surplus shards with an empty assignment, and a shard asked to run nothing cannot have failed to run it.
 
-An unstamped results file is refused rather than treated as "probably the only shard". A whole unsharded scan and one shard of five are indistinguishable without that record, and guessing would let `ash merge` accept a single scan as a complete merge of a five-way split.
+An unstamped results file is refused rather than treated as "probably the only shard". A whole unsharded scan and one shard of five are indistinguishable without that record, and guessing would let `ashx merge` accept a single scan as a complete merge of a five-way split.
 
-The merged output carries no shard provenance of its own; it records `merged_shard_count` and `merged_shard_indices` instead. Copying the base shard's assignment through would make the merged file look like shard 0 of n, so a second `ash merge` over an output directory would accept it and report a whole scan as one fifth of itself.
+The merged output carries no shard provenance of its own; it records `merged_shard_count` and `merged_shard_indices` instead. Copying the base shard's assignment through would make the merged file look like shard 0 of n, so a second `ashx merge` over an output directory would accept it and report a whole scan as one fifth of itself.
 
 ### Merge Exit Codes
 
@@ -459,21 +462,21 @@ An invocation missing a required option also exits 2, from the argument parser r
 
 ```bash
 # Merge three shards' artifact directories downloaded by a CI collector job
-ash merge \
+ashx merge \
   --results ./artifacts/shard-0 \
   --results ./artifacts/shard-1 \
   --results ./artifacts/shard-2 \
   --output-dir ./ash-merged
 
 # Merge explicit results files and generate only the formats CI consumes
-ash merge \
+ashx merge \
   --results ./shard-0/ash_aggregated_results.json \
   --results ./shard-1/ash_aggregated_results.json \
   --output-dir ./ash-merged \
   --output-formats sarif,markdown
 
 # Fail the collector job only on medium-or-worse findings across the union
-ash merge --results ./shard-0 --results ./shard-1 --output-dir ./ash-merged --min-severity medium
+ashx merge --results ./shard-0 --results ./shard-1 --output-dir ./ash-merged --min-severity medium
 ```
 
 ## Config Command
@@ -481,7 +484,7 @@ ash merge --results ./shard-0 --results ./shard-1 --output-dir ./ash-merged --mi
 The `config` command allows you to manage ASH configuration.
 
 ```bash
-ash config [subcommand] [options]
+ashx config [subcommand] [options]
 ```
 
 ### Config Subcommands
@@ -515,51 +518,51 @@ ash config [subcommand] [options]
 
 ```bash
 # Initialize a new configuration file
-ash config init
+ashx config init
 
 # Initialize with force (overwrite existing)
-ash config init --force
+ashx config init --force
 
 # Display current configuration
-ash config get
+ashx config get
 
 # Display configuration from a specific file
-ash config get --config /path/to/config.yaml
+ashx config get --config /path/to/config.yaml
 
 # Update configuration
-ash config update --set 'scanners.bandit.enabled=true'
+ashx config update --set 'scanners.bandit.enabled=true'
 
 # Preview configuration update without writing
-ash config update --set 'scanners.bandit.enabled=true' --dry-run
+ashx config update --set 'scanners.bandit.enabled=true' --dry-run
 
 # Validate configuration file
-ash config validate
+ashx config validate
 
 # Validate a specific configuration file
-ash config validate --config /path/to/config.yaml
+ashx config validate --config /path/to/config.yaml
 
 # Validate with verbose output showing all checks
-ash config validate --verbose
+ashx config validate --verbose
 
 # Lint configuration for issues
-ash config lint
+ashx config lint
 
 # Lint and auto-fix common issues
-ash config lint --fix
+ashx config lint --fix
 
 # Lint, fix, and comment out unused suppressions
-ash config lint --fix --fix-unused
+ashx config lint --fix --fix-unused
 
 # Non-interactive mode (for pre-commit hooks and CI/CD)
-ash config lint --fix --fix-unused --non-interactive
+ashx config lint --fix --fix-unused --non-interactive
 
 # Lint a specific config file
-ash config lint --config path/to/config.yaml
+ashx config lint --config path/to/config.yaml
 ```
 
 ### Config Validate Details
 
-The `ash config validate` command performs comprehensive validation of your ASH configuration file:
+The `ashx config validate` command performs comprehensive validation of your ASH configuration file:
 
 **Validation Checks:**
 - **Schema Validation**: Verifies the configuration matches the JSON schema
@@ -578,7 +581,7 @@ The `ash config validate` command performs comprehensive validation of your ASH 
 **Example Output:**
 
 ```bash
-$ ash config validate
+$ ashx config validate
 ✓ Configuration file loaded successfully
 ✓ YAML syntax is valid
 ✓ Schema validation passed
@@ -588,7 +591,7 @@ $ ash config validate
 
 Configuration is valid!
 
-$ ash config validate --config .ash/.ash_bad_config.yaml
+$ ashx config validate --config .ash/.ash_bad_config.yaml
 ✗ Configuration validation failed
 
 Errors found:
@@ -608,11 +611,11 @@ Please fix these errors and try again.
 
 ### Config Lint Details
 
-The `ash config lint` command performs all validation checks plus additional lint checks that can identify and auto-fix common configuration issues:
+The `ashx config lint` command performs all validation checks plus additional lint checks that can identify and auto-fix common configuration issues:
 
 **Lint Checks:**
-- **All validation checks**: Same checks as `ash config validate`
-- **Internal fields**: Detects internal-only fields leaked from older `ash config init` versions (e.g., `name`, `extension`, `tool_version` in scanner configs)
+- **All validation checks**: Same checks as `ashx config validate`
+- **Internal fields**: Detects internal-only fields leaked from older `ashx config init` versions (e.g., `name`, `extension`, `tool_version` in scanner configs)
 - **Invalid sections**: Detects internal top-level sections like `build` that shouldn't be in user configs
 - **Missing line_end**: Detects suppressions with `line_start` but no `line_end`
 - **Expired suppressions**: Detects suppressions past their expiration date
@@ -642,7 +645,7 @@ The `ash config lint` command performs all validation checks plus additional lin
 **Example Output:**
 
 ```bash
-$ ash config lint
+$ ashx config lint
 Linting configuration file: .ash/.ash.yaml
 
 Found 3 issue(s):
@@ -655,7 +658,7 @@ Found 3 issue(s):
 
 💡 3 issue(s) can be auto-fixed. Run with --fix to apply fixes.
 
-$ ash config lint --fix --non-interactive
+$ ashx config lint --fix --non-interactive
 Linting configuration file: .ash/.ash.yaml
 
 🔧 Fixing 3 issue(s):
@@ -671,7 +674,7 @@ Linting configuration file: .ash/.ash.yaml
 The `plugin` command allows you to manage ASH plugins.
 
 ```bash
-ash plugin [subcommand] [options]
+ashx plugin [subcommand] [options]
 ```
 
 ### Plugin Subcommands
@@ -696,13 +699,13 @@ ash plugin [subcommand] [options]
 
 ```bash
 # List all available plugins
-ash plugin list
+ashx plugin list
 
 # List plugins with their configuration
-ash plugin list --include-plugin-config
+ashx plugin list --include-plugin-config
 
 # List plugins including custom modules
-ash plugin list --ash-plugin-modules my_ash_plugins
+ashx plugin list --ash-plugin-modules my_ash_plugins
 ```
 
 ## Report Command
@@ -710,7 +713,7 @@ ash plugin list --ash-plugin-modules my_ash_plugins
 The `report` command generates reports from scan results.
 
 ```bash
-ash report [options]
+ashx report [options]
 ```
 
 ### Report Options
@@ -730,13 +733,13 @@ ash report [options]
 
 ```bash
 # Generate a markdown report
-ash report --format markdown
+ashx report --format markdown
 
 # Generate a JSON report
-ash report --format json
+ashx report --format json
 
 # Generate a report from specific results
-ash report --output-dir ./my-scan-results --format html
+ashx report --output-dir ./my-scan-results --format html
 ```
 
 ## Dependencies Command
@@ -744,7 +747,7 @@ ash report --output-dir ./my-scan-results --format html
 The `dependencies` command installs dependencies for ASH plugins.
 
 ```bash
-ash dependencies install [options]
+ashx dependencies install [options]
 ```
 
 ### Dependencies Options
@@ -763,13 +766,13 @@ ash dependencies install [options]
 
 ```bash
 # Install dependencies for all plugin types
-ash dependencies install
+ashx dependencies install
 
 # Install dependencies for scanners only
-ash dependencies install --plugin-type scanner
+ashx dependencies install --plugin-type scanner
 
 # Install dependencies to a custom directory
-ash dependencies install --bin-path ~/tools/ash-bin
+ashx dependencies install --bin-path ~/tools/ash-bin
 ```
 
 ## Inspect Command
@@ -777,7 +780,7 @@ ash dependencies install --bin-path ~/tools/ash-bin
 The `inspect` command allows you to analyze ASH outputs and reports.
 
 ```bash
-ash inspect [subcommand] [options]
+ashx inspect [subcommand] [options]
 ```
 
 ### Inspect Subcommands
@@ -801,10 +804,10 @@ ash inspect [subcommand] [options]
 
 ```bash
 # Analyze SARIF fields
-ash inspect sarif-fields
+ashx inspect sarif-fields
 
 # Explore findings interactively
-ash inspect findings
+ashx inspect findings
 ```
 
 ## Build-Image Command
@@ -812,7 +815,7 @@ ash inspect findings
 The `build-image` command builds the ASH container image.
 
 ```bash
-ash build-image [options]
+ashx build-image [options]
 ```
 
 ### Build-Image Options
@@ -831,16 +834,16 @@ ash build-image [options]
 
 ```bash
 # Build the default image
-ash build-image
+ashx build-image
 
 # Build for CI environments
-ash build-image --build-target ci
+ashx build-image --build-target ci
 
 # Build for offline use
-ash build-image --offline --offline-semgrep-rulesets p/ci
+ashx build-image --offline --offline-semgrep-rulesets p/ci
 
 # Build using a specific OCI runner
-ash build-image --oci-runner podman
+ashx build-image --oci-runner podman
 ```
 
 ## Get-GenAI-Guide Command
@@ -848,7 +851,7 @@ ash build-image --oci-runner podman
 The `get-genai-guide` command downloads the ASH GenAI Integration Guide, a comprehensive document designed to help AI assistants and LLMs properly interact with ASH scan results.
 
 ```bash
-ash get-genai-guide [options]
+ashx get-genai-guide [options]
 ```
 
 ### Purpose
@@ -873,13 +876,13 @@ This guide provides AI assistants with:
 
 ```bash
 # Download to default location (ash-genai-guide.md)
-ash get-genai-guide
+ashx get-genai-guide
 
 # Download to custom location
-ash get-genai-guide -o /path/to/guide.md
+ashx get-genai-guide -o /path/to/guide.md
 
 # Download to current directory with custom name
-ash get-genai-guide --output genai-integration.md
+ashx get-genai-guide --output genai-integration.md
 ```
 
 ### Installation for AI Coding Tools
@@ -888,7 +891,7 @@ ash get-genai-guide --output genai-integration.md
 ```bash
 # Install globally for all Kiro workspaces
 mkdir -p ~/.kiro/steering
-ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
+ashx get-genai-guide -o ~/.kiro/steering/ash-integration.md
 
 # Kiro will automatically load this as steering context
 ```
@@ -897,24 +900,24 @@ ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
 ```bash
 # Install for current project only
 mkdir -p .kiro/steering
-ash get-genai-guide -o .kiro/steering/ash-integration.md
+ashx get-genai-guide -o .kiro/steering/ash-integration.md
 ```
 
 **For Cline (VS Code)**:
 ```bash
 # Add to project root for Cline to reference
-ash get-genai-guide -o .cline/ash-guide.md
+ashx get-genai-guide -o .cline/ash-guide.md
 
 # Or add to VS Code workspace settings
 mkdir -p .vscode
-ash get-genai-guide -o .vscode/ash-integration-guide.md
+ashx get-genai-guide -o .vscode/ash-integration-guide.md
 ```
 
 **For Claude Desktop / MCP Clients**:
 ```bash
 # Save to a dedicated documentation folder
 mkdir -p ~/Documents/ai-guides
-ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
+ashx get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
 
 # Then reference in your prompts:
 # "Please read the ASH integration guide at ~/Documents/ai-guides/ash-integration.md"
@@ -924,7 +927,7 @@ ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
 ```bash
 # Add to project documentation
 mkdir -p docs/ai-guides
-ash get-genai-guide -o docs/ai-guides/ash-integration.md
+ashx get-genai-guide -o docs/ai-guides/ash-integration.md
 
 # Reference in .q/config if supported
 ```
@@ -932,10 +935,10 @@ ash get-genai-guide -o docs/ai-guides/ash-integration.md
 **For Cursor**:
 ```bash
 # Add to .cursorrules or project docs
-ash get-genai-guide -o .cursor/ash-guide.md
+ashx get-genai-guide -o .cursor/ash-guide.md
 
 # Or add to project root
-ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
+ashx get-genai-guide -o ASH_INTEGRATION_GUIDE.md
 ```
 
 ### Use Cases
@@ -975,7 +978,7 @@ For more information, see the [GenAI Integration Guide](genai-steering-guide.md)
 The `mcp` command starts the Model Context Protocol (MCP) server, which enables AI assistants to interact with ASH programmatically.
 
 ```bash
-ash mcp
+ashx mcp
 ```
 
 ### Purpose
@@ -1027,7 +1030,7 @@ The flag is only valid with `--transport streamable-http`, and passing it on ano
 `--allowed-host` is repeatable and names the Host header values the server will accept. The MCP SDK enables DNS-rebinding protection automatically when the bind address is loopback, and the allowlist it installs then holds only `127.0.0.1`, `localhost`, and `[::1]`; bind anywhere else and that autodetect leaves protection off. `--allowed-host` is how you keep protection on for a non-loopback bind, because supplying it replaces the SDK's autodetect with an explicit allowlist. That is the right posture behind a proxy whose hostname you know:
 
 ```bash
-ash mcp --transport streamable-http --host 0.0.0.0 --port 8000 \
+ashx mcp --transport streamable-http --host 0.0.0.0 --port 8000 \
   --stateless-http \
   --allowed-host ash-mcp.internal.example.com
 ```
@@ -1048,7 +1051,7 @@ For Amazon Q CLI (`~/.aws/amazonq/mcp.json`):
       "command": "uvx",
       "args": [
         "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-        "ash",
+        "ashx",
         "mcp"
       ],
       "disabled": false,
@@ -1083,7 +1086,7 @@ ASH supports additional environment variables that don't directly map to command
 
 When set, this replaces the Dockerfile's `ARG BASE_IMAGE` default for the duration of the
 build, as `--build-arg BASE_IMAGE=<value>`. Every build entrypoint honours it: the Python CLI
-(`ash build-image` and `ash scan --mode container`) and `Invoke-ASH` in
+(`ashx build-image` and `ashx scan --mode container`) and `Invoke-ASH` in
 `utils/ash_helpers.ps1`.
 
 It exists for one reason. ECR Public meters anonymous pulls by monthly data volume as well as
@@ -1099,7 +1102,7 @@ reference is accepted and recommended:
 
 ```bash
 export ASH_BASE_IMAGE_OVERRIDE="my-registry.example.com/python@sha256:<digest>"
-ash build-image
+ashx build-image
 ```
 
 An explicit `--custom-build-arg BASE_IMAGE=...` takes precedence over this variable.
@@ -1151,7 +1154,7 @@ all ten scanners ran clean.
 ASH now exits 1 for that case and prints which scanners did not run:
 
 ```console
-$ ash scan
+$ ashx scan
 ERROR    Scan incomplete: cfn-nag (MISSING), grype (MISSING), syft (MISSING)
 ```
 
@@ -1189,13 +1192,13 @@ installed on a platform, excluding its scanner is the better answer: the run the
 records `SKIPPED` and the report says which scanners were not part of it, where
 `false` returns to a 0 that carries no such information.
 
-`ash merge` uses the same vocabulary over the union of a sharded run: `0` clean,
+`ashx merge` uses the same vocabulary over the union of a sharded run: `0` clean,
 `1` the merge was refused so the union's findings are unknown, `2` findings at or
 above the threshold. See [Merge Exit Codes](#merge-exit-codes). A shard's own exit
 code is not the verdict for a sharded run — see [Sharding](#sharding).
 
-Workspace mode applies the gate per project, so `ash --workspace` and
-`ash --source-dir <one project>` agree about whether that project's scan happened.
+Workspace mode applies the gate per project, so `ashx --workspace` and
+`ashx --source-dir <one project>` agree about whether that project's scan happened.
 A project that completed with a scanner at `ERROR` or `MISSING` is reported with
 `scan_incomplete: true` and the scanner named in `incomplete_scanners`, and the run
 exits `1`. `--no-fail-on-incomplete-scanners` applies per project as well, and it
@@ -1221,7 +1224,7 @@ declared bound (grype 120h, trivy 24h, the offline semgrep and opengrep rulesets
 30 days):
 
 ```console
-$ ash scan --offline
+$ ashx scan --offline
 ERROR    Content database grype-db (grype) is stale: built 2026-09-21T13:13:21Z,
          10d 0h old, past its 120h bound (grype's own bound); age read from `built`
          in `grype db status -o json`. The scan fails: ...

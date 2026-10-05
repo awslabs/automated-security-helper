@@ -118,8 +118,8 @@ Configuration is resolved at the start of every run. `resolve_config()` in `conf
 4. **Apply CLI overrides.** `--config-overrides` values are applied last and win over both the default and the file. They use dot-path syntax:
 
    ```bash
-   ash --config-overrides 'scanners.bandit.enabled=false'
-   ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/"}]'
+   ashx --config-overrides 'scanners.bandit.enabled=false'
+   ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/"}]'
    ```
 5. **Validate.** The merged dict is parsed into an `AshConfig` pydantic model. Unknown fields, wrong types, or invalid values raise an error before any scanner runs.
 

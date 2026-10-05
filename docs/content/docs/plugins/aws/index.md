@@ -49,7 +49,7 @@ AWS plugins provide:
 
 3. **Run scan with AWS reporters**:
    ```bash
-   ash /path/to/code --reporters aws-security-hub,s3-reporter
+   ashx /path/to/code --reporters aws-security-hub,s3-reporter
    ```
 
 ### Enterprise Setup
@@ -154,7 +154,7 @@ For EC2, ECS, Lambda, or other AWS services:
 ### 4. AWS Profiles
 ```bash
 export AWS_PROFILE="security-scanning"
-ash /path/to/code --reporters aws-security-hub
+ashx /path/to/code --reporters aws-security-hub
 ```
 
 ## Integration Patterns
@@ -184,7 +184,7 @@ jobs:
 
     - name: Run ASH Security Scan
       run: |
-        ash . --reporters aws-security-hub,bedrock-summary-reporter,s3-reporter
+        ashx . --reporters aws-security-hub,bedrock-summary-reporter,s3-reporter
 
     - name: Post AI Summary to PR
       if: github.event_name == 'pull_request'
@@ -217,7 +217,7 @@ pipeline {
             steps {
                 withAWS(role: 'arn:aws:iam::123456789012:role/Jenkins-ASH') {
                     sh '''
-                        ash . \
+                        ashx . \
                           --reporters aws-security-hub,s3-reporter,cloudwatch-logs \
                           --config jenkins-ash-config.yml
                     '''
@@ -269,7 +269,7 @@ def lambda_handler(event, context):
         # Run ASH with AWS reporters
         result = subprocess.run(
             [
-                "ash",
+                "ashx",
                 "scan",
                 "/tmp/code",
                 "--reporters",
@@ -430,7 +430,7 @@ Enable comprehensive debugging:
 
 ```bash
 # Enable debug logging for all AWS plugins
-ash /path/to/code \
+ashx /path/to/code \
   --reporters aws-security-hub,bedrock-summary-reporter,cloudwatch-logs,s3-reporter \
   --log-level DEBUG
 ```

@@ -91,6 +91,8 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 
 ## Installation Options
 
+> **Command name:** the command is `ashx`. In v4, `ash` is a deprecated alias for pip-based installs, Homebrew and the container: it prints one warning line on stderr and keeps the same exit codes. The deb and rpm packages ship only `ashx`, because `ash` is the Almquist shell on many distributions.
+
 ### Quick Install (Recommended)
 
 ```bash
@@ -98,7 +100,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
 ```
 
 ```powershell
@@ -106,7 +108,7 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 $args }
+function ashx { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 $args }
 ```
 
 > **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.7.0` to stay up to date automatically. Pin a specific version (e.g., `@v3.7.0`) when you need reproducible builds.
@@ -121,6 +123,9 @@ function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@
 ```bash
 brew tap awslabs/automated-security-helper https://github.com/awslabs/automated-security-helper.git
 brew install ash
+
+# The formula is named ash; the command it installs is ashx
+ashx --version
 ```
 
 #### Using `pipx`
@@ -130,7 +135,7 @@ brew install ash
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 
 # Use as normal
-ash --help
+ashx --help
 ```
 
 #### Using `pip`
@@ -152,13 +157,13 @@ pip install .
 
 ```bash
 # Run a scan in local mode (Python only)
-ash --mode local
+ashx --mode local
 
 # Run a scan in container mode (all tools)
-ash --mode container
+ashx --mode container
 
 # Run a scan in precommit mode (fast subset of tools)
-ash --mode precommit
+ashx --mode precommit
 ```
 
 ### Sample Output
@@ -190,8 +195,8 @@ To investigate...
     - HTML report of all findings: '.ash/ash_output/reports/ash.html'
     - Markdown summary: '.ash/ash_output/reports/ash.summary.md'
     - Text summary: '.ash/ash_output/reports/ash.summary.txt'
-  2. Use ash report to view a short text summary of the scan in your terminal
-  3. Use ash inspect findings to explore the findings interactively
+  2. Use ashx report to view a short text summary of the scan in your terminal
+  3. Use ashx inspect findings to explore the findings interactively
   4. Review scanner-specific reports and outputs in the '.ash/ash_output/scanners' directory
 
 === ASH Exit Codes ===
@@ -232,7 +237,7 @@ The ASH MCP server provides:
       "command": "uvx",
       "args": [
         "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-        "ash",
+        "ashx",
         "mcp"
       ],
       "disabled": false,
@@ -250,7 +255,7 @@ The ASH MCP server provides:
       "command": "uvx",
       "args": [
         "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-        "ash",
+        "ashx",
         "mcp"
       ]
     }
@@ -266,7 +271,7 @@ The ASH MCP server provides:
       "command": "uvx",
       "args": [
         "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-        "ash",
+        "ashx",
         "mcp"
       ],
       "disabled": false,
@@ -367,7 +372,7 @@ There are three ways in, ordered here by how much work they ask of you. They are
 alternatives, not steps — pick one. All three end up calling the same ASH MCP server,
 so scan behavior does not change between them.
 
-Install ASH first and make sure `ash` runs from your shell; see
+Install ASH first and make sure `ashx` runs from your shell; see
 [Installation Options](#installation-options). These integrations tell an agent how to
 call ASH. They do not install ASH.
 
@@ -502,7 +507,7 @@ ASH respects `.gitignore` files. You can also configure ignore paths in your `.a
 <details>
 <summary>How do I run ASH in an offline/air-gapped environment?</summary>
 
-Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
+Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment.
 </details>
 
 <details>

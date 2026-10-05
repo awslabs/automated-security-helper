@@ -11,8 +11,8 @@ ASH supports running in CI environments as an executable container (e.g., via `d
 Building ASH images for use in CI platforms requires targeting the `ci` stage of the `Dockerfile`:
 
 ```bash
-# Via ash CLI
-ash build-image --build-target ci
+# Via ashx CLI
+ashx build-image --build-target ci
 
 # Via docker or other OCI CLI
 docker build --tag automated-security-helper:ci --target ci .
@@ -23,7 +23,7 @@ docker build --tag automated-security-helper:ci --target ci .
 One scan can be split across several CI executors and recombined afterwards. Each executor runs one shard:
 
 ```bash
-ash scan --shard-index 0 --shard-count 4
+ashx scan --shard-index 0 --shard-count 4
 ```
 
 Both options are required together. A shard is only meaningful as "index of count", so `--shard-index` on its own would scan part of the repository and report it as a whole scan. Indices are zero-based, so a four-way split uses 0, 1, 2 and 3. The environment variables `ASH_SHARD_INDEX` and `ASH_SHARD_COUNT` are equivalent to the two options, which is convenient on platforms that already hand you the index as an environment variable.
@@ -33,7 +33,7 @@ Executors never talk to each other. Each one works out its own slice from the sh
 A separate command recombines the shard results:
 
 ```bash
-ash merge --results <file-or-directory> --results <file-or-directory> \
+ashx merge --results <file-or-directory> --results <file-or-directory> \
   --output-dir .ash/merged --output-formats sarif,markdown
 ```
 
@@ -54,16 +54,16 @@ That choice has consequences worth knowing before you pick a shard count:
 !!! warning
     A shard that finds nothing exits 0. Per-shard success does **not** mean the scan passed — it means that shard's scanners had nothing to report. A pipeline that gates on shard exit codes reports a clean scan whenever the findings happen to land on shards it is not looking at.
 
-    Gate on the exit code of `ash merge`. It is the only step that has seen the whole scan.
+    Gate on the exit code of `ashx merge`. It is the only step that has seen the whole scan.
 
 The shape that follows from this is the same on every platform:
 
 1. Shards run with `--no-fail-on-findings`, so a red shard means something operationally broke rather than "this shard found something".
 2. Every shard uploads its `ash_aggregated_results.json` as an artifact.
-3. The collect job runs only if every shard job succeeded, downloads all the shard artifacts and runs `ash merge` over them.
+3. The collect job runs only if every shard job succeeded, downloads all the shard artifacts and runs `ashx merge` over them.
 4. The collect job's exit code is the pipeline's verdict.
 
-`ash merge` refuses to merge results that do not reconstruct exactly one whole scan. A missing shard index, a repeated index, and shards that disagree about the total count are all hard errors rather than a quietly short merge, because a report missing whole scanners reads exactly like a clean one. So the collect step fails loudly when a shard job did not upload its artifact. That is the intended behavior — do not work around it by letting the collect step run on whatever artifacts happen to be present.
+`ashx merge` refuses to merge results that do not reconstruct exactly one whole scan. A missing shard index, a repeated index, and shards that disagree about the total count are all hard errors rather than a quietly short merge, because a report missing whole scanners reads exactly like a clean one. So the collect step fails loudly when a shard job did not upload its artifact. That is the intended behavior — do not work around it by letting the collect step run on whatever artifacts happen to be present.
 
 !!! note
     ASH publishes no container image to any public registry, so there is no prebuilt `ash` image for these examples to pull. Install ASH on each executor as the single-job examples do, or build the image inside your own organization and push it to a registry you control.
@@ -93,7 +93,7 @@ jobs:
       - name: Install ASH
         run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
       - name: Run ASH scan
-        run: ash --mode local
+        run: ashx --mode local
       - name: Upload scan results
         uses: actions/upload-artifact@v3
         with:
@@ -122,7 +122,7 @@ jobs:
       - name: Install ASH
         run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
       - name: Run ASH scan
-        run: ash --mode container
+        run: ashx --mode container
       - name: Upload scan results
         uses: actions/upload-artifact@v3
         with:
@@ -159,7 +159,7 @@ jobs:
       - name: Install ASH
         run: pip install git+https://github.com/awslabs/automated-security-helper.git
       - name: Run ASH scan
-        run: ash --mode local --no-fail-on-findings
+        run: ashx --mode local --no-fail-on-findings
       - name: Upload to GitHub Advanced Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
@@ -195,7 +195,7 @@ jobs:
       - name: Install ASH
         run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
       - name: Run ASH scan
-        run: ash --mode local
+        run: ashx --mode local
       - name: Add PR comment
         uses: actions/github-script@v6
         if: always()
@@ -252,7 +252,7 @@ jobs:
       - name: Run ASH shard ${{ matrix.shard }}
         # --no-fail-on-findings: this shard's exit code is not the verdict.
         run: |
-          ash scan --mode local --no-fail-on-findings \
+          ashx scan --mode local --no-fail-on-findings \
             --shard-index ${{ matrix.shard }} \
             --shard-count 4
       - name: Upload shard results
@@ -281,14 +281,14 @@ jobs:
           path: shards
           pattern: ash-shard-*
       - name: Merge shard results
-        # This step is the gate. ash merge fails if the shards do not
+        # This step is the gate. ashx merge fails if the shards do not
         # reconstruct one whole scan, then applies the findings verdict.
         run: |
           args=""
           for dir in shards/*/; do
             args="$args --results $dir"
           done
-          ash merge $args --output-dir .ash/merged --output-formats sarif,markdown
+          ashx merge $args --output-dir .ash/merged --output-formats sarif,markdown
       - name: Upload merged results
         if: always()
         uses: actions/upload-artifact@v7
@@ -310,7 +310,7 @@ ash-scan:
   image: python:3.10
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
-    - ash --mode local
+    - ashx --mode local
   artifacts:
     paths:
       - .ash/ash_output
@@ -328,7 +328,7 @@ ash-scan-container:
   script:
     - apk add --no-cache python3 py3-pip git
     - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
-    - ash --mode container
+    - ashx --mode container
   artifacts:
     paths:
       - .ash/ash_output
@@ -352,7 +352,7 @@ ash-scan:
   image: python:3.10
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
-    - ash --mode local --no-fail-on-findings
+    - ashx --mode local --no-fail-on-findings
   artifacts:
     paths:
       - .ash/ash_output
@@ -376,7 +376,7 @@ ash-scan-shard:
     # GitLab's CI_NODE_INDEX runs 1..CI_NODE_TOTAL; ASH's shard index is zero-based.
     - export ASH_SHARD_INDEX="$((CI_NODE_INDEX - 1))"
     - export ASH_SHARD_COUNT="$CI_NODE_TOTAL"
-    - ash scan --mode local --no-fail-on-findings
+    - ashx scan --mode local --no-fail-on-findings
     # A job that uses `needs` on a parallel job downloads the artifacts of every
     # parallel instance into one workspace, and artifacts sharing a path
     # overwrite each other. Each shard therefore needs its own directory.
@@ -394,14 +394,14 @@ ash-merge:
       artifacts: true
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
-    # This step is the gate. ash merge fails if the shards do not reconstruct
+    # This step is the gate. ashx merge fails if the shards do not reconstruct
     # one whole scan, then applies the findings verdict.
     - |
       args=""
       for dir in shards/shard-*/; do
         args="$args --results $dir"
       done
-      ash merge $args --output-dir .ash/merged --output-formats sarif,markdown
+      ashx merge $args --output-dir .ash/merged --output-formats sarif,markdown
   artifacts:
     when: always
     paths:
@@ -428,7 +428,7 @@ phases:
 
   build:
     commands:
-      - ash --mode local
+      - ashx --mode local
 
 artifacts:
   files:
@@ -454,7 +454,7 @@ phases:
 
   build:
     commands:
-      - ash --mode container
+      - ashx --mode container
 
 artifacts:
   files:
@@ -472,7 +472,7 @@ version: 0.2
 
 batch:
   # Let every shard finish so you get all of their logs. The merge task is
-  # still the gate: if a shard never wrote its results, ash merge refuses.
+  # still the gate: if a shard never wrote its results, ashx merge refuses.
   fast-fail: false
   build-graph:
     - identifier: shard0
@@ -513,7 +513,7 @@ phases:
   build:
     commands:
       # ASH_SHARD_INDEX comes from the batch task, ASH_SHARD_COUNT from env above.
-      - ash scan --mode local --no-fail-on-findings
+      - ashx scan --mode local --no-fail-on-findings
       # Deliberately in `build` and not `post_build`: if the scan fails, nothing
       # is uploaded, and the merge task fails on the missing shard index.
       - aws s3 cp .ash/ash_output/ash_aggregated_results.json "s3://${ASH_SHARD_BUCKET}/${CODEBUILD_RESOLVED_SOURCE_VERSION}/shard-${ASH_SHARD_INDEX}/ash_aggregated_results.json"
@@ -533,7 +533,7 @@ phases:
 
   build:
     commands:
-      # This step is the gate. ash merge fails the batch if any shard's results
+      # This step is the gate. ashx merge fails the batch if any shard's results
       # are missing, then applies the findings verdict.
       - |
         aws s3 cp --recursive "s3://${ASH_SHARD_BUCKET}/${CODEBUILD_RESOLVED_SOURCE_VERSION}/" shards/
@@ -541,14 +541,14 @@ phases:
         for dir in shards/shard-*/; do
           args="$args --results $dir"
         done
-        ash merge $args --output-dir .ash/merged --output-formats sarif,markdown
+        ashx merge $args --output-dir .ash/merged --output-formats sarif,markdown
 
 artifacts:
   files:
     - .ash/merged/**/*
 ```
 
-`CODEBUILD_RESOLVED_SOURCE_VERSION` is the commit, and every task in the batch resolves it to the same value — that is what lets the merge task find the shards without being told where they are. It is not unique per batch, though. Re-running the batch on the same commit overwrites each shard's object in place, and `ash merge` verifies coverage rather than freshness, so a shard that fails on the re-run can leave the previous run's object in place for the merge to read. If you re-run batches, add a per-run value to the prefix from an environment variable override supplied when the batch is started.
+`CODEBUILD_RESOLVED_SOURCE_VERSION` is the commit, and every task in the batch resolves it to the same value — that is what lets the merge task find the shards without being told where they are. It is not unique per batch, though. Re-running the batch on the same commit overwrites each shard's object in place, and `ashx merge` verifies coverage rather than freshness, so a shard that fails on the re-run can leave the previous run's object in place for the merge to read. If you re-run batches, add a per-run value to the prefix from an environment variable override supplied when the batch is started.
 
 The fan-out half written as a build matrix, where CodeBuild creates one build per value of `ASH_SHARD_INDEX`:
 
@@ -581,11 +581,11 @@ phases:
 
   build:
     commands:
-      - ash scan --mode local --no-fail-on-findings
+      - ashx scan --mode local --no-fail-on-findings
       - aws s3 cp .ash/ash_output/ash_aggregated_results.json "s3://${ASH_SHARD_BUCKET}/${CODEBUILD_RESOLVED_SOURCE_VERSION}/shard-${ASH_SHARD_INDEX}/ash_aggregated_results.json"
 ```
 
-Whatever runs `ash merge` after that matrix, whether a later CodePipeline stage or a separate project, still owns the verdict and still has to fail the pipeline on its own exit code.
+Whatever runs `ashx merge` after that matrix, whether a later CodePipeline stage or a separate project, still owns the verdict and still has to fail the pipeline on its own exit code.
 
 ## Jenkins
 
@@ -606,7 +606,7 @@ pipeline {
         }
         stage('Run ASH Scan') {
             steps {
-                sh 'ash --mode local'
+                sh 'ashx --mode local'
             }
         }
     }
@@ -637,7 +637,7 @@ pipeline {
         }
         stage('Run ASH Scan') {
             steps {
-                sh 'ash --mode container'
+                sh 'ashx --mode container'
             }
         }
     }
@@ -667,7 +667,7 @@ pipeline {
                     environment { ASH_SHARD_INDEX = '0' }
                     steps {
                         sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
-                        sh 'ash scan --mode local --no-fail-on-findings'
+                        sh 'ashx scan --mode local --no-fail-on-findings'
                         sh 'mkdir -p shards/shard-$ASH_SHARD_INDEX && cp .ash/ash_output/ash_aggregated_results.json shards/shard-$ASH_SHARD_INDEX/'
                         stash name: 'ash-shard-0', includes: 'shards/shard-0/**'
                     }
@@ -677,7 +677,7 @@ pipeline {
                     environment { ASH_SHARD_INDEX = '1' }
                     steps {
                         sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
-                        sh 'ash scan --mode local --no-fail-on-findings'
+                        sh 'ashx scan --mode local --no-fail-on-findings'
                         sh 'mkdir -p shards/shard-$ASH_SHARD_INDEX && cp .ash/ash_output/ash_aggregated_results.json shards/shard-$ASH_SHARD_INDEX/'
                         stash name: 'ash-shard-1', includes: 'shards/shard-1/**'
                     }
@@ -687,7 +687,7 @@ pipeline {
                     environment { ASH_SHARD_INDEX = '2' }
                     steps {
                         sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
-                        sh 'ash scan --mode local --no-fail-on-findings'
+                        sh 'ashx scan --mode local --no-fail-on-findings'
                         sh 'mkdir -p shards/shard-$ASH_SHARD_INDEX && cp .ash/ash_output/ash_aggregated_results.json shards/shard-$ASH_SHARD_INDEX/'
                         stash name: 'ash-shard-2', includes: 'shards/shard-2/**'
                     }
@@ -697,7 +697,7 @@ pipeline {
                     environment { ASH_SHARD_INDEX = '3' }
                     steps {
                         sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
-                        sh 'ash scan --mode local --no-fail-on-findings'
+                        sh 'ashx scan --mode local --no-fail-on-findings'
                         sh 'mkdir -p shards/shard-$ASH_SHARD_INDEX && cp .ash/ash_output/ash_aggregated_results.json shards/shard-$ASH_SHARD_INDEX/'
                         stash name: 'ash-shard-3', includes: 'shards/shard-3/**'
                     }
@@ -712,14 +712,14 @@ pipeline {
                 unstash 'ash-shard-1'
                 unstash 'ash-shard-2'
                 unstash 'ash-shard-3'
-                // This step is the gate. ash merge fails the build if the shards
+                // This step is the gate. ashx merge fails the build if the shards
                 // do not reconstruct one whole scan, then applies the verdict.
                 sh '''
                     args=""
                     for dir in shards/shard-*/; do
                       args="$args --results $dir"
                     done
-                    ash merge $args --output-dir .ash/merged --output-formats sarif,markdown
+                    ashx merge $args --output-dir .ash/merged --output-formats sarif,markdown
                 '''
             }
             post {
@@ -755,7 +755,7 @@ jobs:
           command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
       - run:
           name: Run ASH scan
-          command: ash --mode local
+          command: ashx --mode local
       - store_artifacts:
           path: .ash/ash_output
           destination: ash-results
@@ -782,7 +782,7 @@ jobs:
           command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
       - run:
           name: Run ASH scan
-          command: ash --mode container
+          command: ashx --mode container
       - store_artifacts:
           path: .ash/ash_output
           destination: ash-results
@@ -814,7 +814,7 @@ jobs:
           name: Run ASH shard
           # --no-fail-on-findings: this container's exit code is not the verdict.
           command: |
-            ash scan --mode local --no-fail-on-findings \
+            ashx scan --mode local --no-fail-on-findings \
               --shard-index "$CIRCLE_NODE_INDEX" \
               --shard-count "$CIRCLE_NODE_TOTAL"
             mkdir -p "shards/shard-$CIRCLE_NODE_INDEX"
@@ -838,14 +838,14 @@ jobs:
           command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
       - run:
           name: Merge shard results
-          # This step is the gate. ash merge fails if the shards do not
+          # This step is the gate. ashx merge fails if the shards do not
           # reconstruct one whole scan, then applies the findings verdict.
           command: |
             args=""
             for dir in shards/shard-*/; do
               args="$args --results $dir"
             done
-            ash merge $args --output-dir .ash/merged --output-formats sarif,markdown
+            ashx merge $args --output-dir .ash/merged --output-formats sarif,markdown
       - store_artifacts:
           path: .ash/merged
           destination: ash-merged-results
@@ -868,17 +868,17 @@ workflows:
 
 1. **Fail builds on critical findings**:
    ```bash
-   ash --mode local --fail-on-findings
+   ashx --mode local --fail-on-findings
    ```
 
 2. **Use specific scanners for faster CI runs**:
    ```bash
-   ash --mode local --scanners bandit,semgrep,detect-secrets
+   ashx --mode local --scanners bandit,semgrep,detect-secrets
    ```
 
 3. **Generate CI-friendly reports**:
    ```bash
-   ash --mode local --output-formats sarif,markdown,json
+   ashx --mode local --output-formats sarif,markdown,json
    ```
 
 4. **Cache container images** to speed up builds:
@@ -893,7 +893,7 @@ workflows:
 
 5. **Set severity thresholds** appropriate for your CI pipeline:
    ```bash
-   ash --config-overrides 'global_settings.severity_threshold=HIGH'
+   ashx --config-overrides 'global_settings.severity_threshold=HIGH'
    ```
 
 ## ASH Execution Environment Viability

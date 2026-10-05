@@ -2,12 +2,18 @@
 
 This guide helps users migrate from ASH v2 to ASH v3.
 
+## Command name change in v4
+
+ASH v4 renames the command to `ashx`. Replace `ash` with `ashx` in scripts, CI jobs and MCP client configurations.
+
+`ash` still works as a deprecated alias for pip-based installs (pip, pipx, `uv tool install`), Homebrew and the container. It prints one warning line on stderr, then runs the same command with the same exit codes, so existing pipelines keep passing while you migrate. The deb and rpm packages ship only `ashx`, because `ash` is the Almquist shell on many distributions (BusyBox, Alpine, MSYS2).
+
 ## Migration Steps
 
 1. **Install ASH v3** using one of the installation methods from the [Installation Guide](./installation-guide.md)
 2. **Initialize Configuration**:
    ```bash
-   ash config init
+   ashx config init
    ```
 3. **Update Scripts**:
    - Add `--mode container` to your ASH commands if you need to run ASH in a container still
@@ -16,13 +22,13 @@ This guide helps users migrate from ASH v2 to ASH v3.
     - If you are explicitly passing the `--output-dir` to ASH, then ASH will continue to output to the same directory.
     - If you are not explicitly passing the `--output-dir` to ASH, then you will need to update output directory references to `.ash/ash_output` OR start including `--output-dir ash_output` in your scripts to retain the existing output directory.
    - Replace any collection and/or parsing of `aggregated_results.txt` with collecting/parsing the reports found in the new `reports` directory of the `output-dir` OR with JSON parsing of the new `ash_aggregated_results.json` (public JSON schema in GitHub)
-   - **Recommendation**: Add `ash report` to your script after `ash` has completed to pretty-print the summary report in the terminal or job stdout.
+   - **Recommendation**: Add `ashx report` to your script after `ashx` has completed to pretty-print the summary report in the terminal or job stdout.
 4. **Update Pre-commit Configuration**:
    - Change hook ID from `ash` to `ash-simple-scan`
    - Update the revision to `v3.0.0` or later
 5. **Test Your Migration**:
    ```bash
-   ash --mode local
+   ashx --mode local
    ```
 
 ## Key Changes in ASH v3
@@ -48,7 +54,7 @@ export PATH="${PATH}:/path/to/automated-security-helper"
 
 ```bash
 # Option 1: Using uvx (recommended) -- add to shell profile
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
 
 # Option 2: Using pipx
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
@@ -85,17 +91,17 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 
 ```bash
 # Only runs in a container
-ash --source-dir /path/to/code --output-dir /path/to/output
+ashx --source-dir /path/to/code --output-dir /path/to/output
 ```
 
 #### ASH v3
 
 ```bash
 # Runs in Local mode by default with scanners found locally in $PATH
-ash --source-dir /path/to/code --output-dir /path/to/output
+ashx --source-dir /path/to/code --output-dir /path/to/output
 
 # Explicitly run in container mode (ensures all default scanners are available)
-ash --mode container --source-dir /path/to/code --output-dir /path/to/output
+ashx --mode container --source-dir /path/to/code --output-dir /path/to/output
 ```
 
 ### Common Parameters
@@ -303,7 +309,7 @@ results = run_ash_scan(
 **Solution**: Use `--mode container` to access all scanners or install the required dependencies locally.
 
 ### Issue: Configuration file not found
-**Solution**: Run `ash config init` to create a default configuration file.
+**Solution**: Run `ashx config init` to create a default configuration file.
 
 ### Issue: Different findings compared to v2
 **Solution**: ASH v3 uses updated versions of scanners and may have different detection capabilities. Review the findings and adjust your configuration as needed.
@@ -317,4 +323,4 @@ If you encounter issues during migration:
 
 1. Check the [ASH Documentation](https://awslabs.github.io/automated-security-helper/)
 2. Create an issue on [GitHub](https://github.com/awslabs/automated-security-helper/issues)
-3. Run `ash --help` for command-line help
+3. Run `ashx --help` for command-line help

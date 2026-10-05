@@ -86,7 +86,7 @@ ash_plugin_modules:
 Or specify it on the command line:
 
 ```bash
-ash --ash-plugin-modules my_ash_plugins
+ashx --ash-plugin-modules my_ash_plugins
 ```
 
 ## Real-World Examples

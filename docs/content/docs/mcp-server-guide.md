@@ -10,7 +10,7 @@ The MCP server uses a file-based approach to track scan progress and completion,
 
 ### Transport choice
 
-`ash mcp` supports two transports:
+`ashx mcp` supports two transports:
 
 - **stdio (default)** — local, single-user, launched as a subprocess by an IDE or local agent. This is what every example below assumes.
 - **streamable-HTTP** — networked, multi-tenant, supports remote clients with per-session workspaces and config profiles. See [Streamable-HTTP MCP Deployment Guide](mcp/streamable-http.md).
@@ -431,7 +431,7 @@ controls which directories the server will accept. It takes a list separated by
 the platform path separator (`:` on Linux and macOS, `;` on Windows):
 
 ```bash
-ASH_MCP_ALLOWED_ROOTS=/srv/repos:/home/build/work ash mcp
+ASH_MCP_ALLOWED_ROOTS=/srv/repos:/home/build/work ashx mcp
 ```
 
 With it set, a scan target must resolve to one of those directories or

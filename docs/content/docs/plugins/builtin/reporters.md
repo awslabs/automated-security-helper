@@ -157,7 +157,7 @@ reporters:
 security_scan:
   stage: test
   script:
-    - ash . --reporters gitlab-sast
+    - ashx . --reporters gitlab-sast
   artifacts:
     reports:
       sast: output/gl-sast-report.json
@@ -233,7 +233,7 @@ jobs:
       - name: Install ASH
         run: pip install git+https://github.com/awslabs/automated-security-helper.git
       - name: Run ASH scan
-        run: ash --mode local --no-fail-on-findings
+        run: ashx --mode local --no-fail-on-findings
       - name: Upload GHAS SARIF
         uses: github/codeql-action/upload-sarif@v3
         if: always()
@@ -491,7 +491,7 @@ reporters:
 security_scan:
   stage: test
   script:
-    - ash . --reporters gitlab-cyclonedx
+    - ashx . --reporters gitlab-cyclonedx
   artifacts:
     reports:
       dependency_scanning: .ash/ash_output/reports/ash.gl-dependency-scanning-report.cdx.json
@@ -527,16 +527,16 @@ reporters:
 
 ```bash
 # Development workflow
-ash --reporters text,html,sarif
+ashx --reporters text,html,sarif
 
 # CI/CD pipeline
-ash --reporters sarif,junitxml,gitlab-sast
+ashx --reporters sarif,junitxml,gitlab-sast
 
 # Compliance reporting
-ash --reporters spdx,cyclonedx,ocsf
+ashx --reporters spdx,cyclonedx,ocsf
 
 # Executive reporting
-ash --reporters html,markdown,csv
+ashx --reporters html,markdown,csv
 ```
 
 ### Configuration Example
@@ -600,7 +600,7 @@ reporters:
 
 ```bash
 # Organize outputs by type
-ash --output-dir results/ \
+ashx --output-dir results/ \
   --reporters sarif,html,csv \
   --output-format "{reporter}/{timestamp}"
 ```
@@ -611,7 +611,7 @@ ash --output-dir results/ \
 
 ```yaml
 - name: Security Scan
-  run: ash --reporters sarif,text
+  run: ashx --reporters sarif,text
 
 - name: Upload SARIF to GitHub Advanced Security
   uses: github/codeql-action/upload-sarif@v3
@@ -626,7 +626,7 @@ ash --output-dir results/ \
 ```yaml
 security_scan:
   script:
-    - ash --reporters gitlab-sast,text
+    - ashx --reporters gitlab-sast,text
   artifacts:
     reports:
       sast: results/gitlab-sast/results.json
@@ -639,7 +639,7 @@ pipeline {
   stages {
     stage('Security Scan') {
       steps {
-        sh 'ash --reporters junitxml,html'
+        sh 'ashx --reporters junitxml,html'
         publishTestResults testResultsPattern: 'results/junitxml/*.xml'
         publishHTML([
           allowMissing: false,
@@ -677,7 +677,7 @@ reporters:
 **CI/CD integration failures**:
 ```bash
 # Validate output format
-ash --reporters sarif --validate-output
+ashx --reporters sarif --validate-output
 ```
 
 ## Next Steps

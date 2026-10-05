@@ -22,13 +22,13 @@ Most built-in plugins are enabled by default and require no additional configura
 
 ```bash
 # Run with default built-in scanners
-ash /path/to/code
+ashx /path/to/code
 
 # Use specific built-in scanners only
-ash /path/to/code --scanners bandit,semgrep
+ashx /path/to/code --scanners bandit,semgrep
 
 # Generate reports in multiple formats
-ash /path/to/code --reporters sarif,html,csv
+ashx /path/to/code --reporters sarif,html,csv
 ```
 
 ## Configuration
@@ -92,10 +92,10 @@ Built-in plugins may require external tools to be installed:
 
 ```bash
 # Check plugin dependencies
-ash dependencies --check
+ashx dependencies --check
 
 # Install missing dependencies (where possible)
-ash dependencies --install
+ashx dependencies --install
 ```
 
 ## Advanced Usage
@@ -125,13 +125,13 @@ Control which plugins run:
 
 ```bash
 # Run only infrastructure scanners
-ash --scanners cdk-nag,cfn-nag,checkov
+ashx --scanners cdk-nag,cfn-nag,checkov
 
 # Exclude specific scanners
-ash --exclude-scanners grype,syft
+ashx --exclude-scanners grype,syft
 
 # Generate only compliance reports
-ash --reporters spdx,cyclonedx
+ashx --reporters spdx,cyclonedx
 ```
 
 ### Integration with External Tools
@@ -150,7 +150,7 @@ Common issues and solutions:
 ### Scanner Not Found
 ```bash
 # Check if scanner dependencies are installed
-ash dependencies --check --scanner bandit
+ashx dependencies --check --scanner bandit
 
 # Install missing dependencies
 pip install bandit
@@ -159,22 +159,22 @@ pip install bandit
 ### Configuration Issues
 ```bash
 # Validate configuration
-ash config --validate
+ashx config --validate
 
 # Show effective configuration
-ash config --show
+ashx config --show
 ```
 
 ### Performance Optimization
 ```bash
 # Run scanners in parallel (default)
-ash --parallel
+ashx --parallel
 
 # Limit concurrent scanners
-ash --max-workers 2
+ashx --max-workers 2
 
 # Skip time-intensive scanners for quick feedback
-ash --exclude-scanners grype,syft
+ashx --exclude-scanners grype,syft
 ```
 
 ## Next Steps

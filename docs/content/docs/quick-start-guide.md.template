@@ -25,7 +25,7 @@ Prerequisites: Python 3.10+, [uv](https://docs.astral.sh/uv/getting-started/inst
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
 ```
 
 #### Windows PowerShell
@@ -34,7 +34,7 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{V
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} $args }
+function ashx { uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} $args }
 ```
 
 > **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of a specific version to stay up to date automatically. Pin a specific version (e.g., `@v{{VERSION}}`) when you need reproducible builds.
@@ -63,13 +63,13 @@ Navigate to your project directory and run:
 
 ```bash
 # Run a scan in local mode (Python-based scanners only)
-ash --mode local
+ashx --mode local
 
 # Run a scan in container mode (all scanners)
-ash --mode container
+ashx --mode container
 
 # Run a scan in precommit mode (fast subset of scanners)
-ash --mode precommit
+ashx --mode precommit
 ```
 
 The `precommit` mode runs a subset of fast scanners:
@@ -82,7 +82,7 @@ The `precommit` mode runs a subset of fast scanners:
 ### Specifying Source and Output Directories
 
 ```bash
-ash --source-dir /path/to/code --output-dir /path/to/output
+ashx --source-dir /path/to/code --output-dir /path/to/output
 ```
 
 ### Viewing Results
@@ -112,7 +112,7 @@ ASH uses a YAML configuration file. Create a basic configuration:
 
 ```bash
 # Initialize a new configuration file
-ash config init
+ashx config init
 ```
 
 This creates `.ash/.ash.yaml` with default settings. Edit this file to customize your scan:
@@ -153,33 +153,33 @@ reporters:
 
 ```bash
 # Enable a specific scanner
-ash --config-overrides 'scanners.bandit.enabled=true'
+ashx --config-overrides 'scanners.bandit.enabled=true'
 
 # Change severity threshold
-ash --config-overrides 'global_settings.severity_threshold=LOW'
+ashx --config-overrides 'global_settings.severity_threshold=LOW'
 
 # Ignore a path
-ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
 ### Running Specific Scanners
 
 ```bash
 # Run only specific scanners
-ash --scanners bandit,semgrep
+ashx --scanners bandit,semgrep
 
 # Exclude specific scanners
-ash --exclude-scanners cfn-nag,cdk-nag
+ashx --exclude-scanners cfn-nag,cdk-nag
 ```
 
 ### Generating Specific Reports
 
 ```bash
 # Generate specific report formats
-ash --output-formats markdown,html,json
+ashx --output-formats markdown,html,json
 
 # Generate a report from existing results
-ash report --format html --output-dir ./my-scan-results
+ashx report --format html --output-dir ./my-scan-results
 ```
 
 ## Using ASH with pre-commit

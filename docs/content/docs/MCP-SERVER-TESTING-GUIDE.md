@@ -27,7 +27,7 @@ Update your MCP configuration file to point to your local development directory 
       "args": [
         "--directory=/path/to/your/automated-security-helper",
         "--with=.",
-        "ash",
+        "ashx",
         "mcp"
       ],
       "autoApprove": [
@@ -68,7 +68,7 @@ After configuration changes:
 
 You may see a warning like:
 ```
-warning: An executable named `ash` is not provided by package `ash` 
+warning: An executable named `ashx` is not provided by package `ashx` 
 but is available via the dependency `automated-security-helper`.
 ```
 
@@ -439,7 +439,7 @@ result = await mcp_ash_get_scan_results(output_dir="/non/existent/path")
 
 2. Force reinstall:
    ```bash
-   uvx --force --directory=/path/to/ash --with=. ash mcp
+   uvx --force --directory=/path/to/ash --with=. ashx mcp
    ```
 
 3. Verify configuration path is correct
@@ -522,7 +522,7 @@ INFO: Scanner bandit completed
 
 **Warnings (safe to ignore):**
 ```
-warning: An executable named `ash` is not provided by package `ash`
+warning: An executable named `ashx` is not provided by package `ashx`
 ```
 
 **Errors (need attention):**

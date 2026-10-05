@@ -8,7 +8,7 @@ The behaviour described here lands under Track 10 of the ASH v3.x refactor (sect
 
 ASH ships two MCP transports:
 
-- **stdio (default).** A single client (typically an IDE or a local agent) launches `ash mcp` as a subprocess and speaks JSON-RPC over the child's stdin/stdout. One process per user, no network surface, no auth needed. This is what `ash mcp` does today and remains the recommended setup for individual developer machines.
+- **stdio (default).** A single client (typically an IDE or a local agent) launches `ashx mcp` as a subprocess and speaks JSON-RPC over the child's stdin/stdout. One process per user, no network surface, no auth needed. This is what `ashx mcp` does today and remains the recommended setup for individual developer machines.
 - **streamable-HTTP.** The MCP server is bound to a TCP port and accepts connections from remote clients. Each connection gets its own session workspace, its own selected config profile, and its own optional source-upload pipeline. Use this when you need a deployable, multi-tenant ASH service — for example, a shared scanner for CI runners, a hosted scanner an external agent can drive, or any setup where the client and the scanner run on different hosts.
 
 Pick stdio for local single-user IDE integration. Pick streamable-HTTP when ASH must be reachable over the network.
@@ -18,7 +18,7 @@ Pick stdio for local single-user IDE integration. Pick streamable-HTTP when ASH 
 The full invocation form (Track 10.1):
 
 ```bash
-ash mcp \
+ashx mcp \
   --transport streamable-http \
   --host 0.0.0.0 \
   --port 8000 \
@@ -302,7 +302,7 @@ docker run \
   -v /etc/ash:/etc/ash:ro \
   -e ASH_MCP_WORKSPACE_ROOT=/var/cache/ash-mcp \
   -e ASH_MCP_ALLOWED_ROOTS=/src:/var/cache/ash-mcp \
-  ash mcp \
+  ashx mcp \
     --transport streamable-http \
     --host 0.0.0.0 \
     --port 8000 \

@@ -30,7 +30,7 @@ built once and never rebuilt ages, and ASH's bundled scanners age with it. See
 
 ```bash
 # Build the image
-ash build-image --build-target non-root
+ashx build-image --build-target non-root
 
 # Tag and push to your own registry
 docker tag automated-security-helper:non-root \
@@ -49,7 +49,7 @@ Point ASH at your published image with `ASH_IMAGE_NAME`:
 
 ```bash
 export ASH_IMAGE_NAME="my-registry.example.com/security/ash:3.6.0"
-ash --mode container --source-dir .
+ashx --mode container --source-dir .
 ```
 
 Tag with the ASH version you built rather than only `latest`, so a scan result can be
@@ -77,7 +77,7 @@ Building with `--offline` caches the tool vulnerability databases into the image
 itself, so a scan needs no network access:
 
 ```bash
-ash build-image --build-target non-root --offline
+ashx build-image --build-target non-root --offline
 ```
 
 The build itself still requires network access — that is when the dependencies and
@@ -94,7 +94,7 @@ as online; before it, an offline scan with a weeks-old database exited 0 with no
 warning.
 
 To keep an air-gapped image passing, rebuild it at least every 5 days with
-`ash build-image --offline`, which downloads a current grype database and current
+`ashx build-image --offline`, which downloads a current grype database and current
 rulesets, and move the new image across the air gap. To scan with an older image
 anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn` in the ASH
 config: the scan passes, and the summary reports, `ash.sarif` and `ash.flat.json` all
@@ -132,7 +132,7 @@ destination.
 passed in as the `ASH_BASE_IMAGE` build argument:
 
 ```bash
-ash build-image --build-target ci --custom-containerfile ./Dockerfile.internal
+ashx build-image --build-target ci --custom-containerfile ./Dockerfile.internal
 ```
 
 Supplying a custom containerfile forces the `ci` build target, so the run-as-non-root
