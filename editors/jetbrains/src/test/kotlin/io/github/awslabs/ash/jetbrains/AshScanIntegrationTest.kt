@@ -321,7 +321,7 @@ class AshScanIntegrationTest : BasePlatformTestCase() {
         scan()
         assertEquals(3, ashHighlights().size)
 
-        val messages = scanAndCancel(versionBody = "echo 'awslabs/automated-security-helper v3.7.0'", scanBody = "exec sleep 300")
+        val messages = scanAndCancel(versionBody = "echo 'awslabs/automated-security-helper v3.7.0'", scanBody = "sleep 300; exit 0")
 
         assertEquals("ASH scan cancelled", messages.single().title)
         assertEquals("the service must hold nothing after a cancel", AshScanService.State.EMPTY, AshScanService.getInstance(project).current)
@@ -339,7 +339,7 @@ class AshScanIntegrationTest : BasePlatformTestCase() {
         val previousReport = sourceDir.resolve(".ash/ash_output/reports/ash.sarif")
         assertTrue("the first scan must have left a report", Files.isRegularFile(previousReport))
 
-        val messages = scanAndCancel(versionBody = "exec sleep 300", scanBody = "exit 0")
+        val messages = scanAndCancel(versionBody = "sleep 300", scanBody = "exit 0")
 
         assertEquals("ASH scan cancelled", messages.single().title)
         assertTrue("a cancel during the probe must not reach the freshness guard", Files.isRegularFile(previousReport))

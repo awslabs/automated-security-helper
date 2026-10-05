@@ -8,9 +8,13 @@ import org.junit.Assert.assertTrue
 /**
  * Finds the processes a stub ASH started, so a test can check that none outlives a cancel.
  *
- * A cancel or a timeout kills the process the plugin started. A stub that forks a child (a
- * plain `sleep 300` under sh does) leaves that child running after its parent is killed, and
- * once orphaned it is no longer a descendant of this JVM. So the children are captured while
+ * The stubs fork on purpose: `sleep 300; exit 0` under sh runs the sleep as a child of the
+ * shell, the way ASH's own scanners run as children of ASH. A cancel or a timeout reaches that
+ * child only because the platform's OSProcessHandler destroys the whole process tree by
+ * default (shouldDestroyProcessRecursively is true); a plain Process.destroy() would kill the
+ * shell and leave the sleep running. These checks exist to fail if that default stops holding.
+ *
+ * An orphaned child is no longer a descendant of this JVM, so the children are captured while
  * the stub is still running, and checked by handle afterwards.
  */
 internal object StubProcesses {
