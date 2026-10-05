@@ -46,8 +46,8 @@ tempted.
 
 | Directory | Format | Verified by |
 |---|---|---|
-| `deb/` | Debian, Ubuntu | build + install + real scan in `debian:bookworm` |
-| `rpm/` | Amazon Linux, RHEL | build + install + real scan in `amazonlinux:2023` |
+| `deb/` | Debian, Ubuntu | build + payload gate + install + real scan + upgrade from N-1 + purge in `debian:bookworm` and `ubuntu:24.04` (`ash-native-packages.yml`) |
+| `rpm/` | Amazon Linux, RHEL | build + payload gate + install + real scan + upgrade from N-1 + erase in `amazonlinux:2023` and `ubi9` (`ash-native-packages.yml`) |
 | `flatpak/` | any Linux with flatpak | build + install + real scan against `org.freedesktop.Sdk//24.08` |
 | `msix/` | Windows 10, Windows 11 | build + sign + install + real scan on `windows-latest` |
 | `chocolatey/` | Windows, via Chocolatey | nuspec vs NuGet's XSD anywhere; build + install + real scan on `windows-latest` |
@@ -80,7 +80,17 @@ Both packages install the same way, so a bug in one is a bug in the other:
   which shells out to itself.
 
 Removal drops the venv, because `pip` created it after install and no package manager
-tracks files a `postinst` wrote.
+tracks files a `postinst` wrote. An upgrade does not: the deb's `prerm` removes it only on
+`remove`, the rpm's `%postun` only when `$1` is 0, and both post-install steps park the
+existing venv and restore it if the rebuild fails.
+
+Both packages compress their payload with gzip and add a license file, and
+`packaging/assert-package-payload.py` pins each payload member by member, applies the
+artifact-contents gate's own content rules to every member, and hands the wheel it
+extracts from the built package back to that gate. The shared install-and-scan logic,
+including the negative controls that show each check failing, is
+`packaging/verify-lib.sh`; the command name both packages install is set once, in
+`packaging/cli-name.sh`.
 
 ## Where the Flatpak differs, and why
 
