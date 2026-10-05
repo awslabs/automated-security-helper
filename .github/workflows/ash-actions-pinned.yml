@@ -121,3 +121,12 @@ jobs:
 
       - name: Assert no workflow job has an empty body
         run: uv run --no-project --with pyyaml python .github/scripts/assert-workflows-well-formed.py
+
+      # The image counterpart of the pinning gate above: job containers, services,
+      # Docker actions, every tracked Dockerfile's FROM, and kind's node image must be
+      # named by digest. Self-test first, for the same reason as the check above it.
+      - name: Prove the image-pinning check can fail
+        run: uv run --no-project --with pyyaml python .github/scripts/assert-images-pinned.py --self-test
+
+      - name: Assert no container image is referenced by a mutable tag
+        run: uv run --no-project --with pyyaml python .github/scripts/assert-images-pinned.py

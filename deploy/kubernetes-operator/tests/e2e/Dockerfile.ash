@@ -10,7 +10,9 @@
 #
 # The image is loaded into kind with `kind load docker-image`, so it is never pushed
 # anywhere. ASH publishes no public image and neither does this.
-FROM python:3.12-slim
+# Pinned by digest (.github/scripts/assert-images-pinned.py enforces it): the multi-arch
+# index python:3.12-slim resolved to on 2026-10-05 (Python 3.12.15).
+FROM python:3.12-slim@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d
 
 # A writable HOME that is not root's. Kubernetes' runAsUser overrides the image's
 # USER but does NOT consult /etc/passwd for a home directory, so HOME has to come

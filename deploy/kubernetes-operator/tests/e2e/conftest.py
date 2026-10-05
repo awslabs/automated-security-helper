@@ -35,6 +35,16 @@ from tests.e2e.helpers import (
 E2E_ENABLED = os.environ.get("ASH_OPERATOR_E2E") == "1"
 E2E_DIR = Path(__file__).resolve().parent
 
+# The node image the kind cluster boots, pinned by digest rather than left to kind's
+# built-in default: that default is a tag nothing in this tree records, and
+# .github/scripts/assert-images-pinned.py requires every kind cluster to name a digest.
+# This is kind v0.30.0's own default (its release notes list it), so pinning it changes
+# nothing about the cluster. Bump it together with KIND_VERSION in
+# .github/workflows/ash-kubernetes-operator.yml.
+KIND_NODE_IMAGE = (
+    "kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a"
+)
+
 
 def pytest_report_header(config):
     if E2E_ENABLED:
@@ -132,7 +142,8 @@ def cluster(require_tooling, ash_image, ash_image_nostamp, operator_image):
         # A leftover from an interrupted run. Deleted rather than reused: a cluster in
         # an unknown state produces failures that look like the operator's.
         run(["kind", "delete", "cluster", "--name", CLUSTER_NAME], timeout=300)
-    run(["kind", "create", "cluster", "--name", CLUSTER_NAME, "--wait", "180s"], timeout=1200)
+    create = ["kind", "create", "cluster", "--name", CLUSTER_NAME, "--image", KIND_NODE_IMAGE]
+    run([*create, "--wait", "180s"], timeout=1200)
     try:
         for image in (ash_image, ash_image_nostamp, operator_image):
             run(["kind", "load", "docker-image", image, "--name", CLUSTER_NAME], timeout=1200)
