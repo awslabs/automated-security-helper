@@ -398,6 +398,7 @@ export async function probeAshIdentity(
   executable: string,
   run: CommandRunner,
   options: CommandOptions = {},
+  platform: NodeJS.Platform = process.platform,
 ): Promise<IdentityProbe> {
   const result = await run(executable, ['--version'], options);
 
@@ -433,12 +434,23 @@ export async function probeAshIdentity(
     message:
       `"${executable}" answered, but it is not ASH: \`${executable} --version\` printed ` +
       `${JSON.stringify(firstNonEmptyLine(output))} instead of a string naming ` +
-      `${ASH_IDENTITY_MARKER}. On Windows, MSYS2 and Git Bash ship the Almquist shell ` +
-      `as "ash" and it shadows ASH on PATH. Set ash.executablePath to ` +
+      `${ASH_IDENTITY_MARKER}. ${likelyShadow(platform)} Set ash.executablePath to ` +
       `"${ASH_FALLBACK_EXECUTABLE}", which ASH installs for this case, or to ASH's ` +
       `full path. Refusing to scan: a shell writes no report, and an empty report ` +
       `would look exactly like a clean scan.`,
   };
+}
+
+/**
+ * The likely program shadowing ASH, named for the host the user is on. Each is
+ * where a second `ash` comes from on that platform; naming MSYS2 on Linux sends
+ * the user looking for software they do not have.
+ */
+function likelyShadow(platform: NodeJS.Platform): string {
+  return platform === 'win32'
+    ? 'On Windows, MSYS2 and Git Bash ship the Almquist shell as "ash" and it shadows ASH on PATH.'
+    : 'Another program with that name is ahead of ASH on PATH, most often the Almquist ' +
+        'shell that BusyBox installs as "ash".';
 }
 
 /** The arguments for a workspace scan. */
@@ -550,16 +562,17 @@ export async function resolveExecutable(
   configured: string,
   run: CommandRunner,
   options: CommandOptions = {},
+  platform: NodeJS.Platform = process.platform,
 ): Promise<ExecutableResolution> {
   const explicit = configured.trim();
   if (explicit !== '') {
-    const probe = await probeAshIdentity(explicit, run, options);
+    const probe = await probeAshIdentity(explicit, run, options, platform);
     return probe.ok
       ? { ok: true, executable: explicit, version: probe.version, fellBack: false }
       : { ok: false, message: probe.message };
   }
 
-  const primary = await probeAshIdentity(DEFAULT_EXECUTABLE, run, options);
+  const primary = await probeAshIdentity(DEFAULT_EXECUTABLE, run, options, platform);
   if (primary.ok) {
     return { ok: true, executable: DEFAULT_EXECUTABLE, version: primary.version, fellBack: false };
   }
@@ -567,7 +580,7 @@ export async function resolveExecutable(
     return { ok: false, message: primary.message };
   }
 
-  const legacy = await probeAshIdentity(LEGACY_EXECUTABLE, run, options);
+  const legacy = await probeAshIdentity(LEGACY_EXECUTABLE, run, options, platform);
   if (legacy.ok) {
     return { ok: true, executable: LEGACY_EXECUTABLE, version: legacy.version, fellBack: true };
   }

@@ -80,6 +80,59 @@ describe('probeAshIdentity', () => {
     expect(probe.message).toContain('would look exactly like a clean scan');
   });
 
+  it('names MSYS2 and Git Bash on Windows', async () => {
+    const probe = await probeAshIdentity(
+      'ash',
+      runnerReturning({ status: 2, stderr: 'ash: 0: Illegal option --' }),
+      {},
+      'win32',
+    );
+
+    expect(probe.ok).toBe(false);
+    if (probe.ok) {
+      throw new Error('unreachable');
+    }
+    expect(probe.message).toContain('MSYS2 and Git Bash');
+    expect(probe.message).toContain(ASH_FALLBACK_EXECUTABLE);
+  });
+
+  it('does not blame Windows tools on Linux or macOS', async () => {
+    // Measured on Alpine: BusyBox's `ash` prints this for --version. A message
+    // about MSYS2 there sends the user looking for software they do not have.
+    for (const platform of ['linux', 'darwin'] as const) {
+      const probe = await probeAshIdentity(
+        'ash',
+        runnerReturning({ status: 1, stderr: "ash: bad option '--version'" }),
+        {},
+        platform,
+      );
+
+      expect(probe.ok).toBe(false);
+      if (probe.ok) {
+        throw new Error('unreachable');
+      }
+      expect(probe.message).not.toMatch(/Windows|MSYS2|Git Bash/);
+      expect(probe.message).toContain('BusyBox');
+      expect(probe.message).toContain(ASH_FALLBACK_EXECUTABLE);
+      expect(probe.message).toContain('would look exactly like a clean scan');
+    }
+  });
+
+  it('passes the platform through executable resolution', async () => {
+    const resolution = await resolveExecutable(
+      'ash',
+      runnerReturning({ status: 1, stderr: "ash: bad option '--version'" }),
+      {},
+      'linux',
+    );
+
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) {
+      throw new Error('unreachable');
+    }
+    expect(resolution.message).not.toContain('MSYS2');
+  });
+
   it('does not accept a bare "ash" in the output as proof of identity', async () => {
     // A shell error message contains "ash". If the marker were the program name
     // rather than the distribution name, this would pass and the extension would
