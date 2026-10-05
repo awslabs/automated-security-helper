@@ -29,10 +29,14 @@ through _posixsubprocess.fork_exec, which this script wraps during the build
 because it raises no audit event of its own and multiprocessing's spawn and
 forkserver contexts start their processes through it. Any ctypes audit event is an
 error too, because a foreign call can read a file or start a process with no event
-at all. So is opening a directory for reading: a descriptor from that open lets a
-later open name a file relative to it (`dir_fd=`), and the open event does not
-carry the directory. The installed build backend must satisfy pyproject's
-[build-system] requires, so the build measured is the build `uv build` runs.
+at all. So is opening a directory, in any mode and anywhere: a descriptor from that
+open lets a later open name a file relative to it (`dir_fd=`), and the open event
+does not carry the directory. That refusal covers more than reads. shutil.rmtree
+and TemporaryDirectory cleanup open each directory they remove, so a build hook
+that deletes a tree that way turns this check red; delete files one by one, or
+leave the tree for the frontend's temporary directory. The installed build backend
+must satisfy pyproject's [build-system] requires, so the build measured is the
+build `uv build` runs.
 
 Of the files the build touches, the measured layer sees only the ones it opens. A
 file the build only tests for, with `os.path.exists`, `Path.exists()`, `os.stat`
@@ -512,7 +516,7 @@ SPAWN_EVENTS = frozenset(
 # The event this script records for each call to _posixsubprocess.fork_exec, which
 # raises no audit event of its own (see measured_build).
 FORK_EXEC = "_posixsubprocess.fork_exec"
-# The event recorded for a read-open of a directory.
+# The event recorded for an open of a directory, in any mode.
 DIRECTORY_OPEN = "open of a directory"
 
 # Commands the build may run, keyed by (program name, *arguments). Each must read
@@ -537,14 +541,15 @@ def _audit(event: str, args: tuple[Any, ...]) -> None:
         return
     if event == "open":
         # Resolved later: an audit hook should do as little as it can. A directory
-        # is the exception, because whether a path is one can change by then.
+        # is the exception, because whether a path is one can change by then. Any
+        # open of a directory counts, whatever its access mode: on Linux O_PATH
+        # ignores the mode, so O_PATH|O_WRONLY still gives a usable dir_fd.
         cwd = os.getcwd()
         events.append(("open", args[0], args[1], args[2], cwd))
         raw = args[0]
         if (
             raw is not None
             and not isinstance(raw, int)
-            and _opened_for_reading(args[1], args[2])
             and os.path.isdir(os.path.join(cwd, os.fsdecode(raw)))
         ):
             events.append((DIRECTORY_OPEN, os.path.join(cwd, os.fsdecode(raw))))
@@ -920,9 +925,13 @@ def run_fixture(
     licenses: tuple[str, ...] = ("LICENSE", "NOTICE"),
     files: dict[str, str] | None = None,
     links: dict[str, str] | None = None,
+    path_first: str | None = None,
 ) -> str:
     """Builds a fixture repository under root and a wheel from it with hatchling;
-    returns "ok", "problems" or "error: <the Unresolvable message>"."""
+    returns "ok", "problems" or "error: <the Unresolvable message>".
+
+    path_first names a fixture directory whose files are made executable and which
+    is put first on PATH while the check runs, as a checkout's bin/ would be."""
     hook = hook.replace(STATIC_EXTRA, f"    {static_extra}\n" if static_extra else "")
     hook = hook.replace(BUILD_EXTRA, f"        {build_extra}\n" if build_extra else "")
     tree = {
@@ -941,10 +950,21 @@ def run_fixture(
         os.symlink(target, os.path.join(root, *name.split("/")))
     out_dir = root + "-dist"
     os.makedirs(out_dir)
+    saved_path = os.environ.get("PATH")
+    if path_first is not None:
+        bin_dir = os.path.join(root, *path_first.split("/"))
+        for name in os.listdir(bin_dir):
+            os.chmod(os.path.join(bin_dir, name), 0o755)
+        os.environ["PATH"] = bin_dir + os.pathsep + (saved_path or "")
     try:
         inputs = wheel_inputs(root, out_dir, layers)
     except Unresolvable as error:
         return f"error: {error}"
+    finally:
+        if saved_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = saved_path
     text = workflow if workflow is not None else fixture_workflow(FIXTURE_FILTER)
     return "problems" if check(read_paths_filters(text), inputs) else "ok"
 
@@ -1444,6 +1464,74 @@ def self_test() -> int:
                 ),
             },
             "error: open of a directory",
+        ),
+        (
+            # O_PATH ignores the access mode, so O_WRONLY still gives a descriptor
+            # that works as dir_fd. Linux only; elsewhere the open fails, and the
+            # attempt is refused all the same.
+            "measured: the hook opens a directory O_PATH|O_WRONLY and reads relative to it",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "try:\n"
+                    "            dfd = os.open(str(ASH_ASSETS_PATH), "
+                    'getattr(os, "O_PATH", 0) | os.O_WRONLY)\n'
+                    '            os.close(os.open("../../CHANGELOG.md", os.O_RDONLY, dir_fd=dfd))\n'
+                    "            os.close(dfd)\n"
+                    "        except OSError:\n"
+                    "            pass"
+                ),
+            },
+            "error: open of a directory",
+        ),
+        (
+            "measured: the git first on PATH is inside the repository",
+            {
+                "layers": MEASURED,
+                "files": {"bin/git": "#!/bin/sh\necho main\n"},
+                "path_first": "bin",
+            },
+            "error: subprocess.Popen ['git', 'rev-parse'",
+        ),
+        (
+            "static: license-files is not a list",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    '["LICENSE", "NOTICE"]', '"LICENSE"'
+                ),
+            },
+            "error: project.license-files is not a list",
+        ),
+        (
+            "static: a `?` glob in license-files",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    '["LICENSE", "NOTICE"]', '["LICENS?", "NOTICE"]'
+                ),
+            },
+            "error: is a glob",
+        ),
+        (
+            "static: a `[...]` glob in license-files",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    '["LICENSE", "NOTICE"]', '["LICEN[CS]E", "NOTICE"]'
+                ),
+            },
+            "error: is a glob",
+        ),
+        (
+            "static: a `!` negation in license-files",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    '["LICENSE", "NOTICE"]', '["LICENSE", "NOTICE", "!AUTHORS"]'
+                ),
+            },
+            "error: is a glob",
         ),
         (
             "static: license-files is not set",
