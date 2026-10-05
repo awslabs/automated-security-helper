@@ -104,8 +104,9 @@ export const ASH_CLI = 'ashx';
  * `DEFAULT_ASH_REF` is still a v3 tag, so the unsharded scan, which v3 can run,
  * falls back to this name rather than fail on an `ashx` the release never had.
  * Shard and merge need a v4 ref anyway (v3 has neither `--shard-index` nor
- * `merge`), so they use `ASH_CLI` directly. Drop the fallback once
- * `DEFAULT_ASH_REF` is a v4 tag.
+ * `merge`), so they use `ASH_CLI` directly. Under `UVX` the fallback applies
+ * only to refs that are not a v4-or-later release tag (see `ashInvocation`), so
+ * once `DEFAULT_ASH_REF` is a v4 tag the default command is `ashx`.
  */
 export const ASH_CLI_V3 = 'ash';
 
@@ -202,8 +203,10 @@ function assertGitRef(ref: string): string {
  * An installed executable is resolved at run time, `ashx` first. `uvx` cannot be
  * probed that way: it reports a missing executable with exit code 1, which is
  * also ASH's scanner-error code, so try-`ashx`-then-retry could not tell a
- * missing name from a failed scan. The deprecated `ash`, which both majors
- * provide, is used there instead.
+ * missing name from a failed scan. So the name is chosen from the ref at synth
+ * time: `ashx` for a release tag of v4 or later, and otherwise the deprecated
+ * `ash`, which both majors provide. A branch, a commit or an `$ENV_VAR` could be
+ * either major, so it gets `ash` too.
  */
 function ashInvocation(install: InstallOptions, v3Compatible = false): string {
   if (install.mode !== ASHInstallMode.UVX) {
@@ -211,11 +214,16 @@ function ashInvocation(install: InstallOptions, v3Compatible = false): string {
       ? `"$(command -v ${ASH_CLI} || echo ${ASH_CLI_V3})"`
       : ASH_CLI;
   }
-  const requirement = gitRequirement(
-    install.sourceRepository,
-    install.version ?? DEFAULT_ASH_REF,
-  );
-  return `uvx --from ${requirement} ${v3Compatible ? ASH_CLI_V3 : ASH_CLI}`;
+  const ref = install.version ?? DEFAULT_ASH_REF;
+  const requirement = gitRequirement(install.sourceRepository, ref);
+  const cli = v3Compatible && !refProvidesAshx(ref) ? ASH_CLI_V3 : ASH_CLI;
+  return `uvx --from ${requirement} ${cli}`;
+}
+
+/** Whether `ref` is a release tag, `v4.0.0` or later, known to ship `ashx`. */
+function refProvidesAshx(ref: string): boolean {
+  const match = /^v?(\d+)\.\d+\.\d+(?:[-+][0-9A-Za-z.-]*)?$/.exec(ref);
+  return match !== null && Number(match[1]) >= 4;
 }
 
 /**

@@ -354,9 +354,39 @@ describe('install modes', () => {
     const spec = ashBuildSpec(template);
 
     expect(spec.phases.install.commands).toEqual([]);
-    expect(spec.phases.build.commands.join('\n')).toContain(
-      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0" ash scan',
-    );
+    // The ref on this line moves with `cz bump` (it is a version_files target), and
+    // the command name has to move with it: a v3 tag has only `ash`, a v4 tag has
+    // `ashx`. Deriving the name from the same line keeps the two in step.
+    const requirement =
+      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"';
+    const cli = /@v[0-3]\./.test(requirement) ? 'ash' : 'ashx';
+    expect(spec.phases.build.commands.join('\n')).toContain(`${requirement} ${cli} scan `);
+  });
+
+  test('UVX runs ashx for an unsharded scan on a v4 ref', () => {
+    const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version: 'v4.0.0' });
+    const commands = ashBuildSpec(template).phases.build.commands.join('\n');
+
+    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+@v4\.0\.0" ashx scan /m);
+    expect(commands).not.toMatch(/" ash scan /);
+  });
+
+  test('UVX keeps the deprecated ash for an unsharded scan on a v3 ref', () => {
+    // v3 releases ship no `ashx`, and uvx cannot fall back at run time.
+    const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version: 'v3.6.1' });
+    const commands = ashBuildSpec(template).phases.build.commands.join('\n');
+
+    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+@v3\.6\.1" ash scan /m);
+  });
+
+  test('UVX keeps the deprecated ash when the ref names no major version', () => {
+    // A branch, a commit or an environment variable could be either major. `ash`
+    // runs on both, so it is the only name that cannot fail for the wrong reason.
+    for (const version of ['main', '0123456789abcdef0123456789abcdef01234567', '$ASH_VERSION']) {
+      const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version });
+      const commands = ashBuildSpec(template).phases.build.commands.join('\n');
+      expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ash scan /m);
+    }
   });
 
   test('UVX runs ashx for shards and the merge, which need a v4 ref anyway', () => {
