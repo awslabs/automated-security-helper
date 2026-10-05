@@ -1,11 +1,12 @@
 # ASH for VS Code
 
-Runs the `ash` CLI over the open workspace folder and reports its SARIF findings in
+Runs the ASH CLI over the open workspace folder and reports its SARIF findings in
 the Problems panel.
 
-The extension ships no scanners, no rules, and no copy of ASH. It invokes whatever
-`ash` is on your PATH — or the executable you configure — and reads the SARIF that
-executable already writes. It has no runtime npm dependencies at all.
+The extension ships no scanners, no rules, and no copy of ASH. It invokes the
+`ashx` (or, failing that, `ash`) on your PATH, or the executable you configure,
+and reads the SARIF and `ash_aggregated_results.json` that executable already
+writes. It has no runtime npm dependencies at all.
 
 ## Install
 
@@ -20,9 +21,9 @@ npm run package
 code --install-extension ash-vscode.vsix
 ```
 
-ASH itself has to be installed separately. `ash --version` should print a string
-naming `automated-security-helper`; if it does not, read the next section before
-filing anything.
+ASH itself has to be installed separately. `ashx --version` (or `ash --version`)
+should print a string naming `automated-security-helper`; if it does not, read the
+MSYS2 section below before filing anything.
 
 ## Commands and settings
 
@@ -31,9 +32,22 @@ diagnostics with what the scan found. `ASH: Clear findings` empties them.
 
 | Setting | Default | What it is for |
 |---|---|---|
-| `ash.executablePath` | `ash` | The executable to run. Set it to `automated-security-helper` or to a full path when a bare `ash` resolves to something else. |
+| `ash.executablePath` | empty | Empty runs `ashx` from PATH, and `ash` when no `ashx` is installed. Anything else is run exactly as given, with no fallback. Machine-scoped, so a cloned repository cannot set it. |
 | `ash.outputDirectory` | `.ash/ash_output` | Where the scan writes, relative to the workspace folder. An absolute path is used as given. |
 | `ash.extraArguments` | `[]` | Appended to `ash scan`, for example `--scanners detect-secrets` or `--offline`. |
+
+## Which executable runs
+
+`ashx` is the v4 entry point and the default. When `ash.executablePath` is empty
+and `ashx` is not on PATH at all, the extension runs `ash` instead and says so in a
+notification shown once; the flag that it has been shown is kept in the
+extension's global state, so it does not return on every scan or every window. The
+fallback is taken only for "not found". An `ashx` that answers and is not ASH is an
+error, because scanning with a different program would hide it. A configured value
+is never substituted: if you name `ashx` and it is missing, the scan refuses.
+
+The two names are constants in `src/ash-cli.ts` (`DEFAULT_EXECUTABLE`,
+`LEGACY_EXECUTABLE`).
 
 ## The MSYS2 collision, which is why there is a startup check
 
@@ -61,19 +75,61 @@ logging session.
 
 ## Everything that produces zero findings is reported
 
-Zero diagnostics is what a clean scan looks like. It is also what a missing `ash`,
-a shadowed `ash`, a crashed scan, an unwritten report and an unparseable report
-look like. `src/extension.ts` returns a distinct status for each, and every one of
-them puts a message on screen:
+Zero diagnostics is what a clean scan looks like. It is also what a missing
+executable, a shadowed one, a crashed scan, an unwritten report, the previous
+run's report and a scan whose scanners never ran look like. `src/extension.ts`
+returns a distinct status for each, and every one of them puts a message on screen:
 
 | Status | What happened |
 |---|---|
-| `ok` | The scan ran. `summary.diagnostics` may be zero, and that is a real clean result. |
+| `ok` | The scan ran, exited 0 or 2, and its results name no coverage gap. `summary.diagnostics` may be zero, and that is a real clean result. |
+| `incomplete` | Findings are published, and the scan did not cover everything. See below. |
 | `no-workspace` | No folder is open. |
-| `wrong-executable` | The configured executable is missing, or answered without naming ASH. |
-| `scan-failed` | ASH exited 1, was killed, or could not be started. Exit 2 is NOT a failure. |
+| `wrong-executable` | The executable is missing, or answered without naming ASH. |
+| `scan-failed` | ASH exited 1 having written no report (a crash), exited 3 or 4, was killed, or could not be started. |
 | `no-report` | The scan exited 0 or 2 and wrote no SARIF. There is no evidence the tree is clean. |
+| `stale-report` | The previous run's report could not be deleted and this run did not rewrite it. |
 | `unreadable-report` | A report exists and is not SARIF. |
+
+### The exit-code contract
+
+ASH exits 0 for a clean scan and 2 for findings; both publish. Exit 1 is two
+things. With results written by this run it is `ScanIncompleteExit`: the scan
+finished with partial coverage, and since `fail_on_incomplete_scanners` defaults to
+true that is the ordinary result on a host missing one scanner's tool. The findings
+that were reported are real, so they are published and the scan is reported
+`incomplete` with what is missing. Exit 1 with no report from this run is a crash.
+
+Both reports are deleted before each scan, so a report present afterwards can only
+be this run's. When the delete fails, modification times are compared instead.
+
+### Where "incomplete" comes from
+
+`coverage_complete` is not a field of `ash_aggregated_results.json`. ASH computes
+it on demand for its MCP payloads, as
+`not coverage_has_gap(scan_incompleteness(results, gate=True).to_payload())`.
+Every input that reads is in the results file, so `src/coverage.ts` asks the same
+five questions of it: a scanner that is ERROR or MISSING or lost targets, no
+scanner having run, a converter that did not run, a rule that was not evaluated,
+and a stale content database. The scan is `incomplete` when ASH exited 1 or when
+that answer is false, so a scan run with the gate turned off still says what it
+did not cover.
+
+Being a second reader of one rule, it can drift. `test/fixtures/coverage-cases/cases.json`
+records the verdict ASH reaches on each of 18 cases built from captured scans;
+jest holds `src/coverage.ts` to it and
+`tests/unit/test_vscode_coverage_parity.py` holds ASH to it.
+
+### Suppressed results and where findings land
+
+A result ASH suppressed keeps its `kind` and `level` and gains a `suppressions`
+entry, so it is identified by that entry alone and is counted, not published.
+Results whose `kind` is not `fail` are counted the same way. A SARIF location is
+resolved whether it is relative to the scanned folder, relative to a `uriBaseId`
+the run declares (ASH's workspace mode writes `PROJECTROOT`), a `file:` URI, or an
+absolute POSIX or Windows path. One that names no file on this machine -- another
+URI scheme, a UNC share or a Windows path off Windows -- is counted and reported
+rather than attached to the wrong file.
 
 ## How the .vsix stays free of third-party code
 
@@ -146,12 +202,35 @@ fixture edited into something ASH would not produce fails rather than passes.
 it is required to produce zero diagnostics — without that control, an assertion
 could be satisfied by a mapper that invented findings.
 
-The limitation worth stating: `vscode` is a stub in `test/vscode-stub.ts`, not the
-real editor. `@vscode/test-electron` downloads a full VS Code build and needs a
-display server, which would add a network fetch and an xvfb dependency to a
-coverage gate, and a gate that flakes gets ignored. So the assertion is about the
-diagnostic model as the stub reproduces it — `set` keyed on the URI's string form,
-`clear` emptying everything, `Range` ordering its ends — and not about pixels.
+`vscode` is a stub in `test/vscode-stub.ts` for jest, which is what the coverage
+gate measures: a gate that downloaded an editor and needed a display would flake,
+and a gate that flakes gets ignored. The real editor is the integration suite's
+job.
+
+## The integration suite
+
+`npm run test:integration` downloads VS Code, opens a temporary copy of the
+fixture, and drives the registered command through a real extension host: real
+command dispatch, the real diagnostics API, settings, global state, and a real
+child process on a PATH the suite controls. On a host without a display run it
+under Xvfb, as CI does:
+
+```
+xvfb-run -a npm run test:integration
+```
+
+By default the CLI is `test/integration/ash-stub.ts` behind wrappers named `ash`
+and `ashx`, replaying the captured runs under `test/fixtures/scans/` with their
+exit codes. Set `ASH_IT_REAL_ASH_DIR` to a directory holding an installed `ash`
+to run the same suite against genuine scans instead. Both modes cover the
+`ashx` -> `ash` fallback and its one-time notice, exit 2 findings with a
+suppression, exit 1 with partial findings, exit 0 clearing the editor, exit 1 with
+no report, and a configured executable used as given.
+
+VS Code is launched with `--force-disable-user-env`. Without it VS Code resolves
+your login shell's environment and puts its PATH ahead of the suite's, so an
+installed scanner or a real `ash` on the development machine answers instead of
+the one under test.
 
 ## Why this is not in the agentic-coding transpiler
 
