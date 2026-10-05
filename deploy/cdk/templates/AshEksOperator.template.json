@@ -329,8 +329,7 @@
     }
    },
    "DependsOn": [
-    "InstallerRoleDefaultPolicyC01C83A5",
-    "InstallerRole13277E70"
+    "InstallerRoleDefaultPolicyC01C83A5"
    ]
   },
   "InstallerEc2CodeDeny0202AC72": {

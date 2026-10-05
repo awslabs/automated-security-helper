@@ -903,8 +903,7 @@
     "Timeout": 60
    },
    "DependsOn": [
-    "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
-    "ImageBootstrapStarterRole4262AC52"
+    "ImageBootstrapStarterRoleDefaultPolicy10189EBF"
    ]
   },
   "ImageBootstrapBuildCBE6CA7A": {

@@ -45,6 +45,8 @@ import {
   DefaultStackSynthesizer,
   Duration,
   Fn,
+  FileAssetSource,
+  ISynthesisSession,
   IStackSynthesizer,
   RemovalPolicy,
   Stack,
@@ -52,6 +54,8 @@ import {
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+
+import { pruneDependenciesImpliedByReferences } from './ash-implied-dependencies';
 
 /**
  * Canonical parameter names, shared with the Terraform mirror.
@@ -973,5 +977,27 @@ export function accessLogArchiveProps(): s3.BucketProps {
  * asset would need a staging bucket and would reintroduce the dependency.
  */
 export function ashSynthesizer(): IStackSynthesizer {
-  return new DefaultStackSynthesizer({ generateBootstrapVersionRule: false });
+  return new AshStackSynthesizer({ generateBootstrapVersionRule: false });
+}
+
+/**
+ * The default synthesizer, plus one cleanup that has to happen after CDK's prepare
+ * phase: dropping `DependsOn` entries that a `Ref` or `Fn::GetAtt` already implies.
+ * See ash-implied-dependencies.ts for what is dropped, what is kept, and why the
+ * cleanup cannot live in a constructor or an aspect.
+ *
+ * It rides on the synthesizer for the same reason the bootstrap default does:
+ * every stack already takes `ashSynthesizer()` as its own default, so a stack built
+ * by a test gets the same template as the one `bin/ash.ts` commits.
+ */
+export class AshStackSynthesizer extends DefaultStackSynthesizer {
+  protected synthesizeTemplate(
+    session: ISynthesisSession,
+    lookupRoleArn?: string,
+    lookupRoleExternalId?: string,
+    lookupRoleAdditionalOptions?: { [key: string]: unknown },
+  ): FileAssetSource {
+    pruneDependenciesImpliedByReferences(this.boundStack);
+    return super.synthesizeTemplate(session, lookupRoleArn, lookupRoleExternalId, lookupRoleAdditionalOptions);
+  }
 }
