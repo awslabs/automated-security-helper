@@ -1,0 +1,7 @@
+$ ash config update ash.yaml --set fail_on_findings=maybe
+[<LOG_TIME>] INFO     Applied modification: fail_on_findings=maybe
+Failed to validate config after applying modifications: 1 validation error for AshConfig
+fail_on_findings
+  Input should be a valid boolean, unable to interpret input [type=bool_parsing, input_value='maybe', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/bool_parsing
+[exit code: 1]

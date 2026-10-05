@@ -1,0 +1,83 @@
+$ ash config wizard
+╭─────────────────────────────────────── ASH Config Wizard ────────────────────────────────────────╮
+│ No existing config found -- starting from defaults.                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+Project name [ash-scan]: wizard-demo
+
+Scanner configuration
+               Scanners
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
+┃ Name           ┃ Currently enabled ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ bandit         │        yes        │
+│ cdk-nag        │        yes        │
+│ cfn-nag        │        yes        │
+│ checkov        │        yes        │
+│ detect-secrets │        yes        │
+│ grype          │        yes        │
+│ npm-audit      │        yes        │
+│ opengrep       │        yes        │
+│ semgrep        │        yes        │
+│ syft           │        yes        │
+└────────────────┴───────────────────┘
+  Enable bandit? [Y/n]:
+  Enable cdk-nag? [Y/n]:
+  Enable cfn-nag? [Y/n]:
+  Enable checkov? [Y/n]: n
+  Enable detect-secrets? [Y/n]:
+  Enable grype? [Y/n]: n
+  Enable npm-audit? [Y/n]:
+  Enable opengrep? [Y/n]:
+  Enable semgrep? [Y/n]:
+  Enable syft? [Y/n]:
+
+Output format configuration
+              Output Formats
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
+┃ Name                ┃ Currently enabled ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ csv                 │        yes        │
+│ cyclonedx           │        yes        │
+│ gitlab-cyclonedx    │        yes        │
+│ html                │        yes        │
+│ flat-json           │        yes        │
+│ gitlab-sast         │        yes        │
+│ github-ghas         │        yes        │
+│ junitxml            │        yes        │
+│ markdown            │        yes        │
+│ ocsf                │        yes        │
+│ sarif               │        yes        │
+│ spdx                │        no         │
+│ text                │        yes        │
+│ unused-suppressions │        yes        │
+│ yaml                │        no         │
+└─────────────────────┴───────────────────┘
+  Enable csv? [Y/n]:
+  Enable cyclonedx? [Y/n]:
+  Enable gitlab-cyclonedx? [Y/n]:
+  Enable html? [Y/n]: n
+  Enable flat-json? [Y/n]:
+  Enable gitlab-sast? [Y/n]:
+  Enable github-ghas? [Y/n]:
+  Enable junitxml? [Y/n]:
+  Enable markdown? [Y/n]:
+  Enable ocsf? [Y/n]:
+  Enable sarif? [Y/n]:
+  Enable spdx? [y/N]:
+  Enable text? [Y/n]:
+  Enable unused-suppressions? [Y/n]:
+  Enable yaml? [y/N]: y
+
+Offline mode
+  Offline mode skips tool installation. Set the ASH_OFFLINE environment variable at runtime to
+activate it.
+  Set ASH_OFFLINE=YES in the generated config comments as a reminder? [y/N]: y
+
+Community plugin modules
+  Provide Python module paths for additional plugins, one per line. Leave blank to finish.
+  Add a plugin module (blank to finish): my_org.ash_plugins
+  Add a plugin module (blank to finish):
+╭────────────────────────────────────────────── Done ──────────────────────────────────────────────╮
+│ Config written to <WORKSPACE>/.ash/.ash.yaml                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+[exit code: 0]

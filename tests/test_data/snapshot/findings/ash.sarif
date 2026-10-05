@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "AWS Labs - Automated Security Helper",
+          "version": "0.0.0-fixture"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "B105",
+          "ruleIndex": 3,
+          "level": "error",
+          "kind": "fail",
+          "message": {
+            "text": "Possible hardcoded password: 'hunter2'"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/app.py"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 5,
+                  "snippet": {
+                    "text": "password = 'hunter2'"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "scanner_details": {
+              "tool_name": "bandit"
+            }
+          }
+        },
+        {
+          "ruleId": "CKV_AWS_18",
+          "level": "warning",
+          "message": {
+            "text": "Ensure the S3 bucket has access logging enabled"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "infra/bucket.yaml"
+                },
+                "region": {
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "suppressions": [
+            {
+              "kind": "external",
+              "justification": "Access logs go to a central account"
+            }
+          ],
+          "properties": {
+            "scanner_details": {
+              "tool_name": "checkov"
+            }
+          }
+        },
+        {
+          "ruleId": "javascript.lang.security.audit.unsafe-eval",
+          "level": "note",
+          "message": {
+            "text": "Avoid eval() on user input"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "web/index.js"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "scanner_details": {
+              "tool_name": "semgrep"
+            }
+          }
+        },
+        {
+          "ruleId": "GHSA-0000-fixture",
+          "level": "none",
+          "message": {
+            "text": "Package left-pad 1.0.0 has a known advisory"
+          },
+          "properties": {}
+        }
+      ]
+    }
+  ]
+}

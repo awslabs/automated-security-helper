@@ -21,6 +21,9 @@ What is masked, and why each is safe to mask
 - Timestamps. ISO-8601 instants, ``ASH-YYYYMMDD[HHMMSS]`` report ids, and today's date
   (plus yesterday and tomorrow, so a run that crosses midnight still matches). A date
   a fixture chose, such as a suppression's expiry, is not today and survives.
+- The time column of ASH's console log (rich's ``RichHandler``), which prints each
+  record's creation time as ``[MM/DD/YY HH:MM:SS]`` in local time. Only the bracketed
+  form is masked; a bare ``10/05/26`` in a message survives.
 - Durations: a number followed by a time unit. Fixtures pin every duration they pass
   in, so what this masks is wall-clock time ASH measured itself.
 - A bare number under a volatile key (``VOLATILE_KEYS``) in rendered JSON text, such as
@@ -34,6 +37,8 @@ What is masked, and why each is safe to mask
   passed through, so they move with unrelated edits. The fact that a traceback was
   shown, and the ``ExcType: message`` line after it, are kept: a message that turns
   into a traceback, or back, still shows up as a diff.
+- ``jq-<digits>`` element ids in the ``inspect sarif-fields`` HTML report, which are
+  derived from Python's per-process salted ``hash()``.
 - Trailing whitespace on each line, which rich pads tables with.
 - The padding in front of a rich panel's right border, on a line where a mask
   changed the text's length. rich pads ``│ [default: /home/me/.ash/bin]   │`` to the
@@ -83,6 +88,16 @@ _ISO_INSTANT = re.compile(
 
 # ReportMetadata.report_id is "ASH-" + a UTC date or date-time stamp.
 _REPORT_ID = re.compile(r"\bASH-\d{8}(?:\d{6})?\b")
+
+# RichHandler's default log_time_format "[%x %X]" in the C locale: [10/05/26 17:22:49].
+# Masked before durations, which would otherwise take the HH:MM:SS half alone.
+_LOG_TIME = re.compile(r"\[\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\]")
+
+# Element ids in the `inspect sarif-fields` HTML report, built as
+# f"jq-{abs(hash(path)) % 10000000}" (utils/meta_analysis/reporting.py). str hashes are
+# salted per process (PYTHONHASHSEED), so the number changes on every run. Only a
+# quoted value (an attribute, or the JS string argument that refers to it) is masked.
+_JQ_ELEMENT_ID = re.compile(r"(?<=['\"])((?:btn-)?jq-)\d+(?=['\"])")
 
 # A number followed by a time unit: 1.2s, 350ms, 3 seconds, 0:00:01, 1m 2s, 2h 3m.
 _DURATION = re.compile(
@@ -269,6 +284,8 @@ class SnapshotNormalizer:
         out = _UUID.sub("<UUID>", out)
         out = _ISO_INSTANT.sub("<TIMESTAMP>", out)
         out = _REPORT_ID.sub("ASH-<REPORT_ID>", out)
+        out = _LOG_TIME.sub("[<LOG_TIME>]", out)
+        out = _JQ_ELEMENT_ID.sub(r"\1<HASH_ID>", out)
         today = date.today()
         for day in (today - timedelta(days=1), today, today + timedelta(days=1)):
             out = out.replace(day.isoformat(), "<TODAY>")

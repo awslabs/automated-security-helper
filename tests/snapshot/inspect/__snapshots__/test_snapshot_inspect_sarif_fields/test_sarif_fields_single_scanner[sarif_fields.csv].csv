@@ -1,0 +1,10 @@
+field,scanners
+runs[].results[].fingerprints.bandit/v1,bandit
+runs[].results[].level,bandit
+runs[].results[].locations[].physicalLocation.artifactLocation.uri,bandit
+runs[].results[].locations[].physicalLocation.region.endLine,bandit
+runs[].results[].locations[].physicalLocation.region.snippet.text,bandit
+runs[].results[].locations[].physicalLocation.region.startLine,bandit
+runs[].results[].message.text,bandit
+runs[].results[].properties,bandit
+runs[].results[].ruleId,bandit

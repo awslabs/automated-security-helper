@@ -1,0 +1,12 @@
+$ ash plugin list -c bad.yaml
+[<LOG_TIME>] INFO     Using config file specified at: bad.yaml
+                    ERROR    Configuration validation failed: 1 validation error for AshConfig
+                             fail_on_findings
+                               Input should be a valid boolean
+                                 For further information visit
+                             https://errors.pydantic.dev/2.13/v/bool_type
+Error: Configuration validation failed for 'bad.yaml': 1 validation error for AshConfig
+fail_on_findings
+  Input should be a valid boolean [type=bool_type, input_value='maybe', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/bool_type. Run 'ash config lint' to identify and fix issues.
+[exit code: 1]

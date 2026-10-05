@@ -1,0 +1,27 @@
+$ ash inspect sarif-fields --sarif-dir <SARIF_INPUT> --output-dir <INSPECT_OUT>
+Found 2 SARIF files
+Analyzing <SARIF_INPUT>/reports/ash.sarif
+Analyzing <SARIF_INPUT>/scanners/bandit/source/bandit.sarif
+Wrote included fields JSON to <INSPECT_OUT>/sarif_fields.json
+Wrote excluded fields JSON to <INSPECT_OUT>/sarif_excluded_fields.json
+Wrote included fields CSV to <INSPECT_OUT>/sarif_fields.csv
+Wrote excluded fields CSV to <INSPECT_OUT>/sarif_excluded_fields.csv
+Wrote HTML report to <INSPECT_OUT>/sarif_validation_report.html
+       SARIF Field Analysis Summary
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Metric                          ┃ Value ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ Total unique fields (included)  │ 9     │
+│ Total unique fields (excluded)  │ 1     │
+│ Total unique scanners           │ 2     │
+│ Fields used by all scanners     │ 9     │
+│ Fields used by only one scanner │ 0     │
+└─────────────────────────────────┴───────┘
+                                 Per-Scanner SARIF Field Statistics
+┏━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┓
+┃         ┃              ┃               ┃ Missing            ┃ Missing           ┃                ┃
+┃ Scanner ┃ Total Fields ┃ Unique Fields ┃ (Unexpected)       ┃ (Intentional)     ┃ % in Aggregate ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
+│ bandit  │ 9            │ 0             │ 0                  │ 1                 │ 88.9%          │
+└─────────┴──────────────┴───────────────┴────────────────────┴───────────────────┴────────────────┘
+[exit code: 0]

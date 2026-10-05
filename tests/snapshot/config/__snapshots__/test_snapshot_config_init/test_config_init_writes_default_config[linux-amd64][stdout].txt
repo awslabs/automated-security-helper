@@ -1,0 +1,3 @@
+$ ash config init
+Saving ASH config to path: <CWD>/.ash/.ash.yaml
+[exit code: 0]

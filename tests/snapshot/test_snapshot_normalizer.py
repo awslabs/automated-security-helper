@@ -72,6 +72,28 @@ class TestMasked:
         )
         assert out == "at <TIMESTAMP> and <TIMESTAMP> id ASH-<REPORT_ID> day <TODAY>"
 
+    def test_rich_log_time_column(self, normalizer):
+        out = normalizer.text(
+            "[10/05/26 17:22:49] INFO     Applied modification: a=b\n"
+            "                    INFO     Applied modification: c=d"
+        )
+        assert out == (
+            "[<LOG_TIME>] INFO     Applied modification: a=b\n"
+            "                    INFO     Applied modification: c=d"
+        )
+
+    def test_hash_derived_jq_element_ids(self, normalizer):
+        out = normalizer.text(
+            "<code id='jq-2741195'>jq '.runs'</code>"
+            "<button id='btn-jq-2741195' "
+            "onclick=\"copyToClipboard('jq-2741195')\">Copy</button>"
+        )
+        assert out == (
+            "<code id='jq-<HASH_ID>'>jq '.runs'</code>"
+            "<button id='btn-jq-<HASH_ID>' "
+            "onclick=\"copyToClipboard('jq-<HASH_ID>')\">Copy</button>"
+        )
+
     @pytest.mark.parametrize(
         "duration", ["1.25s", "350ms", "3 seconds", "0:00:01", "1m 2s", "12 sec"]
     )
@@ -137,6 +159,14 @@ class TestSurvives:
 
     def test_a_date_that_is_not_today(self, normalizer):
         assert normalizer.text("expires 2031-01-31") == "expires 2031-01-31"
+
+    def test_slash_dates_outside_the_log_time_column(self, normalizer):
+        text = "released 10/05/26, ratio [10/05/26], level [INFO]"
+        assert normalizer.text(text) == text
+
+    def test_jq_text_that_is_not_an_element_id(self, normalizer):
+        text = ".jq-query { color: #666; } jq '. | select(.x)' jq-1.7 'jq-1.7' jqx-123"
+        assert normalizer.text(text) == text
 
     def test_box_drawing_and_emoji(self, normalizer):
         text = "┏━━━┓ 📊 ✅ ❌"
