@@ -649,6 +649,93 @@ global_settings:
         assert that a scan exited 0. Three rules fire on it, the same three the
         .deb and .rpm verifications see. The fixture is the assertion; removing
         it would make the suite vacuous. See editors/vscode/README.md.
+    # === the Kubernetes operator under deploy/kubernetes-operator ===
+    #
+    # Twenty findings arrived with the operator. Five were fixed at the source and are
+    # not listed: the example access key id is gone from a pyproject comment (and from
+    # the planted fixture's docstring, which only needs the assignments), the three
+    # Dockerfiles declare HEALTHCHECK NONE (Kubernetes reads only the kubelet's probes,
+    # and checkov accepts NONE as a declaration), and Dockerfile.ash-nostamp names its
+    # base repository so the FROM carries a tag. The fifteen below are one of two kinds,
+    # each listed by exact path and rule rather than by a `deploy/kubernetes-operator/**`
+    # glob, so the rest of the operator still gets scanned with nothing excused.
+    #
+    # Planted fixtures. tests/e2e/fixtures/dirty/ exists to be detected: the e2e
+    # asserts that a sharded scan of it returns a bandit B602/B307 pair and a planted
+    # AWS credential, because a green scan of a tree with a known finding in it is the
+    # failure that looks most like success. The fixture is copied into the cluster as
+    # the scan root there, so these repository-relative paths never match inside the
+    # e2e and its assertion is unaffected.
+    - rule_id: "SECRET-*"
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/leaked_settings.py
+      reason: >-
+        AWS's published documentation-only example key pair, planted so the operator
+        e2e can assert that the merged report carries a detect-secrets finding from a
+        second shard rather than that the run completed. Three rules fire on it, the
+        same three the .deb and .rpm verifications see. The fixture is the assertion;
+        removing it would make the test vacuous.
+    - rule_id: B602
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/vulnerable.py
+      reason: >-
+        A deliberate subprocess call with shell=True, planted so the operator e2e can
+        assert bandit reported it. The fixture is the assertion.
+    - rule_id: B307
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/vulnerable.py
+      reason: >-
+        A deliberate eval, planted beside the B602 for the same e2e assertion. The
+        fixture is the assertion.
+    #
+    # False positives, each read on its line before being listed.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .github/workflows/ash-kubernetes-operator.yml
+      reason: >-
+        KIND_SHA256 and KUBECTL_SHA256 are the vendors' published SHA-256 digests for
+        the pinned kind and kubectl binaries, from the release pages the comments
+        beside them name. The workflow verifies each download against its digest, so
+        they are public by construction and are what makes the install verifiable.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: deploy/kubernetes-operator/generated/config-schema-translation.json
+      reason: >-
+        sourceSchemaSha256 is a truncated SHA-256 of ASH's own published config
+        schema, written by `python -m ash_operator.generate_manifests` so a stale
+        generated file can be detected. It changes on every schema change and is
+        derived from a public file.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: deploy/kubernetes-operator/generated/crd-ashscans.yaml
+      reason: >-
+        The ash-config-schema-sha256 annotation, the same generated schema digest as
+        config-schema-translation.json.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: deploy/kubernetes-operator/generated/crd-ashmcpservers.yaml
+      reason: >-
+        The ash-config-schema-sha256 annotation, the same generated schema digest as
+        config-schema-translation.json.
+    - rule_id: B104
+      path: deploy/kubernetes-operator/ash_operator/contract.py
+      reason: >-
+        The default host of build_mcp_argv. The MCP server runs in a pod behind a
+        ClusterIP Service, and a Service routes to the pod IP, so a loopback bind
+        would be unreachable. Same requirement as the AgentCore bind tested in
+        tests/unit/cli/test_mcp_sse_host_binding.py.
+    - rule_id: B104
+      path: deploy/kubernetes-operator/ash_operator/manifests.py
+      reason: >-
+        build_mcp_deployment passes the same all-interfaces host to build_mcp_argv,
+        for the same reason: the Service has to reach the pod IP.
+    - rule_id: B104
+      path: deploy/kubernetes-operator/tests/test_manifests.py
+      reason: >-
+        Asserts that the MCP Deployment's command binds 0.0.0.0. The address is the
+        value under test, as in tests/unit/cli/test_mcp_sse_host_binding.py.
+    - rule_id: B108
+      path: deploy/kubernetes-operator/ash_operator/constants.py
+      reason: >-
+        TMP_MOUNT is where each pod mounts its own emptyDir, a path inside the
+        container rather than one this process writes. The volume is private to one
+        pod and deleted with it, so the shared-/tmp symlink attacks B108 describes do
+        not apply. It has to be /tmp itself: tools that ignore TMPDIR write to /tmp by
+        name, and moving the mount would send those writes to the container's
+        writable layer instead of the volume.
     # === detect-secrets on the CDK sources, scanned here for the first time ===
     #
     # The root .gitignore's Python packaging block carried a bare `lib/` rule,
