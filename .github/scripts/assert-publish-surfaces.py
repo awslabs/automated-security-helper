@@ -111,6 +111,8 @@ KNOWN LIMITATIONS
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -1207,6 +1209,14 @@ def self_test() -> int:
         _failure_only, "        if: ${{ !failure() }}\n"
     )
 
+    # (f4) failure() inside a negated group. Every term split on && reads as
+    # failure() unless parenthesised groups are refused, yet the whole is true on
+    # every green run (env.ACT is unset in CI).
+    widened_grouped = dict(baseline)
+    widened_grouped[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: ${{ !(env.ACT && failure() && true) }}\n"
+    )
+
     # (g) the bare form, without ${{ }}, is the same condition and must pass.
     bare_failure = dict(baseline)
     bare_failure[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
@@ -1228,6 +1238,7 @@ def self_test() -> int:
         ("(f1) failure-only upload's if: removed", widened_dropped, 0, 0, 1),
         ("(f2) failure() kept but || always() added", widened_or, 0, 0, 1),
         ("(f3) failure() negated", widened_negated, 0, 0, 1),
+        ("(f4) failure() inside a negated group", widened_grouped, 0, 0, 1),
         ("(g) bare if: failure() still holds", bare_failure, 0, 0, 0),
     ]
 
@@ -1247,6 +1258,37 @@ def self_test() -> int:
             f"unmatched={got_unmatched} (want {want_unmatched}), "
             f"ungated={got_ungated} (want {want_ungated})"
         )
+        if not ok:
+            failures += 1
+
+    # The counts above prove the detectors fire. These prove the verdict main()
+    # returns honors each of them, so dropping one from the exit decision (an
+    # unexpected site, an orphaned entry, or a condition not held) goes red here
+    # rather than only in the next incident.
+    # The orphan case keeps the cache site, so the census is not empty and only the
+    # unmatched upload entry can fail it. `deleted` above empties the census, which
+    # the no-sites guard would fail on its own. The empty census is run against an
+    # empty allowlist for the same reason: with any entry, the orphan check fails it.
+    upload_removed = dict(baseline)
+    upload_removed[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.split(
+        "      - name: Upload the wheel"
+    )[0]
+    verdicts: list[tuple[str, dict[str, str], tuple[Entry, ...], int]] = [
+        # name, files, allowlist, expected exit status of gate()
+        ("verdict: clean tree passes", baseline, _SELF_TEST_ALLOWLIST, 0),
+        ("verdict: no sites censused fails", {}, (), 1),
+        ("verdict: unexpected site fails", new_file_upload, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: orphaned entry fails", upload_removed, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: condition not held fails", widened_always, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: grouped condition fails", widened_grouped, _SELF_TEST_ALLOWLIST, 1),
+    ]
+    for name, files, allowlist, want_status in verdicts:
+        found = [item for rel, text in files.items() for item in scan_text(rel, text)]
+        with contextlib.redirect_stdout(io.StringIO()):
+            got_status = gate(found, allowlist)
+        ok = got_status == want_status
+        status = "ok  " if ok else "FAIL"
+        print(f"  {status} {name}: exit={got_status} (want {want_status})")
         if not ok:
             failures += 1
     print()
@@ -1281,7 +1323,14 @@ def main(argv: list[str] | None = None) -> int:
 
     found = scan_tree(GITHUB_DIR)
     _print_census(found)
+    return gate(found, ALLOWLIST)
 
+
+def gate(found: list[Found], allowlist: tuple[Entry, ...]) -> int:
+    """Return main()'s exit status for a census against an allowlist.
+
+    Separate from main() so the self-test can run the real verdict over fixtures.
+    """
     if not found:
         print(
             "::error::assert-publish-surfaces.py censused zero publishing sites. "
@@ -1290,13 +1339,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    unexpected, unmatched = evaluate(found, ALLOWLIST)
-    ungated = check_conditions(found, ALLOWLIST)
-    gated = sum(1 for entry in ALLOWLIST if entry.required_condition)
+    unexpected, unmatched = evaluate(found, allowlist)
+    ungated = check_conditions(found, allowlist)
+    gated = sum(1 for entry in allowlist if entry.required_condition)
     if not unexpected and not unmatched and not ungated:
         print(
             f"OK: all {len(found)} publishing site(s) match the "
-            f"{len(ALLOWLIST)} allowlist entr(ies); {gated} entr(ies) with a "
+            f"{len(allowlist)} allowlist entr(ies); {gated} entr(ies) with a "
             f"required condition hold it."
         )
         return 0
