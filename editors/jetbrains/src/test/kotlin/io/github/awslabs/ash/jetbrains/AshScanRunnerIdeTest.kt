@@ -249,6 +249,8 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
     }
 
     fun testAStaleStatusFileIsReportedAsUnknownRatherThanRead() {
+        // Fails, naming the cause, when run as root: root ignores the mode this test sets.
+        PermissionEnforcement.require(workdir)
         // The status file gets the same freshness guard as the SARIF. A previous run's roster
         // saying every scanner PASSED must not vouch for this run.
         val source = Files.createDirectories(workdir.resolve("project"))
@@ -336,6 +338,8 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
     }
 
     fun testUndeletableStaleReportIsRefusedRatherThanReadAsCurrent() {
+        // Fails, naming the cause, when run as root: root ignores the mode this test sets.
+        PermissionEnforcement.require(workdir)
         // THE DEGRADED PATH OF THE STALE-REPORT GUARD, which previously had no coverage at all. The
         // pre-run delete was wrapped in runCatching with the result discarded, so on a read-only
         // output directory the guard became no guard: the delete fails, ASH writes nothing, the
@@ -495,6 +499,8 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
     }
 
     fun testAReportThatCannotBeReadIsAFailureRatherThanEmpty() {
+        // Fails, naming the cause, when run as root: root ignores the mode this test sets.
+        PermissionEnforcement.require(workdir)
         val (source, output) = dirs()
         val script = rawStub("mkdir -p \"\$out/reports\"; echo '{}' > \"\$out/reports/ash.sarif\"; chmod 000 \"\$out/reports/ash.sarif\"; exit 0")
         try {
@@ -506,6 +512,8 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
     }
 
     fun testAStatusFileThatCannotBeReadIsUnknownCompleteness() {
+        // Fails, naming the cause, when run as root: root ignores the mode this test sets.
+        PermissionEnforcement.require(workdir)
         val (source, output) = dirs()
         val status = "\"\$out/ash_aggregated_results.json\""
         val script = rawStub(
