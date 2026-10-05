@@ -91,9 +91,11 @@ Package versions are mapped from the wheel's PEP 440 version by `packaging/versi
 so dpkg and rpm sort them correctly (`3.8.0rc1` becomes `3.8.0~rc1`, below `3.8.0`).
 
 Both packages compress their payload with gzip and add a license file, and
-`packaging/assert-package-payload.py` pins each payload member by member, applies the
-artifact-contents gate's own content rules to every member, and hands the wheel it
-extracts from the built package back to that gate. The shared install-and-scan logic,
+`packaging/assert-package-payload.py` pins each payload member by member, rejects any
+member that is not a regular file or directory (a symlink or device node at a pinned
+path) and any setuid or setgid mode, applies the artifact-contents gate's own content
+rules to every member, and hands the wheel it extracts from the built package back to
+that gate. The shared install-and-scan logic,
 including the negative controls that show each check failing, is
 `packaging/verify-lib.sh`; the command name both packages install is set once, in
 `packaging/cli-name.sh`.

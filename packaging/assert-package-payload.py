@@ -36,17 +36,26 @@ THE GATE IS TWO CHECKS WEARING ONE NAME
 ---------------------------------------
 This is the useful decomposition, and it is measured by running the gate's own
 `classify_member` over the real built packages rather than read off the source. Of
-the fourteen verdicts it can emit, seven are about CONTENT and generalise to any
-archive, six are about the layout of a Python distribution, and one cannot reach
-this file at all:
+the fourteen verdicts it can emit, five are about CONTENT and fire on a package
+payload, six are about the layout of a Python distribution, two are about content
+but can never fire on a package payload, and one cannot reach this file at all:
 
   payload      malformed-member-path, vendor-directory, nested-archive,
-               native-binary, vendored-scanner, link-target-escapes-artifact,
-               oversize-member
+               native-binary, vendored-scanner
   structure    unpinned-asset, unpinned-package-subdirectory,
                unpinned-distribution-directory, unpinned-dist-info-member,
                loose-wheel-root-file, unpinned-package-root-file
+  shadowed     link-target-escapes-artifact, oversize-member
   unreachable  stale-allowlist-entry
+
+"Shadowed" is a consequence of rule order. classify_member returns the FIRST
+violation, and its structure rule 5c fires on every member under `usr/` before the
+link rule (5e) or the size rule (6) is reached, so on a package payload those two
+are never the verdict. An earlier version of this file listed both as applied; a real
+.deb with its wrapper replaced by a symlink to /etc/shadow passed at exit 0. The two
+properties are enforced here by local rules instead -- non-regular-member, which
+rejects every link and device node, and oversized-member, a 2 MiB ceiling -- and
+--assert-gate-contract re-measures the shadowing so the claim cannot go stale.
 
 The counts here were wrong twice, in the same place, for the same reason: they were
 read off a source scan that could not see every verdict. First the number was twelve,
@@ -75,25 +84,33 @@ WHAT THIS SCRIPT DOES
      example, the checker script bundled into the package it checks, or a stray
      __pycache__/*.pyc.
 
-  2. APPLY THE GATE'S OWN PAYLOAD RULES TO THE UNPACKED PAYLOAD. Not a copy of
+  2. REJECT EVERY MEMBER THAT IS NOT A REGULAR FILE OR A DIRECTORY, AND EVERY
+     SETUID OR SETGID MODE. A pin on paths says nothing about what sits at the
+     path; a symlink or a setuid binary at the wrapper's path matches it exactly.
+     Neither package ships a link, so every link is rejected, not only the ones
+     that point outside the payload.
+
+  3. APPLY THE GATE'S OWN PAYLOAD RULES TO THE UNPACKED PAYLOAD. Not a copy of
      them -- the gate is imported and its `classify_member` is called, with the
-     structure verdicts filtered. See load_gate for why importing beats
+     structure verdicts filtered. Five of its content rules can fire this way; see
+     above for the two that cannot. See load_gate for why importing beats
      transcribing, and note that the rules run on the INNER members: a .deb holds
      `data.tar.*` and an .rpm holds a cpio payload, so running them on the outer
      container would report `nested-archive` on the package's own structure every
      time.
 
-  3. HAND THE ONE CONTENT-BEARING MEMBER TO THE REAL GATE IN FULL. Exactly one
+  4. HAND THE ONE CONTENT-BEARING MEMBER TO THE REAL GATE IN FULL. Exactly one
      payload member carries ASH's code: the wheel. It is extracted back out of the
      built package and the gate is run on it. So the wheel inside the shipped
      package is checked by the arbiter, not merely the wheel that was sitting in
      dist/ when the package was built -- which is the substitution this rules out.
-     It is also what earns the wheel its exemption from rule 2: the exemption is
+     It is also what earns the wheel its exemption from rule 3: the exemption is
      granted because the member was opened, never because of its path.
 
 Together those give a claim that is actually supportable: the payload is four
-enumerated files, none of them trips any content rule the gate has, and the one
-archive among them was opened and cleared by the gate itself.
+enumerated regular files with ordinary modes, none of them trips any of the gate's
+content rules that can fire on it, and the one archive among them was opened and
+cleared by the gate itself.
 
 WHAT THIS DOES NOT COVER, STATED PLAINLY
 ----------------------------------------
@@ -174,7 +191,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass, field
 from types import ModuleType
-from typing import TextIO
+from typing import Mapping, TextIO
 
 # Set before the gate is imported, not after.
 #
@@ -293,9 +310,8 @@ ALLOWED_DIRECTORIES = frozenset(
 # WHY IMPORT AND NOT COPY
 #
 # The rules that express "ships no third-party scanner code" -- vendor directories,
-# nested archives, native objects, scanner distribution names, link targets that
-# escape, the size ceiling -- already exist, correct and reviewed, in
-# .github/scripts/assert-artifact-contents.py. Re-typing them here would create a
+# nested archives, native objects, scanner distribution names -- already exist,
+# correct and reviewed, in .github/scripts/assert-artifact-contents.py. Re-typing them here would create a
 # second copy of 38 archive suffixes, 18 vendor components, 21 scanner names, a
 # table of (offset, magic) pairs and a 512-byte header read.
 #
@@ -406,9 +422,9 @@ STRUCTURE_VERDICTS = frozenset(
 # fail-closed direction every other unknown verdict gets.
 UNREACHABLE_VERDICTS = frozenset({"stale-allowlist-entry"})
 
-# The seven that generalise to any archive. Listed for the contract check and for
-# the reader; nothing dispatches on this set, because the code treats "not a
-# structure verdict" as a violation.
+# The five content verdicts that FIRE on a package payload. Listed for the contract
+# check and for the reader; nothing dispatches on this set, because the code treats
+# "not a structure verdict" as a violation.
 PAYLOAD_VERDICTS = frozenset(
     {
         "malformed-member-path",
@@ -416,10 +432,22 @@ PAYLOAD_VERDICTS = frozenset(
         "nested-archive",
         "native-binary",
         "vendored-scanner",
-        "link-target-escapes-artifact",
-        "oversize-member",
     }
 )
+
+# Content verdicts the gate emits that can NEVER be the verdict on a package payload,
+# because classify_member returns the first violation and rule 5c's
+# `unpinned-distribution-directory` (a structure verdict, filtered) is reached first
+# for every member under `usr/`. Each maps to the local rule that covers the same
+# property, and check_gate_contract probes the gate to confirm the shadowing still
+# holds, so this is a measured statement rather than a reading of rule order.
+#
+# Not filtered anywhere. If a gate change ever lets one of these through, it is not
+# in STRUCTURE_VERDICTS, so the per-member loop reports it as a real violation.
+SHADOWED_VERDICTS = {
+    "link-target-escapes-artifact": "non-regular-member",
+    "oversize-member": "oversized-member",
+}
 
 # A payload with fewer members than this did not parse correctly, whatever the
 # rule check then says about it.
@@ -440,19 +468,39 @@ MINIMUM_PAYLOAD_FILES = 4
 # the wheel to grow over releases before a correct build trips it -- which matters,
 # because a gate that fails on correct configuration is a gate that gets deleted.
 #
-# The gate's own `oversize-member` at 4 MiB still applies through the imported rules.
-# Both firing is harmless; this one fires first and names the package's own budget.
+# The gate's own `oversize-member` at 4 MiB does NOT apply through the imported
+# rules: it is shadowed by rule 5c on every payload member (see SHADOWED_VERDICTS),
+# so this ceiling is the only size check a package payload gets.
 MAX_MEMBER_BYTES = 2 * 1024 * 1024
+
+
+# The two member types a correct package payload is made of. Anything else -- a
+# symlink, a hard link, a device node, a FIFO -- is rejected by check_members. See
+# there for why that is a local rule rather than the gate's link rule.
+REGULAR_FILE = "regular file"
+DIRECTORY = "directory"
+
+# S_ISUID | S_ISGID. Neither package needs either bit on anything it ships.
+SETID_BITS = 0o6000
 
 
 @dataclass(frozen=True)
 class PayloadMember:
-    """One entry in a package payload."""
+    """One entry in a package payload.
+
+    `kind` is REGULAR_FILE, DIRECTORY, or a description of whatever else the container
+    recorded ("symbolic link", "hard link", "character device", ...). `mode` is the
+    permission bits as recorded, including setuid/setgid/sticky. `link_target` is set
+    for a link and empty otherwise.
+    """
 
     name: str
     size: int
     is_dir: bool
     data: bytes = b""
+    kind: str = REGULAR_FILE
+    mode: int = 0o644
+    link_target: str = ""
 
 
 @dataclass
@@ -573,8 +621,9 @@ def read_deb_payload(path: str) -> tuple[list[PayloadMember], list[PayloadMember
     with tarfile.open(fileobj=io.BytesIO(members[data_name]), mode="r:gz") as tar:
         for info in tar.getmembers():
             name = normalize_member_name(info.name)
+            mode = info.mode & 0o7777
             if info.isdir():
-                dirs.append(PayloadMember(name, 0, True))
+                dirs.append(PayloadMember(name, 0, True, kind=DIRECTORY, mode=mode))
                 continue
             data = b""
             if info.isfile():
@@ -582,9 +631,53 @@ def read_deb_payload(path: str) -> tuple[list[PayloadMember], list[PayloadMember
                 if extracted is not None:
                     with extracted:
                         data = extracted.read()
-            files.append(PayloadMember(name, info.size, False, data))
+            # Everything that is not a directory goes on the file list, links and
+            # devices included, so the pin and the type rule both see it.
+            files.append(
+                PayloadMember(
+                    name,
+                    info.size,
+                    False,
+                    data,
+                    kind=tar_member_kind(info),
+                    mode=mode,
+                    link_target=info.linkname if (info.issym() or info.islnk()) else "",
+                )
+            )
 
     return files, dirs
+
+
+def tar_member_kind(info: tarfile.TarInfo) -> str:
+    """Names a tar member's type in the vocabulary check_members reports."""
+    if info.isfile():
+        return REGULAR_FILE
+    if info.isdir():
+        return DIRECTORY
+    if info.issym():
+        return "symbolic link"
+    if info.islnk():
+        return "hard link"
+    if info.ischr():
+        return "character device"
+    if info.isblk():
+        return "block device"
+    if info.isfifo():
+        return "FIFO"
+    return f"tar member of type {info.type!r}"
+
+
+# The file-type field of a cpio mode, which is the st_mode layout.
+CPIO_TYPE_MASK = 0o170000
+CPIO_KINDS = {
+    0o100000: REGULAR_FILE,
+    0o040000: DIRECTORY,
+    0o120000: "symbolic link",
+    0o020000: "character device",
+    0o060000: "block device",
+    0o010000: "FIFO",
+    0o140000: "socket",
+}
 
 
 # --------------------------------------------------------------------------
@@ -650,12 +743,28 @@ def read_cpio_newc(blob: bytes) -> tuple[list[PayloadMember], list[PayloadMember
         data = blob[data_start : data_start + filesize]
 
         name = normalize_member_name(raw_name)
-        # S_IFDIR is 0o040000. rpm records directories it owns as cpio entries
-        # with that mode and zero size.
-        if mode & 0o170000 == 0o040000:
-            dirs.append(PayloadMember(name, 0, True))
+        file_type = mode & CPIO_TYPE_MASK
+        kind = CPIO_KINDS.get(file_type, f"cpio member of type {file_type:#o}")
+        # rpm records directories it owns as cpio entries with S_IFDIR and zero size.
+        # A symlink's data is its target, which is what the reader reports.
+        if kind == DIRECTORY:
+            dirs.append(PayloadMember(name, 0, True, kind=kind, mode=mode & 0o7777))
         else:
-            files.append(PayloadMember(name, filesize, False, data))
+            files.append(
+                PayloadMember(
+                    name,
+                    filesize,
+                    False,
+                    data,
+                    kind=kind,
+                    mode=mode & 0o7777,
+                    link_target=(
+                        data.decode("utf-8", "replace")
+                        if kind == "symbolic link"
+                        else ""
+                    ),
+                )
+            )
 
         next_offset = data_start + filesize
         next_offset += (-next_offset) % 4
@@ -762,7 +871,10 @@ def apply_gate_payload_rules(
 
     for member in files:
         gate_member = gate.Member(
-            member.name, member.size, member.data[: gate.MAGIC_READ_BYTES]
+            member.name,
+            member.size,
+            member.data[: gate.MAGIC_READ_BYTES],
+            link_target=member.link_target,
         )
         violation = gate.classify_member(gate_member, "package payload")
         if violation is None:
@@ -885,7 +997,12 @@ def check_gate_contract(gate: ModuleType, gate_path: str) -> list[str]:
     # `declared - found` firing below, but stating it here names the failure as a
     # harvest problem rather than as a gate problem, which is the difference between
     # a one-line fix and an investigation.
-    declared = PAYLOAD_VERDICTS | STRUCTURE_VERDICTS | UNREACHABLE_VERDICTS
+    declared = (
+        PAYLOAD_VERDICTS
+        | STRUCTURE_VERDICTS
+        | UNREACHABLE_VERDICTS
+        | frozenset(SHADOWED_VERDICTS)
+    )
     if len(found) < len(declared):
         problems.append(
             f"gate-contract: harvested {len(found)} verdict name(s) from "
@@ -916,6 +1033,53 @@ def check_gate_contract(gate: ModuleType, gate_path: str) -> list[str]:
             "rule this file relied on has gone."
         )
 
+    problems.extend(check_shadowed_verdicts(gate))
+    return problems
+
+
+def check_shadowed_verdicts(gate: ModuleType) -> list[str]:
+    """Measures that each SHADOWED_VERDICTS entry really cannot fire on a payload.
+
+    A probe member is built that the shadowed rule WOULD reject if it were reached --
+    an absolute-target symlink, a member over the gate's own ceiling -- at a path
+    shaped like this package's payload, and classify_member must return a structure
+    verdict for it. If it returns the shadowed verdict, the gate's order changed and
+    that rule now fires here, so it belongs in PAYLOAD_VERDICTS and this file's
+    claims about it are out of date.
+    """
+    problems: list[str] = []
+    try:
+        probes = {
+            "link-target-escapes-artifact": gate.Member(
+                "usr/bin/probe", 0, b"", link_target="/etc/shadow"
+            ),
+            "oversize-member": gate.Member(
+                "usr/share/doc/probe/README", gate.MAX_MEMBER_BYTES + 1, b"plain text\n"
+            ),
+        }
+    except TypeError as err:
+        return [
+            (
+                f"gate-contract: could not build the shadowing probes ({err}). The "
+                "gate's Member no longer takes the fields this file passes it."
+            )
+        ]
+    if set(probes) != set(SHADOWED_VERDICTS):
+        problems.append(
+            "gate-contract: SHADOWED_VERDICTS and the shadowing probes name different "
+            f"verdicts ({sorted(SHADOWED_VERDICTS)} vs {sorted(probes)})."
+        )
+    for verdict, probe in sorted(probes.items()):
+        violation = gate.classify_member(probe, "shadowing probe")
+        got = None if violation is None else violation.rule
+        if got in STRUCTURE_VERDICTS:
+            continue
+        problems.append(
+            f"gate-contract: `{verdict}` is listed as shadowed on a package payload, "
+            f"but the gate returned {got!r} for a probe it should reject, not a "
+            "structure verdict. The gate's rule order changed: move the verdict to "
+            "PAYLOAD_VERDICTS and correct this file's docstring."
+        )
     return problems
 
 
@@ -965,6 +1129,36 @@ def check_members(
             "nothing was checked and two means it is not decidable which one the "
             "package installs."
         )
+
+    # MEMBER TYPE AND MODE. A correct package is regular files and directories with
+    # ordinary permissions, and nothing else. Both rules run on every member,
+    # before the pin, because a pinned PATH says nothing about what kind of thing
+    # sits there: the wrapper path replaced by a symlink to /etc/shadow, or the
+    # wrapper made setuid, matches the pin exactly.
+    #
+    # These are local rules rather than the gate's link rule because the gate's
+    # cannot fire here. Its classify_member returns the first violation, and for
+    # every member of a .deb or .rpm payload that is a structure verdict
+    # (unpinned-distribution-directory) reached before link-target-escapes-artifact;
+    # see SHADOWED_VERDICTS. Rejecting every link is also strictly stronger than
+    # rejecting links that escape: neither package ships one, so an in-payload link
+    # is as unexplained as an escaping one.
+    for member in [*files, *dirs]:
+        label = member.name or "./"
+        if member.kind not in (REGULAR_FILE, DIRECTORY):
+            target = f" -> {member.link_target!r}" if member.link_target else ""
+            problems.append(
+                f"non-regular-member: {label} is a {member.kind}{target}. A package "
+                "payload here is regular files and directories only; neither package "
+                "ships a link or a device node, and a link at a pinned path passes "
+                "the pin while pointing anywhere."
+            )
+        if member.mode & SETID_BITS:
+            problems.append(
+                f"setid-member: {label} has mode {member.mode:04o}, with the setuid "
+                "or setgid bit set. Nothing this package installs runs with "
+                "elevated privileges, so the bit can only be a mistake or a plant."
+            )
 
     for member in files:
         if not member.name:
@@ -1130,7 +1324,26 @@ def run_wheel_gate(
 # --------------------------------------------------------------------------
 # Self-test
 # --------------------------------------------------------------------------
-def build_fixture_deb(payload: dict[str, bytes], directories: list[str]) -> bytes:
+@dataclass(frozen=True)
+class FixtureMember:
+    """A planted fixture member that is not a plain 0644 regular file.
+
+    `link_type` is a tarfile type constant (SYMTYPE, LNKTYPE) when the member is a
+    link, with `link_target` as what it points at; otherwise the member is a regular
+    file holding `data` with permission bits `mode`.
+    """
+
+    data: bytes = b""
+    mode: int = 0o644
+    link_type: bytes = b""
+    link_target: str = ""
+
+
+def build_fixture_deb(
+    payload: Mapping[str, bytes | FixtureMember],
+    directories: list[str],
+    directory_modes: dict[str, int] | None = None,
+) -> bytes:
     """Assembles a minimal but genuinely valid .deb in memory.
 
     Written rather than mocked so the self-test drives the real ar and tar readers,
@@ -1138,18 +1351,26 @@ def build_fixture_deb(payload: dict[str, bytes], directories: list[str]) -> byte
     a shipped package does, or the control would be testing different code from the
     one that clears artifacts.
     """
+    modes = directory_modes or {}
     tar_buffer = io.BytesIO()
     with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
         for name in directories:
             info = tarfile.TarInfo(f"./{name}")
             info.type = tarfile.DIRTYPE
-            info.mode = 0o755
+            info.mode = modes.get(name, 0o755)
             tar.addfile(info)
         for name, content in payload.items():
             info = tarfile.TarInfo(f"./{name}")
-            info.size = len(content)
-            info.mode = 0o644
-            tar.addfile(info, io.BytesIO(content))
+            if isinstance(content, FixtureMember) and content.link_type:
+                info.type = content.link_type
+                info.linkname = content.link_target
+                info.mode = 0o777
+                tar.addfile(info)
+                continue
+            data = content.data if isinstance(content, FixtureMember) else content
+            info.size = len(data)
+            info.mode = content.mode if isinstance(content, FixtureMember) else 0o644
+            tar.addfile(info, io.BytesIO(data))
     data_tar = tar_buffer.getvalue()
 
     members = [("debian-binary", b"2.0\n"), ("data.tar.gz", data_tar)]
@@ -1169,8 +1390,10 @@ def build_fixture_deb(payload: dict[str, bytes], directories: list[str]) -> byte
     return bytes(out)
 
 
-LEGITIMATE_PAYLOAD = {
-    f"usr/bin/{CLI_NAME}": f'#!/bin/sh\nexec /usr/lib/ash/venv/bin/{CLI_NAME} "$@"\n'.encode(),
+WRAPPER_FIXTURE = f'#!/bin/sh\nexec /usr/lib/ash/venv/bin/{CLI_NAME} "$@"\n'.encode()
+
+LEGITIMATE_PAYLOAD: dict[str, bytes] = {
+    f"usr/bin/{CLI_NAME}": WRAPPER_FIXTURE,
     "usr/lib/ash/wheels/automated_security_helper-3.7.0-py3-none-any.whl": b"PK\x05\x06"
     + b"\x00" * 18,
     "usr/share/doc/ash/copyright": b"Apache-2.0\n",
@@ -1180,7 +1403,7 @@ LEGITIMATE_PAYLOAD = {
 # One planted member per rule, so a rule masked by another is reported rather than
 # hidden: each case names the verdict it must produce, and the self-test fails if
 # some OTHER rule is what rejected it.
-PLANTED_CASES = [
+PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]] = [
     (
         "a vendored scanner tree inside the package",
         {
@@ -1216,7 +1439,58 @@ PLANTED_CASES = [
         [],
         "malformed-member-path",
     ),
+    # Every case below sits at a PINNED path, so only the member-type and mode rules
+    # can reject it. The symlink is the reviewed bypass: the gate's own
+    # link-target-escapes-artifact can never fire here (see SHADOWED_VERDICTS), and a
+    # real .deb with its wrapper replaced by this link was cleared at exit 0.
+    (
+        "the wrapper replaced by a symlink to /etc/shadow",
+        {
+            f"usr/bin/{CLI_NAME}": FixtureMember(
+                link_type=tarfile.SYMTYPE, link_target="/etc/shadow"
+            )
+        },
+        [],
+        "non-regular-member",
+    ),
+    (
+        "the wrapper replaced by a relative symlink that stays inside the payload",
+        {
+            f"usr/bin/{CLI_NAME}": FixtureMember(
+                link_type=tarfile.SYMTYPE, link_target="../share/doc/ash/copyright"
+            )
+        },
+        [],
+        "non-regular-member",
+    ),
+    (
+        "the wrapper replaced by a hard link",
+        {
+            f"usr/bin/{CLI_NAME}": FixtureMember(
+                link_type=tarfile.LNKTYPE, link_target="./usr/share/doc/ash/copyright"
+            )
+        },
+        [],
+        "non-regular-member",
+    ),
+    (
+        "a setuid wrapper",
+        {f"usr/bin/{CLI_NAME}": FixtureMember(data=WRAPPER_FIXTURE, mode=0o4755)},
+        [],
+        "setid-member",
+    ),
+    (
+        "a setgid doc file",
+        {"usr/share/doc/ash/copyright": FixtureMember(data=b"x\n", mode=0o2644)},
+        [],
+        "setid-member",
+    ),
 ]
+
+# Directory modes for the fixture, by case label. A setgid directory is the one
+# planted-mode case that is not a file, and directories are listed separately.
+PLANTED_DIRECTORY_MODES = {"a setgid package directory": {"usr/lib/ash": 0o2755}}
+PLANTED_CASES.append(("a setgid package directory", {}, [], "setid-member"))
 
 # Which planted cases need the gate module. The three malformed-path cases expect a
 # verdict produced by the gate's imported malformed_path_reason, so without the gate
@@ -1369,12 +1643,18 @@ def run_self_test(stream: TextIO, gate_path: str | None = None) -> int:
                 "supplies, and no --artifact-gate was given\n"
             )
             continue
-        payload = dict(LEGITIMATE_PAYLOAD)
+        payload: dict[str, bytes | FixtureMember] = dict(LEGITIMATE_PAYLOAD)
         payload.update(extra_files)
         with tempfile.TemporaryDirectory() as workdir:
             bad = os.path.join(workdir, "planted_3.7.0_all.deb")
             with open(bad, "wb") as handle:
-                handle.write(build_fixture_deb(payload, directories + list(extra_dirs)))
+                handle.write(
+                    build_fixture_deb(
+                        payload,
+                        directories + list(extra_dirs),
+                        PLANTED_DIRECTORY_MODES.get(label),
+                    )
+                )
             try:
                 findings = check_package(bad, gate_path, delegate=False)
                 problems = findings.problems
@@ -1415,7 +1695,7 @@ def run_self_test(stream: TextIO, gate_path: str | None = None) -> int:
     stream.write(
         f"self-test OK: the legitimate payload is accepted, {pin_cases_run} of "
         f"{len(PLANTED_CASES)} planted members were run and each was rejected by "
-        f"the intended pin rule, and {gate_cases} member(s) planted at ACCEPTED "
+        f"the intended local rule, and {gate_cases} member(s) planted at ACCEPTED "
         "paths were rejected by the intended imported gate rule.\n"
     )
     if gate_path is None:
@@ -1447,7 +1727,8 @@ def main(argv: list[str]) -> int:
         "--artifact-gate",
         default=None,
         help="path to .github/scripts/assert-artifact-contents.py. When given, its "
-        "payload rules are applied to the unpacked payload and the wheel extracted "
+        "content rules that can fire on a package payload are applied to the "
+        "unpacked payload and the wheel extracted "
         "from each package is handed to it. Omitting it checks the pinned member "
         "list only, and says so.",
     )
@@ -1493,7 +1774,9 @@ def main(argv: list[str]) -> int:
             "gate contract OK: every verdict "
             f"{os.path.basename(args.artifact_gate)} can emit is classified as "
             f"payload ({len(PAYLOAD_VERDICTS)}), structure "
-            f"({len(STRUCTURE_VERDICTS)}) or unreachable-from-here "
+            f"({len(STRUCTURE_VERDICTS)}), shadowed by a structure verdict on every "
+            f"payload member ({len(SHADOWED_VERDICTS)}, re-measured: "
+            f"{', '.join(sorted(SHADOWED_VERDICTS))}) or unreachable-from-here "
             f"({len(UNREACHABLE_VERDICTS)}), and every table this file imports is "
             "still defined.\n"
             "No table is copied here, so there is no table to diff -- the rules are "
@@ -1572,10 +1855,15 @@ def main(argv: list[str]) -> int:
         )
     else:
         sys.stdout.write(
-            "package payload OK: every payload member is pinned; the gate's own "
-            "payload rules were applied to the unpacked payload; and the wheel "
-            "extracted from each package passed "
+            "package payload OK: every payload member is pinned, is a regular file "
+            "or directory, and has no setuid or setgid bit; the gate's content rules "
+            "that can fire on a package payload ("
+            f"{', '.join(sorted(PAYLOAD_VERDICTS))}) were applied to the unpacked "
+            "payload; and the wheel extracted from each package passed "
             f"{os.path.basename(args.artifact_gate)}.\n"
+            "The gate's link and size verdicts cannot fire on a package payload (a "
+            "structure verdict is reached first); links and size are enforced by "
+            "this script's own non-regular-member and oversized-member rules.\n"
             "The rules are IMPORTED from the gate, not copied, so there is no "
             "second set of tables to drift. Structure verdicts (rule 5) are "
             "filtered because they assert Python-distribution layout, which a "

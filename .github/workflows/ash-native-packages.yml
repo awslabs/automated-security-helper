@@ -29,9 +29,10 @@ name: ASH - Native Packages (deb, rpm)
 #
 # .github/scripts/assert-artifact-contents.py cannot read a .deb or an .rpm: it exits
 # 2 on both, which the self-tests job below re-measures. packaging/assert-package-payload.py
-# closes the gap: it pins the package payload member by member, applies the gate's
-# own content rules (imported, not copied) to every member, and hands the wheel it
-# extracts from the built package back to the gate. Both packages are built with gzip
+# closes the gap: it pins the package payload member by member, rejects links, device
+# nodes and setuid/setgid modes, applies the gate's own content rules (imported, not
+# copied) to every member, and hands the wheel it extracts from the built package back
+# to the gate. Both packages are built with gzip
 # payload compression so that check can read them with the standard library alone.
 #
 # THE NEGATIVE CONTROLS
