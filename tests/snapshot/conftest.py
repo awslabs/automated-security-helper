@@ -23,6 +23,7 @@ import contextlib
 import importlib
 import logging
 import os
+import platform
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -35,7 +36,7 @@ from rich._log_render import LogRender
 from rich.text import Text
 from syrupy.assertion import SnapshotAssertion
 
-from tests.snapshot.support.cli import LINUX_AMD64, simulated_host
+from tests.snapshot.support.cli import LINUX_AMD64, pin_host
 from tests.snapshot.support.extensions import (
     NormalizingAmberExtension,
     NormalizingTextFileExtension,
@@ -153,9 +154,47 @@ def _pinned_host(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     and cfn-nag's install probe asks for a Ruby DevKit instead of a C compiler. A
     test that renders a Windows variant says so with ``simulated_host``, which nests
     inside this one, and then renders it on every OS.
+
+    The patch goes on the test's own ``monkeypatch``, not on a context of its own.
+    With a separate context, a test that patched ``platform.system`` directly
+    (test_snapshot_console_metrics_table.py does) recorded the pinned function as the
+    original, and its ``monkeypatch``, torn down after this fixture, put the pin back
+    after this fixture had removed it. Every later test in that xdist worker then ran
+    as Linux: on windows-latest the unit tests that write a ``.cmd`` launcher wrote a
+    shebang script instead and failed with WinError 193. One ``monkeypatch`` undoes
+    in LIFO order, so the test's patch comes off before this one does.
     """
-    with simulated_host(monkeypatch, LINUX_AMD64):
-        yield
+    restore_defaults = pin_host(monkeypatch, LINUX_AMD64)
+    yield
+    restore_defaults()
+
+
+#: The host lookups as this process found them, before any snapshot test patched them.
+_REAL_HOST_LOOKUPS = (platform.system, platform.machine)
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item: pytest.Item) -> Iterator[None]:
+    """Fail a snapshot test that leaves ``platform.system``/``machine`` patched.
+
+    Runs after every fixture of the test is torn down. A leaked host answer changes
+    what every later test in the worker runs as, snapshot or not, and on the host it
+    names it is invisible: the leak described in ``_pinned_host`` answered "Linux" on
+    Linux like the real function, and was found only as unrelated unit-test failures
+    on Windows. Compared by identity, so it is caught on every OS. The real functions
+    are put back first, so the failure stays with the test that caused it.
+    """
+    try:
+        return (yield)
+    finally:
+        leaked = (platform.system, platform.machine) != _REAL_HOST_LOOKUPS
+        if leaked:
+            platform.system, platform.machine = _REAL_HOST_LOOKUPS
+            raise AssertionError(
+                f"{item.nodeid} left platform.system/platform.machine patched after "
+                "teardown. Patch them through the test's own monkeypatch, or with "
+                "tests.snapshot.support.cli.simulated_host."
+            )
 
 
 #: Where ASH's own plugins live. A fresh ``ash`` process registers these and nothing

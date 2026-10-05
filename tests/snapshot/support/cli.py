@@ -37,7 +37,7 @@ import os
 import platform
 import shlex
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from types import ModuleType
 
@@ -117,30 +117,41 @@ def _set_import_time_defaults(enabled: bool) -> None:
     AshConfig.model_rebuild(force=True)
 
 
-@contextlib.contextmanager
-def simulated_host(monkeypatch: pytest.MonkeyPatch, host: Host) -> Iterator[Host]:
-    """Run the body as if on ``host``; restores the real host's defaults on exit.
+def pin_host(monkeypatch: pytest.MonkeyPatch, host: Host) -> Callable[[], None]:
+    """Answer as ``host`` until ``monkeypatch`` is undone; returns the defaults' undo.
 
-    "Real" is whatever ``platform.system()`` answers on entry, so this nests: inside
-    the linux-amd64 host tests/snapshot/conftest.py pins for every snapshot test, a
-    test's own ``simulated_host`` restores linux-amd64, and the conftest pin restores
-    the machine's own host. The import-time defaults are rebuilt only when the
-    simulated host flips them, which on a Linux or macOS machine running a non-Windows
-    host is never.
+    ``platform.system``/``platform.machine`` are patched on ``monkeypatch`` itself, so
+    they come back when it is undone, in LIFO order with every other patch made through
+    it. The import-time scanner defaults are not attributes ``monkeypatch`` can hold,
+    so the caller runs the returned function to put them back. They are rebuilt only
+    when ``host`` flips them relative to what ``platform.system()`` answers now, which
+    on a Linux or macOS machine simulating a non-Windows host is never.
     """
     real_enabled = platform.system().lower() != "windows"
     simulated_enabled = not host.is_windows
-    flips_defaults = simulated_enabled != real_enabled
+    monkeypatch.setattr(platform, "system", lambda: host.system)
+    monkeypatch.setattr(platform, "machine", lambda: host.machine)
+    if simulated_enabled == real_enabled:
+        return lambda: None
+    _set_import_time_defaults(simulated_enabled)
+    return lambda: _set_import_time_defaults(real_enabled)
+
+
+@contextlib.contextmanager
+def simulated_host(monkeypatch: pytest.MonkeyPatch, host: Host) -> Iterator[Host]:
+    """Run the body as if on ``host``; restores the host it replaced on exit.
+
+    "Replaced" is whatever ``platform.system()`` answers on entry, so this nests inside
+    the linux-amd64 host tests/snapshot/conftest.py pins for every snapshot test: on
+    exit the test is back on linux-amd64, and the conftest pin restores the machine's
+    own host when the test's ``monkeypatch`` is undone.
+    """
     with monkeypatch.context() as mp:
-        mp.setattr(platform, "system", lambda: host.system)
-        mp.setattr(platform, "machine", lambda: host.machine)
-        if flips_defaults:
-            _set_import_time_defaults(simulated_enabled)
+        restore_defaults = pin_host(mp, host)
         try:
             yield host
         finally:
-            if flips_defaults:
-                _set_import_time_defaults(real_enabled)
+            restore_defaults()
 
 
 #: What ``Path.absolute()`` reports under :func:`displayed_cwd`. Same length in its
@@ -294,6 +305,7 @@ __all__ = [
     "Host",
     "LINUX_AMD64",
     "WINDOWS_AMD64",
+    "pin_host",
     "run_cli",
     "simulated_host",
 ]
