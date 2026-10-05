@@ -45,7 +45,7 @@ concurrency:
 
 env:
   # Channels whose job below is a placeholder (if: false). See PENDING CHANNELS above.
-  E2E_PENDING: wheel container homebrew mcpb
+  E2E_PENDING: container homebrew mcpb
 
 jobs:
   contract:
@@ -75,18 +75,45 @@ jobs:
           uv run --group dev pytest tests/unit/test_e2e_assert_outcome.py
           -p no:cacheprovider -o addopts="" -v
 
-  # Placeholder for WP1: the wheel built from head, installed fresh, scanned, upgraded
-  # from N-1 and uninstalled.
   wheel:
-    name: "e2e: wheel"
+    name: "e2e: wheel (${{ matrix.os }}, python ${{ matrix.python }})"
     needs: contract
-    if: false
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.14"]
+    defaults:
+      run:
+        shell: bash
     steps:
-      - run: echo "placeholder; see E2E_PENDING"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. One
+      # commit is enough: the build reads a tree, not history.
+      - name: Fetch the N-1 ref
+        run: git fetch --no-tags --depth=1 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+
+      # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
+      # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
+      # has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Build, install, scan, upgrade, uninstall
+        env:
+          E2E_PYTHON: ${{ matrix.python }}
+          E2E_PREV_REF: origin/v4-capabilities
+        run: |
+          work="$RUNNER_TEMP/e2e-wheel"
+          if command -v cygpath >/dev/null 2>&1; then work="$(cygpath -u "$work")"; fi
+          bash scripts/e2e/wheel.sh "$work"
 
   # Placeholder for WP2: build the image from head (never pushed), scan the three cases
   # with --mode container, rebuild over N-1, `docker rmi`, negative control.
