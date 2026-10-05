@@ -1,124 +1,254 @@
 #!/usr/bin/env bash
 #
-# Builds the .rpm, installs it, and runs a real scan -- the plan's requirement that a
-# package be exercised rather than syntax-checked. Intended to run INSIDE an
-# amazonlinux:2023 or ubi9 container with the repo mounted at /src and a wheel in
-# /src/dist.
+# Builds the .rpm, installs it with dnf, and runs a real scan -- the plan's requirement
+# that a package be exercised rather than syntax-checked. Run INSIDE an
+# amazonlinux:2023 or ubi9 container with the repository at $REPO (default /src,
+# read-only is fine) and the wheel built and gated by CI in $DIST (default
+# $REPO/dist).
 #
-# The scan must report a finding. A scan that exits 0 having found nothing is
-# indistinguishable from a scan that never ran, so asserting exit 0 alone would repeat
-# in the test the bug this branch removes.
+#   verify-in-container.sh [--mode MODE]
+#
+# MODE is one of:
+#   assert             build, gate the payload, install, scan, erase (the default)
+#   upgrade            install N-1 built from $PREV_DIST, upgrade to N, require the venv
+#                      to be replaced; then fail an upgrade on purpose and require the
+#                      working install to survive it; then erase
+#   negative-findings  the fixture with its finding removed must FAIL the findings gate
+#   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code gate
+#   negative-install   a package whose %post fails must FAIL the install step
+#   negative-payload   a package with an empty payload must FAIL the payload gate
+#
+# The system python3 on both targets is 3.9, below ASH's floor. The package declares
+# (python3.11 or python3.12 or python3.13) and dnf must satisfy that itself, so nothing
+# here installs an interpreter for the package; the gates run under uv's own Python.
 set -euo pipefail
 
+MODE=assert
+if [ "${1:-}" = "--mode" ]; then
+  MODE="${2:?--mode needs a value}"
+  shift 2
+fi
+[ "$#" -eq 0 ] || { echo "usage: $0 [--mode MODE]" >&2; exit 2; }
+
 REPO="${REPO:-/src}"
+DIST="${DIST:-$REPO/dist}"
+PREV_DIST="${PREV_DIST:-$REPO/dist-prev}"
 OUT="${OUT:-/tmp/rpmbuild-out}"
 
-echo "== 1. install build prerequisites"
-# Deliberately does NOT install any python3.1x. The package declares
-# (python3.11 or python3.12 or python3.13) and dnf must satisfy that itself at step 4 --
-# pre-installing an interpreter here would mask an unsatisfiable dependency, which is
-# exactly the defect this verification caught on the first attempt.
-dnf -q -y install rpm-build findutils >/dev/null 2>&1
-echo "   rpmbuild $(rpmbuild --version | awk '{print $NF}')"
-echo "   system python3 (below ASH's floor, on purpose): $(python3 -V 2>&1 || echo none)"
+# shellcheck source=packaging/verify-lib.sh
+. "$REPO/packaging/verify-lib.sh"
 
-echo "== 2. build the package"
-WHEEL="$(find "$REPO/dist" -maxdepth 1 -name '*.whl' -print -quit)"
-[ -n "$WHEEL" ] || { echo "   FAIL: no wheel in $REPO/dist" >&2; exit 1; }
-echo "   wheel: $(basename "$WHEEL")"
-# The repo is mounted read-only, so build.sh is copied out first -- rpmbuild needs a
-# writable _topdir and mktemp handles that, but the spec dir itself is read from /src.
-RPM="$("$REPO/packaging/rpm/build.sh" "$WHEEL" "$OUT")"
-echo "   built: $RPM"
-
-echo "== 3. package metadata is well formed"
-rpm -qp --qf 'Name: %{NAME}\nVersion: %{VERSION}\nRelease: %{RELEASE}\nArch: %{ARCH}\n' "$RPM" 2>/dev/null
-echo -n "   Requires: "; rpm -qp --requires "$RPM" 2>/dev/null | tr '\n' ' ' ; echo
-# The payload must be ASH's wheel and nothing else -- the invariant check at the
-# package layer. The contents gate covers the wheel; this covers what the rpm adds.
-PAYLOAD_WHEELS="$(rpm -qp --list "$RPM" 2>/dev/null | grep -c '\.whl$' || true)"
-echo "   wheels in package: $PAYLOAD_WHEELS"
-[ "$PAYLOAD_WHEELS" -eq 1 ] || {
-  echo "   FAIL: expected exactly 1 bundled wheel, found $PAYLOAD_WHEELS." >&2
-  echo "   Bundling dependency wheels would put detect-secrets, a scanner, in a" >&2
-  echo "   published artifact. See packaging/README.md." >&2
-  exit 1
+one_wheel() {
+  local dir="$1" found=()
+  shopt -s nullglob
+  found=("$dir"/*.whl)
+  shopt -u nullglob
+  [ "${#found[@]}" -eq 1 ] || vl_fail "expected exactly one wheel in $dir, found ${#found[@]}"
+  printf '%s\n' "${found[0]}"
 }
 
-echo "== 4. install it -- dnf must resolve the interpreter dependency itself"
-dnf -y install "$RPM" 2>&1 | grep -Ei 'Installing|python3\.|Error|Complete' | head -12
-rpm -q ash
-echo "   interpreter dnf pulled in:"
-rpm -qa 'python3.1*' --qf '     %{NAME} %{VERSION}\n' | sort | head -4
-echo "   interpreter the venv was actually built with:"
-readlink -f /usr/lib/ash/venv/bin/python3 2>/dev/null || echo "     (venv missing)"
-/usr/lib/ash/venv/bin/python3 -V 2>/dev/null || true
+wheel_version() {
+  basename "$1" | sed -n 's/^automated_security_helper-\([^-]*\)-py3-none-any\.whl$/\1/p'
+}
 
-echo "== 5. the installed entry point works"
-command -v ash
-ash --version
+build_rpm() {
+  "$REPO/packaging/rpm/build.sh" "$1" "$2"
+}
 
-echo "== 6. scan a fixture with a KNOWN finding"
-FIX=/tmp/fixture
-rm -rf "$FIX"; mkdir -p "$FIX"
-# detect-secrets is a runtime dependency of ASH and drives in process, so it is the one
-# default scanner present after installing ASH alone. The rest are correctly reported
-# SKIPPED rather than MISSING.
-cat > "$FIX/leak.py" <<'PY'
-# Fixture for packaging verification. Not a real credential.
-AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+# dnf and rpm both exit 0 when %post fails: rpm treats a failed scriptlet as a warning
+# and registers the package anyway. Measured on amazonlinux:2023 with a package whose
+# %post is `exit 1`: `dnf install` exit 0, `rpm -i` exit 0, and the only trace is
+#   warning: %post(...) scriptlet failed, exit status 1
+# So the exit code alone cannot say whether the install worked, and the log is read
+# for that warning as well. The step FAILS on either signal; there is no `|| true`.
+#
+# $1 is the dnf verb (install or upgrade), $2 the package.
+rpm_install() {
+  local verb="$1" pkg="$2" rc=0
+  dnf -y "$verb" "$pkg" >/tmp/dnf-install.log 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    tail -n 30 /tmp/dnf-install.log >&2
+    echo "FAIL: dnf $verb $(basename "$pkg") exited $rc" >&2
+    return 1
+  fi
+  if grep -E 'scriptlet failed|Error in [A-Z]+ scriptlet' /tmp/dnf-install.log >&2; then
+    echo "FAIL: dnf $verb exited 0 but a scriptlet failed; rpm registers the package anyway" >&2
+    return 1
+  fi
+  sed -n -E 's/^ *(Installing|Upgrading) *: /   \1: /p' /tmp/dnf-install.log
+}
+
+interpreter_installed() {
+  # The list is captured before it is searched. `rpm -q` on three names exits non-zero
+  # whenever any one is absent, and piping `rpm -qa` into `grep -q` lets grep exit on the
+  # first match and rpm die of SIGPIPE; under pipefail both read as "not installed".
+  local names
+  names="$(rpm -qa --qf '%{NAME}\n')"
+  grep -q -E '^python3\.1[1-3]$' <<<"$names"
+}
+
+erase_and_check() {
+  dnf -y -q remove ash >/tmp/dnf-remove.log 2>&1 || { tail -n 20 /tmp/dnf-remove.log >&2; vl_fail "dnf remove ash failed"; }
+  if rpm -q ash >/dev/null 2>&1; then
+    vl_fail "rpm still lists ash after erase"
+  fi
+  vl_assert_nothing_left
+}
+
+echo "== distribution: $(. /etc/os-release && echo "$PRETTY_NAME"); mode: $MODE"
+echo "   system python3 (below ASH's floor, on purpose): $(python3 -V 2>&1)"
+
+echo "== 1. harness prerequisites (none of them a package dependency)"
+vl_install_harness_tools
+echo "   rpmbuild $(rpmbuild --version | awk '{print $NF}')"
+
+WHEEL="$(one_wheel "$DIST")"
+VERSION="$(wheel_version "$WHEEL")"
+[ -n "$VERSION" ] || vl_fail "cannot read a version from $(basename "$WHEEL")"
+
+# A copy of packaging/rpm with its spec edited, built by the real build.sh. The spec is
+# the only thing changed; build.sh finds cli-name.sh and LICENSE relative to itself, so
+# those are copied alongside.
+build_variant() {
+  local edit="$1" wheel="$2" out="$3" tree
+  tree="$(mktemp -d)"
+  mkdir -p "$tree/packaging"
+  cp -r "$REPO/packaging/rpm" "$tree/packaging/rpm"
+  cp "$REPO/packaging/cli-name.sh" "$tree/packaging/"
+  cp "$REPO/LICENSE" "$tree/"
+  vl_gate_python - "$tree/packaging/rpm/ash.spec" "$edit" <<'PY'
+import re, sys
+path, edit = sys.argv[1], sys.argv[2]
+spec = open(path, encoding="utf-8").read()
+if edit == "empty-payload":
+    # %install and %files emptied: the package carries no payload at all.
+    spec = re.sub(r"(?ms)^%install\n.*?(?=^%files\n)", "%install\n\n", spec)
+    spec = re.sub(r"(?ms)^%files\n.*?(?=^# Creates the venv)", "%files\n\n", spec)
+elif edit == "failing-post":
+    # %post's final `exit 0` becomes `exit 1`, after a working venv has been built.
+    head, sep, tail = spec.partition("\n%post\n")
+    body, sep2, rest = tail.partition("\n%postun\n")
+    if body.count("\nexit 0\n") != 1:
+        sys.exit("could not find the single top-level `exit 0` in %post")
+    spec = head + sep + body.replace("\nexit 0\n", "\nexit 1\n") + sep2 + rest
+else:
+    sys.exit(f"unknown edit {edit}")
+open(path, "w", encoding="utf-8").write(spec)
 PY
-cd "$FIX"
-set +e
-ash scan --source-dir "$FIX" --output-dir "$FIX/.ash/ash_output" \
-         --scanners detect-secrets --no-progress >/tmp/scan.log 2>&1
-SCAN_RC=$?
-set -e
-tail -4 /tmp/scan.log
-echo "   ash scan rc=$SCAN_RC"
+  "$tree/packaging/rpm/build.sh" "$wheel" "$out"
+}
 
-echo "== 7. assert a finding was actually reported"
-python3 - "$FIX" <<'PY'
-import json, sys, pathlib
-out = pathlib.Path(sys.argv[1]) / ".ash" / "ash_output"
-sarif = out / "reports" / "ash.sarif"
-if not sarif.exists():
-    cands = sorted(out.rglob("*.sarif"))
-    if not cands:
-        print("   FAIL: no SARIF produced, so nothing can be asserted about findings")
-        raise SystemExit(1)
-    sarif = cands[0]
-doc = json.loads(sarif.read_text(encoding="utf-8"))
-results = [r for run in doc.get("runs", []) for r in run.get("results", [])]
-print(f"   SARIF: {sarif.name}, {len(results)} result(s)")
-if not results:
-    print("   FAIL: scan produced 0 findings on a fixture planted with a secret.")
-    raise SystemExit(1)
-for r in results[:3]:
-    loc = (r.get("locations") or [{}])[0]
-    uri = loc.get("physicalLocation", {}).get("artifactLocation", {}).get("uri", "?")
-    print(f"     - {r.get('ruleId','?')} at {uri}")
-print("   OK: the installed package ran a scan and reported findings")
-PY
+case "$MODE" in
+  negative-payload)
+    echo "== NEGATIVE CONTROL: an empty-payload .rpm must FAIL the payload gate"
+    EMPTY="$(build_variant empty-payload "$WHEEL" "$OUT/empty")"
+    rpm -qp --list "$EMPTY" | sed 's/^/   listed: /'
+    rc=0
+    vl_payload_gate "$EMPTY" || rc=$?
+    [ "$rc" -eq 1 ] || vl_fail "NEGATIVE CONTROL: the payload gate exited $rc on an empty payload; 1 (rejected) was required"
+    echo "   OK: the payload gate rejected the empty payload (exit $rc)"
+    echo; echo "RPM NEGATIVE CONTROL (payload) PASSED"
+    exit 0
+    ;;
+  negative-install)
+    echo "== NEGATIVE CONTROL: an .rpm whose %post exits 1 must FAIL the install step"
+    BROKEN="$(build_variant failing-post "$WHEEL" "$OUT/broken")"
+    rc=0
+    rpm_install install "$BROKEN" || rc=$?
+    [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the install step ACCEPTED a package whose %post failed"
+    echo "   OK: the install step rejected the failing %post"
+    echo; echo "RPM NEGATIVE CONTROL (install) PASSED"
+    exit 0
+    ;;
+esac
 
-echo "== 8. an UPGRADE must not delete the venv (postun \$1 check)"
-# rpm runs the old package's %postun after the new one's %post, so a %postun that
-# removes the venv unconditionally breaks every upgrade. Reinstall exercises the same
-# ordering.
-dnf -q -y reinstall "$RPM" >/dev/null 2>&1 || rpm -U --replacepkgs "$RPM"
-if [ ! -x /usr/lib/ash/venv/bin/ash ]; then
-  echo "   FAIL: the venv did not survive a reinstall -- %postun is missing its \$1 guard" >&2
-  exit 1
+echo "== 2. build and gate the package"
+RPM="$(build_rpm "$WHEEL" "$OUT")"
+echo "   built: $RPM"
+rpm -qp --qf '   Name: %{NAME}\n   Version: %{VERSION}\n   Release: %{RELEASE}\n   Arch: %{ARCH}\n' "$RPM"
+echo "   Requires: $(rpm -qp --requires "$RPM" | grep -v '^rpmlib(' | tr '\n' ' ')"
+vl_payload_gate "$RPM"
+
+if [ "$MODE" = upgrade ]; then
+  PREV_WHEEL="$(one_wheel "$PREV_DIST")"
+  PREV_VERSION="$(wheel_version "$PREV_WHEEL")"
+  [ -n "$PREV_VERSION" ] || vl_fail "cannot read a version from $(basename "$PREV_WHEEL")"
+  PREV_RPM="$(build_rpm "$PREV_WHEEL" "$OUT/prev")"
+  echo "   built N-1: $PREV_RPM"
+  vl_payload_gate "$PREV_RPM"
+
+  echo "== 3. install N-1 ($PREV_VERSION)"
+  rpm_install install "$PREV_RPM"
+  vl_assert_installed_version "$PREV_VERSION"
+  OLD_VENV_ID="$(stat -c '%i' "$ASH_VENV")"
+
+  echo "== 4. upgrade to N ($VERSION): the venv must be REPLACED, not kept"
+  rpm_install upgrade "$RPM"
+  [ "$(rpm -q --qf '%{VERSION}' ash)" = "$VERSION" ] || vl_fail "rpm reports $(rpm -q ash) after the upgrade"
+  vl_assert_installed_version "$VERSION"
+  [ "$(stat -c '%i' "$ASH_VENV")" != "$OLD_VENV_ID" ] || vl_fail "the venv directory is the one N-1 created"
+  [ ! -e /usr/lib/ash/venv.previous ] || vl_fail "the parked N-1 venv survived a successful upgrade"
+  echo "   OK: the venv was rebuilt from the N wheel and nothing was left parked"
+
+  echo "== 5. scan with the upgraded install"
+  vl_scan_and_assert
+
+  echo "== 6. an upgrade whose dependency resolve fails must leave the working install"
+  vl_blackhole_index
+  rc=0
+  PIP_RETRIES=0 PIP_TIMEOUT=5 rpm_install reinstall "$RPM" >/tmp/dnf-fail.out 2>&1 || rc=$?
+  vl_restore_index
+  sed -n "s/^$ASH_CLI_NAME: /   $ASH_CLI_NAME: /p" /tmp/dnf-install.log
+  [ "$rc" -ne 0 ] || vl_fail "the reinstall with no reachable index was reported as a success, so it did not exercise a failed upgrade"
+  echo "   the reinstall's %post failed as intended"
+  vl_assert_installed_version "$VERSION"
+  [ ! -e /usr/lib/ash/venv.previous ] || vl_fail "the parked venv was left behind instead of restored"
+  echo "   OK: the previous venv was restored and still runs"
+
+  echo "== 7. the documented recovery works once the index is back"
+  rpm_install reinstall "$RPM"
+  vl_assert_installed_version "$VERSION"
+
+  echo "== 8. erase leaves nothing behind"
+  erase_and_check
+  echo; echo "RPM UPGRADE VERIFICATION PASSED"
+  exit 0
 fi
-ash --version >/dev/null && echo "   OK: venv survived, ash still runs"
 
-echo "== 9. erase drops the venv %post created"
-dnf -q -y remove ash >/dev/null 2>&1 || rpm -e ash
-if [ -d /usr/lib/ash/venv ]; then
-  echo "   FAIL: /usr/lib/ash/venv survived erase" >&2
-  exit 1
+echo "== 3. install it with dnf; dnf must resolve the interpreter dependency itself"
+if interpreter_installed; then
+  vl_fail "a python3.11+ is already installed, so this run cannot show the package's own Requires works"
 fi
-echo "   OK: venv removed on erase"
+rpm_install install "$RPM"
+interpreter_installed || vl_fail "no python3.11+ is installed after installing the package"
+echo "   interpreter dnf pulled in: $(rpm -qa 'python3.1[1-3]' --qf '%{NAME}-%{VERSION} ')"
+echo "   venv built with: $(readlink -f "$ASH_VENV/bin/python3")"
+vl_assert_installed_version "$VERSION"
+
+case "$MODE" in
+  negative-findings)
+    echo "== NEGATIVE CONTROL: the finding removed from the fixture must FAIL the findings gate"
+    vl_negative_findings
+    erase_and_check
+    echo; echo "RPM NEGATIVE CONTROL (findings) PASSED"
+    exit 0
+    ;;
+  negative-scan-rc)
+    echo "== NEGATIVE CONTROL: a scan exiting 0 with findings must FAIL the exit-code gate"
+    vl_negative_scan_rc
+    erase_and_check
+    echo; echo "RPM NEGATIVE CONTROL (scan exit code) PASSED"
+    exit 0
+    ;;
+  assert) ;;
+  *) vl_fail "unknown mode $MODE" ;;
+esac
+
+echo "== 4. scan a fixture with a KNOWN finding"
+vl_scan_and_assert
+
+echo "== 5. erase leaves nothing behind"
+erase_and_check
 
 echo
 echo "RPM VERIFICATION PASSED"

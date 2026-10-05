@@ -536,18 +536,12 @@ global_settings:
     # So the split was removed, the key is one literal there now, and the entry
     # below is the declaration that replaces the evasion.
     - rule_id: "SECRET-*"
-      path: packaging/deb/verify-in-container.sh
+      path: packaging/verify-lib.sh
       reason: >-
-        Plants AWS's published example secret access key so that the .deb
-        verification can assert the installed package reports a finding rather
-        than merely exiting 0. The fixture is the assertion; removing it would
-        make the verification vacuous.
-    - rule_id: "SECRET-*"
-      path: packaging/rpm/verify-in-container.sh
-      reason: >-
-        Same fixture and same reason as the .deb verification above -- AWS's
-        published example key, planted so the .rpm verification asserts a finding
-        instead of an exit code.
+        Plants AWS's published example secret access key so that the .deb and
+        .rpm verifications (which share this file) can assert the installed
+        package reports a finding rather than merely exiting 0. The fixture is
+        the assertion; removing it would make the verification vacuous.
     - rule_id: "SECRET-*"
       path: packaging/flatpak/verify-in-container.sh
       reason: >-
