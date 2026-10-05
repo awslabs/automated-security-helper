@@ -9,8 +9,9 @@ effect.
 
 Two layers, because they fail for different reasons. EXPECTED_RULES and
 EXPECTED_BINDINGS are an exact pin: every (apiGroups, resources, verbs) rule, and
-every binding, as reviewed. Any change at all, `create` on pods included, goes red
-there and has to be re-pinned by hand. The denylist tests below it name the grants
+every binding, as reviewed, read from every file under manifests/ rather than
+rbac.yaml alone. Any change at all, `create` on pods included, goes red there and
+has to be re-pinned by hand. The denylist tests below it name the grants
 that must never be re-pinned, so the reviewer updating the pin is told which kind of
 widening they are looking at.
 """
@@ -25,7 +26,8 @@ import yaml
 from ash_operator.generate_manifests import _source_volume_schema
 
 OPERATOR_DIR = Path(__file__).resolve().parents[1]
-RBAC_YAML = OPERATOR_DIR / "manifests" / "rbac.yaml"
+MANIFESTS_DIR = OPERATOR_DIR / "manifests"
+RBAC_YAML = MANIFESTS_DIR / "rbac.yaml"
 SCAN_CRD = OPERATOR_DIR / "generated" / "crd-ashscans.yaml"
 
 # Resources whose read or write turns the operator's account into something wider
@@ -99,12 +101,22 @@ EXPECTED_BINDINGS = {
 }
 
 RULE_KEYS = {"apiGroups", "resources", "verbs"}
+RBAC_KINDS = frozenset({"Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding"})
+
+
+def manifest_documents() -> list[tuple[Path, dict]]:
+    # Every shipped manifest, not only rbac.yaml. Adopters and the e2e apply the whole
+    # directory, so a ClusterRoleBinding appended to operator.yaml grants exactly as
+    # much as one in rbac.yaml and has to be caught by the same pin.
+    paths = sorted(MANIFESTS_DIR.glob("*.yaml"))
+    assert RBAC_YAML in paths, f"{RBAC_YAML} is missing"
+    docs = [(path, doc) for path in paths for doc in yaml.safe_load_all(path.read_text()) if doc]
+    assert docs, "manifests/ yielded no documents"
+    return docs
 
 
 def rbac_documents() -> list[dict]:
-    docs = [doc for doc in yaml.safe_load_all(RBAC_YAML.read_text()) if doc]
-    assert docs, "rbac.yaml yielded no documents"
-    return docs
+    return [doc for _, doc in manifest_documents()]
 
 
 def _as_rule(rule: dict) -> Rule:
@@ -114,12 +126,24 @@ def _as_rule(rule: dict) -> Rule:
 def rbac_rules() -> list[tuple[str, dict]]:
     rules = [
         (f"{doc['kind']}/{doc['metadata']['name']}", rule)
-        for doc in yaml.safe_load_all(RBAC_YAML.read_text())
-        if doc and doc["kind"] in ("Role", "ClusterRole")
+        for doc in rbac_documents()
+        if doc["kind"] in ("Role", "ClusterRole")
         for rule in doc.get("rules") or []
     ]
-    assert rules, "rbac.yaml yielded no rules, so the checks below would pass vacuously"
+    assert rules, "manifests/ yielded no rules, so the checks below would pass vacuously"
     return rules
+
+
+def test_rbac_objects_live_only_in_rbac_yaml():
+    # The pin below reads every manifest, so this is not what catches a widening. It
+    # keeps the grants in the one file whose comments give the reason for each, so a
+    # reviewer reading rbac.yaml is reading all of them.
+    stray = [
+        f"{path.name}: {doc['kind']}/{doc['metadata'].get('name')}"
+        for path, doc in manifest_documents()
+        if doc.get("kind") in RBAC_KINDS and path != RBAC_YAML
+    ]
+    assert not stray, f"RBAC objects outside rbac.yaml: {stray}"
 
 
 def test_every_rule_is_exactly_the_reviewed_rule():
@@ -135,7 +159,7 @@ def test_every_rule_is_exactly_the_reviewed_rule():
         actual[owner] = sorted(_as_rule(rule) for rule in doc.get("rules") or [])
     expected = {owner: sorted(rules) for owner, rules in EXPECTED_RULES.items()}
     assert actual == expected, (
-        "rbac.yaml's grants differ from the reviewed pin. If the change is intended, "
+        "The manifests' grants differ from the reviewed pin. If the change is intended, "
         "update EXPECTED_RULES in the same commit and say why in rbac.yaml."
     )
 
