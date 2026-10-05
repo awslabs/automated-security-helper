@@ -200,7 +200,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         vulnerabilities: Dict[str, Any],
         lock_rel: str | None,
         lock_index: NpmLockIndex | None,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Dict[str, str]]:
         """The direct findings a transitive package's ``via`` chain leads to.
 
         One entry per (advisory, installed copy of the advisory's package),
@@ -210,7 +210,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         those results is. npm audit does not say which copy of a root package a
         dependent resolves to, so every copy is listed.
         """
-        roots: Dict[tuple, Dict[str, Any]] = {}
+        roots: Dict[tuple[str, str, str], Dict[str, str]] = {}
         seen: set[str] = set()
         pending = [pkg_name]
         while pending:
@@ -456,11 +456,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         identity = self._node_identity(
                             pkg_name, node_path, lock_rel, lock_index
                         )
+                        # Any-valued: root_advisories is a list of refs, unlike
+                        # the string identity fields it joins in the PropertyBag.
+                        identity_fields: Dict[str, Any] = dict(identity)
                         if root_advisories:
-                            identity = {
-                                **identity,
-                                ROOT_ADVISORIES_KEY: root_advisories,
-                            }
+                            identity_fields[ROOT_ADVISORIES_KEY] = root_advisories
                         result = Result(
                             ruleId=vuln_id,
                             level=level,
@@ -478,7 +478,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 )
                             ],
                             properties=PropertyBag(
-                                **identity,
+                                **identity_fields,
                                 installed_version=identity.get(
                                     PACKAGE_VERSION_KEY, vuln_info.get("range", "*")
                                 ),
