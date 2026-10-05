@@ -27,7 +27,9 @@ spec:
       serviceAccountName: ash-operator
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
+        # Above 10000, so the uid cannot collide with an account on the node. The
+        # Dockerfile creates the same uid and gid.
+        runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -37,7 +39,27 @@ spec:
           # publishes none.
           image: ash-operator:local
           imagePullPolicy: IfNotPresent
-          args: ["--namespace", "$(WATCH_NAMESPACE)"]
+          # --liveness starts kopf's health endpoint, which the two probes below
+          # read. It answers 200 only while kopf's event loop is running, so a hung
+          # operator is restarted instead of sitting Available with no watches.
+          args:
+            - "--namespace"
+            - "$(WATCH_NAMESPACE)"
+            - "--liveness=http://0.0.0.0:8080/healthz"
+          ports:
+            - name: health
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
           env:
             - name: WATCH_NAMESPACE
               valueFrom:
@@ -64,7 +86,23 @@ spec:
               cpu: 50m
               memory: 128Mi
             limits:
+              cpu: 500m
               memory: 512Mi
       volumes:
         - name: tmp
           emptyDir: {}
+---
+# The operator serves nothing but its health endpoint, and only the kubelet reads
+# that. Kubernetes always admits traffic from a pod's own node, so this denies every
+# other ingress without touching the probes. Egress is left alone: the operator
+# has to reach the API server, whose address varies by cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ash-operator-ingress
+  namespace: ash-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ash-operator
+  policyTypes: ["Ingress"]

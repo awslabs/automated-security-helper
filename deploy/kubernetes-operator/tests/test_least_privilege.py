@@ -152,6 +152,8 @@ EXPECTED_OBJECTS: frozenset[ObjectKey] = frozenset(
         OPERATOR_DEPLOYMENT,
         ("ServiceAccount", OPERATOR_NAMESPACE, OPERATOR_ACCOUNT),
         ("ServiceAccount", OPERATOR_NAMESPACE, SCAN_ACCOUNT),
+        # Denies ingress to the operator pod; grants nothing to anyone.
+        ("NetworkPolicy", OPERATOR_NAMESPACE, "ash-operator-ingress"),
         *EXPECTED_RULES,
         ("ClusterRoleBinding", None, "ash-operator-crd-reader"),
         ("RoleBinding", OPERATOR_NAMESPACE, "ash-operator"),

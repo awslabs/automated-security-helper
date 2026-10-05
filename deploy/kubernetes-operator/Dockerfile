@@ -13,8 +13,8 @@ FROM python:3.12-slim
 # readOnlyRootFilesystem and runAsUser agree. --user-group is explicit because a
 # base image that already has a group called "operator" makes a bare useradd warn
 # and pick a different gid, and then the uid and gid stop matching the manifest.
-RUN groupadd --gid 1000 ashoperator \
-    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/operator \
+RUN groupadd --gid 10001 ashoperator \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/operator \
        --shell /usr/sbin/nologin ashoperator
 
 WORKDIR /app
@@ -43,6 +43,6 @@ print('entrypoints present:', sorted(cm['data']))"
 # base image might declare, which the kubelet would ignore while `docker ps` showed it.
 HEALTHCHECK NONE
 
-USER 1000
+USER 10001
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 ENTRYPOINT ["kopf", "run", "--standalone", "-m", "ash_operator.main"]

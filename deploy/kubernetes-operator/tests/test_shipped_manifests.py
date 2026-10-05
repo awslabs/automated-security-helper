@@ -215,3 +215,71 @@ class TestRbacAndEntrypointAgree:
             text = OPERATOR_YAML.read_text().lower()
             assert "leader election" not in text
             assert "peering keeps" not in text
+
+
+def _operator_documents() -> list[dict]:
+    return [d for d in yaml.safe_load_all(OPERATOR_YAML.read_text()) if d]
+
+
+class TestHealthEndpointAndProbesAgree:
+    """kopf serves /healthz only when told to, on the port the flag names.
+
+    A probe aimed at a port kopf is not listening on fails, and the kubelet restarts a
+    healthy operator forever. A flag with no probe is an endpoint nothing reads. Both
+    are silent in every test that does not stand a cluster up, so the three places
+    that have to name the same port and path are held together here.
+    """
+
+    def _liveness_url(self, container: dict) -> tuple[int, str]:
+        flags = [a for a in container.get("args") or [] if a.startswith("--liveness=")]
+        assert len(flags) == 1, f"expected one --liveness= flag in args, found {flags!r}"
+        match = re.fullmatch(r"--liveness=http://0\.0\.0\.0:(\d+)(/\S*)", flags[0])
+        # 0.0.0.0, not localhost: the kubelet connects to the pod IP.
+        assert match, f"{flags[0]!r} is not http://0.0.0.0:<port>/<path>"
+        return int(match.group(1)), match.group(2)
+
+    def _probe_target(self, container: dict, probe_name: str) -> tuple[int, str]:
+        probe = container.get(probe_name)
+        assert probe, f"no {probe_name} on the operator container"
+        http = probe["httpGet"]
+        port = http["port"]
+        if isinstance(port, str):
+            named = {p["name"]: p["containerPort"] for p in container.get("ports") or []}
+            assert port in named, f"{probe_name} names port {port!r}, which is not declared"
+            port = named[port]
+        return int(port), http["path"]
+
+    @pytest.mark.parametrize("probe_name", ["livenessProbe", "readinessProbe"])
+    def test_each_probe_reads_the_endpoint_kopf_serves(self, operator_container, probe_name):
+        assert self._probe_target(operator_container, probe_name) == self._liveness_url(
+            operator_container
+        )
+
+
+class TestImageUserAndManifestAgree:
+    def test_run_as_user_is_the_dockerfile_uid_and_above_ten_thousand(self):
+        text = DOCKERFILE.read_text()
+        user = re.search(r"^USER\s+(\d+)\s*$", text, re.M)
+        created = re.search(r"useradd\s+--uid\s+(\d+)\s+--gid\s+(\d+)", text)
+        assert user and created, "the Dockerfile no longer creates and selects a numeric uid"
+        (deployment,) = [d for d in _operator_documents() if d["kind"] == "Deployment"]
+        run_as = deployment["spec"]["template"]["spec"]["securityContext"]["runAsUser"]
+        assert int(user.group(1)) == int(created.group(1)) == run_as
+        # Below 10000 a uid can coincide with an account on the node, which is what
+        # checkov's CKV_K8S_40 asks about.
+        assert run_as >= 10000
+
+
+class TestNetworkPolicy:
+    def test_it_selects_the_operator_pod_and_denies_all_ingress(self):
+        docs = _operator_documents()
+        (deployment,) = [d for d in docs if d["kind"] == "Deployment"]
+        (policy,) = [d for d in docs if d["kind"] == "NetworkPolicy"]
+        assert policy["metadata"]["namespace"] == deployment["metadata"]["namespace"]
+        pod_labels = deployment["spec"]["template"]["metadata"]["labels"]
+        selector = policy["spec"]["podSelector"]["matchLabels"]
+        assert selector.items() <= pod_labels.items(), (selector, pod_labels)
+        assert policy["spec"]["policyTypes"] == ["Ingress"]
+        # No ingress rules at all is what makes this a deny. An empty rule `{}` would
+        # admit everything.
+        assert "ingress" not in policy["spec"]
