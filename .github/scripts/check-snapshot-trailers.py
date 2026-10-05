@@ -24,7 +24,7 @@ WHAT COUNTS AS GOLDEN
 ---------------------
 ``GOLDEN`` below is the one list. A file is golden when it is committed output that
 users or clients see AND it is entirely produced by a generator or a test, so a change
-to it is always a change in behaviour rather than an edit. Files that are partly
+to it is always a change in behavior rather than an edit. Files that are partly
 hand-written are out: requiring a trailer for a typo fix in prose teaches people to
 paste a meaningless reason, and a trailer that is always pasted means nothing. Each
 entry, and each rejected candidate, is explained next to the list.

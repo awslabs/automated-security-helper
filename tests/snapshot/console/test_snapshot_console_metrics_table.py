@@ -81,7 +81,7 @@ def test_summary_table(width, text_snapshot, tmp_path, monkeypatch):
 def test_notices_under_the_table(width, text_snapshot):
     """The "Incomplete coverage" line for cdk-nag, then one line per stale database.
 
-    Enforced records print red with no suffix, warned ones yellow with "(warning)"; colour
+    Enforced records print red with no suffix, warned ones yellow with "(warning)"; color
     is not in a snapshot, so the suffix is what distinguishes them here.
     """
     model = scan_results_model(with_stale_databases=True)

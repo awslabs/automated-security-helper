@@ -11,7 +11,7 @@ reviewer reads one list of what a snapshot cannot see.
 
 What is masked, and why each is safe to mask
 --------------------------------------------
-- ANSI escape sequences and carriage returns. Colour is decided by the terminal, not
+- ANSI escape sequences and carriage returns. Color is decided by the terminal, not
   by ASH's output, and CRLF is how Windows writes a newline.
 - Absolute paths the run chose: the test's tmp dirs, the system temp dir, the repo
   checkout, the home directory and the current directory. Each is replaced by a token
@@ -108,7 +108,7 @@ from urllib.parse import quote_from_bytes
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# CSI sequences (colours, cursor moves), OSC sequences (hyperlinks, titles), and the
+# CSI sequences (colors, cursor moves), OSC sequences (hyperlinks, titles), and the
 # two-byte escapes rich and click emit for resets.
 _ANSI = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]"
@@ -459,7 +459,7 @@ def default_normalizer(
 
 
 def pinned_terminal_env() -> dict[str, str]:
-    """The terminal every snapshot is rendered for: 100 columns, no colour, not a TTY."""
+    """The terminal every snapshot is rendered for: 100 columns, no color, not a TTY."""
     return {
         "COLUMNS": "100",
         "LINES": "50",

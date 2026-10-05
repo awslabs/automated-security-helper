@@ -133,7 +133,7 @@ Snapshots must be identical on every machine, so values that change from run to 
 (temp paths, the repository root, the home directory, ids, versions) are masked by one
 normalizer, `SnapshotNormalizer` in `tests/snapshot/support/normalize.py`. The `snapshot`
 and `text_snapshot` fixtures in `tests/snapshot/conftest.py` apply it, and they also pin
-the terminal (width, no colour, no TTY) and unset the CI variables that change ASH's
+the terminal (width, no color, no TTY) and unset the CI variables that change ASH's
 output. Do not normalize inside a test. If a test produces a value that varies, register
 it with the normalizer (`add_root`, `add_literal`) or extend the normalizer, together with
 a test in `tests/snapshot/test_snapshot_normalizer.py` showing what it masks and what it

@@ -10,7 +10,7 @@ snapshot files ever disagree.
 
 How the help is made identical on every OS
 ------------------------------------------
-- typer reads ``TERMINAL_WIDTH`` and the CI/colour variables once, when
+- typer reads ``TERMINAL_WIDTH`` and the CI/color variables once, when
   ``typer.rich_utils`` is imported, which happens before the autouse fixture in
   tests/snapshot/conftest.py pins the environment. Under GitHub Actions that import
   sets ``FORCE_TERMINAL``. ``_pinned_rich_help`` re-pins both module attributes to

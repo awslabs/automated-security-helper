@@ -48,7 +48,7 @@ from tests.snapshot.support.normalize import (
 
 #: Environment that changes what ASH prints. Unset for every snapshot test, so a
 #: snapshot taken on a laptop matches the one CI takes: ASH switches its console
-#: output on CI and CODEBUILD_BUILD_ID, and the colour variables override NO_COLOR.
+#: output on CI and CODEBUILD_BUILD_ID, and the color variables override NO_COLOR.
 _UNSET_FOR_SNAPSHOTS = (
     "CI",
     "ISCI",
@@ -98,7 +98,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(autouse=True)
 def _pinned_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Render every snapshot for the same terminal: 100 columns, no colour, no TTY."""
+    """Render every snapshot for the same terminal: 100 columns, no color, no TTY."""
     for name in _UNSET_FOR_SNAPSHOTS:
         monkeypatch.delenv(name, raising=False)
     for name, value in pinned_terminal_env().items():
