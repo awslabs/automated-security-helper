@@ -1611,10 +1611,10 @@ jobs:
   # ---------------------------------------------------------------------------
   # One stable name for branch protection to require.
   #
-  # The five checks above are conditional, and a required check that is skipped
-  # never reports, which parks a pull request instead of passing it. This job
-  # always runs, so it always reports, and it turns "skipped because the tree has
-  # not landed" into a pass while turning any real failure into a failure.
+  # Every check above except discover is conditional, and a required check that
+  # is skipped never reports, which parks a pull request instead of passing it.
+  # This job always runs, so it always reports, and it turns "skipped because the
+  # tree has not landed" into a pass while turning any real failure into a failure.
   # ---------------------------------------------------------------------------
   iac-drift:
     name: iac-drift

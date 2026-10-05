@@ -2,8 +2,9 @@
 
 Same pattern the repository already uses for its CDK templates and buildspecs, and
 for the same reason: the generated files are the deliverable. An adopter runs
-``kubectl apply -f deploy/kubernetes-operator/generated/`` against a file in the
-repository; they do not run this generator. That only works if what is committed is
+``kubectl apply -f`` on the ``crd-*.yaml`` files in
+``deploy/kubernetes-operator/generated/`` (the README's command); they do not run
+this generator. That only works if what is committed is
 exactly what this module emits, which is what ``--check`` is for.
 
 **``--check`` compares content in memory and asks git nothing.** That is a

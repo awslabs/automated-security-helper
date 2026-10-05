@@ -8,7 +8,8 @@ change this file as well, which makes it a decision in the diff rather than a si
 effect.
 
 Two layers, because they fail for different reasons. EXPECTED_RULES and
-EXPECTED_BINDINGS are an exact pin: every (apiGroups, resources, verbs) rule, and
+EXPECTED_BINDINGS are an exact pin: every (apiGroups, resources, verbs) rule, every
+role's top-level keys and labels (so aggregation cannot refill a role's rules), and
 every binding, as reviewed, read from every object `kubectl apply -f manifests/`
 would send (.yaml, .yml and .json files, List items expanded) rather than rbac.yaml
 alone, and manifests/ may hold only the reviewed files. Any change at all, `create`
@@ -104,6 +105,18 @@ EXPECTED_BINDINGS = {
 }
 
 RULE_KEYS = {"apiGroups", "resources", "verbs"}
+ROLE_KINDS = ("Role", "ClusterRole")
+# Every top-level key a reviewed role may carry. The rule pin compares `rules` alone,
+# and a key beside it can change what the role grants without touching them:
+# aggregationRule makes the API server overwrite `rules` with the union of every
+# ClusterRole its selectors match, which with the built-in roles' label is
+# cluster-admin.
+ROLE_KEYS = frozenset({"apiVersion", "kind", "metadata", "rules"})
+# The labels each reviewed role carries, exactly. A label is how aggregation finds a
+# role: rbac.authorization.k8s.io/aggregate-to-admin folds its rules into the
+# built-in admin role, and any label can match some other aggregated ClusterRole's
+# selector, so none is added without re-pinning here.
+EXPECTED_ROLE_LABELS: dict[str, dict[str, str]] = {owner: {} for owner in EXPECTED_RULES}
 RBAC_KINDS = frozenset({"Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding"})
 
 # `kubectl apply -f manifests/` reads every file in the directory (not its
@@ -187,22 +200,37 @@ def test_rbac_objects_live_only_in_rbac_yaml():
     assert not stray, f"RBAC objects outside rbac.yaml: {stray}"
 
 
-def test_every_rule_is_exactly_the_reviewed_rule():
+def role_problems(docs: list[dict]) -> list[str]:
+    problems = []
     actual: dict[str, list[Rule]] = {}
-    for doc in rbac_documents():
-        if doc["kind"] not in ("Role", "ClusterRole"):
+    for doc in docs:
+        if doc["kind"] not in ROLE_KINDS:
             continue
         owner = f"{doc['kind']}/{doc['metadata']['name']}"
+        extra = set(doc) - ROLE_KEYS
+        if extra:
+            problems.append(f"{owner} carries {sorted(extra)} beside its rules: {doc}")
+        labels = doc["metadata"].get("labels") or {}
+        if labels != EXPECTED_ROLE_LABELS.get(owner, {}):
+            problems.append(f"{owner} has labels {labels}, not the reviewed ones")
         for rule in doc.get("rules") or []:
             # Only the three pinned keys. resourceNames or nonResourceURLs would change
             # what the rule means without changing the tuple compared below.
-            assert set(rule) == RULE_KEYS, f"{owner} has a rule with keys {sorted(rule)}: {rule}"
+            if set(rule) != RULE_KEYS:
+                problems.append(f"{owner} has a rule with keys {sorted(rule)}: {rule}")
         actual[owner] = sorted(_as_rule(rule) for rule in doc.get("rules") or [])
     expected = {owner: sorted(rules) for owner, rules in EXPECTED_RULES.items()}
-    assert actual == expected, (
-        "The manifests' grants differ from the reviewed pin. If the change is intended, "
-        "update EXPECTED_RULES in the same commit and say why in rbac.yaml."
-    )
+    if actual != expected:
+        problems.append(
+            "The manifests' grants differ from the reviewed pin. If the change is intended, "
+            f"update EXPECTED_RULES in the same commit and say why in rbac.yaml: {actual}"
+        )
+    return problems
+
+
+def test_every_rule_is_exactly_the_reviewed_rule():
+    problems = role_problems(rbac_documents())
+    assert not problems, "\n".join(problems)
 
 
 def actual_bindings(docs: list[dict]) -> set:
@@ -230,6 +258,17 @@ def actual_bindings(docs: list[dict]) -> set:
 
 def test_every_binding_is_exactly_the_reviewed_binding():
     assert actual_bindings(rbac_documents()) == EXPECTED_BINDINGS
+
+
+def pin_problems(manifests_dir: Path) -> list[str]:
+    # Everything the two exact pins above refuse, for a manifests directory other
+    # than the committed one, so the tests below can break a copy and watch it fail.
+    docs = rbac_documents(manifests_dir)
+    problems = role_problems(docs)
+    unexpected = actual_bindings(docs) ^ EXPECTED_BINDINGS
+    if unexpected:
+        problems.append(f"bindings differ from the reviewed pin: {sorted(map(repr, unexpected))}")
+    return problems
 
 
 def test_manifests_dir_holds_only_the_reviewed_files():
@@ -287,19 +326,75 @@ def _append_admin_typed_list(d: Path) -> None:
         handle.write("---\n" + yaml.safe_dump(wrapped))
 
 
+def _edit_crd_reader(d: Path, edit) -> None:
+    # Rewrites rbac.yaml with one change to the ClusterRole bound to the operator.
+    # The rewrite drops the file's comments, which nothing here reads.
+    path = d / "rbac.yaml"
+    docs = [doc for doc in yaml.safe_load_all(path.read_text()) if doc]
+    (role,) = [
+        doc
+        for doc in docs
+        if doc["kind"] == "ClusterRole" and doc["metadata"]["name"] == "ash-operator-crd-reader"
+    ]
+    edit(role)
+    path.write_text(yaml.safe_dump_all(docs))
+
+
+def _add_aggregation_rule(d: Path) -> None:
+    # The API server's aggregation controller overwrites `rules` with the union of
+    # every ClusterRole the selectors match. This selector matches the built-in
+    # roles, cluster-admin among them, and `rules` in the file stays as reviewed.
+    selector = {"matchLabels": {"kubernetes.io/bootstrapping": "rbac-defaults"}}
+    _edit_crd_reader(
+        d, lambda role: role.update(aggregationRule={"clusterRoleSelectors": [selector]})
+    )
+
+
+def _add_aggregate_to_label(d: Path) -> None:
+    # The other direction: this label folds the role's rules into the built-in
+    # `admin` role, widening every account bound to admin rather than the operator's.
+    _edit_crd_reader(
+        d,
+        lambda role: (
+            role["metadata"]
+            .setdefault("labels", {})
+            .update({"rbac.authorization.k8s.io/aggregate-to-admin": "true"})
+        ),
+    )
+
+
+def test_the_pin_is_clean_on_an_untouched_copy(tmp_path):
+    # The control for the test below: copying the directory alone changes nothing.
+    shutil.copytree(MANIFESTS_DIR, tmp_path / "manifests")
+    assert pin_problems(tmp_path / "manifests") == []
+
+
 @pytest.mark.parametrize(
-    "inject",
-    [_write_admin_yml, _write_admin_json, _append_admin_list, _append_admin_typed_list],
-    ids=["yml-file", "json-stream", "list-in-operator-yaml", "nested-typed-list"],
+    ("inject", "marker"),
+    [
+        (_write_admin_yml, "ClusterRoleBinding/ash-operator-admin"),
+        (_write_admin_json, "ClusterRoleBinding/ash-operator-admin"),
+        (_append_admin_list, "ClusterRoleBinding/ash-operator-admin"),
+        (_append_admin_typed_list, "ClusterRoleBinding/ash-operator-admin"),
+        (_add_aggregation_rule, "aggregationRule"),
+        (_add_aggregate_to_label, "rbac.authorization.k8s.io/aggregate-to-admin"),
+    ],
+    ids=[
+        "yml-file",
+        "json-stream",
+        "list-in-operator-yaml",
+        "nested-typed-list",
+        "aggregation-rule",
+        "aggregate-to-label",
+    ],
 )
-def test_the_pin_sees_a_binding_however_kubectl_would_read_it(tmp_path, inject):
-    # Each of these is a cluster-admin grant that `kubectl apply -f manifests/` would
-    # make and that an earlier version of manifest_documents did not read.
+def test_the_pin_refuses_a_widening_however_kubectl_would_read_it(tmp_path, inject, marker):
+    # Each of these widens a grant through `kubectl apply -f manifests/`, and each
+    # once left every test in this file green.
     shutil.copytree(MANIFESTS_DIR, tmp_path / "manifests")
     inject(tmp_path / "manifests")
-    assert actual_bindings(rbac_documents(tmp_path / "manifests")) == EXPECTED_BINDINGS | {
-        ADMIN_ENTRY
-    }
+    problems = pin_problems(tmp_path / "manifests")
+    assert any(marker in problem for problem in problems), problems
 
 
 def test_the_scan_account_has_no_binding():

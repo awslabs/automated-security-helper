@@ -6,9 +6,13 @@ Service. They share only the config-delivery mechanism, which is why they are tw
 kinds and two reconcilers rather than one kind with a mode field.
 
 ```
-kubectl apply -f generated/          # the CRDs
+kubectl apply -f generated/crd-ashscans.yaml -f generated/crd-ashmcpservers.yaml  # the CRDs
 kubectl apply -f manifests/          # namespace, RBAC, operator Deployment
 ```
+
+Name the CRD files rather than the directory: `generated/` also holds
+`config-schema-translation.json`, a report for reviewers with no `kind`, and
+`kubectl apply -f generated/` stops on it.
 
 You must build the operator image yourself (`Dockerfile`), and you must supply an
 ASH image in `spec.image`. Nothing in this directory or its workflow pushes either
