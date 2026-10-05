@@ -42,7 +42,7 @@ export and no hint about which stack to deploy first.
 ## Launching a committed template
 
 The CloudFormation console launch flow reads the template from an S3 URL, so it
-works for all five. Scripting `create-stack` does not: CloudFormation caps an
+works for all six. Scripting `create-stack` does not: CloudFormation caps an
 inline `--template-body` at **51,200 bytes**, and three of these templates are
 larger than that. Upload those to a bucket and launch by URL, where the ceiling is
 1 MB.
@@ -52,6 +52,7 @@ larger than that. Upload those to a bucket and launch by URL, where the ceiling 
 | --- | --- |
 | `AshCodeCommitGate` | `--template-body` |
 | `AshAgentCore` | `--template-body` |
+| `AshEksOperator` | `--template-body` |
 | `AshImagePipeline` | `--template-url` only |
 | `AshFargate` | `--template-url` only |
 | `AshDistributedPipeline` | `--template-url` only |
@@ -60,7 +61,7 @@ Byte counts are deliberately not repeated here — they change with every templa
 change and nothing would catch it if this table went stale. Run
 `wc -c templates/*.template.json` for the current numbers.
 
-The two under the cap launch directly:
+The three under the cap launch directly:
 
 ```sh
 aws cloudformation create-stack \

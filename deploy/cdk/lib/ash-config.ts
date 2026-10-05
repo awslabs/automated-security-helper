@@ -74,6 +74,11 @@ export const ASH_PARAMETER_NAMES = {
   codeCommitRepositoryArn: 'CodeCommitRepositoryArn',
   kmsKeyArn: 'KmsKeyArn',
   vpcSubnetIds: 'VpcSubnetIds',
+  // The companion to vpcSubnetIds. Lambda's VpcConfig requires at least one
+  // security group alongside the subnets, so a target that reads one reads both,
+  // and naming it here keeps the pair from being spelled two different ways by two
+  // stacks. First consumed by AshEksOperator; see that stack's header.
+  vpcSecurityGroupIds: 'VpcSecurityGroupIds',
   certificateArn: 'CertificateArn',
 } as const;
 
