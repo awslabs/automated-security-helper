@@ -1,0 +1,42 @@
+# An ASH image that does NOT stamp `candidate_scanners` onto its shard results.
+#
+# This exists to test one thing the main e2e image cannot: what the operator does when
+# the provenance is absent. `spec.image` pointing at an ASH build that predates
+# `ShardAssignment` stamping is a supported configuration, and in that state
+# `ash merge` does **not** refuse -- it skips the union check, so a coverage hole
+# where two executors partitioned different scanner sets merges into a report that
+# reads as a complete scan of the whole tree. The operator's `derive_phase` is the
+# only thing standing there, and an assertion that the field was present proves
+# nothing about its absence.
+#
+# Built FROM the normal e2e image and patched with one substitution, rather than
+# checking out an old ASH: the point is to reproduce the *absence of one field*, not
+# an old release's behaviour, and an old release would differ in ways that muddy what
+# the test shows.
+#
+# The RUN below asserts the patch took effect. A `sed` that matched nothing would
+# produce an image identical to the normal one, the scan would stamp provenance
+# normally, the operator would report Succeeded, and the test asserting Refused would
+# fail for a reason nobody could find. Verifying the edit is what makes the negative
+# control trustworthy.
+ARG BASE=ash-e2e:local
+FROM ${BASE}
+
+USER 0
+RUN set -eu; \
+    target="$(python -c 'import automated_security_helper.core.phases.scan_phase as m; print(m.__file__)')"; \
+    grep -q 'candidate_scanners=sorted(set(all_scanner_names))' "$target" \
+      || { echo "FATAL: the stamping line is not where this patch expects it in $target." >&2; \
+           echo "Re-read ScanPhase before changing this file; a patch that silently" >&2; \
+           echo "matches nothing turns the negative control into a vacuous pass." >&2; \
+           exit 1; }; \
+    sed -i 's/candidate_scanners=sorted(set(all_scanner_names)),/candidate_scanners=None,  # patched for the operator e2e negative control/' "$target"; \
+    grep -q 'candidate_scanners=None,  # patched for the operator e2e negative control' "$target" \
+      || { echo "FATAL: the substitution did not apply." >&2; exit 1; }; \
+    ! grep -q 'candidate_scanners=sorted(set(all_scanner_names))' "$target" \
+      || { echo "FATAL: the original stamping line survived the substitution." >&2; exit 1; }; \
+    python -c 'import automated_security_helper.core.phases.scan_phase'; \
+    echo "candidate_scanners stamping disabled in $target"
+
+USER 1000
+WORKDIR /workspace

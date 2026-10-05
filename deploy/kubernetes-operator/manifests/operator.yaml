@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ash-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ash-operator
+  namespace: ash-system
+  labels:
+    app.kubernetes.io/name: ash-operator
+spec:
+  # One replica plus leader election. kopf's peering keeps a second replica from
+  # dispatching the same run twice, but a scan is not latency-sensitive enough to
+  # need hot standby and a second replica doubles the API watch load.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ash-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ash-operator
+    spec:
+      serviceAccountName: ash-operator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: operator
+          # Replace with your own build of deploy/kubernetes-operator/Dockerfile.
+          # No public image is published for this, for the same reason ASH itself
+          # publishes none.
+          image: ash-operator:local
+          imagePullPolicy: IfNotPresent
+          args: ["--namespace", "$(WATCH_NAMESPACE)"]
+          env:
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            runAsNonRoot: true
+            # Safe to set here, unlike on a scan pod: this container runs one
+            # Python process that writes nothing outside /tmp. On a scan pod the
+            # same flag was measured to make scanners come back MISSING, which
+            # merges into a report that reads as a complete scan.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,1959 @@
+# GENERATED FILE -- do not edit.
+# Regenerate with:
+#   python -m ash_operator.generate_manifests
+# spec.config is derived from AshConfig.model_json_schema(); see
+# ash_operator/crd_schema.py for what the translation had to drop, and
+# generated/config-schema-translation.json for the measured list.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ashscans.ash.awslabs.github.io
+  annotations:
+    ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
+    ash.awslabs.github.io/ash-config-schema-sha256: cc7d048d8d24592c
+spec:
+  group: ash.awslabs.github.io
+  scope: Namespaced
+  names:
+    kind: AshScan
+    listKind: AshScanList
+    plural: ashscans
+    singular: ashscan
+    shortNames:
+    - ashscan
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    - name: Shards
+      type: integer
+      jsonPath: .status.shardCount
+    - name: Actionable
+      type: integer
+      jsonPath: .status.findings.actionable
+    - name: Incomplete
+      type: string
+      jsonPath: .status.incompleteScanners
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - image
+            - shardCount
+            - source
+            properties:
+              image:
+                type: string
+                minLength: 1
+                description: 'ASH container image. Required with no default: ASH publishes no image to
+                  any public registry and will not, so every deployment builds its own. Installing ASH
+                  by distribution name is also wrong -- the name automated-security-helper on PyPI is
+                  an unrelated placeholder, so a name-based install succeeds, leaves no ash on PATH, and
+                  puts a third party''s code in the scan container.'
+              imagePullPolicy:
+                type: string
+                enum:
+                - Always
+                - IfNotPresent
+                - Never
+              shardCount:
+                type: integer
+                minimum: 1
+                maximum: 50
+                description: How many shards to split the scanner list across. The partition is round-robin
+                  over the sorted, deduplicated, lower-cased scanner names, so a count above the scanner
+                  count gives the surplus shards an empty assignment -- wasteful, not wrong. The ceiling
+                  of 50 exists so a typo is rejected rather than scheduling hundreds of empty pods.
+              parallelism:
+                type: integer
+                minimum: 1
+                description: Job parallelism. Defaults to shardCount. Lower it to run shards in waves
+                  on a small cluster, or to make a ReadWriteOnce results volume workable.
+              source:
+                type: object
+                description: 'Volume carrying the source tree to scan, mounted read-only at /workspace/src.
+                  hostPath and emptyDir are deliberately not offered: the first hands a node''s filesystem
+                  to a pod running third-party scanners over foreign code, and the second describes an
+                  empty tree, which scans clean and reads as success.'
+                properties:
+                  persistentVolumeClaim:
+                    type: object
+                    properties:
+                      claimName:
+                        type: string
+                      readOnly:
+                        type: boolean
+                    required:
+                    - claimName
+                  configMap:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      defaultMode:
+                        type: integer
+                      optional:
+                        type: boolean
+                    required:
+                    - name
+                  secret:
+                    type: object
+                    properties:
+                      secretName:
+                        type: string
+                      defaultMode:
+                        type: integer
+                      optional:
+                        type: boolean
+                    required:
+                    - secretName
+                  csi:
+                    type: object
+                    properties:
+                      driver:
+                        type: string
+                      readOnly:
+                        type: boolean
+                      fsType:
+                        type: string
+                      volumeAttributes:
+                        type: object
+                        additionalProperties:
+                          type: string
+                    required:
+                    - driver
+              results:
+                type: object
+                description: Where shard results are published and the merge reads them. Defaults to a
+                  PVC the operator creates and owns. Supply claimName to reuse your own.
+                properties:
+                  claimName:
+                    type: string
+                  size:
+                    type: string
+                  storageClassName:
+                    type: string
+                  accessModes:
+                    type: array
+                    items:
+                      type: string
+              scanners:
+                type: array
+                items:
+                  type: string
+                description: Passed to every shard as --scanners. Setting it pins the roster identically
+                  on every pod, which is a second guard against the split-brain case where two pods partition
+                  different scanner sets; the run's immutable, content-addressed ConfigMap is the first.
+              excludeScanners:
+                type: array
+                items:
+                  type: string
+              extraScanArguments:
+                type: array
+                items:
+                  type: string
+                description: 'Extra `ash scan` flags. --shard-index, --shard-count, --source-dir, --output-dir,
+                  --min-severity, --fail-on-findings and --fail-on-incomplete-scanners are refused here:
+                  the first four are computed by the operator, and the last three decide the run''s verdict,
+                  which belongs to the merge. A shard runs only its slice, so a shard that finds nothing
+                  exits 0 no matter what the others found.'
+              minSeverity:
+                type: string
+                enum:
+                - ALL
+                - LOW
+                - MEDIUM
+                - HIGH
+                - CRITICAL
+                description: Severity floor for the merged verdict, passed to `ash merge` only. On `ash
+                  scan` it changes just that scan's exit code, and a shard's exit code is discarded, so
+                  setting it per shard would read as a gate that never fires.
+              failOnFindings:
+                type: boolean
+              failOnIncompleteScanners:
+                type: boolean
+                description: Refuse the merge when a shard's owned scanner did not run. ASH's own default
+                  is false, so leaving this unset does NOT fail a scan whose scanners were missing --
+                  .status.incompleteScanners reports them either way, which is where to look before turning
+                  this on.
+              outputFormats:
+                type: array
+                items:
+                  type: string
+              backoffLimit:
+                type: integer
+                minimum: 0
+                description: 'Shard Job backoffLimit, default 0. Retries are safe here: each attempt publishes
+                  to an attempt-qualified, immutable directory, so a retry cannot overwrite a completed
+                  shard and the collector picks one deterministically. 0 is still the default because
+                  it is the option that needs no reasoning about.'
+              collectBackoffLimit:
+                type: integer
+                minimum: 0
+              ttlSecondsAfterFinished:
+                type: integer
+                minimum: 0
+              runAsUser:
+                type: integer
+                minimum: 1
+              fsGroup:
+                type: integer
+                minimum: 1
+              scanServiceAccountName:
+                type: string
+                description: 'ServiceAccount for the shard and collector pods. Its token is never mounted
+                  (automountServiceAccountToken: false) -- a pod running scanners over foreign source
+                  has no business holding an API credential, and nothing in the scan path calls the API.'
+              resources:
+                type: object
+                description: Resources for each shard pod.
+                properties:
+                  limits:
+                    type: object
+                    additionalProperties: &id001
+                      type: string
+                      x-kubernetes-int-or-string: true
+                  requests:
+                    type: object
+                    additionalProperties: *id001
+              collectResources:
+                type: object
+                description: Resources for the collector pod. Defaults to spec.resources.
+                properties:
+                  limits:
+                    type: object
+                    additionalProperties: &id002
+                      type: string
+                      x-kubernetes-int-or-string: true
+                  requests:
+                    type: object
+                    additionalProperties: *id002
+              config:
+                description: ASH configuration, in ASH's own spelling. Written verbatim into the ConfigMap
+                  the scan pods read as ASH_CONFIG, so this block is interchangeable with a .ash.yaml
+                  file. Generated from AshConfig.model_json_schema(); do not edit by hand.
+                properties:
+                  project_name:
+                    description: Name of the project being scanned
+                    type: string
+                  global_settings:
+                    properties:
+                      severity_threshold:
+                        description: Global minimum severity level to consider findings as failures across
+                          all scanners
+                        enum:
+                        - ALL
+                        - LOW
+                        - MEDIUM
+                        - HIGH
+                        - CRITICAL
+                        type: string
+                      ignore_paths:
+                        description: Global list of IgnorePaths. Each path requires a reason for ignoring,
+                          e.g. 'Folder contains test data only and is not committed'.
+                        items:
+                          description: Represents a path exclusion entry.
+                          properties:
+                            path:
+                              description: Path or pattern to exclude
+                              type: string
+                            reason:
+                              description: Reason for exclusion
+                              type: string
+                            expiration:
+                              type: string
+                              description: (Optional) Expiration date (YYYY-MM-DD)
+                              nullable: true
+                          required:
+                          - path
+                          - reason
+                          type: object
+                        type: array
+                      suppressions:
+                        description: Global list of suppression rules. Each rule specifies findings to
+                          suppress based on rule ID, file path, and optional line numbers.
+                        items:
+                          description: Represents a finding suppression rule.
+                          properties:
+                            path:
+                              description: Path or pattern to exclude
+                              type: string
+                            reason:
+                              description: Reason for exclusion
+                              type: string
+                            expiration:
+                              type: string
+                              description: (Optional) Expiration date (YYYY-MM-DD)
+                              nullable: true
+                            rule_id:
+                              type: string
+                              description: Rule ID to suppress
+                              nullable: true
+                            line_start:
+                              type: integer
+                              description: (Optional) Starting line number
+                              nullable: true
+                            line_end:
+                              type: integer
+                              description: (Optional) Ending line number
+                              nullable: true
+                          required:
+                          - path
+                          - reason
+                          type: object
+                        type: array
+                      mcp:
+                        description: MCP-server-specific configuration (runtime override allowlist, etc.).
+                        properties:
+                          runtime_overrides:
+                            description: Allowlist for runtime JSON-Patch overrides.
+                            properties:
+                              enabled:
+                                description: "Master switch \u2014 runtime patches are rejected unless\
+                                  \ True."
+                                type: boolean
+                              allowed_paths:
+                                description: 'JSON-Pointer glob patterns the client may target. `*` matches
+                                  one segment, `**` matches any subtree. Example: ''/scanners/*/options/severity_threshold''.'
+                                items:
+                                  type: string
+                                type: array
+                              denied_paths:
+                                description: JSON-Pointer glob patterns that are NEVER allowed (denied
+                                  wins over allowed). Defaults block the most dangerous fields on the
+                                  real AshConfig schema.
+                                items:
+                                  type: string
+                                type: array
+                              denied_value_patterns:
+                                additionalProperties:
+                                  type: string
+                                description: "Map of JSON-Pointer pattern \u2192 regex. add/replace ops\
+                                  \ are rejected when any string leaf reachable from the op's value matches\
+                                  \ the regex; lists and dicts are walked recursively so a forbidden token\
+                                  \ cannot be hidden inside a nested structure. The `test` op is exempt\
+                                  \ because it is read-only."
+                                type: object
+                            type: object
+                        type: object
+                    type: object
+                    description: Global default settings for ASH shared across scanners. If the same setting
+                      exists at the scanner level and is set in both places, the scanner level settings
+                      take precedence.
+                  fail_on_findings:
+                    description: 'Whether to exit with non-zero code if findings are detected
+
+
+                      IGNORED BY THE OPERATOR: Set on `ash merge` from spec.failOnFindings instead. A
+                      shard''s exit code is discarded, so setting it here would read as a gate that never
+                      fires.'
+                    type: boolean
+                  fail_on_incomplete_scanners:
+                    description: 'Whether to exit with a non-zero code when a selected scanner did not
+                      complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable,
+                      never ran). SKIPPED scanners are not selected and never trip this. Independent of
+                      fail_on_findings: one answers ''was anything found'', this one answers ''did what
+                      I asked for actually run''. Defaults to False so that environments legitimately
+                      lacking a scanner''s tool keep their current exit codes.
+
+
+                      IGNORED BY THE OPERATOR: Set on `ash merge` from spec.failOnIncompleteScanners instead,
+                      for the same reason as fail_on_findings.'
+                    type: boolean
+                  ash_plugin_modules:
+                    description: List of Python modules to import containing ASH plugins and/or event
+                      subscribers. These are loaded in addition to the default modules.
+                    items:
+                      type: string
+                    type: array
+                  external_reports_to_include:
+                    description: List of external reports to include in the final report. These can be
+                      paths to SARIF or CycloneDX reports produced by other tools.
+                    items:
+                      type: string
+                    type: array
+                  build:
+                    description: Configuration model for build-time settings.
+                    properties:
+                      build_mode:
+                        description: Build mode for the container image build. If enabled, also enables
+                          offline mode during the scan phase without any explicit directive when scanning.
+                        enum:
+                        - ONLINE
+                        - OFFLINE
+                        type: string
+                      tool_install_scripts:
+                        additionalProperties:
+                          items:
+                            type: string
+                          type: array
+                        description: Map of tool names to their installation scripts
+                        type: object
+                      custom_scanners:
+                        description: Scanner configurations by type
+                        items:
+                          description: 'Base class for all scanner plugins.
+
+
+                            Plugin implementations'
+                          properties:
+                            context:
+                              description: Context container for plugins to ensure consistent path information.
+                              properties:
+                                source_dir:
+                                  description: Source directory to scan
+                                  format: path
+                                  type: string
+                                output_dir:
+                                  description: Primary output directory for all ASH results
+                                  format: path
+                                  type: string
+                                work_dir:
+                                  description: Working directory for temporary files
+                                  format: path
+                                  type: string
+                                config:
+                                  type: object
+                                  x-kubernetes-preserve-unknown-fields: true
+                                ignore_suppressions:
+                                  description: Ignore all suppression rules
+                                  type: boolean
+                              required:
+                              - source_dir
+                              - output_dir
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                              nullable: true
+                            config:
+                              properties:
+                                name:
+                                  description: Name of the component using letters, numbers, underscores
+                                    and hyphens. Must begin with a letter.
+                                  minLength: 1
+                                  pattern: ^[a-zA-Z][\w-]+$
+                                  type: string
+                                enabled:
+                                  description: Whether the component is enabled
+                                  type: boolean
+                                options:
+                                  description: Scanner options
+                                  properties:
+                                    severity_threshold:
+                                      enum:
+                                      - ALL
+                                      - LOW
+                                      - MEDIUM
+                                      - HIGH
+                                      - CRITICAL
+                                      type: string
+                                      description: Minimum severity level to consider findings as failures.
+                                        This is a scanner-level override of the default severity-level
+                                        within ASH of MEDIUM.
+                                      nullable: true
+                                    scan_timeout:
+                                      minimum: 1
+                                      type: integer
+                                      description: Maximum time in seconds to allow this scanner's tool
+                                        invocation to run before it is killed. Set to null to leave the
+                                        scanner unbounded, which risks a scan that never completes.
+                                      nullable: true
+                                  type: object
+                                  x-kubernetes-preserve-unknown-fields: true
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                              nullable: true
+                            output:
+                              items:
+                                type: string
+                              type: array
+                            errors:
+                              items:
+                                type: string
+                              type: array
+                            results_dir:
+                              format: path
+                              type: string
+                              nullable: true
+                            tool_version:
+                              type: string
+                              nullable: true
+                            tool_description:
+                              type: string
+                              nullable: true
+                            dependencies_satisfied:
+                              type: boolean
+                            start_time:
+                              format: date-time
+                              type: string
+                              nullable: true
+                            end_time:
+                              format: date-time
+                              type: string
+                              nullable: true
+                            exit_code:
+                              type: integer
+                            use_uv_tool:
+                              description: Flag to indicate whether this scanner should use UV tool execution
+                                instead of direct command execution
+                              type: boolean
+                            command:
+                              type: string
+                              description: The command to invoke the scanner, typically the binary or
+                                path to a script
+                              nullable: true
+                            uv_tool_install_commands:
+                              description: List of UV tool install commands to execute for this scanner
+                              items:
+                                type: string
+                              type: array
+                            uv_tool_package_name:
+                              type: string
+                              nullable: true
+                            dependencies:
+                              additionalProperties:
+                                additionalProperties:
+                                  items:
+                                    properties:
+                                      name:
+                                        type: string
+                                      version:
+                                        type: string
+                                      package_manager:
+                                        enum:
+                                        - apt
+                                        - pip
+                                        - uv
+                                        - conda
+                                        - npm
+                                        - brew
+                                        - yum
+                                        - choco
+                                        - custom
+                                        - url
+                                        type: string
+                                    required:
+                                    - name
+                                    type: object
+                                  type: array
+                                type: object
+                              description: Dependencies by platform and architecture
+                              type: object
+                            custom_install_commands:
+                              additionalProperties:
+                                additionalProperties:
+                                  items:
+                                    properties:
+                                      args:
+                                        items:
+                                          type: string
+                                        type: array
+                                      shell:
+                                        type: boolean
+                                    required:
+                                    - args
+                                    type: object
+                                  type: array
+                                type: object
+                              description: Custom installation commands by platform and architecture
+                              type: object
+                            dependency_unavailable_reason:
+                              type: string
+                              description: Why this scanner cannot run, recorded during construction rather
+                                than raised from it. None when nothing blocks it.
+                              nullable: true
+                            tool_type:
+                              description: Type of scanner tool.
+                              enum:
+                              - SAST
+                              - DAST
+                              - SCA
+                              - IAC
+                              - SECRETS
+                              - CONTAINER
+                              - SBOM
+                              - CUSTOM
+                              - UNKNOWN
+                              type: string
+                            subcommands:
+                              description: Subcommands to include when invoking the scanner, e.g. ['scan']
+                                is needed as the subcommand for 'semgrep' as Semgrep supports multiple
+                                subcommands, but we are specifically interested in running a scan.
+                              items:
+                                type: string
+                              type: array
+                            args:
+                              description: Specialized arguments to pass to the scanner command. Includes
+                                an `extra_args` field which accepts a dictionary of arbitrary arguments
+                                to pass to the scanner. These are not configurable at scan time.
+                              properties:
+                                output_arg:
+                                  type: string
+                                  nullable: true
+                                scan_path_arg:
+                                  type: string
+                                  nullable: true
+                                format_arg:
+                                  type: string
+                                  nullable: true
+                                format_arg_value:
+                                  type: string
+                                  nullable: true
+                                extra_args:
+                                  items:
+                                    properties:
+                                      key:
+                                        type: string
+                                      value:
+                                        x-kubernetes-preserve-unknown-fields: true
+                                    required:
+                                    - key
+                                    type: object
+                                  type: array
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                            results_file:
+                              format: path
+                              type: string
+                              description: The path to the results file, if any. This is set by the scanner
+                                plugin after the scan is complete.
+                              nullable: true
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        type: array
+                    type: object
+                    nullable: true
+                  converters:
+                    properties:
+                      archive:
+                        description: Configure the options for the ArchiveConverter
+                        properties:
+                          name:
+                            enum:
+                            - archive
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties: {}
+                            type: object
+                            description: Configure Archive converter
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      jupyter:
+                        description: Configure the options for the JupyterConverter
+                        properties:
+                          name:
+                            enum:
+                            - jupyter
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              tool_version:
+                                type: string
+                                description: Version constraint for nbconvert tool installation (e.g.,
+                                  '>=7.16.0'). If not specified, the latest version will be installed.
+                                nullable: true
+                              install_timeout:
+                                description: 'Timeout in seconds for tool installation (default: 300)'
+                                type: integer
+                            type: object
+                            description: Configure Jupyter Notebook converter
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                    type: object
+                    description: Converter configurations by name.
+                    x-kubernetes-preserve-unknown-fields: true
+                  scanners:
+                    properties:
+                      bandit:
+                        properties:
+                          name:
+                            enum:
+                            - bandit
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: Path to Bandit configuration file, relative to current source
+                                  directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`,
+                                  and `bandit.toml` in the root of the source directory if this is left
+                                  empty.
+                                nullable: true
+                              confidence_level:
+                                description: Confidence level for Bandit findings
+                                enum:
+                                - all
+                                - low
+                                - medium
+                                - high
+                                type: string
+                              ignore_nosec:
+                                description: 'If True, do not skip lines with # nosec comments. Defaults
+                                  to False.'
+                                type: boolean
+                              excluded_paths:
+                                description: List of excluded paths and their corresponding reason to
+                                  exclude from scanning
+                                items:
+                                  description: Represents a path exclusion entry.
+                                  properties:
+                                    path:
+                                      description: Path or pattern to exclude
+                                      type: string
+                                    reason:
+                                      description: Reason for exclusion
+                                      type: string
+                                    expiration:
+                                      type: string
+                                      description: (Optional) Expiration date (YYYY-MM-DD)
+                                      nullable: true
+                                  required:
+                                  - path
+                                  - reason
+                                  type: object
+                                type: array
+                              additional_formats:
+                                description: List of additional formats to output
+                                items:
+                                  enum:
+                                  - csv
+                                  - custom
+                                  - html
+                                  - json
+                                  - sarif
+                                  - txt
+                                  - xml
+                                  - yaml
+                                  type: string
+                                type: array
+                              tool_version:
+                                type: string
+                                description: Specific version constraint for bandit installation (e.g.,
+                                  '>=1.7.0,<2.0.0')
+                                nullable: true
+                              install_timeout:
+                                description: Timeout in seconds for tool installation
+                                type: integer
+                            type: object
+                            description: Configure Bandit scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for Bandit
+                        x-kubernetes-preserve-unknown-fields: true
+                      cdk-nag:
+                        properties:
+                          name:
+                            enum:
+                            - cdk-nag
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            description: Configure Bandit scanner
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              nag_packs:
+                                properties:
+                                  AwsSolutionsChecks:
+                                    description: Runs the AwsSolutionsChecks NagPack included with CDK
+                                      Nag.
+                                    type: boolean
+                                  HIPAASecurityChecks:
+                                    description: Runs the HIPAASecurityChecks NagPack included with CDK
+                                      Nag.
+                                    type: boolean
+                                  NIST80053R4Checks:
+                                    description: Runs the NIST80053R4Checks NagPack included with CDK
+                                      Nag.
+                                    type: boolean
+                                  NIST80053R5Checks:
+                                    description: Runs the NIST80053R5Checks NagPack included with CDK
+                                      Nag.
+                                    type: boolean
+                                  PCIDSS321Checks:
+                                    description: Runs the PCIDSS321Checks NagPack included with CDK Nag.
+                                    type: boolean
+                                type: object
+                                description: CDK Nag packs to enable
+                                x-kubernetes-preserve-unknown-fields: true
+                              include_compliant_checks:
+                                description: Include INFO-level findings for compliant resources in the
+                                  report.
+                                type: boolean
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for CdkNag
+                        x-kubernetes-preserve-unknown-fields: true
+                      cfn-nag:
+                        properties:
+                          name:
+                            enum:
+                            - cfn-nag
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                            type: object
+                            description: Configure CFN Nag scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for CfnNag
+                        x-kubernetes-preserve-unknown-fields: true
+                      checkov:
+                        properties:
+                          name:
+                            enum:
+                            - checkov
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: Path to Checkov configuration file, relative to current source
+                                  directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml`
+                                  in the root of the source directory.
+                                nullable: true
+                              skip_path:
+                                description: Path (file or directory) to skip, using regular expression
+                                  logic, relative to current working directory. Word boundaries are not
+                                  implicit; i.e., specifying "dir1" will skip any directory or subdirectory
+                                  named "dir1". Ignored with -f. Can be specified multiple times.
+                                items:
+                                  description: Represents a path exclusion entry.
+                                  properties:
+                                    path:
+                                      description: Path or pattern to exclude
+                                      type: string
+                                    reason:
+                                      description: Reason for exclusion
+                                      type: string
+                                    expiration:
+                                      type: string
+                                      description: (Optional) Expiration date (YYYY-MM-DD)
+                                      nullable: true
+                                  required:
+                                  - path
+                                  - reason
+                                  type: object
+                                type: array
+                              additional_formats:
+                                description: List of additional formats to output. Defaults to including
+                                  CycloneDX JSON
+                                items:
+                                  enum:
+                                  - cli
+                                  - csv
+                                  - cyclonedx
+                                  - cyclonedx_json
+                                  - json
+                                  - junitxml
+                                  - github_failed_only
+                                  - gitlab_sast
+                                  - sarif
+                                  - spdx
+                                  type: string
+                                type: array
+                              offline:
+                                description: Run in offline mode, disabling policy downloads
+                                type: boolean
+                              frameworks:
+                                description: Specific frameworks to include with Checkov. Defaults to
+                                  `all`.
+                                items:
+                                  enum:
+                                  - all
+                                  - ansible
+                                  - argo_workflows
+                                  - arm
+                                  - azure_pipelines
+                                  - bicep
+                                  - bitbucket_pipelines
+                                  - cdk
+                                  - circleci_pipelines
+                                  - cloudformation
+                                  - dockerfile
+                                  - github_configuration
+                                  - github_actions
+                                  - gitlab_configuration
+                                  - gitlab_ci
+                                  - bitbucket_configuration
+                                  - helm
+                                  - json
+                                  - yaml
+                                  - kubernetes
+                                  - kustomize
+                                  - openapi
+                                  - sca_package
+                                  - sca_image
+                                  - secrets
+                                  - serverless
+                                  - terraform
+                                  - terraform_json
+                                  - terraform_plan
+                                  - sast
+                                  - sast_python
+                                  - sast_java
+                                  - sast_javascript
+                                  - sast_typescript
+                                  - sast_golang
+                                  - 3d_policy
+                                  type: string
+                                type: array
+                              skip_frameworks:
+                                description: Specific frameworks to exclude with Checkov. Defaults to
+                                  none.
+                                items:
+                                  enum:
+                                  - all
+                                  - ansible
+                                  - argo_workflows
+                                  - arm
+                                  - azure_pipelines
+                                  - bicep
+                                  - bitbucket_pipelines
+                                  - cdk
+                                  - circleci_pipelines
+                                  - cloudformation
+                                  - dockerfile
+                                  - github_configuration
+                                  - github_actions
+                                  - gitlab_configuration
+                                  - gitlab_ci
+                                  - bitbucket_configuration
+                                  - helm
+                                  - json
+                                  - yaml
+                                  - kubernetes
+                                  - kustomize
+                                  - openapi
+                                  - sca_package
+                                  - sca_image
+                                  - secrets
+                                  - serverless
+                                  - terraform
+                                  - terraform_json
+                                  - terraform_plan
+                                  - sast
+                                  - sast_python
+                                  - sast_java
+                                  - sast_javascript
+                                  - sast_typescript
+                                  - sast_golang
+                                  - 3d_policy
+                                  type: string
+                                type: array
+                              tool_version:
+                                type: string
+                                description: Specific version constraint for checkov installation (e.g.,
+                                  '>=3.2.0,<4.0.0')
+                                nullable: true
+                              install_timeout:
+                                description: Timeout in seconds for tool installation
+                                type: integer
+                            type: object
+                            description: Configure Checkov scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for Checkov
+                        x-kubernetes-preserve-unknown-fields: true
+                      detect-secrets:
+                        properties:
+                          name:
+                            enum:
+                            - detect-secrets
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              baseline_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: Path to detect-secrets baseline file, relative to current
+                                  source directory. Defaults to searching for `.secrets.baseline` in the
+                                  root of the source directory. The settings from the baseline will be
+                                  overwritten if scan_settings is provided.
+                                nullable: true
+                              scan_settings:
+                                properties:
+                                  version:
+                                    type: string
+                                    nullable: true
+                                  generated_at:
+                                    type: string
+                                    nullable: true
+                                  plugins_used:
+                                    items:
+                                      properties:
+                                        name:
+                                          type: string
+                                          nullable: true
+                                        limit:
+                                          type: number
+                                          nullable: true
+                                        keyword_exclude:
+                                          type: string
+                                          nullable: true
+                                      type: object
+                                      x-kubernetes-preserve-unknown-fields: true
+                                    type: array
+                                  filters_used:
+                                    items:
+                                      properties:
+                                        path:
+                                          type: string
+                                          nullable: true
+                                        min_level:
+                                          type: integer
+                                          nullable: true
+                                        keyword_exclude:
+                                          type: string
+                                          nullable: true
+                                      type: object
+                                      x-kubernetes-preserve-unknown-fields: true
+                                    type: array
+                                  results:
+                                    properties: {}
+                                    type: object
+                                    x-kubernetes-preserve-unknown-fields: true
+                                type: object
+                                description: Settings to use with detect-secrets. Refer to the detect-secrets
+                                  documentation for formatting information. By default, all plugins will
+                                  be used and no filters are configured. scan_settings takes precedence
+                                  over baseline_file
+                                x-kubernetes-preserve-unknown-fields: true
+                            type: object
+                            description: Configure detect-secrets scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for DetectSecrets
+                        x-kubernetes-preserve-unknown-fields: true
+                      grype:
+                        properties:
+                          name:
+                            enum:
+                            - grype
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: Path to Grype configuration file, relative to current source
+                                  directory. Defaults to searching for `.grype.yaml` and `.grype.yml`
+                                  in the root of the source directory.
+                                nullable: true
+                              offline:
+                                description: Run in offline mode, disabling database updates and validation
+                                type: boolean
+                            type: object
+                            description: Configure Grype scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for Grype
+                        x-kubernetes-preserve-unknown-fields: true
+                      npm-audit:
+                        properties:
+                          name:
+                            enum:
+                            - npm-audit
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              offline:
+                                description: Run in offline mode, using locally cached data
+                                type: boolean
+                            type: object
+                            description: Configure NpmAudit scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for NpmAudit
+                        x-kubernetes-preserve-unknown-fields: true
+                      opengrep:
+                        properties:
+                          name:
+                            enum:
+                            - opengrep
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              config:
+                                description: YAML configuration file, directory of YAML files ending in
+                                  .yml|.yaml, URL of a configuration file, or Opengrep registry entry
+                                  name. Defaults to 'p/ci' for consistent results across online and offline
+                                  modes.
+                                type: string
+                              exclude:
+                                description: Skip any file or directory whose path matches the pattern.
+                                items:
+                                  type: string
+                                type: array
+                              exclude_rule:
+                                description: Skip any rule with the given id.
+                                items:
+                                  type: string
+                                type: array
+                              severity:
+                                description: Report findings only from rules matching the supplied severity
+                                  level.
+                                items:
+                                  enum:
+                                  - INFO
+                                  - WARNING
+                                  - ERROR
+                                  type: string
+                                type: array
+                              metrics:
+                                description: Configures how usage metrics are sent to the OpenGrep server.
+                                  Deprecated in Opengrep v1.7.0+. This configuration is ignored if the
+                                  installed version is >= 1.7.0.
+                                enum:
+                                - auto
+                                - 'on'
+                                - 'off'
+                                type: string
+                              offline:
+                                description: Run in offline mode, using locally cached rules.
+                                type: boolean
+                              patterns:
+                                description: Patterns to search for with OpenGrep.
+                                items:
+                                  type: string
+                                type: array
+                              version:
+                                description: Version of OpenGrep to use.
+                                type: string
+                            type: object
+                            description: Configure Opengrep scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for Opengrep
+                        x-kubernetes-preserve-unknown-fields: true
+                      semgrep:
+                        properties:
+                          name:
+                            enum:
+                            - semgrep
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              config:
+                                description: YAML configuration file, directory of YAML files ending in
+                                  .yml|.yaml, URL of a configuration file, or Semgrep registry entry name.
+                                  Defaults to 'p/ci' for consistent results across online and offline
+                                  modes.
+                                type: string
+                              exclude:
+                                description: Skip any file or directory whose path matches the pattern.
+                                items:
+                                  type: string
+                                type: array
+                              exclude_rule:
+                                description: Skip any rule with the given id.
+                                items:
+                                  type: string
+                                type: array
+                              severity:
+                                description: Report findings only from rules matching the supplied severity
+                                  level.
+                                items:
+                                  enum:
+                                  - INFO
+                                  - WARNING
+                                  - ERROR
+                                  type: string
+                                type: array
+                              metrics:
+                                description: Configures how usage metrics are sent to the Semgrep server.
+                                enum:
+                                - auto
+                                - 'on'
+                                - 'off'
+                                type: string
+                              offline:
+                                description: Run in offline mode, using locally cached rules.
+                                type: boolean
+                              tool_version:
+                                type: string
+                                description: Specific version constraint for semgrep installation (e.g.,
+                                  '>=1.125.0')
+                                nullable: true
+                              install_timeout:
+                                description: Timeout in seconds for tool installation
+                                type: integer
+                            type: object
+                            description: Configure Semgrep scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for Semgrep
+                        x-kubernetes-preserve-unknown-fields: true
+                      syft:
+                        properties:
+                          name:
+                            enum:
+                            - syft
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              config_file:
+                                format: path
+                                type: string
+                                description: Path to Syft configuration file, relative to current source
+                                  directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in
+                                  the root of the source directory.
+                                nullable: true
+                              exclude:
+                                description: Path (file or directory) to skip, using regular expression
+                                  logic, relative to current working directory. Word boundaries are not
+                                  implicit; i.e., specifying "dir1" will skip any directory or subdirectory
+                                  named "dir1". Ignored with -f. Can be specified multiple times.
+                                items:
+                                  description: Represents a path exclusion entry.
+                                  properties:
+                                    path:
+                                      description: Path or pattern to exclude
+                                      type: string
+                                    reason:
+                                      description: Reason for exclusion
+                                      type: string
+                                    expiration:
+                                      type: string
+                                      description: (Optional) Expiration date (YYYY-MM-DD)
+                                      nullable: true
+                                  required:
+                                  - path
+                                  - reason
+                                  type: object
+                                type: array
+                              additional_outputs:
+                                description: List of additional formats to output. Defaults to syft-table.
+                                items:
+                                  enum:
+                                  - cyclonedx-json
+                                  - cyclonedx-xml
+                                  - github-json
+                                  - spdx-json
+                                  - spdx-tag-value
+                                  - syft-json
+                                  - syft-table
+                                  - syft-text
+                                  type: string
+                                type: array
+                              offline:
+                                description: Run in offline mode, disabling update checks
+                                type: boolean
+                            type: object
+                            description: Configure Syft scanner
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                        description: Configure the options for Syft
+                        x-kubernetes-preserve-unknown-fields: true
+                    type: object
+                    description: Scanner configurations by name.
+                    x-kubernetes-preserve-unknown-fields: true
+                  reporters:
+                    properties:
+                      csv:
+                        properties:
+                          name:
+                            enum:
+                            - csv
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties: {}
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the CSV reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      cyclonedx:
+                        properties:
+                          name:
+                            enum:
+                            - cyclonedx
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties: {}
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the CycloneDX reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      gitlab-cyclonedx:
+                        properties:
+                          name:
+                            enum:
+                            - gitlab-cyclonedx
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            description: Options for the gitlab-cyclonedx reporter.
+                            properties:
+                              category:
+                                description: Default dependency category injected as gitlab:dependency_scanning:category.
+                                  Typically 'production' or 'development'.
+                                type: string
+                              package_manager_override:
+                                type: string
+                                description: If set, overrides the auto-detected package manager name
+                                  for ALL components. Useful for single-ecosystem repos.
+                                nullable: true
+                              language_override:
+                                type: string
+                                description: If set, overrides the auto-detected language name for ALL
+                                  components.
+                                nullable: true
+                              input_file_path_override:
+                                type: string
+                                description: If set, overrides the auto-detected input file path for ALL
+                                  components. Useful when Syft reports absolute container paths that don't
+                                  match the repo layout.
+                                nullable: true
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the GitLab CycloneDX dependency scanning
+                          reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      html:
+                        properties:
+                          name:
+                            enum:
+                            - html
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties: {}
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the HTML reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      flat-json:
+                        description: Configure the options for the Flat JSON reporter
+                        properties:
+                          name:
+                            enum:
+                            - flat-json
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            description: Configuration options for the Flat JSON reporter.
+                            properties:
+                              include_scanner_metrics:
+                                type: boolean
+                              include_summary_metrics:
+                                type: boolean
+                              include_metadata:
+                                type: boolean
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      gitlab-sast:
+                        properties:
+                          name:
+                            enum:
+                            - gitlab-sast
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              exclude_suppressed:
+                                description: When true, suppressed findings are excluded entirely from
+                                  the GitLab SAST report. When false (default), suppressed findings are
+                                  included with Info severity and the suppression reason in the solution
+                                  field.
+                                type: boolean
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the GitLab SAST reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      github-ghas:
+                        properties:
+                          name:
+                            enum:
+                            - github-ghas
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              exclude_suppressed:
+                                description: When true (default), suppressed findings are excluded from
+                                  the GHAS report. GitHub has its own dismissal workflow so suppressed
+                                  findings are typically not needed.
+                                type: boolean
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the GitHub Advanced Security (GHAS) SARIF
+                          reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      junitxml:
+                        properties:
+                          name:
+                            enum:
+                            - junitxml
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              respect_severity_threshold:
+                                type: boolean
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the JUnit XML reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      markdown:
+                        description: Configure the options for the Markdown reporter
+                        properties:
+                          name:
+                            enum:
+                            - markdown
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            description: Configuration options for the Markdown reporter.
+                            properties:
+                              include_summary:
+                                type: boolean
+                              include_findings_table:
+                                type: boolean
+                              include_detailed_findings:
+                                type: boolean
+                              max_detailed_findings:
+                                type: integer
+                              top_hotspots_limit:
+                                type: integer
+                              use_collapsible_details:
+                                type: boolean
+                              compact:
+                                type: boolean
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      ocsf:
+                        properties:
+                          name:
+                            enum:
+                            - ocsf
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties: {}
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the OCSF reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      sarif:
+                        properties:
+                          name:
+                            enum:
+                            - sarif
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties: {}
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the SARIF reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      spdx:
+                        properties:
+                          name:
+                            enum:
+                            - spdx
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties: {}
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the SPDX reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                      text:
+                        description: Configure the options for the Text reporter
+                        properties:
+                          name:
+                            enum:
+                            - text
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            description: Configuration options for the Text reporter.
+                            properties:
+                              include_summary:
+                                type: boolean
+                              include_findings_table:
+                                type: boolean
+                              include_detailed_findings:
+                                type: boolean
+                              max_detailed_findings:
+                                type: integer
+                              top_hotspots_limit:
+                                type: integer
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      yaml:
+                        properties:
+                          name:
+                            enum:
+                            - yaml
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties: {}
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        description: Configure the options for the YAML reporter
+                        x-kubernetes-preserve-unknown-fields: true
+                    type: object
+                    description: Reporter configurations by name.
+                    x-kubernetes-preserve-unknown-fields: true
+                  mcp-resource-management:
+                    description: Configuration for MCP server resource management and limits
+                    properties:
+                      max_concurrent_scans:
+                        description: Maximum number of concurrent scans allowed
+                        maximum: 10
+                        minimum: 1
+                        type: integer
+                      max_concurrent_tasks:
+                        description: Maximum number of concurrent async tasks allowed
+                        maximum: 50
+                        minimum: 1
+                        type: integer
+                      thread_pool_max_workers:
+                        description: Maximum number of worker threads in the shared thread pool
+                        maximum: 20
+                        minimum: 1
+                        type: integer
+                      scan_timeout_seconds:
+                        description: Maximum time allowed for a single scan operation in seconds
+                        maximum: 7200
+                        minimum: 60
+                        type: integer
+                      operation_timeout_seconds:
+                        description: Default timeout for general operations in seconds
+                        maximum: 600
+                        minimum: 30
+                        type: integer
+                      shutdown_timeout_seconds:
+                        description: Maximum time to wait for graceful shutdown in seconds
+                        maximum: 300
+                        minimum: 5
+                        type: integer
+                      memory_warning_threshold_mb:
+                        description: Memory usage threshold in MB that triggers warnings
+                        maximum: 8192
+                        minimum: 100
+                        type: integer
+                      memory_critical_threshold_mb:
+                        description: Memory usage threshold in MB that triggers protective actions
+                        maximum: 16384
+                        minimum: 200
+                        type: integer
+                      task_count_warning_threshold:
+                        description: Active task count that triggers warnings
+                        maximum: 100
+                        minimum: 5
+                        type: integer
+                      max_message_size_bytes:
+                        description: Maximum size of MCP messages in bytes
+                        maximum: 104857600
+                        minimum: 1024
+                        type: integer
+                      max_path_length:
+                        description: Maximum allowed path length for security validation
+                        maximum: 8192
+                        minimum: 256
+                        type: integer
+                      max_directory_size_mb:
+                        description: Maximum directory size in MB that can be scanned
+                        maximum: 10240
+                        minimum: 10
+                        type: integer
+                      enable_health_checks:
+                        description: Enable periodic health checks and resource monitoring
+                        type: boolean
+                      health_check_interval_seconds:
+                        description: Interval between health checks in seconds
+                        maximum: 300
+                        minimum: 10
+                        type: integer
+                      enable_resource_logging:
+                        description: Enable detailed resource management logging
+                        type: boolean
+                      log_resource_operations:
+                        description: Log individual resource operations for debugging
+                        type: boolean
+                    type: object
+                  workspace:
+                    description: Workspace-mode execution settings. Read from the config resolved for
+                      the workspace root; a project's own copy of this block is ignored, because how many
+                      projects run at once is not a project's decision.
+                    properties:
+                      max_parallel_projects:
+                        maximum: 64
+                        minimum: 1
+                        type: integer
+                        description: Maximum number of projects scanned concurrently. Unset means min(4,
+                          cpu_count). This is an outer bound over each project's own scanner thread pool,
+                          not a replacement for it.
+                        nullable: true
+                      project_timeout:
+                        minimum: 0
+                        exclusiveMinimum: true
+                        type: number
+                        description: Seconds to allow a single project. Unset means no limit. On timeout
+                          that project is recorded as failed and the remaining projects still complete.
+                        nullable: true
+                    type: object
+                type: object
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+            properties:
+              phase:
+                type: string
+                enum:
+                - Pending
+                - Scanning
+                - Merging
+                - Succeeded
+                - Failed
+                - Refused
+                description: Refused is distinct from Failed. Failed means the scan ran and the findings
+                  crossed the threshold, which is an answer. Refused means the operator does not have
+                  an answer and is declining to synthesise one -- a missing shard, a merge that wrote
+                  no report, or a collector summary it could not read.
+              shardCount:
+                type: integer
+              resultsPrefix:
+                type: string
+              resultsClaimName:
+                type: string
+              configMapName:
+                type: string
+              shardJobName:
+                type: string
+              collectJobName:
+                type: string
+              incompleteScanners:
+                type: array
+                items:
+                  type: string
+              scannerCompleteness:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    status:
+                      type: string
+                    completeness:
+                      type: string
+                      enum:
+                      - Complete
+                      - Incomplete
+                      - Unknown
+                    owningShardIndex:
+                      type: integer
+                    dependenciesSatisfied:
+                      type: boolean
+                    findingCount:
+                      type: integer
+                    actionableFindingCount:
+                      type: integer
+              merge:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              findings:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              shardPods:
+                type: array
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+        required:
+        - spec
