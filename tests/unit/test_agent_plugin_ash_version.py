@@ -895,6 +895,24 @@ class TestCommitizenMaintainsTheReferences:
             f"trees stale, failing the drift gate. Current hooks: {hooks}"
         )
 
+    def test_a_bump_re_renders_the_quick_create_links(self):
+        """The same chain for the CDK templates' AshVersion default.
+
+        version_files rewrites that default in each committed template, and
+        deploy/quick-create-links.md tabulates it. The document has a .template
+        sibling, so it cannot be a version_files target itself; it has to be
+        re-rendered after the templates move, or the IaC drift workflow, which
+        renders it and fails on any diff, goes red on the bump commit.
+        """
+        hooks = _commitizen_settings().get("pre_bump_hooks") or []
+
+        assert any("render_quick_create_links.py render" in hook for hook in hooks), (
+            "No [tool.commitizen] pre_bump_hooks entry runs "
+            "`render_quick_create_links.py render`, so `cz bump` would move the CDK "
+            "templates' AshVersion default and leave deploy/quick-create-links.md "
+            f"on the old one. Current hooks: {hooks}"
+        )
+
     def test_the_two_pyproject_version_fields_agree(self):
         """`[project]` and `[tool.commitizen]` both carry a version.
 
