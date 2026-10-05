@@ -172,7 +172,9 @@ def analyze_sarif_fields(
     # Find all SARIF files in the specified patterns
     all_sarif_files = []
     for pattern in search_patterns:
-        all_sarif_files.extend(glob.glob(pattern, recursive=True))
+        # glob returns directory order, which varies by filesystem; sort so the
+        # JSON and CSV outputs list fields and scanners in the same order everywhere.
+        all_sarif_files.extend(sorted(glob.glob(pattern, recursive=True)))
 
     if not all_sarif_files:
         console.print(f"[bold red]No SARIF files found in {sarif_dir}[/bold red]")
@@ -269,7 +271,7 @@ def analyze_sarif_fields(
     for field_name, scanners in results_dict.items():
         field_presence[field_name] = {
             "type": ["unknown"],  # We don't have type information
-            "scanners": list(scanners.keys()),
+            "scanners": sorted(scanners.keys()),
             "in_aggregate": "ash-aggregated" in scanners or "ash" in scanners,
             "intentionally_excluded": False,
         }
@@ -278,7 +280,7 @@ def analyze_sarif_fields(
     for field_name, scanners in excluded_dict.items():
         field_presence[field_name] = {
             "type": ["unknown"],
-            "scanners": list(scanners.keys()),
+            "scanners": sorted(scanners.keys()),
             "in_aggregate": "ash-aggregated" in scanners or "ash" in scanners,
             "intentionally_excluded": True,
         }
@@ -305,7 +307,9 @@ def analyze_sarif_fields(
     for scanners in excluded_dict.values():
         all_scanners.update(scanners.keys())
 
-    for scanner in all_scanners:
+    # Sorted: all_scanners is a set, and this loop's order becomes the order of
+    # the scanner sections in the HTML report.
+    for scanner in sorted(all_scanners):
         # Count fields for this scanner
         scanner_fields = [
             field for field, scanners in results_dict.items() if scanner in scanners

@@ -432,8 +432,9 @@ def generate_html_report(
                 else:
                     all_fields[path]["scanners"].add(scanner)
 
-    # Add scanner sections
-    for scanner, stats in validation_results["match_statistics"].items():
+    # Add scanner sections. Sorted by name: callers build match_statistics from
+    # set iteration, so its insertion order changes with PYTHONHASHSEED.
+    for scanner, stats in sorted(validation_results["match_statistics"].items()):
         html.append("    <div class='scanner'>")
         html.append("      <div class='scanner-header'>")
         html.append(f"        <h3>{scanner}</h3>")
@@ -516,7 +517,7 @@ def generate_html_report(
     html.append("        <th>Informational Missing</th>")
     html.append("      </tr>")
 
-    for scanner, stats in validation_results["match_statistics"].items():
+    for scanner, stats in sorted(validation_results["match_statistics"].items()):
         match_rate = stats["field_preservation_rate"] * 100
         html.append("      <tr>")
         html.append(f"        <td>{scanner}</td>")
@@ -632,7 +633,7 @@ def generate_html_report(
                 )
 
     # Sort fields by path for better readability
-    for path in sorted(all_fields_by_path.keys()):
+    for row_index, path in enumerate(sorted(all_fields_by_path.keys())):
         info = all_fields_by_path[path]
         scanners_list = ", ".join(sorted(info["scanners"]))
 
@@ -656,7 +657,9 @@ def generate_html_report(
         example_file = ".ash/ash_output/reports/ash.sarif"
 
         if info["scanners"]:
-            for scanner in info["scanners"]:
+            # A set: iterate it sorted so the example names the same scanner on
+            # every run.
+            for scanner in sorted(info["scanners"]):
                 if scanner != "ash-aggregated":
                     example_file = f".ash/ash_output/scanners/{scanner}/**/*.sarif"
                     break
@@ -666,8 +669,10 @@ def generate_html_report(
 
         jq_command = f"jq '{jq_query}' {example_file}"
 
-        # Create a unique ID for this field's JQ query
-        field_id = f"jq-{abs(hash(path)) % 10000000}"
+        # Create a unique ID for this field's JQ query. The row index is unique by
+        # construction and stable across runs; hash(path) was neither, since
+        # string hashing is randomized per process.
+        field_id = f"jq-{row_index}"
 
         # Add row to table
         html.append("      <tr>")
