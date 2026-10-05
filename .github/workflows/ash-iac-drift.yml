@@ -189,6 +189,7 @@ jobs:
             echo "| cdk-nag | \`deploy/cdk/cdk.json\` | \`$cdk\` |"
             echo "| Generated buildspec drift | \`deploy/cdk-constructs/package.json\` | \`$constructs\` |"
             echo "| Terraform hygiene | \`deploy/terraform/**/*.tf\` | \`$terraform\` |"
+            echo "| CFN <-> Terraform equivalence | both of the above | \`$([ "$cdk" = true ] && [ "$terraform" = true ] && echo true || echo false)\` |"
             echo
             echo "A \`false\` row means that tree has not landed on this ref yet and its"
             echo "check was skipped. It does not mean the check passed."
@@ -793,6 +794,118 @@ jobs:
           bash "$SCRIPT"
 
   # ---------------------------------------------------------------------------
+  # CloudFormation <-> Terraform equivalence.
+  #
+  # Every other job in this file checks ONE representation against its own
+  # source: the templates must match a fresh cdk synth, the buildspecs must
+  # match their generator, the Terraform must format and validate. None of them
+  # compares the two representations to EACH OTHER, and deploy/ ships two
+  # independent implementations of the same five deployment targets.
+  #
+  # So the gap this closes is specific: a resource added to the CDK app appears
+  # in the template, the template is regenerated, cdk-template-drift goes green
+  # because the committed file matches the app -- and the Terraform module
+  # silently no longer describes the same deployment. Every check above passes.
+  # An adopter who chose Terraform gets a deployment missing whatever was added.
+  #
+  # Needs both trees, so it is conditional on both. It is NOT folded into the
+  # terraform-hygiene job: that job's verdict is about Terraform being valid on
+  # its own terms, and a comparison failure is a different claim that deserves
+  # its own red check rather than being buried in one.
+  #
+  # Offline, like everything else here: it reads the committed templates and the
+  # committed .tf files. No node, no terraform binary, no credentials, no
+  # network. That is why it has no setup step beyond the checkout.
+  #
+  # WHAT IT DOES NOT CATCH is documented at length in the script's own module
+  # docstring and summarized in deploy/README.md. The short version, because a
+  # reader of this file should not have to open another one to know what a green
+  # check here means: it compares which KINDS of resource each side provisions,
+  # not their properties, not their counts, and not whether they are the same
+  # named resource. Two sides that both declare an S3 bucket match here even if
+  # one encrypts it with a customer-managed key and the other does not.
+  #
+  # The five pairs DO diverge today. Every divergence is itemized in the
+  # script's BASELINE with the reason it exists, one entry per pair per kind and
+  # no wildcards, so this job is green on the current tree and red on anything
+  # new. A baseline entry that stops matching also turns it red -- without that,
+  # the baseline stops describing the tree and becomes the blanket exclusion it
+  # was written to avoid. The script distinguishes "both sides declare it now"
+  # (fixed, delete the entry) from "neither side does" (NOT fixed -- consistent
+  # with a deletion the entry is the last record of) because those call for
+  # opposite actions.
+  #
+  # Stacks are discovered by globbing deploy/cdk/templates, not from the pair
+  # table. That matters: while the pair table was the only list of stacks, a
+  # sixth committed template was never opened and the job still reported no
+  # divergence. Every template must now be named in PAIRS or in
+  # STACKS_WITHOUT_TERRAFORM, so a stack with no Terraform counterpart is a
+  # reasoned entry rather than a silent omission.
+  #
+  # tests/unit/test_iac_equivalence_gate.py holds this up from the other side.
+  # It plants divergences in a scratch copy and requires each one to be
+  # rejected, and every one of those tests first asserts that its mutation
+  # changed the PARSED representation -- because a mutation that only changes
+  # file text leaves this check green, which would make a test asserting only
+  # "it failed" prove nothing at all.
+  # ---------------------------------------------------------------------------
+  iac-equivalence:
+    name: cfn/terraform equivalence
+    needs: discover
+    if: needs.discover.outputs.cdk == 'true' && needs.discover.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Named explicitly rather than left to a "file not found" traceback. A
+      # missing checker is a gap in coverage, and this job must not be the one
+      # place in the workflow where an absent check reads as a passing one.
+      - name: Require the equivalence checker
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT=deploy/tests/iac-equivalence.py
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error file=$SCRIPT::$SCRIPT is missing, so nothing compared the CloudFormation templates against the Terraform modules. Both trees are present on this ref, so this is a missing check rather than a tree that has not landed."
+            exit 1
+          fi
+          echo "$SCRIPT present"
+
+      - name: Compare the CloudFormation templates against the Terraform modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Piping this anywhere would replace the script's exit status with the
+          # last command in the pipeline, which is how a red gate reports green.
+          python3 deploy/tests/iac-equivalence.py
+
+      # The census is the evidence for this job's verdict, so it goes in the run
+      # summary rather than only into a collapsed log. Re-run rather than teed
+      # from the step above, because teeing is what would have masked the exit
+      # code there. Failure only: on a green run the log is enough, and this
+      # would double the output of every passing build.
+      - name: Record the census in the run summary
+        if: failure()
+        shell: bash
+        run: |
+          set -uo pipefail
+          {
+            echo "### CloudFormation <-> Terraform equivalence"
+            echo
+            echo '```'
+            python3 deploy/tests/iac-equivalence.py 2>&1 || true
+            echo '```'
+            echo
+            echo "This check compares which **kinds** of resource each representation"
+            echo "provisions. It does not compare properties, counts, or named resources."
+            echo "See the 'WHAT THIS CHECK DOES NOT CATCH' section of"
+            echo "\`deploy/tests/iac-equivalence.py\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
   # cdk-nag, failing on any unsuppressed finding.
   #
   # cdk-nag is an ASPECT, not a validation plugin, and that one fact determines
@@ -1363,7 +1476,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # One stable name for branch protection to require.
   #
-  # The four checks above are conditional, and a required check that is skipped
+  # The five checks above are conditional, and a required check that is skipped
   # never reports, which parks a pull request instead of passing it. This job
   # always runs, so it always reports, and it turns "skipped because the tree has
   # not landed" into a pass while turning any real failure into a failure.
@@ -1376,6 +1489,7 @@ jobs:
       - cdk-template-drift
       - generated-buildspec-drift
       - terraform-hygiene
+      - iac-equivalence
       - cdk-nag
     runs-on: ubuntu-latest
     timeout-minutes: 5
