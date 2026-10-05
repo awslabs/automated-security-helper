@@ -10,15 +10,15 @@
 #
 # WHAT A PASSING SCAN MEANS HERE
 #
-# `ashx scan` exits 0 when it finds nothing and 2 when it finds something, because
-# fail_on_findings defaults to true. On a fixture planted with a secret, 0 is therefore
-# the FAILING outcome, and 1 is an execution error. So the scan must exit exactly 2, the
-# SARIF report and ash_aggregated_results.json must both exist, and
-# packaging/assert-scan-findings.py must find at least one result attributed to
-# detect-secrets. Each of those is a separate check because each one has failed
-# independently of the others somewhere in this repository's history: an earlier
-# version of these scripts captured the exit code into SCAN_RC and never compared it
-# to anything.
+# Each install and each upgrade runs the three shared e2e cases from
+# tests/e2e/fixtures/cases.json and judges them with scripts/e2e/assert_outcome.py:
+# the planted secret must exit exactly 2 with exactly three results attributed to
+# detect-secrets, the clean tree must exit exactly 0, and the incomplete case must exit
+# exactly 1 with opengrep named incomplete in ash_aggregated_results.json. Both report
+# files must exist at their exact paths. Each of those is a separate check because each
+# one has failed independently of the others somewhere in this repository's history:
+# an earlier version of these scripts captured the exit code into SCAN_RC and never
+# compared it to anything, and a later one checked only that a clean scan was "not 2".
 #
 # Callers must set REPO (the repository root) before sourcing.
 
@@ -222,124 +222,200 @@ vl_assert_installed_version() {
 }
 
 # --------------------------------------------------------------------------
-# The scan.
+# The scans: the shared e2e cases, judged by the shared e2e verdict.
 # --------------------------------------------------------------------------
+#
+# The fixtures, the scanner selection, the per-case arguments and environment, and the
+# expected outcome of each case all come from tests/e2e/fixtures/cases.json, and the
+# verdict is scripts/e2e/assert_outcome.py, the one every other install channel uses.
+# Nothing about what a passing scan means is restated here, so this channel cannot
+# come to check less than its siblings. The three cases are:
+#
+#   findings    exit exactly 2, exactly 3 actionable results, attributed to
+#               detect-secrets
+#   clean       exit exactly 0, no results
+#   incomplete  exit exactly 1, with opengrep MISSING or ERROR in the aggregated
+#               results (the measured trigger in tests/e2e/README.md), so a crash
+#               cannot pass as "incomplete"
+#
+# assert_outcome.py is standard-library Python. It runs under the harness interpreter
+# uv provides, never under the package's venv, so a broken venv cannot judge itself.
 
-# $1: "secret" plants AWS's published example key, which detect-secrets reports and
-#     which is non-functional by construction. "clean" plants nothing to find.
-vl_make_fixture() {
-  rm -rf "$FIXTURE_DIR"
-  mkdir -p "$FIXTURE_DIR"
-  if [ "$1" = clean ]; then
-    printf 'print("hello")\n' > "$FIXTURE_DIR/leak.py"
-  else
-    cat > "$FIXTURE_DIR/leak.py" <<'PY'
-# Fixture for packaging verification. Not a real credential.
-AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+VL_CASES="$REPO/tests/e2e/fixtures/cases.json"
+VL_ASSERT_OUTCOME="$REPO/scripts/e2e/assert_outcome.py"
+SCAN_LOG=/tmp/ash-scan.log
+
+# Prints one field of case $1, read through assert_outcome.load_case so a case that
+# does not exist fails here the same way it fails the verdict:
+#   source     the fixture directory name under tests/e2e/fixtures
+#   scan-args  --scanners and the case's own args, shell-quoted
+#   env        the case's environment as shell-quoted NAME=VALUE words
+vl_case_field() {
+  vl_gate_python - "$REPO/scripts/e2e" "$VL_CASES" "$1" "$2" <<'PY'
+import shlex
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+import assert_outcome  # noqa: E402
+
+case = assert_outcome.load_case(Path(sys.argv[2]), sys.argv[3])
+field = sys.argv[4]
+args = case.get("args") or []
+env = case.get("env") or {}
+if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+    sys.exit(f"the case's args must be a list of strings, not {args!r}")
+if not isinstance(env, dict):
+    sys.exit(f"the case's env must be an object, not {env!r}")
+if field == "source":
+    print(case["source"])
+elif field == "scan-args":
+    words = ["--scanners", ",".join(case["scanners"]), *args]
+    print(" ".join(shlex.quote(w) for w in words))
+elif field == "env":
+    print(" ".join(shlex.quote(f"{k}={v}") for k, v in sorted(env.items())))
+else:
+    sys.exit(f"unknown case field {field}")
 PY
-  fi
-  # Root-owned and unwritable by the scanning user. ASH's default output directory is
-  # inside the scanned tree, so a scan of a checkout the user does not own fails while
-  # writing reports; scanning as root would hide that.
-  chmod 0755 "$FIXTURE_DIR"
-  chmod 0644 "$FIXTURE_DIR/leak.py"
+}
+
+# Copies case $1's fixture to $FIXTURE_DIR, root-owned and unwritable by the scanning
+# user. ASH's default output directory is inside the scanned tree, so a scan of a
+# checkout the user does not own fails while writing reports; scanning as root, or a
+# tree the user owns, would hide that.
+vl_make_fixture() {
+  local source
+  source="$(vl_case_field "$1" source)" || vl_fail "cannot read case $1 from $VL_CASES"
+  [ -d "$REPO/tests/e2e/fixtures/$source" ] || vl_fail "case $1 names fixture $source, which does not exist"
+  rm -rf "$FIXTURE_DIR"
+  cp -R "$REPO/tests/e2e/fixtures/$source" "$FIXTURE_DIR"
+  chown -R 0:0 "$FIXTURE_DIR"
+  chmod -R u=rwX,go=rX "$FIXTURE_DIR"
   id -u "$SCAN_USER" >/dev/null 2>&1 || useradd --create-home "$SCAN_USER"
-  rm -rf "$SCAN_OUT"
-  install -d -o "$SCAN_USER" -g "$SCAN_USER" -m 0755 "$SCAN_OUT"
   # A read must succeed before a failed write means anything: `su ... test -w` also
   # fails when su itself is broken.
-  su -s /bin/sh "$SCAN_USER" -c "test -r $FIXTURE_DIR/leak.py" \
-    || vl_fail "$SCAN_USER cannot read the fixture, so su or the fixture is broken"
+  su -s /bin/sh "$SCAN_USER" -c "ls -A $FIXTURE_DIR | grep -q . && test -r $FIXTURE_DIR" \
+    || vl_fail "$SCAN_USER cannot list a non-empty $FIXTURE_DIR, so su or the fixture is broken"
   if su -s /bin/sh "$SCAN_USER" -c "test -w $FIXTURE_DIR"; then
     vl_fail "$FIXTURE_DIR is writable by $SCAN_USER, so the read-only-source case is not exercised"
   fi
 }
 
-# Runs the scan as $SCAN_USER and sets SCAN_RC. Extra arguments go to `ashx scan`.
-#
-# --scanners detect-secrets because it is the one default scanner that arrives with ASH
-# itself (a [project] dependency driven in process); the rest are recorded SKIPPED
-# rather than reported MISSING for tools this container never had.
+# Runs case $1 over $FIXTURE_DIR as $SCAN_USER, with the case's scanners, args and
+# environment, and sets SCAN_RC and SCAN_CASE. Further arguments are appended to
+# `ashx scan` after the case's own; the negative controls use that.
 vl_scan() {
-  local extra="$*"
+  local case="$1" scan_args env_words extra=""
+  shift
+  scan_args="$(vl_case_field "$case" scan-args)" || vl_fail "cannot read case $case's scan arguments"
+  env_words="$(vl_case_field "$case" env)" || vl_fail "cannot read case $case's environment"
+  if [ "$#" -gt 0 ]; then
+    extra="$(printf ' %q' "$@")"
+  fi
+  rm -rf "$SCAN_OUT"
+  install -d -o "$SCAN_USER" -g "$SCAN_USER" -m 0755 "$SCAN_OUT"
+  vl_say "   [$case] ${env_words:+$env_words }$ASH_CLI_NAME scan --source-dir $FIXTURE_DIR --output-dir $SCAN_OUT --no-progress $scan_args$extra"
   set +e
   su -s /bin/bash "$SCAN_USER" -c \
-    "cd /tmp && $ASH_CLI_NAME scan --source-dir '$FIXTURE_DIR' --output-dir '$SCAN_OUT' \
-       --scanners detect-secrets --no-progress $extra" >/tmp/ash-scan.log 2>&1
+    "cd /tmp && env $env_words $ASH_CLI_NAME scan --source-dir '$FIXTURE_DIR' --output-dir '$SCAN_OUT' \
+       --no-progress $scan_args$extra" >"$SCAN_LOG" 2>&1
   SCAN_RC=$?
   set -e
-  tail -n 3 /tmp/ash-scan.log
-  vl_say "   $ASH_CLI_NAME scan rc=$SCAN_RC"
+  SCAN_CASE="$case"
+  tail -n 3 "$SCAN_LOG"
+  vl_say "   [$case] $ASH_CLI_NAME scan rc=$SCAN_RC"
 }
 
-# The exit-code gate. Returns non-zero rather than exiting, so the negative control can
-# observe it firing.
-vl_check_scan_rc() {
-  if [ "$SCAN_RC" -ne 2 ]; then
-    printf 'FAIL: %s scan exited %s on a fixture planted with a secret; 2 (findings) is the only passing value.\n' \
-      "$ASH_CLI_NAME" "$SCAN_RC" >&2
-    printf 'FAIL: 0 means nothing was reported as actionable and 1 means the scan did not complete.\n' >&2
-    tail -n 40 /tmp/ash-scan.log >&2
-    return 1
+# Judges the last scan's exit code and output directory as case $1 with
+# assert_outcome.py; further arguments override the case's expectations. Returns the
+# verdict's exit code (0 match, 1 mismatch, 3 usage error) rather than exiting, so a
+# negative control can observe a rejection.
+vl_assert_case() {
+  local case="$1"
+  shift
+  vl_gate_python "$VL_ASSERT_OUTCOME" --cases "$VL_CASES" --case "$case" \
+    --rc "$SCAN_RC" --output-dir "$SCAN_OUT" "$@"
+}
+
+# One case end to end: fixture, scan, verdict. Exits on a mismatch.
+vl_scan_and_assert_case() {
+  vl_make_fixture "$1"
+  vl_scan "$1"
+  if ! vl_assert_case "$1"; then
+    tail -n 40 "$SCAN_LOG" >&2
+    vl_fail "the $1 case did not produce its expected outcome"
   fi
-  return 0
 }
 
-vl_check_reports() {
-  local sarif="$SCAN_OUT/reports/ash.sarif" aggregated="$SCAN_OUT/ash_aggregated_results.json"
-  [ -f "$sarif" ] || vl_fail "no SARIF report at $sarif"
-  [ -f "$aggregated" ] || vl_fail "no aggregated results at $aggregated"
-  vl_gate_python -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$aggregated" \
-    || vl_fail "$aggregated is not valid JSON"
-  vl_say "   reports present: reports/ash.sarif, ash_aggregated_results.json"
-}
-
-vl_check_findings() {
-  vl_gate_python "$REPO/packaging/assert-scan-findings.py" "$SCAN_OUT/reports/ash.sarif" \
-    --minimum 1 --require-scanner detect-secrets
-}
-
-# The full positive check: planted secret, exit 2, both reports, attributed findings.
+# The full positive check: all three cases, so every install and every upgrade is
+# shown producing exit 2, exit 0 and exit 1, each for its own reason.
 vl_scan_and_assert() {
-  vl_make_fixture secret
-  vl_scan
-  vl_check_scan_rc || exit 1
-  vl_check_reports
-  vl_check_findings || vl_fail "the findings gate rejected the scan"
+  local case
+  for case in findings clean incomplete; do
+    vl_scan_and_assert_case "$case"
+  done
 }
 
 # --------------------------------------------------------------------------
 # Negative controls: each check above must be seen failing on a real install.
 # --------------------------------------------------------------------------
 
-# The finding removed from the fixture. The scan exits 0, and the findings gate must
-# reject the report.
-vl_negative_findings() {
-  vl_make_fixture clean
-  vl_scan
-  local rc=0
-  vl_check_findings || rc=$?
-  if [ "$rc" -eq 0 ]; then
-    vl_fail "NEGATIVE CONTROL: the findings gate ACCEPTED a scan of a fixture with nothing to find"
+# Requires the verdict to REJECT the last scan judged as case $1: exit 1, not 0 and not
+# 3 (a usage error proves nothing about the scan). $2 is the exact number of problems
+# it must report, or `any`; each further argument is a problem text the rejection
+# must contain, so the control shows the check it is aimed at firing, not some other.
+vl_require_rejection() {
+  local case="$1" want_count="$2" out rc=0 count text
+  shift 2
+  out="$(vl_assert_case "$case" 2>&1)" || rc=$?
+  printf '%s\n' "$out" | sed 's/^/   | /'
+  [ "$rc" -eq 1 ] \
+    || vl_fail "NEGATIVE CONTROL: the verdict exited $rc judging the $SCAN_CASE scan as the $case case; 1 (rejected) was required"
+  count="$(grep -c '^::error::' <<<"$out" || true)"
+  if [ "$want_count" != any ] && [ "$count" -ne "$want_count" ]; then
+    vl_fail "NEGATIVE CONTROL: the verdict reported $count problems; exactly $want_count was required, so a check other than the one under test fired"
   fi
-  vl_say "   OK: the findings gate rejected a scan that found nothing (exit $rc)"
-  rc=0
-  vl_check_scan_rc 2>/dev/null || rc=$?
-  [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the exit-code gate accepted rc=$SCAN_RC on a clean fixture"
-  vl_say "   OK: the exit-code gate also rejected rc=$SCAN_RC"
+  for text in "$@"; do
+    grep -qF -- "$text" <<<"$out" \
+      || vl_fail "NEGATIVE CONTROL: the rejection does not name the problem under test: $text"
+  done
+  vl_say "   OK: the verdict rejected the $SCAN_CASE scan judged as $case ($count problem(s))"
+}
+
+# The finding removed from the fixture. The clean scan must itself be exactly right
+# (exit 0, nothing found), and the same real output judged as the findings case must
+# be rejected on both the exit code and the finding count.
+vl_negative_findings() {
+  vl_scan_and_assert_case clean
+  vl_require_rejection findings any \
+    "exit code 0 (nothing actionable), expected exactly 2" \
+    "0 actionable SARIF results, expected exactly 3"
 }
 
 # The secret is still there and still reported, but the scan is told not to fail on
-# findings, so it exits 0 with a populated report. The findings gate passes; the
-# exit-code gate is the only thing that can catch this, and it must.
+# findings, so it exits 0 with a populated report. The count and attribution checks
+# pass, so the exit-code check is the only thing that can catch this: the rejection
+# must name it and nothing else.
 vl_negative_scan_rc() {
-  vl_make_fixture secret
-  vl_scan --no-fail-on-findings
-  vl_check_findings || vl_fail "NEGATIVE CONTROL setup: the findings gate should PASS here, so that only the exit-code gate is under test"
-  local rc=0
-  vl_check_scan_rc || rc=$?
-  [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the exit-code gate ACCEPTED rc=$SCAN_RC with findings present"
-  vl_say "   OK: the exit-code gate rejected rc=$SCAN_RC although the report had findings"
+  vl_make_fixture findings
+  vl_scan findings --no-fail-on-findings
+  [ "$SCAN_RC" -eq 0 ] || vl_fail "NEGATIVE CONTROL setup: --no-fail-on-findings exited $SCAN_RC, not 0"
+  vl_require_rejection findings 1 "exit code 0 (nothing actionable), expected exactly 2"
+}
+
+# Exit 1 must be told apart from exit 2 in both directions. The real incomplete output
+# judged as the findings case must be rejected for the incomplete scanner; the real
+# findings output judged as the incomplete case must be rejected because the trigger
+# did not fire. A verdict that ignored scanner status would accept either.
+vl_negative_incomplete() {
+  vl_scan_and_assert_case incomplete
+  vl_require_rejection findings any \
+    "exit code 1 (scan incomplete or crashed), expected exactly 2" \
+    "scanners did not complete: opengrep="
+  vl_scan_and_assert_case findings
+  vl_require_rejection incomplete any \
+    "exit code 2 (actionable findings), expected exactly 1" \
+    "the incomplete trigger did not fire"
 }
 
 # --------------------------------------------------------------------------

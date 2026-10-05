@@ -15,8 +15,14 @@
 #                      to be replaced; then fail an upgrade on purpose and require the
 #                      working install to survive it; then migrate a venv left as a
 #                      directory by an older release to the symlink layout; then erase
-#   negative-findings  the fixture with its finding removed must FAIL the findings gate
-#   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code gate
+#   negative-findings  the clean case must exit exactly 0, and its real output judged
+#                      as the findings case must FAIL on exit code and count
+#   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code check,
+#                      and only that check
+#   negative-incomplete
+#                      the real incomplete output judged as the findings case, and
+#                      the real findings output judged as the incomplete case, must
+#                      each FAIL
 #   negative-install   a package whose %post fails must FAIL the install step
 #   negative-payload   a package with an empty payload must FAIL the payload gate
 #   negative-shell-path
@@ -317,7 +323,7 @@ if [ "$MODE" = upgrade ]; then
   [ ! -e "$OLD_VENV" ] || vl_fail "the N-1 venv $OLD_VENV survived a successful upgrade"
   echo "   OK: the venv was rebuilt from the N wheel and the N-1 venv is gone"
 
-  echo "== 5. scan with the upgraded install"
+  echo "== 5. the three e2e cases with the upgraded install"
   vl_scan_and_assert
 
   echo "== 6. an upgrade whose dependency resolve fails must leave the working install"
@@ -387,6 +393,13 @@ case "$MODE" in
     echo; echo "RPM NEGATIVE CONTROL (scan exit code) PASSED"
     exit 0
     ;;
+  negative-incomplete)
+    echo "== NEGATIVE CONTROL: exit 1 and exit 2 must each FAIL as the other"
+    vl_negative_incomplete
+    erase_and_check
+    echo; echo "RPM NEGATIVE CONTROL (incomplete) PASSED"
+    exit 0
+    ;;
   assert) ;;
   *) vl_fail "unknown mode $MODE" ;;
 esac
@@ -395,7 +408,7 @@ echo "== 3b. the package and the package owning /usr/bin/ash work side by side"
 vl_assert_shell_coexists "ash stand-in" || vl_fail "the package and the ash stand-in do not coexist"
 [ "$(rpm -qf /usr/bin/ash --qf '%{NAME}')" = ash ] || vl_fail "/usr/bin/ash is not owned by the ash stand-in"
 
-echo "== 4. scan a fixture with a KNOWN finding"
+echo "== 4. the three e2e cases: findings (exit 2), clean (exit 0), incomplete (exit 1)"
 vl_scan_and_assert
 
 echo "== 5. erase leaves nothing behind, and leaves /usr/bin/ash alone"

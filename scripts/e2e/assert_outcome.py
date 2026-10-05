@@ -22,8 +22,10 @@ WHAT IT REQUIRES
   reporters; requiring them to agree catches one of them dropping results.
 - When a scanner is named with --require-scanner, at least one SARIF result whose
   properties.scanner_name is that scanner. That field is where ASH records which
-  scanner produced a result; see packaging/assert-scan-findings.py for why the driver
-  name and ruleId are the wrong places to look.
+  scanner produced a result. The obvious fields are the wrong ones, as measured on a
+  real report: runs[].tool.driver.name is ASH on every run, and ruleId is ASH's own
+  normalized id (SECRET-AWS-ACCESS-KEY, not detect-secrets' AWSKeyDetector), so the
+  string detect-secrets appears in neither.
 - Every scanner listed with --selected to have actually been selected, meaning its
   status is not SKIPPED, so a --scanners argument that was dropped on the way into a
   channel (a wrapper, a shim, an MCP tool call) fails here rather than producing a scan

@@ -535,17 +535,15 @@ global_settings:
     #
     # So the split was removed, the key is one literal there now, and the entry
     # below is the declaration that replaces the evasion.
-    - rule_id: "SECRET-*"
-      path: packaging/verify-lib.sh
-      reason: >-
-        Plants AWS's published example secret access key so that the .deb and
-        .rpm verifications (which share this file) can assert the installed
-        package reports a finding rather than merely exiting 0. The fixture is
-        the assertion; removing it would make the verification vacuous.
+    #
+    # packaging/verify-lib.sh, which the .deb and .rpm verifications share, used to
+    # plant the key itself and had an entry here. It now scans the shared e2e
+    # fixture, tests/e2e/fixtures/findings/, which the tests/** entry covers, so its
+    # entry was removed with the literal.
     - rule_id: "SECRET-*"
       path: packaging/flatpak/verify-in-container.sh
       reason: >-
-        Same fixture and same reason as the .deb and .rpm verifications above.
+        AWS's published example key, planted for the reason given above.
         This one plants it twice: once in a directory the sandbox cannot reach, as
         a positive control proving that an unreadable tree yields exit 0 and zero
         findings, and once in a directory it can, where the non-zero result count

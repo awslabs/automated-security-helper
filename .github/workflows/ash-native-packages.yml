@@ -10,7 +10,7 @@ name: ASH - Native Packages (deb, rpm)
 # WHY THIS IS ITS OWN WORKFLOW
 #
 # The deb and rpm jobs used to live in ash-package.yml. They moved here because they
-# grew from two legs to nineteen (four distributions, an upgrade leg on each, eight
+# grew from two legs to twenty (four distributions, an upgrade leg on each, nine
 # negative controls and three version-ordering checks), and because ash-package.yml deliberately has no `push` trigger
 # (its header explains why), while these legs need to run on a pushed branch before
 # a pull request exists. ash-package.yml still owns the wheel and sdist gate; each leg
@@ -19,11 +19,20 @@ name: ASH - Native Packages (deb, rpm)
 #
 # WHAT IS ASSERTED, AND WHY NOT `ashx scan && echo ok`
 #
-# `ashx scan` exits 0 when it finds nothing and 2 when it finds something. On a fixture
-# planted with a secret, 0 is therefore the FAILING outcome. Every assert leg requires
-# exit 2, the SARIF report and ash_aggregated_results.json, and at least one SARIF
-# result attributed to detect-secrets (packaging/assert-scan-findings.py). The shared
-# logic is packaging/verify-lib.sh.
+# `ashx scan` exits 0 when it finds nothing, 2 when it finds something and 1 when a
+# selected scanner could not run. On a fixture planted with a secret, 0 is therefore the
+# FAILING outcome. Every assert leg and every upgrade leg runs the three shared e2e
+# cases (tests/e2e/fixtures/cases.json) and judges each with the shared e2e verdict,
+# scripts/e2e/assert_outcome.py: findings must exit exactly 2 with exactly three results
+# attributed to detect-secrets, clean must exit exactly 0, and incomplete must exit
+# exactly 1 with opengrep recorded MISSING or ERROR. Both reports must exist at their
+# exact paths. The shared shell logic is packaging/verify-lib.sh.
+#
+# The deb assert legs install Debian's and Ubuntu's own `ash` shell package first and
+# require it to keep working beside the package, before and after the purge, with
+# /usr/bin/ash absent from the package's file list (packaging/cli-name.sh explains
+# why). The rpm legs do the same with a stand-in package owning /usr/bin/ash, because
+# neither EL image has one.
 #
 # THE ARTIFACT-CONTENTS RULE FOR THESE FORMATS
 #
@@ -40,9 +49,10 @@ name: ASH - Native Packages (deb, rpm)
 #
 # Each gate is shown failing on a real artifact or a real install, not only on a unit
 # fixture: an empty-payload package must fail the payload gate, a package whose
-# post-install script fails must fail the install step, the fixture with its finding
-# removed must fail the findings gate, and a scan that exits 0 with findings present
-# must fail the exit-code gate. A check that has never been seen failing passes
+# post-install script fails must fail the install step, the clean case's real output
+# judged as the findings case must fail on its exit code and count, a scan that exits 0
+# with findings present must fail on its exit code alone, and the real exit-1 and exit-2
+# outputs must each fail when judged as the other. A check that has never been seen failing passes
 # forever.
 #
 # THE UPGRADE LEGS
@@ -69,6 +79,9 @@ on:
       - "packaging/*.sh"
       - "packaging/deb/**"
       - "packaging/rpm/**"
+      # The e2e cases and verdict every leg runs.
+      - "tests/e2e/**"
+      - "scripts/e2e/**"
       - "automated_security_helper/**"
       - "pyproject.toml"
       - "hatch_build.py"
@@ -85,7 +98,7 @@ on:
       - ".gitignore"
   # `["**"]` so a PR stacked on a nested branch name still runs, as in ash-package.yml.
   # The paths filter matches push's, so a PR that touches none of these files does not
-  # start seventeen container legs. That cannot leave a required check pending: the
+  # start twenty container legs. That cannot leave a required check pending: the
   # required `required-checks` job lives in ash-unified-ci.yml and does not depend on
   # this workflow. Keep the two lists identical.
   pull_request:
@@ -97,6 +110,9 @@ on:
       - "packaging/*.sh"
       - "packaging/deb/**"
       - "packaging/rpm/**"
+      # The e2e cases and verdict every leg runs.
+      - "tests/e2e/**"
+      - "scripts/e2e/**"
       - "automated_security_helper/**"
       - "pyproject.toml"
       - "hatch_build.py"
@@ -183,8 +199,8 @@ jobs:
         shell: bash
         run: bash packaging/test-build-names.sh
 
-      - name: The findings assertion can reject a scan that found nothing
-        run: uv run --no-project python packaging/assert-scan-findings.py --self-test
+      - name: The e2e verdict can reject every planted wrong outcome
+        run: uv run --no-project python scripts/e2e/assert_outcome.py --self-test
 
       - name: The artifact-contents gate can still fail
         run: uv run --no-project python .github/scripts/assert-artifact-contents.py --self-test
@@ -226,8 +242,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { label: "deb: Debian 12 (bookworm)", family: deb, mode: assert, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
-          - { label: "deb: Ubuntu 24.04 (noble)", family: deb, mode: assert, image: "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3" }
+          - { label: "deb: Debian 12 (bookworm), beside Debian's ash shell", family: deb, mode: assert, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "deb: Ubuntu 24.04 (noble), beside Ubuntu's ash shell", family: deb, mode: assert, image: "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3" }
           - { label: "rpm: Amazon Linux 2023", family: rpm, mode: assert, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
           - { label: "rpm: RHEL UBI 9", family: rpm, mode: assert, image: "redhat/ubi9@sha256:094ea2ecfd3225af8f93807b99daa9ff33710fc705ebdf6e8466f46ed605585c" }
           - { label: "upgrade: deb, Debian 12", family: deb, mode: upgrade, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
@@ -239,11 +255,12 @@ jobs:
           - { label: "version map: dpkg ordering", family: deb, mode: version-map, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
           - { label: "version map: rpm ordering, Amazon Linux 2023", family: rpm, mode: version-map, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
           - { label: "version map: rpm ordering, RHEL UBI 9", family: rpm, mode: version-map, image: "redhat/ubi9@sha256:094ea2ecfd3225af8f93807b99daa9ff33710fc705ebdf6e8466f46ed605585c" }
-          # The findings and exit-code controls exercise packaging/verify-lib.sh, which
+          # The findings, exit-code and incomplete controls exercise packaging/verify-lib.sh, which
           # both formats share, so one distribution is enough for them. The install and
           # payload controls are format-specific and run on one image per format.
-          - { label: "negative control: finding removed must fail the findings gate", family: deb, mode: negative-findings, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
-          - { label: "negative control: exit 0 with findings must fail the exit-code gate", family: deb, mode: negative-scan-rc, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: clean output judged as findings must fail", family: deb, mode: negative-findings, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: exit 0 with findings must fail the exit-code check", family: deb, mode: negative-scan-rc, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: exit 1 and exit 2 must each fail as the other", family: deb, mode: negative-incomplete, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
           - { label: "negative control: deb with a failing postinst must fail install", family: deb, mode: negative-install, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
           - { label: "negative control: rpm with a failing %post must fail install", family: rpm, mode: negative-install, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
           - { label: "negative control: empty-payload deb must fail the payload gate", family: deb, mode: negative-payload, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
