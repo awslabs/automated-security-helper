@@ -6,10 +6,10 @@
 
 WHY THIS EXISTS
 ---------------
-A snapshot test fails when output changes, and ``pytest --snapshot-update`` makes it
-pass again by rewriting the snapshot. That rewrite is one command and produces a diff
-nobody has to read, so on its own a snapshot suite only proves that someone ran the
-command. What makes a changed snapshot a decision is a sentence, attached to the commit
+A snapshot test fails when output changes, and syrupy's update flag makes it pass again
+by rewriting the snapshot (see DEVELOPMENT.md). That rewrite is one command and
+produces a diff nobody has to read, so on its own a snapshot suite only proves that
+someone ran the command. What makes a changed snapshot a decision is a sentence, attached to the commit
 that changed it, saying why the output is now different. This script requires that
 sentence: every golden file touched in the range must be touched by at least one commit
 that carries ``Snapshot-Update: <non-empty reason>`` as a git trailer.
@@ -350,17 +350,30 @@ def fix_instructions(violation: Violation, base: str | None, head_sha: str) -> s
     return f"git rebase {onto} --exec {shlex.quote(exec_cmd)}"
 
 
+def _annotation_data(text: str) -> str:
+    # Commit subjects are author-controlled and land in a workflow command, so they get
+    # the runner's own escaping and cannot end the annotation or start a new command.
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _annotation_property(text: str) -> str:
+    return _annotation_data(text).replace(":", "%3A").replace(",", "%2C")
+
+
 def report(violations: list[Violation], base: str | None, head_sha: str) -> None:
     for v in violations:
         touched_by = ", ".join(f"{c.sha[:10]} ({c.subject})" for c in v.commits)
-        print(
-            f"::error file={v.path}::{v.path} ({v.why_golden}) changed in "
+        message = (
+            f"{v.path} ({v.why_golden}) changed in "
             f"{(base or '')[:10] or '(root)'}..{head_sha[:10]} without a "
             f"'{TRAILER_KEY}: <reason>' trailer on the commit that changed it. Touched "
             f"by: {touched_by}. A separate commit carrying the trailer does not count. "
             f"Fix: {fix_instructions(v, base, head_sha)} -- replace <why the output "
             f"changed> with the reason, review `git log`, then "
             f"`git push --force-with-lease`."
+        )
+        print(
+            f"::error file={_annotation_property(v.path)}::{_annotation_data(message)}"
         )
 
 
