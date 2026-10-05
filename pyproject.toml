@@ -1591,7 +1591,11 @@ members = [ ".",]
 [tool.uv.sources]
 
 [tool.hatch.build.targets.sdist]
-include = [ "automated_security_helper", "Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
+# Hatch reads these as gitignore patterns, so a bare "Dockerfile" matches a file of
+# that name at any depth. It pulled deploy/kubernetes-operator/Dockerfile and every
+# Dockerfile under deploy/cdk/node_modules into the sdist. The leading slash anchors
+# each entry to the repository root. tests/unit/test_sdist_file_selection.py holds it.
+include = [ "/automated_security_helper", "/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
 
 [tool.hatch.build.targets.wheel]
 include = [ "automated_security_helper", "automated_security_helper/assets", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
