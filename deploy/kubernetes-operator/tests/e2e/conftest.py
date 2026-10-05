@@ -25,10 +25,10 @@ from tests.e2e.helpers import (
     NAMESPACE,
     OPERATOR_DIR,
     OPERATOR_IMAGE,
-    REPO_ROOT,
     kubectl,
     kubectl_apply_stdin,
     run,
+    stage_ash_source,
 )
 
 E2E_ENABLED = os.environ.get("ASH_OPERATOR_E2E") == "1"
@@ -68,19 +68,7 @@ def ash_image(require_tooling) -> str:
     with tempfile.TemporaryDirectory(prefix="ash-e2e-ctx-") as ctx:
         context_dir = Path(ctx)
         shutil.copy(E2E_DIR / "Dockerfile.ash", context_dir / "Dockerfile")
-        source = context_dir / "ash-source"
-        source.mkdir()
-        # Only what a wheel build needs. Copying the worktree would drag in .git,
-        # other work in progress and any venv sitting in it.
-        for item in ("pyproject.toml", "README.md", "LICENSE", "NOTICE", "hatch_build.py"):
-            candidate = REPO_ROOT / item
-            if candidate.exists():
-                shutil.copy(candidate, source / item)
-        shutil.copytree(
-            REPO_ROOT / "automated_security_helper",
-            source / "automated_security_helper",
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
+        stage_ash_source(context_dir / "ash-source")
         run(
             [
                 "docker",

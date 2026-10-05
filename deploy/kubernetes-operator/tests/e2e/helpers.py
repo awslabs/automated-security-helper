@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -32,6 +33,55 @@ TERMINAL = frozenset(constants.TERMINAL_PHASES)
 E2E_DIR = Path(__file__).resolve().parent
 OPERATOR_DIR = E2E_DIR.parents[1]
 REPO_ROOT = OPERATOR_DIR.parents[1]
+
+
+# Root-level files the ASH wheel build reads. "Dockerfile" is the one that is easy to
+# miss: pyproject.toml force-includes automated_security_helper/assets/Dockerfile,
+# which is gitignored and which hatch_build.py generates from the root Dockerfile
+# during the build. Without the root file in the context, `pip install .` fails with
+# "Forced include not found ... assets/Dockerfile".
+ASH_SOURCE_FILES = (
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "hatch_build.py",
+    "Dockerfile",
+)
+# What hatch_build.py writes into automated_security_helper/assets/, all gitignored.
+# Never copied: a copy left in a developer's checkout by an earlier build would stand
+# in for the one this build has to generate, which is how a context missing the root
+# Dockerfile built locally and failed on every clean CI checkout.
+ASH_GENERATED_ASSETS = frozenset(
+    {"Dockerfile", "ASH_INSTALLED_REVISION", "tool_downloads.py", "exceptions.py"}
+)
+
+
+def stage_ash_source(dest: Path, repo_root: Path = REPO_ROOT) -> None:
+    """Copy what an ASH wheel build needs from ``repo_root`` into ``dest``.
+
+    Only that, rather than the whole checkout, which would drag in .git, other work
+    in progress and any venv sitting in it. Every listed file is required: a context
+    that silently lacks one builds an image from something other than the checkout.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    missing = [name for name in ASH_SOURCE_FILES if not (repo_root / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"the ASH build context needs {missing} from {repo_root}")
+    for name in ASH_SOURCE_FILES:
+        shutil.copy(repo_root / name, dest / name)
+
+    package = repo_root / "automated_security_helper"
+    assets = package / "assets"
+    generic = shutil.ignore_patterns("__pycache__", "*.pyc")
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        ignored = set(generic(directory, names))
+        if Path(directory) == assets:
+            ignored |= ASH_GENERATED_ASSETS & set(names)
+        return ignored
+
+    shutil.copytree(package, dest / "automated_security_helper", ignore=ignore)
 
 
 def context() -> str:
