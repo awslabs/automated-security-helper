@@ -38,22 +38,17 @@ which does a real `brew install` and `brew test`.
 
 Why the resource list is generated and not hand-maintained
 ----------------------------------------------------------
-`packaging/homebrew/refresh-resources.py` resolves the closure with `uv` and
-reads each sdist URL and sha256 from the PyPI JSON API. The same reasoning as
-the long `[tool.commitizen]` comment block in pyproject.toml applies: a
-hand-maintained second list of what ASH depends on drifts from the first one,
-and the drift is invisible until someone installs it. This test does not
-re-derive the closure -- resolving 78 packages needs a network -- it asserts the
-property that catches the common drift, which is a *new top-level* requirement
-added to pyproject.toml without regenerating the block.
+`packaging/homebrew/refresh-resources.py` generates the block from `uv.lock`.
+The same reasoning as the long `[tool.commitizen]` comment block in
+pyproject.toml applies: a hand-maintained second list of what ASH depends on
+drifts from the first one, and the drift is invisible until someone installs it.
 
-What this test deliberately does not catch
+What this file deliberately does not catch
 ------------------------------------------
 A transitive-only change (a dependency of a dependency gaining a new
 requirement) does not touch `[project.dependencies]`, so nothing here fires.
-That case is caught by the real `brew install` in CI, and by
-`refresh-resources.py --check`, which re-resolves and diffs. Both need a
-network; this file must not.
+tests/unit/test_homebrew_formula_lock_sync.py catches it: it regenerates the
+formula from `uv.lock`, offline, and requires a byte-identical result.
 """
 
 import re

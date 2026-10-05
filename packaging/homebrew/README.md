@@ -31,13 +31,15 @@ URL ends in `.whl` is not merely off-convention: pip refuses it.
 ## Regenerating
 
 ```
-python packaging/homebrew/refresh-resources.py            # print the block to stdout
-python packaging/homebrew/refresh-resources.py --write     # rewrite Formula/ash.rb
-python packaging/homebrew/refresh-resources.py --check     # exit 1 if it has drifted
+uv run python packaging/homebrew/refresh-resources.py            # print the block to stdout
+uv run python packaging/homebrew/refresh-resources.py --write     # rewrite Formula/ash.rb
+uv run python packaging/homebrew/refresh-resources.py --check     # exit 1 if it has drifted
 ```
 
-Run `--write` after any change to `[project.dependencies]`. The script needs `uv` on
-PATH and network access to PyPI; it needs no Homebrew.
+Run `--write` after any change to `uv.lock`. The script reads `uv.lock` and nothing
+else: no resolver run, no network, no Homebrew. The same `uv.lock` always produces a
+byte-identical `Formula/ash.rb`, and `tests/unit/test_homebrew_formula_lock_sync.py`
+regenerates the formula on every unit test run and fails on any difference.
 
 It rewrites only the text between
 
@@ -52,24 +54,38 @@ block ends, and a wrong inference would delete `def install`.
 ## What it does
 
 1. Reads the Python minor version out of the formula's own `depends_on "python@X.Y"`,
-   so the resolution and the interpreter the virtualenv is built with cannot drift.
-2. Runs `uv pip compile pyproject.toml` once per platform Homebrew supports --
-   `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`,
-   `x86_64-unknown-linux-gnu` -- and merges the four results, failing if any package
-   resolved to two different versions. A formula carries one resource list and installs
-   it on all four; a closure resolved only on the build machine would be missing
-   whatever is conditional on the other platforms, and that lands on users as a
-   `ModuleNotFoundError` rather than on whoever regenerated the block.
-3. Reads each release's sdist URL and sha256 from the PyPI JSON API
-   (`https://pypi.org/pypi/<name>/<version>/json`), taking the entry whose
-   `packagetype` is `"sdist"` and its `digests.sha256`.
-4. Emits `resource` stanzas sorted by canonical name, using PyPI's own spelling of each
-   name (`GitPython`, not `gitpython`) so the block reads the same as one written by
-   `brew update-python-resources`.
+   so the closure and the interpreter the virtualenv is built with cannot drift.
+2. Walks `uv.lock` from the root package's runtime dependencies (no extras, no
+   dependency groups) once per platform Homebrew supports, evaluating each edge's
+   PEP 508 marker for that platform: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+   `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`. The four closures are
+   merged, and a package locked at two different versions across them is a hard
+   failure, because one `resource` stanza cannot carry both. A closure computed only
+   for the build machine would miss whatever is conditional on the other platforms,
+   and that lands on users as a `ModuleNotFoundError`.
+3. Takes each package's sdist URL and sha256 from its `sdist = { url, hash }` entry in
+   `uv.lock`, refusing a package with no sdist, a hash that is not SHA-256, or a URL
+   that is not on `files.pythonhosted.org`.
+4. Names each resource the way `brew audit --strict` derives the name it checks
+   against: the sdist URL's basename up to its last hyphen, with `_` and `.` mapped to
+   `-`. Modern sdists are named in normalized lowercase, so the names are too
+   (`gitpython`, `pyyaml`). Emits the stanzas sorted by canonical name.
 
 Windows is absent from the platform list because Homebrew does not run there. Including
-it would pull in Windows-only requirements that pip would then refuse to install on the
-platforms Homebrew does support.
+it would pull in `pywin32`, which publishes no sdist.
+
+## Why uv.lock and not a fresh resolution
+
+The first version of this script ran `uv pip compile pyproject.toml` per platform and
+read each sdist from the PyPI JSON API. That made the block a function of the day it
+was generated: an upstream release inside a declared range moved the resolution, so
+`--check` reported drift on a formula nobody had touched, and the formula pinned
+versions the test suite had never run against. Measured on this branch, the committed
+block disagreed with `uv.lock` on 30 of its 77 versions and was missing `uc-micro-py`,
+which the locked `linkify-it-py` needs.
+
+Reading `uv.lock` makes the formula install exactly what CI tested, and makes `--check`
+a gate that changes its answer only when the repository changes.
 
 ## Why generated and not hand-maintained
 
@@ -80,12 +96,10 @@ separate hand-maintained lists of the files that pin ASH's version, and a file a
 from all three was invisible to every one of them. A stale resource block fails the same
 way -- silently, one release later, on a user's machine.
 
-`brew update-python-resources` is the normal tool for this and is the right one to reach
-for when Homebrew is installed. It was unavailable on the machine this was written on,
-and writing the block by hand was the alternative being avoided. The PyPI JSON API
-returns the same two fields that command writes, and the `homebrew` job in
-`.github/workflows/ash-package.yml` runs `brew audit --strict` against Homebrew's own
-rules either way.
+`brew update-python-resources` is the normal tool for this. It resolves against PyPI
+rather than against a lock, which is the property this script exists to avoid. The
+`homebrew` job in `.github/workflows/ash-package.yml` runs `brew audit --strict` against
+Homebrew's own rules either way.
 
 ## The uv collision, and why there is no `uv` resource
 
@@ -145,39 +159,26 @@ that the supplied versions still satisfy `[project.dependencies]`.
 
 ## Known limitations
 
-- **The resolution is for one Python minor version.** It is read from the formula's
-  `depends_on "python@X.Y"` rather than hardcoded, but it is not a universal resolution
-  across interpreters. Bumping that dependency requires regenerating the block.
+- **The closure is for one Python minor version.** It is read from the formula's
+  `depends_on "python@X.Y"` rather than hardcoded, but markers are evaluated with
+  `python_full_version` set to `X.Y.0`, so a marker keyed on a later patch release would
+  be read against `.0`. None in the lock does today. Bumping the Python dependency
+  requires regenerating the block.
 
 - **Build backends are fetched unpinned at build time.** `Virtualenv#pip_install`
   defaults to `build_isolation: true`, so pip builds each sdist in an isolated
   environment and fetches its PEP 517 backend -- maturin for the Rust extensions,
   setuptools for the rest -- from PyPI itself. That is network access inside a Homebrew
-  build, and the versions are whatever PyPI serves that day. Pinning it would mean
-  replacing `virtualenv_install_with_resources` with hand-rolled install code that
-  stages the backends first, which is a larger change than the problem currently
-  justifies. This is also why the formula does not declare `depends_on "maturin"`:
-  nothing in this install path would consult it.
+  build, and `uv.lock` cannot pin it, because the lock records runtime dependencies and
+  not build backends. Pinning it would mean replacing `virtualenv_install_with_resources`
+  with hand-rolled install code that stages the backends first. This is also why the
+  formula does not declare `depends_on "maturin"`: nothing in this install path would
+  consult it.
 
 - **A freshly released version can fail to install.** `std_pip_args` also passes
   `--uploaded-prior-to`, a release cooldown intended to avoid installing a
   just-compromised PyPI release. A resource whose version was published inside that
-  window is refused. Regenerating immediately after an upstream release can therefore
-  produce a block that installs fine in a few days and not today. Wait it out rather
-  than editing the formula.
-
-- **A transitive-only change is not caught by the unit test.**
-  `tests/unit/test_homebrew_formula_resources.py` asserts that every *top-level* name in
-  `[project.dependencies]` has a stanza, which catches the common drift of adding a
-  requirement and forgetting to regenerate. A dependency of a dependency gaining a new
-  requirement does not touch that array. That case is caught by the real `brew install`
-  in CI and by `--check`, both of which need a network; the unit test must not.
-
-- **`--check` re-resolves, so its answer can change without the repository changing.**
-  An upstream release inside a declared range moves the resolution, and `--check` then
-  reports drift on an untouched formula. That is the correct reading -- the pinned block
-  is now behind -- but it means `--check` is a maintenance prompt rather than a gate that
-  belongs in front of every pull request.
+  window is refused. That window is now governed by when `uv.lock` was last updated.
 
 ## Publishing boundary
 
