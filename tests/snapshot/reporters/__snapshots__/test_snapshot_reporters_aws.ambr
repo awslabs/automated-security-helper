@@ -1,0 +1,1944 @@
+# serializer version: 1
+# name: test_aws_reporter_output_and_payload[aws-security-hub-single][aws_calls]
+  list([
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[aws-security-hub-skipped-workspace][aws_calls]
+  list([
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[aws-security-hub-workspace][aws_calls]
+  list([
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[bedrock-summary-reporter-single][aws_calls]
+  list([
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate an executive summary for a security scan with the following results:
+                  
+                  SCAN OVERVIEW:
+                  - Total actionable findings: 10
+                  - Secret findings: 0
+                  - Scanners used: npm-audit, cdk-nag, bandit, cfn-nag, checkov, detect-secrets, grype, semgrep, syft
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 4, note: 3, warning: 3
+                  
+                  Provide a concise executive summary that highlights the most important aspects of the scan results.
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing a concise executive summary of security scan results.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Analyze the following warning level security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Message: Ensure the S3 bucket has access logging enabled
+                  - Locations: infra/main.tf
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Message: Ensure the last USER is not root
+                  - Locations: Dockerfile
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Message: A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt
+                  - Locations: requirements.txt
+                  
+                  Provide a concise analysis of these warning level findings, including:
+                  1. Common patterns or issues
+                  2. Potential impact
+                  3. Brief remediation guidance
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert analyzing warning level findings from a security scan.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Analyze the following note level security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Message: Possible hardcoded password: 'hunter2-not-a-real-secret'
+                  - Locations: app/app.py
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Message: Ensure that HEALTHCHECK instructions have been added to container images
+                  - Locations: Dockerfile
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Message: The last user in the container is 'root'. Switch back to an unprivileged user.
+                  - Locations: Dockerfile
+                  
+                  Provide a concise analysis of these note level findings, including:
+                  1. Common patterns or issues
+                  2. Potential impact
+                  3. Brief remediation guidance
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert analyzing note level findings from a security scan.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Analyze the following none level security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app/app.py
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: infra/main.tf
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Message: Command string built with an f-string; prefer an argument list.
+                  - Locations: app/app.py
+                  
+                  FINDING 4:
+                  - Rule ID:
+                  - Message: A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt
+                  - Locations: requirements.txt
+                  
+                  Provide a concise analysis of these none level findings, including:
+                  1. Common patterns or issues
+                  2. Potential impact
+                  3. Brief remediation guidance
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert analyzing none level findings from a security scan.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Based on the security scan with the following results:
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 4, note: 3, warning: 3
+                  
+                  Sample findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Ensure the S3 bucket has access logging enabled
+                  - Locations: infra/main.tf
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Ensure the last USER is not root
+                  - Locations: Dockerfile
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt
+                  - Locations: requirements.txt
+                  
+                  FINDING 4:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app/app.py
+                  
+                  FINDING 5:
+                  - Rule ID:
+                  - Level: note
+                  - Message: Possible hardcoded password: 'hunter2-not-a-real-secret'
+                  - Locations: app/app.py
+                  
+                  FINDING 6:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: infra/main.tf
+                  
+                  FINDING 7:
+                  - Rule ID:
+                  - Level: note
+                  - Message: Ensure that HEALTHCHECK instructions have been added to container images
+                  - Locations: Dockerfile
+                  
+                  FINDING 8:
+                  - Rule ID:
+                  - Level: note
+                  - Message: The last user in the container is 'root'. Switch back to an unprivileged user.
+                  - Locations: Dockerfile
+                  
+                  FINDING 9:
+                  - Rule ID:
+                  - Level: none
+                  - Message: Command string built with an f-string; prefer an argument list.
+                  - Locations: app/app.py
+                  
+                  FINDING 10:
+                  - Rule ID:
+                  - Level: none
+                  - Message: A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt
+                  - Locations: requirements.txt
+                  
+                  Provide actionable recommendations for addressing these security issues, including:
+                  1. Prioritized next steps
+                  2. Best practices to implement
+                  3. Long-term security improvements
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing actionable recommendations based on security scan findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate a risk assessment based on the following security scan results:
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 4, note: 3, warning: 3
+                  
+                  Sample findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: note
+                  - Message: Possible hardcoded password: 'hunter2-not-a-real-secret'
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  
+                  FINDING 4:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Ensure the S3 bucket has access logging enabled
+                  
+                  FINDING 5:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Ensure the last USER is not root
+                  
+                  Provide a risk assessment including:
+                  1. Overall risk score (LOW/MEDIUM/HIGH/CRITICAL)
+                  2. Risk breakdown by severity
+                  3. Compliance impact assessment
+                  4. Business impact analysis
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing risk assessment based on security scan findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate an executive summary for a security scan with the following results:
+                  
+                  SCAN OVERVIEW:
+                  - Total actionable findings: 10
+                  - Secret findings: 0
+                  - Scanners used: npm-audit, cdk-nag, bandit, cfn-nag, checkov, detect-secrets, grype, semgrep, syft
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 4, note: 3, warning: 3
+                  
+                  Provide a concise executive summary that highlights the most important aspects of the scan results.
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing a concise executive summary of security scan results.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate a detailed technical analysis of the following security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app/app.py
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: note
+                  - Message: Possible hardcoded password: 'hunter2-not-a-real-secret'
+                  - Locations: app/app.py
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: infra/main.tf
+                  
+                  FINDING 4:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Ensure the S3 bucket has access logging enabled
+                  - Locations: infra/main.tf
+                  
+                  FINDING 5:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Ensure the last USER is not root
+                  - Locations: Dockerfile
+                  
+                  FINDING 6:
+                  - Rule ID:
+                  - Level: note
+                  - Message: Ensure that HEALTHCHECK instructions have been added to container images
+                  - Locations: Dockerfile
+                  
+                  FINDING 7:
+                  - Rule ID:
+                  - Level: note
+                  - Message: The last user in the container is 'root'. Switch back to an unprivileged user.
+                  - Locations: Dockerfile
+                  
+                  FINDING 8:
+                  - Rule ID:
+                  - Level: none
+                  - Message: Command string built with an f-string; prefer an argument list.
+                  - Locations: app/app.py
+                  
+                  FINDING 9:
+                  - Rule ID:
+                  - Level: none
+                  - Message: A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt
+                  - Locations: requirements.txt
+                  
+                  FINDING 10:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt
+                  - Locations: requirements.txt
+                  
+                  Provide a detailed technical analysis including:
+                  1. Root cause analysis for each finding
+                  2. Specific remediation steps with code examples where appropriate
+                  3. Testing recommendations to verify fixes
+                  4. Security best practices related to these issues
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing detailed technical analysis of security findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[bedrock-summary-reporter-skipped-workspace][aws_calls]
+  list([
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate an executive summary for a security scan with the following results:
+                  
+                  SCAN OVERVIEW:
+                  - Total actionable findings: 3
+                  - Secret findings: 0
+                  - Scanners used: bandit, checkov, npm-audit, semgrep
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 2, warning: 1
+                  
+                  Provide a concise executive summary that highlights the most important aspects of the scan results.
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing a concise executive summary of security scan results.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Analyze the following warning level security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Message: Bucket name is hardcoded; derive it from a variable.
+                  - Locations: main.tf
+                  
+                  Provide a concise analysis of these warning level findings, including:
+                  1. Common patterns or issues
+                  2. Potential impact
+                  3. Brief remediation guidance
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert analyzing warning level findings from a security scan.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Analyze the following none level security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app.py
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: main.tf
+                  
+                  Provide a concise analysis of these none level findings, including:
+                  1. Common patterns or issues
+                  2. Potential impact
+                  3. Brief remediation guidance
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert analyzing none level findings from a security scan.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Based on the security scan with the following results:
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 2, warning: 1
+                  
+                  Sample findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Bucket name is hardcoded; derive it from a variable.
+                  - Locations: main.tf
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app.py
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: main.tf
+                  
+                  Provide actionable recommendations for addressing these security issues, including:
+                  1. Prioritized next steps
+                  2. Best practices to implement
+                  3. Long-term security improvements
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing actionable recommendations based on security scan findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate a risk assessment based on the following security scan results:
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 2, warning: 1
+                  
+                  Sample findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Bucket name is hardcoded; derive it from a variable.
+                  
+                  Provide a risk assessment including:
+                  1. Overall risk score (LOW/MEDIUM/HIGH/CRITICAL)
+                  2. Risk breakdown by severity
+                  3. Compliance impact assessment
+                  4. Business impact analysis
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing risk assessment based on security scan findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate an executive summary for a security scan with the following results:
+                  
+                  SCAN OVERVIEW:
+                  - Total actionable findings: 3
+                  - Secret findings: 0
+                  - Scanners used: bandit, checkov, npm-audit, semgrep
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 2, warning: 1
+                  
+                  Provide a concise executive summary that highlights the most important aspects of the scan results.
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing a concise executive summary of security scan results.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate a detailed technical analysis of the following security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app.py
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: main.tf
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Bucket name is hardcoded; derive it from a variable.
+                  - Locations: main.tf
+                  
+                  Provide a detailed technical analysis including:
+                  1. Root cause analysis for each finding
+                  2. Specific remediation steps with code examples where appropriate
+                  3. Testing recommendations to verify fixes
+                  4. Security best practices related to these issues
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing detailed technical analysis of security findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[bedrock-summary-reporter-workspace][aws_calls]
+  list([
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate an executive summary for a security scan with the following results:
+                  
+                  SCAN OVERVIEW:
+                  - Total actionable findings: 3
+                  - Secret findings: 0
+                  - Scanners used: bandit, checkov, npm-audit, semgrep
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 2, warning: 1
+                  
+                  Provide a concise executive summary that highlights the most important aspects of the scan results.
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing a concise executive summary of security scan results.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Analyze the following warning level security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Message: Bucket name is hardcoded; derive it from a variable.
+                  - Locations: main.tf
+                  
+                  Provide a concise analysis of these warning level findings, including:
+                  1. Common patterns or issues
+                  2. Potential impact
+                  3. Brief remediation guidance
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert analyzing warning level findings from a security scan.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Analyze the following none level security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app.py
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: main.tf
+                  
+                  Provide a concise analysis of these none level findings, including:
+                  1. Common patterns or issues
+                  2. Potential impact
+                  3. Brief remediation guidance
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert analyzing none level findings from a security scan.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Based on the security scan with the following results:
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 2, warning: 1
+                  
+                  Sample findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Bucket name is hardcoded; derive it from a variable.
+                  - Locations: main.tf
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app.py
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: main.tf
+                  
+                  Provide actionable recommendations for addressing these security issues, including:
+                  1. Prioritized next steps
+                  2. Best practices to implement
+                  3. Long-term security improvements
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing actionable recommendations based on security scan findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate a risk assessment based on the following security scan results:
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 2, warning: 1
+                  
+                  Sample findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Bucket name is hardcoded; derive it from a variable.
+                  
+                  Provide a risk assessment including:
+                  1. Overall risk score (LOW/MEDIUM/HIGH/CRITICAL)
+                  2. Risk breakdown by severity
+                  3. Compliance impact assessment
+                  4. Business impact analysis
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing risk assessment based on security scan findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate an executive summary for a security scan with the following results:
+                  
+                  SCAN OVERVIEW:
+                  - Total actionable findings: 3
+                  - Secret findings: 0
+                  - Scanners used: bandit, checkov, npm-audit, semgrep
+                  
+                  FINDINGS BY SEVERITY:
+                  none: 2, warning: 1
+                  
+                  Provide a concise executive summary that highlights the most important aspects of the scan results.
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing a concise executive summary of security scan results.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+    dict({
+      'operation': 'Converse',
+      'params': dict({
+        'additionalModelRequestFields': dict({
+          'top_k': 200,
+        }),
+        'inferenceConfig': dict({
+          'maxTokens': 4000,
+          'temperature': 0.5,
+          'topP': 0.9,
+        }),
+        'messages': list([
+          dict({
+            'content': list([
+              dict({
+                'text': '''
+                  Generate a detailed technical analysis of the following security findings:
+                  
+                  FINDING 1:
+                  - Rule ID:
+                  - Level: none
+                  - Message: subprocess call with shell=True identified, security issue.
+                  - Locations: app.py
+                  
+                  FINDING 2:
+                  - Rule ID:
+                  - Level: none
+                  - Message: S3 Bucket has an ACL defined which allows public READ access.
+                  - Locations: main.tf
+                  
+                  FINDING 3:
+                  - Rule ID:
+                  - Level: warning
+                  - Message: Bucket name is hardcoded; derive it from a variable.
+                  - Locations: main.tf
+                  
+                  Provide a detailed technical analysis including:
+                  1. Root cause analysis for each finding
+                  2. Specific remediation steps with code examples where appropriate
+                  3. Testing recommendations to verify fixes
+                  4. Security best practices related to these issues
+  
+                ''',
+              }),
+            ]),
+            'role': 'user',
+          }),
+        ]),
+        'modelId': 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        'system': list([
+          dict({
+            'text': 'You are a security expert providing detailed technical analysis of security findings.',
+          }),
+        ]),
+      }),
+      'service': 'bedrock-runtime',
+    }),
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[cloudwatch-logs-single][aws_calls]
+  list([
+    dict({
+      'operation': 'CreateLogStream',
+      'params': dict({
+        'logGroupName': '/ash/snapshot-fixture',
+        'logStreamName': 'ASHScanResults',
+      }),
+      'service': 'logs',
+    }),
+    dict({
+      'operation': 'PutLogEvents',
+      'params': dict({
+        'logEvents': list([
+          dict({
+            'message': dict({
+              'ash_config': dict({
+                'fail_on_findings': True,
+                'global_settings': dict({
+                  'severity_threshold': 'MEDIUM',
+                  'suppressions': list([
+                    dict({
+                      'line_end': 5,
+                      'line_start': 5,
+                      'path': 'app/app.py',
+                      'reason': 'Fixture placeholder credential, not a real secret',
+                      'rule_id': 'SECRET-SECRET-KEYWORD',
+                    }),
+                    dict({
+                      'expiration': '2099-12-31',
+                      'path': 'infra/main.tf',
+                      'reason': 'Stale suppression for a check that no longer exists',
+                      'rule_id': 'CKV_AWS_999',
+                    }),
+                  ]),
+                }),
+                'project_name': 'snapshot-fixture',
+              }),
+              'converter_results': dict({
+              }),
+              'description': 'Aggregated security scan results',
+              'metadata': dict({
+                'description': 'Automated Security Helper Aggregated Report Post-processor',
+                'generated_at': '<GENERATED_AT>',
+                'project_name': 'ASH',
+                'report_id': '<REPORT_ID>',
+                'summary_stats': dict({
+                  'actionable': 6,
+                  'duration': '<DURATION>',
+                  'end': None,
+                  'error': 1,
+                  'failed': 3,
+                  'missing': 1,
+                  'passed': 3,
+                  'severity_counts': dict({
+                    'critical': 1,
+                    'high': 2,
+                    'info': 1,
+                    'low': 3,
+                    'medium': 3,
+                    'suppressed': 1,
+                  }),
+                  'skipped': 1,
+                  'start': None,
+                  'total': 10,
+                }),
+                'tool_version': '<ASH_VERSION>',
+              }),
+              'name': 'ASH Scan <TIMESTAMP>',
+              'scanner_results': dict({
+                'bandit': dict({
+                  'actionable_finding_count': 1,
+                  'duration': '<DURATION>',
+                  'finding_count': 2,
+                  'severity_counts': dict({
+                    'critical': 0,
+                    'high': 1,
+                    'info': 0,
+                    'low': 1,
+                    'medium': 0,
+                    'suppressed': 0,
+                  }),
+                  'status': 'FAILED',
+                  'suppressed_finding_count': 0,
+                }),
+                'cdk-nag': dict({
+                  'actionable_finding_count': 0,
+                  'duration': '<DURATION>',
+                  'finding_count': 0,
+                  'severity_counts': dict({
+                    'critical': 0,
+                    'high': 0,
+                    'info': 0,
+                    'low': 0,
+                    'medium': 0,
+                    'suppressed': 0,
+                  }),
+                  'status': 'SKIPPED',
+                  'suppressed_finding_count': 0,
+                }),
+                'cfn-nag': dict({
+                  'actionable_finding_count': 0,
+                  'duration': '<DURATION>',
+                  'finding_count': 0,
+                  'severity_counts': dict({
+                    'critical': 0,
+                    'high': 0,
+                    'info': 0,
+                    'low': 0,
+                    'medium': 0,
+                    'suppressed': 0,
+                  }),
+                  'status': 'ERROR',
+                  'suppressed_finding_count': 0,
+                }),
+                'checkov': dict({
+                  'actionable_finding_count': 3,
+                  'duration': '<DURATION>',
+                  'finding_count': 4,
+                  'severity_counts': dict({
+                    'critical': 0,
+                    'high': 1,
+                    'info': 0,
+                    'low': 1,
+                    'medium': 2,
+                    'suppressed': 0,
+                  }),
+                  'status': 'FAILED',
+                  'suppressed_finding_count': 0,
+                }),
+                'detect-secrets': dict({
+                  'actionable_finding_count': 0,
+                  'duration': '<DURATION>',
+                  'finding_count': 0,
+                  'severity_counts': dict({
+                    'critical': 0,
+                    'high': 0,
+                    'info': 0,
+                    'low': 0,
+                    'medium': 0,
+                    'suppressed': 1,
+                  }),
+                  'status': 'PASSED',
+                  'suppressed_finding_count': 1,
+                }),
+                'grype': dict({
+                  'actionable_finding_count': 2,
+                  'duration': '<DURATION>',
+                  'finding_count': 2,
+                  'severity_counts': dict({
+                    'critical': 1,
+                    'high': 0,
+                    'info': 0,
+                    'low': 0,
+                    'medium': 1,
+                    'suppressed': 0,
+                  }),
+                  'status': 'FAILED',
+                  'suppressed_finding_count': 0,
+                }),
+                'npm-audit': dict({
+                  'actionable_finding_count': 0,
+                  'duration': '<DURATION>',
+                  'finding_count': 0,
+                  'severity_counts': dict({
+                    'critical': 0,
+                    'high': 0,
+                    'info': 0,
+                    'low': 0,
+                    'medium': 0,
+                    'suppressed': 0,
+                  }),
+                  'status': 'MISSING',
+                  'suppressed_finding_count': 0,
+                }),
+                'semgrep': dict({
+                  'actionable_finding_count': 0,
+                  'duration': '<DURATION>',
+                  'finding_count': 2,
+                  'severity_counts': dict({
+                    'critical': 0,
+                    'high': 0,
+                    'info': 1,
+                    'low': 1,
+                    'medium': 0,
+                    'suppressed': 0,
+                  }),
+                  'status': 'PASSED',
+                  'suppressed_finding_count': 0,
+                }),
+                'syft': dict({
+                  'actionable_finding_count': 0,
+                  'duration': '<DURATION>',
+                  'finding_count': 0,
+                  'severity_counts': dict({
+                    'critical': 0,
+                    'high': 0,
+                    'info': 0,
+                    'low': 0,
+                    'medium': 0,
+                    'suppressed': 0,
+                  }),
+                  'status': 'PASSED',
+                  'suppressed_finding_count': 0,
+                }),
+              }),
+            }),
+            'timestamp': '<TIMESTAMP>',
+          }),
+        ]),
+        'logGroupName': '/ash/snapshot-fixture',
+        'logStreamName': 'ASHScanResults',
+      }),
+      'service': 'logs',
+    }),
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[cloudwatch-logs-skipped-workspace][aws_calls]
+  list([
+    dict({
+      'operation': 'CreateLogStream',
+      'params': dict({
+        'logGroupName': '/ash/snapshot-fixture',
+        'logStreamName': 'ASHScanResults',
+      }),
+      'service': 'logs',
+    }),
+    dict({
+      'operation': 'PutLogEvents',
+      'params': dict({
+        'logEvents': list([
+          dict({
+            'message': dict({
+              'ash_config': "project_name='ash-scan' global_settings=AshConfigGlobalSettingsSection(severity_threshold='MEDIUM', ignore_paths=[], suppressions=[], mcp=AshMcpConfig(runtime_overrides=RuntimeOverridesConfig(enabled=False, allowed_paths=[], denied_paths=['/fail_on_findings', '/fail_on_incomplete_scanners', '/content_db_staleness', '/global_settings/ignore_paths', '/global_settings/suppressions', '/reporters/bedrock-summary-reporter/options/aws_*', '/reporters/cloudwatch-logs/**'], denied_value_patterns={}))) fail_on_findings=True fail_on_incomplete_scanners=True content_db_staleness='fail' ash_plugin_modules=[] external_reports_to_include=[] build=None converters=ConverterConfigSegment(archive=ArchiveConverterConfig(name='archive', enabled=True, options=ArchiveConverterConfigOptions()), jupyter=JupyterConverterConfig(name='jupyter', enabled=True, options=JupyterConverterConfigOptions(tool_version='>=7.16.0,<8.0.0', install_timeout=300))) scanners=ScannerConfigSegment(bandit=BanditScannerConfig(name='bandit', enabled=True, options=BanditScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, confidence_level='all', ignore_nosec=False, excluded_paths=[], additional_formats=[], tool_version='>=1.7.0,<2.0.0', install_timeout=300)), cdk_nag=CdkNagScannerConfig(name='cdk-nag', enabled=True, options=CdkNagScannerConfigOptions(severity_threshold=None, scan_timeout=1800, nag_packs=CdkNagPacks(AwsSolutionsChecks=True, HIPAASecurityChecks=False, NIST80053R4Checks=False, NIST80053R5Checks=False, PCIDSS321Checks=False), include_compliant_checks=False)), cfn_nag=CfnNagScannerConfig(name='cfn-nag', enabled=True, options=CfnNagScannerConfigOptions(severity_threshold=None, scan_timeout=1800)), checkov=CheckovScannerConfig(name='checkov', enabled=True, options=CheckovScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, skip_path=[], additional_formats=['cyclonedx_json'], offline=False, frameworks=['all'], skip_frameworks=[], skip_ash_output_dir=True, tool_version=None, install_timeout=300)), detect_secrets=DetectSecretsScannerConfig(name='detect-secrets', enabled=True, options=DetectSecretsScannerConfigOptions(severity_threshold=None, scan_timeout=1800, baseline_file=None, scan_settings=DetectSecretsScanSettings(version=None, generated_at=None, plugins_used=[], filters_used=[], results=DetectSecretsScanSettingsResults()), skip_generated_lockfiles=True)), grype=GrypeScannerConfig(name='grype', enabled=True, options=GrypeScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, offline=False)), npm_audit=NpmAuditScannerConfig(name='npm-audit', enabled=True, options=NpmAuditScannerConfigOptions(severity_threshold=None, scan_timeout=1800, offline=False)), opengrep=OpengrepScannerConfig(name='opengrep', enabled=True, options=OpengrepScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config='p/ci', exclude=['*-converted.py', '*_report_result.txt'], exclude_rule=[], severity=[], metrics='auto', offline=False, patterns=[], version='v1.15.1')), semgrep=SemgrepScannerConfig(name='semgrep', enabled=True, options=SemgrepScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config='p/ci', exclude=['*-converted.py', '*_report_result.txt'], exclude_rule=[], severity=[], metrics='auto', offline=False, tool_version=None, install_timeout=300)), syft=SyftScannerConfig(name='syft', enabled=True, options=SyftScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, exclude=[], additional_outputs=['syft-table'], offline=False))) reporters=ReporterConfigSegment(csv=CSVReporterConfig(name='csv', enabled=True, options=CSVReporterConfigOptions(), extension='csv'), cyclonedx=CycloneDXReporterConfig(name='cyclonedx', enabled=True, options=CycloneDXReporterConfigOptions(), extension='cdx.json'), gitlab_cyclonedx=GitLabCycloneDXReporterConfig(name='gitlab-cyclonedx', enabled=True, options=GitLabCycloneDXReporterConfigOptions(category='production', package_manager_override=None, language_override=None, input_file_path_override=None), extension='gl-dependency-scanning-report.cdx.json'), html=HTMLReporterConfig(name='html', enabled=True, options=HTMLReporterConfigOptions(), extension='html'), flat_json=FlatJSONReporterConfig(name='flat-json', enabled=True, options=FlatJSONReporterConfigOptions(include_scanner_metrics=True, include_summary_metrics=True, include_metadata=True), extension='flat.json'), gitlab_sast=GitLabSASTReporterConfig(name='gitlab-sast', enabled=True, options=GitLabSASTReporterConfigOptions(exclude_suppressed=False), extension='gl-sast-report.json'), github_ghas=GHASReporterConfig(name='github-ghas', enabled=True, options=GHASReporterConfigOptions(exclude_suppressed=True), extension='ghas.sarif'), junitxml=JUnitXMLReporterConfig(name='junitxml', enabled=True, options=JUnitXMLReporterConfigOptions(respect_severity_threshold=True), extension='junit.xml'), markdown=MarkdownReporterConfig(name='markdown', enabled=True, options=MarkdownReporterConfigOptions(include_summary=True, include_findings_table=False, include_detailed_findings=True, max_detailed_findings=20, top_hotspots_limit=10, use_collapsible_details=True, compact=False), extension='summary.md'), ocsf=OCSFReporterConfig(name='ocsf', enabled=True, options=OCSFReporterConfigOptions(), extension='ocsf.json'), sarif=SARIFReporterConfig(name='sarif', enabled=True, options=SARIFReporterConfigOptions(), extension='sarif'), spdx=SPDXReporterConfig(name='spdx', enabled=False, options=SPDXReporterConfigOptions(), extension='spdx.json'), text=TextReporterConfig(name='text', enabled=True, options=TextReporterConfigOptions(include_summary=True, include_findings_table=False, include_detailed_findings=False, max_detailed_findings=20, top_hotspots_limit=20), extension='summary.txt'), unused_suppressions=UnusedSuppressionsReporterConfig(name='unused-suppressions', enabled=True, options=UnusedSuppressionsReporterConfigOptions(output_format='both'), extension='unused-suppressions.json'), yaml=YAMLReporterConfig(name='yaml', enabled=False, options=YAMLReporterConfigOptions(), extension='yaml')) mcp_resource_management=MCPResourceManagementConfig(max_concurrent_scans=3, max_concurrent_tasks=20, thread_pool_max_workers=4, scan_timeout_seconds=1800, operation_timeout_seconds=180, shutdown_timeout_seconds=30, memory_warning_threshold_mb=1024, memory_critical_threshold_mb=2048, task_count_warning_threshold=15, max_message_size_bytes=10485760, max_path_length=4096, max_directory_size_mb=1000, enable_health_checks=True, health_check_interval_seconds=60, enable_resource_logging=True, log_resource_operations=False) workspace=WorkspaceExecutionConfig(max_parallel_projects=None, project_timeout=None)",
+              'converter_results': dict({
+              }),
+              'description': "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
+              'metadata': dict({
+                'description': 'Automated Security Helper workspace-mode aggregated report',
+                'generated_at': '<GENERATED_AT>',
+                'project_name': 'workspace',
+                'report_id': '<REPORT_ID>',
+                'tool_version': '<ASH_VERSION>',
+              }),
+              'name': 'ASH Workspace Scan: workspace',
+              'scanner_results': dict({
+                'bandit': dict({
+                  'actionable_finding_count': 1,
+                  'dependencies_satisfied': True,
+                  'excluded': False,
+                  'exit_code': 0,
+                  'finding_count': 1,
+                  'status': 'FAILED',
+                }),
+                'checkov': dict({
+                  'actionable_finding_count': 1,
+                  'dependencies_satisfied': True,
+                  'excluded': False,
+                  'exit_code': 0,
+                  'finding_count': 1,
+                  'status': 'FAILED',
+                }),
+                'npm-audit': dict({
+                  'actionable_finding_count': 0,
+                  'dependencies_satisfied': False,
+                  'excluded': False,
+                  'exit_code': 0,
+                  'finding_count': 0,
+                  'status': 'MISSING',
+                }),
+                'semgrep': dict({
+                  'actionable_finding_count': 0,
+                  'dependencies_satisfied': True,
+                  'excluded': False,
+                  'exit_code': 0,
+                  'finding_count': 1,
+                  'status': 'PASSED',
+                }),
+              }),
+            }),
+            'timestamp': '<TIMESTAMP>',
+          }),
+        ]),
+        'logGroupName': '/ash/snapshot-fixture',
+        'logStreamName': 'ASHScanResults',
+      }),
+      'service': 'logs',
+    }),
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[cloudwatch-logs-workspace][aws_calls]
+  list([
+    dict({
+      'operation': 'CreateLogStream',
+      'params': dict({
+        'logGroupName': '/ash/snapshot-fixture',
+        'logStreamName': 'ASHScanResults',
+      }),
+      'service': 'logs',
+    }),
+    dict({
+      'operation': 'PutLogEvents',
+      'params': dict({
+        'logEvents': list([
+          dict({
+            'message': dict({
+              'ash_config': "project_name='ash-scan' global_settings=AshConfigGlobalSettingsSection(severity_threshold='MEDIUM', ignore_paths=[], suppressions=[], mcp=AshMcpConfig(runtime_overrides=RuntimeOverridesConfig(enabled=False, allowed_paths=[], denied_paths=['/fail_on_findings', '/fail_on_incomplete_scanners', '/content_db_staleness', '/global_settings/ignore_paths', '/global_settings/suppressions', '/reporters/bedrock-summary-reporter/options/aws_*', '/reporters/cloudwatch-logs/**'], denied_value_patterns={}))) fail_on_findings=True fail_on_incomplete_scanners=True content_db_staleness='fail' ash_plugin_modules=[] external_reports_to_include=[] build=None converters=ConverterConfigSegment(archive=ArchiveConverterConfig(name='archive', enabled=True, options=ArchiveConverterConfigOptions()), jupyter=JupyterConverterConfig(name='jupyter', enabled=True, options=JupyterConverterConfigOptions(tool_version='>=7.16.0,<8.0.0', install_timeout=300))) scanners=ScannerConfigSegment(bandit=BanditScannerConfig(name='bandit', enabled=True, options=BanditScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, confidence_level='all', ignore_nosec=False, excluded_paths=[], additional_formats=[], tool_version='>=1.7.0,<2.0.0', install_timeout=300)), cdk_nag=CdkNagScannerConfig(name='cdk-nag', enabled=True, options=CdkNagScannerConfigOptions(severity_threshold=None, scan_timeout=1800, nag_packs=CdkNagPacks(AwsSolutionsChecks=True, HIPAASecurityChecks=False, NIST80053R4Checks=False, NIST80053R5Checks=False, PCIDSS321Checks=False), include_compliant_checks=False)), cfn_nag=CfnNagScannerConfig(name='cfn-nag', enabled=True, options=CfnNagScannerConfigOptions(severity_threshold=None, scan_timeout=1800)), checkov=CheckovScannerConfig(name='checkov', enabled=True, options=CheckovScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, skip_path=[], additional_formats=['cyclonedx_json'], offline=False, frameworks=['all'], skip_frameworks=[], skip_ash_output_dir=True, tool_version=None, install_timeout=300)), detect_secrets=DetectSecretsScannerConfig(name='detect-secrets', enabled=True, options=DetectSecretsScannerConfigOptions(severity_threshold=None, scan_timeout=1800, baseline_file=None, scan_settings=DetectSecretsScanSettings(version=None, generated_at=None, plugins_used=[], filters_used=[], results=DetectSecretsScanSettingsResults()), skip_generated_lockfiles=True)), grype=GrypeScannerConfig(name='grype', enabled=True, options=GrypeScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, offline=False)), npm_audit=NpmAuditScannerConfig(name='npm-audit', enabled=True, options=NpmAuditScannerConfigOptions(severity_threshold=None, scan_timeout=1800, offline=False)), opengrep=OpengrepScannerConfig(name='opengrep', enabled=True, options=OpengrepScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config='p/ci', exclude=['*-converted.py', '*_report_result.txt'], exclude_rule=[], severity=[], metrics='auto', offline=False, patterns=[], version='v1.15.1')), semgrep=SemgrepScannerConfig(name='semgrep', enabled=True, options=SemgrepScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config='p/ci', exclude=['*-converted.py', '*_report_result.txt'], exclude_rule=[], severity=[], metrics='auto', offline=False, tool_version=None, install_timeout=300)), syft=SyftScannerConfig(name='syft', enabled=True, options=SyftScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, exclude=[], additional_outputs=['syft-table'], offline=False))) reporters=ReporterConfigSegment(csv=CSVReporterConfig(name='csv', enabled=True, options=CSVReporterConfigOptions(), extension='csv'), cyclonedx=CycloneDXReporterConfig(name='cyclonedx', enabled=True, options=CycloneDXReporterConfigOptions(), extension='cdx.json'), gitlab_cyclonedx=GitLabCycloneDXReporterConfig(name='gitlab-cyclonedx', enabled=True, options=GitLabCycloneDXReporterConfigOptions(category='production', package_manager_override=None, language_override=None, input_file_path_override=None), extension='gl-dependency-scanning-report.cdx.json'), html=HTMLReporterConfig(name='html', enabled=True, options=HTMLReporterConfigOptions(), extension='html'), flat_json=FlatJSONReporterConfig(name='flat-json', enabled=True, options=FlatJSONReporterConfigOptions(include_scanner_metrics=True, include_summary_metrics=True, include_metadata=True), extension='flat.json'), gitlab_sast=GitLabSASTReporterConfig(name='gitlab-sast', enabled=True, options=GitLabSASTReporterConfigOptions(exclude_suppressed=False), extension='gl-sast-report.json'), github_ghas=GHASReporterConfig(name='github-ghas', enabled=True, options=GHASReporterConfigOptions(exclude_suppressed=True), extension='ghas.sarif'), junitxml=JUnitXMLReporterConfig(name='junitxml', enabled=True, options=JUnitXMLReporterConfigOptions(respect_severity_threshold=True), extension='junit.xml'), markdown=MarkdownReporterConfig(name='markdown', enabled=True, options=MarkdownReporterConfigOptions(include_summary=True, include_findings_table=False, include_detailed_findings=True, max_detailed_findings=20, top_hotspots_limit=10, use_collapsible_details=True, compact=False), extension='summary.md'), ocsf=OCSFReporterConfig(name='ocsf', enabled=True, options=OCSFReporterConfigOptions(), extension='ocsf.json'), sarif=SARIFReporterConfig(name='sarif', enabled=True, options=SARIFReporterConfigOptions(), extension='sarif'), spdx=SPDXReporterConfig(name='spdx', enabled=False, options=SPDXReporterConfigOptions(), extension='spdx.json'), text=TextReporterConfig(name='text', enabled=True, options=TextReporterConfigOptions(include_summary=True, include_findings_table=False, include_detailed_findings=False, max_detailed_findings=20, top_hotspots_limit=20), extension='summary.txt'), unused_suppressions=UnusedSuppressionsReporterConfig(name='unused-suppressions', enabled=True, options=UnusedSuppressionsReporterConfigOptions(output_format='both'), extension='unused-suppressions.json'), yaml=YAMLReporterConfig(name='yaml', enabled=False, options=YAMLReporterConfigOptions(), extension='yaml')) mcp_resource_management=MCPResourceManagementConfig(max_concurrent_scans=3, max_concurrent_tasks=20, thread_pool_max_workers=4, scan_timeout_seconds=1800, operation_timeout_seconds=180, shutdown_timeout_seconds=30, memory_warning_threshold_mb=1024, memory_critical_threshold_mb=2048, task_count_warning_threshold=15, max_message_size_bytes=10485760, max_path_length=4096, max_directory_size_mb=1000, enable_health_checks=True, health_check_interval_seconds=60, enable_resource_logging=True, log_resource_operations=False) workspace=WorkspaceExecutionConfig(max_parallel_projects=None, project_timeout=None)",
+              'converter_results': dict({
+              }),
+              'description': "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
+              'metadata': dict({
+                'description': 'Automated Security Helper workspace-mode aggregated report',
+                'generated_at': '<GENERATED_AT>',
+                'project_name': 'workspace',
+                'report_id': '<REPORT_ID>',
+                'tool_version': '<ASH_VERSION>',
+              }),
+              'name': 'ASH Workspace Scan: workspace',
+              'scanner_results': dict({
+                'bandit': dict({
+                  'actionable_finding_count': 1,
+                  'dependencies_satisfied': True,
+                  'excluded': False,
+                  'exit_code': 0,
+                  'finding_count': 1,
+                  'status': 'FAILED',
+                }),
+                'checkov': dict({
+                  'actionable_finding_count': 1,
+                  'dependencies_satisfied': True,
+                  'excluded': False,
+                  'exit_code': 0,
+                  'finding_count': 1,
+                  'status': 'FAILED',
+                }),
+                'npm-audit': dict({
+                  'actionable_finding_count': 0,
+                  'dependencies_satisfied': False,
+                  'excluded': False,
+                  'exit_code': 0,
+                  'finding_count': 0,
+                  'status': 'MISSING',
+                }),
+                'semgrep': dict({
+                  'actionable_finding_count': 0,
+                  'dependencies_satisfied': True,
+                  'excluded': False,
+                  'exit_code': 0,
+                  'finding_count': 1,
+                  'status': 'PASSED',
+                }),
+              }),
+            }),
+            'timestamp': '<TIMESTAMP>',
+          }),
+        ]),
+        'logGroupName': '/ash/snapshot-fixture',
+        'logStreamName': 'ASHScanResults',
+      }),
+      'service': 'logs',
+    }),
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[s3-single][aws_calls]
+  list([
+    dict({
+      'operation': 'PutObject',
+      'params': dict({
+        'Body': dict({
+          'ash_config': dict({
+            'fail_on_findings': True,
+            'global_settings': dict({
+              'severity_threshold': 'MEDIUM',
+              'suppressions': list([
+                dict({
+                  'line_end': 5,
+                  'line_start': 5,
+                  'path': 'app/app.py',
+                  'reason': 'Fixture placeholder credential, not a real secret',
+                  'rule_id': 'SECRET-SECRET-KEYWORD',
+                }),
+                dict({
+                  'expiration': '2099-12-31',
+                  'path': 'infra/main.tf',
+                  'reason': 'Stale suppression for a check that no longer exists',
+                  'rule_id': 'CKV_AWS_999',
+                }),
+              ]),
+            }),
+            'project_name': 'snapshot-fixture',
+          }),
+          'converter_results': dict({
+          }),
+          'description': 'Aggregated security scan results',
+          'metadata': dict({
+            'description': 'Automated Security Helper Aggregated Report Post-processor',
+            'generated_at': '<GENERATED_AT>',
+            'project_name': 'ASH',
+            'report_id': '<REPORT_ID>',
+            'summary_stats': dict({
+              'actionable': 6,
+              'duration': '<DURATION>',
+              'end': None,
+              'error': 1,
+              'failed': 3,
+              'missing': 1,
+              'passed': 3,
+              'severity_counts': dict({
+                'critical': 1,
+                'high': 2,
+                'info': 1,
+                'low': 3,
+                'medium': 3,
+                'suppressed': 1,
+              }),
+              'skipped': 1,
+              'start': None,
+              'total': 10,
+            }),
+            'tool_version': '<ASH_VERSION>',
+          }),
+          'name': 'ASH Scan <TIMESTAMP>',
+          'scanner_results': dict({
+            'bandit': dict({
+              'actionable_finding_count': 1,
+              'duration': '<DURATION>',
+              'finding_count': 2,
+              'severity_counts': dict({
+                'critical': 0,
+                'high': 1,
+                'info': 0,
+                'low': 1,
+                'medium': 0,
+                'suppressed': 0,
+              }),
+              'status': 'FAILED',
+              'suppressed_finding_count': 0,
+            }),
+            'cdk-nag': dict({
+              'actionable_finding_count': 0,
+              'duration': '<DURATION>',
+              'finding_count': 0,
+              'severity_counts': dict({
+                'critical': 0,
+                'high': 0,
+                'info': 0,
+                'low': 0,
+                'medium': 0,
+                'suppressed': 0,
+              }),
+              'status': 'SKIPPED',
+              'suppressed_finding_count': 0,
+            }),
+            'cfn-nag': dict({
+              'actionable_finding_count': 0,
+              'duration': '<DURATION>',
+              'finding_count': 0,
+              'severity_counts': dict({
+                'critical': 0,
+                'high': 0,
+                'info': 0,
+                'low': 0,
+                'medium': 0,
+                'suppressed': 0,
+              }),
+              'status': 'ERROR',
+              'suppressed_finding_count': 0,
+            }),
+            'checkov': dict({
+              'actionable_finding_count': 3,
+              'duration': '<DURATION>',
+              'finding_count': 4,
+              'severity_counts': dict({
+                'critical': 0,
+                'high': 1,
+                'info': 0,
+                'low': 1,
+                'medium': 2,
+                'suppressed': 0,
+              }),
+              'status': 'FAILED',
+              'suppressed_finding_count': 0,
+            }),
+            'detect-secrets': dict({
+              'actionable_finding_count': 0,
+              'duration': '<DURATION>',
+              'finding_count': 0,
+              'severity_counts': dict({
+                'critical': 0,
+                'high': 0,
+                'info': 0,
+                'low': 0,
+                'medium': 0,
+                'suppressed': 1,
+              }),
+              'status': 'PASSED',
+              'suppressed_finding_count': 1,
+            }),
+            'grype': dict({
+              'actionable_finding_count': 2,
+              'duration': '<DURATION>',
+              'finding_count': 2,
+              'severity_counts': dict({
+                'critical': 1,
+                'high': 0,
+                'info': 0,
+                'low': 0,
+                'medium': 1,
+                'suppressed': 0,
+              }),
+              'status': 'FAILED',
+              'suppressed_finding_count': 0,
+            }),
+            'npm-audit': dict({
+              'actionable_finding_count': 0,
+              'duration': '<DURATION>',
+              'finding_count': 0,
+              'severity_counts': dict({
+                'critical': 0,
+                'high': 0,
+                'info': 0,
+                'low': 0,
+                'medium': 0,
+                'suppressed': 0,
+              }),
+              'status': 'MISSING',
+              'suppressed_finding_count': 0,
+            }),
+            'semgrep': dict({
+              'actionable_finding_count': 0,
+              'duration': '<DURATION>',
+              'finding_count': 2,
+              'severity_counts': dict({
+                'critical': 0,
+                'high': 0,
+                'info': 1,
+                'low': 1,
+                'medium': 0,
+                'suppressed': 0,
+              }),
+              'status': 'PASSED',
+              'suppressed_finding_count': 0,
+            }),
+            'syft': dict({
+              'actionable_finding_count': 0,
+              'duration': '<DURATION>',
+              'finding_count': 0,
+              'severity_counts': dict({
+                'critical': 0,
+                'high': 0,
+                'info': 0,
+                'low': 0,
+                'medium': 0,
+                'suppressed': 0,
+              }),
+              'status': 'PASSED',
+              'suppressed_finding_count': 0,
+            }),
+          }),
+        }),
+        'Bucket': 'snapshot-fixture-reports',
+        'ContentType': 'application/json',
+        'Key': 'ash-reports/ash-report-None.json',
+      }),
+      'service': 's3',
+    }),
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[s3-skipped-workspace][aws_calls]
+  list([
+    dict({
+      'operation': 'PutObject',
+      'params': dict({
+        'Body': dict({
+          'ash_config': "project_name='ash-scan' global_settings=AshConfigGlobalSettingsSection(severity_threshold='MEDIUM', ignore_paths=[], suppressions=[], mcp=AshMcpConfig(runtime_overrides=RuntimeOverridesConfig(enabled=False, allowed_paths=[], denied_paths=['/fail_on_findings', '/fail_on_incomplete_scanners', '/content_db_staleness', '/global_settings/ignore_paths', '/global_settings/suppressions', '/reporters/bedrock-summary-reporter/options/aws_*', '/reporters/cloudwatch-logs/**'], denied_value_patterns={}))) fail_on_findings=True fail_on_incomplete_scanners=True content_db_staleness='fail' ash_plugin_modules=[] external_reports_to_include=[] build=None converters=ConverterConfigSegment(archive=ArchiveConverterConfig(name='archive', enabled=True, options=ArchiveConverterConfigOptions()), jupyter=JupyterConverterConfig(name='jupyter', enabled=True, options=JupyterConverterConfigOptions(tool_version='>=7.16.0,<8.0.0', install_timeout=300))) scanners=ScannerConfigSegment(bandit=BanditScannerConfig(name='bandit', enabled=True, options=BanditScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, confidence_level='all', ignore_nosec=False, excluded_paths=[], additional_formats=[], tool_version='>=1.7.0,<2.0.0', install_timeout=300)), cdk_nag=CdkNagScannerConfig(name='cdk-nag', enabled=True, options=CdkNagScannerConfigOptions(severity_threshold=None, scan_timeout=1800, nag_packs=CdkNagPacks(AwsSolutionsChecks=True, HIPAASecurityChecks=False, NIST80053R4Checks=False, NIST80053R5Checks=False, PCIDSS321Checks=False), include_compliant_checks=False)), cfn_nag=CfnNagScannerConfig(name='cfn-nag', enabled=True, options=CfnNagScannerConfigOptions(severity_threshold=None, scan_timeout=1800)), checkov=CheckovScannerConfig(name='checkov', enabled=True, options=CheckovScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, skip_path=[], additional_formats=['cyclonedx_json'], offline=False, frameworks=['all'], skip_frameworks=[], skip_ash_output_dir=True, tool_version=None, install_timeout=300)), detect_secrets=DetectSecretsScannerConfig(name='detect-secrets', enabled=True, options=DetectSecretsScannerConfigOptions(severity_threshold=None, scan_timeout=1800, baseline_file=None, scan_settings=DetectSecretsScanSettings(version=None, generated_at=None, plugins_used=[], filters_used=[], results=DetectSecretsScanSettingsResults()), skip_generated_lockfiles=True)), grype=GrypeScannerConfig(name='grype', enabled=True, options=GrypeScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, offline=False)), npm_audit=NpmAuditScannerConfig(name='npm-audit', enabled=True, options=NpmAuditScannerConfigOptions(severity_threshold=None, scan_timeout=1800, offline=False)), opengrep=OpengrepScannerConfig(name='opengrep', enabled=True, options=OpengrepScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config='p/ci', exclude=['*-converted.py', '*_report_result.txt'], exclude_rule=[], severity=[], metrics='auto', offline=False, patterns=[], version='v1.15.1')), semgrep=SemgrepScannerConfig(name='semgrep', enabled=True, options=SemgrepScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config='p/ci', exclude=['*-converted.py', '*_report_result.txt'], exclude_rule=[], severity=[], metrics='auto', offline=False, tool_version=None, install_timeout=300)), syft=SyftScannerConfig(name='syft', enabled=True, options=SyftScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, exclude=[], additional_outputs=['syft-table'], offline=False))) reporters=ReporterConfigSegment(csv=CSVReporterConfig(name='csv', enabled=True, options=CSVReporterConfigOptions(), extension='csv'), cyclonedx=CycloneDXReporterConfig(name='cyclonedx', enabled=True, options=CycloneDXReporterConfigOptions(), extension='cdx.json'), gitlab_cyclonedx=GitLabCycloneDXReporterConfig(name='gitlab-cyclonedx', enabled=True, options=GitLabCycloneDXReporterConfigOptions(category='production', package_manager_override=None, language_override=None, input_file_path_override=None), extension='gl-dependency-scanning-report.cdx.json'), html=HTMLReporterConfig(name='html', enabled=True, options=HTMLReporterConfigOptions(), extension='html'), flat_json=FlatJSONReporterConfig(name='flat-json', enabled=True, options=FlatJSONReporterConfigOptions(include_scanner_metrics=True, include_summary_metrics=True, include_metadata=True), extension='flat.json'), gitlab_sast=GitLabSASTReporterConfig(name='gitlab-sast', enabled=True, options=GitLabSASTReporterConfigOptions(exclude_suppressed=False), extension='gl-sast-report.json'), github_ghas=GHASReporterConfig(name='github-ghas', enabled=True, options=GHASReporterConfigOptions(exclude_suppressed=True), extension='ghas.sarif'), junitxml=JUnitXMLReporterConfig(name='junitxml', enabled=True, options=JUnitXMLReporterConfigOptions(respect_severity_threshold=True), extension='junit.xml'), markdown=MarkdownReporterConfig(name='markdown', enabled=True, options=MarkdownReporterConfigOptions(include_summary=True, include_findings_table=False, include_detailed_findings=True, max_detailed_findings=20, top_hotspots_limit=10, use_collapsible_details=True, compact=False), extension='summary.md'), ocsf=OCSFReporterConfig(name='ocsf', enabled=True, options=OCSFReporterConfigOptions(), extension='ocsf.json'), sarif=SARIFReporterConfig(name='sarif', enabled=True, options=SARIFReporterConfigOptions(), extension='sarif'), spdx=SPDXReporterConfig(name='spdx', enabled=False, options=SPDXReporterConfigOptions(), extension='spdx.json'), text=TextReporterConfig(name='text', enabled=True, options=TextReporterConfigOptions(include_summary=True, include_findings_table=False, include_detailed_findings=False, max_detailed_findings=20, top_hotspots_limit=20), extension='summary.txt'), unused_suppressions=UnusedSuppressionsReporterConfig(name='unused-suppressions', enabled=True, options=UnusedSuppressionsReporterConfigOptions(output_format='both'), extension='unused-suppressions.json'), yaml=YAMLReporterConfig(name='yaml', enabled=False, options=YAMLReporterConfigOptions(), extension='yaml')) mcp_resource_management=MCPResourceManagementConfig(max_concurrent_scans=3, max_concurrent_tasks=20, thread_pool_max_workers=4, scan_timeout_seconds=1800, operation_timeout_seconds=180, shutdown_timeout_seconds=30, memory_warning_threshold_mb=1024, memory_critical_threshold_mb=2048, task_count_warning_threshold=15, max_message_size_bytes=10485760, max_path_length=4096, max_directory_size_mb=1000, enable_health_checks=True, health_check_interval_seconds=60, enable_resource_logging=True, log_resource_operations=False) workspace=WorkspaceExecutionConfig(max_parallel_projects=None, project_timeout=None)",
+          'converter_results': dict({
+          }),
+          'description': "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
+          'metadata': dict({
+            'description': 'Automated Security Helper workspace-mode aggregated report',
+            'generated_at': '<GENERATED_AT>',
+            'project_name': 'workspace',
+            'report_id': '<REPORT_ID>',
+            'tool_version': '<ASH_VERSION>',
+          }),
+          'name': 'ASH Workspace Scan: workspace',
+          'scanner_results': dict({
+            'bandit': dict({
+              'actionable_finding_count': 1,
+              'dependencies_satisfied': True,
+              'excluded': False,
+              'exit_code': 0,
+              'finding_count': 1,
+              'status': 'FAILED',
+            }),
+            'checkov': dict({
+              'actionable_finding_count': 1,
+              'dependencies_satisfied': True,
+              'excluded': False,
+              'exit_code': 0,
+              'finding_count': 1,
+              'status': 'FAILED',
+            }),
+            'npm-audit': dict({
+              'actionable_finding_count': 0,
+              'dependencies_satisfied': False,
+              'excluded': False,
+              'exit_code': 0,
+              'finding_count': 0,
+              'status': 'MISSING',
+            }),
+            'semgrep': dict({
+              'actionable_finding_count': 0,
+              'dependencies_satisfied': True,
+              'excluded': False,
+              'exit_code': 0,
+              'finding_count': 1,
+              'status': 'PASSED',
+            }),
+          }),
+        }),
+        'Bucket': 'snapshot-fixture-reports',
+        'ContentType': 'application/json',
+        'Key': 'ash-reports/ash-report-None.json',
+      }),
+      'service': 's3',
+    }),
+  ])
+# ---
+# name: test_aws_reporter_output_and_payload[s3-workspace][aws_calls]
+  list([
+    dict({
+      'operation': 'PutObject',
+      'params': dict({
+        'Body': dict({
+          'ash_config': "project_name='ash-scan' global_settings=AshConfigGlobalSettingsSection(severity_threshold='MEDIUM', ignore_paths=[], suppressions=[], mcp=AshMcpConfig(runtime_overrides=RuntimeOverridesConfig(enabled=False, allowed_paths=[], denied_paths=['/fail_on_findings', '/fail_on_incomplete_scanners', '/content_db_staleness', '/global_settings/ignore_paths', '/global_settings/suppressions', '/reporters/bedrock-summary-reporter/options/aws_*', '/reporters/cloudwatch-logs/**'], denied_value_patterns={}))) fail_on_findings=True fail_on_incomplete_scanners=True content_db_staleness='fail' ash_plugin_modules=[] external_reports_to_include=[] build=None converters=ConverterConfigSegment(archive=ArchiveConverterConfig(name='archive', enabled=True, options=ArchiveConverterConfigOptions()), jupyter=JupyterConverterConfig(name='jupyter', enabled=True, options=JupyterConverterConfigOptions(tool_version='>=7.16.0,<8.0.0', install_timeout=300))) scanners=ScannerConfigSegment(bandit=BanditScannerConfig(name='bandit', enabled=True, options=BanditScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, confidence_level='all', ignore_nosec=False, excluded_paths=[], additional_formats=[], tool_version='>=1.7.0,<2.0.0', install_timeout=300)), cdk_nag=CdkNagScannerConfig(name='cdk-nag', enabled=True, options=CdkNagScannerConfigOptions(severity_threshold=None, scan_timeout=1800, nag_packs=CdkNagPacks(AwsSolutionsChecks=True, HIPAASecurityChecks=False, NIST80053R4Checks=False, NIST80053R5Checks=False, PCIDSS321Checks=False), include_compliant_checks=False)), cfn_nag=CfnNagScannerConfig(name='cfn-nag', enabled=True, options=CfnNagScannerConfigOptions(severity_threshold=None, scan_timeout=1800)), checkov=CheckovScannerConfig(name='checkov', enabled=True, options=CheckovScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, skip_path=[], additional_formats=['cyclonedx_json'], offline=False, frameworks=['all'], skip_frameworks=[], skip_ash_output_dir=True, tool_version=None, install_timeout=300)), detect_secrets=DetectSecretsScannerConfig(name='detect-secrets', enabled=True, options=DetectSecretsScannerConfigOptions(severity_threshold=None, scan_timeout=1800, baseline_file=None, scan_settings=DetectSecretsScanSettings(version=None, generated_at=None, plugins_used=[], filters_used=[], results=DetectSecretsScanSettingsResults()), skip_generated_lockfiles=True)), grype=GrypeScannerConfig(name='grype', enabled=True, options=GrypeScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, offline=False)), npm_audit=NpmAuditScannerConfig(name='npm-audit', enabled=True, options=NpmAuditScannerConfigOptions(severity_threshold=None, scan_timeout=1800, offline=False)), opengrep=OpengrepScannerConfig(name='opengrep', enabled=True, options=OpengrepScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config='p/ci', exclude=['*-converted.py', '*_report_result.txt'], exclude_rule=[], severity=[], metrics='auto', offline=False, patterns=[], version='v1.15.1')), semgrep=SemgrepScannerConfig(name='semgrep', enabled=True, options=SemgrepScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config='p/ci', exclude=['*-converted.py', '*_report_result.txt'], exclude_rule=[], severity=[], metrics='auto', offline=False, tool_version=None, install_timeout=300)), syft=SyftScannerConfig(name='syft', enabled=True, options=SyftScannerConfigOptions(severity_threshold=None, scan_timeout=1800, config_file=None, exclude=[], additional_outputs=['syft-table'], offline=False))) reporters=ReporterConfigSegment(csv=CSVReporterConfig(name='csv', enabled=True, options=CSVReporterConfigOptions(), extension='csv'), cyclonedx=CycloneDXReporterConfig(name='cyclonedx', enabled=True, options=CycloneDXReporterConfigOptions(), extension='cdx.json'), gitlab_cyclonedx=GitLabCycloneDXReporterConfig(name='gitlab-cyclonedx', enabled=True, options=GitLabCycloneDXReporterConfigOptions(category='production', package_manager_override=None, language_override=None, input_file_path_override=None), extension='gl-dependency-scanning-report.cdx.json'), html=HTMLReporterConfig(name='html', enabled=True, options=HTMLReporterConfigOptions(), extension='html'), flat_json=FlatJSONReporterConfig(name='flat-json', enabled=True, options=FlatJSONReporterConfigOptions(include_scanner_metrics=True, include_summary_metrics=True, include_metadata=True), extension='flat.json'), gitlab_sast=GitLabSASTReporterConfig(name='gitlab-sast', enabled=True, options=GitLabSASTReporterConfigOptions(exclude_suppressed=False), extension='gl-sast-report.json'), github_ghas=GHASReporterConfig(name='github-ghas', enabled=True, options=GHASReporterConfigOptions(exclude_suppressed=True), extension='ghas.sarif'), junitxml=JUnitXMLReporterConfig(name='junitxml', enabled=True, options=JUnitXMLReporterConfigOptions(respect_severity_threshold=True), extension='junit.xml'), markdown=MarkdownReporterConfig(name='markdown', enabled=True, options=MarkdownReporterConfigOptions(include_summary=True, include_findings_table=False, include_detailed_findings=True, max_detailed_findings=20, top_hotspots_limit=10, use_collapsible_details=True, compact=False), extension='summary.md'), ocsf=OCSFReporterConfig(name='ocsf', enabled=True, options=OCSFReporterConfigOptions(), extension='ocsf.json'), sarif=SARIFReporterConfig(name='sarif', enabled=True, options=SARIFReporterConfigOptions(), extension='sarif'), spdx=SPDXReporterConfig(name='spdx', enabled=False, options=SPDXReporterConfigOptions(), extension='spdx.json'), text=TextReporterConfig(name='text', enabled=True, options=TextReporterConfigOptions(include_summary=True, include_findings_table=False, include_detailed_findings=False, max_detailed_findings=20, top_hotspots_limit=20), extension='summary.txt'), unused_suppressions=UnusedSuppressionsReporterConfig(name='unused-suppressions', enabled=True, options=UnusedSuppressionsReporterConfigOptions(output_format='both'), extension='unused-suppressions.json'), yaml=YAMLReporterConfig(name='yaml', enabled=False, options=YAMLReporterConfigOptions(), extension='yaml')) mcp_resource_management=MCPResourceManagementConfig(max_concurrent_scans=3, max_concurrent_tasks=20, thread_pool_max_workers=4, scan_timeout_seconds=1800, operation_timeout_seconds=180, shutdown_timeout_seconds=30, memory_warning_threshold_mb=1024, memory_critical_threshold_mb=2048, task_count_warning_threshold=15, max_message_size_bytes=10485760, max_path_length=4096, max_directory_size_mb=1000, enable_health_checks=True, health_check_interval_seconds=60, enable_resource_logging=True, log_resource_operations=False) workspace=WorkspaceExecutionConfig(max_parallel_projects=None, project_timeout=None)",
+          'converter_results': dict({
+          }),
+          'description': "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
+          'metadata': dict({
+            'description': 'Automated Security Helper workspace-mode aggregated report',
+            'generated_at': '<GENERATED_AT>',
+            'project_name': 'workspace',
+            'report_id': '<REPORT_ID>',
+            'tool_version': '<ASH_VERSION>',
+          }),
+          'name': 'ASH Workspace Scan: workspace',
+          'scanner_results': dict({
+            'bandit': dict({
+              'actionable_finding_count': 1,
+              'dependencies_satisfied': True,
+              'excluded': False,
+              'exit_code': 0,
+              'finding_count': 1,
+              'status': 'FAILED',
+            }),
+            'checkov': dict({
+              'actionable_finding_count': 1,
+              'dependencies_satisfied': True,
+              'excluded': False,
+              'exit_code': 0,
+              'finding_count': 1,
+              'status': 'FAILED',
+            }),
+            'npm-audit': dict({
+              'actionable_finding_count': 0,
+              'dependencies_satisfied': False,
+              'excluded': False,
+              'exit_code': 0,
+              'finding_count': 0,
+              'status': 'MISSING',
+            }),
+            'semgrep': dict({
+              'actionable_finding_count': 0,
+              'dependencies_satisfied': True,
+              'excluded': False,
+              'exit_code': 0,
+              'finding_count': 1,
+              'status': 'PASSED',
+            }),
+          }),
+        }),
+        'Bucket': 'snapshot-fixture-reports',
+        'ContentType': 'application/json',
+        'Key': 'ash-reports/ash-report-None.json',
+      }),
+      'service': 's3',
+    }),
+  ])
+# ---

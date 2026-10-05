@@ -1,0 +1,251 @@
+{
+  "metadata": {
+    "project": "workspace",
+    "scan_time": "<TIMESTAMP>",
+    "report_time": "<TIMESTAMP>",
+    "tool_version": "<ASH_VERSION>",
+    "time_delta": "<DURATION>"
+  },
+  "scanner_metrics": [
+    {
+      "scanner_name": "bandit",
+      "suppressed": 0,
+      "critical": 0,
+      "high": 1,
+      "medium": 0,
+      "low": 0,
+      "info": 0,
+      "total": 1,
+      "passed": false,
+      "threshold": "MEDIUM",
+      "threshold_source": "global",
+      "actionable": 1,
+      "status": "FAILED",
+      "excluded": false,
+      "dependencies_missing": false,
+      "targets_attempted": null,
+      "targets_failed": 0
+    },
+    {
+      "scanner_name": "checkov",
+      "suppressed": 0,
+      "critical": 0,
+      "high": 1,
+      "medium": 0,
+      "low": 0,
+      "info": 0,
+      "total": 1,
+      "passed": false,
+      "threshold": "MEDIUM",
+      "threshold_source": "global",
+      "actionable": 1,
+      "status": "FAILED",
+      "excluded": false,
+      "dependencies_missing": false,
+      "targets_attempted": null,
+      "targets_failed": 0
+    },
+    {
+      "scanner_name": "npm-audit",
+      "suppressed": 0,
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 0,
+      "info": 0,
+      "total": 0,
+      "passed": true,
+      "threshold": "MEDIUM",
+      "threshold_source": "global",
+      "actionable": 0,
+      "status": "MISSING",
+      "excluded": false,
+      "dependencies_missing": true,
+      "targets_attempted": null,
+      "targets_failed": 0
+    },
+    {
+      "scanner_name": "semgrep",
+      "suppressed": 0,
+      "critical": 0,
+      "high": 0,
+      "medium": 1,
+      "low": 0,
+      "info": 0,
+      "total": 1,
+      "passed": false,
+      "threshold": "MEDIUM",
+      "threshold_source": "global",
+      "actionable": 1,
+      "status": "FAILED",
+      "excluded": false,
+      "dependencies_missing": false,
+      "targets_attempted": null,
+      "targets_failed": 0
+    }
+  ],
+  "content_databases": [],
+  "top_hotspots": [
+    {
+      "location": "main.tf",
+      "count": 2
+    },
+    {
+      "location": "app.py",
+      "count": 1
+    }
+  ],
+  "findings": [
+    {
+      "id": "bandit-B602-e9f369ff",
+      "title": "B602",
+      "description": "subprocess call with shell=True identified, security issue.",
+      "severity": "HIGH",
+      "workspace_project": "api",
+      "scanner": "bandit",
+      "scanner_type": "UNKNOWN",
+      "rule_id": "B602",
+      "file_path": "app.py",
+      "line_start": 7,
+      "line_end": 7,
+      "is_suppressed": false,
+      "detected_at": "<TIMESTAMP>",
+      "tags": "[\"bandit\"]",
+      "properties": "{\"tags\": [\"bandit\"], \"issue_severity\": \"HIGH\", \"issue_confidence\": \"HIGH\", \"scanner_name\": \"bandit\", \"scanner_version\": \"1.8.6\", \"scanner_details\": {\"tool_name\": \"bandit\", \"tool_version\": \"1.8.6\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 1.0, \"start_time\": \"<TIMESTAMP>\", \"end_time\": \"<TIMESTAMP>\"}}, \"workspace_project\": \"api\", \"workspace_uri\": \"api/app.py\"}",
+      "raw_data": "{\"ruleId\":\"B602\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"subprocess call with shell=True identified, security issue.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app.py\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":7,\"endLine\":7,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"bandit\"],\"issue_severity\":\"HIGH\",\"issue_confidence\":\"HIGH\",\"scanner_name\":\"bandit\",\"scanner_version\":\"1.8.6\",\"scanner_details\":{\"tool_name\":\"bandit\",\"tool_version\":\"1.8.6\",\"tool_invocation\":{\"exit_code\":0,\"duration\":1.0,\"start_time\":\"<TIMESTAMP>\",\"end_time\":\"<TIMESTAMP>\"}},\"workspace_project\":\"api\",\"workspace_uri\":\"api/app.py\"}}"
+    },
+    {
+      "id": "checkov-CKV_AWS_20-89534355",
+      "title": "CKV_AWS_20",
+      "description": "S3 Bucket has an ACL defined which allows public READ access.",
+      "severity": "HIGH",
+      "workspace_project": "web",
+      "scanner": "checkov",
+      "scanner_type": "UNKNOWN",
+      "rule_id": "CKV_AWS_20",
+      "file_path": "main.tf",
+      "line_start": 1,
+      "line_end": 4,
+      "is_suppressed": false,
+      "detected_at": "<TIMESTAMP>",
+      "tags": "[\"checkov\"]",
+      "properties": "{\"tags\": [\"checkov\"], \"issue_severity\": \"HIGH\", \"scanner_name\": \"checkov\", \"scanner_version\": \"3.2.469\", \"scanner_details\": {\"tool_name\": \"checkov\", \"tool_version\": \"3.2.469\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 2.0, \"start_time\": \"<TIMESTAMP>\", \"end_time\": \"<TIMESTAMP>\"}}, \"workspace_project\": \"web\", \"workspace_uri\": \"web/main.tf\"}",
+      "raw_data": "{\"ruleId\":\"CKV_AWS_20\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"S3 Bucket has an ACL defined which allows public READ access.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"main.tf\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":1,\"endLine\":4,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"checkov\"],\"issue_severity\":\"HIGH\",\"scanner_name\":\"checkov\",\"scanner_version\":\"3.2.469\",\"scanner_details\":{\"tool_name\":\"checkov\",\"tool_version\":\"3.2.469\",\"tool_invocation\":{\"exit_code\":0,\"duration\":2.0,\"start_time\":\"<TIMESTAMP>\",\"end_time\":\"<TIMESTAMP>\"}},\"workspace_project\":\"web\",\"workspace_uri\":\"web/main.tf\"}}"
+    },
+    {
+      "id": "semgrep-terraform.aws.best-practice.s3-bucket-name-hardcoded-2ffa28f7",
+      "title": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
+      "description": "Bucket name is hardcoded; derive it from a variable.",
+      "severity": "MEDIUM",
+      "workspace_project": "web",
+      "scanner": "semgrep",
+      "scanner_type": "UNKNOWN",
+      "rule_id": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
+      "file_path": "main.tf",
+      "line_start": 2,
+      "line_end": 2,
+      "is_suppressed": false,
+      "detected_at": "<TIMESTAMP>",
+      "tags": "[\"semgrep\"]",
+      "properties": "{\"tags\": [\"semgrep\"], \"issue_severity\": \"MEDIUM\", \"scanner_name\": \"semgrep\", \"scanner_version\": \"1.140.0\", \"scanner_details\": {\"tool_name\": \"semgrep\", \"tool_version\": \"1.140.0\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 1.5, \"start_time\": \"<TIMESTAMP>\", \"end_time\": \"<TIMESTAMP>\"}}, \"workspace_project\": \"web\", \"workspace_uri\": \"web/main.tf\"}",
+      "raw_data": "{\"ruleId\":\"terraform.aws.best-practice.s3-bucket-name-hardcoded\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Bucket name is hardcoded; derive it from a variable.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"main.tf\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":2,\"endLine\":2,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"semgrep\"],\"issue_severity\":\"MEDIUM\",\"scanner_name\":\"semgrep\",\"scanner_version\":\"1.140.0\",\"scanner_details\":{\"tool_name\":\"semgrep\",\"tool_version\":\"1.140.0\",\"tool_invocation\":{\"exit_code\":0,\"duration\":1.5,\"start_time\":\"<TIMESTAMP>\",\"end_time\":\"<TIMESTAMP>\"}},\"workspace_project\":\"web\",\"workspace_uri\":\"web/main.tf\"}}"
+    }
+  ],
+  "workspace": {
+    "workspace_file": "<REPO>/tests/test_data/snapshot_fixture/workspace/snapshot-with-skipped.code-workspace",
+    "workspace_root": "<REPO>/tests/test_data/snapshot_fixture/workspace",
+    "status": "completed",
+    "exit_code": 2,
+    "projects": [
+      {
+        "project": "api",
+        "relative_path": "api",
+        "display_label": "snapshot-api",
+        "status": "completed",
+        "severity_threshold": "MEDIUM",
+        "finding_count": 1,
+        "actionable_finding_count": 1,
+        "policy_origin_finding_count": 0,
+        "exceeds_threshold": true,
+        "duration_seconds": 0.0,
+        "output_path": "projects/api",
+        "sarif_run_index": 0,
+        "scanners": {
+          "npm-audit": "MISSING",
+          "bandit": "FAILED"
+        },
+        "incomplete_scanners": [
+          "npm-audit"
+        ],
+        "no_scanner_ran": false,
+        "scan_incomplete": true,
+        "ceiling_unreachable_findings": {},
+        "skip_reason": null,
+        "skip_detail": null,
+        "error": null,
+        "invalid_config": false
+      },
+      {
+        "project": "web",
+        "relative_path": "web",
+        "display_label": "snapshot-web",
+        "status": "completed",
+        "severity_threshold": "HIGH",
+        "finding_count": 2,
+        "actionable_finding_count": 1,
+        "policy_origin_finding_count": 0,
+        "exceeds_threshold": true,
+        "duration_seconds": 0.0,
+        "output_path": "projects/web",
+        "sarif_run_index": 1,
+        "scanners": {
+          "checkov": "FAILED",
+          "semgrep": "PASSED"
+        },
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "scan_incomplete": false,
+        "ceiling_unreachable_findings": {},
+        "skip_reason": null,
+        "skip_detail": null,
+        "error": null,
+        "invalid_config": false
+      },
+      {
+        "project": "docs",
+        "relative_path": "docs",
+        "display_label": "docs",
+        "status": "skipped",
+        "severity_threshold": null,
+        "finding_count": 0,
+        "actionable_finding_count": 0,
+        "policy_origin_finding_count": 0,
+        "exceeds_threshold": false,
+        "duration_seconds": 0.0,
+        "output_path": "projects/docs",
+        "sarif_run_index": null,
+        "scanners": {},
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "scan_incomplete": false,
+        "ceiling_unreachable_findings": {},
+        "skip_reason": "error",
+        "skip_detail": "'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'",
+        "error": null,
+        "invalid_config": false
+      }
+    ],
+    "max_parallel_projects": 1,
+    "project_timeout": null,
+    "wall_clock_seconds": 0.0,
+    "unconvertible_finding_paths": 0,
+    "refusal_detail": null,
+    "skipped_projects": [
+      {
+        "project": "docs",
+        "reason": "error",
+        "detail": "'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'"
+      }
+    ]
+  }
+}

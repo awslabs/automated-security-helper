@@ -1,0 +1,2520 @@
+{
+  "name": "ASH Scan <TIMESTAMP>",
+  "description": "Aggregated security scan results",
+  "metadata": {
+    "report_id": "ASH-<REPORT_ID>",
+    "generated_at": "<TIMESTAMP>",
+    "project_name": "ASH",
+    "tool_version": "<ASH_VERSION>",
+    "description": "Automated Security Helper Aggregated Report Post-processor",
+    "summary_stats": {
+      "severity_counts": {
+        "suppressed": 1,
+        "critical": 1,
+        "high": 2,
+        "medium": 3,
+        "low": 3,
+        "info": 1
+      },
+      "start": "<TIMESTAMP>",
+      "end": "<TIMESTAMP>",
+      "duration": 42.0,
+      "total": 10,
+      "actionable": 6,
+      "passed": 3,
+      "failed": 3,
+      "missing": 1,
+      "skipped": 1,
+      "error": 1
+    },
+    "validation_summary": {},
+    "execution_discrepancy_report": {},
+    "shard": null,
+    "expected_scanners": [],
+    "plugin_load_errors": {}
+  },
+  "ash_config": {
+    "project_name": "snapshot-fixture",
+    "global_settings": {
+      "severity_threshold": "MEDIUM",
+      "ignore_paths": [],
+      "suppressions": [
+        {
+          "path": "app/app.py",
+          "reason": "Fixture placeholder credential, not a real secret",
+          "expiration": null,
+          "rule_id": "SECRET-SECRET-KEYWORD",
+          "line_start": 5,
+          "line_end": 5,
+          "package_name": null,
+          "package_version": null,
+          "package_path": null,
+          "symbol": null
+        },
+        {
+          "path": "infra/main.tf",
+          "reason": "Stale suppression for a check that no longer exists",
+          "expiration": "2099-12-31",
+          "rule_id": "CKV_AWS_999",
+          "line_start": null,
+          "line_end": null,
+          "package_name": null,
+          "package_version": null,
+          "package_path": null,
+          "symbol": null
+        }
+      ],
+      "mcp": {
+        "runtime_overrides": {
+          "enabled": false,
+          "allowed_paths": [],
+          "denied_paths": [
+            "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
+            "/content_db_staleness",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**"
+          ],
+          "denied_value_patterns": {}
+        }
+      }
+    },
+    "fail_on_findings": true,
+    "fail_on_incomplete_scanners": true,
+    "content_db_staleness": "fail",
+    "ash_plugin_modules": [],
+    "external_reports_to_include": [],
+    "build": null,
+    "converters": {
+      "archive": {
+        "name": "archive",
+        "enabled": true,
+        "options": {}
+      },
+      "jupyter": {
+        "name": "jupyter",
+        "enabled": true,
+        "options": {
+          "tool_version": ">=7.16.0,<8.0.0",
+          "install_timeout": 300
+        }
+      }
+    },
+    "scanners": {
+      "bandit": {
+        "name": "bandit",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config_file": null,
+          "confidence_level": "all",
+          "ignore_nosec": false,
+          "excluded_paths": [],
+          "additional_formats": [],
+          "tool_version": ">=1.7.0,<2.0.0",
+          "install_timeout": 300
+        }
+      },
+      "cdk-nag": {
+        "name": "cdk-nag",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "nag_packs": {
+            "AwsSolutionsChecks": true,
+            "HIPAASecurityChecks": false,
+            "NIST80053R4Checks": false,
+            "NIST80053R5Checks": false,
+            "PCIDSS321Checks": false
+          },
+          "include_compliant_checks": false
+        }
+      },
+      "cfn-nag": {
+        "name": "cfn-nag",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800
+        }
+      },
+      "checkov": {
+        "name": "checkov",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config_file": null,
+          "skip_path": [],
+          "additional_formats": [
+            "cyclonedx_json"
+          ],
+          "offline": false,
+          "frameworks": [
+            "all"
+          ],
+          "skip_frameworks": [],
+          "skip_ash_output_dir": true,
+          "tool_version": null,
+          "install_timeout": 300
+        }
+      },
+      "detect-secrets": {
+        "name": "detect-secrets",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "baseline_file": null,
+          "scan_settings": {
+            "version": null,
+            "generated_at": null,
+            "plugins_used": [],
+            "filters_used": [],
+            "results": {}
+          },
+          "skip_generated_lockfiles": true
+        }
+      },
+      "grype": {
+        "name": "grype",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config_file": null,
+          "offline": false
+        }
+      },
+      "npm-audit": {
+        "name": "npm-audit",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "offline": false
+        }
+      },
+      "opengrep": {
+        "name": "opengrep",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config": "p/ci",
+          "exclude": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "exclude_rule": [],
+          "severity": [],
+          "metrics": "auto",
+          "offline": false,
+          "patterns": [],
+          "version": "v1.15.1"
+        }
+      },
+      "semgrep": {
+        "name": "semgrep",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config": "p/ci",
+          "exclude": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "exclude_rule": [],
+          "severity": [],
+          "metrics": "auto",
+          "offline": false,
+          "tool_version": null,
+          "install_timeout": 300
+        }
+      },
+      "syft": {
+        "name": "syft",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config_file": null,
+          "exclude": [],
+          "additional_outputs": [
+            "syft-table"
+          ],
+          "offline": false
+        }
+      }
+    },
+    "reporters": {
+      "csv": {
+        "name": "csv",
+        "enabled": true,
+        "options": {},
+        "extension": "csv"
+      },
+      "cyclonedx": {
+        "name": "cyclonedx",
+        "enabled": true,
+        "options": {},
+        "extension": "cdx.json"
+      },
+      "gitlab-cyclonedx": {
+        "name": "gitlab-cyclonedx",
+        "enabled": true,
+        "options": {
+          "category": "production",
+          "package_manager_override": null,
+          "language_override": null,
+          "input_file_path_override": null
+        },
+        "extension": "gl-dependency-scanning-report.cdx.json"
+      },
+      "html": {
+        "name": "html",
+        "enabled": true,
+        "options": {},
+        "extension": "html"
+      },
+      "flat-json": {
+        "name": "flat-json",
+        "enabled": true,
+        "options": {
+          "include_scanner_metrics": true,
+          "include_summary_metrics": true,
+          "include_metadata": true
+        },
+        "extension": "flat.json"
+      },
+      "gitlab-sast": {
+        "name": "gitlab-sast",
+        "enabled": true,
+        "options": {
+          "exclude_suppressed": false
+        },
+        "extension": "gl-sast-report.json"
+      },
+      "github-ghas": {
+        "name": "github-ghas",
+        "enabled": true,
+        "options": {
+          "exclude_suppressed": true
+        },
+        "extension": "ghas.sarif"
+      },
+      "junitxml": {
+        "name": "junitxml",
+        "enabled": true,
+        "options": {
+          "respect_severity_threshold": true
+        },
+        "extension": "junit.xml"
+      },
+      "markdown": {
+        "name": "markdown",
+        "enabled": true,
+        "options": {
+          "include_summary": true,
+          "include_findings_table": false,
+          "include_detailed_findings": true,
+          "max_detailed_findings": 20,
+          "top_hotspots_limit": 10,
+          "use_collapsible_details": true,
+          "compact": false
+        },
+        "extension": "summary.md"
+      },
+      "ocsf": {
+        "name": "ocsf",
+        "enabled": true,
+        "options": {},
+        "extension": "ocsf.json"
+      },
+      "sarif": {
+        "name": "sarif",
+        "enabled": true,
+        "options": {},
+        "extension": "sarif"
+      },
+      "spdx": {
+        "name": "spdx",
+        "enabled": false,
+        "options": {},
+        "extension": "spdx.json"
+      },
+      "text": {
+        "name": "text",
+        "enabled": true,
+        "options": {
+          "include_summary": true,
+          "include_findings_table": false,
+          "include_detailed_findings": false,
+          "max_detailed_findings": 20,
+          "top_hotspots_limit": 20
+        },
+        "extension": "summary.txt"
+      },
+      "unused-suppressions": {
+        "name": "unused-suppressions",
+        "enabled": true,
+        "options": {
+          "output_format": "both"
+        },
+        "extension": "unused-suppressions.json"
+      },
+      "yaml": {
+        "name": "yaml",
+        "enabled": false,
+        "options": {},
+        "extension": "yaml"
+      }
+    },
+    "mcp-resource-management": {
+      "max_concurrent_scans": 3,
+      "max_concurrent_tasks": 20,
+      "thread_pool_max_workers": 4,
+      "scan_timeout_seconds": 1800,
+      "operation_timeout_seconds": 180,
+      "shutdown_timeout_seconds": 30,
+      "memory_warning_threshold_mb": 1024,
+      "memory_critical_threshold_mb": 2048,
+      "task_count_warning_threshold": 15,
+      "max_message_size_bytes": 10485760,
+      "max_path_length": 4096,
+      "max_directory_size_mb": 1000,
+      "enable_health_checks": true,
+      "health_check_interval_seconds": 60,
+      "enable_resource_logging": true,
+      "log_resource_operations": false
+    },
+    "workspace": {
+      "max_parallel_projects": null,
+      "project_timeout": null
+    }
+  },
+  "scanner_results": {
+    "npm-audit": {
+      "status": "MISSING",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0
+      },
+      "finding_count": 0,
+      "actionable_finding_count": 0,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 0.0
+    },
+    "cdk-nag": {
+      "status": "SKIPPED",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0
+      },
+      "finding_count": 0,
+      "actionable_finding_count": 0,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 0.0
+    },
+    "bandit": {
+      "status": "FAILED",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 0,
+        "high": 1,
+        "medium": 0,
+        "low": 1,
+        "info": 0
+      },
+      "finding_count": 2,
+      "actionable_finding_count": 1,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 1.25
+    },
+    "cfn-nag": {
+      "status": "ERROR",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0
+      },
+      "finding_count": 0,
+      "actionable_finding_count": 0,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 0.25
+    },
+    "checkov": {
+      "status": "FAILED",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 0,
+        "high": 1,
+        "medium": 2,
+        "low": 1,
+        "info": 0
+      },
+      "finding_count": 4,
+      "actionable_finding_count": 3,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 7.5
+    },
+    "detect-secrets": {
+      "status": "PASSED",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 1,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0
+      },
+      "finding_count": 0,
+      "actionable_finding_count": 0,
+      "suppressed_finding_count": 1,
+      "exit_code": 0,
+      "duration": 0.5
+    },
+    "grype": {
+      "status": "FAILED",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 1,
+        "high": 0,
+        "medium": 1,
+        "low": 0,
+        "info": 0
+      },
+      "finding_count": 2,
+      "actionable_finding_count": 2,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 3.0
+    },
+    "semgrep": {
+      "status": "PASSED",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 1,
+        "info": 1
+      },
+      "finding_count": 2,
+      "actionable_finding_count": 0,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 4.0
+    },
+    "syft": {
+      "status": "PASSED",
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "severity_counts": {
+        "suppressed": 0,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0
+      },
+      "finding_count": 0,
+      "actionable_finding_count": 0,
+      "suppressed_finding_count": 0,
+      "exit_code": 0,
+      "duration": 2.0
+    }
+  },
+  "converter_results": {},
+  "sarif": {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "version": "2.1.0",
+    "runs": [
+      {
+        "tool": {
+          "driver": {
+            "guid": null,
+            "name": "AWS Labs - Automated Security Helper",
+            "organization": "Amazon Web Services",
+            "product": null,
+            "productSuite": null,
+            "shortDescription": null,
+            "fullDescription": null,
+            "fullName": "awslabs/automated-security-helper",
+            "version": "<ASH_VERSION>",
+            "semanticVersion": null,
+            "dottedQuadFileVersion": null,
+            "releaseDateUtc": null,
+            "downloadUri": "https://github.com/awslabs/automated-security-helper",
+            "informationUri": "https://awslabs.github.io/automated-security-helper",
+            "globalMessageStrings": null,
+            "notifications": [],
+            "rules": [],
+            "taxa": [],
+            "locations": [],
+            "language": "en-US",
+            "contents": [
+              "localizedData",
+              "nonLocalizedData"
+            ],
+            "isComprehensive": false,
+            "localizedDataSemanticVersion": null,
+            "minimumRequiredLocalizedDataSemanticVersion": null,
+            "associatedComponent": null,
+            "translationMetadata": null,
+            "supportedTaxonomies": [],
+            "properties": null
+          },
+          "extensions": [
+            {
+              "guid": null,
+              "name": "bandit",
+              "organization": null,
+              "product": null,
+              "productSuite": null,
+              "shortDescription": null,
+              "fullDescription": null,
+              "fullName": null,
+              "version": "1.8.6",
+              "semanticVersion": null,
+              "dottedQuadFileVersion": null,
+              "releaseDateUtc": null,
+              "downloadUri": null,
+              "informationUri": "https://bandit.readthedocs.io/",
+              "globalMessageStrings": null,
+              "notifications": [],
+              "rules": [
+                {
+                  "id": "B602",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "subprocess_popen_with_shell_equals_true",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "subprocess call with shell=True identified, security issue.",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": "https://bandit.readthedocs.io/en/latest/plugins/b602_subprocess_popen_with_shell_equals_true.html",
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                },
+                {
+                  "id": "B105",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "hardcoded_password_string",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "Possible hardcoded password.",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": "https://bandit.readthedocs.io/en/latest/plugins/b105_hardcoded_password_string.html",
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                }
+              ],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "localizedDataSemanticVersion": null,
+              "minimumRequiredLocalizedDataSemanticVersion": null,
+              "associatedComponent": null,
+              "translationMetadata": null,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "bandit"
+                ],
+                "scanner_details": {
+                  "tool_name": "bandit",
+                  "tool_version": "1.8.6",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 1.25,
+                    "start_time": "<TIMESTAMP>",
+                    "end_time": "<TIMESTAMP>"
+                  }
+                }
+              }
+            },
+            {
+              "guid": null,
+              "name": "checkov",
+              "organization": null,
+              "product": null,
+              "productSuite": null,
+              "shortDescription": null,
+              "fullDescription": null,
+              "fullName": null,
+              "version": "3.2.469",
+              "semanticVersion": null,
+              "dottedQuadFileVersion": null,
+              "releaseDateUtc": null,
+              "downloadUri": null,
+              "informationUri": "https://checkov.io/",
+              "globalMessageStrings": null,
+              "notifications": [],
+              "rules": [
+                {
+                  "id": "CKV_AWS_20",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "S3 Bucket has an ACL defined which allows public READ access.",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "S3 Bucket has an ACL defined which allows public READ access.",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-1-acl-read-permissions-everyone",
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                },
+                {
+                  "id": "CKV_AWS_18",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "Ensure the S3 bucket has access logging enabled",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "Ensure the S3 bucket has access logging enabled",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-13-enable-logging",
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                },
+                {
+                  "id": "CKV_DOCKER_8",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "Ensure the last USER is not root",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "Ensure the last USER is not root",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": null,
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                },
+                {
+                  "id": "CKV_DOCKER_2",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "Ensure that HEALTHCHECK instructions have been added to container images",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "Ensure that HEALTHCHECK instructions have been added to container images",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": null,
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                }
+              ],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "localizedDataSemanticVersion": null,
+              "minimumRequiredLocalizedDataSemanticVersion": null,
+              "associatedComponent": null,
+              "translationMetadata": null,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "checkov"
+                ],
+                "scanner_details": {
+                  "tool_name": "checkov",
+                  "tool_version": "3.2.469",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 7.5,
+                    "start_time": "<TIMESTAMP>",
+                    "end_time": "<TIMESTAMP>"
+                  }
+                }
+              }
+            },
+            {
+              "guid": null,
+              "name": "semgrep",
+              "organization": null,
+              "product": null,
+              "productSuite": null,
+              "shortDescription": null,
+              "fullDescription": null,
+              "fullName": null,
+              "version": "1.140.0",
+              "semanticVersion": "1.140.0",
+              "dottedQuadFileVersion": null,
+              "releaseDateUtc": null,
+              "downloadUri": null,
+              "informationUri": null,
+              "globalMessageStrings": null,
+              "notifications": [],
+              "rules": [
+                {
+                  "id": "dockerfile.security.last-user-is-root.last-user-is-root",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "dockerfile.security.last-user-is-root.last-user-is-root",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "The last user in the container is 'root'.",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": null,
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                },
+                {
+                  "id": "python.lang.best-practice.unpinned-shell-command",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "python.lang.best-practice.unpinned-shell-command",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "Command string built with an f-string.",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": null,
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                }
+              ],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "localizedDataSemanticVersion": null,
+              "minimumRequiredLocalizedDataSemanticVersion": null,
+              "associatedComponent": null,
+              "translationMetadata": null,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "semgrep"
+                ],
+                "scanner_details": {
+                  "tool_name": "semgrep",
+                  "tool_version": "1.140.0",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 4.0,
+                    "start_time": "<TIMESTAMP>",
+                    "end_time": "<TIMESTAMP>"
+                  }
+                }
+              }
+            },
+            {
+              "guid": null,
+              "name": "detect-secrets",
+              "organization": null,
+              "product": null,
+              "productSuite": null,
+              "shortDescription": null,
+              "fullDescription": null,
+              "fullName": null,
+              "version": "1.5.0",
+              "semanticVersion": null,
+              "dottedQuadFileVersion": null,
+              "releaseDateUtc": null,
+              "downloadUri": null,
+              "informationUri": null,
+              "globalMessageStrings": null,
+              "notifications": [],
+              "rules": [
+                {
+                  "id": "SECRET-SECRET-KEYWORD",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "Secret Keyword",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "Secret Keyword",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": null,
+                  "help": null,
+                  "relationships": [],
+                  "properties": null
+                }
+              ],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "localizedDataSemanticVersion": null,
+              "minimumRequiredLocalizedDataSemanticVersion": null,
+              "associatedComponent": null,
+              "translationMetadata": null,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "detect-secrets"
+                ],
+                "scanner_details": {
+                  "tool_name": "detect-secrets",
+                  "tool_version": "1.5.0",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 0.5,
+                    "start_time": "<TIMESTAMP>",
+                    "end_time": "<TIMESTAMP>"
+                  }
+                }
+              }
+            },
+            {
+              "guid": null,
+              "name": "grype",
+              "organization": null,
+              "product": null,
+              "productSuite": null,
+              "shortDescription": null,
+              "fullDescription": null,
+              "fullName": null,
+              "version": "0.100.0",
+              "semanticVersion": null,
+              "dottedQuadFileVersion": null,
+              "releaseDateUtc": null,
+              "downloadUri": null,
+              "informationUri": "https://github.com/anchore/grype",
+              "globalMessageStrings": null,
+              "notifications": [],
+              "rules": [
+                {
+                  "id": "CVE-2018-18074-requests",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "PythonMatcherExactDirectMatch",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "CVE-2018-18074 critical vulnerability for requests package",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": "https://github.com/advisories/GHSA-x84v-xcm2-53pg",
+                  "help": null,
+                  "relationships": [],
+                  "properties": {
+                    "tags": [],
+                    "security-severity": "9.8"
+                  }
+                },
+                {
+                  "id": "CVE-2023-32681-requests",
+                  "deprecatedIds": null,
+                  "guid": null,
+                  "deprecatedGuids": null,
+                  "name": "PythonMatcherExactDirectMatch",
+                  "deprecatedNames": null,
+                  "shortDescription": {
+                    "text": "CVE-2023-32681 medium vulnerability for requests package",
+                    "markdown": null,
+                    "properties": null
+                  },
+                  "fullDescription": null,
+                  "messageStrings": null,
+                  "defaultConfiguration": null,
+                  "helpUri": "https://github.com/advisories/GHSA-j8r2-6x86-q33q",
+                  "help": null,
+                  "relationships": [],
+                  "properties": {
+                    "tags": [],
+                    "security-severity": "6.1"
+                  }
+                }
+              ],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "localizedDataSemanticVersion": null,
+              "minimumRequiredLocalizedDataSemanticVersion": null,
+              "associatedComponent": null,
+              "translationMetadata": null,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "grype"
+                ],
+                "scanner_details": {
+                  "tool_name": "grype",
+                  "tool_version": "0.100.0",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 3.0,
+                    "start_time": "<TIMESTAMP>",
+                    "end_time": "<TIMESTAMP>"
+                  }
+                }
+              }
+            },
+            {
+              "guid": null,
+              "name": "cfn-nag",
+              "organization": null,
+              "product": null,
+              "productSuite": null,
+              "shortDescription": null,
+              "fullDescription": null,
+              "fullName": null,
+              "version": "0.8.10",
+              "semanticVersion": null,
+              "dottedQuadFileVersion": null,
+              "releaseDateUtc": null,
+              "downloadUri": null,
+              "informationUri": null,
+              "globalMessageStrings": null,
+              "notifications": [],
+              "rules": [],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "localizedDataSemanticVersion": null,
+              "minimumRequiredLocalizedDataSemanticVersion": null,
+              "associatedComponent": null,
+              "translationMetadata": null,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "cfn-nag"
+                ],
+                "scanner_details": {
+                  "tool_name": "cfn-nag",
+                  "tool_version": "0.8.10",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 0.25,
+                    "start_time": "<TIMESTAMP>",
+                    "end_time": "<TIMESTAMP>"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": null
+        },
+        "invocations": [],
+        "conversion": null,
+        "language": "en-US",
+        "versionControlProvenance": [],
+        "originalUriBaseIds": null,
+        "artifacts": null,
+        "logicalLocations": [],
+        "graphs": [],
+        "results": [
+          {
+            "ruleId": "B602",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "error",
+            "message": {
+              "text": "subprocess call with shell=True identified, security issue.",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "app/app.py",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 9,
+                    "startColumn": null,
+                    "endLine": 9,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": {
+                      "text": "    return subprocess.run(f\"pg_dump orders --where id={customer_id}\", shell=True)",
+                      "binary": null,
+                      "rendered": null,
+                      "properties": null
+                    },
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "bandit"
+              ],
+              "issue_severity": "HIGH",
+              "issue_confidence": "HIGH",
+              "scanner_name": "bandit",
+              "scanner_version": "1.8.6",
+              "scanner_details": {
+                "tool_name": "bandit",
+                "tool_version": "1.8.6",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 1.25,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "B105",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "note",
+            "message": {
+              "text": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "app/app.py",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 5,
+                    "startColumn": null,
+                    "endLine": 5,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "bandit"
+              ],
+              "issue_severity": "LOW",
+              "issue_confidence": "MEDIUM",
+              "scanner_name": "bandit",
+              "scanner_version": "1.8.6",
+              "scanner_details": {
+                "tool_name": "bandit",
+                "tool_version": "1.8.6",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 1.25,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "CKV_AWS_20",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "error",
+            "message": {
+              "text": "S3 Bucket has an ACL defined which allows public READ access.",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "infra/main.tf",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 6,
+                    "startColumn": null,
+                    "endLine": 9,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "checkov"
+              ],
+              "issue_severity": "HIGH",
+              "scanner_name": "checkov",
+              "scanner_version": "3.2.469",
+              "scanner_details": {
+                "tool_name": "checkov",
+                "tool_version": "3.2.469",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 7.5,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "CKV_AWS_18",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "warning",
+            "message": {
+              "text": "Ensure the S3 bucket has access logging enabled",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "infra/main.tf",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 2,
+                    "startColumn": null,
+                    "endLine": 4,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "checkov"
+              ],
+              "issue_severity": "MEDIUM",
+              "scanner_name": "checkov",
+              "scanner_version": "3.2.469",
+              "scanner_details": {
+                "tool_name": "checkov",
+                "tool_version": "3.2.469",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 7.5,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "CKV_DOCKER_8",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "warning",
+            "message": {
+              "text": "Ensure the last USER is not root",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "Dockerfile",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 5,
+                    "startColumn": null,
+                    "endLine": 5,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "checkov"
+              ],
+              "issue_severity": "MEDIUM",
+              "scanner_name": "checkov",
+              "scanner_version": "3.2.469",
+              "scanner_details": {
+                "tool_name": "checkov",
+                "tool_version": "3.2.469",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 7.5,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "CKV_DOCKER_2",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "note",
+            "message": {
+              "text": "Ensure that HEALTHCHECK instructions have been added to container images",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "Dockerfile",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "startColumn": null,
+                    "endLine": 6,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "checkov"
+              ],
+              "issue_severity": "LOW",
+              "scanner_name": "checkov",
+              "scanner_version": "3.2.469",
+              "scanner_details": {
+                "tool_name": "checkov",
+                "tool_version": "3.2.469",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 7.5,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "dockerfile.security.last-user-is-root.last-user-is-root",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "note",
+            "message": {
+              "text": "The last user in the container is 'root'. Switch back to an unprivileged user.",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "Dockerfile",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 5,
+                    "startColumn": null,
+                    "endLine": 5,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "semgrep"
+              ],
+              "issue_severity": "LOW",
+              "scanner_name": "semgrep",
+              "scanner_version": "1.140.0",
+              "scanner_details": {
+                "tool_name": "semgrep",
+                "tool_version": "1.140.0",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 4.0,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "python.lang.best-practice.unpinned-shell-command",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "none",
+            "message": {
+              "text": "Command string built with an f-string; prefer an argument list.",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "app/app.py",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 9,
+                    "startColumn": null,
+                    "endLine": 9,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "semgrep"
+              ],
+              "issue_severity": "INFO",
+              "scanner_name": "semgrep",
+              "scanner_version": "1.140.0",
+              "scanner_details": {
+                "tool_name": "semgrep",
+                "tool_version": "1.140.0",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 4.0,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "SECRET-SECRET-KEYWORD",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "error",
+            "message": {
+              "text": "Secret of type Secret Keyword detected in file app/app.py at line 5",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "app/app.py",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 5,
+                    "startColumn": null,
+                    "endLine": 5,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": [
+              {
+                "guid": null,
+                "kind": "inSource",
+                "state": null,
+                "justification": "(ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret",
+                "location": null,
+                "properties": null
+              }
+            ],
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "detect-secrets"
+              ],
+              "issue_severity": "HIGH",
+              "scanner_name": "detect-secrets",
+              "scanner_version": "1.5.0",
+              "scanner_details": {
+                "tool_name": "detect-secrets",
+                "tool_version": "1.5.0",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 0.5,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "CVE-2018-18074-requests",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "error",
+            "message": {
+              "text": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "requirements.txt",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "startColumn": null,
+                    "endLine": 1,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "grype"
+              ],
+              "issue_severity": "CRITICAL",
+              "scanner_name": "grype",
+              "scanner_version": "0.100.0",
+              "scanner_details": {
+                "tool_name": "grype",
+                "tool_version": "0.100.0",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 3.0,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          },
+          {
+            "ruleId": "CVE-2023-32681-requests",
+            "ruleIndex": -1,
+            "rule": null,
+            "kind": "fail",
+            "level": "warning",
+            "message": {
+              "text": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
+              "markdown": null,
+              "id": null,
+              "arguments": [],
+              "properties": null
+            },
+            "analysisTarget": null,
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "uri": "requirements.txt",
+                    "uriBaseId": null,
+                    "index": -1,
+                    "description": null,
+                    "properties": null
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "startColumn": null,
+                    "endLine": 1,
+                    "endColumn": null,
+                    "charOffset": -1,
+                    "charLength": null,
+                    "byteOffset": -1,
+                    "byteLength": null,
+                    "snippet": null,
+                    "message": null,
+                    "sourceLanguage": null,
+                    "properties": null
+                  },
+                  "contextRegion": null,
+                  "properties": null
+                },
+                "logicalLocations": [],
+                "message": null,
+                "annotations": [],
+                "relationships": [],
+                "properties": null
+              }
+            ],
+            "guid": null,
+            "correlationGuid": null,
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "fingerprints": null,
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "suppressions": null,
+            "baselineState": null,
+            "rank": -1.0,
+            "attachments": [],
+            "hostedViewerUri": null,
+            "workItemUris": null,
+            "provenance": null,
+            "fixes": [],
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "properties": {
+              "tags": [
+                "grype"
+              ],
+              "issue_severity": "MEDIUM",
+              "scanner_name": "grype",
+              "scanner_version": "0.100.0",
+              "scanner_details": {
+                "tool_name": "grype",
+                "tool_version": "0.100.0",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 3.0,
+                  "start_time": "<TIMESTAMP>",
+                  "end_time": "<TIMESTAMP>"
+                }
+              }
+            }
+          }
+        ],
+        "automationDetails": null,
+        "runAggregates": [],
+        "baselineGuid": null,
+        "redactionTokens": [],
+        "defaultEncoding": null,
+        "defaultSourceLanguage": null,
+        "newlineSequences": [
+          "\r\n",
+          "\n"
+        ],
+        "columnKind": null,
+        "externalPropertyFileReferences": null,
+        "threadFlowLocations": [],
+        "taxonomies": [],
+        "addresses": [],
+        "translations": [],
+        "policies": [],
+        "webRequests": [],
+        "webResponses": [],
+        "specialLocations": null,
+        "properties": {
+          "tags": []
+        }
+      }
+    ],
+    "inlineExternalProperties": [],
+    "properties": {
+      "tags": []
+    }
+  },
+  "cyclonedx": {
+    "$schema": null,
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.6",
+    "serialNumber": "urn:uuid:<UUID>",
+    "version": 1,
+    "metadata": {
+      "timestamp": "<TIMESTAMP>",
+      "lifecycles": null,
+      "tools": {
+        "components": [
+          {
+            "type": "application",
+            "mime-type": null,
+            "bom-ref": null,
+            "supplier": null,
+            "manufacturer": null,
+            "authors": null,
+            "author": "anchore",
+            "publisher": null,
+            "group": null,
+            "name": "syft",
+            "version": "1.33.0",
+            "description": null,
+            "scope": "required",
+            "hashes": null,
+            "licenses": null,
+            "copyright": null,
+            "cpe": null,
+            "purl": null,
+            "omniborId": null,
+            "swhid": null,
+            "swid": null,
+            "modified": null,
+            "pedigree": null,
+            "externalReferences": null,
+            "components": null,
+            "evidence": null,
+            "releaseNotes": null,
+            "modelCard": null,
+            "data": null,
+            "cryptoProperties": null,
+            "properties": null,
+            "tags": null,
+            "signature": null
+          }
+        ],
+        "services": null
+      },
+      "manufacturer": null,
+      "authors": null,
+      "component": {
+        "type": "file",
+        "mime-type": null,
+        "bom-ref": "snapshot-fixture",
+        "supplier": null,
+        "manufacturer": null,
+        "authors": null,
+        "author": null,
+        "publisher": null,
+        "group": null,
+        "name": "snapshot-fixture",
+        "version": null,
+        "description": null,
+        "scope": "required",
+        "hashes": null,
+        "licenses": null,
+        "copyright": null,
+        "cpe": null,
+        "purl": null,
+        "omniborId": null,
+        "swhid": null,
+        "swid": null,
+        "modified": null,
+        "pedigree": null,
+        "externalReferences": null,
+        "components": null,
+        "evidence": null,
+        "releaseNotes": null,
+        "modelCard": null,
+        "data": null,
+        "cryptoProperties": null,
+        "properties": null,
+        "tags": null,
+        "signature": null
+      },
+      "manufacture": null,
+      "supplier": null,
+      "licenses": null,
+      "properties": null
+    },
+    "components": [
+      {
+        "type": "library",
+        "mime-type": null,
+        "bom-ref": "pkg:pypi/requests@2.19.1",
+        "supplier": null,
+        "manufacturer": null,
+        "authors": null,
+        "author": null,
+        "publisher": null,
+        "group": null,
+        "name": "requests",
+        "version": "2.19.1",
+        "description": null,
+        "scope": "required",
+        "hashes": null,
+        "licenses": [
+          {
+            "license": {
+              "id": "Apache-2.0"
+            }
+          }
+        ],
+        "copyright": null,
+        "cpe": null,
+        "purl": "pkg:pypi/requests@2.19.1",
+        "omniborId": null,
+        "swhid": null,
+        "swid": null,
+        "modified": null,
+        "pedigree": null,
+        "externalReferences": null,
+        "components": null,
+        "evidence": null,
+        "releaseNotes": null,
+        "modelCard": null,
+        "data": null,
+        "cryptoProperties": null,
+        "properties": [
+          {
+            "name": "syft:package:language",
+            "value": "python"
+          },
+          {
+            "name": "syft:location:0:path",
+            "value": "/requirements.txt"
+          }
+        ],
+        "tags": null,
+        "signature": null
+      },
+      {
+        "type": "container",
+        "mime-type": null,
+        "bom-ref": "pkg:docker/python@3.12-slim",
+        "supplier": null,
+        "manufacturer": null,
+        "authors": null,
+        "author": null,
+        "publisher": null,
+        "group": null,
+        "name": "python",
+        "version": "3.12-slim",
+        "description": null,
+        "scope": "required",
+        "hashes": null,
+        "licenses": null,
+        "copyright": null,
+        "cpe": null,
+        "purl": "pkg:docker/python@3.12-slim",
+        "omniborId": null,
+        "swhid": null,
+        "swid": null,
+        "modified": null,
+        "pedigree": null,
+        "externalReferences": null,
+        "components": null,
+        "evidence": null,
+        "releaseNotes": null,
+        "modelCard": null,
+        "data": null,
+        "cryptoProperties": null,
+        "properties": [
+          {
+            "name": "syft:location:0:path",
+            "value": "/Dockerfile"
+          }
+        ],
+        "tags": null,
+        "signature": null
+      }
+    ],
+    "services": null,
+    "externalReferences": null,
+    "dependencies": null,
+    "compositions": null,
+    "vulnerabilities": null,
+    "annotations": null,
+    "formulation": null,
+    "declarations": null,
+    "definitions": null,
+    "properties": null,
+    "signature": null
+  },
+  "additional_reports": {
+    "bandit": {
+      "source": {
+        "scanner_name": "bandit",
+        "report_type": "sarif",
+        "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
+        "target_type": "source",
+        "finding_count": 2,
+        "start_time": "<TIMESTAMP>",
+        "end_time": "<TIMESTAMP>",
+        "duration": 1.25,
+        "metadata": {
+          "scanner_version": "1.8.6"
+        },
+        "severity_counts": {
+          "high": 1,
+          "low": 1
+        },
+        "status": "PASSED"
+      }
+    },
+    "checkov": {
+      "source": {
+        "scanner_name": "checkov",
+        "report_type": "sarif",
+        "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
+        "target_type": "source",
+        "finding_count": 4,
+        "start_time": "<TIMESTAMP>",
+        "end_time": "<TIMESTAMP>",
+        "duration": 7.5,
+        "metadata": {
+          "scanner_version": "3.2.469"
+        },
+        "severity_counts": {
+          "high": 1,
+          "medium": 2,
+          "low": 1
+        },
+        "status": "PASSED"
+      }
+    },
+    "semgrep": {
+      "source": {
+        "scanner_name": "semgrep",
+        "report_type": "sarif",
+        "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
+        "target_type": "source",
+        "finding_count": 2,
+        "start_time": "<TIMESTAMP>",
+        "end_time": "<TIMESTAMP>",
+        "duration": 4.0,
+        "metadata": {
+          "scanner_version": "1.140.0"
+        },
+        "severity_counts": {
+          "low": 1,
+          "info": 1
+        },
+        "status": "PASSED"
+      }
+    },
+    "detect-secrets": {
+      "source": {
+        "scanner_name": "detect-secrets",
+        "report_type": "sarif",
+        "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
+        "target_type": "source",
+        "finding_count": 1,
+        "start_time": "<TIMESTAMP>",
+        "end_time": "<TIMESTAMP>",
+        "duration": 0.5,
+        "metadata": {
+          "scanner_version": "1.5.0"
+        },
+        "severity_counts": {
+          "suppressed": 1
+        },
+        "status": "PASSED"
+      }
+    },
+    "grype": {
+      "source": {
+        "scanner_name": "grype",
+        "report_type": "sarif",
+        "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
+        "target_type": "source",
+        "finding_count": 2,
+        "start_time": "<TIMESTAMP>",
+        "end_time": "<TIMESTAMP>",
+        "duration": 3.0,
+        "metadata": {
+          "scanner_version": "0.100.0"
+        },
+        "severity_counts": {
+          "critical": 1,
+          "medium": 1
+        },
+        "status": "PASSED"
+      }
+    },
+    "syft": {
+      "source": {
+        "scanner_name": "syft",
+        "report_type": "cyclonedx",
+        "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
+        "target_type": "source",
+        "start_time": "<TIMESTAMP>",
+        "end_time": "<TIMESTAMP>",
+        "duration": 2.0,
+        "metadata": {
+          "scanner_version": "1.33.0"
+        },
+        "status": "PASSED"
+      }
+    },
+    "cfn-nag": {
+      "source": {
+        "scanner_name": "cfn-nag",
+        "report_type": "sarif",
+        "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
+        "target_type": "source",
+        "finding_count": 0,
+        "start_time": "<TIMESTAMP>",
+        "end_time": "<TIMESTAMP>",
+        "duration": 0.25,
+        "metadata": {
+          "scanner_version": "0.8.10"
+        },
+        "severity_counts": {},
+        "status": "ERROR",
+        "targets_attempted": 1,
+        "targets_failed": 1
+      }
+    },
+    "npm-audit": {
+      "None": {
+        "scanner_name": "npm-audit",
+        "status": "MISSING",
+        "dependencies_satisfied": false,
+        "raw_results": null
+      }
+    },
+    "cdk-nag": {
+      "None": {
+        "scanner_name": "cdk-nag",
+        "status": "SKIPPED",
+        "excluded": true,
+        "raw_results": null
+      }
+    }
+  },
+  "validation_checkpoints": [],
+  "used_suppressions": [
+    "app/app.py|SECRET-SECRET-KEYWORD|5|5"
+  ],
+  "workspace": null
+}
