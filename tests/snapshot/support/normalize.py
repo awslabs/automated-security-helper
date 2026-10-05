@@ -68,6 +68,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path, PurePath
 from typing import Any
+from urllib.parse import quote_from_bytes
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -202,6 +203,27 @@ _ROOT_BEFORE = r"(?<![\w.\-/\\])"
 _ROOT_AFTER = r"(?![\w\-]|\.\w)"
 
 
+def _file_uri(path: PurePath) -> str:
+    """``path.as_uri()``, for an absolute concrete or pure path.
+
+    ``PurePath.as_uri()`` is deprecated from Python 3.14 (``Path.as_uri()`` is not), and
+    a pure path is how the Windows spellings are tested on any host. So a concrete path
+    asks pathlib, and a pure one gets the URI CPython 3.10-3.13 built, constructed the
+    same way here: ``file:///C:/x`` for a drive, ``file://server/share/x`` for UNC
+    (``file:`` + its POSIX form), ``file:///x`` for POSIX; percent-encoded as UTF-8.
+    """
+    if isinstance(path, Path):
+        return path.as_uri()
+    drive = path.drive
+    if len(drive) == 2 and drive[1] == ":":
+        prefix, rest = "file:///" + drive, path.as_posix()[2:]
+    elif drive:
+        prefix, rest = "file:", path.as_posix()
+    else:
+        prefix, rest = "file://", str(path)
+    return prefix + quote_from_bytes(rest.encode("utf-8", "surrogateescape"))
+
+
 def _path_spellings(path: PurePath) -> list[str]:
     """Every way ASH might print ``path``: native, POSIX, JSON-escaped and as a URI."""
     spellings: set[str] = set()
@@ -212,10 +234,7 @@ def _path_spellings(path: PurePath) -> list[str]:
         posix = candidate.as_posix()
         spellings.update({native, posix, json.dumps(native)[1:-1]})
         if candidate.is_absolute():
-            try:
-                spellings.add(candidate.as_uri())
-            except ValueError:
-                pass
+            spellings.add(_file_uri(candidate))
             # file:///C:/x and file:/C:/x both occur; so does a lower-cased drive.
             spellings.add("file://" + posix)
             if len(posix) > 1 and posix[1] == ":":

@@ -11,6 +11,8 @@ reports it. So every masking rule below has a paired "this survives" case.
 from __future__ import annotations
 
 import json
+import sys
+import warnings
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -19,6 +21,8 @@ import pytest
 from tests.snapshot.support.normalize import (
     REPO_ROOT,
     SnapshotNormalizer,
+    _file_uri,
+    _path_spellings,
     default_normalizer,
 )
 
@@ -314,3 +318,38 @@ class TestSurvivesErrorOutputRules:
         n.add_root(PurePosixPath("/tmp"), "SYSTEM_TMP")
         text = "/var/tmp/a /tmpfile dir/tmpk2x_.yaml /tmp-old /tmp.d"
         assert n.text(text) == text
+
+
+class TestFileUriSpellings:
+    """The ``file://`` spelling of a pure path, built without ``PurePath.as_uri()``."""
+
+    @pytest.mark.parametrize(
+        "path, uri",
+        [
+            (PureWindowsPath(r"C:\Users\a b\x"), "file:///C:/Users/a%20b/x"),
+            (PureWindowsPath(r"\\server\share\x"), "file://server/share/x"),
+            (PurePosixPath("/tmp/a b"), "file:///tmp/a%20b"),
+        ],
+    )
+    def test_pure_path_uri(self, path, uri):
+        with warnings.catch_warnings():
+            # PurePath.as_uri() warns from Python 3.14; nothing here may call it.
+            warnings.simplefilter("error")
+            assert uri in _path_spellings(path)
+
+    @pytest.mark.skipif(
+        sys.version_info >= (3, 14), reason="PurePath.as_uri() is deprecated here"
+    )
+    @pytest.mark.parametrize(
+        "path",
+        [
+            PureWindowsPath(r"C:\Users\a b\x"),
+            PureWindowsPath(r"\\server\share\x"),
+            PurePosixPath("/tmp/a b/é"),
+        ],
+    )
+    def test_matches_pathlib_where_pathlib_still_builds_it(self, path):
+        assert _file_uri(path) == path.as_uri()
+
+    def test_a_concrete_path_asks_pathlib(self, tmp_path):
+        assert _file_uri(tmp_path) == tmp_path.as_uri()
