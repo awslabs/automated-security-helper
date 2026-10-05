@@ -16,14 +16,17 @@ anything cannot pass by default:
 
 from __future__ import annotations
 
+import fnmatch
 import importlib.util
 import re
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import ModuleType
 
 import pytest
+
+from tests.utils.helpers import iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / ".github/scripts/check-snapshot-trailers.py"
@@ -213,10 +216,24 @@ def test_golden_set(trailers, path: str, golden: bool) -> None:
 def test_golden_set_names_files_that_exist(trailers) -> None:
     # A golden pattern that matches nothing in the tree is a typo that silently exempts
     # the file it meant.
+    #
+    # Listed with iter_repo_files rather than REPO_ROOT.glob, which
+    # tests/unit/test_repo_walkers_skip_scratch.py forbids (a walk from the root can
+    # descend into another xdist worker's scratch dir as it is removed). Every GOLDEN
+    # pattern globs a file name inside a literal directory, so only that directory is
+    # listed, and the name is matched the way golden_reason matches a component.
     for pattern, _ in trailers.GOLDEN:
         if pattern == "__snapshots__":
             continue
-        assert list(REPO_ROOT.glob(pattern)), f"{pattern} matches no file"
+        pattern_path = PurePosixPath(pattern)
+        assert not any(c in str(pattern_path.parent) for c in "*?["), (
+            f"{pattern}: a glob in a directory part needs a different existence check"
+        )
+        directory = REPO_ROOT / pattern_path.parent
+        names = [p.name for p in iter_repo_files(directory) if p.parent == directory]
+        assert any(fnmatch.fnmatchcase(name, pattern_path.name) for name in names), (
+            f"{pattern} matches no file"
+        )
 
 
 def test_squash_sections_expose_mid_message_trailers(trailers, repo) -> None:
