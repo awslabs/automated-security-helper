@@ -12,6 +12,13 @@ set -euo pipefail
 WHEEL="${1:?usage: build.sh <wheel> <outdir>}"
 OUTDIR="${2:?usage: build.sh <wheel> <outdir>}"
 SPECDIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SPECDIR/../.." && pwd)"
+
+# The CLI name lives in one file so renaming the command is a one-line change. See
+# packaging/cli-name.sh. It reaches the spec as the ash_cli macro.
+# shellcheck source=packaging/cli-name.sh
+. "$SPECDIR/../cli-name.sh"
+: "${ASH_CLI_NAME:?packaging/cli-name.sh did not set ASH_CLI_NAME}"
 
 [ -f "$WHEEL" ] || { echo "error: no such wheel: $WHEEL" >&2; exit 1; }
 command -v rpmbuild >/dev/null || { echo "error: rpmbuild not found" >&2; exit 1; }
@@ -35,6 +42,7 @@ trap 'rm -rf "$TOP"' EXIT
 mkdir -p "$TOP"/{SOURCES,SPECS,BUILD,BUILDROOT,RPMS,SRPMS}
 cp "$WHEEL" "$TOP/SOURCES/"
 cp "$SPECDIR/README.rpm" "$TOP/SOURCES/"
+cp "$REPO_ROOT/LICENSE" "$TOP/SOURCES/"
 cp "$SPECDIR/ash.spec" "$TOP/SPECS/"
 
 mkdir -p "$OUTDIR"
@@ -46,6 +54,7 @@ if ! rpmbuild \
       --define "_topdir $TOP" \
       --define "ash_version $RPM_VERSION" \
       --define "ash_wheel $WHEEL_BASE" \
+      --define "ash_cli $ASH_CLI_NAME" \
       --define "dist %{nil}" \
       -bb "$TOP/SPECS/ash.spec" >"$BUILD_LOG" 2>&1; then
   echo "error: rpmbuild failed. Its output follows:" >&2

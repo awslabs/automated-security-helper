@@ -18,10 +18,14 @@ Building a self-contained offline package for your own hosts is fine, and the
 commands below are the supported way to do it. The line is about what the project
 publishes, not about what the bytes are allowed to do.
 
-On a host with no reachable index, stage one before installing:
+On a host with no reachable index, stage one before installing. Resolve the
+dependencies from ASH's own wheel -- the release asset, or the copy this package
+installs under /usr/lib/ash/wheels/ -- on a machine that can reach an index. Do NOT
+run `pip download automated-security-helper`: that name on PyPI belongs to an
+unrelated third party, not to this project.
 
-  pip download automated-security-helper==<version> -d /srv/ash-wheels
-  # then, on the target, before dnf install:
+  pip download ./automated_security_helper-<version>-py3-none-any.whl -d /srv/ash-wheels
+  # then, on the target, before installing the package:
   printf '[global]\nno-index = true\nfind-links = /srv/ash-wheels\n' > /etc/pip.conf
 
 Scanners are not installed by this package
@@ -38,8 +42,14 @@ Files
   /usr/lib/ash/wheels/   ASH's wheel, the package's only payload
   /usr/lib/ash/venv/     created by %post, removed by %postun on erase only
   /usr/bin/ash           wrapper that execs the venv entry point
-  /usr/share/doc/ash/    this file, which %post's failure message points at
+  /usr/share/doc/ash/    this file (installed as README), which %post's failure
+                         message points at
+  /usr/share/licenses/ash/LICENSE
 
 The venv is built on the target rather than shipped, because a virtualenv records
 absolute paths and the interpreter ABI of the machine that created it. %postun checks
 $1 = 0 so an upgrade does not delete the venv the new version's %post just built.
+%post installs the wheel this package shipped by its exact name: during an upgrade
+the old package's wheel is still on disk when %post runs. If the rebuild fails, %post
+moves the previous venv back, so the previous version keeps working; once the index is
+reachable, run: dnf reinstall ash

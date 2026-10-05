@@ -4,48 +4,100 @@
 # Deliberately NOT `set -e` at the top: a bare failure here leaves the package
 # "installed" with a broken venv and no explanation. Each step is checked and
 # reported instead, so the failure names what to do about it.
+#
+# @ASH_CLI@ is replaced by packaging/deb/build.sh with the name in
+# packaging/cli-name.sh.
 set -u
 
 VENV=/usr/lib/ash/venv
+# Where a working venv is parked while its replacement is built. See UPGRADE SAFETY.
+VENV_PREV=/usr/lib/ash/venv.previous
 WHEELS=/usr/lib/ash/wheels
+CLI=@ASH_CLI@
+
+# UPGRADE SAFETY
+#
+# An earlier version removed the venv unconditionally before rebuilding it, so an
+# upgrade whose dependency resolve then failed (no egress, an index outage, a
+# resolver conflict) left /usr/bin/$CLI installed and pointing at nothing. The old
+# venv is now moved aside first and moved back on any failure, so a failed upgrade
+# ends with the previous working install in place.
+#
+# The replacement is built at its FINAL path, not built elsewhere and renamed into
+# place. A venv records its own absolute path in every console script's shebang, so
+# a venv built at venv.new and moved to venv has scripts naming an interpreter that
+# no longer exists; it cannot be relocated.
+#
+# A rebuild rather than `pip install --upgrade` into the old venv, because an
+# in-place upgrade leaves the old distribution's entry points behind when a release
+# renames one.
+#
+# prerm must leave the venv alone on `upgrade` for any of this to work, because it
+# runs before this script. See packaging/deb/debian/prerm.
+
+restore_and_fail() {
+  rm -rf "$VENV"
+  if [ "$had_previous" = 1 ] && [ -d "$VENV_PREV" ]; then
+    mv "$VENV_PREV" "$VENV"
+    echo "$CLI: restored the previous working environment at $VENV." >&2
+  fi
+  exit 1
+}
 
 case "$1" in
   configure)
-    # Remove any venv from a previous version before rebuilding. An in-place
-    # `pip install --upgrade` into an existing venv leaves the old distribution's
-    # entry points behind when a release renames one, and ASH ships three.
-    rm -rf "$VENV"
-
-    if ! python3 -m venv "$VENV"; then
-      echo "ash: failed to create a virtualenv at $VENV." >&2
-      echo "ash: python3-venv is a declared dependency; if it is present, check" >&2
-      echo "ash: that $VENV is writable and not on a noexec mount." >&2
+    # Exactly one wheel. dpkg has already replaced the old version's files when
+    # configure runs, so two wheels here is a packaging accident, and picking either
+    # would install a version nobody chose.
+    wheel_count=0
+    WHEEL=
+    for candidate in "$WHEELS"/*.whl; do
+      [ -f "$candidate" ] || continue
+      wheel_count=$((wheel_count + 1))
+      WHEEL="$candidate"
+    done
+    if [ "$wheel_count" -ne 1 ]; then
+      echo "$CLI: expected exactly one wheel under $WHEELS, found $wheel_count." >&2
+      echo "$CLI: the package is malformed." >&2
       exit 1
     fi
 
-    WHEEL=$(find "$WHEELS" -maxdepth 1 -name '*.whl' -print -quit 2>/dev/null || true)
-    if [ -z "$WHEEL" ]; then
-      echo "ash: no wheel found under $WHEELS -- the package is malformed." >&2
-      exit 1
+    # A leftover from a run killed between the park and the restore. It cannot be
+    # told apart from a superseded venv, and the one about to be built is newer.
+    rm -rf "$VENV_PREV"
+    had_previous=0
+    if [ -d "$VENV" ]; then
+      mv "$VENV" "$VENV_PREV"
+      had_previous=1
+    fi
+
+    if ! python3 -m venv "$VENV"; then
+      echo "$CLI: failed to create a virtualenv at $VENV." >&2
+      echo "$CLI: python3-venv is a declared dependency; if it is present, check" >&2
+      echo "$CLI: that $VENV is writable and not on a noexec mount." >&2
+      restore_and_fail
     fi
 
     # The wheel is installed from the local path; its DEPENDENCIES come from the
     # index. That split is the whole reason this package is not self-contained,
     # and it is documented in README.Debian.
     if ! "$VENV/bin/pip" install --quiet --disable-pip-version-check "$WHEEL"; then
-      echo "ash: failed to install $WHEEL into $VENV." >&2
-      echo "ash: this step needs a reachable Python package index to resolve ASH's" >&2
-      echo "ash: runtime dependencies. See /usr/share/doc/ash/README.Debian." >&2
-      exit 1
+      echo "$CLI: failed to install $WHEEL into $VENV." >&2
+      echo "$CLI: this step needs a reachable Python package index to resolve ASH's" >&2
+      echo "$CLI: runtime dependencies. See /usr/share/doc/ash/README.Debian." >&2
+      restore_and_fail
     fi
 
-    # Assert the entry point exists rather than trusting pip's exit code. A wheel
-    # can install cleanly and still not produce a console script if its metadata
-    # is wrong, and the wrapper in /usr/bin/ash would then fail for every user.
-    if [ ! -x "$VENV/bin/ash" ]; then
-      echo "ash: $WHEEL installed but produced no 'ash' entry point." >&2
-      exit 1
+    # Run the entry point rather than trusting pip's exit code. A wheel can install
+    # cleanly and still not produce a working console script if its metadata is
+    # wrong, and the wrapper in /usr/bin would then fail for every user.
+    if ! "$VENV/bin/$CLI" --version >/dev/null 2>&1; then
+      echo "$CLI: $WHEEL installed but $VENV/bin/$CLI does not run." >&2
+      restore_and_fail
     fi
+
+    # Only now is the parked venv expendable.
+    rm -rf "$VENV_PREV"
     ;;
   abort-upgrade|abort-remove|abort-deconfigure)
     ;;

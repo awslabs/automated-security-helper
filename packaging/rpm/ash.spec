@@ -18,6 +18,14 @@
 # rather than letting rpmbuild report an empty Version or a Source0 of ".whl".
 %{!?ash_version:%{error:ash_version is not defined. Build with packaging/rpm/build.sh <wheel> <outdir>, which reads the version from the wheel filename.}}
 %{!?ash_wheel:%{error:ash_wheel is not defined. Build with packaging/rpm/build.sh <wheel> <outdir>, which reads the wheel basename from its argument.}}
+%{!?ash_cli:%{error:ash_cli is not defined. Build with packaging/rpm/build.sh <wheel> <outdir>, which reads it from packaging/cli-name.sh.}}
+
+# A gzip-compressed cpio payload, not rpm 4.16's zstd default. zstd has no Python
+# standard-library decompressor before 3.14, and packaging/assert-package-payload.py
+# reads the payload with the standard library alone rather than with rpm2cpio: a
+# check that opens an artifact with the tool that wrote it inherits that tool's blind
+# spots. The cost is a few hundred KB on a payload that is one wheel.
+%define _binary_payload w9.gzdio
 
 Name:           ash
 Version:        %{ash_version}
@@ -33,7 +41,13 @@ URL:            https://github.com/awslabs/automated-security-helper
 Source0:        %{ash_wheel}
 # The wrapper's failure message points users at this file, so it has to be in the package.
 # An error message citing a path the package never installed is worse than no message.
+#
+# Installed as plain README, not README.rpm. The artifact-contents gate classifies a
+# member by suffix, and `.rpm` is one of its archive suffixes, so a doc file named
+# README.rpm inside the payload is reported as a nested archive. Exempting that path in
+# the gate would open a hole exactly where a vendored .rpm could hide.
 Source1:        README.rpm
+Source2:        LICENSE
 
 # The wheel is py3-none-any and carries no compiled extension. Dependencies that do build
 # native code are resolved by pip on the target at %%post time, so they match the target's
@@ -77,7 +91,7 @@ selecting individual tools with --tool.
 
 The post-install scriptlet needs a reachable Python package index to resolve ASH's runtime
 dependencies. On a host with no index, stage a wheelhouse first; see
-%{_docdir}/%{name}/README.rpm for why the package cannot carry them and for the exact
+%{_docdir}/%{name}/README for why the package cannot carry them and for the exact
 commands.
 
 %prep
@@ -95,19 +109,24 @@ install -d -m 0755 %{buildroot}%{_prefix}/lib/%{name}/wheels
 install -m 0644 %{SOURCE0} %{buildroot}%{_prefix}/lib/%{name}/wheels/
 
 install -d -m 0755 %{buildroot}%{_docdir}/%{name}
-install -m 0644 %{SOURCE1} %{buildroot}%{_docdir}/%{name}/README.rpm
+install -m 0644 %{SOURCE1} %{buildroot}%{_docdir}/%{name}/README
+install -d -m 0755 %{buildroot}%{_licensedir}/%{name}
+install -m 0644 %{SOURCE2} %{buildroot}%{_licensedir}/%{name}/LICENSE
 
-# A wrapper, not a symlink into the venv. `ash` shells out to sys.executable for the
-# container runner, and a symlink leaves sys.executable pointing at /usr/bin/ash.
+# A wrapper, not a symlink into the venv. The CLI shells out to sys.executable for the
+# container runner, and a symlink leaves sys.executable pointing at /usr/bin.
+#
+# %%{ash_cli} is the name in packaging/cli-name.sh, passed in by build.sh, so the
+# command name is not written into this spec.
 install -d -m 0755 %{buildroot}%{_bindir}
-cat > %{buildroot}%{_bindir}/ash <<'WRAPPER'
+cat > %{buildroot}%{_bindir}/%{ash_cli} <<'WRAPPER'
 #!/bin/sh
 # Installed by the ash .rpm. The venv is created by the package's post-install
 # scriptlet, not shipped inside it, so this is also the check for a half-completed
 # install.
-if [ ! -x /usr/lib/ash/venv/bin/ash ]; then
-  echo "ash: /usr/lib/ash/venv is missing or incomplete." >&2
-  echo "ash: reinstall the package: dnf reinstall ash" >&2
+if [ ! -x /usr/lib/ash/venv/bin/%{ash_cli} ]; then
+  echo "%{ash_cli}: /usr/lib/ash/venv is missing or incomplete." >&2
+  echo "%{ash_cli}: reinstall the package: dnf reinstall ash" >&2
   exit 127
 fi
 # The .deb needs no equivalent of this second check, because it depends on one python3
@@ -115,21 +134,23 @@ fi
 # considers the dependency satisfied after the particular interpreter the venv was built
 # against is removed -- leaving venv/bin/ash present but unable to start.
 if [ ! -x /usr/lib/ash/venv/bin/python3 ]; then
-  echo "ash: /usr/lib/ash/venv's interpreter is gone." >&2
-  echo "ash: the Python it was built against was removed. Run: dnf reinstall ash" >&2
+  echo "%{ash_cli}: /usr/lib/ash/venv's interpreter is gone." >&2
+  echo "%{ash_cli}: the Python it was built against was removed. Run: dnf reinstall ash" >&2
   exit 127
 fi
-exec /usr/lib/ash/venv/bin/ash "$@"
+exec /usr/lib/ash/venv/bin/%{ash_cli} "$@"
 WRAPPER
-chmod 0755 %{buildroot}%{_bindir}/ash
+chmod 0755 %{buildroot}%{_bindir}/%{ash_cli}
 
 %files
-%doc %{_docdir}/%{name}/README.rpm
+%doc %{_docdir}/%{name}/README
+%license %{_licensedir}/%{name}/LICENSE
 %dir %{_docdir}/%{name}
+%dir %{_licensedir}/%{name}
 %dir %{_prefix}/lib/%{name}
 %dir %{_prefix}/lib/%{name}/wheels
 %{_prefix}/lib/%{name}/wheels/%{ash_wheel}
-%{_bindir}/ash
+%{_bindir}/%{ash_cli}
 
 # Creates the venv and installs ASH's wheel into it.
 #
@@ -140,13 +161,53 @@ chmod 0755 %{buildroot}%{_bindir}/ash
 set -u
 
 VENV=/usr/lib/ash/venv
-WHEELS=/usr/lib/ash/wheels
-DOC=%{_docdir}/%{name}/README.rpm
+# Where a working venv is parked while its replacement is built. See UPGRADE SAFETY.
+VENV_PREV=/usr/lib/ash/venv.previous
+DOC=%{_docdir}/%{name}/README
+CLI=%{ash_cli}
 
-# Remove any venv from a previous version before rebuilding. An in-place
-# `pip install --upgrade` into an existing venv leaves the old distribution's entry points
-# behind when a release renames one, and ASH ships three.
-rm -rf "$VENV"
+# The wheel THIS package shipped, by its exact name, not a glob over the directory.
+#
+# A glob was the upgrade bug. rpm runs the new package's %%post BEFORE it removes the old
+# package's files, so on an upgrade /usr/lib/ash/wheels holds both the old and the new
+# wheel when this runs. The glob took the first match, which sorts as the OLD version,
+# so `rpm -q ash` reported the new release while the venv kept running the old one.
+# Measured on amazonlinux:2023 upgrading 3.6.0 to 3.7.0: rpm said 3.7.0, `ash --version`
+# said 3.6.0. The name is a build-time constant, so there is nothing to search for.
+WHEEL=/usr/lib/ash/wheels/%{ash_wheel}
+if [ ! -f "$WHEEL" ]; then
+  echo "$CLI: the packaged wheel is missing at $WHEEL -- the package is malformed." >&2
+  exit 1
+fi
+
+# UPGRADE SAFETY
+#
+# An earlier version removed the venv unconditionally before rebuilding it, so an
+# upgrade whose dependency resolve then failed left /usr/bin/$CLI installed and pointing
+# at nothing. The old venv is now moved aside first and moved back on any failure.
+#
+# It is rebuilt at its FINAL path, not built elsewhere and renamed into place: a venv
+# records its absolute path in every console script's shebang, so it cannot be moved.
+# A rebuild rather than `pip install --upgrade` into the old venv, because an in-place
+# upgrade leaves the old distribution's entry points behind when a release renames one.
+#
+# rpm reports a failed %%post as a warning and still registers the new version, so this
+# is the only thing standing between a failed upgrade and a broken install.
+rm -rf "$VENV_PREV"
+had_previous=0
+if [ -d "$VENV" ]; then
+  mv "$VENV" "$VENV_PREV"
+  had_previous=1
+fi
+
+restore_and_fail() {
+  rm -rf "$VENV"
+  if [ "$had_previous" = 1 ] && [ -d "$VENV_PREV" ]; then
+    mv "$VENV_PREV" "$VENV"
+    echo "$CLI: restored the previous working environment at $VENV." >&2
+  fi
+  exit 1
+}
 
 # Requires guarantees one of these is present but not which one, and rpm gives a scriptlet
 # no way to ask which arm of a boolean was satisfied. So probe, newest first.
@@ -164,51 +225,38 @@ for CAND in python3.13 python3.12 python3.11; do
 done
 
 if [ -z "$PY" ]; then
-  echo "ash: found no Python that can create a virtualenv." >&2
-  echo "ash: this package requires one of python3.11, python3.12 or python3.13." >&2
-  echo "ash: install one, then run: dnf reinstall ash" >&2
-  exit 1
+  echo "$CLI: found no Python that can create a virtualenv." >&2
+  echo "$CLI: this package requires one of python3.11, python3.12 or python3.13." >&2
+  echo "$CLI: install one, then run: dnf reinstall ash" >&2
+  restore_and_fail
 fi
 
 if ! "$PY" -m venv "$VENV"; then
-  echo "ash: failed to create a virtualenv at $VENV with $PY." >&2
-  echo "ash: check that $VENV is writable and not on a noexec mount." >&2
-  exit 1
-fi
-
-# A shell glob, not `find`. findutils is not in the amazonlinux:2023 base image --
-# packaging/rpm/verify-in-container.sh installs it for build.sh's own use -- and this
-# scriptlet runs on hosts that never installed it.
-WHEEL=
-for W in "$WHEELS"/*.whl; do
-  if [ -f "$W" ]; then
-    WHEEL="$W"
-    break
-  fi
-done
-
-if [ -z "$WHEEL" ]; then
-  echo "ash: no wheel found under $WHEELS -- the package is malformed." >&2
-  exit 1
+  echo "$CLI: failed to create a virtualenv at $VENV with $PY." >&2
+  echo "$CLI: check that $VENV is writable and not on a noexec mount." >&2
+  restore_and_fail
 fi
 
 # The wheel is installed from the local path; its DEPENDENCIES come from the index. That
 # split is the whole reason this package is not self-contained, and it is documented in
-# README.rpm.
+# $DOC.
 if ! "$VENV/bin/pip" install --quiet --disable-pip-version-check "$WHEEL"; then
-  echo "ash: failed to install $WHEEL into $VENV." >&2
-  echo "ash: this step needs a reachable Python package index to resolve ASH's runtime" >&2
-  echo "ash: dependencies. See $DOC." >&2
-  exit 1
+  echo "$CLI: failed to install $WHEEL into $VENV." >&2
+  echo "$CLI: this step needs a reachable Python package index to resolve ASH's runtime" >&2
+  echo "$CLI: dependencies. See $DOC." >&2
+  restore_and_fail
 fi
 
-# Assert the entry point exists rather than trusting pip's exit code. A wheel can install
-# cleanly and still not produce a console script if its metadata is wrong, and the wrapper
-# in /usr/bin/ash would then fail for every user.
-if [ ! -x "$VENV/bin/ash" ]; then
-  echo "ash: $WHEEL installed but produced no 'ash' entry point." >&2
-  exit 1
+# Run the entry point rather than trusting pip's exit code. A wheel can install cleanly
+# and still not produce a working console script if its metadata is wrong, and the
+# wrapper in /usr/bin would then fail for every user.
+if ! "$VENV/bin/$CLI" --version >/dev/null 2>&1; then
+  echo "$CLI: $WHEEL installed but $VENV/bin/$CLI does not run." >&2
+  restore_and_fail
 fi
+
+# Only now is the parked venv expendable.
+rm -rf "$VENV_PREV"
 
 exit 0
 
@@ -222,13 +270,16 @@ set -u
 # $1 is the number of instances of this package left after the transaction: 0 on erase, 1
 # on an upgrade or a reinstall. rpm runs the OLD package's %%postun AFTER the new one's
 # %%post, so a %%postun that removed the venv unconditionally would delete the venv the
-# new version had just built and break every upgrade. Guarding on 0 is what makes step 8
-# of packaging/rpm/verify-in-container.sh pass.
+# new version had just built and break every upgrade. The upgrade leg of
+# packaging/rpm/verify-in-container.sh exercises this ordering.
 if [ "$1" -eq 0 ]; then
-  rm -rf /usr/lib/ash/venv
+  rm -rf /usr/lib/ash/venv /usr/lib/ash/venv.previous
   # rpm removed its own files before this ran, but could not rmdir /usr/lib/ash while the
-  # unowned venv was still inside it. Now that the venv is gone, take the empty parent.
-  rmdir /usr/lib/ash 2>/dev/null || true
+  # unowned venv was still inside it. Now that the venv is gone, take the parent if it is
+  # empty; anything else left there is not this package's to delete.
+  if [ -d /usr/lib/ash ] && [ -z "$(ls -A /usr/lib/ash)" ]; then
+    rmdir /usr/lib/ash
+  fi
 fi
 
 exit 0

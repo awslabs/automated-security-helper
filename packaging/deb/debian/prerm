@@ -1,13 +1,22 @@
 #!/bin/sh
-# Drops the venv on removal.
+# Drops the venv on removal, and ONLY on removal.
 #
 # dpkg tracks only files shipped in the .deb, and the venv was written by postinst,
 # so without this the package "removes" and leaves a few thousand files behind.
+#
+# dpkg calls prerm with `remove`, `upgrade`, `deconfigure` or `failed-upgrade`.
+# Only `remove` means the package is going away. On `upgrade` and `failed-upgrade`
+# the venv is the working install the new postinst parks and restores if its own
+# rebuild fails, so deleting it here turned a failed upgrade into a broken one.
+# `deconfigure` is a conflicting package being installed, which also leaves this one
+# installed. `purge` is never passed to prerm; by then `remove` has already run.
 set -u
 
 case "$1" in
-  remove|upgrade|deconfigure)
-    rm -rf /usr/lib/ash/venv
+  remove)
+    rm -rf /usr/lib/ash/venv /usr/lib/ash/venv.previous
+    ;;
+  upgrade|failed-upgrade|deconfigure)
     ;;
 esac
 
