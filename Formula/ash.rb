@@ -15,8 +15,8 @@ class Ash < Formula
   # rpds-py, rtoml and orjson. Homebrew installs every resource with
   # `--no-binary=:all:` (Formula#std_pip_args), so pip is forbidden from taking
   # the prebuilt wheel and compiles each one from its sdist. Without a toolchain
-  # those five fail partway through the install, after the other 68 have already
-  # gone in, with a cargo error that names neither ASH nor this formula.
+  # those five fail partway through the install, after some of the others have
+  # already gone in, with a cargo error that names neither ASH nor this formula.
   #
   # libyaml is for the pyyaml resource, which builds its C extension against it.
   # Homebrew's FormulaAudit/ResourceRequiresDependencies cop requires it, and only
