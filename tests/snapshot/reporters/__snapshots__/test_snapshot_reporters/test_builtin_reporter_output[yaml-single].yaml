@@ -2,7 +2,7 @@ additional_reports:
   bandit:
     source:
       duration: 1.25
-      end_time: '<TIMESTAMP>'
+      end_time: '2026-01-15T12:00:01.250000Z'
       finding_count: 2
       metadata:
         scanner_version: 1.8.6
@@ -11,7 +11,7 @@ additional_reports:
       severity_counts:
         high: 1
         low: 1
-      start_time: '<TIMESTAMP>'
+      start_time: '2026-01-15T12:00:00Z'
       status: PASSED
       target: <REPO>/tests/test_data/snapshot_fixture/repo
       target_type: source
@@ -24,14 +24,14 @@ additional_reports:
   cfn-nag:
     source:
       duration: 0.25
-      end_time: '<TIMESTAMP>'
+      end_time: '2026-01-15T12:00:18.500000Z'
       finding_count: 0
       metadata:
         scanner_version: 0.8.10
       report_type: sarif
       scanner_name: cfn-nag
       severity_counts: {}
-      start_time: '<TIMESTAMP>'
+      start_time: '2026-01-15T12:00:18.250000Z'
       status: ERROR
       target: <REPO>/tests/test_data/snapshot_fixture/repo
       target_type: source
@@ -40,7 +40,7 @@ additional_reports:
   checkov:
     source:
       duration: 7.5
-      end_time: '<TIMESTAMP>'
+      end_time: '2026-01-15T12:00:08.750000Z'
       finding_count: 4
       metadata:
         scanner_version: 3.2.469
@@ -50,14 +50,14 @@ additional_reports:
         high: 1
         low: 1
         medium: 2
-      start_time: '<TIMESTAMP>'
+      start_time: '2026-01-15T12:00:01.250000Z'
       status: PASSED
       target: <REPO>/tests/test_data/snapshot_fixture/repo
       target_type: source
   detect-secrets:
     source:
       duration: 0.5
-      end_time: '<TIMESTAMP>'
+      end_time: '2026-01-15T12:00:13.250000Z'
       finding_count: 1
       metadata:
         scanner_version: 1.5.0
@@ -65,14 +65,14 @@ additional_reports:
       scanner_name: detect-secrets
       severity_counts:
         suppressed: 1
-      start_time: '<TIMESTAMP>'
+      start_time: '2026-01-15T12:00:12.750000Z'
       status: PASSED
       target: <REPO>/tests/test_data/snapshot_fixture/repo
       target_type: source
   grype:
     source:
       duration: 3.0
-      end_time: '<TIMESTAMP>'
+      end_time: '2026-01-15T12:00:16.250000Z'
       finding_count: 2
       metadata:
         scanner_version: 0.100.0
@@ -81,7 +81,7 @@ additional_reports:
       severity_counts:
         critical: 1
         medium: 1
-      start_time: '<TIMESTAMP>'
+      start_time: '2026-01-15T12:00:13.250000Z'
       status: PASSED
       target: <REPO>/tests/test_data/snapshot_fixture/repo
       target_type: source
@@ -94,7 +94,7 @@ additional_reports:
   semgrep:
     source:
       duration: 4.0
-      end_time: '<TIMESTAMP>'
+      end_time: '2026-01-15T12:00:12.750000Z'
       finding_count: 2
       metadata:
         scanner_version: 1.140.0
@@ -103,19 +103,19 @@ additional_reports:
       severity_counts:
         info: 1
         low: 1
-      start_time: '<TIMESTAMP>'
+      start_time: '2026-01-15T12:00:08.750000Z'
       status: PASSED
       target: <REPO>/tests/test_data/snapshot_fixture/repo
       target_type: source
   syft:
     source:
       duration: 2.0
-      end_time: '<TIMESTAMP>'
+      end_time: '2026-01-15T12:00:18.250000Z'
       metadata:
         scanner_version: 1.33.0
       report_type: cyclonedx
       scanner_name: syft
-      start_time: '<TIMESTAMP>'
+      start_time: '2026-01-15T12:00:16.250000Z'
       status: PASSED
       target: <REPO>/tests/test_data/snapshot_fixture/repo
       target_type: source
@@ -544,7 +544,7 @@ cyclonedx:
     manufacturer: null
     properties: null
     supplier: null
-    timestamp: '<TIMESTAMP>'
+    timestamp: '2026-01-15T12:00:00Z'
     tools:
       components:
       - author: anchore
@@ -593,10 +593,10 @@ metadata:
   description: Automated Security Helper Aggregated Report Post-processor
   execution_discrepancy_report: {}
   expected_scanners: []
-  generated_at: '<TIMESTAMP>'
+  generated_at: '2026-01-15T12:00:00+00:00'
   plugin_load_errors: {}
   project_name: ASH
-  report_id: ASH-<REPORT_ID>
+  report_id: ASH-20260115
   shard: null
   summary_stats:
     actionable: 6
@@ -618,7 +618,7 @@ metadata:
     total: 10
   tool_version: <ASH_VERSION>
   validation_summary: {}
-name: ASH Scan <TIMESTAMP>
+name: ASH Scan 2026-01-15T12:00:00
 sarif:
   $schema: https://json.schemastore.org/sarif-2.1.0.json
   inlineExternalProperties: []
@@ -711,9 +711,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 1.25
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:01.250000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:00+00:00'
           tool_name: bandit
           tool_version: 1.8.6
         scanner_name: bandit
@@ -789,9 +789,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 1.25
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:01.250000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:00+00:00'
           tool_name: bandit
           tool_version: 1.8.6
         scanner_name: bandit
@@ -866,9 +866,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 7.5
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:08.750000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:01.250000+00:00'
           tool_name: checkov
           tool_version: 3.2.469
         scanner_name: checkov
@@ -943,9 +943,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 7.5
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:08.750000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:01.250000+00:00'
           tool_name: checkov
           tool_version: 3.2.469
         scanner_name: checkov
@@ -1020,9 +1020,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 7.5
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:08.750000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:01.250000+00:00'
           tool_name: checkov
           tool_version: 3.2.469
         scanner_name: checkov
@@ -1097,9 +1097,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 7.5
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:08.750000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:01.250000+00:00'
           tool_name: checkov
           tool_version: 3.2.469
         scanner_name: checkov
@@ -1175,9 +1175,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 4.0
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:12.750000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:08.750000+00:00'
           tool_name: semgrep
           tool_version: 1.140.0
         scanner_name: semgrep
@@ -1252,9 +1252,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 4.0
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:12.750000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:08.750000+00:00'
           tool_name: semgrep
           tool_version: 1.140.0
         scanner_name: semgrep
@@ -1329,9 +1329,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 0.5
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:13.250000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:12.750000+00:00'
           tool_name: detect-secrets
           tool_version: 1.5.0
         scanner_name: detect-secrets
@@ -1415,9 +1415,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 3.0
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:16.250000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:13.250000+00:00'
           tool_name: grype
           tool_version: 0.100.0
         scanner_name: grype
@@ -1493,9 +1493,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 3.0
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:16.250000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:13.250000+00:00'
           tool_name: grype
           tool_version: 0.100.0
         scanner_name: grype
@@ -1576,9 +1576,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 1.25
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:01.250000+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:00+00:00'
             tool_name: bandit
             tool_version: 1.8.6
           tags:
@@ -1650,9 +1650,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 7.5
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:08.750000+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:01.250000+00:00'
             tool_name: checkov
             tool_version: 3.2.469
           tags:
@@ -1760,9 +1760,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 4.0
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:12.750000+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:08.750000+00:00'
             tool_name: semgrep
             tool_version: 1.140.0
           tags:
@@ -1834,9 +1834,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 0.5
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:13.250000+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:12.750000+00:00'
             tool_name: detect-secrets
             tool_version: 1.5.0
           tags:
@@ -1891,9 +1891,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 3.0
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:16.250000+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:13.250000+00:00'
             tool_name: grype
             tool_version: 0.100.0
           tags:
@@ -1969,9 +1969,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 0.25
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:18.500000+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:18.250000+00:00'
             tool_name: cfn-nag
             tool_version: 0.8.10
           tags:

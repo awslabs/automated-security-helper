@@ -14,7 +14,7 @@
       "labels": [
         "workspace_project:api"
       ],
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -25,7 +25,7 @@
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -65,7 +65,7 @@
       "labels": [
         "workspace_project:web"
       ],
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -76,7 +76,7 @@
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -116,7 +116,7 @@
       "labels": [
         "workspace_project:web"
       ],
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -127,7 +127,7 @@
     "severity_id": 3,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -168,7 +168,7 @@
         "workspace_project:docs",
         "ash_row_type:workspace_skipped_project"
       ],
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -180,7 +180,7 @@
     "status": "Skipped",
     "status_detail": "Project 'docs' was not scanned (error): 'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'",
     "status_id": 99,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": []
   }

@@ -20,6 +20,7 @@ apply the one shared :class:`SnapshotNormalizer`; never normalize inside a test.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import logging
 import os
 import sys
@@ -69,17 +70,19 @@ _UNSET_FOR_SNAPSHOTS = (
 )
 
 
-#: Normalizer switches a test or module may turn off with
-#: ``@pytest.mark.snapshot_masking(...)``. See the module docstring of
-#: tests/snapshot/support/normalize.py for what each one masks.
-_MASKING_SWITCHES = frozenset({"mask_durations", "mask_duration_keys"})
+#: Normalizer switches a test or module may turn on with
+#: ``@pytest.mark.snapshot_masking(...)``. All are off by default; see "Time" in the
+#: module docstring of tests/snapshot/support/normalize.py for what each one masks
+#: and when opting in is justified.
+_MASKING_SWITCHES = frozenset({"mask_instants", "mask_durations", "mask_duration_keys"})
 
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        "snapshot_masking(mask_durations=..., mask_duration_keys=...): turn off a "
-        "SnapshotNormalizer rule for a test whose inputs pin what it masks.",
+        "snapshot_masking(mask_instants=..., mask_durations=..., "
+        "mask_duration_keys=...): turn on a SnapshotNormalizer time rule (all are off "
+        "by default) for a test that renders wall-clock time it cannot pin.",
     )
     # Belt and braces with test_snapshot_policy.py, which reads the workflow files: a
     # CI job that somehow passes --snapshot-update would turn every intended diff into
@@ -191,6 +194,16 @@ def builtin_plugin_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """
     from automated_security_helper.plugin_modules import ash_builtin
     from automated_security_helper.plugins import ash_plugin_manager
+    from tests.snapshot.support.fixture_model import CLOCK_PINNED_MODULES
+
+    # ``pinned_clock`` imports these to patch them, and two are AWS reporters: their
+    # package registers its plugins on first import. Imported inside the test, those
+    # registrations would land in the test's copy and the first test in a worker to
+    # pin the clock would list the AWS reporters (measured: `ash report --format
+    # dict` did, under xdist only). Importing them first puts them in the real
+    # registry, where the filter below leaves them out of every test alike.
+    for module_name in CLOCK_PINNED_MODULES:
+        importlib.import_module(module_name)
 
     library = ash_plugin_manager.plugin_library
     imported_before = set(sys.modules)
@@ -414,9 +427,10 @@ def snapshot_normalizer(
 
     A test that creates paths elsewhere registers them with ``add_root`` before it
     asserts; a test that learns an id it cannot choose (a scan id) uses ``add_literal``.
-    A test whose inputs pin time fully opts out of duration masking with
-    ``@pytest.mark.snapshot_masking(mask_durations=False, mask_duration_keys=False)``
-    (or a module ``pytestmark``), so a wrong duration shows up as a diff.
+    Instants and durations are not masked. A test that renders wall-clock time it
+    cannot pin opts in with, for example,
+    ``@pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True)`` (or a
+    module ``pytestmark``). Prefer pinning the clock (``pinned_clock``).
     """
     normalizer = default_normalizer(
         tmp_paths=[tmp_path, tmp_path_factory.getbasetemp()]

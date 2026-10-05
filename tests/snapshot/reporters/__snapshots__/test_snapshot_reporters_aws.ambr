@@ -1295,9 +1295,9 @@
               'description': 'Aggregated security scan results',
               'metadata': dict({
                 'description': 'Automated Security Helper Aggregated Report Post-processor',
-                'generated_at': '<GENERATED_AT>',
+                'generated_at': '2026-01-15T12:00:00+00:00',
                 'project_name': 'ASH',
-                'report_id': '<REPORT_ID>',
+                'report_id': 'ASH-20260115',
                 'summary_stats': dict({
                   'actionable': 6,
                   'duration': 0.0,
@@ -1320,7 +1320,7 @@
                 }),
                 'tool_version': '<ASH_VERSION>',
               }),
-              'name': 'ASH Scan <TIMESTAMP>',
+              'name': 'ASH Scan 2026-01-15T12:00:00',
               'scanner_results': dict({
                 'bandit': dict({
                   'actionable_finding_count': 1,
@@ -1459,7 +1459,7 @@
                 }),
               }),
             }),
-            'timestamp': '<TIMESTAMP>',
+            'timestamp': 1768478442000,
           }),
         ]),
         'logGroupName': '/ash/snapshot-fixture',
@@ -1491,9 +1491,9 @@
               'description': "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
               'metadata': dict({
                 'description': 'Automated Security Helper workspace-mode aggregated report',
-                'generated_at': '<GENERATED_AT>',
+                'generated_at': '2026-01-15T12:00:42+00:00',
                 'project_name': 'workspace',
-                'report_id': '<REPORT_ID>',
+                'report_id': 'ASH-WORKSPACE-snapshot-with-skipped',
                 'tool_version': '<ASH_VERSION>',
               }),
               'name': 'ASH Workspace Scan: workspace',
@@ -1532,7 +1532,7 @@
                 }),
               }),
             }),
-            'timestamp': '<TIMESTAMP>',
+            'timestamp': 1768478442000,
           }),
         ]),
         'logGroupName': '/ash/snapshot-fixture',
@@ -1564,9 +1564,9 @@
               'description': "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
               'metadata': dict({
                 'description': 'Automated Security Helper workspace-mode aggregated report',
-                'generated_at': '<GENERATED_AT>',
+                'generated_at': '2026-01-15T12:00:42+00:00',
                 'project_name': 'workspace',
-                'report_id': '<REPORT_ID>',
+                'report_id': 'ASH-WORKSPACE-snapshot',
                 'tool_version': '<ASH_VERSION>',
               }),
               'name': 'ASH Workspace Scan: workspace',
@@ -1605,7 +1605,7 @@
                 }),
               }),
             }),
-            'timestamp': '<TIMESTAMP>',
+            'timestamp': 1768478442000,
           }),
         ]),
         'logGroupName': '/ash/snapshot-fixture',
@@ -1648,9 +1648,9 @@
           'description': 'Aggregated security scan results',
           'metadata': dict({
             'description': 'Automated Security Helper Aggregated Report Post-processor',
-            'generated_at': '<GENERATED_AT>',
+            'generated_at': '2026-01-15T12:00:00+00:00',
             'project_name': 'ASH',
-            'report_id': '<REPORT_ID>',
+            'report_id': 'ASH-20260115',
             'summary_stats': dict({
               'actionable': 6,
               'duration': 0.0,
@@ -1673,7 +1673,7 @@
             }),
             'tool_version': '<ASH_VERSION>',
           }),
-          'name': 'ASH Scan <TIMESTAMP>',
+          'name': 'ASH Scan 2026-01-15T12:00:00',
           'scanner_results': dict({
             'bandit': dict({
               'actionable_finding_count': 1,
@@ -1832,9 +1832,9 @@
           'description': "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
           'metadata': dict({
             'description': 'Automated Security Helper workspace-mode aggregated report',
-            'generated_at': '<GENERATED_AT>',
+            'generated_at': '2026-01-15T12:00:42+00:00',
             'project_name': 'workspace',
-            'report_id': '<REPORT_ID>',
+            'report_id': 'ASH-WORKSPACE-snapshot-with-skipped',
             'tool_version': '<ASH_VERSION>',
           }),
           'name': 'ASH Workspace Scan: workspace',
@@ -1893,9 +1893,9 @@
           'description': "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
           'metadata': dict({
             'description': 'Automated Security Helper workspace-mode aggregated report',
-            'generated_at': '<GENERATED_AT>',
+            'generated_at': '2026-01-15T12:00:42+00:00',
             'project_name': 'workspace',
-            'report_id': '<REPORT_ID>',
+            'report_id': 'ASH-WORKSPACE-snapshot',
             'tool_version': '<ASH_VERSION>',
           }),
           'name': 'ASH Workspace Scan: workspace',

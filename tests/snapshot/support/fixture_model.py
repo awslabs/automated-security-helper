@@ -161,10 +161,16 @@ CLOCK_PINNED_MODULES = (
 )
 
 
-def pin_clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
-    """Pin "now" and uuid4 for the rest of the test. Returns the clock to advance."""
+def pin_clock(
+    monkeypatch: pytest.MonkeyPatch, extra_modules: tuple[str, ...] = ()
+) -> _Clock:
+    """Pin "now" and uuid4 for the rest of the test. Returns the clock to advance.
+
+    ``extra_modules`` are pinned too, for a surface whose clock reads live outside
+    :data:`CLOCK_PINNED_MODULES` (the MCP server's, in tests/snapshot/mcp/conftest.py).
+    """
     CLOCK.set(SCAN_STARTED)
-    for name in CLOCK_PINNED_MODULES:
+    for name in (*CLOCK_PINNED_MODULES, *extra_modules):
         module = importlib.import_module(name)
         if getattr(module, "datetime", None) is _RealDatetime:
             monkeypatch.setattr(module, "datetime", FrozenDatetime)

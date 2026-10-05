@@ -108,8 +108,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 1.25,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:00+00:00",
+        "end_time": "2026-01-15T12:00:01.250000+00:00"
       }
     }
   },
@@ -161,8 +161,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 1.25,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:00+00:00",
+        "end_time": "2026-01-15T12:00:01.250000+00:00"
       }
     }
   },
@@ -212,8 +212,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 7.5,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:01.250000+00:00",
+        "end_time": "2026-01-15T12:00:08.750000+00:00"
       }
     }
   },
@@ -264,8 +264,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 7.5,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:01.250000+00:00",
+        "end_time": "2026-01-15T12:00:08.750000+00:00"
       }
     }
   },
@@ -316,8 +316,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 7.5,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:01.250000+00:00",
+        "end_time": "2026-01-15T12:00:08.750000+00:00"
       }
     }
   },
@@ -368,8 +368,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 7.5,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:01.250000+00:00",
+        "end_time": "2026-01-15T12:00:08.750000+00:00"
       }
     }
   },
@@ -420,8 +420,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 4.0,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:08.750000+00:00",
+        "end_time": "2026-01-15T12:00:12.750000+00:00"
       }
     }
   },
@@ -472,8 +472,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 4.0,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:08.750000+00:00",
+        "end_time": "2026-01-15T12:00:12.750000+00:00"
       }
     }
   },
@@ -533,8 +533,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 3.0,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:13.250000+00:00",
+        "end_time": "2026-01-15T12:00:16.250000+00:00"
       }
     }
   },
@@ -585,8 +585,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 3.0,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:13.250000+00:00",
+        "end_time": "2026-01-15T12:00:16.250000+00:00"
       }
     }
   },

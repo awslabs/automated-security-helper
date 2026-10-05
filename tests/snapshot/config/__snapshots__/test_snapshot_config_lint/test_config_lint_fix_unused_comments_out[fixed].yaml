@@ -6,7 +6,7 @@ global_settings:
       line_start: 10
       line_end: 12
       reason: Still matches a finding
-    # [ash-lint <TODAY>] Commented out: unused suppression (not matched in last scan)
+    # [ash-lint 2026-01-15] Commented out: unused suppression (not matched in last scan)
     # - path: src/old.py
     # rule_id: B105
     # reason: The file was deleted

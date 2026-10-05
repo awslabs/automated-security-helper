@@ -12,7 +12,7 @@
       'config_path': None,
       'coverage_complete': True,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': None,
       'incomplete_converters': list([
       ]),
@@ -65,10 +65,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -135,10 +135,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -175,13 +175,13 @@
             ]),
           }),
           'directory_path': '<TMP>/allowed/project',
-          'end_time': '<END_TIME>',
+          'end_time': '2026-01-15T12:00:00',
           'error_message': None,
           'output_directory': '<TMP>/allowed/project/.ash/ash_output',
           'process_id': None,
           'scan_id': '<SCAN_ID>',
           'severity_threshold': 'MEDIUM',
-          'start_time': '<START_TIME>',
+          'start_time': '2026-01-15T12:00:00',
           'status': 'completed',
           'warnings': list([
           ]),
@@ -201,7 +201,7 @@
         'total_scans': 1,
       }),
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'list_active_scans',
   })
@@ -267,7 +267,7 @@
     'result': dict({
       '_filter': 'summary',
       '_source_function': 'get_scan_summary',
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -289,10 +289,10 @@
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
-        'generated_at': '<GENERATED_AT>',
+        'generated_at': '2026-01-02T03:04:05+00:00',
         'scan_duration_seconds': 0.0,
       }),
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
           'bandit': dict({
@@ -348,7 +348,7 @@
       'config_path': None,
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': 'Error executing scan: scanner orchestration crashed',
       'incomplete_converters': list([
       ]),
@@ -391,10 +391,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -461,10 +461,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -491,13 +491,13 @@
           'config_path': None,
           'coverage': None,
           'directory_path': '<TMP>/allowed/project',
-          'end_time': '<END_TIME>',
+          'end_time': '2026-01-15T12:00:00',
           'error_message': 'Error executing scan: scanner orchestration crashed',
           'output_directory': '<TMP>/allowed/project/.ash/ash_output',
           'process_id': None,
           'scan_id': '<SCAN_ID>',
           'severity_threshold': 'MEDIUM',
-          'start_time': '<START_TIME>',
+          'start_time': '2026-01-15T12:00:00',
           'status': 'failed',
           'warnings': list([
           ]),
@@ -517,7 +517,7 @@
         'total_scans': 1,
       }),
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'list_active_scans',
   })
@@ -613,7 +613,7 @@
       'config_path': None,
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': 'ASH exited with code 2',
       'incomplete_converters': list([
       ]),
@@ -656,10 +656,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -726,10 +726,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -756,13 +756,13 @@
           'config_path': None,
           'coverage': None,
           'directory_path': '<TMP>/allowed/project',
-          'end_time': '<END_TIME>',
+          'end_time': '2026-01-15T12:00:00',
           'error_message': 'ASH exited with code 2',
           'output_directory': '<TMP>/allowed/project/.ash/ash_output',
           'process_id': None,
           'scan_id': '<SCAN_ID>',
           'severity_threshold': 'MEDIUM',
-          'start_time': '<START_TIME>',
+          'start_time': '2026-01-15T12:00:00',
           'status': 'failed',
           'warnings': list([
           ]),
@@ -782,7 +782,7 @@
         'total_scans': 1,
       }),
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'list_active_scans',
   })
@@ -878,7 +878,7 @@
       'config_path': None,
       'coverage_complete': False,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': None,
       'incomplete_converters': list([
       ]),
@@ -953,10 +953,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'incomplete',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 3,
       'unevaluated_rules': list([
@@ -1023,10 +1023,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -1069,13 +1069,13 @@
             ]),
           }),
           'directory_path': '<TMP>/allowed/project',
-          'end_time': '<END_TIME>',
+          'end_time': '2026-01-15T12:00:00',
           'error_message': None,
           'output_directory': '<TMP>/allowed/project/.ash/ash_output',
           'process_id': None,
           'scan_id': '<SCAN_ID>',
           'severity_threshold': 'MEDIUM',
-          'start_time': '<START_TIME>',
+          'start_time': '2026-01-15T12:00:00',
           'status': 'incomplete',
           'warnings': list([
           ]),
@@ -1095,7 +1095,7 @@
         'total_scans': 1,
       }),
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'list_active_scans',
   })
@@ -1161,7 +1161,7 @@
     'result': dict({
       '_filter': 'summary',
       '_source_function': 'get_scan_summary',
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -1183,10 +1183,10 @@
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
-        'generated_at': '<GENERATED_AT>',
+        'generated_at': '2026-01-02T03:04:05+00:00',
         'scan_duration_seconds': 0.0,
       }),
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
           'bandit': dict({
@@ -1254,7 +1254,7 @@
     ]),
     'result': dict({
       'actionable_findings': 2,
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'coverage_complete': True,
       'incomplete_converters': list([
       ]),
@@ -1275,11 +1275,11 @@
           }),
           'expected_scanners': list([
           ]),
-          'generated_at': '<GENERATED_AT>',
+          'generated_at': '2026-01-02T03:04:05+00:00',
           'plugin_load_errors': dict({
           }),
           'project_name': 'snapshot-fixture',
-          'report_id': '<REPORT_ID>',
+          'report_id': 'ASH-20260102',
           'summary_stats': dict({
             'actionable': 2,
             'duration': 0.0,
@@ -1333,7 +1333,7 @@
         'validation_checkpoints': list([
         ]),
       }),
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'scanner_reports': dict({
       }),
       'stale_content_databases': list([
@@ -1358,7 +1358,7 @@
         'skipped': 0,
         'total': 3,
       }),
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_scanners': 2,
       'unevaluated_rules': list([
       ]),
@@ -1376,9 +1376,9 @@
     ]),
     'result': dict({
       '_filter': 'minimal',
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'is_complete': True,
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'status': 'completed',
       'success': True,
       'summary_stats': dict({
@@ -1413,9 +1413,9 @@
     ]),
     'result': dict({
       '_filter': 'minimal',
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'is_complete': True,
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'status': 'completed',
       'success': True,
       'summary_stats': dict({
@@ -1451,7 +1451,7 @@
     ]),
     'result': dict({
       '_filter': 'summary',
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -1473,10 +1473,10 @@
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
-        'generated_at': '<GENERATED_AT>',
+        'generated_at': '2026-01-02T03:04:05+00:00',
         'scan_duration_seconds': 0.0,
       }),
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
           'bandit': dict({
@@ -1529,7 +1529,7 @@
     ]),
     'result': dict({
       '_filter': 'summary',
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -1551,10 +1551,10 @@
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
-        'generated_at': '<GENERATED_AT>',
+        'generated_at': '2026-01-02T03:04:05+00:00',
         'scan_duration_seconds': 0.0,
       }),
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
           'bandit': dict({
@@ -1592,7 +1592,7 @@
     ]),
     'result': dict({
       '_filter': 'summary',
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -1614,10 +1614,10 @@
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
-        'generated_at': '<GENERATED_AT>',
+        'generated_at': '2026-01-02T03:04:05+00:00',
         'scan_duration_seconds': 0.0,
       }),
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
           'bandit': dict({
@@ -1674,7 +1674,7 @@
     ]),
     'result': dict({
       'actionable_findings': 2,
-      'completion_time': '<TIMESTAMP>',
+      'completion_time': '2026-01-02T03:04:05+00:00',
       'coverage_complete': True,
       'incomplete_converters': list([
       ]),
@@ -1695,11 +1695,11 @@
           }),
           'expected_scanners': list([
           ]),
-          'generated_at': '<GENERATED_AT>',
+          'generated_at': '2026-01-02T03:04:05+00:00',
           'plugin_load_errors': dict({
           }),
           'project_name': 'snapshot-fixture',
-          'report_id': '<REPORT_ID>',
+          'report_id': 'ASH-20260102',
           'summary_stats': dict({
             'actionable': 2,
             'duration': 0.0,
@@ -1753,7 +1753,7 @@
         'validation_checkpoints': list([
         ]),
       }),
-      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scan_id': 'scan-20260115120000',
       'scanner_reports': dict({
       }),
       'stale_content_databases': list([
@@ -1778,7 +1778,7 @@
         'skipped': 0,
         'total': 3,
       }),
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_scanners': 2,
       'unevaluated_rules': list([
       ]),
@@ -1800,7 +1800,7 @@
       'scan_id': '<RUNNING_SCAN_ID>',
       'status': 'cancelled',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'cancel_scan',
   })
@@ -1824,7 +1824,7 @@
         'Use get_scan_results to retrieve results if the scan is completed',
         'Start a new scan if needed',
       ]),
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'cancel_scan',
   })
@@ -1848,7 +1848,7 @@
         'Use get_scan_results to retrieve results if the scan is completed',
         'Start a new scan if needed',
       ]),
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'cancel_scan',
   })
@@ -1928,7 +1928,7 @@
           'process_id': None,
           'scan_id': '<RUNNING_SCAN_ID>',
           'severity_threshold': 'MEDIUM',
-          'start_time': '<START_TIME>',
+          'start_time': '2026-01-15T12:00:00',
           'status': 'running',
           'warnings': list([
           ]),
@@ -1945,7 +1945,7 @@
           'process_id': None,
           'scan_id': '<RUNNING_SCAN_ID>',
           'severity_threshold': 'MEDIUM',
-          'start_time': '<START_TIME>',
+          'start_time': '2026-01-15T12:00:00',
           'status': 'running',
           'warnings': list([
           ]),
@@ -1954,13 +1954,13 @@
           'config_path': None,
           'coverage': None,
           'directory_path': '<TMP>/allowed/finished',
-          'end_time': '<END_TIME>',
+          'end_time': '2026-01-15T12:00:00',
           'error_message': None,
           'output_directory': '<TMP>/allowed/finished/.ash/ash_output',
           'process_id': None,
           'scan_id': '<FINISHED_SCAN_ID>',
           'severity_threshold': 'MEDIUM',
-          'start_time': '<START_TIME>',
+          'start_time': '2026-01-15T12:00:00',
           'status': 'completed',
           'warnings': list([
           ]),
@@ -1980,7 +1980,7 @@
         'total_scans': 2,
       }),
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'list_active_scans',
   })
@@ -2012,7 +2012,7 @@
         'total_scans': 0,
       }),
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'list_active_scans',
   })
@@ -2092,7 +2092,7 @@
         'Check if the scan has been cleaned up or expired',
         'Ensure the scan was properly registered',
       ]),
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'get_scan_progress',
   })
@@ -2111,7 +2111,7 @@
       'scan_id': '<SCAN_ID>',
       'status': 'cancelled',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
     }),
     'tool': 'cancel_scan',
   })
@@ -2129,7 +2129,7 @@
       'config_path': None,
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': None,
       'incomplete_converters': list([
       ]),
@@ -2182,10 +2182,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'cancelled',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -2209,7 +2209,7 @@
       'config_path': None,
       'coverage_complete': True,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': None,
       'incomplete_converters': list([
       ]),
@@ -2262,10 +2262,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -2289,7 +2289,7 @@
       'config_path': None,
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': 'ASH exited with code 2',
       'incomplete_converters': list([
       ]),
@@ -2342,10 +2342,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -2369,7 +2369,7 @@
       'config_path': None,
       'coverage_complete': False,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': None,
       'incomplete_converters': list([
       ]),
@@ -2444,10 +2444,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'incomplete',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 3,
       'unevaluated_rules': list([
@@ -2471,7 +2471,7 @@
       'config_path': None,
       'coverage_complete': True,
       'directory_path': '<TMP>/allowed/project',
-      'end_time': '<END_TIME>',
+      'end_time': '2026-01-15T12:00:00',
       'error_message': None,
       'incomplete_converters': list([
       ]),
@@ -2524,10 +2524,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
       'unevaluated_rules': list([
@@ -2579,10 +2579,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
       'unevaluated_rules': list([
@@ -2659,10 +2659,10 @@
       ]),
       'stale_content_databases': list([
       ]),
-      'start_time': '<START_TIME>',
+      'start_time': '2026-01-15T12:00:00',
       'status': 'running',
       'success': True,
-      'timestamp': '<TIMESTAMP>',
+      'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
       'unevaluated_rules': list([

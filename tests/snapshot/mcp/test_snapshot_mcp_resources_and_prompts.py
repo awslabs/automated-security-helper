@@ -34,12 +34,6 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 
-# Resources and prompts are fixed text; the config schema's descriptions quote
-# measured medians ("21.3s") that must not be masked into a different sentence.
-pytestmark = pytest.mark.snapshot_masking(
-    mask_durations=False, mask_duration_keys=False
-)
-
 TEXT_RESOURCES = ["ash://exit-codes", "ash://status", "ash://help"]
 SCHEMA_RESOURCES = {
     "ash://schema/config": "ash_config_schema",

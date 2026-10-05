@@ -1,9 +1,9 @@
 {
-  "name": "ASH Scan <TIMESTAMP>",
+  "name": "ASH Scan 2026-01-15T12:00:00",
   "description": "Aggregated security scan results",
   "metadata": {
-    "report_id": "ASH-<REPORT_ID>",
-    "generated_at": "<TIMESTAMP>",
+    "report_id": "ASH-20260115",
+    "generated_at": "2026-01-15T12:00:00+00:00",
     "project_name": "ASH",
     "tool_version": "<ASH_VERSION>",
     "description": "Automated Security Helper Aggregated Report Post-processor",
@@ -16,8 +16,8 @@
         "low": 3,
         "info": 1
       },
-      "start": "<TIMESTAMP>",
-      "end": "<TIMESTAMP>",
+      "start": "2026-01-15T12:00:00+00:00",
+      "end": "2026-01-15T12:00:42+00:00",
       "duration": 42.0,
       "total": 10,
       "actionable": 6,
@@ -685,8 +685,8 @@
                   "tool_invocation": {
                     "exit_code": 0,
                     "duration": 1.25,
-                    "start_time": "<TIMESTAMP>",
-                    "end_time": "<TIMESTAMP>"
+                    "start_time": "2026-01-15T12:00:00+00:00",
+                    "end_time": "2026-01-15T12:00:01.250000+00:00"
                   }
                 }
               }
@@ -813,8 +813,8 @@
                   "tool_invocation": {
                     "exit_code": 0,
                     "duration": 7.5,
-                    "start_time": "<TIMESTAMP>",
-                    "end_time": "<TIMESTAMP>"
+                    "start_time": "2026-01-15T12:00:01.250000+00:00",
+                    "end_time": "2026-01-15T12:00:08.750000+00:00"
                   }
                 }
               }
@@ -901,8 +901,8 @@
                   "tool_invocation": {
                     "exit_code": 0,
                     "duration": 4.0,
-                    "start_time": "<TIMESTAMP>",
-                    "end_time": "<TIMESTAMP>"
+                    "start_time": "2026-01-15T12:00:08.750000+00:00",
+                    "end_time": "2026-01-15T12:00:12.750000+00:00"
                   }
                 }
               }
@@ -969,8 +969,8 @@
                   "tool_invocation": {
                     "exit_code": 0,
                     "duration": 0.5,
-                    "start_time": "<TIMESTAMP>",
-                    "end_time": "<TIMESTAMP>"
+                    "start_time": "2026-01-15T12:00:12.750000+00:00",
+                    "end_time": "2026-01-15T12:00:13.250000+00:00"
                   }
                 }
               }
@@ -1063,8 +1063,8 @@
                   "tool_invocation": {
                     "exit_code": 0,
                     "duration": 3.0,
-                    "start_time": "<TIMESTAMP>",
-                    "end_time": "<TIMESTAMP>"
+                    "start_time": "2026-01-15T12:00:13.250000+00:00",
+                    "end_time": "2026-01-15T12:00:16.250000+00:00"
                   }
                 }
               }
@@ -1110,8 +1110,8 @@
                   "tool_invocation": {
                     "exit_code": 0,
                     "duration": 0.25,
-                    "start_time": "<TIMESTAMP>",
-                    "end_time": "<TIMESTAMP>"
+                    "start_time": "2026-01-15T12:00:18.250000+00:00",
+                    "end_time": "2026-01-15T12:00:18.500000+00:00"
                   }
                 }
               }
@@ -1218,8 +1218,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 1.25,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:00+00:00",
+                  "end_time": "2026-01-15T12:00:01.250000+00:00"
                 }
               }
             }
@@ -1309,8 +1309,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 1.25,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:00+00:00",
+                  "end_time": "2026-01-15T12:00:01.250000+00:00"
                 }
               }
             }
@@ -1399,8 +1399,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 7.5,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:01.250000+00:00",
+                  "end_time": "2026-01-15T12:00:08.750000+00:00"
                 }
               }
             }
@@ -1489,8 +1489,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 7.5,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:01.250000+00:00",
+                  "end_time": "2026-01-15T12:00:08.750000+00:00"
                 }
               }
             }
@@ -1579,8 +1579,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 7.5,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:01.250000+00:00",
+                  "end_time": "2026-01-15T12:00:08.750000+00:00"
                 }
               }
             }
@@ -1669,8 +1669,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 7.5,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:01.250000+00:00",
+                  "end_time": "2026-01-15T12:00:08.750000+00:00"
                 }
               }
             }
@@ -1759,8 +1759,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 4.0,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:08.750000+00:00",
+                  "end_time": "2026-01-15T12:00:12.750000+00:00"
                 }
               }
             }
@@ -1849,8 +1849,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 4.0,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:08.750000+00:00",
+                  "end_time": "2026-01-15T12:00:12.750000+00:00"
                 }
               }
             }
@@ -1948,8 +1948,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 0.5,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:12.750000+00:00",
+                  "end_time": "2026-01-15T12:00:13.250000+00:00"
                 }
               }
             }
@@ -2038,8 +2038,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 3.0,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:13.250000+00:00",
+                  "end_time": "2026-01-15T12:00:16.250000+00:00"
                 }
               }
             }
@@ -2128,8 +2128,8 @@
                 "tool_invocation": {
                   "exit_code": 0,
                   "duration": 3.0,
-                  "start_time": "<TIMESTAMP>",
-                  "end_time": "<TIMESTAMP>"
+                  "start_time": "2026-01-15T12:00:13.250000+00:00",
+                  "end_time": "2026-01-15T12:00:16.250000+00:00"
                 }
               }
             }
@@ -2172,7 +2172,7 @@
     "serialNumber": "urn:uuid:<UUID>",
     "version": 1,
     "metadata": {
-      "timestamp": "<TIMESTAMP>",
+      "timestamp": "2026-01-15T12:00:00Z",
       "lifecycles": null,
       "tools": {
         "components": [
@@ -2368,8 +2368,8 @@
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
         "finding_count": 2,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>",
+        "start_time": "2026-01-15T12:00:00Z",
+        "end_time": "2026-01-15T12:00:01.250000Z",
         "duration": 1.25,
         "metadata": {
           "scanner_version": "1.8.6"
@@ -2388,8 +2388,8 @@
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
         "finding_count": 4,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>",
+        "start_time": "2026-01-15T12:00:01.250000Z",
+        "end_time": "2026-01-15T12:00:08.750000Z",
         "duration": 7.5,
         "metadata": {
           "scanner_version": "3.2.469"
@@ -2409,8 +2409,8 @@
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
         "finding_count": 2,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>",
+        "start_time": "2026-01-15T12:00:08.750000Z",
+        "end_time": "2026-01-15T12:00:12.750000Z",
         "duration": 4.0,
         "metadata": {
           "scanner_version": "1.140.0"
@@ -2429,8 +2429,8 @@
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
         "finding_count": 1,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>",
+        "start_time": "2026-01-15T12:00:12.750000Z",
+        "end_time": "2026-01-15T12:00:13.250000Z",
         "duration": 0.5,
         "metadata": {
           "scanner_version": "1.5.0"
@@ -2448,8 +2448,8 @@
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
         "finding_count": 2,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>",
+        "start_time": "2026-01-15T12:00:13.250000Z",
+        "end_time": "2026-01-15T12:00:16.250000Z",
         "duration": 3.0,
         "metadata": {
           "scanner_version": "0.100.0"
@@ -2467,8 +2467,8 @@
         "report_type": "cyclonedx",
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>",
+        "start_time": "2026-01-15T12:00:16.250000Z",
+        "end_time": "2026-01-15T12:00:18.250000Z",
         "duration": 2.0,
         "metadata": {
           "scanner_version": "1.33.0"
@@ -2483,8 +2483,8 @@
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
         "finding_count": 0,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>",
+        "start_time": "2026-01-15T12:00:18.250000Z",
+        "end_time": "2026-01-15T12:00:18.500000Z",
         "duration": 0.25,
         "metadata": {
           "scanner_version": "0.8.10"

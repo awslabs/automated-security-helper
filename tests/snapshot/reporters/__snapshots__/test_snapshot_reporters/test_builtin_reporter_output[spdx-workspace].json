@@ -26,7 +26,7 @@ metadata:
   description: Automated Security Helper workspace-mode aggregated report
   execution_discrepancy_report: {}
   expected_scanners: []
-  generated_at: '<TIMESTAMP>'
+  generated_at: '2026-01-15T12:00:42+00:00'
   plugin_load_errors: {}
   project_name: workspace
   report_id: ASH-WORKSPACE-snapshot
@@ -148,9 +148,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 1.0
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:01+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:00+00:00'
           tool_name: bandit
           tool_version: 1.8.6
         scanner_name: bandit
@@ -233,9 +233,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 1.0
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:01+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:00+00:00'
             tool_name: bandit
             tool_version: 1.8.6
           tags:
@@ -359,9 +359,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 2.0
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:02+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:00+00:00'
           tool_name: checkov
           tool_version: 3.2.469
         scanner_name: checkov
@@ -438,9 +438,9 @@ sarif:
         scanner_details:
           tool_invocation:
             duration: 1.5
-            end_time: '<TIMESTAMP>'
+            end_time: '2026-01-15T12:00:03.500000+00:00'
             exit_code: 0
-            start_time: '<TIMESTAMP>'
+            start_time: '2026-01-15T12:00:02+00:00'
           tool_name: semgrep
           tool_version: 1.140.0
         scanner_name: semgrep
@@ -523,9 +523,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 2.0
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:02+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:00+00:00'
             tool_name: checkov
             tool_version: 3.2.469
           tags:
@@ -580,9 +580,9 @@ sarif:
           scanner_details:
             tool_invocation:
               duration: 1.5
-              end_time: '<TIMESTAMP>'
+              end_time: '2026-01-15T12:00:03.500000+00:00'
               exit_code: 0
-              start_time: '<TIMESTAMP>'
+              start_time: '2026-01-15T12:00:02+00:00'
             tool_name: semgrep
             tool_version: 1.140.0
           tags:

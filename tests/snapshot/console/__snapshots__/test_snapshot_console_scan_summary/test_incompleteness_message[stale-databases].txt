@@ -1,6 +1,6 @@
 
 ERROR (1) Exiting because 2 content database(s) are past their declared age bound
-  Content database semgrep-offline-rules (semgrep) is stale: downloaded <TIMESTAMP>, 33d 4h old, past its 720h
+  Content database semgrep-offline-rules (semgrep) is stale: downloaded 2025-12-13T08:00:00Z, 33d 4h old, past its 720h
 bound (ASH's bound); age read from the download time in `.ash-rules-fetched-at` in the cache directory, else the oldest
 rules file's mtime. The scan fails: a clean result from a stale database is not evidence of a clean target. To refresh
 it, rebuild the offline image (`ash build-image --offline`), which downloads the rulesets again, or download them into

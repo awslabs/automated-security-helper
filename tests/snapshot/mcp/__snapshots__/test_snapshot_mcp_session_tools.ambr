@@ -799,7 +799,7 @@
           'ceiling_unreachable_findings': dict({
           }),
           'display_label': 'api',
-          'duration_seconds': '<DURATION_SECONDS>',
+          'duration_seconds': 0.0,
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
@@ -826,7 +826,7 @@
           'ceiling_unreachable_findings': dict({
           }),
           'display_label': 'web',
-          'duration_seconds': '<DURATION_SECONDS>',
+          'duration_seconds': 0.0,
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
@@ -853,7 +853,7 @@
           'ceiling_unreachable_findings': dict({
           }),
           'display_label': 'gone',
-          'duration_seconds': '<DURATION_SECONDS>',
+          'duration_seconds': 0.0,
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,

@@ -37,6 +37,15 @@ def normalizer(tmp_path: Path) -> SnapshotNormalizer:
     return default_normalizer(tmp_paths=[tmp_path])
 
 
+@pytest.fixture
+def timed(normalizer: SnapshotNormalizer) -> SnapshotNormalizer:
+    """The normalizer with every time switch on, as a test that opts in to all gets it."""
+    normalizer.mask_instants = True
+    normalizer.mask_durations = True
+    normalizer.mask_duration_keys = True
+    return normalizer
+
+
 class TestMasked:
     def test_ansi_and_crlf(self, normalizer):
         assert normalizer.text("\x1b[1;31mERROR\x1b[0m\r\nnext\r\n") == "ERROR\nnext\n"
@@ -73,9 +82,9 @@ class TestMasked:
     def test_repo_root(self, normalizer):
         assert normalizer.text(str(REPO_ROOT / "ash")) == "<REPO>/ash"
 
-    def test_timestamps_report_ids_and_today(self, normalizer):
+    def test_timestamps_report_ids_and_today(self, timed):
         today = date.today().isoformat()
-        out = normalizer.text(
+        out = timed.text(
             f"at 2026-10-05T12:34:56+00:00 and 2026-10-05 12:34:56Z id ASH-20261005123456 "
             f"day {today}"
         )
@@ -112,16 +121,16 @@ class TestMasked:
             "<SYSTEM_TMP>."
         )
 
-    def test_mcp_results_scan_id(self, normalizer):
+    def test_mcp_results_scan_id(self, timed):
         # Minted from the wall clock on every get_scan_results call.
-        out = normalizer.text("'scan_id': 'scan-20261005181909'")
+        out = timed.text("'scan_id': 'scan-20261005181909'")
         assert out == "'scan_id': 'scan-<SCAN_TIMESTAMP>'"
 
     @pytest.mark.parametrize(
         "duration", ["1.25s", "350ms", "3 seconds", "0:00:01", "1m 2s", "12 sec"]
     )
-    def test_durations(self, normalizer, duration):
-        assert normalizer.text(f"took {duration}.") == "took <DURATION>."
+    def test_durations(self, timed, duration):
+        assert timed.text(f"took {duration}.") == "took <DURATION>."
 
     def test_uuid_version_and_hostname(self, normalizer):
         n = SnapshotNormalizer()
@@ -132,21 +141,21 @@ class TestMasked:
         )
         assert out == "ASH <ASH_VERSION> on <HOSTNAME> run <UUID>"
 
-    def test_volatile_keys_in_data(self, normalizer):
+    def test_volatile_keys_in_data(self, timed):
         data = {"duration": 1.5, "start_time": "x", "count": 3, "nested": [{"time": 2}]}
-        assert normalizer.data(data) == {
+        assert timed.data(data) == {
             "duration": "<DURATION>",
             "start_time": "<START_TIME>",
             "count": 3,
             "nested": [{"time": "<TIME>"}],
         }
 
-    def test_volatile_keys_in_json_text(self, normalizer):
+    def test_volatile_keys_in_json_text(self, timed):
         text = json.dumps(
             {"time": 1791220796403, "metadata": {"logged_time": 1791220796403}},
             indent=2,
         )
-        assert json.loads(normalizer.text(text)) == {
+        assert json.loads(timed.text(text)) == {
             "time": "<TIME>",
             "metadata": {"logged_time": "<LOGGED_TIME>"},
         }
@@ -221,8 +230,8 @@ class TestSurvives:
         text = "CRITICAL 2  HIGH 10  B105 src/app.py:12  exit code 2"
         assert normalizer.text(text) == text
 
-    def test_a_date_that_is_not_today(self, normalizer):
-        assert normalizer.text("expires 2031-01-31") == "expires 2031-01-31"
+    def test_a_date_that_is_not_today(self, timed):
+        assert timed.text("expires 2031-01-31") == "expires 2031-01-31"
 
     def test_slash_dates_outside_the_log_time_column(self, normalizer):
         text = "released 10/05/26, ratio [10/05/26], level [INFO]"
@@ -366,62 +375,101 @@ class TestSurvivesErrorOutputRules:
         assert n.text(text) == text
 
 
-class TestDurationOptOut:
-    """``mask_durations`` and ``mask_duration_keys``: what each turns off, and what stays."""
+class TestTimeSwitches:
+    """``mask_instants``, ``mask_durations``, ``mask_duration_keys``: all off by default.
 
-    def test_prose_durations_survive_with_mask_durations_off(self, normalizer):
-        normalizer.mask_durations = False
-        text = "poll every 5 seconds; bandit <1ms, checkov 12.5s, 0:00:42 elapsed"
+    A new test sees every instant and duration it renders; each switch masks only its
+    own kind of value, and only for a test that opts in.
+    """
+
+    TEXT = (
+        "at 2026-10-05T12:34:56Z id ASH-20261005123456 scan-20261005181909 "
+        'took 3s {"time": 1768478442000, "duration": 1.25}'
+    )
+
+    def test_all_three_default_off(self):
+        n = SnapshotNormalizer()
+        assert (n.mask_instants, n.mask_durations, n.mask_duration_keys) == (
+            False,
+            False,
+            False,
+        )
+
+    def test_nothing_time_shaped_is_masked_by_default(self, normalizer):
+        today = date.today().isoformat()
+        text = f"{self.TEXT} day {today} poll every 5 seconds <1ms 0:00:42"
         assert normalizer.text(text) == text
+        data = {"time": 1768478442000, "start_time": "x", "duration_seconds": 0.0}
+        assert normalizer.data(data) == data
 
-    def test_mask_durations_off_keeps_every_other_rule(self, normalizer):
-        normalizer.mask_durations = False
+    def test_default_keeps_every_other_rule(self, normalizer):
         out = normalizer.text(
             "at 2026-10-05T12:34:56Z run 123e4567-e89b-12d3-a456-426614174000 took 3s"
         )
-        assert out == "at <TIMESTAMP> run <UUID> took 3s"
+        assert out == "at 2026-10-05T12:34:56Z run <UUID> took 3s"
 
-    def test_duration_keys_survive_with_mask_duration_keys_off(self, normalizer):
-        normalizer.mask_duration_keys = False
-        data = {"duration": 42.0, "duration_seconds": 0.0, "elapsed": "1.5s"}
-        # A string under a duration key still meets the prose rule, which is on.
-        assert normalizer.data(data) == {
-            "duration": 42.0,
-            "duration_seconds": 0.0,
-            "elapsed": "<DURATION>",
-        }
-        text = json.dumps({"duration": 1.25, "scan_duration_seconds": 7})
-        assert normalizer.text(text) == text
-
-    def test_instant_keys_stay_masked_with_both_switches_off(self, normalizer):
-        normalizer.mask_durations = False
-        normalizer.mask_duration_keys = False
+    def test_mask_instants_alone(self, normalizer):
+        normalizer.mask_instants = True
+        assert normalizer.text(self.TEXT) == (
+            "at <TIMESTAMP> id ASH-<REPORT_ID> scan-<SCAN_TIMESTAMP> "
+            'took 3s {"time": "<TIME>", "duration": 1.25}'
+        )
         data = {"time": 1768478442000, "start_time": "x", "report_id": "r"}
         assert normalizer.data(data) == {
             "time": "<TIME>",
             "start_time": "<START_TIME>",
             "report_id": "<REPORT_ID>",
         }
-        text = json.dumps({"logged_time": 1768478442000, "duration": 1.0})
-        assert json.loads(normalizer.text(text)) == {
-            "logged_time": "<LOGGED_TIME>",
-            "duration": 1.0,
-        }
+        assert normalizer.data({"duration": 42.0}) == {"duration": 42.0}
 
-    def test_both_switches_default_on(self, normalizer):
-        assert normalizer.mask_durations and normalizer.mask_duration_keys
-        assert normalizer.text('took 3s {"duration": 1.25}') == (
-            'took <DURATION> {"duration": "<DURATION>"}'
+    def test_mask_durations_alone(self, normalizer):
+        normalizer.mask_durations = True
+        assert normalizer.text(self.TEXT) == (
+            "at 2026-10-05T12:34:56Z id ASH-20261005123456 scan-20261005181909 "
+            'took <DURATION> {"time": 1768478442000, "duration": 1.25}'
         )
 
-    @pytest.mark.snapshot_masking(mask_durations=False, mask_duration_keys=False)
-    def test_the_marker_reaches_the_fixture(self, snapshot_normalizer):
+    def test_mask_duration_keys_alone(self, normalizer):
+        normalizer.mask_duration_keys = True
+        assert normalizer.text(self.TEXT) == (
+            "at 2026-10-05T12:34:56Z id ASH-20261005123456 scan-20261005181909 "
+            'took 3s {"time": 1768478442000, "duration": "<DURATION>"}'
+        )
+        data = {"duration": 42.0, "duration_seconds": 0.0, "elapsed": "1.5s"}
+        # A string under a duration key is masked by key, like a number.
+        assert normalizer.data(data) == {
+            "duration": "<DURATION>",
+            "duration_seconds": "<DURATION_SECONDS>",
+            "elapsed": "<ELAPSED>",
+        }
+
+    def test_a_duration_string_under_a_key_follows_the_prose_rule_when_keys_are_off(
+        self, normalizer
+    ):
+        normalizer.mask_durations = True
+        assert normalizer.data({"elapsed": "1.5s", "duration": 2.0}) == {
+            "elapsed": "<DURATION>",
+            "duration": 2.0,
+        }
+
+    @pytest.mark.snapshot_masking(mask_instants=True)
+    def test_the_marker_turns_one_switch_on(self, snapshot_normalizer):
+        assert snapshot_normalizer.mask_instants is True
         assert snapshot_normalizer.mask_durations is False
         assert snapshot_normalizer.mask_duration_keys is False
 
-    def test_the_fixture_defaults_without_the_marker(self, snapshot_normalizer):
+    @pytest.mark.snapshot_masking(
+        mask_instants=True, mask_durations=True, mask_duration_keys=True
+    )
+    def test_the_marker_reaches_the_fixture(self, snapshot_normalizer):
+        assert snapshot_normalizer.mask_instants is True
         assert snapshot_normalizer.mask_durations is True
         assert snapshot_normalizer.mask_duration_keys is True
+
+    def test_the_fixture_defaults_without_the_marker(self, snapshot_normalizer):
+        assert snapshot_normalizer.mask_instants is False
+        assert snapshot_normalizer.mask_durations is False
+        assert snapshot_normalizer.mask_duration_keys is False
 
 
 class TestWorkingDirectoryRoot:

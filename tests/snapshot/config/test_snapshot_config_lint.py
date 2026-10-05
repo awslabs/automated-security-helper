@@ -23,6 +23,7 @@ from automated_security_helper.config.config_linter import (
     LintCategory,
 )
 from tests.snapshot.support.cli import run_cli
+from tests.snapshot.support.fixture_model import pin_clock
 
 # Everything except a parse failure and an unused suppression, which need their own
 # fixtures: a parse failure stops the lint, and unused suppressions need a report.
@@ -123,6 +124,13 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # Fresh, so the "report is N hours old" warning (a wall-clock value) never fires.
     now = time.time()
     os.utime(report, (now, now))
+    # --fix-unused stamps each commented-out line "[ash-lint <today>]" from the local
+    # clock: measured, 2026-10-05 under one TZ and 2026-10-06 under Pacific/Kiritimati.
+    # Pinned, the stamp is the fixture's date. The pinned "now" is earlier than the
+    # report's real mtime, so the report's age stays below the warning threshold.
+    pin_clock(
+        monkeypatch, extra_modules=("automated_security_helper.config.config_linter",)
+    )
     monkeypatch.chdir(project)
     return project
 

@@ -53,12 +53,6 @@ from tests.snapshot.console.console_inputs import (
     stale_records,
 )
 
-# The summary is rendered from fixed inputs: the scan took 42.5s because the fixture
-# says so.
-pytestmark = pytest.mark.snapshot_masking(
-    mask_durations=False, mask_duration_keys=False
-)
-
 SCAN_STARTED = 1_000.0
 SCAN_FINISHED = 1_042.5
 

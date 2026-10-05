@@ -3,18 +3,18 @@ issue_severity: HIGH
 issue_confidence: HIGH
 scanner_name: bandit
 scanner_version: 1.8.6
-scanner_details: {'tool_name': 'bandit', 'tool_version': '1.8.6', 'tool_invocation': {'exit_code': 0, 'duration': 1.0, 'start_time': '<TIMESTAMP>', 'end_time': '<TIMESTAMP>'}}
+scanner_details: {'tool_name': 'bandit', 'tool_version': '1.8.6', 'tool_invocation': {'exit_code': 0, 'duration': 1.0, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:01+00:00'}}
 workspace_project: api
 workspace_uri: api/app.py</system-out></testcase></testsuite><testsuite name="web/checkov" tests="1" errors="1" failures="0" skipped="0" time="0"><testcase name="S3 Bucket has an ACL defined which allows public READ access. [CKV_AWS_20]" classname="CKV_AWS_20"><error message="S3 Bucket has an ACL defined which allows public READ access." type="error" /><system-out>tags: ['checkov']
 issue_severity: HIGH
 scanner_name: checkov
 scanner_version: 3.2.469
-scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 2.0, 'start_time': '<TIMESTAMP>', 'end_time': '<TIMESTAMP>'}}
+scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 2.0, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:02+00:00'}}
 workspace_project: web
 workspace_uri: web/main.tf</system-out></testcase></testsuite><testsuite name="web/semgrep" tests="1" errors="1" failures="0" skipped="0" time="0"><testcase name="Bucket name is hardcoded; derive it from a variable. [terraform.aws.best-practice.s3-bucket-name-hardcoded]" classname="terraform.aws.best-practice.s3-bucket-name-hardcoded"><error message="Bucket name is hardcoded; derive it from a variable." type="error" /><system-out>tags: ['semgrep']
 issue_severity: MEDIUM
 scanner_name: semgrep
 scanner_version: 1.140.0
-scanner_details: {'tool_name': 'semgrep', 'tool_version': '1.140.0', 'tool_invocation': {'exit_code': 0, 'duration': 1.5, 'start_time': '<TIMESTAMP>', 'end_time': '<TIMESTAMP>'}}
+scanner_details: {'tool_name': 'semgrep', 'tool_version': '1.140.0', 'tool_invocation': {'exit_code': 0, 'duration': 1.5, 'start_time': '2026-01-15T12:00:02+00:00', 'end_time': '2026-01-15T12:00:03.500000+00:00'}}
 workspace_project: web
 workspace_uri: web/main.tf</system-out></testcase></testsuite><testsuite name="docs" tests="1" errors="0" failures="0" skipped="1" time="0"><testcase name="project skipped (error)" classname="ash.workspace"><skipped message="Project 'docs' was not scanned (error): 'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'" type="project-skipped" /></testcase></testsuite></testsuites>

@@ -11,7 +11,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -22,7 +22,7 @@
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -59,7 +59,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -70,7 +70,7 @@
     "severity_id": 2,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -107,7 +107,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -118,7 +118,7 @@
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -155,7 +155,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -166,7 +166,7 @@
     "severity_id": 3,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -203,7 +203,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -214,7 +214,7 @@
     "severity_id": 3,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -251,7 +251,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -262,7 +262,7 @@
     "severity_id": 2,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -299,7 +299,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -310,7 +310,7 @@
     "severity_id": 2,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -347,7 +347,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -358,7 +358,7 @@
     "severity_id": 1,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -395,7 +395,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -407,7 +407,7 @@
     "status": "Suppressed",
     "status_detail": "kind: inSource; justification: (ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret",
     "status_id": 3,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -444,7 +444,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -455,7 +455,7 @@
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -492,7 +492,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -503,7 +503,7 @@
     "severity_id": 3,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768478442000,
     "type_uid": 200201,
     "vulnerabilities": [
       {

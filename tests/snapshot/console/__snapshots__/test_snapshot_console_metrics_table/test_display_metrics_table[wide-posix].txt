@@ -61,12 +61,12 @@ result from a stale database is not evidence of a clean target. To refresh it, r
 access, or rebuild the offline image (`ash build-image --offline`) so it downloads a current database. To scan against
 it anyway, pass --allow-stale-content-db or set `content_db_staleness: warn` in the ASH config.
 Stale content database (warning): Content database opengrep-offline-rules (opengrep) is stale: downloaded
-<TIMESTAMP>, 30d 7h old, past its 720h bound (ASH's bound); age read from the download time in
+2025-12-16T05:00:00Z, 30d 7h old, past its 720h bound (ASH's bound); age read from the download time in
 `.ash-rules-fetched-at` in the cache directory, else the oldest rules file's mtime. The scan ran against it anyway
 because content_db_staleness is warn, so it may be missing advisories or rules published since. To refresh it, rebuild
 the offline image (`ash build-image --offline`), which downloads the rulesets again, or download them into
 $OPENGREP_RULES_CACHE_DIR and record the time in .ash-rules-fetched-at.
-Stale content database: Content database semgrep-offline-rules (semgrep) is stale: downloaded <TIMESTAMP>, 33d
+Stale content database: Content database semgrep-offline-rules (semgrep) is stale: downloaded 2025-12-13T08:00:00Z, 33d
 4h old, past its 720h bound (ASH's bound); age read from the download time in `.ash-rules-fetched-at` in the cache
 directory, else the oldest rules file's mtime. The scan fails: a clean result from a stale database is not evidence of a
 clean target. To refresh it, rebuild the offline image (`ash build-image --offline`), which downloads the rulesets

@@ -92,8 +92,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 1.0,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:00+00:00",
+        "end_time": "2026-01-15T12:00:01+00:00"
       }
     },
     "workspace_project": "api",
@@ -146,8 +146,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 2.0,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:00+00:00",
+        "end_time": "2026-01-15T12:00:02+00:00"
       }
     },
     "workspace_project": "web",
@@ -201,8 +201,8 @@ This section contains detailed information about each finding referenced in the 
       "tool_invocation": {
         "exit_code": 0,
         "duration": 1.5,
-        "start_time": "<TIMESTAMP>",
-        "end_time": "<TIMESTAMP>"
+        "start_time": "2026-01-15T12:00:02+00:00",
+        "end_time": "2026-01-15T12:00:03.500000+00:00"
       }
     },
     "workspace_project": "web",

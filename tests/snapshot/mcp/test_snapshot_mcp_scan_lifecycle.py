@@ -40,12 +40,6 @@ from tests.snapshot.mcp.mcp_snapshot_support import (
     write_results,
 )
 
-# Durations in these payloads come from the fixture results document, and the guidance
-# text ("poll ... every 5 seconds") is fixed prose.
-pytestmark = pytest.mark.snapshot_masking(
-    mask_durations=False, mask_duration_keys=False
-)
-
 _LAUNCHER = "automated_security_helper.interactions.run_ash_scan.run_ash_scan"
 
 

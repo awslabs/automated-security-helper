@@ -62,6 +62,32 @@ def isolated_mcp_state(
     reset_default_registry_for_tests()
 
 
+#: Modules of the MCP server that stamp "now" into a tool result: the ``timestamp`` of
+#: every response, a scan's ``start_time``/``end_time``, and the ``scan-<YYYYmmddHHMMSS>``
+#: id get_scan_results mints per call. Each binds ``datetime`` at module level.
+MCP_CLOCK_MODULES = (
+    "automated_security_helper.cli.mcp_tools",
+    "automated_security_helper.cli.mcp.sessions",
+    "automated_security_helper.core.resource_management.event_manager",
+    "automated_security_helper.core.resource_management.scan_management",
+    "automated_security_helper.core.resource_management.scan_registry",
+    "automated_security_helper.core.resource_management.scan_tracking",
+)
+
+
+@pytest.fixture(autouse=True)
+def _pinned_mcp_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the clock every MCP payload reads, so its instants are snapshotted as-is.
+
+    Without this the ``timestamp``, ``start_time``, ``end_time`` and ``scan_id`` of
+    the lifecycle and findings payloads differed on every run (measured), and the
+    only alternative was to mask them, which would hide a wrong or missing instant.
+    """
+    from tests.snapshot.support.fixture_model import pin_clock
+
+    pin_clock(monkeypatch, extra_modules=MCP_CLOCK_MODULES)
+
+
 @pytest.fixture
 def allowed(isolated_mcp_state: Path) -> Path:
     """The one directory ASH_MCP_ALLOWED_ROOTS permits, empty."""

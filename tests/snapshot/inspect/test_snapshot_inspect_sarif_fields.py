@@ -26,11 +26,6 @@ import pytest
 from tests.snapshot.support.cli import run_cli
 from tests.snapshot.support.normalize import REPO_ROOT
 
-# No measured time in the report; the one duration-shaped text is a CSS transition.
-pytestmark = pytest.mark.snapshot_masking(
-    mask_durations=False, mask_duration_keys=False
-)
-
 FIXTURE = REPO_ROOT / "tests" / "test_data" / "snapshot" / "sarif_fields"
 SARIF_DIR = "sarif-input"
 OUTPUT_DIR = "inspect-out"

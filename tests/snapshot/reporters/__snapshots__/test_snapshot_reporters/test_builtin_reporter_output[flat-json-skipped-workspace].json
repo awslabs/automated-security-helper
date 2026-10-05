@@ -1,8 +1,8 @@
 {
   "metadata": {
     "project": "workspace",
-    "scan_time": "<TIMESTAMP>",
-    "report_time": "<TIMESTAMP>",
+    "scan_time": "2026-01-15T12:00:42+00:00",
+    "report_time": "2026-01-15T12:00:42+00:00",
     "tool_version": "<ASH_VERSION>",
     "time_delta": "0:00:00"
   },
@@ -109,10 +109,10 @@
       "line_start": 7,
       "line_end": 7,
       "is_suppressed": false,
-      "detected_at": "<TIMESTAMP>",
+      "detected_at": "2026-01-15T12:00:42+00:00",
       "tags": "[\"bandit\"]",
-      "properties": "{\"tags\": [\"bandit\"], \"issue_severity\": \"HIGH\", \"issue_confidence\": \"HIGH\", \"scanner_name\": \"bandit\", \"scanner_version\": \"1.8.6\", \"scanner_details\": {\"tool_name\": \"bandit\", \"tool_version\": \"1.8.6\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 1.0, \"start_time\": \"<TIMESTAMP>\", \"end_time\": \"<TIMESTAMP>\"}}, \"workspace_project\": \"api\", \"workspace_uri\": \"api/app.py\"}",
-      "raw_data": "{\"ruleId\":\"B602\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"subprocess call with shell=True identified, security issue.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app.py\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":7,\"endLine\":7,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"bandit\"],\"issue_severity\":\"HIGH\",\"issue_confidence\":\"HIGH\",\"scanner_name\":\"bandit\",\"scanner_version\":\"1.8.6\",\"scanner_details\":{\"tool_name\":\"bandit\",\"tool_version\":\"1.8.6\",\"tool_invocation\":{\"exit_code\":0,\"duration\":1.0,\"start_time\":\"<TIMESTAMP>\",\"end_time\":\"<TIMESTAMP>\"}},\"workspace_project\":\"api\",\"workspace_uri\":\"api/app.py\"}}"
+      "properties": "{\"tags\": [\"bandit\"], \"issue_severity\": \"HIGH\", \"issue_confidence\": \"HIGH\", \"scanner_name\": \"bandit\", \"scanner_version\": \"1.8.6\", \"scanner_details\": {\"tool_name\": \"bandit\", \"tool_version\": \"1.8.6\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 1.0, \"start_time\": \"2026-01-15T12:00:00+00:00\", \"end_time\": \"2026-01-15T12:00:01+00:00\"}}, \"workspace_project\": \"api\", \"workspace_uri\": \"api/app.py\"}",
+      "raw_data": "{\"ruleId\":\"B602\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"subprocess call with shell=True identified, security issue.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app.py\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":7,\"endLine\":7,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"bandit\"],\"issue_severity\":\"HIGH\",\"issue_confidence\":\"HIGH\",\"scanner_name\":\"bandit\",\"scanner_version\":\"1.8.6\",\"scanner_details\":{\"tool_name\":\"bandit\",\"tool_version\":\"1.8.6\",\"tool_invocation\":{\"exit_code\":0,\"duration\":1.0,\"start_time\":\"2026-01-15T12:00:00+00:00\",\"end_time\":\"2026-01-15T12:00:01+00:00\"}},\"workspace_project\":\"api\",\"workspace_uri\":\"api/app.py\"}}"
     },
     {
       "id": "checkov-CKV_AWS_20-89534355",
@@ -127,10 +127,10 @@
       "line_start": 1,
       "line_end": 4,
       "is_suppressed": false,
-      "detected_at": "<TIMESTAMP>",
+      "detected_at": "2026-01-15T12:00:42+00:00",
       "tags": "[\"checkov\"]",
-      "properties": "{\"tags\": [\"checkov\"], \"issue_severity\": \"HIGH\", \"scanner_name\": \"checkov\", \"scanner_version\": \"3.2.469\", \"scanner_details\": {\"tool_name\": \"checkov\", \"tool_version\": \"3.2.469\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 2.0, \"start_time\": \"<TIMESTAMP>\", \"end_time\": \"<TIMESTAMP>\"}}, \"workspace_project\": \"web\", \"workspace_uri\": \"web/main.tf\"}",
-      "raw_data": "{\"ruleId\":\"CKV_AWS_20\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"S3 Bucket has an ACL defined which allows public READ access.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"main.tf\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":1,\"endLine\":4,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"checkov\"],\"issue_severity\":\"HIGH\",\"scanner_name\":\"checkov\",\"scanner_version\":\"3.2.469\",\"scanner_details\":{\"tool_name\":\"checkov\",\"tool_version\":\"3.2.469\",\"tool_invocation\":{\"exit_code\":0,\"duration\":2.0,\"start_time\":\"<TIMESTAMP>\",\"end_time\":\"<TIMESTAMP>\"}},\"workspace_project\":\"web\",\"workspace_uri\":\"web/main.tf\"}}"
+      "properties": "{\"tags\": [\"checkov\"], \"issue_severity\": \"HIGH\", \"scanner_name\": \"checkov\", \"scanner_version\": \"3.2.469\", \"scanner_details\": {\"tool_name\": \"checkov\", \"tool_version\": \"3.2.469\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 2.0, \"start_time\": \"2026-01-15T12:00:00+00:00\", \"end_time\": \"2026-01-15T12:00:02+00:00\"}}, \"workspace_project\": \"web\", \"workspace_uri\": \"web/main.tf\"}",
+      "raw_data": "{\"ruleId\":\"CKV_AWS_20\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"S3 Bucket has an ACL defined which allows public READ access.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"main.tf\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":1,\"endLine\":4,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"checkov\"],\"issue_severity\":\"HIGH\",\"scanner_name\":\"checkov\",\"scanner_version\":\"3.2.469\",\"scanner_details\":{\"tool_name\":\"checkov\",\"tool_version\":\"3.2.469\",\"tool_invocation\":{\"exit_code\":0,\"duration\":2.0,\"start_time\":\"2026-01-15T12:00:00+00:00\",\"end_time\":\"2026-01-15T12:00:02+00:00\"}},\"workspace_project\":\"web\",\"workspace_uri\":\"web/main.tf\"}}"
     },
     {
       "id": "semgrep-terraform.aws.best-practice.s3-bucket-name-hardcoded-2ffa28f7",
@@ -145,10 +145,10 @@
       "line_start": 2,
       "line_end": 2,
       "is_suppressed": false,
-      "detected_at": "<TIMESTAMP>",
+      "detected_at": "2026-01-15T12:00:42+00:00",
       "tags": "[\"semgrep\"]",
-      "properties": "{\"tags\": [\"semgrep\"], \"issue_severity\": \"MEDIUM\", \"scanner_name\": \"semgrep\", \"scanner_version\": \"1.140.0\", \"scanner_details\": {\"tool_name\": \"semgrep\", \"tool_version\": \"1.140.0\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 1.5, \"start_time\": \"<TIMESTAMP>\", \"end_time\": \"<TIMESTAMP>\"}}, \"workspace_project\": \"web\", \"workspace_uri\": \"web/main.tf\"}",
-      "raw_data": "{\"ruleId\":\"terraform.aws.best-practice.s3-bucket-name-hardcoded\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Bucket name is hardcoded; derive it from a variable.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"main.tf\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":2,\"endLine\":2,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"semgrep\"],\"issue_severity\":\"MEDIUM\",\"scanner_name\":\"semgrep\",\"scanner_version\":\"1.140.0\",\"scanner_details\":{\"tool_name\":\"semgrep\",\"tool_version\":\"1.140.0\",\"tool_invocation\":{\"exit_code\":0,\"duration\":1.5,\"start_time\":\"<TIMESTAMP>\",\"end_time\":\"<TIMESTAMP>\"}},\"workspace_project\":\"web\",\"workspace_uri\":\"web/main.tf\"}}"
+      "properties": "{\"tags\": [\"semgrep\"], \"issue_severity\": \"MEDIUM\", \"scanner_name\": \"semgrep\", \"scanner_version\": \"1.140.0\", \"scanner_details\": {\"tool_name\": \"semgrep\", \"tool_version\": \"1.140.0\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 1.5, \"start_time\": \"2026-01-15T12:00:02+00:00\", \"end_time\": \"2026-01-15T12:00:03.500000+00:00\"}}, \"workspace_project\": \"web\", \"workspace_uri\": \"web/main.tf\"}",
+      "raw_data": "{\"ruleId\":\"terraform.aws.best-practice.s3-bucket-name-hardcoded\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Bucket name is hardcoded; derive it from a variable.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"main.tf\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":2,\"endLine\":2,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"semgrep\"],\"issue_severity\":\"MEDIUM\",\"scanner_name\":\"semgrep\",\"scanner_version\":\"1.140.0\",\"scanner_details\":{\"tool_name\":\"semgrep\",\"tool_version\":\"1.140.0\",\"tool_invocation\":{\"exit_code\":0,\"duration\":1.5,\"start_time\":\"2026-01-15T12:00:02+00:00\",\"end_time\":\"2026-01-15T12:00:03.500000+00:00\"}},\"workspace_project\":\"web\",\"workspace_uri\":\"web/main.tf\"}}"
     }
   ],
   "workspace": {

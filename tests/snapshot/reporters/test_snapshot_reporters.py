@@ -30,12 +30,6 @@ from tests.snapshot.support.reporter_catalog import (
     snapshot_extension,
 )
 
-# Every reporter renders the fixture scan under the pinned clock, so each duration
-# and "time since scan" it prints is a fixed value a user reads.
-pytestmark = pytest.mark.snapshot_masking(
-    mask_durations=False, mask_duration_keys=False
-)
-
 
 def test_every_registered_reporter_is_snapshotted():
     """The registry and the snapshotted set are the same set of names.

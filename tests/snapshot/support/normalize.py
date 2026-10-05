@@ -18,10 +18,6 @@ What is masked, and why each is safe to mask
   (``<TMP>``, ``<REPO>`` ...) in every spelling ASH can emit: native, POSIX,
   JSON-escaped and ``file://`` URI. After the token, backslashes become ``/``, so a
   Windows path and a POSIX path snapshot identically.
-- Timestamps. ISO-8601 instants, ``ASH-YYYYMMDD[HHMMSS]`` report ids, the
-  ``scan-YYYYMMDDHHMMSS`` id MCP get_scan_results mints per call, and today's date
-  (plus yesterday and tomorrow, so a run that crosses midnight still matches). A date
-  a fixture chose, such as a suppression's expiry, is not today and survives.
 - The time column of ASH's console log (rich's ``RichHandler``). This one is not
   masked here but pinned where it is drawn: tests/snapshot/conftest.py makes every
   ``LogRender`` print the constant ``[<LOG_TIME>]`` instead of the record's time, for
@@ -37,23 +33,7 @@ What is masked, and why each is safe to mask
   ``_LOG_TIME`` below is the backstop for a C-locale stamp drawn some other way (it
   masks the stamp only, so such output would still fail on its indentation, loudly).
   A bare or bracketed date in a message survives.
-- Durations: a number followed by a time unit, in prose. Only while ``mask_durations``
-  is on, which is the default: a test whose output holds wall-clock time ASH measured
-  itself (a real scan, a progress bar) keeps it. A test whose inputs pin time fully
-  sets ``mask_durations = False``, because there the rule only hides things: fixed
-  prose ("poll every 5 seconds", "a median of 21.3s" in a schema description) and the
-  duration a reporter renders from the pinned clock, which is how a ``<1ms`` defect in
-  the text and HTML reporters stayed invisible. Turn it off, never on selectively.
-- A number under a duration key (``DURATION_KEYS``: ``duration``, ``elapsed`` ...), in
-  structured data and in JSON text a command printed. Governed by ``mask_duration_keys``
-  (default on), for the same reason and with the same opt-out: under the pinned clock
-  ``"duration_seconds": 0.0`` is a value a user reads, and a wrong one is a defect.
-- A value under an instant key (``INSTANT_KEYS``: ``time``, ``logged_time``,
-  ``start_time`` ...), always, such as OCSF's ``"time": 1791220796403`` epoch
-  milliseconds. An instant is the clock's value, not something ASH computed: under the
-  pinned clock it is the fixture's own constant, and its ISO spelling is masked by the
-  timestamp rule above anyway, so the epoch spelling of the same instant is treated
-  alike. ``VOLATILE_KEYS`` is both sets.
+- Instants and durations, but only for a test that opts in; see "Time" below.
 - UUIDs, the ASH version, the Python version and the hostname.
 - The pydantic minor version in its ``errors.pydantic.dev/<version>/`` help links, which
   a dependency bump changes in every config-error message.
@@ -80,6 +60,33 @@ What is masked, and why each is safe to mask
 
 A path root is masked only where it starts a path and ends at a component boundary,
 so the system temp dir ``/tmp`` does not mask the middle of ``/home/u/tmp/x``.
+
+Time
+----
+Time is NOT masked by default. Three switches mask it, each off unless a test opts in
+with ``@pytest.mark.snapshot_masking(<switch>=True)`` (see tests/snapshot/conftest.py),
+so a new test sees every timestamp and duration it renders. A wrong instant or a wrong
+duration is a defect a user reads. While masking was on by default, truncating the text
+report's "Report generated:" stamp, writing OCSF's ``time`` in seconds instead of
+milliseconds, and a ``<1ms`` duration defect in the text and HTML reporters all passed
+the whole suite. The fix for wall-clock output is to pin the clock
+(``pinned_clock`` in tests/snapshot/conftest.py, ``pin_clock`` in
+support/fixture_model.py). Opting in is for output whose time cannot be pinned cheaply,
+and only once the test has been shown to differ between runs, or between time zones,
+without it.
+
+- ``mask_instants``: ISO-8601 instants, ``ASH-YYYYMMDD[HHMMSS]`` report ids, the
+  ``scan-YYYYMMDDHHMMSS`` id MCP get_scan_results mints per call, today's date (plus
+  yesterday and tomorrow, so a run that crosses midnight still matches), and any value
+  under an instant key (``INSTANT_KEYS``: ``time``, ``logged_time``, ``start_time``
+  ...), in structured data and in JSON text a command printed. A date a fixture chose,
+  such as a suppression's expiry, is not today and survives even with the switch on.
+- ``mask_durations``: a number followed by a time unit, in prose (``1.2s``, ``350ms``,
+  ``0:00:01``, ``3 seconds``).
+- ``mask_duration_keys``: a number under a duration key (``DURATION_KEYS``:
+  ``duration``, ``elapsed`` ...), in structured data and in JSON text.
+
+``VOLATILE_KEYS`` is both key sets.
 
 What is deliberately NOT masked: counts, severities, rule ids, messages, relative
 paths, ordering, column layout, box-drawing characters and emoji. Those are what a
@@ -145,7 +152,7 @@ _DURATION = re.compile(
 
 # Time ASH writes as bare values. Masked by key, not by value, because a bare number is
 # only a duration or an instant because of the key it sits under.
-#: Lengths of time ASH measured. Masked unless ``mask_duration_keys`` is off.
+#: Lengths of time ASH measured. Masked only under ``mask_duration_keys``.
 DURATION_KEYS = frozenset(
     {
         "duration",
@@ -157,7 +164,8 @@ DURATION_KEYS = frozenset(
         "scan_duration_seconds",
     }
 )
-#: Points in time, and the report id minted from one. Always masked.
+#: Points in time, and the report id minted from one. Masked only under
+#: ``mask_instants``.
 INSTANT_KEYS = frozenset(
     {
         "start_time",
@@ -302,10 +310,14 @@ class SnapshotNormalizer:
 
     roots: list[tuple[PurePath, str]] = field(default_factory=list)
     extra_literals: dict[str, str] = field(default_factory=dict)
-    #: Mask "number + time unit" in prose. Off for a test whose inputs pin time fully.
-    mask_durations: bool = True
-    #: Mask numbers under DURATION_KEYS. Off for a test whose clock is pinned.
-    mask_duration_keys: bool = True
+    # Off by default: a test opts in only for wall-clock time it cannot pin. See "Time"
+    # in the module docstring.
+    #: Mask ISO instants, report-id and scan-id stamps, today's date, INSTANT_KEYS.
+    mask_instants: bool = False
+    #: Mask "number + time unit" in prose.
+    mask_durations: bool = False
+    #: Mask numbers under DURATION_KEYS.
+    mask_duration_keys: bool = False
 
     def add_root(self, path: PurePath | str, token: str) -> None:
         """Mask ``path`` (and everything below it) as ``<token>``."""
@@ -361,17 +373,21 @@ class SnapshotNormalizer:
                 lambda m: m.group(1) + re.sub(r"\\\\|\\", "/", m.group(2)), out
             )
         out = _UUID.sub("<UUID>", out)
-        out = _ISO_INSTANT.sub("<TIMESTAMP>", out)
-        out = _REPORT_ID.sub("ASH-<REPORT_ID>", out)
+        # The log-time backstop runs whatever the switches say: the column is pinned
+        # by conftest.py, so a stamp here is drawn some other way (see the docstring).
         out = _LOG_TIME.sub("[<LOG_TIME>]", out)
         out = _JQ_ELEMENT_ID.sub(r"\1<HASH_ID>", out)
-        out = _MCP_RESULTS_SCAN_ID.sub("scan-<SCAN_TIMESTAMP>", out)
-        today = date.today()
-        for day in (today - timedelta(days=1), today, today + timedelta(days=1)):
-            out = out.replace(day.isoformat(), "<TODAY>")
+        if self.mask_instants:
+            out = _ISO_INSTANT.sub("<TIMESTAMP>", out)
+            out = _REPORT_ID.sub("ASH-<REPORT_ID>", out)
+            out = _MCP_RESULTS_SCAN_ID.sub("scan-<SCAN_TIMESTAMP>", out)
+            today = date.today()
+            for day in (today - timedelta(days=1), today, today + timedelta(days=1)):
+                out = out.replace(day.isoformat(), "<TODAY>")
         if self.mask_durations:
             out = _DURATION.sub("<DURATION>", out)
-        out = _INSTANT_JSON_NUMBER.sub(_mask_json_number, out)
+        if self.mask_instants:
+            out = _INSTANT_JSON_NUMBER.sub(_mask_json_number, out)
         if self.mask_duration_keys:
             out = _DURATION_JSON_NUMBER.sub(_mask_json_number, out)
         out = _keep_panel_width(rendered, out)
@@ -386,12 +402,12 @@ class SnapshotNormalizer:
             _key is not None
             and value not in (None, "", [], {})
             and (
-                _key in INSTANT_KEYS
+                (_key in INSTANT_KEYS and self.mask_instants)
                 or (_key in DURATION_KEYS and self.mask_duration_keys)
             )
         ):
-            # With mask_duration_keys off, a duration is normalized like any other
-            # value: a number is kept, a string still goes through the text rules.
+            # With its switch off, a volatile key's value is normalized like any
+            # other: a number is kept, a string still goes through the text rules.
             return f"<{_key.upper()}>"
         if isinstance(value, dict):
             return {

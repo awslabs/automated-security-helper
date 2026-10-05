@@ -304,7 +304,7 @@
     'stdout': '''
       
       ERROR (1) Exiting because 1 content database(s) are past their declared age bound
-        Content database grype-db (grype) is stale: built <TIMESTAMP>, 30d 0h old, past its 120h
+        Content database grype-db (grype) is stale: built 2020-01-01T00:00:00Z, 30d 0h old, past its 120h
       bound (grype's own bound); age read from grype db status. The scan fails: a clean result from a
       stale database is not evidence of a clean target. To refresh it, run 'grype db update'. To scan
       against it anyway, pass --allow-stale-content-db or set `content_db_staleness: warn` in the ASH
@@ -320,7 +320,7 @@
     'stdout': '''
       
       ERROR (1) Exiting because 1 content database(s) are past their declared age bound
-        Content database grype-db (grype) is stale: built <TIMESTAMP>, 30d 0h old, past its 120h
+        Content database grype-db (grype) is stale: built 2020-01-01T00:00:00Z, 30d 0h old, past its 120h
       bound (grype's own bound); age read from grype db status. The scan fails: a clean result from a
       stale database is not evidence of a clean target. To refresh it, run 'grype db update'. To scan
       against it anyway, pass --allow-stale-content-db or set `content_db_staleness: warn` in the ASH
@@ -411,7 +411,7 @@
                    ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
                    INFO
                             Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
-                   INFO     ===== ASH Security Scan Completed in <DURATION> =====
+                   INFO     ===== ASH Security Scan Completed in 0s =====
                    ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
       ERROR (1) None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag,
       cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than

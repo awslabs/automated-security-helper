@@ -130,7 +130,7 @@ list, and why each candidate is in or out, is the `GOLDEN` table in
 ### Normalization
 
 Snapshots must be identical on every machine, so values that change from run to run
-(temp paths, the repository root, timestamps, durations, ids, versions) are masked by one
+(temp paths, the repository root, the home directory, ids, versions) are masked by one
 normalizer, `SnapshotNormalizer` in `tests/snapshot/support/normalize.py`. The `snapshot`
 and `text_snapshot` fixtures in `tests/snapshot/conftest.py` apply it, and they also pin
 the terminal (width, no colour, no TTY) and unset the CI variables that change ASH's
@@ -139,24 +139,37 @@ it with the normalizer (`add_root`, `add_literal`) or extend the normalizer, tog
 a test in `tests/snapshot/test_snapshot_normalizer.py` showing what it masks and what it
 leaves alone.
 
-Durations are masked by default, because most output that contains one measured it from
-the wall clock. A test whose inputs pin time fully (the pinned clock in the reporter
-tests, fixed scanner metrics, a fixture results document, help text and other fixed
-prose) turns that off, so a wrong duration and a sentence like "poll every 5 seconds"
-show up as written:
+Time is not masked by default. A wrong timestamp or duration is a defect a user reads,
+so a new test sees every instant and duration it renders. When output contains the
+wall clock, pin the clock rather than masking it: the `pinned_clock` fixture in
+`tests/snapshot/conftest.py` (built on `pin_clock` in
+`tests/snapshot/support/fixture_model.py`) replaces `datetime.now()` and `uuid4` in the
+modules that stamp them into output, and `pin_clock(monkeypatch, extra_modules=(...))`
+covers a module outside that list. Only when the time cannot be pinned cheaply, and
+only after the test has been shown to differ between runs or between time zones (run it
+several times, and under `TZ=Pacific/Kiritimati` and `TZ=America/Adak`), opt in to
+masking for that test or module:
 
 ```python
-pytestmark = pytest.mark.snapshot_masking(
-    mask_durations=False, mask_duration_keys=False
-)
+pytestmark = pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True)
 ```
 
-`mask_durations` is the rule for a number followed by a time unit in text;
-`mask_duration_keys` covers bare numbers under keys such as `duration` and
-`duration_seconds`. Instants (`time`, `start_time`, ISO timestamps) stay masked either way.
-Only opt out after running the test several times, under more than one `TZ`, with no
-diff. The console log's time column is not a normalizer rule: the fixtures draw it as the
-constant `[<LOG_TIME>]`, so the column has one width under any clock, locale or timezone.
+The switches, all `False` unless a marker turns them on:
+
+- `mask_instants`: ISO-8601 instants, `ASH-YYYYMMDD...` report ids, the
+  `scan-YYYYMMDDHHMMSS` id from MCP `get_scan_results`, today's date, and values under
+  instant keys such as `time`, `logged_time`, `generated_at`, `start_time`, `end_time`
+  and `timestamp`.
+- `mask_durations`: a number followed by a time unit in text (`1.2s`, `350ms`,
+  `0:00:01`).
+- `mask_duration_keys`: numbers under keys such as `duration` and `duration_seconds`.
+
+No snapshot test opts in at the moment: every one that renders the time runs under a
+pinned clock.
+
+The console log's time column is not a normalizer rule: the fixtures draw it as the
+constant `[<LOG_TIME>]`, so the column has one width under any clock, locale or
+timezone.
 
 ### When a snapshot test fails
 
@@ -170,7 +183,7 @@ constant `[<LOG_TIME>]`, so the column has one width under any clock, locale or 
 3. If it is, rewrite the snapshots for the tests you changed:
 
    ```bash
-   uv run pytest tests/snapshot/test_<area>.py -n 0 --snapshot-update
+   uv run pytest tests/snapshot/<area>/test_snapshot_<area>_<topic>.py -n 0 --snapshot-update
    ```
 
    Pass `-n 0`. Under xdist several workers rewrite the same `.ambr` file at once, and
@@ -202,9 +215,10 @@ Then run `git push --force-with-lease`. Pull requests are squash-merged with eve
 message kept, and the check reads trailers from each commit's section of the squash
 message, so the trailer survives the merge.
 
-CI never passes `--snapshot-update`, and `tests/snapshot/conftest.py` refuses it when `CI`
-or `GITHUB_ACTIONS` is set. `tests/snapshot/test_snapshot_policy.py` fails if any workflow,
-action, script or pytest configuration passes `--snapshot-update` or
+CI never passes `--snapshot-update`, and `tests/snapshot/conftest.py` refuses it when the
+`CI` or `GITHUB_ACTIONS` environment variable equals `true` (exactly that string, so
+`CI=1` does not trigger the refusal). `tests/snapshot/test_snapshot_policy.py` fails if
+any workflow, action, script or pytest configuration passes `--snapshot-update` or
 `--snapshot-warn-unused`. A missing snapshot fails.
 
 ### Orphaned snapshots

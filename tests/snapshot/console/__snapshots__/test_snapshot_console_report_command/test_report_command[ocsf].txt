@@ -13,7 +13,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -24,7 +24,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -61,7 +61,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -72,7 +72,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -109,7 +109,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -120,7 +120,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -157,7 +157,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -168,7 +168,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -205,7 +205,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -217,7 +217,7 @@ $ ash report --format ocsf --log-level ERROR
     "status": "Suppressed",
     "status_detail": "kind: external; justification: Accepted risk: test fixture",
     "status_id": 3,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -254,7 +254,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -265,7 +265,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -302,7 +302,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -313,7 +313,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -350,7 +350,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -361,7 +361,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -398,7 +398,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -410,7 +410,7 @@ $ ash report --format ocsf --log-level ERROR
     "status": "Suppressed",
     "status_detail": "kind: external; justification: Accepted risk: test fixture",
     "status_id": 3,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -447,7 +447,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -459,7 +459,7 @@ $ ash report --format ocsf --log-level ERROR
     "status": "Suppressed",
     "status_detail": "kind: external; justification: Accepted risk: test fixture",
     "status_id": 3,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -496,7 +496,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -507,7 +507,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -544,7 +544,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -555,7 +555,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -592,7 +592,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -603,7 +603,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -640,7 +640,7 @@ $ ash report --format ocsf --log-level ERROR
       "uid": "<UUID>"
     },
     "metadata": {
-      "logged_time": "<LOGGED_TIME>",
+      "logged_time": 1768480200000,
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -651,7 +651,7 @@ $ ash report --format ocsf --log-level ERROR
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": "<TIME>",
+    "time": 1768480200000,
     "type_uid": 200201,
     "vulnerabilities": [
       {

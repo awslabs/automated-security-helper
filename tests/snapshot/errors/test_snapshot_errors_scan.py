@@ -195,8 +195,13 @@ class TestCliJsonInputRefusals:
         assert run_cli([*SCAN, "--cli-json-input", "nowhere.json"]) == snapshot
 
 
+@pytest.mark.usefixtures("pinned_clock")
 class TestScanFailures:
-    """Failures raised once the scan has started, printed as ``ERROR (n) ...``."""
+    """Failures raised once the scan has started, printed as ``ERROR (n) ...``.
+
+    The clock is pinned because a scan that starts prints "ASH Security Scan
+    Completed in <n>s" from the wall clock (measured: 0s on one run, 4s on another).
+    """
 
     def test_invalid_configuration(self, run_cli, snapshot, in_tmp):
         # In the working directory rather than .ash/, because the message quotes the

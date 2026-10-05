@@ -87,8 +87,8 @@ $ ash report --format html --log-level ERROR
 
         <div class="metadata-section">
             <p><strong>Project:</strong> ASH</p>
-            <p><strong>Scan executed:</strong> <TIMESTAMP></p>
-            <p><strong>Report generated:</strong> <TIMESTAMP></p>
+            <p><strong>Scan executed:</strong> 2026-01-15T12:00:00+00:00</p>
+            <p><strong>Report generated:</strong> 2026-01-15T12:30:00+00:00</p>
             <p><strong>ASH version:</strong> <ASH_VERSION></p>
         </div>
 
@@ -163,7 +163,7 @@ threshold</li>
                 <td>2</td>
                 <td>1</td>
                 <td>0</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-failed">3</td>
                 <td class="status-failed">FAILED</td>
                 <td>MEDIUM (global)</td>
@@ -177,7 +177,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-passed">PASSED</td>
                 <td>MEDIUM (global)</td>
@@ -191,7 +191,7 @@ threshold</li>
                 <td>0</td>
                 <td>2</td>
                 <td>1</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-passed">PASSED</td>
                 <td>MEDIUM (global)</td>
@@ -205,7 +205,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-skipped">SKIPPED</td>
                 <td>MEDIUM (global)</td>
@@ -219,7 +219,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-missing">MISSING</td>
                 <td>MEDIUM (global)</td>
@@ -233,7 +233,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-error">ERROR</td>
                 <td>MEDIUM (global)</td>
@@ -247,7 +247,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-passed">PASSED</td>
                 <td>CRITICAL (config)</td>
@@ -261,7 +261,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>2</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-failed">1</td>
                 <td class="status-failed">FAILED</td>
                 <td>MEDIUM (global)</td>
@@ -275,7 +275,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><<DURATION></td>
+                <td><1ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-skipped">SKIPPED</td>
                 <td>MEDIUM (global)</td>
@@ -444,11 +444,11 @@ result.</p>
         <h2>Scan Metadata</h2>
         <div class='metadata-section'>
             <div class="metadata-item">
-                <strong>report_id:</strong> ASH-<REPORT_ID>
+                <strong>report_id:</strong> ASH-20260115
             </div>
 
             <div class="metadata-item">
-                <strong>generated_at:</strong> <TIMESTAMP>
+                <strong>generated_at:</strong> 2026-01-15T12:00:00+00:00
             </div>
 
             <div class="metadata-item">

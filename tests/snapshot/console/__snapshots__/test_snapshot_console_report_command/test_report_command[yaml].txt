@@ -355,10 +355,10 @@ metadata:
   description: Automated Security Helper Aggregated Report Post-processor
   execution_discrepancy_report: {}
   expected_scanners: []
-  generated_at: '<TIMESTAMP>'
+  generated_at: '2026-01-15T12:00:00+00:00'
   plugin_load_errors: {}
   project_name: ASH
-  report_id: ASH-<REPORT_ID>
+  report_id: ASH-20260115
   shard: null
   summary_stats:
     actionable: 4
