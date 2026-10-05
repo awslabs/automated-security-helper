@@ -1066,6 +1066,87 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
+    # =====================================================================
+    # The Kubernetes operator under deploy/kubernetes-operator
+    # =====================================================================
+    #
+    # Twelve findings in this mode when the operator arrived. Six are bandit rules
+    # whose decisions are recorded in .ash/.ash.yaml under the same heading and are
+    # repeated here, path for path, because this file does not read that one. The
+    # other six come from the two scanners only this mode runs. Every entry names
+    # one file, so the rest of the operator is still scanned with nothing excused.
+    - rule_id: B602
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/vulnerable.py
+      reason: >-
+        A deliberate subprocess call with shell=True, planted so the operator e2e can
+        assert bandit reported it. The fixture is the assertion. Same entry as in
+        .ash/.ash.yaml.
+    - rule_id: B307
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/vulnerable.py
+      reason: >-
+        A deliberate eval, planted beside the B602 for the same e2e assertion. Same
+        entry as in .ash/.ash.yaml.
+    - rule_id: B104
+      path: deploy/kubernetes-operator/ash_operator/contract.py
+      reason: >-
+        The default host of build_mcp_argv. The MCP server runs in a pod behind a
+        ClusterIP Service, which routes to the pod IP, so a loopback bind would be
+        unreachable. Same entry as in .ash/.ash.yaml.
+    - rule_id: B104
+      path: deploy/kubernetes-operator/ash_operator/manifests.py
+      reason: >-
+        build_mcp_deployment passes the same all-interfaces host to build_mcp_argv,
+        for the same reason. Same entry as in .ash/.ash.yaml.
+    - rule_id: B104
+      path: deploy/kubernetes-operator/tests/test_manifests.py
+      reason: >-
+        Asserts that the MCP Deployment's command binds all interfaces; the address
+        is the value under test. Same entry as in .ash/.ash.yaml.
+    - rule_id: B108
+      path: deploy/kubernetes-operator/ash_operator/constants.py
+      reason: >-
+        TMP_MOUNT is where each pod mounts its own emptyDir, a path inside the
+        container that this process never writes. The volume is private to one pod
+        and deleted with it, so the shared-/tmp attacks B108 describes do not apply.
+        Same entry as in .ash/.ash.yaml.
+    # ferret-scan's unquoted-assignment heuristic, described in the
+    # API_KEY_OR_SECRET block near the top of this file. Reasons paraphrase the
+    # lines for the reason given there.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/kubernetes-operator/ash_operator/auth.py
+      reason: >-
+        False positive. The flagged line assigns a local named for the bearer
+        credential from the service account file the kubelet projects into the pod.
+        The value is read at run time; nothing is hardcoded.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/kubernetes-operator/tests/test_auth.py
+      reason: >-
+        False positive. The flagged line compares the parsed credential with a
+        placeholder string the test itself wrote into a temporary directory. It is
+        a fixture value, not a credential.
+    # trivy-repo's RBAC rules on the operator's namespaced Role. Each verb below
+    # is the operator's job, and tests/test_least_privilege.py pins the Role rule
+    # for rule, so widening any of them fails there first.
+    - rule_id: KSV-0048
+      path: deploy/kubernetes-operator/manifests/rbac.yaml
+      reason: >-
+        Two rules fire. The operator creates and deletes the shard and collector
+        Jobs for each AshScan, and creates and patches the Deployment for each
+        AshMcpServer. Creating those workloads is what the operator is for. Neither
+        rule grants update, and the Role is namespaced to ash-system.
+    - rule_id: KSV-0049
+      path: deploy/kubernetes-operator/manifests/rbac.yaml
+      reason: >-
+        The operator creates one immutable, content-addressed ConfigMap per run,
+        holding the ASH config and entrypoint scripts, and deletes it with the run.
+        It is granted no update or patch, so it cannot rewrite a ConfigMap a running
+        pod has mounted.
+    - rule_id: KSV-0056
+      path: deploy/kubernetes-operator/manifests/rbac.yaml
+      reason: >-
+        The operator creates and patches the ClusterIP Service in front of each
+        AshMcpServer. It has no delete on Services, the ownerReference collects
+        them, and it has no grant on endpoints, ingresses or networkpolicies.
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

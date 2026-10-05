@@ -736,6 +736,38 @@ global_settings:
         not apply. It has to be /tmp itself: tools that ignore TMPDIR write to /tmp by
         name, and moving the mount would send those writes to the container's
         writable layer instead of the volume.
+    #
+    # checkov on manifests/operator.yaml. Eight rules fired when the operator was
+    # first scanned with the kubernetes framework. Five were fixed in the manifest
+    # and are not listed: a CPU limit, a uid above 10000 (the Dockerfile matches),
+    # liveness and readiness probes on kopf's --liveness endpoint, and a
+    # NetworkPolicy denying ingress. The three below have no fix that keeps the
+    # manifest usable.
+    - rule_id: CKV_K8S_15
+      path: deploy/kubernetes-operator/manifests/operator.yaml
+      reason: >-
+        ash-operator:local is built from deploy/kubernetes-operator/Dockerfile and
+        handed to the node with `kind load docker-image` or the adopter's own
+        registry. No public image exists, as for ASH itself. With imagePullPolicy
+        Always the kubelet asks a registry for the image on every pod start, so a
+        locally loaded image fails with ErrImagePull. An adopter who pushes the
+        image to a registry sets their own reference and policy.
+    - rule_id: CKV_K8S_43
+      path: deploy/kubernetes-operator/manifests/operator.yaml
+      reason: >-
+        A digest names a pushed manifest, and this image is never pushed by this
+        repository: each adopter builds it, so there is no digest to write here.
+        The comment on the image line tells the adopter to replace the reference
+        with their own build, which is where a digest belongs.
+    - rule_id: CKV_K8S_38
+      path: deploy/kubernetes-operator/manifests/operator.yaml
+      reason: >-
+        This is the one pod that needs its token. The operator watches AshScans
+        and creates Jobs through the API server, authenticating with the projected
+        service account token that ash_operator/auth.py reads. Every pod the
+        operator creates sets automountServiceAccountToken false, and so does the
+        scan ServiceAccount in rbac.yaml. tests/test_manifests.py and
+        tests/test_least_privilege.py pin those two.
     # === detect-secrets on the CDK sources, scanned here for the first time ===
     #
     # The root .gitignore's Python packaging block carried a bare `lib/` rule,
