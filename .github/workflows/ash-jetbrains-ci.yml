@@ -3,6 +3,7 @@
 
 name: JetBrains plugin CI
 # Builds the JetBrains plugin under editors/jetbrains/, runs its tests, gates its coverage,
+# runs the Plugin Verifier against later IDE releases (the plugin-verifier job),
 # and checks what the distribution zip contains.
 #
 # WHY THIS WORKFLOW EXISTS
@@ -158,3 +159,43 @@ jobs:
             editors/jetbrains/build/test-results/
           if-no-files-found: warn
           retention-days: 7
+
+  # The Plugin Verifier's compatibility run, against the IDE releases recommended() resolves for
+  # the declared since-build with no upper bound -- including releases newer than the 2025.2
+  # build target. Folded in from the standalone workflow the Kotlin runtime was written with.
+  #
+  # WHY IT IS A GATE HERE AND NOT OPTIONAL. Two decisions in this plugin are only defensible
+  # because something tests a later platform. The open until-build lets the plugin load on IDE
+  # releases nobody has tried it on, and the SARIF and status readers use the Gson the platform
+  # bundles rather than a declared dependency, which keeps the distribution free of third-party
+  # jars but is not something the plugin SDK promises to keep shipping. If a newer IDE dropped an
+  # API or a class this plugin uses, this job reports it as a compatibility problem and fails;
+  # nothing in the build job above can, because it compiles and tests against 2025.2 only.
+  #
+  # A separate job because it downloads one full IDE per recommended release on top of the build
+  # target, and the build job's signal should not wait on that. The same container, for the same
+  # reasons the build job gives. No artifact upload and no cache: the verdict and the problem list
+  # are in the job log, and an upload would be a new publish surface for
+  # .github/scripts/assert-publish-surfaces.py to allowlist for no reader.
+  plugin-verifier:
+    name: "editors: jetbrains plugin verifier (gradle:jdk21)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container: gradle:jdk21
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # verifyPlugin fails the task on a compatibility problem by default (failureLevel
+      # COMPATIBILITY_PROBLEMS), so the exit status is the verdict. Deprecated-API usages are
+      # reported in the log without failing, which is what DaemonCodeAnalyzer.restart() needs:
+      # see AshScanService for why the 252 floor cannot use its replacement.
+      - name: Verify the plugin against the recommended IDE releases
+        working-directory: editors/jetbrains
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain verifyPlugin
