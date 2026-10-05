@@ -44,7 +44,9 @@ metadata:
 # collector and MCP server pods do not run as `default`, whose token an adopter may
 # have bound to something. The operator uses it unless a CR names another account
 # (constants.SCAN_SERVICE_ACCOUNT). automountServiceAccountToken is false on every
-# pod that uses it.
+# pod the operator creates, and false here as well, so a pod that names this
+# account without setting the field still gets no token.
+automountServiceAccountToken: false
 ---
 # Cluster-scoped, because a CustomResourceDefinition is a cluster-scoped object and
 # kopf must read the ones it serves to learn their schema. Read-only, and named:

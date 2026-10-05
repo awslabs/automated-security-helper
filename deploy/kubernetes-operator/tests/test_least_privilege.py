@@ -16,12 +16,21 @@ alone, and manifests/ may hold only the reviewed files. Any change at all, `crea
 on pods included, goes red there and has to be re-pinned by hand. The denylist
 tests below it name the grants that must never be re-pinned, so the reviewer
 updating the pin is told which kind of widening they are looking at.
+
+Every pin is keyed by (kind, namespace, name), because that is what identifies an
+object to the API server: a Role keyed by kind and name alone let a same-named copy
+in another namespace stand in for the real one while the real one was widened. And
+a binding pin only means something if the operator runs as the account it binds, so
+EXPECTED_OBJECTS pins every object manifests/ holds, the Deployment's namespace and
+serviceAccountName are pinned, and a Secret or any other workload is refused: each
+of those could run code as, or hand out the token of, an account no pin here reads.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -62,12 +71,19 @@ SOURCE_VOLUME_KEYS = {"persistentVolumeClaim", "configMap", "secret", "csi"}
 # removing any member is. Keep this in step with the comments in rbac.yaml, which
 # give the reason for each grant.
 Rule = tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]
+# (kind, namespace, name). The namespace is None for a cluster-scoped object.
+ObjectKey = tuple[str, str | None, str]
 
-EXPECTED_RULES: dict[str, list[Rule]] = {
-    "ClusterRole/ash-operator-crd-reader": [
+OPERATOR_NAMESPACE = "ash-system"
+OPERATOR_ACCOUNT = "ash-operator"
+SCAN_ACCOUNT = "ash-scan"
+OPERATOR_DEPLOYMENT: ObjectKey = ("Deployment", OPERATOR_NAMESPACE, "ash-operator")
+
+EXPECTED_RULES: dict[ObjectKey, list[Rule]] = {
+    ("ClusterRole", None, "ash-operator-crd-reader"): [
         (("apiextensions.k8s.io",), ("customresourcedefinitions",), ("get", "list", "watch")),
     ],
-    "Role/ash-operator": [
+    ("Role", OPERATOR_NAMESPACE, "ash-operator"): [
         (
             ("ash.awslabs.github.io",),
             ("ashmcpservers", "ashscans"),
@@ -116,7 +132,7 @@ ROLE_KEYS = frozenset({"apiVersion", "kind", "metadata", "rules"})
 # role: rbac.authorization.k8s.io/aggregate-to-admin folds its rules into the
 # built-in admin role, and any label can match some other aggregated ClusterRole's
 # selector, so none is added without re-pinning here.
-EXPECTED_ROLE_LABELS: dict[str, dict[str, str]] = {owner: {} for owner in EXPECTED_RULES}
+EXPECTED_ROLE_LABELS: dict[ObjectKey, dict[str, str]] = {owner: {} for owner in EXPECTED_RULES}
 RBAC_KINDS = frozenset({"Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding"})
 
 # `kubectl apply -f manifests/` reads every file in the directory (not its
@@ -125,6 +141,37 @@ KUBECTL_SUFFIXES = (".json", ".yaml", ".yml")
 # Everything manifests/ may hold, as reviewed. A new file is a new set of objects
 # the adopter applies, so adding one changes this set in the same diff.
 EXPECTED_MANIFEST_FILES = frozenset({"operator.yaml", "rbac.yaml"})
+
+# Every object `kubectl apply -f manifests/` creates, as reviewed. The binding pin
+# above names the account it grants to; this names everything that could run as an
+# account or carry its credential, so a Pod in kube-system running as a controller's
+# account, or a token Secret for the operator's, is a change to this set.
+EXPECTED_OBJECTS: frozenset[ObjectKey] = frozenset(
+    {
+        ("Namespace", None, OPERATOR_NAMESPACE),
+        OPERATOR_DEPLOYMENT,
+        ("ServiceAccount", OPERATOR_NAMESPACE, OPERATOR_ACCOUNT),
+        ("ServiceAccount", OPERATOR_NAMESPACE, SCAN_ACCOUNT),
+        *EXPECTED_RULES,
+        ("ClusterRoleBinding", None, "ash-operator-crd-reader"),
+        ("RoleBinding", OPERATOR_NAMESPACE, "ash-operator"),
+    }
+)
+# Kinds that run a container, and so run as some ServiceAccount. Only the operator
+# Deployment may appear; the scan pods are created by the operator, not shipped.
+WORKLOAD_KINDS = frozenset(
+    {
+        "Pod",
+        "Deployment",
+        "StatefulSet",
+        "DaemonSet",
+        "ReplicaSet",
+        "ReplicationController",
+        "Job",
+        "CronJob",
+    }
+)
+REVIEWED_WORKLOADS = frozenset({OPERATOR_DEPLOYMENT})
 
 
 def _json_documents(text: str) -> list:
@@ -173,13 +220,23 @@ def rbac_documents(manifests_dir: Path = MANIFESTS_DIR) -> list[dict]:
     return [doc for _, doc in manifest_documents(manifests_dir)]
 
 
+def object_key(doc: dict) -> ObjectKey:
+    metadata = doc.get("metadata") or {}
+    return (doc.get("kind"), metadata.get("namespace"), metadata.get("name"))
+
+
+def describe(key: ObjectKey) -> str:
+    kind, namespace, name = key
+    return f"{kind}/{namespace}/{name}" if namespace else f"{kind}/{name}"
+
+
 def _as_rule(rule: dict) -> Rule:
     return tuple(tuple(sorted(rule.get(key) or [])) for key in ("apiGroups", "resources", "verbs"))
 
 
 def rbac_rules() -> list[tuple[str, dict]]:
     rules = [
-        (f"{doc['kind']}/{doc['metadata']['name']}", rule)
+        (describe(object_key(doc)), rule)
         for doc in rbac_documents()
         if doc["kind"] in ("Role", "ClusterRole")
         for rule in doc.get("rules") or []
@@ -202,29 +259,36 @@ def test_rbac_objects_live_only_in_rbac_yaml():
 
 def role_problems(docs: list[dict]) -> list[str]:
     problems = []
-    actual: dict[str, list[Rule]] = {}
+    actual: dict[ObjectKey, list[Rule]] = {}
     for doc in docs:
         if doc["kind"] not in ROLE_KINDS:
             continue
-        owner = f"{doc['kind']}/{doc['metadata']['name']}"
+        key = object_key(doc)
+        owner = describe(key)
+        if key in actual:
+            # kubectl applies both and the later one wins, so which grant reaches the
+            # cluster depends on file order. Refused rather than resolved either way.
+            problems.append(f"{owner} is defined more than once in manifests/")
         extra = set(doc) - ROLE_KEYS
         if extra:
             problems.append(f"{owner} carries {sorted(extra)} beside its rules: {doc}")
         labels = doc["metadata"].get("labels") or {}
-        if labels != EXPECTED_ROLE_LABELS.get(owner, {}):
+        if labels != EXPECTED_ROLE_LABELS.get(key, {}):
             problems.append(f"{owner} has labels {labels}, not the reviewed ones")
         for rule in doc.get("rules") or []:
             # Only the three pinned keys. resourceNames or nonResourceURLs would change
             # what the rule means without changing the tuple compared below.
             if set(rule) != RULE_KEYS:
                 problems.append(f"{owner} has a rule with keys {sorted(rule)}: {rule}")
-        actual[owner] = sorted(_as_rule(rule) for rule in doc.get("rules") or [])
-    expected = {owner: sorted(rules) for owner, rules in EXPECTED_RULES.items()}
-    if actual != expected:
-        problems.append(
-            "The manifests' grants differ from the reviewed pin. If the change is intended, "
-            f"update EXPECTED_RULES in the same commit and say why in rbac.yaml: {actual}"
-        )
+        actual[key] = sorted(_as_rule(rule) for rule in doc.get("rules") or [])
+    expected = {key: sorted(rules) for key, rules in EXPECTED_RULES.items()}
+    for key in sorted(actual.keys() | expected.keys(), key=repr):
+        if actual.get(key) != expected.get(key):
+            problems.append(
+                f"{describe(key)}: the grants differ from the reviewed pin. If the change is "
+                "intended, update EXPECTED_RULES in the same commit and say why in rbac.yaml: "
+                f"reviewed {expected.get(key)}, found {actual.get(key)}"
+            )
     return problems
 
 
@@ -260,11 +324,79 @@ def test_every_binding_is_exactly_the_reviewed_binding():
     assert actual_bindings(rbac_documents()) == EXPECTED_BINDINGS
 
 
+def object_problems(docs: list[dict]) -> list[str]:
+    problems = []
+    keys = [object_key(doc) for doc in docs]
+    for key, count in sorted(Counter(keys).items(), key=repr):
+        if count > 1:
+            problems.append(f"{describe(key)} is defined more than once in manifests/")
+    for doc, key in zip(docs, keys, strict=True):
+        # Named outright rather than left to the set pin below: a Secret here is a
+        # credential committed to the repository, or a service-account-token Secret
+        # that mints a token for whatever account its annotation names. Neither is
+        # re-pinned.
+        if key[0] == "Secret":
+            problems.append(f"{describe(key)}: manifests/ must not ship a Secret: {doc}")
+        elif key[0] in WORKLOAD_KINDS and key not in REVIEWED_WORKLOADS:
+            # A workload runs as the account in its pod spec, in whatever namespace it
+            # names, so any account in the cluster is reachable from here.
+            problems.append(f"{describe(key)}: a workload other than the operator's: {doc}")
+    unexpected = set(keys) ^ EXPECTED_OBJECTS
+    if unexpected:
+        problems.append(
+            "manifests/ objects differ from EXPECTED_OBJECTS: "
+            + ", ".join(
+                f"{'unreviewed' if key in keys else 'missing'} {describe(key)}"
+                for key in sorted(unexpected, key=repr)
+            )
+        )
+    operators = [doc for doc, key in zip(docs, keys, strict=True) if key == OPERATOR_DEPLOYMENT]
+    if not operators:
+        problems.append(
+            f"no Deployment ash-operator in namespace {OPERATOR_NAMESPACE}: the bindings are "
+            f"pinned to {OPERATOR_NAMESPACE}/{OPERATOR_ACCOUNT}, so the operator must run there"
+        )
+    for doc in operators:
+        pod = ((doc.get("spec") or {}).get("template") or {}).get("spec") or {}
+        # serviceAccount is the deprecated alias; the API server honors it when
+        # serviceAccountName is empty, so it is held to the same value.
+        for field in ("serviceAccountName", "serviceAccount"):
+            if field in pod and pod[field] != OPERATOR_ACCOUNT:
+                problems.append(
+                    f"{describe(OPERATOR_DEPLOYMENT)} runs as {field}={pod[field]!r}, not "
+                    f"{OPERATOR_ACCOUNT!r}, the account every binding is pinned to"
+                )
+        if pod.get("serviceAccountName") != OPERATOR_ACCOUNT:
+            problems.append(
+                f"{describe(OPERATOR_DEPLOYMENT)} does not set serviceAccountName: "
+                f"{OPERATOR_ACCOUNT}"
+            )
+    scan_accounts = [
+        doc
+        for doc, key in zip(docs, keys, strict=True)
+        if key == ("ServiceAccount", OPERATOR_NAMESPACE, SCAN_ACCOUNT)
+    ]
+    for doc in scan_accounts:
+        # The pods the operator creates set this false themselves. Pinned on the
+        # account too, so a pod that names ash-scan without the field gets no token.
+        if doc.get("automountServiceAccountToken") is not False:
+            problems.append(
+                f"{describe(object_key(doc))} has automountServiceAccountToken="
+                f"{doc.get('automountServiceAccountToken')!r}, not false"
+            )
+    return problems
+
+
+def test_every_object_is_exactly_the_reviewed_object():
+    problems = object_problems(rbac_documents())
+    assert not problems, "\n".join(problems)
+
+
 def pin_problems(manifests_dir: Path) -> list[str]:
-    # Everything the two exact pins above refuse, for a manifests directory other
-    # than the committed one, so the tests below can break a copy and watch it fail.
+    # Everything the exact pins above refuse, for a manifests directory other than
+    # the committed one, so the tests below can break a copy and watch it fail.
     docs = rbac_documents(manifests_dir)
-    problems = role_problems(docs)
+    problems = role_problems(docs) + object_problems(docs)
     unexpected = actual_bindings(docs) ^ EXPECTED_BINDINGS
     if unexpected:
         problems.append(f"bindings differ from the reviewed pin: {sorted(map(repr, unexpected))}")
@@ -363,6 +495,92 @@ def _add_aggregate_to_label(d: Path) -> None:
     )
 
 
+def _replace(path: Path, old: str, new: str) -> None:
+    text = path.read_text()
+    assert text.count(old) == 1, (path, old)
+    path.write_text(text.replace(old, new))
+
+
+def _append(path: Path, doc: dict) -> None:
+    with path.open("a") as handle:
+        handle.write("---\n" + yaml.safe_dump(doc))
+
+
+def _widen_role_behind_a_same_name_decoy(d: Path) -> None:
+    # The real Role gains pods/create, which lets the operator run a pod as any
+    # account in ash-system. A copy of the reviewed Role in another namespace,
+    # placed after it, is what a pin keyed by kind and name alone compared instead.
+    path = d / "rbac.yaml"
+    docs = [doc for doc in yaml.safe_load_all(path.read_text()) if doc]
+    (role,) = [doc for doc in docs if object_key(doc) == ("Role", "ash-system", "ash-operator")]
+    decoy = json.loads(json.dumps(role))
+    decoy["metadata"]["namespace"] = "default"
+    (pods,) = [rule for rule in role["rules"] if rule["resources"] == ["pods"]]
+    pods["verbs"].append("create")
+    path.write_text(yaml.safe_dump_all([*docs, decoy]))
+
+
+def _duplicate_the_role(d: Path) -> None:
+    path = d / "rbac.yaml"
+    docs = [doc for doc in yaml.safe_load_all(path.read_text()) if doc]
+    (role,) = [doc for doc in docs if object_key(doc) == ("Role", "ash-system", "ash-operator")]
+    path.write_text(yaml.safe_dump_all([*docs, role]))
+
+
+def _run_operator_as_default(d: Path) -> None:
+    _replace(d / "operator.yaml", "serviceAccountName: ash-operator", "serviceAccountName: default")
+
+
+def _move_operator_to_kube_system(d: Path) -> None:
+    # kube-system holds controller accounts with wide built-in grants, so the
+    # Deployment there can run as one of them while every binding stays as pinned.
+    _replace(
+        d / "operator.yaml",
+        "  name: ash-operator\n  namespace: ash-system\n",
+        "  name: ash-operator\n  namespace: kube-system\n",
+    )
+    _replace(
+        d / "operator.yaml",
+        "serviceAccountName: ash-operator",
+        "serviceAccountName: clusterrole-aggregation-controller",
+    )
+
+
+def _add_pod_in_kube_system(d: Path) -> None:
+    pod = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {"name": "ash-helper", "namespace": "kube-system"},
+        "spec": {
+            "serviceAccountName": "generic-garbage-collector",
+            "containers": [{"name": "c", "image": "ash-operator:local"}],
+        },
+    }
+    _append(d / "operator.yaml", pod)
+
+
+def _add_operator_token_secret(d: Path) -> None:
+    secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "type": "kubernetes.io/service-account-token",
+        "metadata": {
+            "name": "ash-operator-token",
+            "namespace": "ash-system",
+            "annotations": {"kubernetes.io/service-account.name": "ash-operator"},
+        },
+    }
+    _append(d / "rbac.yaml", secret)
+
+
+def _automount_the_scan_token(d: Path) -> None:
+    _replace(
+        d / "rbac.yaml",
+        "automountServiceAccountToken: false",
+        "automountServiceAccountToken: true",
+    )
+
+
 def test_the_pin_is_clean_on_an_untouched_copy(tmp_path):
     # The control for the test below: copying the directory alone changes nothing.
     shutil.copytree(MANIFESTS_DIR, tmp_path / "manifests")
@@ -378,6 +596,13 @@ def test_the_pin_is_clean_on_an_untouched_copy(tmp_path):
         (_append_admin_typed_list, "ClusterRoleBinding/ash-operator-admin"),
         (_add_aggregation_rule, "aggregationRule"),
         (_add_aggregate_to_label, "rbac.authorization.k8s.io/aggregate-to-admin"),
+        (_widen_role_behind_a_same_name_decoy, "Role/ash-system/ash-operator: the grants differ"),
+        (_duplicate_the_role, "Role/ash-system/ash-operator is defined more than once"),
+        (_run_operator_as_default, "serviceAccountName='default'"),
+        (_move_operator_to_kube_system, "no Deployment ash-operator in namespace ash-system"),
+        (_add_pod_in_kube_system, "Pod/kube-system/ash-helper: a workload other than"),
+        (_add_operator_token_secret, "must not ship a Secret"),
+        (_automount_the_scan_token, "automountServiceAccountToken=True"),
     ],
     ids=[
         "yml-file",
@@ -386,6 +611,13 @@ def test_the_pin_is_clean_on_an_untouched_copy(tmp_path):
         "nested-typed-list",
         "aggregation-rule",
         "aggregate-to-label",
+        "same-name-other-namespace",
+        "duplicate-role",
+        "operator-as-default",
+        "operator-in-kube-system",
+        "pod-in-kube-system",
+        "token-secret",
+        "scan-account-automount",
     ],
 )
 def test_the_pin_refuses_a_widening_however_kubectl_would_read_it(tmp_path, inject, marker):
