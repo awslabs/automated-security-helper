@@ -11,9 +11,10 @@ metadata:
   labels:
     app.kubernetes.io/name: ash-operator
 spec:
-  # One replica plus leader election. kopf's peering keeps a second replica from
-  # dispatching the same run twice, but a scan is not latency-sensitive enough to
-  # need hot standby and a second replica doubles the API watch load.
+  # Exactly one replica. The image runs `kopf run --standalone`, which turns kopf's
+  # peering off, and rbac.yaml grants no leases, so a second replica would dispatch
+  # every run twice. Running more than one needs both of those changed together; see
+  # the note at the end of the Role in rbac.yaml.
   replicas: 1
   selector:
     matchLabels:

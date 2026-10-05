@@ -44,8 +44,8 @@ packages = ["ash_operator"]
 [tool.pytest.ini_options]
 # Declared here, not inherited. Without a [tool.pytest.ini_options] section pytest
 # walks upward looking for one and can pick up a config from outside the
-# repository -- on this development host a bare ~/pyproject.toml injects
-# `addopts = "-n auto"`, which turns a 40-test suite into an xdist run and changes
+# repository -- a stray pyproject.toml in a parent directory that sets
+# `addopts = "-n auto"`, for example, turns this suite into an xdist run and changes
 # what a failure looks like.
 testpaths = ["tests"]
 addopts = "-q"

@@ -206,3 +206,12 @@ class TestRbacAndEntrypointAgree:
             "the ENTRYPOINT is not --standalone, so kopf will try to create a peering "
             "Lease, but rbac.yaml does not grant coordination.k8s.io/leases."
         )
+
+    def test_the_deployment_does_not_claim_leader_election_while_standalone(self, entrypoint):
+        # operator.yaml once said "One replica plus leader election" beside an
+        # ENTRYPOINT that disables peering and an RBAC file with no leases grant. A
+        # reader sizing replicas from that comment would get two dispatchers.
+        if "--standalone" in entrypoint:
+            text = OPERATOR_YAML.read_text().lower()
+            assert "leader election" not in text
+            assert "peering keeps" not in text
