@@ -261,7 +261,8 @@ async function scanAndPublish(
     return { status: 'no-workspace', detail };
   }
 
-  const resolved = await resolveExecutable(settings.executablePath, host.run, { cwd: sourceDir });
+  // No working directory on the probe or the scan: see CommandOptions in ash-cli.ts.
+  const resolved = await resolveExecutable(settings.executablePath, host.run);
   if (!resolved.ok) {
     host.log(resolved.message);
     host.showError(`ASH: ${resolved.message}`);
@@ -290,7 +291,6 @@ async function scanAndPublish(
   const timeoutMs = settings.scanTimeoutSeconds * 1000;
   const outcome = await host.withProgress('ASH: scanning workspace', (signal) =>
     runScan(executable, sourceDir, outputDir, host.runAsync, settings.extraArguments, {
-      cwd: sourceDir,
       timeoutMs,
       signal,
     }),

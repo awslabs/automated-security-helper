@@ -29,7 +29,7 @@
 
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { AsyncCommandOptions, CommandResult } from '../src/ash-cli';
+import { AsyncCommandOptions, CommandOptions, CommandResult } from '../src/ash-cli';
 import {
   COMMAND_CLEAR,
   COMMAND_SCAN,
@@ -117,6 +117,8 @@ interface Harness {
   readonly memento: Memento;
   /** What each async run was given, so a test can see the timeout and the signal. */
   readonly asyncOptions: AsyncCommandOptions[];
+  /** What each `--version` probe was given. */
+  readonly probeOptions: CommandOptions[];
   readonly progressTitles: string[];
 }
 
@@ -176,6 +178,7 @@ function harness(options: HarnessOptions = {}): Harness {
   };
 
   const asyncOptions: AsyncCommandOptions[] = [];
+  const probeOptions: CommandOptions[] = [];
   const progressTitles: string[] = [];
 
   return {
@@ -185,10 +188,14 @@ function harness(options: HarnessOptions = {}): Harness {
     files,
     memento,
     asyncOptions,
+    probeOptions,
     progressTitles,
     host: {
       collection: collection as unknown as vscode.DiagnosticCollection,
-      run: (executable, args) => Promise.resolve(runSync(executable, args)),
+      run: (executable, args, runOptions) => {
+        probeOptions.push(runOptions);
+        return Promise.resolve(runSync(executable, args));
+      },
       runAsync: (executable, args, runOptions) => {
         asyncOptions.push(runOptions);
         return Promise.resolve({
@@ -923,7 +930,20 @@ describe('the scan runs without blocking, and can be stopped', () => {
     expect(progressTitles).toEqual(['ASH: scanning workspace']);
     expect(asyncOptions[0].timeoutMs).toBe(90_000);
     expect(asyncOptions[0].signal).toBeDefined();
-    expect(asyncOptions[0].cwd).toBe(SOURCE_DIR);
+  });
+
+  it('sets no working directory on the probe or the scan', async () => {
+    // On Windows a bare `ashx` is looked up in the child's working directory
+    // before PATH, so a workspace cwd would let a repository's own ashx.exe
+    // answer the probe and run the scan. Both paths ASH needs are absolute.
+    const { host, asyncOptions, probeOptions } = captured('findings', { onPath: ['ash'] });
+
+    await runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(probeOptions.length).toBe(2);
+    for (const options of [...probeOptions, ...asyncOptions]) {
+      expect(options).not.toHaveProperty('cwd');
+    }
   });
 
   it('passes a timeout of 0 through, which waits indefinitely', async () => {

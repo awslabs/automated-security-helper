@@ -154,7 +154,7 @@ function asyncReturning(result: Partial<AsyncCommandResult>): AsyncCommandRunner
 }
 
 describe('runScan', () => {
-  it('calls the runner in the source directory and passes the timeout and signal through', async () => {
+  it('passes the timeout and signal through and sets no working directory', async () => {
     const seen: AsyncCommandOptions[] = [];
     const signal = new AbortController().signal;
     const run: AsyncCommandRunner = (_exe, _args, options) => {
@@ -164,7 +164,8 @@ describe('runScan', () => {
 
     await runScan('ash', '/ws', '/out', run, [], { timeoutMs: 5000, signal });
 
-    expect(seen[0]).toMatchObject({ cwd: '/ws', timeoutMs: 5000, signal });
+    expect(seen[0]).toEqual({ timeoutMs: 5000, signal });
+    expect(seen[0]).not.toHaveProperty('cwd');
   });
 
   it('classifies 0 as clean and 2 as findings, because 2 is ASH\'s findings code', async () => {
@@ -343,12 +344,10 @@ describe('probeRunner', () => {
     expect(result.error).toBeUndefined();
   });
 
-  it('runs in the requested directory', async () => {
-    const result = await probeRunner(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], {
-      cwd: __dirname,
-    });
+  it('runs in the host process\'s working directory, not one a caller picks', async () => {
+    const result = await probeRunner(process.execPath, ['-e', 'process.stdout.write(process.cwd())']);
 
-    expect(result.stdout).toBe(__dirname);
+    expect(result.stdout).toBe(process.cwd());
   });
 
   it('reports ENOENT as an error rather than as an exit code', async () => {
@@ -434,12 +433,10 @@ describe('spawnAsyncRunner', () => {
     expect(result).toEqual({ status: 2, stdout: 'out', stderr: 'err', timedOut: false, cancelled: false });
   });
 
-  it('runs in the requested directory', async () => {
-    const result = await spawnAsyncRunner(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], {
-      cwd: __dirname,
-    });
+  it('runs in the host process\'s working directory, not one a caller picks', async () => {
+    const result = await spawnAsyncRunner(process.execPath, ['-e', 'process.stdout.write(process.cwd())']);
 
-    expect(result.stdout).toBe(__dirname);
+    expect(result.stdout).toBe(process.cwd());
   });
 
   it('resolves with ENOENT rather than rejecting when the executable does not exist', async () => {

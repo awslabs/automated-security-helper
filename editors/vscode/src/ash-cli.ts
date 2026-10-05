@@ -47,8 +47,18 @@ export interface CommandResult {
   readonly timedOut?: boolean;
 }
 
+/**
+ * There is no `cwd` here, or on AsyncCommandOptions, and that is deliberate.
+ *
+ * On Windows, libuv resolves a bare program name such as `ashx` by looking in the
+ * child's working directory before PATH (src/win/process.c, search_path), trying
+ * `.com` then `.exe`. A working directory of the workspace folder would therefore
+ * let a cloned repository with `ashx.exe` at its root answer the identity probe and
+ * run the scan in place of the real ASH. Both directories ASH needs are passed as
+ * absolute arguments, so a working directory carries nothing the CLI reads. Leaving
+ * the field out of the type means no caller can reintroduce it.
+ */
 export interface CommandOptions {
-  readonly cwd?: string;
   readonly timeoutMs?: number;
 }
 
@@ -93,13 +103,12 @@ export function probeRunner(
   options: CommandOptions = {},
 ): Promise<CommandResult> {
   return spawnAsyncRunner(executable, args, {
-    cwd: options.cwd,
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 }
 
+/** No `cwd`, for the reason given on CommandOptions. */
 export interface AsyncCommandOptions {
-  readonly cwd?: string;
   /** Milliseconds before the process tree is stopped. 0 or less waits indefinitely. */
   readonly timeoutMs?: number;
   /** Aborting stops the process tree and resolves with `cancelled: true`. */
@@ -208,8 +217,9 @@ export function spawnAsyncRunner(
       return;
     }
 
+    // No `cwd`: see CommandOptions. The child inherits the extension host's
+    // working directory, which a workspace does not choose.
     const child = spawn(executable, [...args], {
-      cwd: options.cwd,
       windowsHide: true,
       // A process-group leader on POSIX, so killProcessTree can signal the group.
       // Not on Windows, where detached means a new console window.
@@ -471,10 +481,7 @@ export async function runScan(
   extra: readonly string[] = [],
   options: AsyncCommandOptions = {},
 ): Promise<ScanOutcome> {
-  const result = await run(executable, scanArgs(sourceDir, outputDir, extra), {
-    cwd: sourceDir,
-    ...options,
-  });
+  const result = await run(executable, scanArgs(sourceDir, outputDir, extra), options);
   return { result, verdict: classifyExit(result) };
 }
 
