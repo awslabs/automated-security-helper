@@ -96,6 +96,16 @@ class TestMasked:
             "nested": [{"time": "<TIME>"}],
         }
 
+    def test_volatile_keys_in_json_text(self, normalizer):
+        text = json.dumps(
+            {"time": 1791220796403, "metadata": {"logged_time": 1791220796403}},
+            indent=2,
+        )
+        assert json.loads(normalizer.text(text)) == {
+            "time": "<TIME>",
+            "metadata": {"logged_time": "<LOGGED_TIME>"},
+        }
+
     def test_trailing_whitespace(self, normalizer):
         assert normalizer.text("| a |   \n| b |\t\n") == "| a |\n| b |\n"
 
@@ -149,6 +159,13 @@ class TestSurvives:
 
     def test_numbers_that_are_not_durations(self, normalizer):
         text = "B105 v2.1.0 3 findings 10 scanners sha256 1s2"
+        assert normalizer.text(text) == text
+
+    def test_bare_numbers_under_ordinary_keys_in_json_text(self, normalizer):
+        """Only the exact volatile key names: ``severity_id`` and ``time_to_fix`` stay."""
+        text = json.dumps(
+            {"severity_id": 4, "end_line": 12, "time_to_fix": 3, "uptime": 99}
+        )
         assert normalizer.text(text) == text
 
     def test_bare_numbers_under_ordinary_keys(self, normalizer):

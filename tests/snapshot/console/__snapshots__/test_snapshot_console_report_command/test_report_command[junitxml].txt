@@ -1,0 +1,3 @@
+$ ash report --format junitxml --log-level ERROR
+[exit 1]
+Error generating report: 'dict' object has no attribute 'options'

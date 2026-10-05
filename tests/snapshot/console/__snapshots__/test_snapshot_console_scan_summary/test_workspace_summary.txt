@@ -1,0 +1,14 @@
+
+=== ASH Workspace Scan Completed in <DURATION> ===
+  workspace: <TMP>/repo/dev.code-workspace
+  output:    <TMP>/repo/.ash/ash_output
+
+  skipped  docs (no-changes)
+  failed   legacy: git clone missing
+  FAIL     api -- 2 actionable of 7 at threshold MEDIUM (<DURATION>)
+  pass     web -- 0 actionable of 1 at threshold HIGH (<DURATION>)
+  pass     tools -- 0 actionable of 0 at threshold none (<DURATION>)
+
+  Aggregated results: <TMP>/repo/.ash/ash_output/ash_aggregated_results.json
+  Per-project output: <TMP>/repo/.ash/ash_output/projects
+  3 finding path(s) could not be expressed relative to the workspace root and carry no workspace_uri; they are still reported.

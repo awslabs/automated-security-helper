@@ -1,0 +1,1560 @@
+$ ash report --format yaml --log-level ERROR
+[exit 0]
+additional_reports:
+  bandit:
+    source:
+      duration: 12.5
+      scanner_name: bandit
+      status: FAILED
+  cdk-nag:
+    converted:
+      scanner_name: cdk-nag
+      status: PASSED
+      targets_attempted: 2
+      targets_failed: 0
+    source:
+      duration: 7.0
+      scanner_name: cdk-nag
+      status: PASSED
+      targets_attempted: 8
+      targets_failed: 4
+  checkov:
+    source:
+      duration: 0.5
+      scanner_name: checkov
+      status: PASSED
+  detect-secrets:
+    source:
+      duration: 0.25
+      scanner_name: detect-secrets
+      status: SKIPPED
+      targets_attempted: 0
+  grype:
+    None:
+      scanner_name: grype
+      status: MISSING
+  npm-audit:
+    source:
+      duration: 1.0
+      scanner_name: npm-audit
+      status: ERROR
+  opengrep:
+    source:
+      duration: 95.0
+      scanner_name: opengrep
+      status: PASSED
+  semgrep:
+    source:
+      duration: 48.0
+      scanner_name: semgrep
+      status: FAILED
+  syft:
+    None:
+      excluded: true
+      scanner_name: syft
+      status: SKIPPED
+ash_config:
+  ash_plugin_modules: []
+  build: null
+  content_db_staleness: fail
+  converters:
+    archive:
+      enabled: true
+      name: archive
+      options: {}
+    jupyter:
+      enabled: true
+      name: jupyter
+      options:
+        install_timeout: 300
+        tool_version: '>=7.16.0,<8.0.0'
+  external_reports_to_include: []
+  fail_on_findings: true
+  fail_on_incomplete_scanners: true
+  global_settings:
+    ignore_paths: []
+    mcp:
+      runtime_overrides:
+        allowed_paths: []
+        denied_paths:
+        - /fail_on_findings
+        - /fail_on_incomplete_scanners
+        - /content_db_staleness
+        - /global_settings/ignore_paths
+        - /global_settings/suppressions
+        - /reporters/bedrock-summary-reporter/options/aws_*
+        - /reporters/cloudwatch-logs/**
+        denied_value_patterns: {}
+        enabled: false
+    severity_threshold: MEDIUM
+    suppressions: []
+  mcp-resource-management:
+    enable_health_checks: true
+    enable_resource_logging: true
+    health_check_interval_seconds: 60
+    log_resource_operations: false
+    max_concurrent_scans: 3
+    max_concurrent_tasks: 20
+    max_directory_size_mb: 1000
+    max_message_size_bytes: 10485760
+    max_path_length: 4096
+    memory_critical_threshold_mb: 2048
+    memory_warning_threshold_mb: 1024
+    operation_timeout_seconds: 180
+    scan_timeout_seconds: 1800
+    shutdown_timeout_seconds: 30
+    task_count_warning_threshold: 15
+    thread_pool_max_workers: 4
+  project_name: ash-scan
+  reporters:
+    csv:
+      enabled: true
+      extension: csv
+      name: csv
+      options: {}
+    cyclonedx:
+      enabled: true
+      extension: cdx.json
+      name: cyclonedx
+      options: {}
+    flat-json:
+      enabled: true
+      extension: flat.json
+      name: flat-json
+      options:
+        include_metadata: true
+        include_scanner_metrics: true
+        include_summary_metrics: true
+    github-ghas:
+      enabled: true
+      extension: ghas.sarif
+      name: github-ghas
+      options:
+        exclude_suppressed: true
+    gitlab-cyclonedx:
+      enabled: true
+      extension: gl-dependency-scanning-report.cdx.json
+      name: gitlab-cyclonedx
+      options:
+        category: production
+        input_file_path_override: null
+        language_override: null
+        package_manager_override: null
+    gitlab-sast:
+      enabled: true
+      extension: gl-sast-report.json
+      name: gitlab-sast
+      options:
+        exclude_suppressed: false
+    html:
+      enabled: true
+      extension: html
+      name: html
+      options: {}
+    junitxml:
+      enabled: true
+      extension: junit.xml
+      name: junitxml
+      options:
+        respect_severity_threshold: true
+    markdown:
+      enabled: true
+      extension: summary.md
+      name: markdown
+      options:
+        compact: false
+        include_detailed_findings: true
+        include_findings_table: false
+        include_summary: true
+        max_detailed_findings: 20
+        top_hotspots_limit: 10
+        use_collapsible_details: true
+    ocsf:
+      enabled: true
+      extension: ocsf.json
+      name: ocsf
+      options: {}
+    sarif:
+      enabled: true
+      extension: sarif
+      name: sarif
+      options: {}
+    spdx:
+      enabled: false
+      extension: spdx.json
+      name: spdx
+      options: {}
+    text:
+      enabled: true
+      extension: summary.txt
+      name: text
+      options:
+        include_detailed_findings: false
+        include_findings_table: false
+        include_summary: true
+        max_detailed_findings: 20
+        top_hotspots_limit: 20
+    unused-suppressions:
+      enabled: true
+      extension: unused-suppressions.json
+      name: unused-suppressions
+      options:
+        output_format: both
+    yaml:
+      enabled: false
+      extension: yaml
+      name: yaml
+      options: {}
+  scanners:
+    bandit:
+      enabled: true
+      name: bandit
+      options:
+        additional_formats: []
+        confidence_level: all
+        config_file: null
+        excluded_paths: []
+        ignore_nosec: false
+        install_timeout: 300
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.7.0,<2.0.0'
+    cdk-nag:
+      enabled: true
+      name: cdk-nag
+      options:
+        include_compliant_checks: false
+        nag_packs:
+          AwsSolutionsChecks: true
+          HIPAASecurityChecks: false
+          NIST80053R4Checks: false
+          NIST80053R5Checks: false
+          PCIDSS321Checks: false
+        scan_timeout: 1800
+        severity_threshold: null
+    cfn-nag:
+      enabled: true
+      name: cfn-nag
+      options:
+        scan_timeout: 1800
+        severity_threshold: null
+    checkov:
+      enabled: true
+      name: checkov
+      options:
+        additional_formats:
+        - cyclonedx_json
+        config_file: null
+        frameworks:
+        - all
+        install_timeout: 300
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+        skip_ash_output_dir: true
+        skip_frameworks: []
+        skip_path: []
+        tool_version: null
+    detect-secrets:
+      enabled: true
+      name: detect-secrets
+      options:
+        baseline_file: null
+        scan_settings:
+          filters_used: []
+          generated_at: null
+          plugins_used: []
+          results: {}
+          version: null
+        scan_timeout: 1800
+        severity_threshold: null
+        skip_generated_lockfiles: true
+    grype:
+      enabled: true
+      name: grype
+      options:
+        config_file: null
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    npm-audit:
+      enabled: true
+      name: npm-audit
+      options:
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    opengrep:
+      enabled: true
+      name: opengrep
+      options:
+        config: p/ci
+        exclude:
+        - '*-converted.py'
+        - '*_report_result.txt'
+        exclude_rule: []
+        metrics: auto
+        offline: false
+        patterns: []
+        scan_timeout: 1800
+        severity: []
+        severity_threshold: CRITICAL
+        version: v1.15.1
+    semgrep:
+      enabled: true
+      name: semgrep
+      options:
+        config: p/ci
+        exclude:
+        - '*-converted.py'
+        - '*_report_result.txt'
+        exclude_rule: []
+        install_timeout: 300
+        metrics: auto
+        offline: false
+        scan_timeout: 1800
+        severity: []
+        severity_threshold: null
+        tool_version: null
+    syft:
+      enabled: true
+      name: syft
+      options:
+        additional_outputs:
+        - syft-table
+        config_file: null
+        exclude: []
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+  workspace:
+    max_parallel_projects: null
+    project_timeout: null
+converter_results: {}
+cyclonedx:
+  $schema: null
+  annotations: null
+  bomFormat: CycloneDX
+  components: null
+  compositions: null
+  declarations: null
+  definitions: null
+  dependencies: null
+  externalReferences: null
+  formulation: null
+  metadata: null
+  properties: null
+  serialNumber: null
+  services: null
+  signature: null
+  specVersion: '1.6'
+  version: 1
+  vulnerabilities: null
+description: Automated Security Helper - Aggregated Report
+metadata:
+  description: Automated Security Helper Aggregated Report Post-processor
+  execution_discrepancy_report: {}
+  expected_scanners: []
+  generated_at: '<TIMESTAMP>'
+  plugin_load_errors: {}
+  project_name: ASH
+  report_id: ASH-<REPORT_ID>
+  shard: null
+  summary_stats:
+    actionable: 4
+    duration: 0.0
+    end: null
+    error: 1
+    failed: 2
+    missing: 1
+    passed: 3
+    severity_counts:
+      critical: 1
+      high: 2
+      info: 3
+      low: 3
+      medium: 2
+      suppressed: 3
+    skipped: 2
+    start: null
+    total: 11
+  tool_version: <ASH_VERSION>
+  validation_summary: {}
+name: ASH Scan Report
+sarif:
+  $schema: https://json.schemastore.org/sarif-2.1.0.json
+  inlineExternalProperties: []
+  properties:
+    tags: []
+  runs:
+  - addresses: []
+    artifacts: null
+    automationDetails: null
+    baselineGuid: null
+    columnKind: null
+    conversion: null
+    defaultEncoding: null
+    defaultSourceLanguage: null
+    externalPropertyFileReferences: null
+    graphs: []
+    invocations: []
+    language: en-US
+    logicalLocations: []
+    newlineSequences:
+    - "\r\n"
+    - '
+
+      '
+    originalUriBaseIds: null
+    policies: []
+    properties:
+      tags: []
+    redactionTokens: []
+    results:
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: src/app.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 12
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 12
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: subprocess call with shell=True
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: HIGH
+        scanner_name: bandit
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: B602
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: src/config.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 3
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 3
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Possible hardcoded password
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        scanner_name: bandit
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: B105
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: src/app.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 40
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 40
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Probable insecure usage of temp file
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        scanner_name: bandit
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: B108
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: tests/test_app.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 8
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 8
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Use of assert detected
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: LOW
+        scanner_name: bandit
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: B101
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: src/util.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 5
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 5
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Standard pseudo-random generator
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: LOW
+        scanner_name: bandit
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: B311
+      ruleIndex: -1
+      stacks: []
+      suppressions:
+      - guid: null
+        justification: 'Accepted risk: test fixture'
+        kind: external
+        location: null
+        properties: null
+        state: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: src/app.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 77
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 77
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Detected use of eval()
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: CRITICAL
+        scanner_name: semgrep
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: python.lang.security.eval
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: README.md
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 1
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 1
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Example key in docs
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: INFO
+        scanner_name: semgrep
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: generic.secrets.gitleaks
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: src/util.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 9
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 9
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: open() without encoding
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: INFO
+        scanner_name: semgrep
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: python.lang.best-practice.open
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: src/web.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 4
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 4
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Flask debug mode
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: HIGH
+        scanner_name: semgrep
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: python.flask.debug
+      ruleIndex: -1
+      stacks: []
+      suppressions:
+      - guid: null
+        justification: 'Accepted risk: test fixture'
+        kind: external
+        location: null
+        properties: null
+        state: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: src/web.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 20
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 20
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Request without timeout
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        scanner_name: semgrep
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: python.requests.no-timeout
+      ruleIndex: -1
+      stacks: []
+      suppressions:
+      - guid: null
+        justification: 'Accepted risk: test fixture'
+        kind: external
+        location: null
+        properties: null
+        state: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: infra/bucket.yaml
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 6
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 6
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: S3 access logging disabled
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: LOW
+        scanner_name: checkov
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CKV_AWS_18
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: infra/bucket.yaml
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 6
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 6
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: S3 versioning disabled
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: LOW
+        scanner_name: checkov
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CKV_AWS_21
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: infra/bucket.yaml
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 6
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 6
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Cross-region replication off
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: INFO
+        scanner_name: checkov
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CKV_AWS_144
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: web/server.js
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 31
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 31
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Unescaped user input
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: HIGH
+        scanner_name: opengrep
+        tags: []
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: javascript.express.xss
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    runAggregates: []
+    specialLocations: null
+    taxonomies: []
+    threadFlowLocations: []
+    tool:
+      driver:
+        associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: https://github.com/awslabs/automated-security-helper
+        fullDescription: null
+        fullName: awslabs/automated-security-helper
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://awslabs.github.io/automated-security-helper
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: AWS Labs - Automated Security Helper
+        notifications: []
+        organization: Amazon Web Services
+        product: null
+        productSuite: null
+        properties: null
+        releaseDateUtc: null
+        rules: []
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: <ASH_VERSION>
+      extensions: []
+      properties: null
+    translations: []
+    versionControlProvenance: []
+    webRequests: []
+    webResponses: []
+  version: 2.1.0
+scanner_results:
+  bandit:
+    actionable_finding_count: 3
+    dependencies_satisfied: true
+    duration: 12.5
+    excluded: false
+    exit_code: 0
+    finding_count: 4
+    severity_counts:
+      critical: 0
+      high: 1
+      info: 0
+      low: 1
+      medium: 2
+      suppressed: 1
+    status: FAILED
+    suppressed_finding_count: 1
+  cdk-nag:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 7.0
+    excluded: false
+    exit_code: 0
+    finding_count: 0
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: PASSED
+    suppressed_finding_count: 0
+  checkov:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 0.5
+    excluded: false
+    exit_code: 0
+    finding_count: 3
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 1
+      low: 2
+      medium: 0
+      suppressed: 0
+    status: PASSED
+    suppressed_finding_count: 0
+  detect-secrets:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 0.25
+    excluded: false
+    exit_code: 0
+    finding_count: 0
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: SKIPPED
+    suppressed_finding_count: 0
+  grype:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 0.0
+    excluded: false
+    exit_code: 0
+    finding_count: 0
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: MISSING
+    suppressed_finding_count: 0
+  npm-audit:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 1.0
+    excluded: false
+    exit_code: 0
+    finding_count: 0
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: ERROR
+    suppressed_finding_count: 0
+  opengrep:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 95.0
+    excluded: false
+    exit_code: 0
+    finding_count: 1
+    severity_counts:
+      critical: 0
+      high: 1
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: PASSED
+    suppressed_finding_count: 0
+  semgrep:
+    actionable_finding_count: 1
+    dependencies_satisfied: true
+    duration: 48.0
+    excluded: false
+    exit_code: 0
+    finding_count: 3
+    severity_counts:
+      critical: 1
+      high: 0
+      info: 2
+      low: 0
+      medium: 0
+      suppressed: 2
+    status: FAILED
+    suppressed_finding_count: 2
+  syft:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 0.0
+    excluded: false
+    exit_code: 0
+    finding_count: 0
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: SKIPPED
+    suppressed_finding_count: 0
+used_suppressions: []
+validation_checkpoints: []
+workspace: null

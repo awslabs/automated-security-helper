@@ -1,0 +1,135 @@
+$ ash report --format markdown --log-level ERROR
+[exit 0]
+                                      ASH Security Scan Report
+
+ • Report generated: <TIMESTAMP>
+ • Time since scan: <DURATION>
+
+Scan Metadata
+
+ • Project: ASH
+ • Scan executed: <TIMESTAMP>
+ • ASH version: <ASH_VERSION>
+
+Summary
+
+Scanner Results
+
+The table below shows findings by scanner, with status based on severity thresholds and
+dependencies:
+
+ • Severity levels:
+    • Suppressed (S): Findings that have been explicitly suppressed and don't affect scanner status
+    • Critical (C): Highest severity findings that require immediate attention
+    • High (H): Serious findings that should be addressed soon
+    • Medium (M): Moderate risk findings
+    • Low (L): Lower risk findings
+    • Info (I): Informational findings with minimal risk
+ • Duration (Time): Time taken by the scanner to complete its execution
+ • Actionable: Number of findings at or above the threshold severity level that require attention
+ • Result:
+    • PASSED = No findings at or above threshold
+    • FAILED = Findings at or above threshold
+    • MISSING = Required dependencies not available
+    • SKIPPED = Scanner explicitly disabled
+    • ERROR = Scanner execution error
+ • Threshold: The minimum severity level that will cause a scanner to fail
+    • Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL
+    • Source: Values in parentheses indicate where the threshold is set:
+       • global (global_settings section in the ASH_CONFIG used)
+       • config (scanner config section in the ASH_CONFIG used)
+       • scanner (default configuration in the plugin, if explicitly set)
+ • Statistics calculation:
+    • All statistics are calculated from the final aggregated SARIF report
+    • Suppressed findings are counted separately and do not contribute to actionable findings
+    • Scanner status is determined by comparing actionable findings to the threshold
+
+
+ Scanner         Suppressed  Critical  High  Medium  Low  Info  Actionable  Result   Threshold
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ bandit                   1         0     1       2    1     0           3  FAILED   MEDIUM
+                                                                                     (global)
+ cdk-nag                  0         0     0       0    0     0           0  PASSED   MEDIUM
+                                                                                     (global)
+ checkov                  0         0     0       0    2     1           0  PASSED   MEDIUM
+                                                                                     (global)
+ detect-secrets           0         0     0       0    0     0           0  SKIPPED  MEDIUM
+                                                                                     (global)
+ grype                    0         0     0       0    0     0           0  MISSING  MEDIUM
+                                                                                     (global)
+ npm-audit                0         0     0       0    0     0           0  ERROR    MEDIUM
+                                                                                     (global)
+ opengrep                 0         0     1       0    0     0           0  PASSED   CRITICAL
+                                                                                     (config)
+ semgrep                  2         1     0       0    0     2           1  FAILED   MEDIUM
+                                                                                     (global)
+ syft                     0         0     0       0    0     0           0  SKIPPED  MEDIUM
+                                                                                     (global)
+
+
+Incomplete coverage
+
+These scanners could not evaluate part of their input. The findings they did report are real, but
+the set is known to be partial:
+
+ • cdk-nag: evaluated 6 of 10 target(s); 4 could not be evaluated
+
+Top 2 Hotspots
+
+Files with the highest number of security findings:
+
+
+ Finding Count  File Location
+ ────────────────────────────
+             3  src/app.py
+             1  src/config.py
+
+
+
+
+Finding 1: B602
+
+ • Severity: HIGH
+ • Scanner: bandit
+ • Rule ID: B602
+ • Location: src/app.py:12
+
+Description: subprocess call with shell=True
+
+----------------------------------------------------------------------------------------------------
+
+Finding 2: B105
+
+ • Severity: MEDIUM
+ • Scanner: bandit
+ • Rule ID: B105
+ • Location: src/config.py:3
+
+Description: Possible hardcoded password
+
+----------------------------------------------------------------------------------------------------
+
+Finding 3: B108
+
+ • Severity: MEDIUM
+ • Scanner: bandit
+ • Rule ID: B108
+ • Location: src/app.py:40
+
+Description: Probable insecure usage of temp file
+
+----------------------------------------------------------------------------------------------------
+
+Finding 4: python.lang.security.eval
+
+ • Severity: CRITICAL
+ • Scanner: semgrep
+ • Rule ID: python.lang.security.eval
+ • Location: src/app.py:77
+
+Description: Detected use of eval()
+
+
+----------------------------------------------------------------------------------------------------
+
+Report generated by Automated Security Helper (ASH) at <TIMESTAMP>

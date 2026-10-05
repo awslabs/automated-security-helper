@@ -23,6 +23,9 @@ What is masked, and why each is safe to mask
   a fixture chose, such as a suppression's expiry, is not today and survives.
 - Durations: a number followed by a time unit. Fixtures pin every duration they pass
   in, so what this masks is wall-clock time ASH measured itself.
+- A bare number under a volatile key (``VOLATILE_KEYS``) in rendered JSON text, such as
+  OCSF's ``"time": 1791220796403`` epoch milliseconds. Structured data already masks these
+  by key; this is the same rule for JSON a command printed rather than returned.
 - UUIDs, the ASH version, the Python version and the hostname.
 - Trailing whitespace on each line, which rich pads tables with.
 - The padding in front of a rich panel's right border, on a line where a mask
@@ -95,6 +98,7 @@ VOLATILE_KEYS = frozenset(
         "start_time",
         "end_time",
         "generated_at",
+        "logged_time",
         "report_id",
         "timestamp",
         "time",
@@ -131,6 +135,15 @@ def _keep_panel_width(rendered: str, masked: str) -> str:
         if pad >= 1:
             after_lines[i] = match["body"] + " " * pad + match["end"]
     return "\n".join(after_lines)
+
+
+# The same keys in JSON text: `"time": 1791220796403`. Numbers only; a string value under
+# one of these keys is an ISO instant or a duration, which the rules above already mask.
+_VOLATILE_JSON_NUMBER = re.compile(
+    r'"('
+    + "|".join(sorted(map(re.escape, VOLATILE_KEYS)))
+    + r')"(\s*:\s*)-?\d+(?:\.\d+)?\b'
+)
 
 
 def _path_spellings(path: PurePath) -> list[str]:
@@ -208,6 +221,9 @@ class SnapshotNormalizer:
         for day in (today - timedelta(days=1), today, today + timedelta(days=1)):
             out = out.replace(day.isoformat(), "<TODAY>")
         out = _DURATION.sub("<DURATION>", out)
+        out = _VOLATILE_JSON_NUMBER.sub(
+            lambda m: f'"{m.group(1)}"{m.group(2)}"<{m.group(1).upper()}>"', out
+        )
         out = _keep_panel_width(rendered, out)
         out = _TRAILING_WS.sub("", out)
         return out

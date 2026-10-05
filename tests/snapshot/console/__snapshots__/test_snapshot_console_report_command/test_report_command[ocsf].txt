@@ -1,0 +1,679 @@
+$ ash report --format ocsf --log-level ERROR
+[exit 0]
+[
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "subprocess call with shell=True",
+      "title": "B602 in app.py - subprocess call with shell=True",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 12,
+            "file": {
+              "name": "app.py",
+              "path": "src/app.py",
+              "type_id": 1
+            },
+            "start_line": 12
+          }
+        ],
+        "cve": {
+          "desc": "subprocess call with shell=True",
+          "uid": "B602"
+        },
+        "desc": "subprocess call with shell=True",
+        "severity": "ERROR",
+        "title": "B602"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Possible hardcoded password",
+      "title": "B105 in config.py - Possible hardcoded password",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 3,
+            "file": {
+              "name": "config.py",
+              "path": "src/config.py",
+              "type_id": 1
+            },
+            "start_line": 3
+          }
+        ],
+        "cve": {
+          "desc": "Possible hardcoded password",
+          "uid": "B105"
+        },
+        "desc": "Possible hardcoded password",
+        "severity": "ERROR",
+        "title": "B105"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Probable insecure usage of temp file",
+      "title": "B108 in app.py - Probable insecure usage of temp file",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 40,
+            "file": {
+              "name": "app.py",
+              "path": "src/app.py",
+              "type_id": 1
+            },
+            "start_line": 40
+          }
+        ],
+        "cve": {
+          "desc": "Probable insecure usage of temp file",
+          "uid": "B108"
+        },
+        "desc": "Probable insecure usage of temp file",
+        "severity": "ERROR",
+        "title": "B108"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Use of assert detected",
+      "title": "B101 in test_app.py - Use of assert detected",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 8,
+            "file": {
+              "name": "test_app.py",
+              "path": "tests/test_app.py",
+              "type_id": 1
+            },
+            "start_line": 8
+          }
+        ],
+        "cve": {
+          "desc": "Use of assert detected",
+          "uid": "B101"
+        },
+        "desc": "Use of assert detected",
+        "severity": "ERROR",
+        "title": "B101"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Standard pseudo-random generator",
+      "title": "B311 in util.py - Standard pseudo-random generator",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "Suppressed",
+    "status_detail": "kind: external; justification: Accepted risk: test fixture",
+    "status_id": 3,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 5,
+            "file": {
+              "name": "util.py",
+              "path": "src/util.py",
+              "type_id": 1
+            },
+            "start_line": 5
+          }
+        ],
+        "cve": {
+          "desc": "Standard pseudo-random generator",
+          "uid": "B311"
+        },
+        "desc": "Standard pseudo-random generator",
+        "severity": "ERROR",
+        "title": "B311"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Detected use of eval()",
+      "title": "python.lang.security.eval in app.py - Detected use of eval()",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 77,
+            "file": {
+              "name": "app.py",
+              "path": "src/app.py",
+              "type_id": 1
+            },
+            "start_line": 77
+          }
+        ],
+        "cve": {
+          "desc": "Detected use of eval()",
+          "uid": "python.lang.security.eval"
+        },
+        "desc": "Detected use of eval()",
+        "severity": "ERROR",
+        "title": "python.lang.security.eval"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Example key in docs",
+      "title": "generic.secrets.gitleaks in README.md - Example key in docs",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 1,
+            "file": {
+              "name": "README.md",
+              "path": "README.md",
+              "type_id": 1
+            },
+            "start_line": 1
+          }
+        ],
+        "cve": {
+          "desc": "Example key in docs",
+          "uid": "generic.secrets.gitleaks"
+        },
+        "desc": "Example key in docs",
+        "severity": "ERROR",
+        "title": "generic.secrets.gitleaks"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "open() without encoding",
+      "title": "python.lang.best-practice.open in util.py - open() without encoding",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 9,
+            "file": {
+              "name": "util.py",
+              "path": "src/util.py",
+              "type_id": 1
+            },
+            "start_line": 9
+          }
+        ],
+        "cve": {
+          "desc": "open() without encoding",
+          "uid": "python.lang.best-practice.open"
+        },
+        "desc": "open() without encoding",
+        "severity": "ERROR",
+        "title": "python.lang.best-practice.open"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Flask debug mode",
+      "title": "python.flask.debug in web.py - Flask debug mode",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "Suppressed",
+    "status_detail": "kind: external; justification: Accepted risk: test fixture",
+    "status_id": 3,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 4,
+            "file": {
+              "name": "web.py",
+              "path": "src/web.py",
+              "type_id": 1
+            },
+            "start_line": 4
+          }
+        ],
+        "cve": {
+          "desc": "Flask debug mode",
+          "uid": "python.flask.debug"
+        },
+        "desc": "Flask debug mode",
+        "severity": "ERROR",
+        "title": "python.flask.debug"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Request without timeout",
+      "title": "python.requests.no-timeout in web.py - Request without timeout",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "Suppressed",
+    "status_detail": "kind: external; justification: Accepted risk: test fixture",
+    "status_id": 3,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 20,
+            "file": {
+              "name": "web.py",
+              "path": "src/web.py",
+              "type_id": 1
+            },
+            "start_line": 20
+          }
+        ],
+        "cve": {
+          "desc": "Request without timeout",
+          "uid": "python.requests.no-timeout"
+        },
+        "desc": "Request without timeout",
+        "severity": "ERROR",
+        "title": "python.requests.no-timeout"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "S3 access logging disabled",
+      "title": "CKV_AWS_18 in bucket.yaml - S3 access logging disabled",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 6,
+            "file": {
+              "name": "bucket.yaml",
+              "path": "infra/bucket.yaml",
+              "type_id": 1
+            },
+            "start_line": 6
+          }
+        ],
+        "cve": {
+          "desc": "S3 access logging disabled",
+          "uid": "CKV_AWS_18"
+        },
+        "desc": "S3 access logging disabled",
+        "severity": "ERROR",
+        "title": "CKV_AWS_18"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "S3 versioning disabled",
+      "title": "CKV_AWS_21 in bucket.yaml - S3 versioning disabled",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 6,
+            "file": {
+              "name": "bucket.yaml",
+              "path": "infra/bucket.yaml",
+              "type_id": 1
+            },
+            "start_line": 6
+          }
+        ],
+        "cve": {
+          "desc": "S3 versioning disabled",
+          "uid": "CKV_AWS_21"
+        },
+        "desc": "S3 versioning disabled",
+        "severity": "ERROR",
+        "title": "CKV_AWS_21"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Cross-region replication off",
+      "title": "CKV_AWS_144 in bucket.yaml - Cross-region replication off",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 6,
+            "file": {
+              "name": "bucket.yaml",
+              "path": "infra/bucket.yaml",
+              "type_id": 1
+            },
+            "start_line": 6
+          }
+        ],
+        "cve": {
+          "desc": "Cross-region replication off",
+          "uid": "CKV_AWS_144"
+        },
+        "desc": "Cross-region replication off",
+        "severity": "ERROR",
+        "title": "CKV_AWS_144"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Unescaped user input",
+      "title": "javascript.express.xss in server.js - Unescaped user input",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": "<LOGGED_TIME>",
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": "<TIME>",
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 31,
+            "file": {
+              "name": "server.js",
+              "path": "web/server.js",
+              "type_id": 1
+            },
+            "start_line": 31
+          }
+        ],
+        "cve": {
+          "desc": "Unescaped user input",
+          "uid": "javascript.express.xss"
+        },
+        "desc": "Unescaped user input",
+        "severity": "ERROR",
+        "title": "javascript.express.xss"
+      }
+    ]
+  }
+]

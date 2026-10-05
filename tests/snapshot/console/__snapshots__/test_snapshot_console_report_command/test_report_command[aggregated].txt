@@ -1,0 +1,19 @@
+$ ash report --format aggregated --log-level ERROR
+[exit 1]
+Error: Reporter plugin 'aggregated' not found.
+Available reporter formats:
+  - csv
+  - cyclonedx
+  - github-ghas
+  - gitlab-cyclonedx
+  - gitlab-sast
+  - html
+  - flat-json
+  - junitxml
+  - markdown
+  - ocsf
+  - sarif
+  - spdx
+  - text
+  - unused-suppressions
+  - yaml
