@@ -599,7 +599,12 @@ def _apply_fixes(
 
     typer.secho(f"\n🔧 Fixing {len(fixable)} issue(s):", fg=typer.colors.BLUE)
     for issue in fixable:
-        typer.secho(f"  • {issue.fix_description}", fg=typer.colors.CYAN)
+        # An issue that sets fixable=True without a fix_description would print an
+        # empty bullet, which tells the user a change is coming but not which one.
+        # The message always names the problem, so fall back to it.
+        typer.secho(
+            f"  • {issue.fix_description or issue.message}", fg=typer.colors.CYAN
+        )
 
     if not non_interactive:
         confirm = typer.confirm("\nApply these fixes?")
