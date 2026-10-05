@@ -73,12 +73,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # No enable-cache: this job is not worth publishing an Actions cache for (the
-      # repository is public, so a cache is readable by anyone), and
-      # .github/scripts/assert-publish-surfaces.py would rightly refuse an
-      # unallowlisted one.
+      # enable-cache: false, stated rather than left out. The input defaults to
+      # "auto", which turns the cache on for a push on a GitHub-hosted runner, so
+      # omitting it would publish an Actions cache from this job. This job is not
+      # worth one (the repository is public, so a cache is readable by anyone), and
+      # .github/scripts/assert-publish-surfaces.py refuses an unallowlisted one,
+      # including the default-on kind.
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
 
       # -o addopts= so the repository's default options (coverage thresholds sized for
       # the whole suite) do not fail a run of four files.
