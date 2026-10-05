@@ -124,3 +124,87 @@ def text_snapshot(
         )
 
     return _for
+
+
+# --------------------------------------------------------------------------- #
+# The canonical fixture scan. Built by tests/snapshot/support/fixture_model.py
+# through ASH's own aggregation; its findings and scanner statuses are listed in
+# tests/test_data/snapshot_fixture/README.md. Imports are local so this section
+# stays an append to the fixtures above.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def pinned_clock(monkeypatch: pytest.MonkeyPatch):
+    """Pin datetime.now() and uuid4 in every module that stamps them into output.
+
+    Returns the clock; the fixture-model builders advance it from scan start to
+    report time themselves.
+    """
+    from tests.snapshot.support.fixture_model import pin_clock
+
+    return pin_clock(monkeypatch)
+
+
+@pytest.fixture
+def fixture_context(tmp_path: Path):
+    """The PluginContext of the single-directory fixture scan."""
+    from tests.snapshot.support.fixture_model import fixture_plugin_context
+
+    return fixture_plugin_context(tmp_path)
+
+
+@pytest.fixture
+def fixture_model(pinned_clock, fixture_context, tmp_path: Path):
+    """The single-directory fixture scan, as reporters receive it."""
+    from tests.snapshot.support.fixture_model import build_fixture_model
+
+    return build_fixture_model(tmp_path, fixture_context)
+
+
+@pytest.fixture
+def fixture_workspace_model(
+    pinned_clock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The two-project workspace fixture scan, as merged reporters receive it."""
+    from tests.snapshot.support.fixture_model import build_fixture_workspace_model
+
+    return build_fixture_workspace_model(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def fixture_skipped_workspace_model(
+    pinned_clock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The workspace fixture scan with a third, skipped project (``docs``)."""
+    from tests.snapshot.support.fixture_model import build_fixture_workspace_model
+
+    return build_fixture_workspace_model(
+        tmp_path, monkeypatch, with_skipped_project=True
+    )
+
+
+@pytest.fixture
+def fixture_variant(request: pytest.FixtureRequest, tmp_path: Path):
+    """``fixture_variant("single" | "workspace" | "skipped-workspace")`` -> (model, context).
+
+    The context is the one ASH gives reporters for that shape: the fixture
+    repository's own config for a single scan, and the workspace-level default
+    config ``emit_workspace_reports`` uses for the two workspace shapes.
+    """
+    from tests.snapshot.support.fixture_model import workspace_reporter_context
+
+    def _for(variant: str):
+        if variant == "single":
+            return (
+                request.getfixturevalue("fixture_model"),
+                request.getfixturevalue("fixture_context"),
+            )
+        name = {
+            "workspace": "fixture_workspace_model",
+            "skipped-workspace": "fixture_skipped_workspace_model",
+        }[variant]
+        model = request.getfixturevalue(name)
+        return model, workspace_reporter_context(model, tmp_path)
+
+    return _for
