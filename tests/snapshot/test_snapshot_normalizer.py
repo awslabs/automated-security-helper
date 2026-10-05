@@ -13,7 +13,6 @@ from __future__ import annotations
 import io
 import json
 import logging
-import sys
 import time
 import warnings
 from datetime import date
@@ -494,10 +493,14 @@ class TestWorkingDirectoryRoot:
         # Not inside the repo checkout, and not a parent of it.
         outside = tmp_path / "work"
         outside.mkdir()
-        if outside.resolve().is_relative_to(REPO_ROOT.resolve()):
-            pytest.skip("the basetemp is inside the checkout")
         monkeypatch.chdir(outside)
-        assert default_normalizer().text(str(outside / "a.txt")) == "<CWD>/a.txt"
+        out = default_normalizer().text(str(outside / "a.txt"))
+        # A --basetemp inside the checkout puts tmp_path under <REPO>; then <TMP>, the
+        # longer and more specific root, is what must win, and <CWD> must not appear.
+        if outside.resolve().is_relative_to(REPO_ROOT.resolve()):
+            assert "<CWD>" not in out
+        else:
+            assert out == "<CWD>/a.txt"
 
 
 class TestFileUriSpellings:
@@ -517,9 +520,6 @@ class TestFileUriSpellings:
             warnings.simplefilter("error")
             assert uri in _path_spellings(path)
 
-    @pytest.mark.skipif(
-        sys.version_info >= (3, 14), reason="PurePath.as_uri() is deprecated here"
-    )
     @pytest.mark.parametrize(
         "path",
         [
@@ -528,8 +528,13 @@ class TestFileUriSpellings:
             PurePosixPath("/tmp/a b/é"),
         ],
     )
-    def test_matches_pathlib_where_pathlib_still_builds_it(self, path):
-        assert _file_uri(path) == path.as_uri()
+    def test_matches_pathlib(self, path):
+        # PurePath.as_uri() is deprecated from 3.14 but still works, so it remains the
+        # reference on every version; only its warning is silenced, and only here.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            expected = path.as_uri()
+        assert _file_uri(path) == expected
 
     def test_a_concrete_path_asks_pathlib(self, tmp_path):
         assert _file_uri(tmp_path) == tmp_path.as_uri()
