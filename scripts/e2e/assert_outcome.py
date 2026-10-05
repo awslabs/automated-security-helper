@@ -110,6 +110,16 @@ class Expectation:
             )
         if self.expect_rc == 2 and self.findings == 0:
             problems.append("--expect-rc 2 with --findings 0 contradicts itself")
+        if (
+            self.expect_rc == 2
+            and self.findings is None
+            and self.min_findings is not None
+            and self.min_findings < 1
+        ):
+            problems.append(
+                f"--expect-rc 2 with --min-findings {self.min_findings} checks no count; "
+                "exit 2 means at least one actionable finding, so give --min-findings 1 or more"
+            )
         if self.expect_rc == 0 and (self.findings or self.min_findings):
             problems.append(
                 "--expect-rc 0 means nothing actionable; expect --findings 0"
@@ -340,10 +350,12 @@ def _write_output(
     actionable: Optional[int] = None,
     sarif_at: Path = SARIF_RELATIVE,
     write_aggregated: bool = True,
+    no_runs: bool = False,
 ) -> Path:
     (root / sarif_at).parent.mkdir(parents=True, exist_ok=True)
+    runs: List[Dict[str, Any]] = [] if no_runs else [{"results": results}]
     (root / sarif_at).write_text(
-        json.dumps({"version": "2.1.0", "runs": [{"results": results}]}),
+        json.dumps({"version": "2.1.0", "runs": runs}),
         encoding="utf-8",
     )
     if write_aggregated:
@@ -438,6 +450,15 @@ def self_test() -> int:
             findings,
             {"write_aggregated": False},
             "no aggregated results at",
+        ),
+        (
+            "SARIF has no runs",
+            [],
+            {"detect-secrets": "PASSED"},
+            0,
+            clean,
+            {"no_runs": True},
+            "has no runs",
         ),
         (
             "finding count too low",
@@ -568,6 +589,11 @@ def self_test() -> int:
             "--findings N or --min-findings N",
         ),
         ("no selection", Expectation(0, findings=0), "--selected"),
+        (
+            "exit 2 with --min-findings 0",
+            Expectation(2, min_findings=0, selected=["a"]),
+            "checks no count",
+        ),
     ]
     for name, expectation, needle in usage:
         passed = any(needle in p for p in expectation.usage_problems())
