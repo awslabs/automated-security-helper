@@ -110,14 +110,14 @@ VERSION="$(wheel_version "$WHEEL")"
 [ -n "$VERSION" ] || vl_fail "cannot read a version from $(basename "$WHEEL")"
 
 # A copy of packaging/rpm with its spec edited, built by the real build.sh. The spec is
-# the only thing changed; build.sh finds cli-name.sh and LICENSE relative to itself, so
-# those are copied alongside.
+# the only thing changed; build.sh sources cli-name.sh and version-map.sh and reads
+# LICENSE relative to itself, so those are copied alongside.
 build_variant() {
   local edit="$1" wheel="$2" out="$3" tree
   tree="$(mktemp -d)"
   mkdir -p "$tree/packaging"
   cp -r "$REPO/packaging/rpm" "$tree/packaging/rpm"
-  cp "$REPO/packaging/cli-name.sh" "$tree/packaging/"
+  cp "$REPO/packaging/cli-name.sh" "$REPO/packaging/version-map.sh" "$tree/packaging/"
   cp "$REPO/LICENSE" "$tree/"
   vl_gate_python - "$tree/packaging/rpm/ash.spec" "$edit" <<'PY'
 import re, sys
