@@ -369,11 +369,13 @@ def fake_execute_workspace(monkeypatch):
         # it sees, so its messages depend on timing unless this waits for them:
         # the initial report first, then one "complete" report per project after
         # each project's results file appears, as a real run would write it.
+        # One file at a time: the monitor sweeps the projects in plan order, and a
+        # sweep that had already passed "api" when both files landed reported "web"
+        # first (seen in a full-suite run under xdist).
         assert progress_reports.acquire(timeout=60), "no initial progress report"
         for project in plan.active_projects:
             output = Path(settings.output_dir) / PROJECTS_DIR_NAME / project.key
             (output / AGGREGATED_RESULTS_FILENAME).write_text("{}", encoding="utf-8")
-        for project in plan.active_projects:
             assert progress_reports.acquire(timeout=60), (
                 f"no completion report for {project.key}"
             )
