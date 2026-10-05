@@ -33,7 +33,16 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
+# Never as root. The image runs as root by default, and root ignores the file permissions that
+# the unreadable-report and undeletable-stale-report tests depend on; those tests fail by
+# design under root. So the whole script re-executes as the checkout's owner. The reasons, and
+# why the owner's uid in particular, are in run-unprivileged.sh.
+if [ "$(id -u)" = 0 ]; then
+  exec bash "$HERE/run-unprivileged.sh" bash "$HERE/verify-in-container.sh" "$@"
+fi
+
 echo "== 1. record the toolchain, so a later failure can be attributed"
+echo "   uid $(id -u), gid $(id -g), HOME=$HOME"
 java -version 2>&1 | head -2 | sed 's/^/   /'
 echo "   $(python3 -V)"
 echo "   $(git --version)"
