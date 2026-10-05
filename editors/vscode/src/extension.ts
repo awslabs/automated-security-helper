@@ -7,23 +7,28 @@
  *
  * WHAT THIS EXTENSION IS, AND WHAT IT DELIBERATELY IS NOT
  *
- * It shells out to the `ash` CLI already on the machine and reads the SARIF that
- * CLI writes. It carries no scanners, no rules, no copy of ASH, and no runtime
- * npm dependencies -- the VS Code API and Node's standard library are enough to
- * spawn a process and parse JSON. That is not minimalism for its own sake:
- * packaging/README.md forbids third-party code in an artifact this project
- * publishes, and a `.vsix` is such an artifact, so a runtime dependency would be
- * a boundary question rather than a packaging detail. src/vsix-contents.ts is the
- * mechanical check that keeps it that way.
+ * It shells out to the ASH CLI already on the machine and reads the SARIF and the
+ * aggregated results that CLI writes. It carries no scanners, no rules, no copy of
+ * ASH, and no runtime npm dependencies -- the VS Code API and Node's standard
+ * library are enough to spawn a process and parse JSON. packaging/README.md forbids
+ * third-party code in an artifact this project publishes, and a `.vsix` is such an
+ * artifact, so src/vsix-contents.ts is the mechanical check that keeps it that way.
  *
  * WHY EVERY FAILURE PATH ENDS IN A MESSAGE AND NEVER IN AN EMPTY EDITOR
  *
  * Zero diagnostics is what a clean scan looks like. It is also what a missing
- * `ash`, a shadowed `ash`, a crashed scan and an unwritten report look like, and
- * the whole reason this file is written the way it is: each of those five
- * outcomes has to be distinguishable from safety at the moment it happens. So no
+ * executable, a shadowed one, a crashed scan, an unwritten report, a stale report
+ * from the previous run and a scan whose scanners never ran look like. Each of
+ * those has to be distinguishable from safety at the moment it happens, so no
  * branch below returns quietly. `runScanCommand` reports which one occurred, and
- * its return value is what the test suite asserts on.
+ * its return value is what the test suites assert on.
+ *
+ * THE EXIT-CODE CONTRACT
+ *
+ * 0 is clean and 2 is findings; both publish. 1 is ASH's `ScanIncompleteExit` when
+ * this run wrote results: the findings are real and the set is partial, so they are
+ * published AND the scan is reported incomplete, never as a plain failure. 1 with no
+ * report from this run is a crash. Anything else is a failure.
  */
 
 import * as fs from 'fs';
@@ -31,12 +36,20 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   CommandRunner,
+  DEFAULT_EXECUTABLE,
+  LEGACY_EXECUTABLE,
   SARIF_RELATIVE_PATH,
   outputTail,
-  probeAshIdentity,
+  resolveExecutable,
   runScan,
   spawnSyncRunner,
 } from './ash-cli';
+import {
+  AGGREGATED_RESULTS_FILE,
+  CoverageAssessment,
+  assessCoverageText,
+  describeGaps,
+} from './coverage';
 import { PublishSummary, publishFindings } from './diagnostics';
 import { parseAshSarif } from './sarif';
 
@@ -45,14 +58,18 @@ export const COMMAND_CLEAR = 'ash.clearFindings';
 export const CONFIG_SECTION = 'ash';
 /** Name shown on the Problems panel filter and on the output channel. */
 export const COLLECTION_NAME = 'ash';
+/** globalState key recording that the ashx-to-ash fallback notice was shown. */
+export const FALLBACK_NOTICE_KEY = 'ash.legacyExecutableNoticeShown';
 
-/** Why a scan produced no diagnostics, when it produced none. */
+/** What a scan amounted to. Every value other than `ok` carries a `detail`. */
 export type ScanStatus =
   | 'ok'
+  | 'incomplete'
   | 'no-workspace'
   | 'wrong-executable'
   | 'scan-failed'
   | 'no-report'
+  | 'stale-report'
   | 'unreadable-report';
 
 export interface ScanReport {
@@ -61,6 +78,20 @@ export interface ScanReport {
   readonly summary?: PublishSummary;
   /** Human-readable detail; always set when status is not 'ok'. */
   readonly detail?: string;
+  /** The executable that ran the scan, once one was resolved. */
+  readonly executable?: string;
+  /**
+   * Set when `ashx` was not on PATH and `ash` ran instead: `shown` the first time,
+   * `already-shown` once the persisted flag says the user has seen the notice.
+   */
+  readonly fallbackNotice?: 'shown' | 'already-shown';
+  /** The scan's exit status, once it ran. */
+  readonly exitCode?: number | null;
+  /**
+   * The coverage verdict read from ash_aggregated_results.json. `null` when this
+   * run wrote no readable results file, which means "cannot tell" -- not complete.
+   */
+  readonly coverage?: CoverageAssessment | null;
 }
 
 /** The pieces of the host a scan needs, so a test can supply each one. */
@@ -68,13 +99,21 @@ export interface ScanHost {
   readonly collection: vscode.DiagnosticCollection;
   readonly run: CommandRunner;
   readonly readFile: (file: string) => string;
-  readonly fileExists: (file: string) => boolean;
+  /** Modification time in milliseconds, or undefined when the file does not exist. */
+  readonly mtimeMs: (file: string) => number | undefined;
+  /** Deletes a file. True when it is gone afterwards, including when it was never there. */
+  readonly removeFile: (file: string) => boolean;
   readonly log: (line: string) => void;
   readonly showError: (message: string) => void;
+  readonly showWarning: (message: string) => void;
   readonly showInfo: (message: string) => void;
+  /** Whether the one-time fallback notice has been shown, persisted across sessions. */
+  readonly fallbackNoticeShown: () => boolean;
+  readonly recordFallbackNoticeShown: () => void;
 }
 
 export interface ScanSettings {
+  /** Empty means "resolve ashx, then ash, from PATH". */
   readonly executablePath: string;
   readonly outputDirectory: string;
   readonly extraArguments: readonly string[];
@@ -84,12 +123,85 @@ export function readSettings(): ScanSettings {
   const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
   // Each `get` carries the same default as package.json's contributes block. A
   // `get` without one returns undefined when a user has explicitly set the value
-  // to null, and `undefined` as an executable name spawns nothing.
+  // to null.
   return {
-    executablePath: config.get<string>('executablePath', 'ash') || 'ash',
+    executablePath: (config.get<string>('executablePath', '') ?? '').trim(),
     outputDirectory: config.get<string>('outputDirectory', '.ash/ash_output') || '.ash/ash_output',
     extraArguments: config.get<string[]>('extraArguments', []) ?? [],
   };
+}
+
+/** The message the one-time fallback notice shows. Exported so tests pin it. */
+export const FALLBACK_NOTICE =
+  `ASH: "${DEFAULT_EXECUTABLE}" is not on PATH, so this extension is running ` +
+  `"${LEGACY_EXECUTABLE}" instead. That works, and this notice is shown once. Install a ` +
+  `version of ASH that provides "${DEFAULT_EXECUTABLE}", or set ash.executablePath to ` +
+  'pin an executable and stop the lookup.';
+
+interface ReportFile {
+  readonly file: string;
+  readonly mtimeBefore: number | undefined;
+  readonly removed: boolean;
+}
+
+/**
+ * Removes the previous run's report before the scan, so a report that is present
+ * afterwards can only be this run's.
+ *
+ * ASH clears its own output first too (`_discard_prior_run_artifacts` and the
+ * orchestrator's `initialize`), but this extension cannot assume the executable on
+ * PATH is a version that does, and a run that fails before that point leaves the
+ * old report in place. When the delete itself fails -- a read-only directory -- the
+ * modification time taken here is the fallback evidence.
+ */
+function prepareReportFile(host: ScanHost, file: string): ReportFile {
+  const mtimeBefore = host.mtimeMs(file);
+  const removed = host.removeFile(file);
+  if (!removed) {
+    host.log(
+      `could not remove the previous ${file}; comparing modification times to tell this ` +
+        "run's output from the last one",
+    );
+  }
+  return { file, mtimeBefore, removed };
+}
+
+/** 'absent', 'stale' (from a previous run), or 'fresh' (written by this run). */
+function reportFreshness(host: ScanHost, report: ReportFile): 'absent' | 'stale' | 'fresh' {
+  const after = host.mtimeMs(report.file);
+  if (after === undefined) {
+    return 'absent';
+  }
+  if (report.removed || report.mtimeBefore === undefined || after > report.mtimeBefore) {
+    return 'fresh';
+  }
+  return 'stale';
+}
+
+/** Reads the coverage verdict from this run's results file, or null when it cannot. */
+function readCoverage(host: ScanHost, report: ReportFile): CoverageAssessment | null {
+  const freshness = reportFreshness(host, report);
+  if (freshness !== 'fresh') {
+    host.log(
+      freshness === 'absent'
+        ? `no ${AGGREGATED_RESULTS_FILE} at ${report.file}`
+        : `${report.file} is from a previous run and was not read`,
+    );
+    return null;
+  }
+  let text: string;
+  try {
+    text = host.readFile(report.file);
+  } catch (err) {
+    host.log(`${report.file}: ${(err as Error).message}`);
+    return null;
+  }
+  const assessment = assessCoverageText(text);
+  if (assessment === undefined) {
+    host.log(`${report.file} is not an ASH aggregated results document`);
+    return null;
+  }
+  return assessment;
 }
 
 /**
@@ -109,84 +221,158 @@ export function runScanCommand(
     return { status: 'no-workspace', detail };
   }
 
-  const probe = probeAshIdentity(settings.executablePath, host.run, { cwd: sourceDir });
-  if (!probe.ok) {
-    host.log(probe.message);
-    host.showError(`ASH: ${probe.message}`);
-    return { status: 'wrong-executable', detail: probe.message };
+  const resolved = resolveExecutable(settings.executablePath, host.run, { cwd: sourceDir });
+  if (!resolved.ok) {
+    host.log(resolved.message);
+    host.showError(`ASH: ${resolved.message}`);
+    return { status: 'wrong-executable', detail: resolved.message };
   }
-  host.log(`Using ${settings.executablePath}: ${probe.version}`);
+  const executable = resolved.executable;
+  host.log(`Using ${executable}: ${resolved.version}`);
+  let fallbackNotice: ScanReport['fallbackNotice'];
+  if (resolved.fellBack) {
+    host.log(`"${DEFAULT_EXECUTABLE}" is not on PATH; fell back to "${LEGACY_EXECUTABLE}"`);
+    if (host.fallbackNoticeShown()) {
+      fallbackNotice = 'already-shown';
+    } else {
+      host.recordFallbackNoticeShown();
+      host.showInfo(FALLBACK_NOTICE);
+      fallbackNotice = 'shown';
+    }
+  }
 
   const outputDir = path.isAbsolute(settings.outputDirectory)
     ? settings.outputDirectory
     : path.join(sourceDir, settings.outputDirectory);
+  const sarif = prepareReportFile(host, path.join(outputDir, ...SARIF_RELATIVE_PATH.split('/')));
+  const aggregated = prepareReportFile(host, path.join(outputDir, AGGREGATED_RESULTS_FILE));
 
-  const outcome = runScan(
-    settings.executablePath,
-    sourceDir,
-    outputDir,
-    host.run,
-    settings.extraArguments,
-    { cwd: sourceDir },
-  );
+  const outcome = runScan(executable, sourceDir, outputDir, host.run, settings.extraArguments, {
+    cwd: sourceDir,
+  });
+  const exitCode = outcome.result.status;
+  const base = { executable, exitCode, fallbackNotice };
 
-  const sarifFile = path.join(outputDir, ...SARIF_RELATIVE_PATH.split('/'));
-
-  if (!outcome.completed) {
-    // Exit 2 means findings and is not a failure -- runScan already accounts for
-    // that -- so reaching here is a real error, a signal, or a process that never
-    // started. Report it even if a stale SARIF from a previous run is lying
-    // around, because publishing that would show yesterday's findings as today's.
+  if (outcome.verdict === 'failed') {
+    // A configuration error (3, 4), a signal, or a process that never started.
+    // Reported even if a report is lying around: publishing it would show the
+    // previous run's findings as this one's.
     const detail =
-      `the scan did not complete (exit ${String(outcome.result.status)})` +
+      `the scan did not complete (exit ${String(exitCode)})` +
       (outcome.result.error === undefined ? '' : `: ${outcome.result.error.message}`) +
       `\n${outputTail(outcome.result)}`;
     host.log(detail);
     host.showError(`ASH: ${detail.split('\n')[0]}. See the ASH output channel.`);
-    return { status: 'scan-failed', detail };
+    return { ...base, status: 'scan-failed', detail };
   }
 
-  if (!host.fileExists(sarifFile)) {
-    // The case that most needs saying out loud. A missing report is not an empty
-    // report, and an empty editor would read as a clean tree.
+  const sarifFreshness = reportFreshness(host, sarif);
+  if (sarifFreshness === 'absent') {
+    if (outcome.verdict === 'incomplete') {
+      // Exit 1 and no results: the crash half of exit 1.
+      const detail =
+        `the scan exited 1 and wrote no SARIF report at ${sarif.file}, so it failed ` +
+        `before producing results.\n${outputTail(outcome.result)}`;
+      host.log(detail);
+      host.showError(`ASH: ${detail.split('\n')[0]} See the ASH output channel.`);
+      return { ...base, status: 'scan-failed', detail };
+    }
+    // A missing report is not an empty report, and an empty editor would read as
+    // a clean tree.
     const detail =
-      `the scan exited ${String(outcome.result.status)} but wrote no SARIF report at ` +
-      `${sarifFile}, so there are no findings to show and no evidence the tree is clean.`;
+      `the scan exited ${String(exitCode)} but wrote no SARIF report at ` +
+      `${sarif.file}, so there are no findings to show and no evidence the tree is clean.`;
     host.log(detail);
     host.showError(`ASH: ${detail}`);
-    return { status: 'no-report', detail };
+    return { ...base, status: 'no-report', detail };
+  }
+  if (sarifFreshness === 'stale') {
+    const detail =
+      `the SARIF report at ${sarif.file} was not rewritten by this run (exit ` +
+      `${String(exitCode)}); it is from a previous scan, and showing it would present ` +
+      "old findings as this run's result.";
+    host.log(detail);
+    host.showError(`ASH: ${detail}`);
+    return { ...base, status: 'stale-report', detail };
   }
 
   let parsed;
   try {
-    parsed = parseAshSarif(host.readFile(sarifFile));
+    parsed = parseAshSarif(host.readFile(sarif.file));
   } catch (err) {
-    const detail = `${sarifFile}: ${(err as Error).message}`;
+    const detail = `${sarif.file}: ${(err as Error).message}`;
     host.log(detail);
     host.showError(`ASH: ${detail}`);
-    return { status: 'unreadable-report', detail };
+    return { ...base, status: 'unreadable-report', detail };
   }
 
   const summary = publishFindings(host.collection, sourceDir, parsed);
+  const coverage = readCoverage(host, aggregated);
   const tools = parsed.toolNames.length === 0 ? 'ASH' : parsed.toolNames.join(', ');
   host.log(
-    `${tools}: ${summary.diagnostics} finding(s) across ${summary.files} file(s)` +
-      (summary.unlocated === 0 ? '' : `, plus ${summary.unlocated} with no file location`),
+    `${tools}: ${summary.diagnostics} finding(s) across ${summary.files} file(s); ` +
+      `${summary.suppressed} suppressed by ASH, ${summary.notFailures} not failures, ` +
+      `${summary.unlocated} with no file location, ${summary.unresolved} naming no local file`,
   );
+  surfaceShortfalls(host, summary);
+
+  const incomplete = outcome.verdict === 'incomplete' || coverage?.coverage_complete === false;
+  if (incomplete) {
+    const detail = incompleteDetail(exitCode, coverage, summary);
+    host.log(detail);
+    host.showWarning(`ASH: ${detail}`);
+    return { ...base, status: 'incomplete', summary, coverage, detail };
+  }
+
+  if (coverage === null) {
+    // "Cannot tell" is a fact the user needs; it is not the same as complete.
+    host.showWarning(
+      `ASH: could not confirm that every selected scanner ran: this run wrote no readable ` +
+        `${AGGREGATED_RESULTS_FILE} beside the report. The findings shown are real.`,
+    );
+  }
   host.showInfo(
     summary.diagnostics === 0
       ? `ASH: scan completed with no findings at or above the configured severity threshold.`
       : `ASH: ${summary.diagnostics} finding(s) in ${summary.files} file(s). See the Problems panel.`,
   );
+  return { ...base, status: 'ok', summary, coverage };
+}
+
+function incompleteDetail(
+  exitCode: number | null,
+  coverage: CoverageAssessment | null,
+  summary: PublishSummary,
+): string {
+  const gaps = coverage === null ? [] : describeGaps(coverage);
+  const why =
+    gaps.length > 0
+      ? gaps.join('; ')
+      : coverage === null
+        ? `no readable ${AGGREGATED_RESULTS_FILE} was written, so which part is missing is unknown`
+        : 'the results file names no gap this extension recognizes; see the ASH output channel';
+  const shown =
+    summary.diagnostics === 0
+      ? 'The Problems panel is empty, but that is not the same as clean.'
+      : `The ${summary.diagnostics} finding(s) shown are real but may not be all of them.`;
+  return `the scan is incomplete (exit ${String(exitCode)}): ${why}. ${shown}`;
+}
+
+/** Findings the Problems panel cannot show, said out loud. Suppressions are not. */
+function surfaceShortfalls(host: ScanHost, summary: PublishSummary): void {
+  const missing: string[] = [];
   if (summary.unlocated > 0) {
-    // Not folded into the message above: a finding with no location cannot be
-    // shown in the Problems panel at all, so it would otherwise be invisible.
+    missing.push(`${summary.unlocated} finding(s) named no file`);
+  }
+  if (summary.unresolved > 0) {
+    missing.push(`${summary.unresolved} finding(s) named a file with no path on this machine`);
+  }
+  if (missing.length > 0) {
     host.showError(
-      `ASH: ${summary.unlocated} finding(s) named no file and cannot be placed in the editor. ` +
+      `ASH: ${missing.join(' and ')} and cannot be placed in the editor. ` +
         'See the ASH output channel.',
     );
   }
-  return { status: 'ok', summary };
 }
 
 /** The first workspace folder's path, or undefined when no folder is open. */
@@ -195,32 +381,56 @@ export function currentSourceDir(): string | undefined {
   return folders === undefined || folders.length === 0 ? undefined : folders[0].uri.fsPath;
 }
 
+function mtimeOf(file: string): number | undefined {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
+function removeIfPresent(file: string): boolean {
+  try {
+    fs.unlinkSync(file);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+}
+
 /**
- * The real host: the spawner, the filesystem and the two notification calls.
+ * The real host: the spawner, the filesystem, the notifications and the persisted
+ * fallback flag.
  *
  * Exported so a test can build the same object `activate` builds and exercise its
- * members. Wiring that only exists inside `activate` is wiring nobody has run,
- * and a `readFile` that read the wrong encoding, or a `showError` that never
- * reached the window, would look identical to a clean scan from outside.
+ * members. Wiring that only exists inside `activate` is wiring nobody has run.
  */
 export function createScanHost(
   collection: vscode.DiagnosticCollection,
   channel: vscode.OutputChannel,
+  globalState: vscode.Memento,
 ): ScanHost {
   return {
     collection,
     run: spawnSyncRunner,
     readFile: (file) => fs.readFileSync(file, 'utf8'),
-    fileExists: (file) => fs.existsSync(file),
+    mtimeMs: mtimeOf,
+    removeFile: removeIfPresent,
     log: (line) => channel.appendLine(line),
+    // `void` and not `await`: a command handler that awaited a notification would
+    // stay pending until the user dismissed it.
     showError: (message) => {
-      // `void` and not `await`: a command handler that awaited the notification
-      // would stay pending until the user dismissed it, and VS Code would report
-      // the command as still running.
       void vscode.window.showErrorMessage(message);
+    },
+    showWarning: (message) => {
+      void vscode.window.showWarningMessage(message);
     },
     showInfo: (message) => {
       void vscode.window.showInformationMessage(message);
+    },
+    fallbackNoticeShown: () => globalState.get<boolean>(FALLBACK_NOTICE_KEY, false),
+    recordFallbackNoticeShown: () => {
+      void globalState.update(FALLBACK_NOTICE_KEY, true);
     },
   };
 }
@@ -230,7 +440,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const channel = vscode.window.createOutputChannel('ASH');
   context.subscriptions.push(collection, channel);
 
-  const host = createScanHost(collection, channel);
+  const host = createScanHost(collection, channel, context.globalState);
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_SCAN, () =>

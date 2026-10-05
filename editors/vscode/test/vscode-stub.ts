@@ -188,6 +188,7 @@ export const state = {
   workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
   configuration: new Map<string, unknown>(),
   errors: [] as string[],
+  warnings: [] as string[],
   infos: [] as string[],
   channels: [] as OutputChannel[],
   collections: [] as DiagnosticCollection[],
@@ -198,6 +199,7 @@ export function resetState(): void {
   state.workspaceFolders = undefined;
   state.configuration = new Map();
   state.errors = [];
+  state.warnings = [];
   state.infos = [];
   state.channels = [];
   state.collections = [];
@@ -222,6 +224,10 @@ export const window = {
     state.errors.push(message);
     return Promise.resolve(undefined);
   },
+  showWarningMessage(message: string): Promise<undefined> {
+    state.warnings.push(message);
+    return Promise.resolve(undefined);
+  },
   showInformationMessage(message: string): Promise<undefined> {
     state.infos.push(message);
     return Promise.resolve(undefined);
@@ -241,6 +247,20 @@ export const workspace = {
     };
   },
 };
+
+/** `vscode.Memento` over a Map, so a test can read what the extension persisted. */
+export class Memento {
+  public readonly values = new Map<string, unknown>();
+
+  public get<T>(key: string, fallback: T): T {
+    return this.values.has(key) ? (this.values.get(key) as T) : fallback;
+  }
+
+  public update(key: string, value: unknown): Promise<void> {
+    this.values.set(key, value);
+    return Promise.resolve();
+  }
+}
 
 export const commands = {
   registerCommand(id: string, callback: (...args: unknown[]) => unknown): Disposable {

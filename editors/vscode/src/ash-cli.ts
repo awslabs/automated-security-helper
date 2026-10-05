@@ -111,14 +111,41 @@ export const ASH_IDENTITY_MARKER = 'automated-security-helper';
  */
 export const ASH_FALLBACK_EXECUTABLE = 'automated-security-helper';
 
-/** ASH's documented exit codes, from `ash scan`'s own epilogue. */
+/**
+ * The executable tried when `ash.executablePath` is empty.
+ *
+ * One constant each, so the CLI rename is a one-line change here. `ashx` is the v4
+ * entry point; `ash` is tried next, and only when `ashx` is not on PATH at all, so
+ * an install that predates the rename keeps working. A configured path is never
+ * substituted: the user named a program, and running a different one would be a
+ * surprise worse than the error.
+ */
+export const DEFAULT_EXECUTABLE = 'ashx';
+export const LEGACY_EXECUTABLE = 'ash';
+
+/**
+ * ASH's exit codes, from `ash scan`'s own epilogue and `_compute_exit_code` in
+ * automated_security_helper/interactions/run_ash_scan.py.
+ *
+ * 1 is two things. With results in hand it is `ScanIncompleteExit`: the scan
+ * finished with partial coverage (a scanner ERROR or MISSING, lost targets, a
+ * converter that never ran, an unevaluated rule, a stale content database), and
+ * `fail_on_incomplete_scanners` defaults to true, so this is the ordinary result
+ * of a scan on a host missing one tool. Without results it is a crash. The two
+ * are told apart by whether this run wrote a report, never by the code alone.
+ */
 export const EXIT_NO_ACTIONABLE_FINDINGS = 0;
-export const EXIT_EXECUTION_ERROR = 1;
+export const EXIT_INCOMPLETE_OR_ERROR = 1;
 export const EXIT_ACTIONABLE_FINDINGS = 2;
 
 export type IdentityProbe =
   | { readonly ok: true; readonly version: string }
-  | { readonly ok: false; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      /** The executable does not exist on PATH (ENOENT), as opposed to answering wrongly. */
+      readonly notFound?: boolean;
+    };
 
 function combinedOutput(result: CommandResult): string {
   // ASH prints its version to stdout; a shell rejecting `--version` prints to
@@ -155,6 +182,7 @@ export function probeAshIdentity(
     const enoent = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
     return {
       ok: false,
+      notFound: enoent,
       message: enoent
         ? `Could not run "${executable}": it is not on PATH. Install ASH, or set ` +
           `ash.executablePath to its full path.`
@@ -202,16 +230,39 @@ export function scanArgs(
 /** Where ASH writes the SARIF report, relative to its `--output-dir`. */
 export const SARIF_RELATIVE_PATH = 'reports/ash.sarif';
 
+/**
+ * What the exit status says, before anyone looks for a report.
+ *
+ *   clean       exit 0.
+ *   findings    exit 2. Findings make ASH exit 2 under the default
+ *               `fail_on_findings: true`, so this is a normal scan.
+ *   incomplete  exit 1. Partial results if this run wrote a report, a crash if it
+ *               did not; the caller decides which by looking.
+ *   failed      anything else: 3 and 4 (configuration errors), a signal, or a
+ *               process that never started.
+ */
+export type ExitVerdict = 'clean' | 'findings' | 'incomplete' | 'failed';
+
+export function classifyExit(result: CommandResult): ExitVerdict {
+  if (result.error !== undefined) {
+    return 'failed';
+  }
+  switch (result.status) {
+    case EXIT_NO_ACTIONABLE_FINDINGS:
+      return 'clean';
+    case EXIT_ACTIONABLE_FINDINGS:
+      return 'findings';
+    case EXIT_INCOMPLETE_OR_ERROR:
+      return 'incomplete';
+    default:
+      return 'failed';
+  }
+}
+
 export interface ScanOutcome {
   /** The process result, so a caller can surface stderr on failure. */
   readonly result: CommandResult;
-  /**
-   * True when the exit code says the scan ran to completion, whether or not it
-   * found anything. Findings make ASH exit 2 under this repository's default
-   * `fail_on_findings: true`, so treating any non-zero code as failure would
-   * report a broken scan every time the extension had something to show.
-   */
-  readonly completed: boolean;
+  readonly verdict: ExitVerdict;
 }
 
 export function runScan(
@@ -226,10 +277,67 @@ export function runScan(
     cwd: sourceDir,
     ...options,
   });
-  const completed =
-    result.error === undefined &&
-    (result.status === EXIT_NO_ACTIONABLE_FINDINGS || result.status === EXIT_ACTIONABLE_FINDINGS);
-  return { result, completed };
+  return { result, verdict: classifyExit(result) };
+}
+
+/** Which executable answered, and whether it was the fallback. */
+export type ExecutableResolution =
+  | {
+      readonly ok: true;
+      readonly executable: string;
+      readonly version: string;
+      /** True when `ashx` was not on PATH and `ash` answered instead. */
+      readonly fellBack: boolean;
+    }
+  | { readonly ok: false; readonly message: string };
+
+function isNotFound(probe: IdentityProbe): boolean {
+  return !probe.ok && probe.notFound === true;
+}
+
+/**
+ * Picks the executable to scan with.
+ *
+ * A non-empty `configured` value is probed as given and nothing else is tried.
+ * An empty one tries DEFAULT_EXECUTABLE, then LEGACY_EXECUTABLE only when the
+ * first is not found (ENOENT). An `ashx` that answers and is not ASH is an error,
+ * not a reason to try `ash`: the name resolved to something, and scanning with a
+ * different program would hide that.
+ */
+export function resolveExecutable(
+  configured: string,
+  run: CommandRunner,
+  options: CommandOptions = {},
+): ExecutableResolution {
+  const explicit = configured.trim();
+  if (explicit !== '') {
+    const probe = probeAshIdentity(explicit, run, options);
+    return probe.ok
+      ? { ok: true, executable: explicit, version: probe.version, fellBack: false }
+      : { ok: false, message: probe.message };
+  }
+
+  const primary = probeAshIdentity(DEFAULT_EXECUTABLE, run, options);
+  if (primary.ok) {
+    return { ok: true, executable: DEFAULT_EXECUTABLE, version: primary.version, fellBack: false };
+  }
+  if (!isNotFound(primary)) {
+    return { ok: false, message: primary.message };
+  }
+
+  const legacy = probeAshIdentity(LEGACY_EXECUTABLE, run, options);
+  if (legacy.ok) {
+    return { ok: true, executable: LEGACY_EXECUTABLE, version: legacy.version, fellBack: true };
+  }
+  if (isNotFound(legacy)) {
+    return {
+      ok: false,
+      message:
+        `Neither "${DEFAULT_EXECUTABLE}" nor "${LEGACY_EXECUTABLE}" is on PATH. Install ASH, ` +
+        'or set ash.executablePath to its full path.',
+    };
+  }
+  return { ok: false, message: legacy.message };
 }
 
 /**

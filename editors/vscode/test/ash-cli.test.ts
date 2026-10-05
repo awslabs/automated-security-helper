@@ -21,7 +21,11 @@ import {
   ASH_IDENTITY_MARKER,
   CommandResult,
   CommandRunner,
+  DEFAULT_EXECUTABLE,
   EXIT_ACTIONABLE_FINDINGS,
+  LEGACY_EXECUTABLE,
+  classifyExit,
+  resolveExecutable,
   SARIF_RELATIVE_PATH,
   outputTail,
   probeAshIdentity,
@@ -138,19 +142,127 @@ describe('runScan', () => {
     expect(seen[0].cwd).toBe('/ws');
   });
 
-  it('counts exit 0 and exit 2 as completed', () => {
-    expect(runScan('ash', '/ws', '/out', runnerReturning({ status: 0 })).completed).toBe(true);
+  it('classifies 0 as clean and 2 as findings, because 2 is ASH\'s findings code', () => {
+    expect(runScan('ash', '/ws', '/out', runnerReturning({ status: 0 })).verdict).toBe('clean');
     expect(
-      runScan('ash', '/ws', '/out', runnerReturning({ status: EXIT_ACTIONABLE_FINDINGS })).completed,
-    ).toBe(true);
+      runScan('ash', '/ws', '/out', runnerReturning({ status: EXIT_ACTIONABLE_FINDINGS })).verdict,
+    ).toBe('findings');
   });
 
-  it('counts exit 1, a signal and a start failure as not completed', () => {
-    expect(runScan('ash', '/ws', '/out', runnerReturning({ status: 1 })).completed).toBe(false);
-    expect(runScan('ash', '/ws', '/out', runnerReturning({ status: null })).completed).toBe(false);
-    expect(
-      runScan('ash', '/ws', '/out', runnerReturning({ status: 0, error: new Error('x') })).completed,
-    ).toBe(false);
+  it('classifies 1 as incomplete, not as a failure, so the caller looks for partial results', () => {
+    expect(runScan('ash', '/ws', '/out', runnerReturning({ status: 1 })).verdict).toBe('incomplete');
+  });
+
+  it('classifies 3, 4, a signal and a start failure as failed', () => {
+    for (const status of [3, 4, 127]) {
+      expect(runScan('ash', '/ws', '/out', runnerReturning({ status })).verdict).toBe('failed');
+    }
+    expect(runScan('ash', '/ws', '/out', runnerReturning({ status: null })).verdict).toBe('failed');
+    expect(classifyExit({ status: 0, stdout: '', stderr: '', error: new Error('x') })).toBe('failed');
+  });
+});
+
+describe('resolveExecutable', () => {
+  /** A PATH holding exactly the named executables, each answering as ASH. */
+  function pathWith(...present: string[]): { run: CommandRunner; probed: string[] } {
+    const probed: string[] = [];
+    const run: CommandRunner = (executable) => {
+      probed.push(executable);
+      if (!present.includes(executable)) {
+        return {
+          status: null,
+          stdout: '',
+          stderr: '',
+          error: Object.assign(new Error(`spawnSync ${executable} ENOENT`), { code: 'ENOENT' }),
+        };
+      }
+      return { status: 0, stdout: MEASURED_VERSION, stderr: '' };
+    };
+    return { run, probed };
+  }
+
+  it('defaults to ashx and keeps it when it is installed', () => {
+    const { run, probed } = pathWith('ashx', 'ash');
+
+    expect(DEFAULT_EXECUTABLE).toBe('ashx');
+    expect(resolveExecutable('', run)).toEqual({
+      ok: true,
+      executable: 'ashx',
+      version: MEASURED_VERSION,
+      fellBack: false,
+    });
+    expect(probed).toEqual(['ashx']);
+  });
+
+  it('falls back to ash only when ashx is not on PATH, and says it did', () => {
+    const { run, probed } = pathWith('ash');
+
+    expect(LEGACY_EXECUTABLE).toBe('ash');
+    expect(resolveExecutable('', run)).toMatchObject({ ok: true, executable: 'ash', fellBack: true });
+    expect(probed).toEqual(['ashx', 'ash']);
+  });
+
+  it('treats whitespace as unset', () => {
+    expect(resolveExecutable('   ', pathWith('ash').run)).toMatchObject({ executable: 'ash' });
+  });
+
+  it('names both executables when neither is installed', () => {
+    const resolved = resolveExecutable('', pathWith().run);
+
+    expect(resolved.ok).toBe(false);
+    expect(resolved.ok ? '' : resolved.message).toContain('Neither "ashx" nor "ash" is on PATH');
+  });
+
+  it('does not fall back when ashx answered and is not ASH', () => {
+    // A name that resolved to something else is an error to report. Quietly
+    // scanning with a different program would hide it.
+    const probed: string[] = [];
+    const run: CommandRunner = (executable) => {
+      probed.push(executable);
+      return { status: 2, stdout: '', stderr: 'ashx: 0: Illegal option --' };
+    };
+
+    const resolved = resolveExecutable('', run);
+
+    expect(resolved.ok).toBe(false);
+    expect(probed).toEqual(['ashx']);
+  });
+
+  it('reports why ash failed when ashx is missing and ash is not ASH', () => {
+    const run: CommandRunner = (executable) =>
+      executable === 'ashx'
+        ? {
+            status: null,
+            stdout: '',
+            stderr: '',
+            error: Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
+          }
+        : { status: 2, stdout: '', stderr: 'ash: 0: Illegal option --' };
+
+    const resolved = resolveExecutable('', run);
+
+    expect(resolved.ok ? '' : resolved.message).toContain('Almquist');
+  });
+
+  it('uses a configured executable as given, with no fallback', () => {
+    const { run, probed } = pathWith('ash');
+
+    const resolved = resolveExecutable('ashx', run);
+
+    expect(resolved.ok).toBe(false);
+    expect(resolved.ok ? '' : resolved.message).toContain('not on PATH');
+    expect(probed).toEqual(['ashx']);
+  });
+
+  it('runs a configured full path when it answers as ASH', () => {
+    const { run, probed } = pathWith('/opt/ash/bin/ash');
+
+    expect(resolveExecutable('/opt/ash/bin/ash', run)).toMatchObject({
+      ok: true,
+      executable: '/opt/ash/bin/ash',
+      fellBack: false,
+    });
+    expect(probed).toEqual(['/opt/ash/bin/ash']);
   });
 });
 

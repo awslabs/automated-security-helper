@@ -13,7 +13,14 @@
 
 import { readFileSync } from 'fs';
 import * as path from 'path';
-import { groupByUri, parseAshSarif } from '../src/sarif';
+import {
+  groupByUri,
+  isFailure,
+  isSuppressed,
+  joinUriReference,
+  parseAshSarif,
+  resolveBaseId,
+} from '../src/sarif';
 
 const FIXTURES = path.join(__dirname, 'fixtures');
 
@@ -304,5 +311,161 @@ describe('groupByUri', () => {
 
   it('returns an empty map for no findings', () => {
     expect(groupByUri([]).size).toBe(0);
+  });
+});
+
+describe('a real report with an ASH suppression', () => {
+  // scans/findings is `ash scan --scanners detect-secrets` over the planted secret
+  // with a global_settings.suppressions entry for SECRET-SECRET-KEYWORD. ASH kept
+  // that result in the SARIF with kind "fail" and level "error" and added a
+  // `suppressions` entry, so only `suppressions` says it is hidden.
+  const parsed = parseAshSarif(fixture('scans/findings/ash.sarif'));
+
+  it('publishes the two unsuppressed findings and counts the third', () => {
+    expect(parsed.findings.map((finding) => finding.ruleId).sort()).toEqual([
+      'SECRET-AWS-ACCESS-KEY',
+      'SECRET-BASE64-HIGH-ENTROPY-STRING',
+    ]);
+    expect(parsed.suppressed).toBe(1);
+    expect(parsed.notFailures).toBe(0);
+    expect(parsed.unlocated).toHaveLength(0);
+  });
+
+  it('reads the line ASH reported', () => {
+    expect(new Set(parsed.findings.map((finding) => finding.startLine))).toEqual(new Set([25]));
+  });
+});
+
+describe('isSuppressed', () => {
+  it('is false with no suppressions, or an empty list', () => {
+    expect(isSuppressed({})).toBe(false);
+    expect(isSuppressed({ suppressions: [] })).toBe(false);
+    expect(isSuppressed({ suppressions: 'yes' })).toBe(false);
+  });
+
+  it('honors a suppression whose state is absent, null or accepted', () => {
+    expect(isSuppressed({ suppressions: [{ kind: 'inSource' }] })).toBe(true);
+    expect(isSuppressed({ suppressions: [{ kind: 'external', state: null }] })).toBe(true);
+    expect(isSuppressed({ suppressions: [{ kind: 'external', state: 'accepted' }] })).toBe(true);
+  });
+
+  it('shows a finding whose only suppression is under review or rejected', () => {
+    expect(isSuppressed({ suppressions: [{ kind: 'external', state: 'underReview' }] })).toBe(false);
+    expect(isSuppressed({ suppressions: [{ kind: 'external', state: 'rejected' }] })).toBe(false);
+  });
+
+  it('honors one effective suppression among ineffective ones', () => {
+    expect(
+      isSuppressed({ suppressions: [{ state: 'rejected' }, { state: 'accepted' }] }),
+    ).toBe(true);
+  });
+
+  it('honors a suppression it cannot read, at either depth', () => {
+    expect(isSuppressed({ suppressions: [12345] })).toBe(true);
+    expect(isSuppressed({ suppressions: [{ state: 12345 }] })).toBe(true);
+  });
+});
+
+describe('isFailure', () => {
+  it('reads an absent kind as fail, the model default', () => {
+    expect(isFailure({})).toBe(true);
+    expect(isFailure({ kind: null })).toBe(true);
+    expect(isFailure({ kind: 'fail' })).toBe(true);
+  });
+
+  it('is false for the five kinds that are not problems', () => {
+    for (const kind of ['pass', 'notApplicable', 'review', 'open', 'informational']) {
+      expect(isFailure({ kind })).toBe(false);
+    }
+    expect(isFailure({ kind: 7 })).toBe(false);
+  });
+});
+
+describe('suppressed and non-failure results in a parse', () => {
+  it('are counted and never become findings, even without a location', () => {
+    const text = JSON.stringify({
+      runs: [
+        {
+          results: [
+            { ruleId: 'A', suppressions: [{ kind: 'inSource' }] },
+            { ruleId: 'B', kind: 'pass', locations: [{ physicalLocation: { artifactLocation: { uri: 'b.py' } } }] },
+            { ruleId: 'C', locations: [{ physicalLocation: { artifactLocation: { uri: 'c.py' } } }] },
+          ],
+        },
+      ],
+    });
+
+    const parsed = parseAshSarif(text);
+
+    expect(parsed.findings.map((finding) => finding.ruleId)).toEqual(['C']);
+    expect(parsed.suppressed).toBe(1);
+    expect(parsed.notFailures).toBe(1);
+    // The suppressed result had no location. Counting it as unlocated would fire
+    // the "named no file" warning about a finding nobody wanted to see.
+    expect(parsed.unlocated).toHaveLength(0);
+  });
+});
+
+describe('uriBaseId', () => {
+  const run = (artifactLocation: Record<string, unknown>, originalUriBaseIds?: unknown): string =>
+    JSON.stringify({
+      runs: [
+        {
+          originalUriBaseIds,
+          results: [{ ruleId: 'R', locations: [{ physicalLocation: { artifactLocation } }] }],
+        },
+      ],
+    });
+
+  it('resolves the base the run declares, as workspace mode writes it', () => {
+    const [finding] = parseAshSarif(
+      run({ uri: 'src/app.py', uriBaseId: 'PROJECTROOT' }, { PROJECTROOT: { uri: 'file:///ws/api/' } }),
+    ).findings;
+
+    expect(finding.uriBaseId).toBe('PROJECTROOT');
+    expect(finding.baseUri).toBe('file:///ws/api/');
+  });
+
+  it('leaves the base unresolved when the run does not declare it', () => {
+    const [finding] = parseAshSarif(run({ uri: 'src/app.py', uriBaseId: 'SRCROOT' })).findings;
+
+    expect(finding.uriBaseId).toBe('SRCROOT');
+    expect(finding.baseUri).toBeUndefined();
+  });
+
+  it('ignores an empty uriBaseId', () => {
+    const [finding] = parseAshSarif(run({ uri: 'a.py', uriBaseId: '' })).findings;
+
+    expect(finding.uriBaseId).toBeUndefined();
+  });
+});
+
+describe('resolveBaseId', () => {
+  it('follows a nested base id', () => {
+    const table = {
+      ROOT: { uri: 'file:///ws/' },
+      API: { uri: 'api/', uriBaseId: 'ROOT' },
+    };
+    expect(resolveBaseId(table, 'API')).toBe('file:///ws/api/');
+  });
+
+  it('returns a relative base as-is when it names no parent', () => {
+    expect(resolveBaseId({ API: { uri: 'api/' } }, 'API')).toBe('api/');
+  });
+
+  it('gives up on a cycle, an undeclared parent, or a malformed entry', () => {
+    expect(resolveBaseId({ A: { uri: 'a/', uriBaseId: 'B' }, B: { uri: 'b/', uriBaseId: 'A' } }, 'A')).toBeUndefined();
+    expect(resolveBaseId({ A: { uri: 'a/', uriBaseId: 'MISSING' } }, 'A')).toBeUndefined();
+    expect(resolveBaseId({ A: 'file:///ws/' }, 'A')).toBeUndefined();
+    expect(resolveBaseId({ A: { uri: '' } }, 'A')).toBeUndefined();
+    expect(resolveBaseId(undefined, 'A')).toBeUndefined();
+  });
+});
+
+describe('joinUriReference', () => {
+  it('puts exactly one separator between the parts', () => {
+    expect(joinUriReference('file:///ws/', 'a.py')).toBe('file:///ws/a.py');
+    expect(joinUriReference('file:///ws', 'a.py')).toBe('file:///ws/a.py');
+    expect(joinUriReference('C:\\ws\\', 'a.py')).toBe('C:\\ws\\a.py');
   });
 });

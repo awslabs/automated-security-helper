@@ -14,9 +14,11 @@
  * different fact from a clean scan, and both are visible from the return value.
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
+import { URL } from 'url';
 import * as vscode from 'vscode';
-import { AshFinding, ParsedSarif, SarifLevel, groupByUri } from './sarif';
+import { AshFinding, ParsedSarif, SarifLevel, joinUriReference } from './sarif';
 
 /** The `source` shown beside each diagnostic in the Problems panel. */
 export const DIAGNOSTIC_SOURCE = 'ASH';
@@ -28,6 +30,16 @@ export interface PublishSummary {
   readonly diagnostics: number;
   /** Findings that named no file and so could not be placed. */
   readonly unlocated: number;
+  /**
+   * Findings that named a file this machine has no path for: another URI
+   * scheme, a UNC share off Windows, a Windows path off Windows. Counted and
+   * surfaced, because they are findings the Problems panel cannot show.
+   */
+  readonly unresolved: number;
+  /** Results ASH suppressed. Never published. */
+  readonly suppressed: number;
+  /** Results whose `kind` is not `fail`. Never published. */
+  readonly notFailures: number;
 }
 
 const SEVERITY: Readonly<Record<SarifLevel, vscode.DiagnosticSeverity>> = {
@@ -77,24 +89,147 @@ export function toDiagnostic(finding: AshFinding): vscode.Diagnostic {
   return diagnostic;
 }
 
+/** Whether a path exists. Injected so every arm of the resolver is reachable from a test. */
+export type ExistsOracle = (candidate: string) => boolean;
+
+/** The host platform, injected for the same reason. Only `win32` changes behavior. */
+export type Platform = NodeJS.Platform;
+
 /**
- * Resolves a SARIF `artifactLocation.uri` against the scanned directory.
- *
- * ASH writes paths relative to `--source-dir` -- measured: `planted_secret.py`
- * for a file at the root of the scanned tree. The absolute and `file:` forms are
- * handled anyway because SARIF permits them and a future scanner plugin may
- * produce one; resolving those against the workspace root would build a path
- * like `/workspace//home/user/file.py` that matches no open document, so the
- * diagnostic would vanish rather than error.
+ * Any URI scheme of TWO or more characters. RFC 3986 allows one, but a single
+ * letter and a colon is a Windows drive (`C:\src\app.py`), and reading that as a
+ * scheme would discard every absolute Windows path.
  */
-export function resolveUri(sourceDir: string, sarifUri: string): vscode.Uri {
-  if (sarifUri.startsWith('file:')) {
-    return vscode.Uri.parse(sarifUri);
+const URI_SCHEME = /^[a-z][a-z0-9+.-]+:/i;
+
+/** `C:\x`, `C:/x`. A drive-letter path, absolute on Windows. */
+const WINDOWS_DRIVE_PATH = /^[a-z]:[\\/]/i;
+
+/**
+ * `\\server\share\x`. A UNC path, absolute on Windows. Backslashes only: on a
+ * POSIX host `//server/share` is an ordinary absolute path.
+ */
+const UNC_PATH = /^\\\\[^\\/]+[\\/]/;
+
+function pathFor(platform: Platform): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
+/**
+ * Resolves a finding's location to a file, or returns undefined when it names
+ * nothing on this machine.
+ *
+ * The SARIF `artifactLocation.uri` arrives in five shapes, and each is handled
+ * rather than forced into a path:
+ *
+ *   - Relative, the shape ASH writes (measured: `planted_secret.py` for a file
+ *     at the root of the scanned tree). Joined onto the scanned directory.
+ *   - Relative to a `uriBaseId`. ASH's workspace mode writes `PROJECTROOT` with a
+ *     project-relative uri and declares `PROJECTROOT` in the run's
+ *     `originalUriBaseIds` as the project's `file://` URI. The parser resolves the
+ *     base; an undeclared base id leaves the uri relative to the scanned directory.
+ *   - `file:` URIs in every RFC 8089 form (`file:///p`, `file:/p`,
+ *     `file://localhost/p`). A Windows drive URI, `file:///C:/x`, becomes `C:/x`.
+ *     A real host is a UNC share, which only Windows can open.
+ *   - Absolute paths, POSIX or Windows. A Windows path on a non-Windows host
+ *     names no local file and is unresolved rather than joined under the root.
+ *   - Any other scheme (`https:`, `urn:`, `data:`) has no file and is unresolved.
+ *
+ * POSIX absolute paths get one heuristic, with an existence check that makes it
+ * monotone. grype writes scan-root-absolute paths such as `/poetry.lock` because
+ * it ran with the source directory as its root; read literally those name files
+ * at the filesystem root. So when the literal path does not exist and the same
+ * path under the scanned directory does, the latter is used. A literal path that
+ * exists is always used as given, and when neither exists the literal path is
+ * kept so the finding stays visible.
+ *
+ * `..` is not clamped: a report can legitimately name a file above the scanned
+ * root, and clamping would move the diagnostic to the wrong file.
+ */
+export function resolveFindingUri(
+  sourceDir: string,
+  finding: Pick<AshFinding, 'uri' | 'baseUri'>,
+  exists: ExistsOracle = fs.existsSync,
+  platform: Platform = process.platform,
+): vscode.Uri | undefined {
+  const raw =
+    finding.baseUri === undefined || isAbsoluteReference(finding.uri, platform)
+      ? finding.uri
+      : joinUriReference(finding.baseUri, finding.uri);
+  const native = pathFor(platform);
+
+  if (/^file:/i.test(raw)) {
+    const fsPath = fileUriToPath(raw, platform);
+    return fsPath === undefined ? undefined : vscode.Uri.file(fsPath);
   }
-  if (path.isAbsolute(sarifUri)) {
-    return vscode.Uri.file(sarifUri);
+  if (URI_SCHEME.test(raw)) {
+    return undefined;
   }
-  return vscode.Uri.file(path.join(sourceDir, sarifUri));
+  if (WINDOWS_DRIVE_PATH.test(raw) || UNC_PATH.test(raw)) {
+    return platform === 'win32' ? vscode.Uri.file(native.normalize(raw)) : undefined;
+  }
+  if (native.isAbsolute(raw)) {
+    return vscode.Uri.file(resolveScanRootAbsolute(sourceDir, raw, exists, native));
+  }
+  return vscode.Uri.file(native.resolve(sourceDir, raw));
+}
+
+/** Whether a uri stands on its own, so a base id must not be prefixed onto it. */
+function isAbsoluteReference(uri: string, platform: Platform): boolean {
+  return (
+    URI_SCHEME.test(uri) ||
+    WINDOWS_DRIVE_PATH.test(uri) ||
+    UNC_PATH.test(uri) ||
+    pathFor(platform).isAbsolute(uri)
+  );
+}
+
+/**
+ * The local path a `file:` URI names, or undefined.
+ *
+ * Malformed URIs and malformed percent-encoding are refused rather than used raw:
+ * the undecoded form names a different file than the producer meant.
+ */
+export function fileUriToPath(raw: string, platform: Platform): string | undefined {
+  let parsed: URL;
+  let pathname: string;
+  try {
+    parsed = new URL(raw);
+    pathname = decodeURIComponent(parsed.pathname);
+  } catch {
+    return undefined;
+  }
+  const host = parsed.hostname;
+  if (host !== '' && host.toLowerCase() !== 'localhost') {
+    // A real host is a UNC share. Windows can open `\\server\share\x`; anywhere
+    // else there is no local file it can mean, and taking only the pathname
+    // would name a different file on this machine.
+    return platform === 'win32'
+      ? path.win32.normalize(`\\\\${host}${pathname}`)
+      : undefined;
+  }
+  // `file:///C:/x` parses to the pathname `/C:/x`. The leading slash is URI
+  // syntax, not part of the Windows path.
+  if (/^\/[a-z]:\//i.test(pathname)) {
+    const drivePath = pathname.slice(1);
+    return platform === 'win32' ? path.win32.normalize(drivePath) : undefined;
+  }
+  return platform === 'win32' ? path.win32.normalize(pathname) : pathname;
+}
+
+function resolveScanRootAbsolute(
+  sourceDir: string,
+  raw: string,
+  exists: ExistsOracle,
+  native: path.PlatformPath,
+): string {
+  if (exists(raw)) {
+    return raw;
+  }
+  // `join`, not `resolve`: resolve discards the first argument when the second is
+  // absolute, which is the misreading this exists to correct.
+  const underRoot = native.join(sourceDir, raw);
+  return exists(underRoot) ? underRoot : raw;
 }
 
 /**
@@ -108,19 +243,40 @@ export function publishFindings(
   collection: vscode.DiagnosticCollection,
   sourceDir: string,
   parsed: ParsedSarif,
+  exists: ExistsOracle = fs.existsSync,
+  platform: Platform = process.platform,
 ): PublishSummary {
   collection.clear();
 
-  let diagnostics = 0;
-  const grouped = groupByUri(parsed.findings);
-  for (const [sarifUri, findings] of grouped) {
-    const uri = resolveUri(sourceDir, sarifUri);
-    collection.set(
-      uri,
-      findings.map((finding) => toDiagnostic(finding)),
-    );
-    diagnostics += findings.length;
+  // Keyed on the resolved URI's string form: two SARIF spellings of one file
+  // (`a.py` and `file:///ws/a.py`) must land in one entry, because `set` on the
+  // same key a second time would replace the first group rather than add to it.
+  const byFile = new Map<string, { uri: vscode.Uri; items: vscode.Diagnostic[] }>();
+  let unresolved = 0;
+  for (const finding of parsed.findings) {
+    const uri = resolveFindingUri(sourceDir, finding, exists, platform);
+    if (uri === undefined) {
+      unresolved += 1;
+      continue;
+    }
+    const key = uri.toString();
+    const bucket = byFile.get(key) ?? { uri, items: [] };
+    bucket.items.push(toDiagnostic(finding));
+    byFile.set(key, bucket);
   }
 
-  return { files: grouped.size, diagnostics, unlocated: parsed.unlocated.length };
+  let diagnostics = 0;
+  for (const { uri, items } of byFile.values()) {
+    collection.set(uri, items);
+    diagnostics += items.length;
+  }
+
+  return {
+    files: byFile.size,
+    diagnostics,
+    unlocated: parsed.unlocated.length,
+    unresolved,
+    suppressed: parsed.suppressed,
+    notFailures: parsed.notFailures,
+  };
 }

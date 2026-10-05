@@ -2,7 +2,7 @@
   "//": "The jest block below is deliberately here rather than in a jest.config.js. See README.md, 'Why the jest configuration lives in package.json', for the reason and for the reasoning that would otherwise be a comment on `roots`.",
   "name": "ash-vscode",
   "displayName": "Automated Security Helper",
-  "description": "Runs the ash CLI over the open workspace and reports its SARIF findings as editor diagnostics. Ships no scanners and no copy of ASH.",
+  "description": "Runs the ASH CLI over the open workspace and reports its SARIF findings as editor diagnostics. Ships no scanners and no copy of ASH.",
   "version": "3.7.0",
   "license": "Apache-2.0",
   "publisher": "awslabs",
@@ -45,8 +45,9 @@
       "properties": {
         "ash.executablePath": {
           "type": "string",
-          "default": "ash",
-          "markdownDescription": "The ASH executable to run. `ash` resolves through PATH. On Windows with MSYS2 or Git Bash on PATH, a bare `ash` can resolve to the Almquist shell instead of ASH; set this to `automated-security-helper`, which ASH installs as a permanent alias for exactly that case."
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The ASH executable to run. Empty (the default) runs `ashx` from PATH, and runs `ash` instead when `ashx` is not installed, with a one-time notice. Any other value is run exactly as given, with no fallback. On Windows with MSYS2 or Git Bash on PATH, a bare `ash` can resolve to the Almquist shell instead of ASH; set this to `automated-security-helper`, which ASH installs as a permanent alias for exactly that case.\n\nMachine-scoped: this names a program that gets executed, so a cloned repository cannot set it from its own `.vscode/settings.json`."
         },
         "ash.outputDirectory": {
           "type": "string",

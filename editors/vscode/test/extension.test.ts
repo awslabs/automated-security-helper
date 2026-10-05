@@ -9,24 +9,22 @@
  * A fixture carrying a planted AWS secret must produce a NON-ZERO count of
  * diagnostics in the editor model. Not "the command completed", not "a SARIF file
  * appeared": both of those are satisfied by a scan that saw nothing, because an
- * empty ASH scan exits 0 and still writes a report. The same reasoning is written
- * out in packaging/deb/verify-in-container.sh, which asserts a non-zero SARIF
- * result count for the same reason at the package layer.
- *
- * The negative control is the other half. `clean-scan.sarif` is the same measured
- * document with `results` emptied, and the test below requires it to produce ZERO
- * diagnostics. Without that, an assertion of `>= 0` would pass on everything and
- * an assertion of `> 0` could be satisfied by a mapper that invented findings.
+ * empty ASH scan exits 0 and still writes a report. `clean-scan.sarif` and
+ * scans/clean are the negative controls and must produce ZERO.
  *
  * WHERE THE FIXTURES CAME FROM
  *
- * `planted-secret.sarif` is the real output of
- * `ash scan --source-dir . --output-dir .ash/ash_output --scanners detect-secrets
- * --no-progress` over test/fixtures/planted_secret.py, with the scanning
- * machine's absolute path replaced by /workspace. That run exited 2 -- ASH's
- * "actionable findings detected" code -- and reported 3 results. Both numbers are
- * asserted below, so a fixture edited to something ASH would not produce fails
- * rather than passes.
+ * `planted-secret.sarif` is the real output of `ash scan --scanners detect-secrets
+ * --no-progress` over an earlier, two-line version of test/fixtures/planted_secret.py,
+ * with the scanning machine's path replaced by /workspace. The directories under
+ * test/fixtures/scans/ are real `ash scan` runs captured on this branch, with the
+ * source and output directories replaced by __ASH_SOURCE_DIR__ and
+ * __ASH_OUTPUT_DIR__ and each run's exit status in `exit-code`:
+ *
+ *   findings    exit 2  --scanners detect-secrets, one result suppressed in config
+ *   clean       exit 0  --scanners detect-secrets over a file with no secret
+ *   incomplete  exit 1  --scanners semgrep,detect-secrets with semgrep unable to run
+ *   missing     exit 1  --scanners cfn-nag,detect-secrets with cfn-nag not installed
  */
 
 import * as path from 'path';
@@ -35,6 +33,8 @@ import { CommandResult } from '../src/ash-cli';
 import {
   COMMAND_CLEAR,
   COMMAND_SCAN,
+  FALLBACK_NOTICE,
+  FALLBACK_NOTICE_KEY,
   ScanHost,
   ScanSettings,
   activate,
@@ -44,45 +44,84 @@ import {
   readSettings,
   runScanCommand,
 } from '../src/extension';
-import { DiagnosticCollection, OutputChannel, resetState, state } from './vscode-stub';
-import { readFileSync } from 'fs';
+import { DiagnosticCollection, Memento, OutputChannel, resetState, state } from './vscode-stub';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 
 const FIXTURES = path.join(__dirname, 'fixtures');
 const SOURCE_DIR = '/workspace';
 const OUTPUT_DIR = path.join(SOURCE_DIR, '.ash', 'ash_output');
 const SARIF_FILE = path.join(OUTPUT_DIR, 'reports', 'ash.sarif');
+const AGGREGATED_FILE = path.join(OUTPUT_DIR, 'ash_aggregated_results.json');
 
 const ASH_VERSION_OUTPUT = 'awslabs/automated-security-helper v3.7.0';
 
 const SETTINGS: ScanSettings = {
-  executablePath: 'ash',
+  executablePath: '',
   outputDirectory: '.ash/ash_output',
   extraArguments: [],
 };
 
+/** One captured scan under test/fixtures/scans/, with its paths put back. */
+function capturedScan(name: string): { sarif: string; aggregated: string; exitCode: number } {
+  const dir = path.join(FIXTURES, 'scans', name);
+  const restore = (text: string): string =>
+    text.split('__ASH_SOURCE_DIR__').join(SOURCE_DIR).split('__ASH_OUTPUT_DIR__').join(OUTPUT_DIR);
+  return {
+    sarif: restore(readFileSync(path.join(dir, 'ash.sarif'), 'utf8')),
+    aggregated: restore(readFileSync(path.join(dir, 'ash_aggregated_results.json'), 'utf8')),
+    exitCode: Number(readFileSync(path.join(dir, 'exit-code'), 'utf8').trim()),
+  };
+}
+
 interface HarnessOptions {
-  /** Which fixture the fake ASH "wrote" to the SARIF path, if any. */
+  /** What the scan writes to the SARIF path, if anything. */
   readonly sarifFixture?: string;
-  /** Raw SARIF text, when a fixture would not express the case. */
   readonly sarifText?: string;
+  /** What the scan writes to ash_aggregated_results.json, if anything. */
+  readonly aggregatedText?: string;
   /** Exit status of the scan invocation. ASH exits 2 when it finds something. */
   readonly scanStatus?: number | null;
   readonly scanError?: Error;
-  /** Output of `--version`. Defaults to the measured real string. */
+  /** Executables on the fake PATH. Each answers --version as ASH. */
+  readonly onPath?: readonly string[];
+  /** Output of `--version`, for every executable on PATH. */
   readonly versionOutput?: string;
-  readonly versionError?: Error;
+  /** Files present before the scan, as left by a previous run. */
+  readonly previous?: Readonly<Record<string, string>>;
+  /** Files the extension cannot delete. */
+  readonly undeletable?: readonly string[];
+  /** Whether the scan rewrites the files it writes (false leaves the previous ones). */
+  readonly scanWrites?: boolean;
+  readonly memento?: Memento;
 }
 
 interface Harness {
   readonly host: ScanHost;
   readonly collection: DiagnosticCollection;
   readonly invocations: { executable: string; args: readonly string[] }[];
+  readonly lines: string[];
+  readonly files: Map<string, { text: string; mtime: number }>;
+  readonly memento: Memento;
 }
 
 function harness(options: HarnessOptions = {}): Harness {
   const collection = new DiagnosticCollection('ash');
   const invocations: { executable: string; args: readonly string[] }[] = [];
   const lines: string[] = [];
+  const memento = options.memento ?? new Memento();
+  const onPath = options.onPath ?? ['ashx'];
+
+  // A filesystem with a clock, so freshness is decided by real mtime comparisons.
+  let clock = 1000;
+  const files = new Map<string, { text: string; mtime: number }>();
+  for (const [file, text] of Object.entries(options.previous ?? {})) {
+    files.set(file, { text, mtime: clock });
+  }
+  const write = (file: string, text: string): void => {
+    clock += 1;
+    files.set(file, { text, mtime: clock });
+  };
 
   const sarifText =
     options.sarifText ??
@@ -92,19 +131,28 @@ function harness(options: HarnessOptions = {}): Harness {
 
   const run = (executable: string, args: readonly string[]): CommandResult => {
     invocations.push({ executable, args });
-    if (args[0] === '--version') {
+    if (!onPath.includes(executable)) {
       return {
-        status: options.versionError === undefined ? 0 : null,
-        stdout: options.versionOutput ?? ASH_VERSION_OUTPUT,
+        status: null,
+        stdout: '',
         stderr: '',
-        error: options.versionError,
+        error: Object.assign(new Error(`spawnSync ${executable} ENOENT`), { code: 'ENOENT' }),
       };
+    }
+    if (args[0] === '--version') {
+      return { status: 0, stdout: options.versionOutput ?? ASH_VERSION_OUTPUT, stderr: '' };
+    }
+    if (options.scanWrites !== false) {
+      if (sarifText !== undefined) {
+        write(SARIF_FILE, sarifText);
+      }
+      if (options.aggregatedText !== undefined) {
+        write(AGGREGATED_FILE, options.aggregatedText);
+      }
     }
     return {
       // `?? 2` would be wrong here: `null` is the status of a process killed by a
-      // signal and is one of the cases under test, and nullish coalescing would
-      // quietly turn it into 2. The `in` check keeps "not specified" and
-      // "specified as null" apart.
+      // signal and is one of the cases under test.
       status: 'scanStatus' in options ? (options.scanStatus as number | null) : 2,
       stdout: 'scan output',
       stderr: '',
@@ -115,21 +163,48 @@ function harness(options: HarnessOptions = {}): Harness {
   return {
     collection,
     invocations,
+    lines,
+    files,
+    memento,
     host: {
       collection: collection as unknown as vscode.DiagnosticCollection,
       run,
       readFile: (file) => {
-        if (file !== SARIF_FILE || sarifText === undefined) {
-          throw new Error(`unexpected read of ${file}`);
+        const entry = files.get(file);
+        if (entry === undefined) {
+          throw new Error(`ENOENT: ${file}`);
         }
-        return sarifText;
+        return entry.text;
       },
-      fileExists: (file) => file === SARIF_FILE && sarifText !== undefined,
+      mtimeMs: (file) => files.get(file)?.mtime,
+      removeFile: (file) => {
+        if ((options.undeletable ?? []).includes(file)) {
+          return !files.has(file);
+        }
+        files.delete(file);
+        return true;
+      },
       log: (line) => lines.push(line),
       showError: (message) => state.errors.push(message),
+      showWarning: (message) => state.warnings.push(message),
       showInfo: (message) => state.infos.push(message),
+      fallbackNoticeShown: () => memento.get<boolean>(FALLBACK_NOTICE_KEY, false),
+      recordFallbackNoticeShown: () => {
+        void memento.update(FALLBACK_NOTICE_KEY, true);
+      },
     },
   };
+}
+
+/** A harness whose scan writes one captured run, exit status included. */
+function captured(name: string, overrides: HarnessOptions = {}): Harness {
+  const scan = capturedScan(name);
+  return harness({
+    sarifText: scan.sarif,
+    aggregatedText: scan.aggregated,
+    scanStatus: scan.exitCode,
+    ...overrides,
+  });
 }
 
 beforeEach(() => {
@@ -154,7 +229,14 @@ describe('a fixture with a planted secret reaches the editor model', () => {
 
     const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
 
-    expect(report.summary).toEqual({ files: 1, diagnostics: 3, unlocated: 0 });
+    expect(report.summary).toEqual({
+      files: 1,
+      diagnostics: 3,
+      unlocated: 0,
+      unresolved: 0,
+      suppressed: 0,
+      notFailures: 0,
+    });
     expect(collection.totalDiagnostics()).toBe(3);
 
     const uri = vscode.Uri.file(path.join(SOURCE_DIR, 'planted_secret.py'));
@@ -229,14 +311,13 @@ describe('every way a scan can produce nothing is distinguishable from a clean t
     expect(state.errors.join('\n')).toContain('open a folder');
   });
 
-  it('refuses when the executable is not on PATH', () => {
-    const enoent = Object.assign(new Error('spawnSync ash ENOENT'), { code: 'ENOENT' });
-    const { host } = harness({ versionError: enoent });
+  it('refuses when neither ashx nor ash is on PATH', () => {
+    const { host } = harness({ onPath: [] });
 
     const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
 
     expect(report.status).toBe('wrong-executable');
-    expect(state.errors.join('\n')).toContain('not on PATH');
+    expect(state.errors.join('\n')).toContain('Neither "ashx" nor "ash" is on PATH');
   });
 
   it('refuses when the Almquist shell answered instead of ASH', () => {
@@ -254,14 +335,28 @@ describe('every way a scan can produce nothing is distinguishable from a clean t
     expect(shown).toContain('Almquist');
   });
 
-  it('reports a scan that exited 1 rather than publishing a stale report', () => {
-    const { host } = harness({ sarifFixture: 'planted-secret.sarif', scanStatus: 1 });
+  it('reports an exit 1 that wrote no report as a crash', () => {
+    const { host, collection } = harness({ scanStatus: 1 });
 
     const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
 
     expect(report.status).toBe('scan-failed');
-    expect(report.detail).toContain('did not complete');
+    expect(report.detail).toContain('exited 1 and wrote no SARIF report');
+    expect(collection.totalDiagnostics()).toBe(0);
     expect(state.errors.join('\n')).toContain('ASH:');
+  });
+
+  it('reports exit 3 and 4 as failures even with a report on disk', () => {
+    for (const scanStatus of [3, 4]) {
+      resetState();
+      const { host, collection } = harness({ sarifFixture: 'planted-secret.sarif', scanStatus });
+
+      const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+      expect(report.status).toBe('scan-failed');
+      expect(report.detail).toContain(`exit ${scanStatus}`);
+      expect(collection.totalDiagnostics()).toBe(0);
+    }
   });
 
   it('reports a scan killed by a signal', () => {
@@ -352,7 +447,7 @@ describe('activation', () => {
   it('registers both commands and hands them a disposable collection', () => {
     const subscriptions: { dispose(): void }[] = [];
 
-    activate({ subscriptions } as unknown as vscode.ExtensionContext);
+    activate({ subscriptions, globalState: new Memento() } as unknown as vscode.ExtensionContext);
 
     expect([...state.commands.keys()].sort()).toEqual([COMMAND_CLEAR, COMMAND_SCAN]);
     expect(state.collections).toHaveLength(1);
@@ -362,7 +457,7 @@ describe('activation', () => {
   });
 
   it('scans through the registered command, and reports no workspace when none is open', () => {
-    activate({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+    activate({ subscriptions: [], globalState: new Memento() } as unknown as vscode.ExtensionContext);
 
     const report = state.commands.get(COMMAND_SCAN)?.() as { status: string };
 
@@ -370,7 +465,7 @@ describe('activation', () => {
   });
 
   it('clears findings through the registered command', () => {
-    activate({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+    activate({ subscriptions: [], globalState: new Memento() } as unknown as vscode.ExtensionContext);
     const collection = state.collections[0];
     collection.set(vscode.Uri.file('/workspace/a.py'), [
       new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1), 'x'),
@@ -392,14 +487,16 @@ describe('the real host activate builds', () => {
   it('reads a real file, answers about a real path, and logs to the channel', () => {
     const collection = new DiagnosticCollection('ash');
     const channel = new OutputChannel('ASH');
+    const memento = new Memento();
     const host = createScanHost(
       collection as unknown as vscode.DiagnosticCollection,
       channel as unknown as vscode.OutputChannel,
+      memento as unknown as vscode.Memento,
     );
 
     const fixture = path.join(FIXTURES, 'clean-scan.sarif');
-    expect(host.fileExists(fixture)).toBe(true);
-    expect(host.fileExists(path.join(FIXTURES, 'absent.sarif'))).toBe(false);
+    expect(host.mtimeMs(fixture)).toBeGreaterThan(0);
+    expect(host.mtimeMs(path.join(FIXTURES, 'absent.sarif'))).toBeUndefined();
     // utf8 and not a Buffer: `readFileSync` without an encoding returns bytes,
     // and JSON.parse on a Buffer works by coercion, which would hide a real
     // encoding bug until a non-ASCII path appeared in a message.
@@ -410,9 +507,37 @@ describe('the real host activate builds', () => {
     expect(channel.lines).toEqual(['hello']);
 
     host.showError('bad');
+    host.showWarning('careful');
     host.showInfo('good');
     expect(state.errors).toEqual(['bad']);
+    expect(state.warnings).toEqual(['careful']);
     expect(state.infos).toEqual(['good']);
+
+    expect(host.fallbackNoticeShown()).toBe(false);
+    host.recordFallbackNoticeShown();
+    expect(host.fallbackNoticeShown()).toBe(true);
+    expect(memento.values.get(FALLBACK_NOTICE_KEY)).toBe(true);
+  });
+
+  it('removes a real file, and reports an absent one as already gone', () => {
+    const host = createScanHost(
+      new DiagnosticCollection('ash') as unknown as vscode.DiagnosticCollection,
+      new OutputChannel('ASH') as unknown as vscode.OutputChannel,
+      new Memento() as unknown as vscode.Memento,
+    );
+    const dir = mkdtempSync(path.join(tmpdir(), 'ash-vscode-host-'));
+    try {
+      const file = path.join(dir, 'ash.sarif');
+      writeFileSync(file, '{}');
+
+      expect(host.removeFile(file)).toBe(true);
+      expect(host.mtimeMs(file)).toBeUndefined();
+      expect(host.removeFile(file)).toBe(true);
+      // A directory cannot be unlinked; that is a failure to remove, not absence.
+      expect(host.removeFile(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('spawns for real, so a missing executable is reported rather than scanned past', () => {
@@ -421,7 +546,7 @@ describe('the real host activate builds', () => {
     // test that proves activate wired the real spawnSyncRunner in.
     state.workspaceFolders = [{ uri: { fsPath: FIXTURES } }];
     state.configuration.set('ash.executablePath', 'ash-that-is-not-installed-anywhere');
-    activate({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+    activate({ subscriptions: [], globalState: new Memento() } as unknown as vscode.ExtensionContext);
 
     const report = state.commands.get(COMMAND_SCAN)?.() as { status: string; detail: string };
 
@@ -435,7 +560,7 @@ describe('the real host activate builds', () => {
 describe('settings and workspace resolution', () => {
   it('fall back to the defaults package.json contributes', () => {
     expect(readSettings()).toEqual({
-      executablePath: 'ash',
+      executablePath: '',
       outputDirectory: '.ash/ash_output',
       extraArguments: [],
     });
@@ -453,12 +578,18 @@ describe('settings and workspace resolution', () => {
     });
   });
 
-  it('replace an empty configured value with the default rather than spawning nothing', () => {
-    state.configuration.set('ash.executablePath', '');
+  it('read an empty or blank executable as unset, which selects ashx then ash', () => {
+    state.configuration.set('ash.executablePath', '  ');
     state.configuration.set('ash.outputDirectory', '');
 
-    expect(readSettings().executablePath).toBe('ash');
+    expect(readSettings().executablePath).toBe('');
     expect(readSettings().outputDirectory).toBe('.ash/ash_output');
+  });
+
+  it('read a null executable as unset', () => {
+    state.configuration.set('ash.executablePath', null);
+
+    expect(readSettings().executablePath).toBe('');
   });
 
   it('report no source directory when no folder is open', () => {
@@ -469,5 +600,271 @@ describe('settings and workspace resolution', () => {
 
     state.workspaceFolders = [{ uri: { fsPath: '/workspace' } }];
     expect(currentSourceDir()).toBe('/workspace');
+  });
+});
+
+describe('the exit-code contract with real ASH output', () => {
+  it('publishes an exit 2 scan and leaves the suppressed result out', () => {
+    const { host, collection } = captured('findings');
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('ok');
+    expect(report.exitCode).toBe(2);
+    expect(report.coverage?.coverage_complete).toBe(true);
+    expect(report.summary).toMatchObject({ diagnostics: 2, suppressed: 1, files: 1 });
+    const diagnostics = collection.get(vscode.Uri.file(path.join(SOURCE_DIR, 'planted_secret.py')));
+    expect(diagnostics?.map((diagnostic) => diagnostic.code).sort()).toEqual([
+      'SECRET-AWS-ACCESS-KEY',
+      'SECRET-BASE64-HIGH-ENTROPY-STRING',
+    ]);
+    expect(state.warnings).toEqual([]);
+  });
+
+  it('reports an exit 0 scan with nothing found as clean, the negative control', () => {
+    const { host, collection } = captured('clean');
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('ok');
+    expect(report.exitCode).toBe(0);
+    expect(collection.totalDiagnostics()).toBe(0);
+    expect(state.warnings).toEqual([]);
+  });
+
+  it('publishes the partial findings of an exit 1 scan and reports it incomplete', () => {
+    const { host, collection } = captured('incomplete');
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('incomplete');
+    expect(report.exitCode).toBe(1);
+    // Never a plain failure when results exist: the findings are on screen.
+    expect(collection.totalDiagnostics()).toBe(3);
+    expect(report.coverage?.coverage_complete).toBe(false);
+    expect(report.coverage?.incomplete_scanners.map((row) => row.scanner)).toEqual(['semgrep']);
+    const warning = state.warnings.join('\n');
+    expect(warning).toContain('incomplete (exit 1)');
+    expect(warning).toContain('scanner semgrep: ERROR');
+    expect(warning).toContain('may not be all of them');
+    expect(state.errors).toEqual([]);
+  });
+
+  it('says an empty panel is not clean when an exit 1 scan found nothing', () => {
+    const { host, collection } = captured('missing');
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('incomplete');
+    expect(collection.totalDiagnostics()).toBe(0);
+    expect(report.coverage?.incomplete_scanners.map((row) => row.scanner)).toEqual(['cfn-nag']);
+    expect(state.warnings.join('\n')).toContain('not the same as clean');
+  });
+
+  it('reports incomplete from coverage_complete even when the gate let ASH exit 0', () => {
+    // fail_on_incomplete_scanners: false makes ASH exit 0 over a MISSING scanner.
+    // The gap is still a fact the user needs.
+    const { host } = captured('missing', { scanStatus: 0 });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('incomplete');
+    expect(report.detail).toContain('exit 0');
+    expect(report.detail).toContain('scanner cfn-nag: MISSING');
+  });
+
+  it('reports an exit 1 scan whose results file is missing as incomplete, cause unknown', () => {
+    const scan = capturedScan('incomplete');
+    const { host, collection } = harness({ sarifText: scan.sarif, scanStatus: 1 });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('incomplete');
+    expect(report.coverage).toBeNull();
+    expect(collection.totalDiagnostics()).toBe(3);
+    expect(report.detail).toContain('which part is missing is unknown');
+  });
+
+  it('reports an exit 1 scan whose results name no gap, rather than calling it complete', () => {
+    const scan = capturedScan('clean');
+    const { host } = harness({ sarifText: scan.sarif, aggregatedText: scan.aggregated, scanStatus: 1 });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('incomplete');
+    expect(report.coverage?.coverage_complete).toBe(true);
+    expect(report.detail).toContain('names no gap this extension recognizes');
+  });
+
+  it('warns that coverage is unknown when an exit 2 scan wrote no results file', () => {
+    const { host } = harness({ sarifFixture: 'planted-secret.sarif', scanStatus: 2 });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('ok');
+    expect(report.coverage).toBeNull();
+    expect(state.warnings.join('\n')).toContain('could not confirm that every selected scanner ran');
+  });
+
+  it('treats an unparseable results file as unknown coverage, not as complete', () => {
+    const { host, lines } = harness({
+      sarifFixture: 'planted-secret.sarif',
+      aggregatedText: 'not json',
+    });
+
+    expect(runScanCommand(host, SOURCE_DIR, SETTINGS).coverage).toBeNull();
+    expect(lines.join('\n')).toContain('is not an ASH aggregated results document');
+  });
+});
+
+describe('a report from a previous run is never shown as this one', () => {
+  const OLD = { [SARIF_FILE]: readFileSync(path.join(FIXTURES, 'planted-secret.sarif'), 'utf8') };
+
+  it('deletes the previous report first, so a run that writes none reads as no report', () => {
+    const { host, collection, files } = harness({ previous: OLD, scanStatus: 0, scanWrites: false });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('no-report');
+    expect(files.has(SARIF_FILE)).toBe(false);
+    expect(collection.totalDiagnostics()).toBe(0);
+  });
+
+  it('refuses a report it could not delete and the scan did not rewrite', () => {
+    const { host, collection, lines } = harness({
+      previous: OLD,
+      undeletable: [SARIF_FILE],
+      scanStatus: 2,
+      scanWrites: false,
+    });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('stale-report');
+    expect(report.detail).toContain('from a previous scan');
+    expect(collection.totalDiagnostics()).toBe(0);
+    expect(lines.join('\n')).toContain('comparing modification times');
+  });
+
+  it('accepts a report it could not delete when the scan rewrote it', () => {
+    const { host, collection } = harness({
+      previous: OLD,
+      undeletable: [SARIF_FILE],
+      sarifFixture: 'planted-secret.sarif',
+    });
+
+    expect(runScanCommand(host, SOURCE_DIR, SETTINGS).status).toBe('ok');
+    expect(collection.totalDiagnostics()).toBe(3);
+  });
+
+  it('does not read a stale results file for coverage', () => {
+    const scan = capturedScan('missing');
+    const { host, lines } = harness({
+      previous: { [AGGREGATED_FILE]: scan.aggregated },
+      undeletable: [AGGREGATED_FILE],
+      sarifFixture: 'planted-secret.sarif',
+    });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    // The stale file names cfn-nag MISSING. Reading it would report a gap this
+    // run may not have.
+    expect(report.coverage).toBeNull();
+    expect(report.status).toBe('ok');
+    expect(lines.join('\n')).toContain('is from a previous run and was not read');
+  });
+
+  it('reports a results file that vanished before it could be read as unknown', () => {
+    const { host } = harness({ sarifFixture: 'planted-secret.sarif', aggregatedText: '{}' });
+    const flaky: ScanHost = {
+      ...host,
+      readFile: (file) => {
+        if (file === AGGREGATED_FILE) {
+          throw new Error('EIO');
+        }
+        return host.readFile(file);
+      },
+    };
+
+    expect(runScanCommand(flaky, SOURCE_DIR, SETTINGS).coverage).toBeNull();
+  });
+});
+
+describe('choosing the executable', () => {
+  it('runs ashx by default', () => {
+    const { host, invocations } = captured('findings', { onPath: ['ashx', 'ash'] });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.executable).toBe('ashx');
+    expect(report.fallbackNotice).toBeUndefined();
+    expect(invocations.map((call) => call.executable)).toEqual(['ashx', 'ashx']);
+    expect(state.infos.join('\n')).not.toContain('is not on PATH');
+  });
+
+  it('falls back to ash when ashx is not installed, and says so once', () => {
+    const memento = new Memento();
+    const first = captured('findings', { onPath: ['ash'], memento });
+
+    const report = runScanCommand(first.host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('ok');
+    expect(report.executable).toBe('ash');
+    expect(report.fallbackNotice).toBe('shown');
+    expect(first.invocations.map((call) => call.executable)).toEqual(['ashx', 'ash', 'ash']);
+    expect(state.infos.filter((message) => message === FALLBACK_NOTICE)).toHaveLength(1);
+    expect(memento.values.get(FALLBACK_NOTICE_KEY)).toBe(true);
+
+    // Persisted: a second scan, even through a new host, shows it no more.
+    const second = captured('findings', { onPath: ['ash'], memento });
+    expect(runScanCommand(second.host, SOURCE_DIR, SETTINGS).fallbackNotice).toBe('already-shown');
+    expect(state.infos.filter((message) => message === FALLBACK_NOTICE)).toHaveLength(1);
+    expect(second.lines.join('\n')).toContain('fell back to "ash"');
+  });
+
+  it('uses a configured executable as given and never falls back', () => {
+    const { host, invocations, collection } = captured('findings', { onPath: ['ash'] });
+
+    const report = runScanCommand(host, SOURCE_DIR, { ...SETTINGS, executablePath: 'ashx' });
+
+    expect(report.status).toBe('wrong-executable');
+    expect(invocations.map((call) => call.executable)).toEqual(['ashx']);
+    expect(collection.totalDiagnostics()).toBe(0);
+  });
+
+  it('runs a configured legacy name without the fallback notice', () => {
+    const { host } = captured('findings', { onPath: ['ash'] });
+
+    const report = runScanCommand(host, SOURCE_DIR, { ...SETTINGS, executablePath: 'ash' });
+
+    expect(report.executable).toBe('ash');
+    expect(state.infos).not.toContain(FALLBACK_NOTICE);
+  });
+});
+
+describe('findings the Problems panel cannot show', () => {
+  it('are counted and surfaced when they name a file with no local path', () => {
+    const sarif = JSON.stringify({
+      runs: [
+        {
+          results: [
+            {
+              ruleId: 'REMOTE',
+              level: 'error',
+              locations: [
+                { physicalLocation: { artifactLocation: { uri: 'https://example.com/a.py' } } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const { host, collection } = harness({ sarifText: sarif });
+
+    const report = runScanCommand(host, SOURCE_DIR, SETTINGS);
+
+    expect(report.summary?.unresolved).toBe(1);
+    expect(collection.totalDiagnostics()).toBe(0);
+    expect(state.errors.join('\n')).toContain('named a file with no path on this machine');
   });
 });

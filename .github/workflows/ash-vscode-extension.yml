@@ -53,6 +53,16 @@ on:
       # toolchain this job builds on.
       - ".nvmrc"
       - ".github/workflows/ash-vscode-extension.yml"
+      # The coverage-parity job below runs ASH's own coverage rule over the
+      # extension's fixtures, so a change to that rule must run it. These are the
+      # modules `assess_coverage` reads its verdict through.
+      - "tests/unit/test_vscode_coverage_parity.py"
+      - "automated_security_helper/interactions/run_ash_scan.py"
+      - "automated_security_helper/core/resource_management/scan_tracking.py"
+      - "automated_security_helper/core/unified_metrics.py"
+      - "automated_security_helper/core/scanner_statistics_calculator.py"
+      - "automated_security_helper/utils/content_db_staleness.py"
+      - "automated_security_helper/models/asharp_model.py"
   pull_request:
     branches:
       - "**"
@@ -60,6 +70,13 @@ on:
       - "editors/vscode/**"
       - ".nvmrc"
       - ".github/workflows/ash-vscode-extension.yml"
+      - "tests/unit/test_vscode_coverage_parity.py"
+      - "automated_security_helper/interactions/run_ash_scan.py"
+      - "automated_security_helper/core/resource_management/scan_tracking.py"
+      - "automated_security_helper/core/unified_metrics.py"
+      - "automated_security_helper/core/scanner_statistics_calculator.py"
+      - "automated_security_helper/utils/content_db_staleness.py"
+      - "automated_security_helper/models/asharp_model.py"
   # merge_group takes no paths filter -- GitHub scopes paths to push, pull_request
   # and pull_request_target only. So this leg runs on every queue entry, including
   # entries that touch nothing here. That costs a build on unrelated entries and
@@ -173,3 +190,32 @@ jobs:
           # that uploaded nothing did not do its job, and a warning would leave a
           # green check saying otherwise.
           if-no-files-found: error
+
+  # ASH's own coverage rule over the cases src/coverage.ts is tested against.
+  # coverage_complete is not a field of ash_aggregated_results.json, so the
+  # extension re-derives it, and this is what keeps the re-derivation honest: the
+  # jest suite holds coverage.ts to test/fixtures/coverage-cases/cases.json, and
+  # this holds ASH to the same file. Run here, and not only in the unified unit
+  # matrix, so a push that touches either side runs both on the same commit.
+  coverage-parity:
+    name: coverage verdicts agree with ASH
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Cache off: an Actions cache is readable by anyone on a public repository,
+      # so each one is a recorded decision in .github/scripts/assert-publish-surfaces.py,
+      # and this job does not need one.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Run the parity test
+        run: uv run --group dev pytest tests/unit/test_vscode_coverage_parity.py -q --no-cov -p no:cacheprovider
