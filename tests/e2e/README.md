@@ -102,3 +102,27 @@ run is that measurement. With the override, the trigger rests on an environment 
 that ASH reads the same way everywhere and on a config value the case sets explicitly.
 The simulation covers the platform default that is known to differ. It does not cover
 anything else Windows might do differently.
+
+## Container mode (measured 2026-10-05)
+
+`ashx scan --mode container` runs the case's command on the host, and the host starts
+`docker run` with a fixed set of variables. The case's `ASH_OFFLINE` and
+`OPENGREP_RULES_CACHE_DIR` are not among them, so they never reach the scan inside the
+image. Measured with an image built online from head by `ashx build-image`, scanned
+through `run_case.py ... -- --mode container --no-build`:
+
+| case | extra args | exit | statuses |
+|---|---|---|---|
+| findings | none | 2 | detect-secrets FAILED (3) |
+| clean | none | 0 | detect-secrets PASSED |
+| incomplete | none | 2 | opengrep PASSED, online |
+| incomplete | `--offline` | 1 | opengrep MISSING |
+
+`--offline` is the CLI's own switch for this. It passes `-e ASH_OFFLINE=YES` and
+`--network=none` to the container. Inside, opengrep reads offline rules from the
+image's `OPENGREP_RULES_CACHE_DIR` (`/deps/.opengrep`), which only an image built with
+`--offline` fills. An image built online has it empty, so opengrep fails closed for
+the same reason as on the other channels. `scripts/e2e/container.sh` adds `--offline`
+to the incomplete case for that reason and leaves the case's expectations alone. An
+image built with `--offline` would ship a populated cache, and this trigger would not
+fire there.
