@@ -127,8 +127,11 @@ object AshScanController {
             }
 
             is AshScanRunner.Outcome.Cancelled -> {
-                // Cleared for the same reason as a failure: the report the previous findings
-                // came from was removed before this run started.
+                // Cleared, as after a failure, because nothing on screen would be this run's
+                // result. A cancel during the scan comes after the freshness guard removed the
+                // report the previous findings came from. A cancel during the identity probe
+                // comes before the guard, so that report is still on disk, but it is the
+                // previous run's, and the message below says no findings are shown.
                 service.clear()
                 messages += Message(
                     NotificationType.WARNING,
