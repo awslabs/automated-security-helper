@@ -99,6 +99,24 @@ class TestMasked:
     def test_trailing_whitespace(self, normalizer):
         assert normalizer.text("| a |   \n| b |\t\n") == "| a |\n| b |\n"
 
+    def test_panel_padding_after_a_masked_home(self):
+        # rich pads a help panel to the terminal width, so the space count before the
+        # right border would otherwise still say how long the home directory was.
+        def panel_line(home: str) -> str:
+            line = f"│ --bin-path  [default: {home}/.ash/bin]"
+            return line + " " * (60 - len(line) - 1) + "│"
+
+        rendered = []
+        for home in ("/home/me", "C:\\Users\\runneradmin"):
+            normalizer = SnapshotNormalizer()
+            normalizer.add_literal(home, "HOME")
+            rendered.append(normalizer.text(panel_line(home) + "\nnext"))
+        assert rendered[0] == rendered[1]
+        first = rendered[0].split("\n")[0]
+        assert len(first) == 60
+        assert first.startswith("│ --bin-path  [default: <HOME>/.ash/bin]   ")
+        assert first.endswith(" │")
+
 
 class TestSurvives:
     """What a user reads. A rule that ate any of these would hide a real change."""
@@ -113,6 +131,21 @@ class TestSurvives:
     def test_box_drawing_and_emoji(self, normalizer):
         text = "┏━━━┓ 📊 ✅ ❌"
         assert normalizer.text(text) == text
+
+    def test_panel_width_on_a_masked_line(self):
+        # Only the mask's own length change is undone: a panel drawn wider is still
+        # wider after masking, so a layout change on that line shows in the diff.
+        normalizer = SnapshotNormalizer()
+        normalizer.add_literal("/home/me", "HOME")
+        narrow = normalizer.text("│ [default: /home/me/.ash]  │")
+        wide = normalizer.text("│ [default: /home/me/.ash]      │")
+        assert narrow == "│ [default: <HOME>/.ash]    │"
+        assert wide == "│ [default: <HOME>/.ash]        │"
+
+    def test_markdown_table_padding_after_a_masked_value(self):
+        normalizer = SnapshotNormalizer()
+        normalizer.add_literal("/home/me", "HOME")
+        assert normalizer.text("| /home/me/x | 3 |") == "| <HOME>/x | 3 |"
 
     def test_numbers_that_are_not_durations(self, normalizer):
         text = "B105 v2.1.0 3 findings 10 scanners sha256 1s2"

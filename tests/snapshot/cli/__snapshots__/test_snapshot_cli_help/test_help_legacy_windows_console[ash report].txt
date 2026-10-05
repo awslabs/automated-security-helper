@@ -1,0 +1,56 @@
+
+ Usage: ash report [OPTIONS]
+
+ Generate a report from ASH scan results using the specified reporter plugin.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --format                              <str>                        Report format to generate    │
+│                                                                    (reporter plugin name).      │
+│                                                                    Defaults to 'markdown'.      │
+│                                                                    Examples values: aggregated, │
+│                                                                    text, flat-json, yaml, csv,  │
+│                                                                    html, dict, junitxml,        │
+│                                                                    markdown, sarif, asff, ocsf, │
+│                                                                    cyclonedx, spdx, custom      │
+│                                                                    [default: markdown]          │
+│ --output-dir                          <str>                        The directory to output      │
+│                                                                    results to                   │
+│                                                                    [env var: ASH_OUTPUT_DIR]    │
+│ --log-level                           <QUIET|SIMPLE|ERROR|INFO|VE  Set the log level.           │
+│                                       RBOSE|DEBUG|TRACE>           [default: INFO]              │
+│ --config            -c                <str>                        The path to the              │
+│                                                                    configuration file. By       │
+│                                                                    default, ASH looks for the   │
+│                                                                    following config file names  │
+│                                                                    in the source directory of a │
+│                                                                    scan: ['.ash.yml',           │
+│                                                                    '.ash.yaml', '.ash.json',    │
+│                                                                    'ash.yml', 'ash.yaml',       │
+│                                                                    'ash.json']. Alternatively,  │
+│                                                                    the full path to a config    │
+│                                                                    file can be provided by      │
+│                                                                    setting the ASH_CONFIG       │
+│                                                                    environment variable before  │
+│                                                                    running ASH.                 │
+│                                                                    [env var: ASH_CONFIG]        │
+│ --config-overrides                    <str>                        Configuration overrides      │
+│                                                                    specified as key-value pairs │
+│                                                                    (e.g.,                       │
+│                                                                    'reporters.cloudwatch-logs.… │
+│ --verbose           -v                                             Enable verbose logging       │
+│ --debug             -d                                             Enable debug logging         │
+│ --color                 --no-color                                 Enable/disable colorized     │
+│                                                                    output                       │
+│                                                                    [default: color]             │
+│ --help                                                             Show this message and exit.  │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Structured input ──────────────────────────────────────────────────────────────────────────────┐
+│ --cli-json-input               PATH  Read parameter values from a JSON object: a path, a        │
+│                                      file:// URI, or '-' for stdin. Keys are parameter names    │
+│                                      (output_dir) or long flag spellings (--output-dir). Flags  │
+│                                      given on the command line override the file; the file      │
+│                                      overrides environment variables. Run with                  │
+│                                      --generate-cli-skeleton for a template.                    │
+│ --generate-cli-skeleton              Print a JSON template for --cli-json-input, listing every  │
+│                                      parameter of this command with its default, and exit.      │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

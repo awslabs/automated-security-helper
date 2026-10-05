@@ -25,6 +25,13 @@ What is masked, and why each is safe to mask
   in, so what this masks is wall-clock time ASH measured itself.
 - UUIDs, the ASH version, the Python version and the hostname.
 - Trailing whitespace on each line, which rich pads tables with.
+- The padding in front of a rich panel's right border, on a line where a mask
+  changed the text's length. rich pads ``│ [default: /home/me/.ash/bin]   │`` to the
+  terminal width, so after masking, the space count still encodes how long the home
+  directory was. The space run before the closing ``│`` is resized so the line keeps
+  its rendered width. Only Unicode box verticals count as a border; a markdown
+  ``|`` table is left alone. A masked value long enough to wrap onto another line
+  on one machine and not another is not handled; snapshot at a width that fits it.
 
 What is deliberately NOT masked: counts, severities, rule ids, messages, relative
 paths, ordering, column layout, box-drawing characters and emoji. Those are what a
@@ -96,6 +103,35 @@ VOLATILE_KEYS = frozenset(
 
 _TRAILING_WS = re.compile(r"[ \t]+$", re.MULTILINE)
 
+# The verticals rich closes a panel or table row with (ROUNDED/SQUARE, HEAVY, DOUBLE).
+_PANEL_VERTICALS = "│┃║"
+# A panel content line: optional indent, a vertical, content, a space run, a vertical.
+_PANEL_LINE = re.compile(
+    rf"^(?P<body>[ ]*[{_PANEL_VERTICALS}].*?)(?P<pad>[ ]*)(?P<end>[{_PANEL_VERTICALS}])$"
+)
+
+
+def _keep_panel_width(rendered: str, masked: str) -> str:
+    """Resize the padding before a panel's right border to undo a mask's length change.
+
+    ``rendered`` and ``masked`` are the same text before and after masking. Lines are
+    paired by position, so this only runs when masking kept the line count.
+    """
+    before_lines = rendered.split("\n")
+    after_lines = masked.split("\n")
+    if len(before_lines) != len(after_lines):
+        return masked
+    for i, (before, after) in enumerate(zip(before_lines, after_lines)):
+        if before == after or not _PANEL_LINE.match(before):
+            continue
+        match = _PANEL_LINE.match(after)
+        if match is None:
+            continue
+        pad = len(match["pad"]) + len(before) - len(after)
+        if pad >= 1:
+            after_lines[i] = match["body"] + " " * pad + match["end"]
+    return "\n".join(after_lines)
+
 
 def _path_spellings(path: PurePath) -> list[str]:
     """Every way ASH might print ``path``: native, POSIX, JSON-escaped and as a URI."""
@@ -151,6 +187,7 @@ class SnapshotNormalizer:
     def text(self, value: str) -> str:
         out = value.replace("\r\n", "\n").replace("\r", "\n")
         out = _ANSI.sub("", out)
+        rendered = out
         for literal, token in self._replacements():
             out = out.replace(literal, token)
         tokens = sorted({token for _, token in self.roots}, key=len, reverse=True)
@@ -171,6 +208,7 @@ class SnapshotNormalizer:
         for day in (today - timedelta(days=1), today, today + timedelta(days=1)):
             out = out.replace(day.isoformat(), "<TODAY>")
         out = _DURATION.sub("<DURATION>", out)
+        out = _keep_panel_width(rendered, out)
         out = _TRAILING_WS.sub("", out)
         return out
 

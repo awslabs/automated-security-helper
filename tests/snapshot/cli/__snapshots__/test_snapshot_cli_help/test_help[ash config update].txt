@@ -1,0 +1,24 @@
+
+ Usage: ash config update [OPTIONS] [config_path]
+
+ Update an existing configuration file with the specified modifications.
+
+ This command applies changes to an ASH configuration file using the same syntax as
+ --config-overrides.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   config_path      <str>  The path to the configuration file to update. By default, ASH looks    │
+│                           for the following config file names in the source directory of a scan: │
+│                           ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml',          │
+│                           'ash.json'].                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --set                        <str>  Configuration modifications specified as key-value pairs     │
+│                                     (e.g., 'global_settings.severity_threshold=LOW'). Supports   │
+│                                     lists with , append mode with key+=, and JSON syntax.        │
+│ --verbose    --no-verbose           Enable verbose logging [default: no-verbose]                 │
+│ --debug      --no-debug             Enable debug logging [default: no-debug]                     │
+│ --color      --no-color             Enable/disable colorized output [default: color]             │
+│ --dry-run    --no-dry-run           Show changes without writing to file [default: no-dry-run]   │
+│ --help                              Show this message and exit.                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

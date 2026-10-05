@@ -1,0 +1,18 @@
+
+ Usage: ash inspect findings [OPTIONS]
+
+ The `inspect findings` command provides an interactive TUI to explore the findings and identify
+ actions to quickly take.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --output-dir           <path>  Path to the output directory containing an ASH Aggregated Results │
+│                                JSON report file to analyze.                                      │
+│ --report-file          <str>   Name of the report file to analyze. Defaults to                   │
+│                                'ash_aggregated_results.json'.                                    │
+│                                [default: ash_aggregated_results.json]                            │
+│ --config       -c      <path>  Path to the configuration file where suppressions should be       │
+│                                saved. By default, ASH searches for ['.ash.yml', '.ash.yaml',     │
+│                                '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'].                  │
+│                                [env var: ASH_CONFIG]                                             │
+│ --help                         Show this message and exit.                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

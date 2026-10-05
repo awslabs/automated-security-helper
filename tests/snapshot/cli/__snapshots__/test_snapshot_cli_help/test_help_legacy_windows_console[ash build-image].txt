@@ -1,0 +1,155 @@
+
+ Usage: ash build-image [OPTIONS]
+
+ Builds the ASH container image then runs a scan with it.
+
+ Any additional arguments passed will be forwarded to ASH inside the container image when starting
+ the scan.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --no-build                                                             Skip building the ASH    │
+│                                                                        container image; reuse   │
+│                                                                        an existing image if     │
+│                                                                        present                  │
+│ --no-run                                                               Build the ASH container  │
+│                                                                        image but do not run a   │
+│                                                                        scan                     │
+│ --force                   -f                                           Force rebuild of the ASH │
+│                                                                        container image          │
+│ --oci-runner,--oci,--ru…  -r                  <str>                    Use the specified OCI    │
+│                                                                        runner instead of docker │
+│                                                                        to run the containerized │
+│                                                                        tools. To prefix every   │
+│                                                                        OCI command with a       │
+│                                                                        wrapper (e.g. sudo), set │
+│                                                                        the OCI_RUNNER_WRAPPER   │
+│                                                                        environment variable     │
+│                                                                        instead of using this    │
+│                                                                        option (e.g.             │
+│                                                                        OCI_RUNNER_WRAPPER=sudo  │
+│                                                                        ash ...).                │
+│                                                                        [env var: OCI_RUNNER]    │
+│ --container-network                           <str>                    Docker network mode for  │
+│                                                                        the container run (e.g.  │
+│                                                                        'bridge', 'none',        │
+│                                                                        'host'). Pass 'none' to  │
+│                                                                        force offline/airgapped  │
+│                                                                        network isolation        │
+│                                                                        independently of         │
+│                                                                        --offline.               │
+│                                                                        [default: bridge]        │
+│ --build-target                                <non-root|ci>            Specify the target stage │
+│                                                                        of the ASH image to      │
+│                                                                        build                    │
+│                                                                        [default: non-root]      │
+│ --offline-semgrep-rules…                      <str>                    Specify Semgrep rulesets │
+│                                                                        for use in ASH offline   │
+│                                                                        mode                     │
+│                                                                        [default: p/ci]          │
+│ --container-uid           -u                  <str>                    UID to use for the       │
+│                                                                        container user           │
+│ --container-gid           -g                  <str>                    GID to use for the       │
+│                                                                        container user           │
+│ --ash-revision-to-insta…                      <str>                    ASH branch or tag to     │
+│                                                                        install in the container │
+│                                                                        image for usage during   │
+│                                                                        containerized scans      │
+│ --custom-containerfile                        <str>                    Path to a custom         │
+│                                                                        container definition     │
+│                                                                        (e.g. Dockerfile) that   │
+│                                                                        you would like to build  │
+│                                                                        *after* the ASH          │
+│                                                                        container image builds.  │
+│                                                                        This is typically used   │
+│                                                                        when building a custom   │
+│                                                                        container image for ASH  │
+│                                                                        and including custom     │
+│                                                                        tooling that ASH does    │
+│                                                                        not come with by         │
+│                                                                        default. The fully       │
+│                                                                        qualified image name for │
+│                                                                        the ASH image is passed  │
+│                                                                        in as the                │
+│                                                                        `ASH_BASE_IMAGE`         │
+│                                                                        build-arg so you can use │
+│                                                                        it as a base. IMPORTANT: │
+│                                                                        When a                   │
+│                                                                        custom_containerfile     │
+│                                                                        path is provided, the    │
+│                                                                        build-target is set to   │
+│                                                                        `ci` so the container    │
+│                                                                        run-as configuration is  │
+│                                                                        not shifted to the       │
+│                                                                        non-root user. If you    │
+│                                                                        are using this           │
+│                                                                        parameter, you are       │
+│                                                                        responsible for securing │
+│                                                                        your final container as  │
+│                                                                        appropriate.             │
+│ --custom-build-arg                            <str>                    Custom build arguments   │
+│                                                                        to pass to the container │
+│                                                                        build                    │
+│ --config-overrides                            <str>                    Configuration overrides  │
+│                                                                        specified as key-value   │
+│                                                                        pairs (e.g.,             │
+│                                                                        'reporters.cloudwatch-l… │
+│ --offline                     --no-offline                             Run scan in              │
+│                                                                        offline/airgapped mode   │
+│                                                                        (skips NPM/PNPM/Yarn     │
+│                                                                        Audit checks).           │
+│                                                                        IMPORTANT: Online access │
+│                                                                        is needed when building  │
+│                                                                        ASH to prepare it for    │
+│                                                                        usage during a scan! If  │
+│                                                                        selecting Offline while  │
+│                                                                        performing a build, the  │
+│                                                                        ASH container image will │
+│                                                                        be built in offline mode │
+│                                                                        and any typically        │
+│                                                                        online-only dependencies │
+│                                                                        like downloadable tool   │
+│                                                                        vulnerability databases  │
+│                                                                        will be cached in the    │
+│                                                                        image itself before      │
+│                                                                        publishing for scan      │
+│                                                                        usage.                   │
+│                                                                        [default: no-offline]    │
+│ --quiet                       --no-quiet                               Hide all log output      │
+│                                                                        [default: no-quiet]      │
+│ --log-level                                   <QUIET|SIMPLE|ERROR|INF  Set the log level.       │
+│                                               O|VERBOSE|DEBUG|TRACE>   [default: INFO]          │
+│ --config                  -c                  <str>                    The path to the          │
+│                                                                        configuration file. By   │
+│                                                                        default, ASH looks for   │
+│                                                                        the following config     │
+│                                                                        file names in the source │
+│                                                                        directory of a scan:     │
+│                                                                        ['.ash.yml',             │
+│                                                                        '.ash.yaml',             │
+│                                                                        '.ash.json', 'ash.yml',  │
+│                                                                        'ash.yaml', 'ash.json']. │
+│                                                                        Alternatively, the full  │
+│                                                                        path to a config file    │
+│                                                                        can be provided by       │
+│                                                                        setting the ASH_CONFIG   │
+│                                                                        environment variable     │
+│                                                                        before running ASH.      │
+│                                                                        [env var: ASH_CONFIG]    │
+│ --verbose                 -v                                           Enable verbose logging   │
+│ --debug                   -d                                           Enable debug logging     │
+│ --color                       --no-color                               Enable/disable colorized │
+│                                                                        output                   │
+│                                                                        [default: color]         │
+│ --help                                                                 Show this message and    │
+│                                                                        exit.                    │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Structured input ──────────────────────────────────────────────────────────────────────────────┐
+│ --cli-json-input               PATH  Read parameter values from a JSON object: a path, a        │
+│                                      file:// URI, or '-' for stdin. Keys are parameter names    │
+│                                      (output_dir) or long flag spellings (--output-dir). Flags  │
+│                                      given on the command line override the file; the file      │
+│                                      overrides environment variables. Run with                  │
+│                                      --generate-cli-skeleton for a template.                    │
+│ --generate-cli-skeleton              Print a JSON template for --cli-json-input, listing every  │
+│                                      parameter of this command with its default, and exit.      │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

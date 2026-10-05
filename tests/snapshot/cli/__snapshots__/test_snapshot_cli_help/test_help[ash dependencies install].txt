@@ -1,0 +1,37 @@
+
+ Usage: ash dependencies install [OPTIONS]
+
+ Install dependencies for ASH plugins.
+
+ This command installs all required dependencies for the specified plugin types.
+ By default, it installs dependencies for all plugin types (converter, scanner, reporter).
+
+ Binary tools will be installed to the specified bin path (defaults to ~/.ash/bin).
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --bin-path          -b                <path>  Path to install binaries to.                       │
+│                                               [env var: ASH_BIN_PATH]                            │
+│                                               [default: <HOME>/.ash/bin]                         │
+│ --plugin-type       -t                <str>   Plugin types to install dependencies for           │
+│                                               [default: converter, scanner, reporter]            │
+│ --tool              -T                <str>   Install dependencies for these tools only, by      │
+│                                               plugin name (repeatable, e.g. '--tool grype --tool │
+│                                               syft'). An unknown name is an error rather than a  │
+│                                               no-op.                                             │
+│ --config            -c                <str>   The path to the configuration file. By default,    │
+│                                               ASH looks for the following config file names in   │
+│                                               the source directory of a scan: ['.ash.yml',       │
+│                                               '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml',   │
+│                                               'ash.json']. Alternatively, the full path to a     │
+│                                               config file can be provided by setting the         │
+│                                               ASH_CONFIG environment variable before running     │
+│                                               ASH.                                               │
+│                                               [env var: ASH_CONFIG]                              │
+│ --config-overrides                    <str>   Configuration overrides specified as key-value     │
+│                                               pairs (e.g.,                                       │
+│                                               'reporters.cloudwatch-logs.options.aws_region=us-… │
+│ --verbose           -v                        Enable verbose logging                             │
+│ --debug             -d                        Enable debug logging                               │
+│ --color                 --no-color            Enable/disable colorized output [default: color]   │
+│ --help                                        Show this message and exit.                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
