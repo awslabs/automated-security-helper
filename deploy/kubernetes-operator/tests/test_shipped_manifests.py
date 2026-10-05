@@ -283,3 +283,20 @@ class TestNetworkPolicy:
         # No ingress rules at all is what makes this a deny. An empty rule `{}` would
         # admit everything.
         assert "ingress" not in policy["spec"]
+
+
+class TestOperatorResources:
+    """The operator's requests and limits, pinned so removing one fails a unit test.
+
+    Before this, only CI's checkov scan (CKV_K8S_11, CPU limit) would notice a dropped
+    CPU limit, and checkov does not run in this suite. Without a limit one stuck
+    reconcile loop can take every core on the node.
+    """
+
+    def test_cpu_and_memory_are_limited(self, operator_container):
+        resources = operator_container.get("resources") or {}
+        assert resources.get("limits") == {"cpu": "500m", "memory": "512Mi"}, resources
+
+    def test_requests_are_set_and_below_the_limits(self, operator_container):
+        resources = operator_container.get("resources") or {}
+        assert resources.get("requests") == {"cpu": "50m", "memory": "128Mi"}, resources
