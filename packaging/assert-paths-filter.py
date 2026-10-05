@@ -70,6 +70,7 @@ import sys
 import tempfile
 import tomllib
 import zipfile
+from typing import Any
 
 DEFAULT_WORKFLOW = ".github/workflows/ash-native-packages.yml"
 PACKAGE_DIR = "automated_security_helper"
@@ -283,6 +284,7 @@ def _defines_repo_root(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
     statement = parents.get(node)
     while statement is not None and not isinstance(statement, ast.stmt):
         statement = parents.get(statement)
+    targets: list[ast.expr]
     if isinstance(statement, ast.AnnAssign):
         targets = [statement.target]
     elif isinstance(statement, ast.Assign):
@@ -336,7 +338,7 @@ NON_INPUT_OPTIONS = frozenset(
 )
 
 
-def build_config_inputs(repo: str, build: dict, where: str) -> set[str]:
+def build_config_inputs(repo: str, build: dict[str, Any], where: str) -> set[str]:
     """Source paths a hatch build table names, at any of its levels."""
     found: set[str] = set()
     for option, value in build.items():
@@ -369,7 +371,7 @@ def as_probe(repo: str, path: str) -> str:
     return path
 
 
-def read_pyproject(repo: str) -> dict:
+def read_pyproject(repo: str) -> dict[str, Any]:
     with open(os.path.join(repo, "pyproject.toml"), "rb") as handle:
         return tomllib.load(handle)
 
@@ -465,11 +467,11 @@ ATTRIBUTED_COMMANDS = {
 }
 
 # Set to a list while a measured build runs; the audit hook appends to it.
-_recording: list[tuple] | None = None
+_recording: list[tuple[Any, ...]] | None = None
 _hook_installed = False
 
 
-def _audit(event: str, args: tuple) -> None:
+def _audit(event: str, args: tuple[Any, ...]) -> None:
     events = _recording
     if events is None:
         return
@@ -480,7 +482,7 @@ def _audit(event: str, args: tuple) -> None:
         events.append((event, args))
 
 
-def check_build_backend(pyproject: dict) -> None:
+def check_build_backend(pyproject: dict[str, Any]) -> None:
     """The backend this process will run must be the one `uv build` would run."""
     build_system = pyproject.get("build-system")
     if not isinstance(build_system, dict):
@@ -510,7 +512,7 @@ def check_build_backend(pyproject: dict) -> None:
             )
 
 
-def measured_build(repo: str, out_dir: str) -> tuple[str, list[tuple]]:
+def measured_build(repo: str, out_dir: str) -> tuple[str, list[tuple[Any, ...]]]:
     """Builds the wheel in-process under the audit hook; returns its path and the
     open and spawn events recorded while the build ran."""
     global _recording, _hook_installed
@@ -520,7 +522,7 @@ def measured_build(repo: str, out_dir: str) -> tuple[str, list[tuple]]:
     if not _hook_installed:
         sys.addaudithook(_audit)
         _hook_installed = True
-    events: list[tuple] = []
+    events: list[tuple[Any, ...]] = []
     cwd = os.getcwd()
     dont_write_bytecode = sys.dont_write_bytecode
     # The frontend runs the backend from the project root, so the hook's relative
@@ -571,7 +573,7 @@ def _repo_path(repo: str, out_dir: str, raw: object, cwd: str) -> str | None:
     return rel
 
 
-def measured_inputs(repo: str, out_dir: str, events: list[tuple]) -> set[str]:
+def measured_inputs(repo: str, out_dir: str, events: list[tuple[Any, ...]]) -> set[str]:
     """Files the build read inside the repository; refuses unattributed processes."""
     repo = os.path.realpath(repo)
     out_dir = os.path.realpath(out_dir)
@@ -841,7 +843,7 @@ def self_test() -> int:
         'ASH_REPO_ROOT.joinpath("Dockerfile")', 'ASH_REPO_ROOT / "Dockerfile"'
     )
     copy_changelog = 'shutil.copyfile({}, ASH_ASSETS_PATH / "CL.md")'
-    wheel_cases: list[tuple[str, dict, str]] = [
+    wheel_cases: list[tuple[str, dict[str, Any], str]] = [
         # Each layer on its own. A case names the layer whose measurement it needs,
         # so deleting that measurement turns it red even where the other layer
         # would have caught the same file in a real run.
