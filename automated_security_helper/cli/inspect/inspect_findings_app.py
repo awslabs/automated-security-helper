@@ -890,7 +890,11 @@ def extract_findings(model):
                 for result in run.results:
                     # Extract basic info
                     finding = {
-                        "id": result.ruleIndex or -1,
+                        # 0 is the first rule in the driver's rules array, not a
+                        # missing index; `or -1` turned it into -1.
+                        "id": (
+                            result.ruleIndex if result.ruleIndex is not None else -1
+                        ),
                         "rule_id": result.ruleId,
                         "message": (
                             result.message.root.text if result.message.root else ""
@@ -946,7 +950,10 @@ def extract_findings(model):
                                 break
 
                     # If no snippet was found in locations, try to extract from codeFlows if available
-                    if not finding.get("code_snippet") and hasattr(result, "codeFlows"):
+                    # codeFlows is always an attribute of Result, so hasattr() said
+                    # nothing; an explicit `"codeFlows": null` made it None and the
+                    # loop raised TypeError.
+                    if not finding.get("code_snippet") and result.codeFlows:
                         for codeFlow in result.codeFlows:
                             if hasattr(codeFlow, "threadFlows"):
                                 for threadFlow in codeFlow.threadFlows:
