@@ -31,11 +31,12 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-# RPM forbids '-' in Version. PEP 440 pre-release and local versions contain it
-# (1.0.0-rc1, 1.0.0+local), so translate rather than emitting a spec rpmbuild rejects
-# with a message that does not mention the wheel.
-RPM_VERSION="${VERSION//-/'~'}"
-RPM_VERSION="${RPM_VERSION//+/'~'}"
+# Mapped so rpm sorts it the way PEP 440 does: 3.8.0rc1 becomes 3.8.0~rc1, which
+# sorts below 3.8.0, where the verbatim string would sort above it and the release
+# would never replace the candidate. See packaging/version-map.sh.
+# shellcheck source=packaging/version-map.sh
+. "$SPECDIR/../version-map.sh"
+RPM_VERSION="$(pkg_version "$VERSION" rpm)"
 
 TOP="$(mktemp -d)"
 trap 'rm -rf "$TOP"' EXIT

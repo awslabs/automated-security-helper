@@ -40,11 +40,12 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-# Debian upstream versions may not contain '-'. PEP 440 pre-release and local
-# versions do (1.0.0-rc1, 1.0.0+local), so translate rather than emitting a package
-# dpkg-deb will reject with a message that does not mention the wheel.
-DEB_VERSION="${VERSION//-/'~'}"
-DEB_VERSION="${DEB_VERSION//+/'~'}"
+# Mapped so dpkg sorts it the way PEP 440 does: 3.8.0rc1 becomes 3.8.0~rc1, which
+# sorts below 3.8.0, where the verbatim string would sort above it and the release
+# would never replace the candidate. See packaging/version-map.sh.
+# shellcheck source=packaging/version-map.sh
+. "$HERE/../version-map.sh"
+DEB_VERSION="$(pkg_version "$VERSION" deb)"
 
 mkdir -p "$OUTDIR"
 STAGE="$(mktemp -d)"
