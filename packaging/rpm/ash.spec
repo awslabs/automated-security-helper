@@ -1,6 +1,8 @@
 #
 # ASH's rpm. Built by packaging/rpm/build.sh, which passes ash_version and ash_wheel;
-# this spec does not derive either one itself.
+# this spec does not derive either one itself. It also passes ash_cli and ash_pkg, the
+# command and package names from packaging/cli-name.sh, so neither is written here.
+# Below, /usr/lib/ash and /usr/bin/ash stand for the default names.
 #
 # Unlike debian/control.in, an rpm spec accepts '#' comments, so the reasoning that the
 # .deb had to displace into packaging/deb/build.sh lines 53-72 lives here instead.
@@ -19,6 +21,7 @@
 %{!?ash_version:%{error:ash_version is not defined. Build with packaging/rpm/build.sh <wheel> <outdir>, which reads the version from the wheel filename.}}
 %{!?ash_wheel:%{error:ash_wheel is not defined. Build with packaging/rpm/build.sh <wheel> <outdir>, which reads the wheel basename from its argument.}}
 %{!?ash_cli:%{error:ash_cli is not defined. Build with packaging/rpm/build.sh <wheel> <outdir>, which reads it from packaging/cli-name.sh.}}
+%{!?ash_pkg:%{error:ash_pkg is not defined. Build with packaging/rpm/build.sh <wheel> <outdir>, which reads it from packaging/cli-name.sh.}}
 
 # A gzip-compressed cpio payload, not rpm 4.16's zstd default. zstd has no Python
 # standard-library decompressor before 3.14, and packaging/assert-package-payload.py
@@ -27,7 +30,7 @@
 # spots. The cost is a few hundred KB on a payload that is one wheel.
 %define _binary_payload w9.gzdio
 
-Name:           ash
+Name:           %{ash_pkg}
 Version:        %{ash_version}
 Release:        1%{?dist}
 Summary:        Automated Security Helper (ASH) security scan orchestrator
@@ -86,7 +89,7 @@ into a single report, in SARIF and several other formats.
 
 This package installs ASH itself. It does not bundle any scanner: the scanners ASH drives
 are third-party tools, and shipping their source inside this package is forbidden by the
-project's artifact-contents rule. Install them with "ash dependencies install", optionally
+project's artifact-contents rule. Install them with "%{ash_cli} dependencies install", optionally
 selecting individual tools with --tool.
 
 The post-install scriptlet needs a reachable Python package index to resolve ASH's runtime
@@ -104,7 +107,7 @@ commands.
 %install
 # /usr/lib, spelled out rather than %{_libdir}. On x86_64 %{_libdir} is /usr/lib64, and
 # the path packaging/README.md documents -- and that the .deb, the wrapper below, and
-# packaging/rpm/verify-in-container.sh all hardcode -- is /usr/lib/ash.
+# packaging/verify-lib.sh all use -- is /usr/lib/<package name>.
 install -d -m 0755 %{buildroot}%{_prefix}/lib/%{name}/wheels
 install -m 0644 %{SOURCE0} %{buildroot}%{_prefix}/lib/%{name}/wheels/
 
@@ -121,24 +124,24 @@ install -m 0644 %{SOURCE2} %{buildroot}%{_licensedir}/%{name}/LICENSE
 install -d -m 0755 %{buildroot}%{_bindir}
 cat > %{buildroot}%{_bindir}/%{ash_cli} <<'WRAPPER'
 #!/bin/sh
-# Installed by the ash .rpm. The venv is created by the package's post-install
+# Installed by the %{name} .rpm. The venv is created by the package's post-install
 # scriptlet, not shipped inside it, so this is also the check for a half-completed
 # install.
-if [ ! -x /usr/lib/ash/venv/bin/%{ash_cli} ]; then
-  echo "%{ash_cli}: /usr/lib/ash/venv is missing or incomplete." >&2
-  echo "%{ash_cli}: reinstall the package: dnf reinstall ash" >&2
+if [ ! -x /usr/lib/%{name}/venv/bin/%{ash_cli} ]; then
+  echo "%{ash_cli}: /usr/lib/%{name}/venv is missing or incomplete." >&2
+  echo "%{ash_cli}: reinstall the package: dnf reinstall %{name}" >&2
   exit 127
 fi
 # The .deb needs no equivalent of this second check, because it depends on one python3
 # package. This package depends on (python3.11 or python3.12 or python3.13), so rpm still
 # considers the dependency satisfied after the particular interpreter the venv was built
-# against is removed -- leaving venv/bin/ash present but unable to start.
-if [ ! -x /usr/lib/ash/venv/bin/python3 ]; then
-  echo "%{ash_cli}: /usr/lib/ash/venv's interpreter is gone." >&2
-  echo "%{ash_cli}: the Python it was built against was removed. Run: dnf reinstall ash" >&2
+# against is removed -- leaving venv/bin/%{ash_cli} present but unable to start.
+if [ ! -x /usr/lib/%{name}/venv/bin/python3 ]; then
+  echo "%{ash_cli}: /usr/lib/%{name}/venv's interpreter is gone." >&2
+  echo "%{ash_cli}: the Python it was built against was removed. Run: dnf reinstall %{name}" >&2
   exit 127
 fi
-exec /usr/lib/ash/venv/bin/%{ash_cli} "$@"
+exec /usr/lib/%{name}/venv/bin/%{ash_cli} "$@"
 WRAPPER
 chmod 0755 %{buildroot}%{_bindir}/%{ash_cli}
 
@@ -160,7 +163,7 @@ chmod 0755 %{buildroot}%{_bindir}/%{ash_cli}
 %post
 set -u
 
-BASE=/usr/lib/ash
+BASE=/usr/lib/%{name}
 # A SYMLINK to the live venv, never a directory, except on a host upgrading from a
 # release that predates this layout. See LAYOUT.
 VENV="$BASE/venv"
@@ -175,7 +178,7 @@ CLI=%{ash_cli}
 # so `rpm -q ash` reported the new release while the venv kept running the old one.
 # Measured on amazonlinux:2023 upgrading 3.6.0 to 3.7.0: rpm said 3.7.0, `ash --version`
 # said 3.6.0. The name is a build-time constant, so there is nothing to search for.
-WHEEL=/usr/lib/ash/wheels/%{ash_wheel}
+WHEEL=/usr/lib/%{name}/wheels/%{ash_wheel}
 if [ ! -f "$WHEEL" ]; then
   echo "$CLI: the packaged wheel is missing at $WHEEL -- the package is malformed." >&2
   exit 1
@@ -186,7 +189,7 @@ fi
 # The same scheme as packaging/deb/debian/postinst; change both together. Each install
 # builds a fresh venv in $BASE/venv-<id>, and only once it runs is $BASE/venv repointed
 # at it by renaming a new symlink over the old one. rename(2) replaces the link
-# atomically, so /usr/lib/ash/venv always resolves to a complete venv, and an upgrade
+# atomically, so /usr/lib/%{name}/venv always resolves to a complete venv, and an upgrade
 # whose build fails never touches the link at all. That matters more here than for the
 # .deb: rpm treats a failed %%post as a warning and registers the new version anyway.
 #
@@ -222,7 +225,7 @@ done
 if [ -z "$PY" ]; then
   echo "$CLI: found no Python that can create a virtualenv." >&2
   echo "$CLI: this package requires one of python3.11, python3.12 or python3.13." >&2
-  echo "$CLI: install one, then run: dnf reinstall ash" >&2
+  echo "$CLI: install one, then run: dnf reinstall %{name}" >&2
   fail
 fi
 
@@ -293,12 +296,12 @@ set -u
 if [ "$1" -eq 0 ]; then
   # The link, every venv it could point at, and anything an interrupted %%post left
   # behind. See LAYOUT in %%post.
-  rm -rf /usr/lib/ash/venv /usr/lib/ash/venv-* /usr/lib/ash/venv.previous /usr/lib/ash/venv.swap-*
+  rm -rf /usr/lib/%{name}/venv /usr/lib/%{name}/venv-* /usr/lib/%{name}/venv.previous /usr/lib/%{name}/venv.swap-*
   # rpm removed its own files before this ran, but could not rmdir /usr/lib/ash while the
   # unowned venv was still inside it. Now that the venv is gone, take the parent if it is
   # empty; anything else left there is not this package's to delete.
-  if [ -d /usr/lib/ash ] && [ -z "$(ls -A /usr/lib/ash)" ]; then
-    rmdir /usr/lib/ash
+  if [ -d /usr/lib/%{name} ] && [ -z "$(ls -A /usr/lib/%{name})" ]; then
+    rmdir /usr/lib/%{name}
   fi
 fi
 

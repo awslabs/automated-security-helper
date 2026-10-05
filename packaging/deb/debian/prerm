@@ -10,13 +10,17 @@
 # rebuild fails, so deleting it here turned a failed upgrade into a broken one.
 # `deconfigure` is a conflicting package being installed, which also leaves this one
 # installed. `purge` is never passed to prerm; by then `remove` has already run.
+#
+# @ASH_PKG@ is replaced by packaging/deb/build.sh with the name in
+# packaging/cli-name.sh.
 set -u
 
 case "$1" in
   remove)
     # The link, every venv it could point at, and anything an interrupted postinst
     # left behind. See LAYOUT in postinst.
-    rm -rf /usr/lib/ash/venv /usr/lib/ash/venv-* /usr/lib/ash/venv.previous /usr/lib/ash/venv.swap-*
+    rm -rf /usr/lib/@ASH_PKG@/venv /usr/lib/@ASH_PKG@/venv-* \
+      /usr/lib/@ASH_PKG@/venv.previous /usr/lib/@ASH_PKG@/venv.swap-*
     ;;
   upgrade|failed-upgrade|deconfigure)
     ;;

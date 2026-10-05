@@ -97,9 +97,9 @@ interpreter_installed() {
 }
 
 erase_and_check() {
-  dnf -y -q remove ash >/tmp/dnf-remove.log 2>&1 || { tail -n 20 /tmp/dnf-remove.log >&2; vl_fail "dnf remove ash failed"; }
-  if rpm -q ash >/dev/null 2>&1; then
-    vl_fail "rpm still lists ash after erase"
+  dnf -y -q remove "$ASH_PKG_NAME" >/tmp/dnf-remove.log 2>&1 || { tail -n 20 /tmp/dnf-remove.log >&2; vl_fail "dnf remove $ASH_PKG_NAME failed"; }
+  if rpm -q "$ASH_PKG_NAME" >/dev/null 2>&1; then
+    vl_fail "rpm still lists $ASH_PKG_NAME after erase"
   fi
   vl_assert_nothing_left
 }
@@ -208,8 +208,8 @@ if [ "$MODE" = upgrade ]; then
   vl_probe_start
   rpm_install upgrade "$RPM"
   vl_probe_stop_and_assert
-  [ "$(rpm -q --qf '%{VERSION}' ash)" = "$(pkg_version "$VERSION" rpm)" ] \
-    || vl_fail "rpm reports $(rpm -q ash) after the upgrade"
+  [ "$(rpm -q --qf '%{VERSION}' "$ASH_PKG_NAME")" = "$(pkg_version "$VERSION" rpm)" ] \
+    || vl_fail "rpm reports $(rpm -q "$ASH_PKG_NAME") after the upgrade"
   vl_assert_installed_version "$VERSION"
   vl_assert_venv_layout
   [ "$(readlink -f "$ASH_VENV")" != "$OLD_VENV" ] || vl_fail "the venv is the one N-1 created"
@@ -241,7 +241,7 @@ if [ "$MODE" = upgrade ]; then
   vl_assert_venv_layout
 
   echo "== 8. a host still on the directory layout is migrated to the symlink"
-  vl_make_directory_layout "$(one_wheel /usr/lib/ash/wheels)"
+  vl_make_directory_layout "$(one_wheel "$ASH_LIB/wheels")"
   rpm_install reinstall "$RPM"
   vl_assert_installed_version "$VERSION"
   vl_assert_venv_layout

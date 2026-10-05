@@ -220,8 +220,11 @@ sys.dont_write_bytecode = True
 # fail-closed so that doing so is a visible act, not so that it is hard.
 
 
-def read_cli_name() -> str:
-    """The command name from packaging/cli-name.sh, the one place it is written.
+def read_name(variable: str) -> str:
+    """A name from packaging/cli-name.sh, the one place it is written.
+
+    `variable` is ASH_CLI_NAME (the command on PATH) or ASH_PKG_NAME (the package,
+    and the directory under /usr/lib, /usr/share/doc and /usr/share/licenses).
 
     Read with a regular expression rather than by running a shell, so this check has
     no dependency beyond the standard library. A missing or unparsable file is an
@@ -231,13 +234,14 @@ def read_cli_name() -> str:
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli-name.sh")
     with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
-            match = re.match(r"^ASH_CLI_NAME=([A-Za-z0-9._-]+)\s*$", line)
+            match = re.match(rf"^{variable}=([A-Za-z0-9.+_-]+)\s*$", line)
             if match:
                 return match.group(1)
-    raise ValueError(f"{path} has no `ASH_CLI_NAME=<name>` line")
+    raise ValueError(f"{path} has no `{variable}=<name>` line")
 
 
-CLI_NAME = read_cli_name()
+CLI_NAME = read_name("ASH_CLI_NAME")
+PKG_NAME = read_name("ASH_PKG_NAME")
 
 # Files common to both formats: the wrapper on PATH.
 COMMON_FILES = frozenset({f"usr/bin/{CLI_NAME}"})
@@ -246,8 +250,8 @@ COMMON_FILES = frozenset({f"usr/bin/{CLI_NAME}"})
 # file and `README.Debian` for package-specific notes; both names are fixed by policy.
 DEB_ONLY_FILES = frozenset(
     {
-        "usr/share/doc/ash/copyright",
-        "usr/share/doc/ash/README.Debian",
+        f"usr/share/doc/{PKG_NAME}/copyright",
+        f"usr/share/doc/{PKG_NAME}/README.Debian",
     }
 )
 
@@ -261,8 +265,8 @@ DEB_ONLY_FILES = frozenset(
 # installs it under a different name instead.
 RPM_ONLY_FILES = frozenset(
     {
-        "usr/share/doc/ash/README",
-        "usr/share/licenses/ash/LICENSE",
+        f"usr/share/doc/{PKG_NAME}/README",
+        f"usr/share/licenses/{PKG_NAME}/LICENSE",
     }
 )
 
@@ -275,7 +279,7 @@ RPM_ONLY_FILES = frozenset(
 # optional pre-, post- and dev-release segments packaging/deb/build.sh maps), so it
 # cannot match a second unrelated wheel that someone dropped into the same directory.
 WHEEL_PATTERN = re.compile(
-    r"^usr/lib/ash/wheels/automated_security_helper-[0-9]+(?:\.[0-9]+)*"
+    rf"^usr/lib/{re.escape(PKG_NAME)}/wheels/automated_security_helper-[0-9]+(?:\.[0-9]+)*"
     r"(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?"
     r"-py3-none-any\.whl$"
 )
@@ -294,13 +298,13 @@ ALLOWED_DIRECTORIES = frozenset(
         "usr",
         "usr/bin",
         "usr/lib",
-        "usr/lib/ash",
-        "usr/lib/ash/wheels",
+        f"usr/lib/{PKG_NAME}",
+        f"usr/lib/{PKG_NAME}/wheels",
         "usr/share",
         "usr/share/doc",
-        "usr/share/doc/ash",
+        f"usr/share/doc/{PKG_NAME}",
         "usr/share/licenses",
-        "usr/share/licenses/ash",
+        f"usr/share/licenses/{PKG_NAME}",
     }
 )
 
@@ -1390,14 +1394,16 @@ def build_fixture_deb(
     return bytes(out)
 
 
-WRAPPER_FIXTURE = f'#!/bin/sh\nexec /usr/lib/ash/venv/bin/{CLI_NAME} "$@"\n'.encode()
+WRAPPER_FIXTURE = (
+    f'#!/bin/sh\nexec /usr/lib/{PKG_NAME}/venv/bin/{CLI_NAME} "$@"\n'.encode()
+)
 
 LEGITIMATE_PAYLOAD: dict[str, bytes] = {
     f"usr/bin/{CLI_NAME}": WRAPPER_FIXTURE,
-    "usr/lib/ash/wheels/automated_security_helper-3.7.0-py3-none-any.whl": b"PK\x05\x06"
+    f"usr/lib/{PKG_NAME}/wheels/automated_security_helper-3.7.0-py3-none-any.whl": b"PK\x05\x06"
     + b"\x00" * 18,
-    "usr/share/doc/ash/copyright": b"Apache-2.0\n",
-    "usr/share/doc/ash/README.Debian": b"notes\n",
+    f"usr/share/doc/{PKG_NAME}/copyright": b"Apache-2.0\n",
+    f"usr/share/doc/{PKG_NAME}/README.Debian": b"notes\n",
 }
 
 # One planted member per rule, so a rule masked by another is reported rather than
@@ -1407,7 +1413,7 @@ PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]
     (
         "a vendored scanner tree inside the package",
         {
-            "usr/lib/ash/vendor/detect_secrets/main.py": b"# upstream source\n",
+            f"usr/lib/{PKG_NAME}/vendor/detect_secrets/main.py": b"# upstream source\n",
         },
         [],
         "unpinned-payload-member",
@@ -1415,7 +1421,7 @@ PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]
     (
         "a new directory at the package root",
         {},
-        ["usr/lib/ash/vendor"],
+        [f"usr/lib/{PKG_NAME}/vendor"],
         "unpinned-payload-directory",
     ),
     (
@@ -1426,7 +1432,7 @@ PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]
     ),
     (
         "a member escaping the payload root",
-        {"usr/lib/ash/../../../etc/shadow": b"x\n"},
+        {f"usr/lib/{PKG_NAME}/../../../etc/shadow": b"x\n"},
         [],
         "malformed-member-path",
     ),
@@ -1457,7 +1463,8 @@ PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]
         "the wrapper replaced by a relative symlink that stays inside the payload",
         {
             f"usr/bin/{CLI_NAME}": FixtureMember(
-                link_type=tarfile.SYMTYPE, link_target="../share/doc/ash/copyright"
+                link_type=tarfile.SYMTYPE,
+                link_target=f"../share/doc/{PKG_NAME}/copyright",
             )
         },
         [],
@@ -1467,7 +1474,8 @@ PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]
         "the wrapper replaced by a hard link",
         {
             f"usr/bin/{CLI_NAME}": FixtureMember(
-                link_type=tarfile.LNKTYPE, link_target="./usr/share/doc/ash/copyright"
+                link_type=tarfile.LNKTYPE,
+                link_target=f"./usr/share/doc/{PKG_NAME}/copyright",
             )
         },
         [],
@@ -1481,7 +1489,11 @@ PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]
     ),
     (
         "a setgid doc file",
-        {"usr/share/doc/ash/copyright": FixtureMember(data=b"x\n", mode=0o2644)},
+        {
+            f"usr/share/doc/{PKG_NAME}/copyright": FixtureMember(
+                data=b"x\n", mode=0o2644
+            )
+        },
         [],
         "setid-member",
     ),
@@ -1489,7 +1501,9 @@ PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]
 
 # Directory modes for the fixture, by case label. A setgid directory is the one
 # planted-mode case that is not a file, and directories are listed separately.
-PLANTED_DIRECTORY_MODES = {"a setgid package directory": {"usr/lib/ash": 0o2755}}
+PLANTED_DIRECTORY_MODES = {
+    "a setgid package directory": {f"usr/lib/{PKG_NAME}": 0o2755}
+}
 PLANTED_CASES.append(("a setgid package directory", {}, [], "setid-member"))
 
 # Which planted cases need the gate module. The three malformed-path cases expect a
@@ -1513,19 +1527,19 @@ PLANTED_CASES_NEEDING_GATE = frozenset({"malformed-member-path"})
 GATE_RULE_CASES = [
     (
         "an ELF binary hidden at the pinned license path",
-        "usr/share/doc/ash/copyright",
+        f"usr/share/doc/{PKG_NAME}/copyright",
         b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56,
         "native-binary",
     ),
     (
         "a Windows PE hidden at the pinned license path",
-        "usr/share/doc/ash/copyright",
+        f"usr/share/doc/{PKG_NAME}/copyright",
         b"MZ\x90\x00\x03" + b"\x00" * 59,
         "native-binary",
     ),
     (
         "a gzip stream at a pinned text path",
-        "usr/share/doc/ash/README.Debian",
+        f"usr/share/doc/{PKG_NAME}/README.Debian",
         b"\x1f\x8b\x08\x00" + b"\x00" * 60,
         "nested-archive",
     ),
@@ -1537,7 +1551,7 @@ GATE_RULE_CASES = [
     ),
     (
         "a vendored scanner distribution by name",
-        "usr/lib/ash/detect_secrets/main.py",
+        f"usr/lib/{PKG_NAME}/detect_secrets/main.py",
         b"# upstream source\n",
         "vendored-scanner",
     ),

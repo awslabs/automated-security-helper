@@ -5,14 +5,14 @@
 # "installed" with a broken venv and no explanation. Each step is checked and
 # reported instead, so the failure names what to do about it.
 #
-# @ASH_CLI@ is replaced by packaging/deb/build.sh with the name in
+# @ASH_CLI@ and @ASH_PKG@ are replaced by packaging/deb/build.sh with the names in
 # packaging/cli-name.sh.
 #
 # The rpm's %post (packaging/rpm/ash.spec) does the same thing the same way. Change
 # both together.
 set -u
 
-BASE=/usr/lib/ash
+BASE=/usr/lib/@ASH_PKG@
 # A SYMLINK to the live venv, never a directory, except on a host upgrading from a
 # release that predates this layout. See LAYOUT.
 VENV="$BASE/venv"
@@ -24,7 +24,7 @@ CLI=@ASH_CLI@
 # Each install builds a fresh venv in its own directory, $BASE/venv-<id>, and only
 # once that venv runs is $BASE/venv repointed at it, by renaming a new symlink over
 # the old one. rename(2) replaces the link atomically, so at every instant
-# /usr/lib/ash/venv resolves to a complete venv: the old one until the swap, the new
+# $VENV resolves to a complete venv: the old one until the swap, the new
 # one after it. An upgrade whose build fails (no index, a resolver conflict) never
 # touches the link, so the previous install keeps working with nothing to restore.
 #
@@ -42,7 +42,7 @@ CLI=@ASH_CLI@
 # in-place upgrade leaves the old distribution's entry points behind when a release
 # renames one.
 #
-# Known limit: the previous venv is deleted right after the swap, so an `ash`
+# Known limit: the previous venv is deleted right after the swap, so a $CLI
 # process that was ALREADY running from it when the upgrade finished can fail on a
 # later import. Every invocation started after the swap uses the new venv.
 #
@@ -87,7 +87,7 @@ case "$1" in
     if ! "$NEW/bin/pip" install --quiet --disable-pip-version-check "$WHEEL"; then
       echo "$CLI: failed to install $WHEEL into $NEW." >&2
       echo "$CLI: this step needs a reachable Python package index to resolve ASH's" >&2
-      echo "$CLI: runtime dependencies. See /usr/share/doc/ash/README.Debian." >&2
+      echo "$CLI: runtime dependencies. See /usr/share/doc/@ASH_PKG@/README.Debian." >&2
       echo "$CLI: the previously installed version, if any, is untouched." >&2
       fail
     fi

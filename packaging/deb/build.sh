@@ -20,11 +20,19 @@ OUTDIR="${2:?usage: build.sh <wheel> <outdir>}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 
-# The CLI name lives in one file so renaming the command is a one-line change. See
-# packaging/cli-name.sh.
+# The CLI and package names live in one file so renaming either is a one-line change.
+# See packaging/cli-name.sh.
 # shellcheck source=packaging/cli-name.sh
 . "$HERE/../cli-name.sh"
 : "${ASH_CLI_NAME:?packaging/cli-name.sh did not set ASH_CLI_NAME}"
+: "${ASH_PKG_NAME:?packaging/cli-name.sh did not set ASH_PKG_NAME}"
+# Debian policy 5.6.1. Checked here because the name is also substituted into the
+# maintainer scripts' rm -rf paths, so it must be a plain path component.
+if ! printf '%s\n' "$ASH_PKG_NAME" | grep -Eqx '[a-z0-9][a-z0-9+.-]+'; then
+  echo "error: ASH_PKG_NAME '$ASH_PKG_NAME' is not a valid Debian package name." >&2
+  exit 1
+fi
+PKG="$ASH_PKG_NAME"
 
 [ -f "$WHEEL" ] || { echo "error: no such wheel: $WHEEL" >&2; exit 1; }
 command -v dpkg-deb >/dev/null || { echo "error: dpkg-deb not found" >&2; exit 1; }
@@ -55,16 +63,16 @@ trap 'rm -rf "$STAGE"' EXIT
 # the build on a payload member it does not list. Adding a file means adding it there
 # in the same commit, which is the point: the payload of a package that must not carry
 # third-party scanner code is enumerated, not discovered.
-install -d -m 0755 "$STAGE/DEBIAN" "$STAGE/usr/lib/ash/wheels" "$STAGE/usr/bin" \
-              "$STAGE/usr/share/doc/ash"
-install -m 0644 "$WHEEL" "$STAGE/usr/lib/ash/wheels/"
+install -d -m 0755 "$STAGE/DEBIAN" "$STAGE/usr/lib/$PKG/wheels" "$STAGE/usr/bin" \
+              "$STAGE/usr/share/doc/$PKG"
+install -m 0644 "$WHEEL" "$STAGE/usr/lib/$PKG/wheels/"
 
 # postinst's failure message points users here, so the doc has to be in the package.
 # An error message citing a path the package never installed is worse than no message.
-install -m 0644 "$HERE/debian/README.Debian" "$STAGE/usr/share/doc/ash/README.Debian"
+install -m 0644 "$HERE/debian/README.Debian" "$STAGE/usr/share/doc/$PKG/README.Debian"
 # Debian policy 12.5: every binary package ships its license as
 # /usr/share/doc/<package>/copyright.
-install -m 0644 "$REPO_ROOT/LICENSE" "$STAGE/usr/share/doc/ash/copyright"
+install -m 0644 "$REPO_ROOT/LICENSE" "$STAGE/usr/share/doc/$PKG/copyright"
 
 # Architecture is `all`: the wheel is py3-none-any and carries no compiled extension.
 # Dependencies that do build native code are resolved by pip on the target, so they
@@ -86,8 +94,13 @@ install -m 0644 "$REPO_ROOT/LICENSE" "$STAGE/usr/share/doc/ash/copyright"
 # maintainers table and no tracked file carries an address. control.in uses the GitHub
 # noreply form for the owning org rather than inventing a personal or internal address.
 # If the maintainers want a real contact, set it in pyproject.toml and read it here.
-sed -e "s/@DEB_VERSION@/${DEB_VERSION}/" \
+sed -e "s/@DEB_VERSION@/${DEB_VERSION}/" -e "s/@ASH_PKG@/${PKG}/g" \
+    -e "s/@ASH_CLI@/${ASH_CLI_NAME}/g" \
     "$HERE/debian/control.in" > "$STAGE/DEBIAN/control"
+if grep -q '@[A-Z_]*@' "$STAGE/DEBIAN/control"; then
+  echo "error: DEBIAN/control still carries an unsubstituted @...@ token." >&2
+  exit 1
+fi
 
 # Assert the generated control file is comment-free before handing it to dpkg-deb, so a
 # future edit to control.in fails here with a message naming the cause rather than in
@@ -98,13 +111,15 @@ if grep -q '^#' "$STAGE/DEBIAN/control"; then
   exit 1
 fi
 
-# The maintainer scripts carry @ASH_CLI@ where they name the console script, so the
-# CLI name is substituted from packaging/cli-name.sh rather than written into each one.
+# The maintainer scripts carry @ASH_CLI@ where they name the console script and
+# @ASH_PKG@ where they name the package's directories, so both names are substituted
+# from packaging/cli-name.sh rather than written into each one.
 for script in postinst prerm; do
-  sed -e "s/@ASH_CLI@/${ASH_CLI_NAME}/g" "$HERE/debian/$script" > "$STAGE/DEBIAN/$script"
+  sed -e "s/@ASH_CLI@/${ASH_CLI_NAME}/g" -e "s/@ASH_PKG@/${PKG}/g" \
+    "$HERE/debian/$script" > "$STAGE/DEBIAN/$script"
   chmod 0755 "$STAGE/DEBIAN/$script"
-  if grep -q '@ASH_CLI@' "$STAGE/DEBIAN/$script"; then
-    echo "error: @ASH_CLI@ was not substituted in DEBIAN/$script." >&2
+  if grep -q '@ASH_CLI@\|@ASH_PKG@' "$STAGE/DEBIAN/$script"; then
+    echo "error: a @ASH_CLI@ or @ASH_PKG@ token was not substituted in DEBIAN/$script." >&2
     exit 1
   fi
 done
@@ -113,19 +128,19 @@ done
 # the container runner, and a symlink leaves sys.executable pointing at /usr/bin.
 cat > "$STAGE/usr/bin/${ASH_CLI_NAME}" <<WRAPPER
 #!/bin/sh
-# Installed by the ash .deb. The venv is created by the package's postinst, not
+# Installed by the ${PKG} .deb. The venv is created by the package's postinst, not
 # shipped inside it, so this is also the check for a half-completed install.
-if [ ! -x /usr/lib/ash/venv/bin/${ASH_CLI_NAME} ]; then
-  echo "${ASH_CLI_NAME}: /usr/lib/ash/venv is missing or incomplete." >&2
+if [ ! -x /usr/lib/${PKG}/venv/bin/${ASH_CLI_NAME} ]; then
+  echo "${ASH_CLI_NAME}: /usr/lib/${PKG}/venv is missing or incomplete." >&2
   echo "${ASH_CLI_NAME}: re-run the install step with: dpkg --configure -a" >&2
   echo "${ASH_CLI_NAME}: or reinstall the package from its .deb." >&2
   exit 127
 fi
-exec /usr/lib/ash/venv/bin/${ASH_CLI_NAME} "\$@"
+exec /usr/lib/${PKG}/venv/bin/${ASH_CLI_NAME} "\$@"
 WRAPPER
 chmod 0755 "$STAGE/usr/bin/${ASH_CLI_NAME}"
 
-DEB="$OUTDIR/ash_${DEB_VERSION}_all.deb"
+DEB="$OUTDIR/${PKG}_${DEB_VERSION}_all.deb"
 # -Zgzip, not dpkg-deb's default. bookworm defaults to xz and newer Debian and Ubuntu
 # to zstd, and zstd has no Python standard-library decompressor before 3.14.
 # packaging/assert-package-payload.py reads the package with the standard library

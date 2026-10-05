@@ -74,12 +74,12 @@ deb_install() {
     echo "FAIL: apt-get install $(basename "$pkg") exited $rc" >&2
     return 1
   fi
-  status="$(dpkg-query -W -f='${Status}' ash 2>/dev/null)" || status="not known to dpkg"
+  status="$(dpkg-query -W -f='${Status}' "$ASH_PKG_NAME" 2>/dev/null)" || status="not known to dpkg"
   if [ "$status" != "install ok installed" ]; then
-    echo "FAIL: after installing, dpkg reports ash as '$status', not 'install ok installed'" >&2
+    echo "FAIL: after installing, dpkg reports $ASH_PKG_NAME as '$status', not 'install ok installed'" >&2
     return 1
   fi
-  sed -n -E 's/^Setting up ((python3|ash)[^ ]* .*)/   Setting up \1/p' /tmp/apt-install.log
+  sed -n -E "s/^Setting up ((python3|${ASH_PKG_NAME})[^ ]* .*)/   Setting up \1/p" /tmp/apt-install.log
 }
 
 # `apt-get install --reinstall` with the same checks as deb_install.
@@ -90,8 +90,8 @@ deb_install_reinstall() {
     tail -n 30 /tmp/apt-install.log >&2
     vl_fail "apt-get install --reinstall $(basename "$pkg") exited $rc"
   fi
-  [ "$(dpkg-query -W -f='${Status}' ash)" = "install ok installed" ] \
-    || vl_fail "ash is not 'install ok installed' after the reinstall"
+  [ "$(dpkg-query -W -f='${Status}' "$ASH_PKG_NAME")" = "install ok installed" ] \
+    || vl_fail "$ASH_PKG_NAME is not 'install ok installed' after the reinstall"
 }
 
 key_dependency_installed() {
@@ -99,12 +99,12 @@ key_dependency_installed() {
 }
 
 purge_and_check() {
-  apt-get purge -y -q ash >/tmp/apt-purge.log 2>&1 || { tail -n 20 /tmp/apt-purge.log >&2; vl_fail "apt-get purge ash failed"; }
+  apt-get purge -y -q "$ASH_PKG_NAME" >/tmp/apt-purge.log 2>&1 || { tail -n 20 /tmp/apt-purge.log >&2; vl_fail "apt-get purge $ASH_PKG_NAME failed"; }
   local status
-  status="$(dpkg-query -W -f='${Status}' ash 2>/dev/null)" || status="unknown to dpkg"
+  status="$(dpkg-query -W -f='${Status}' "$ASH_PKG_NAME" 2>/dev/null)" || status="unknown to dpkg"
   case "$status" in
     "unknown to dpkg" | *" not-installed") ;;
-    *) vl_fail "dpkg reports ash as '$status' after purge" ;;
+    *) vl_fail "dpkg reports $ASH_PKG_NAME as '$status' after purge" ;;
   esac
   vl_assert_nothing_left
 }
@@ -129,9 +129,9 @@ case "$MODE" in
     echo "== NEGATIVE CONTROL: an empty-payload .deb must FAIL the payload gate"
     STAGE="$(mktemp -d)"
     install -d "$STAGE/DEBIAN"
-    sed -e "s/@DEB_VERSION@/${VERSION}/" "$REPO/packaging/deb/debian/control.in" > "$STAGE/DEBIAN/control"
+    sed -e "s/@DEB_VERSION@/${VERSION}/" -e "s/@ASH_PKG@/${ASH_PKG_NAME}/g" -e "s/@ASH_CLI@/${ASH_CLI_NAME}/g" "$REPO/packaging/deb/debian/control.in" > "$STAGE/DEBIAN/control"
     mkdir -p "$OUT"
-    EMPTY="$OUT/ash_${VERSION}_all.deb"
+    EMPTY="$OUT/${ASH_PKG_NAME}_${VERSION}_all.deb"
     dpkg-deb --build -Zgzip --root-owner-group "$STAGE" "$EMPTY" >/dev/null
     rc=0
     vl_payload_gate "$EMPTY" || rc=$?
@@ -158,7 +158,7 @@ if [ "$MODE" = negative-install ]; then
   sed -i 's/^exit 0$/exit 1/' "$BROKEN_ROOT/DEBIAN/postinst"
   grep -q '^exit 1$' "$BROKEN_ROOT/DEBIAN/postinst" || vl_fail "could not plant the failing exit in postinst"
   mkdir -p "$OUT/broken"
-  BROKEN="$OUT/broken/ash_${VERSION}_all.deb"
+  BROKEN="$OUT/broken/${ASH_PKG_NAME}_${VERSION}_all.deb"
   dpkg-deb --build -Zgzip --root-owner-group "$BROKEN_ROOT" "$BROKEN" >/dev/null
   rc=0
   deb_install "$BROKEN" || rc=$?
@@ -202,7 +202,7 @@ if [ "$MODE" = upgrade ]; then
 
   echo "== 6. prerm must keep the venv on upgrade and failed-upgrade"
   for arg in upgrade failed-upgrade; do
-    /var/lib/dpkg/info/ash.prerm "$arg" "$VERSION"
+    "/var/lib/dpkg/info/$ASH_PKG_NAME.prerm" "$arg" "$VERSION"
     [ -x "$ASH_VENV/bin/$ASH_CLI_NAME" ] || vl_fail "prerm $arg deleted the venv"
     echo "   OK: prerm $arg left $ASH_VENV in place"
   done
@@ -225,12 +225,12 @@ if [ "$MODE" = upgrade ]; then
 
   echo "== 8. the documented recovery works once the index is back"
   dpkg --configure -a >/tmp/dpkg-configure.log 2>&1 || { tail -n 20 /tmp/dpkg-configure.log >&2; vl_fail "dpkg --configure -a failed"; }
-  [ "$(dpkg-query -W -f='${Status}' ash)" = "install ok installed" ] || vl_fail "ash is not configured after recovery"
+  [ "$(dpkg-query -W -f='${Status}' "$ASH_PKG_NAME")" = "install ok installed" ] || vl_fail "$ASH_PKG_NAME is not configured after recovery"
   vl_assert_installed_version "$VERSION"
   vl_assert_venv_layout
 
   echo "== 9. a host still on the directory layout is migrated to the symlink"
-  vl_make_directory_layout "$(one_wheel /usr/lib/ash/wheels)"
+  vl_make_directory_layout "$(one_wheel "$ASH_LIB/wheels")"
   deb_install_reinstall "$DEB"
   vl_assert_installed_version "$VERSION"
   vl_assert_venv_layout

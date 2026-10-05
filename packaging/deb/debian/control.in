@@ -1,4 +1,4 @@
-Package: ash
+Package: @ASH_PKG@
 Version: @DEB_VERSION@
 Section: devel
 Priority: optional
@@ -13,8 +13,8 @@ Description: Automated Security Helper (ASH) security scan orchestrator
  This package installs ASH itself. It does not bundle any scanner: the scanners
  ASH drives are third-party tools, and shipping their source inside this package
  is forbidden by the project's artifact-contents rule. Install them with
- "ash dependencies install", optionally selecting individual tools with --tool.
+ "@ASH_CLI@ dependencies install", optionally selecting individual tools with --tool.
  .
  The post-install step needs a reachable Python package index to resolve ASH's
  runtime dependencies. On a host with no index, stage one first; see
- /usr/share/doc/ash/README.Debian for why the package cannot carry them.
+ /usr/share/doc/@ASH_PKG@/README.Debian for why the package cannot carry them.

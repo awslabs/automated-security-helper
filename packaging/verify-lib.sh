@@ -27,8 +27,10 @@
 # shellcheck source=packaging/cli-name.sh
 . "$REPO/packaging/cli-name.sh"
 : "${ASH_CLI_NAME:?packaging/cli-name.sh did not set ASH_CLI_NAME}"
+: "${ASH_PKG_NAME:?packaging/cli-name.sh did not set ASH_PKG_NAME}"
 
-ASH_VENV=/usr/lib/ash/venv
+ASH_LIB="/usr/lib/$ASH_PKG_NAME"
+ASH_VENV="$ASH_LIB/venv"
 FIXTURE_DIR=/opt/ash-fixture
 SCAN_OUT=/tmp/ash-scan-out
 SCAN_USER=ashscan
@@ -299,14 +301,14 @@ vl_lower_version() {
 vl_assert_venv_layout() {
   [ -L "$ASH_VENV" ] || vl_fail "$ASH_VENV is not a symlink"
   local dirs=() d
-  for d in /usr/lib/ash/venv-*; do
+  for d in "$ASH_LIB"/venv-*; do
     if [ -d "$d" ]; then
       dirs+=("$d")
     fi
   done
-  [ "${#dirs[@]}" -eq 1 ] || vl_fail "expected exactly one /usr/lib/ash/venv-* directory, found ${#dirs[@]}: ${dirs[*]}"
+  [ "${#dirs[@]}" -eq 1 ] || vl_fail "expected exactly one $ASH_LIB/venv-* directory, found ${#dirs[@]}: ${dirs[*]}"
   [ "$(readlink -f "$ASH_VENV")" = "${dirs[0]}" ] || vl_fail "$ASH_VENV does not point at ${dirs[0]}"
-  for d in /usr/lib/ash/venv.previous /usr/lib/ash/venv.swap-*; do
+  for d in "$ASH_LIB"/venv.previous "$ASH_LIB"/venv.swap-*; do
     if [ -e "$d" ] || [ -L "$d" ]; then
       vl_fail "left behind by the install: $d"
     fi
@@ -322,7 +324,7 @@ vl_make_directory_layout() {
   local wheel="$1" py
   py="$(readlink -f "$ASH_VENV/bin/python3")"
   [ -x "$py" ] || vl_fail "cannot find the interpreter behind $ASH_VENV"
-  rm -rf "$ASH_VENV" /usr/lib/ash/venv-*
+  rm -rf "$ASH_VENV" "$ASH_LIB"/venv-*
   "$py" -m venv "$ASH_VENV"
   "$ASH_VENV/bin/pip" install --quiet --disable-pip-version-check "$wheel"
   if [ -L "$ASH_VENV" ] || [ ! -d "$ASH_VENV" ]; then
@@ -368,7 +370,7 @@ vl_probe_stop_and_assert() {
 vl_assert_nothing_left() {
   local leftover=()
   local path
-  for path in /usr/lib/ash "/usr/bin/$ASH_CLI_NAME" /usr/share/doc/ash /usr/share/licenses/ash; do
+  for path in "$ASH_LIB" "/usr/bin/$ASH_CLI_NAME" "/usr/share/doc/$ASH_PKG_NAME" "/usr/share/licenses/$ASH_PKG_NAME"; do
     if [ -e "$path" ]; then
       leftover+=("$path")
     fi
@@ -377,5 +379,5 @@ vl_assert_nothing_left() {
     ls -la "${leftover[@]}" >&2
     vl_fail "left behind after removal: ${leftover[*]}"
   fi
-  vl_say "   OK: /usr/lib/ash, /usr/bin/$ASH_CLI_NAME and the package's doc and license directories are gone"
+  vl_say "   OK: $ASH_LIB, /usr/bin/$ASH_CLI_NAME and the package's doc and license directories are gone"
 }
