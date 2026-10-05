@@ -72,12 +72,16 @@ object AshCliLocator {
      * @param pathValue the PATH to search; defaults to the process's own. Injectable so a test
      *   can assert every arm without depending on what is installed on the machine running it.
      * @param isExecutable how executability is decided. Injectable for the same reason.
+     * @param windows whether to search the way Windows does; see [candidatePasses].
+     * @param pathExt the PATHEXT value that orders the Windows launcher extensions.
      */
     fun resolve(
         configured: String?,
         pathValue: String? = System.getenv("PATH"),
         pathSeparator: String = File.pathSeparator,
         isExecutable: (File) -> Boolean = { it.isFile && it.canExecute() },
+        windows: Boolean = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true),
+        pathExt: String? = System.getenv("PATHEXT"),
     ): Outcome {
         val trimmed = configured?.trim().orEmpty()
         if (trimmed.isNotEmpty()) return Outcome.Found(trimmed, Source.CONFIGURED)
@@ -92,8 +96,10 @@ object AshCliLocator {
         }
 
         val entries = pathValue.split(pathSeparator).filter { it.isNotBlank() }
-        search(PRIMARY_NAME, entries, isExecutable)?.let { return Outcome.Found(it, Source.PRIMARY) }
-        search(FALLBACK_NAME, entries, isExecutable)?.let { return Outcome.Found(it, Source.FALLBACK) }
+        for (fileNames in candidatePasses(windows, pathExt)) {
+            search(fileNames(PRIMARY_NAME), entries, isExecutable)?.let { return Outcome.Found(it, Source.PRIMARY) }
+            search(fileNames(FALLBACK_NAME), entries, isExecutable)?.let { return Outcome.Found(it, Source.FALLBACK) }
+        }
 
         return Outcome.NotFound(
             entries,
@@ -106,14 +112,32 @@ object AshCliLocator {
         )
     }
 
+    /** What Windows uses when PATHEXT is unset or blank. */
+    private const val DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD"
+
     /**
-     * The first executable named [name] in [entries], or null.
+     * The file names to try for a command name, in passes; each pass covers both names across
+     * all of PATH before the next pass starts.
      *
-     * On Windows an extensionless name is not executable, so the launcher forms the ASH
-     * installers produce are tried as well. Harmless on POSIX, where no such file exists.
+     * POSIX: one pass, the bare name first. The launcher forms after it are harmless there,
+     * where no such file exists.
+     *
+     * WINDOWS: the bare name goes LAST, in a pass of its own. Windows does not run an
+     * extensionless file, and `canExecute()` is true there for any file that exists, so an
+     * extensionless `ash` shell script in a Git for Windows PATH entry would otherwise win over
+     * `ash.exe` and then fail to start. The first pass tries the PATHEXT extensions in PATHEXT
+     * order, which is the order Windows itself uses. The bare name is still tried after that, so
+     * a PATH holding only that file gets "could not start <file>" rather than "not found".
      */
-    private fun search(name: String, entries: List<String>, isExecutable: (File) -> Boolean): String? {
-        val candidateNames = listOf(name, "$name.exe", "$name.cmd", "$name.bat")
+    private fun candidatePasses(windows: Boolean, pathExt: String?): List<(String) -> List<String>> {
+        if (!windows) return listOf { name -> listOf(name, "$name.exe", "$name.cmd", "$name.bat") }
+        val extensions = pathExt?.takeIf { it.isNotBlank() } ?: DEFAULT_PATHEXT
+        val ordered = extensions.split(';').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+        return listOf({ name -> ordered.map { name + it } }, { name -> listOf(name) })
+    }
+
+    /** The first executable in [entries] with one of [candidateNames], or null. */
+    private fun search(candidateNames: List<String>, entries: List<String>, isExecutable: (File) -> Boolean): String? {
         for (entry in entries) {
             for (candidateName in candidateNames) {
                 val candidate = File(entry, candidateName)

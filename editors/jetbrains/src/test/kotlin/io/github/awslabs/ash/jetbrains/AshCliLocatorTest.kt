@@ -106,6 +106,44 @@ class AshCliLocatorTest {
         }
     }
 
+    private fun onWindows(pathValue: String, pathExt: String?, vararg present: String) = AshCliLocator.resolve(
+        configured = null,
+        pathValue = pathValue,
+        pathSeparator = ";",
+        isExecutable = on(*present),
+        windows = true,
+        pathExt = pathExt,
+    ) as AshCliLocator.Outcome.Found
+
+    @Test
+    fun onWindowsALauncherFormBeatsAnExtensionlessFileEarlierOnPath() {
+        // Git for Windows puts an extensionless `ash` shell script on PATH. Windows cannot run it,
+        // and canExecute() is true there for any existing file, so it must not shadow ash.exe.
+        val found = onWindows("/git/usr/bin;/py/Scripts", ".COM;.EXE;.BAT;.CMD", "/git/usr/bin/ash", "/py/Scripts/ash.exe")
+        assertEquals(AshCliLocator.Outcome.Found(File("/py/Scripts/ash.exe").absolutePath, AshCliLocator.Source.FALLBACK), found)
+
+        // And an extensionless primary does not beat a runnable fallback.
+        val fallback = onWindows("/a;/b", null, "/a/ashx", "/b/ash.exe")
+        assertEquals(File("/b/ash.exe").absolutePath, fallback.path)
+    }
+
+    @Test
+    fun onWindowsTheExtensionsAreTriedInPathextOrder() {
+        assertEquals("ashx.exe", File(onWindows("/w", ".COM;.EXE;.BAT;.CMD", "/w/ashx.cmd", "/w/ashx.exe").path).name)
+        assertEquals("ashx.cmd", File(onWindows("/w", " .CMD ; ;.EXE", "/w/ashx.cmd", "/w/ashx.exe").path).name)
+        // Unset or blank PATHEXT falls back to Windows' own default, in which .BAT precedes .CMD.
+        for (pathExt in listOf(null, "  ")) {
+            assertEquals("ashx.bat", File(onWindows("/w", pathExt, "/w/ashx.cmd", "/w/ashx.bat").path).name)
+        }
+    }
+
+    @Test
+    fun onWindowsAnExtensionlessFileIsTheLastResort() {
+        // Tried after every launcher form, so a PATH holding only that file reports that it could
+        // not start it rather than that nothing was found.
+        assertEquals(File("/w/ashx").absolutePath, onWindows("/w", null, "/w/ashx").path)
+    }
+
     @Test
     fun theDefaultSearchUsesTheRealFilesystem() {
         // The default isExecutable is exercised once, against a directory that cannot hold
