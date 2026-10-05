@@ -131,6 +131,18 @@ class SuppressDialog(ModalScreen[bool]):
         self.dismiss(False)
 
 
+def _display_location(value) -> str:
+    """Render a finding's file or line, using the module's N/A for a missing one.
+
+    Findings come from SARIF results, and a result is not required to have a
+    location: extract_findings then sets no "file" or "line" key, and a location
+    without a region leaves "line" unset.
+    """
+    if value is None or value == "":
+        return "N/A"
+    return str(value)
+
+
 class FindingDetailScreen(Screen):
     """Screen for displaying detailed information about a finding."""
 
@@ -144,13 +156,15 @@ class FindingDetailScreen(Screen):
         self.finding = finding
 
     def compose(self) -> ComposeResult:
-        snippet_path = Path(self.finding["file"])
+        # A result without a location has no "file" or "line" key at all.
+        file_value = self.finding.get("file")
+        snippet_path = Path(file_value) if file_value else None
         file_ext = (
-            snippet_path.suffix.lstrip(".")
+            None
+            if snippet_path is None
+            else snippet_path.suffix.lstrip(".")
             if snippet_path.suffix != ""
             else snippet_path.name
-            if self.finding["file"]
-            else None
         )
         if file_ext == "yml":
             file_ext = "yaml"
@@ -166,8 +180,8 @@ class FindingDetailScreen(Screen):
 |-----|-------|
 |Severity|{self.finding["severity"]}|
 |Scanner|{self.finding["scanner"]}|
-|File|{self.finding["file"]}|
-|Line|{self.finding["line"]}|
+|File|{_display_location(self.finding.get("file"))}|
+|Line|{_display_location(self.finding.get("line"))}|
 
 ## Message
 
@@ -189,7 +203,7 @@ class FindingDetailScreen(Screen):
                 if self.finding.get("code_snippet"):
                     md_text += f"""\n\n## Code
 
-```{Path(self.finding["file"]).name.split(".")[-1]}
+```{file_ext or ""}
 {self.finding.get("code_snippet")}
 ```
 """
@@ -475,8 +489,8 @@ class FindingsExplorerApp(App):
                     f"[suppressed]{finding.get('rule_id', 'N/A')}[/suppressed]",
                     f"[suppressed]{finding['severity']}[/suppressed]",
                     f"[suppressed]{finding['scanner']}[/suppressed]",
-                    f"[suppressed]{finding['file'] or 'N/A'}[/suppressed]",
-                    f"[suppressed]{str(finding.get('line', 'N/A'))}[/suppressed]",
+                    f"[suppressed]{_display_location(finding.get('file'))}[/suppressed]",
+                    f"[suppressed]{_display_location(finding.get('line'))}[/suppressed]",
                     f"[suppressed]{finding['message']}[/suppressed]",
                     key=i,
                 )
@@ -487,8 +501,8 @@ class FindingsExplorerApp(App):
                     finding.get("rule_id", "N/A"),
                     finding["severity"],
                     finding["scanner"],
-                    finding["file"] or "N/A",
-                    str(finding.get("line", "N/A")),
+                    _display_location(finding.get("file")),
+                    _display_location(finding.get("line")),
                     finding["message"],
                     key=i,
                 )
@@ -803,7 +817,7 @@ class FindingsExplorerApp(App):
             )
         elif self.current_sort == "file":
             self.filtered_findings.sort(
-                key=lambda f: f.get("file", ""), reverse=self.sort_reverse
+                key=lambda f: f.get("file") or "", reverse=self.sort_reverse
             )
         elif self.current_sort == "scanner":
             self.filtered_findings.sort(
@@ -839,7 +853,7 @@ class FindingsExplorerApp(App):
             if (
                 search_term in f.get("message", "").lower()
                 or search_term in f.get("rule_id", "").lower()
-                or search_term in f.get("file", "").lower()
+                or search_term in (f.get("file") or "").lower()
                 or search_term in f.get("scanner", "").lower()
                 or search_term in str(f.get("line", "")).lower()
             )

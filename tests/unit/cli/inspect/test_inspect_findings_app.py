@@ -1150,3 +1150,68 @@ class TestExtractFindingsRuleIndex:
         """`"codeFlows": null` is valid input and used to raise TypeError."""
         findings = _findings_from_result(ruleIndex=0, codeFlows=None)
         assert [f["rule_id"] for f in findings] == ["R0"]
+
+
+# ---------------------------------------------------------------------------
+# Findings without a location, driven through the running app
+# ---------------------------------------------------------------------------
+
+
+class TestFindingWithoutLocation:
+    """A SARIF result may have no locations, and extract_findings then sets no
+    "file" or "line" key. _populate_table read finding["file"] and the app
+    crashed on mount with KeyError: 'file'. The detail screen did the same.
+    """
+
+    @staticmethod
+    def _locationless_findings():
+        findings = _findings_from_result(ruleId="NOLOC", ruleIndex=0)
+        assert "file" not in findings[0] and "line" not in findings[0]
+        return findings
+
+    @staticmethod
+    def _row(table, index):
+        return [str(cell) for cell in table.get_row_at(index)]
+
+    @pytest.mark.asyncio
+    async def test_table_renders_placeholder_location(self, tmp_path):
+        from textual.widgets import DataTable
+
+        app = FindingsExplorerApp(
+            self._locationless_findings(), config_path=tmp_path / ".ash.yaml"
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            table = app.query_one("#findings_table", DataTable)
+            assert table.row_count == 1
+            row = self._row(table, 0)
+            # ID, Rule ID, Severity, Scanner, File, Line, Message
+            assert row[1] == "NOLOC"
+            assert row[4] == "N/A"
+            assert row[5] == "N/A"
+
+    @pytest.mark.asyncio
+    async def test_suppressed_row_renders_placeholder_location(self, tmp_path):
+        from textual.widgets import DataTable
+
+        findings = self._locationless_findings()
+        findings[0]["suppressed"] = True
+        app = FindingsExplorerApp(findings, config_path=tmp_path / ".ash.yaml")
+        app.show_suppressed = True
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            table = app.query_one("#findings_table", DataTable)
+            row = self._row(table, 0)
+            assert "N/A" in row[4]
+            assert "N/A" in row[5]
+
+    @pytest.mark.asyncio
+    async def test_detail_screen_opens_for_locationless_finding(self, tmp_path):
+        app = FindingsExplorerApp(
+            self._locationless_findings(), config_path=tmp_path / ".ash.yaml"
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("v")
+            await pilot.pause()
+            assert isinstance(app.screen, FindingDetailScreen)
