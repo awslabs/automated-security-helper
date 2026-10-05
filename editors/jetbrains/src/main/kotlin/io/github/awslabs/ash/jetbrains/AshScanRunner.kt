@@ -88,6 +88,7 @@ object AshScanRunner {
 
         /** The scan did not get far enough to produce a readable report of this run. */
         data class Failed(val summary: String, val detail: String?) : Outcome
+
     }
 
     /**

@@ -441,7 +441,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         assertTrue("stub script should still be executable", File(script.toString()).canExecute())
     }
 
-    /** A stub whose `--version` answers like ASH and whose `scan` runs [scanBody] with `$out` set. */
+    /** A stub whose `--version` answers like ASH and whose `scan` runs [scanBody] with `$out` and `$src` set. */
     private fun rawStub(scanBody: String, versionBody: String = "echo 'awslabs/automated-security-helper v4.0.0'"): Path {
         val bin = Files.createDirectories(workdir.resolve("bin"))
         val script = bin.resolve("ashx")
@@ -451,7 +451,11 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
                 appendLine("#!/bin/sh")
                 appendLine("if [ \"\$1\" = --version ]; then $versionBody; exit 0; fi")
                 appendLine("out=''")
-                appendLine("while [ \$# -gt 0 ]; do case \"\$1\" in --output-dir) out=\"\$2\"; shift 2;; *) shift;; esac; done")
+                appendLine("src=''")
+                appendLine(
+                    "while [ \$# -gt 0 ]; do case \"\$1\" in --output-dir) out=\"\$2\"; shift 2;; " +
+                        "--source-dir) src=\"\$2\"; shift 2;; *) shift;; esac; done",
+                )
                 appendLine(scanBody)
             },
         )
@@ -526,5 +530,29 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         val script = rawStub("cat > \"\$out/reports/ash.sarif\" < /dev/null 2>/dev/null; exit 0")
         val failed = AshScanRunner.run(script.toString(), source, output) as AshScanRunner.Outcome.Failed
         assertTrue(failed.summary, failed.summary.contains("wrote no SARIF"))
+    }
+
+    fun testTheScanRunsInTheSourceDirectorySoRelativeUrisMatchTheScannedTree() {
+        // ASH writes SARIF URIs relative to its WORKING DIRECTORY, not to --source-dir. This stub
+        // does the same: it records its cwd and writes the URI of $src/app.py relative to it. So a
+        // runner that let the child inherit the IDE's cwd gets a URI like ../../tmp/.../app.py,
+        // and every finding is keyed against a file that is not the one the user has open.
+        val (source, output) = dirs()
+        Files.writeString(source.resolve("app.py"), "x\n")
+        val cwd = workdir.resolve("cwd.txt")
+        val script = rawStub(
+            "pwd -P > '$cwd'; rel=\$(realpath --relative-to=\"\$(pwd -P)\" \"\$src/app.py\"); " +
+                "mkdir -p \"\$out/reports\"; " +
+                "printf '%s' '{\"version\":\"2.1.0\",\"runs\":[{\"results\":[{\"ruleId\":\"R\",\"level\":\"error\"," +
+                "\"message\":{\"text\":\"m\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"' " +
+                "> \"\$out/reports/ash.sarif\"; " +
+                "printf '%s' \"\$rel\" >> \"\$out/reports/ash.sarif\"; " +
+                "printf '%s' '\"},\"region\":{\"startLine\":1}}}]}]}]}' >> \"\$out/reports/ash.sarif\"; exit 2",
+        )
+
+        val completed = AshScanRunner.run(script.toString(), source, output) as AshScanRunner.Outcome.Completed
+
+        assertEquals("the child must run in the scanned directory", source.toRealPath().toString(), Files.readString(cwd).trim())
+        assertEquals("app.py", completed.results.findings.single().filePath)
     }
 }
