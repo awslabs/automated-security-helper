@@ -1034,10 +1034,11 @@ def respond(event, status, reason, physical_id, data=None):
     The body is bounded to RESPONSE_MAX_BYTES here rather than trusted to be small.
     See the stack header under PRECONDITIONS for the S3 egress requirement.
     """
-    # Bounded in serialized BYTES, not characters: with ensure_ascii=True each U+FFFD
-    # that call() produces escapes to six bytes. The [:1000] pre-slice enforces the
-    # cap today; the loop is a backstop if the fixed fields grow. A byte slice can
-    # split a character, so the tail is re-decoded with errors="ignore".
+    # Bounded in serialized BYTES, not characters. json.dumps' default ensure_ascii=True
+    # escapes each U+FFFD to six bytes, so this uses False and bounds bytes. The
+    # [:1000] pre-slice enforces the cap today; the loop is a backstop if the fixed
+    # fields grow. A byte slice can split a character, so the tail is re-decoded with
+    # errors="ignore".
     def serialize(reason_bytes):
         return json.dumps(
             {

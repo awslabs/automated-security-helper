@@ -528,6 +528,19 @@ describe('REGRESSION: an unanswerable CloudFormation response must not be silent
     expect(respond).toContain('except Exception as err');
   });
 
+  test("respond's ensure_ascii comment matches the call it explains", () => {
+    // The comment ships inside the ZipFile. A shortened version read "with
+    // ensure_ascii=True each U+FFFD ... escapes to six bytes" above a call passing
+    // False, which states the opposite of the code.
+    const respond = ASH_OPERATOR_APPLIER.slice(
+      ASH_OPERATOR_APPLIER.indexOf('def respond('),
+      ASH_OPERATOR_APPLIER.indexOf('def handler('),
+    );
+    expect(respond).toContain('ensure_ascii=False,');
+    expect(respond).not.toMatch(/with ensure_ascii=True each/);
+    expect(respond).toMatch(/default ensure_ascii=True\s+#\s+escapes each U\+FFFD to six bytes, so this uses False/);
+  });
+
   test('the properties are read inside the try, so a missing one still responds', () => {
     // These used to be read above the try. A missing property then raised before any
     // responder existed, producing the same indefinite hang as an unreachable
