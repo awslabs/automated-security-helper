@@ -155,6 +155,17 @@ records the verdict ASH reaches on each of 18 cases built from captured scans;
 jest holds `src/coverage.ts` to it and
 `tests/unit/test_vscode_coverage_parity.py` holds ASH to it.
 
+This replaces, deliberately, an earlier design that also read the SARIF report's
+`runs[].invocations[]` and reported any `executionSuccessful: false` as a failed
+scanner. That field cannot carry the answer: a scanner that fails returns before
+ASH injects its invocation, so it leaves no invocation at all, and a real run on a
+host missing most scanner tools reported `executionSuccessful: true` for a
+scanner ASH marked FAILED. `assess_coverage` reads ASH's per-scanner status
+instead, and reproducing ASH's own rule, with a parity test against ASH, keeps the
+editor and ASH agreeing. The consequence is that an invocation marked
+unsuccessful whose scanner status is a complete one is not reported as a gap,
+here or by ASH.
+
 ### Suppressed results and where findings land
 
 A result ASH suppressed keeps its `kind` and `level` and gains a `suppressions`
