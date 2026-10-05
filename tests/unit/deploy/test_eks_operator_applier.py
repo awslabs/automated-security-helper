@@ -34,6 +34,7 @@ is deliberate and is the honest limit of this file.
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import pathlib
 import re
@@ -111,16 +112,25 @@ def applier_source() -> str:
 
 
 @pytest.fixture(scope="module")
-def applier(applier_source: str) -> dict:
+def applier(applier_source: str, tmp_path_factory: pytest.TempPathFactory) -> dict:
     """The applier executed as a module.
 
     Executing it is the point: a syntax error, a bad import or a module-scope typo fails
     here, and every check below then runs against real objects rather than text.
+
+    It is written to a file and loaded through the import system, the way Lambda loads
+    `index.py` from a ZipFile, rather than passed to `exec()`. The returned mapping is the
+    module's own globals, so a test that replaces a name in it changes what `handler()`
+    sees.
     """
     pytest.importorskip("boto3", reason="the applier imports boto3 at module scope")
-    namespace: dict = {"__name__": "ash_eks_applier_under_test"}
-    exec(compile(applier_source, str(TEMPLATE), "exec"), namespace)  # noqa: S102
-    return namespace
+    path = tmp_path_factory.mktemp("eks_applier") / "ash_eks_applier_under_test.py"
+    path.write_text(applier_source, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("ash_eks_applier_under_test", path)
+    assert spec is not None and spec.loader is not None, f"cannot load {path}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return vars(module)
 
 
 @pytest.fixture(scope="module")
