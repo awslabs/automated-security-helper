@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: cc7d048d8d24592c
+    ash.awslabs.github.io/ash-config-schema-sha256: 7bdbe2fdad9bfe40
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -200,6 +200,24 @@ spec:
                               type: integer
                               description: (Optional) Ending line number
                               nullable: true
+                            package_name:
+                              type: string
+                              description: (Optional) Only suppress findings about this package (glob,
+                                case-insensitive). Findings that do not report a package name never match.
+                              nullable: true
+                            package_version:
+                              type: string
+                              description: (Optional) Only suppress findings about this installed package
+                                version (glob, case-insensitive). Findings that do not report an installed
+                                version never match.
+                              nullable: true
+                            package_path:
+                              type: string
+                              description: (Optional) Only suppress findings about the package copy installed
+                                at this path, relative to the scan root (glob, supports **), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'.
+                                Separates two copies with the same name and version. Findings that do
+                                not report an install path never match.
+                              nullable: true
                           required:
                           - path
                           - reason
@@ -256,13 +274,30 @@ spec:
                       complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable,
                       never ran). SKIPPED scanners are not selected and never trip this. Independent of
                       fail_on_findings: one answers ''was anything found'', this one answers ''did what
-                      I asked for actually run''. Defaults to False so that environments legitimately
-                      lacking a scanner''s tool keep their current exit codes.
+                      I asked for actually run''. Selects on the scanner''s status, so it covers only
+                      a failure that reached that status. Defaults to True, so a scanner recorded ERROR
+                      or MISSING does not report the exit code of a clean scan. Set it to False, or pass
+                      --no-fail-on-incomplete-scanners, to accept a partial scan''s exit code; excluding
+                      the scanner whose tool is unavailable is usually better, because an excluded scanner
+                      is recorded SKIPPED and the report then says what was not measured.
 
 
                       IGNORED BY THE OPERATOR: Set on `ash merge` from spec.failOnIncompleteScanners instead,
                       for the same reason as fail_on_findings.'
                     type: boolean
+                  content_db_staleness:
+                    description: What a scan does when a scanner's content database (grype's or trivy's
+                      vulnerability database, the offline semgrep/opengrep rulesets) was built longer
+                      ago than the bound declared for it in automated_security_helper/utils/content_databases.py.
+                      'fail' (the default) keeps the scanner's findings and exits 1, naming the database,
+                      its build time, its age and the bound. 'warn' lets the scan pass and records the
+                      same warning in the log and in the reports (summary, SARIF invocation notifications,
+                      flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes
+                      precedence over this value; --no-allow-stale-content-db sets 'fail'.
+                    enum:
+                    - fail
+                    - warn
+                    type: string
                   ash_plugin_modules:
                     description: List of Python modules to import containing ASH plugins and/or event
                       subscribers. These are loaded in addition to the default modules.
@@ -659,8 +694,8 @@ spec:
                                 type: array
                               tool_version:
                                 type: string
-                                description: Specific version constraint for bandit installation (e.g.,
-                                  '>=1.7.0,<2.0.0')
+                                description: Version constraint for bandit installation, in pip requirement
+                                  syntax. The default below is the constraint the scanner enforces.
                                 nullable: true
                               install_timeout:
                                 description: Timeout in seconds for tool installation
@@ -937,8 +972,8 @@ spec:
                                 type: array
                               tool_version:
                                 type: string
-                                description: Specific version constraint for checkov installation (e.g.,
-                                  '>=3.2.0,<4.0.0')
+                                description: Version constraint for checkov installation, in pip requirement
+                                  syntax. Leave unset to use the scanner's own default constraint.
                                 nullable: true
                               install_timeout:
                                 description: Timeout in seconds for tool installation
@@ -1035,6 +1070,15 @@ spec:
                                   be used and no filters are configured. scan_settings takes precedence
                                   over baseline_file
                                 x-kubernetes-preserve-unknown-fields: true
+                              skip_generated_lockfiles:
+                                description: Skip machine-generated dependency lockfiles (package-lock.json,
+                                  yarn.lock, poetry.lock, and similar) before scanning. These are dense
+                                  with integrity hashes and are regenerated rather than hand-edited, so
+                                  findings in them are usually noise. Hand-authored dependency declarations
+                                  such as requirements.txt, Pipfile and environment.yml are always scanned
+                                  and are not affected by this option. Set to false to scan generated
+                                  lockfiles as well.
+                                type: boolean
                             type: object
                             description: Configure detect-secrets scanner
                             x-kubernetes-preserve-unknown-fields: true
@@ -1270,8 +1314,8 @@ spec:
                                 type: boolean
                               tool_version:
                                 type: string
-                                description: Specific version constraint for semgrep installation (e.g.,
-                                  '>=1.125.0')
+                                description: Version constraint for semgrep installation, in pip requirement
+                                  syntax. Leave unset to use the scanner's own default constraint.
                                 nullable: true
                               install_timeout:
                                 description: Timeout in seconds for tool installation
@@ -1653,6 +1697,26 @@ spec:
                                 type: integer
                               top_hotspots_limit:
                                 type: integer
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          extension:
+                            type: string
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      unused-suppressions:
+                        description: Configure the options for the Unused Suppressions reporter
+                        properties:
+                          name:
+                            enum:
+                            - unused-suppressions
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            description: Configuration options for the Unused Suppressions reporter.
+                            properties:
+                              output_format:
+                                type: string
                             type: object
                             x-kubernetes-preserve-unknown-fields: true
                           extension:

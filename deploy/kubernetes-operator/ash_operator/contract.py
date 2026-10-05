@@ -39,6 +39,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ash_operator.constants import (
+    ASH_CLI,
     MAX_SHARD_COUNT,
     MIN_SHARD_COUNT,
     SEVERITY_LEVELS,
@@ -189,7 +190,7 @@ def build_scan_argv(
     scanners: list[str] | None = None,
     exclude_scanners: list[str] | None = None,
     extra_arguments: list[str] | None = None,
-    ash_binary: str = "ash",
+    ash_binary: str = ASH_CLI,
 ) -> list[str]:
     """Return the ``ash scan`` argv for one worker.
 
@@ -235,7 +236,7 @@ def build_merge_argv(
     fail_on_findings: bool | None = None,
     fail_on_incomplete_scanners: bool | None = None,
     output_formats: list[str] | None = None,
-    ash_binary: str = "ash",
+    ash_binary: str = ASH_CLI,
 ) -> list[str]:
     """Return the ``ash merge`` argv for the collector.
 
@@ -297,7 +298,7 @@ def build_mcp_argv(
     allowed_hosts: list[str] | None = None,
     auth_header_name: str | None = None,
     auth_value_from_environment: bool = False,
-    ash_binary: str = "ash",
+    ash_binary: str = ASH_CLI,
 ) -> list[str]:
     """Return the ``ash mcp`` argv for a long-lived server pod.
 

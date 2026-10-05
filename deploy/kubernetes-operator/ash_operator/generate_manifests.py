@@ -70,10 +70,12 @@ from ash_operator.constants import (
     MCP_KIND,
     MCP_PLURAL,
     MCP_SINGULAR,
+    NON_TERMINAL_PHASES,
     SCAN_KIND,
     SCAN_PLURAL,
     SCAN_SINGULAR,
     SEVERITY_LEVELS,
+    TERMINAL_PHASES,
     VERSION,
 )
 from ash_operator.crd_schema import build_config_schema
@@ -275,11 +277,12 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
             "failOnIncompleteScanners": {
                 "type": "boolean",
                 "description": (
-                    "Refuse the merge when a shard's owned scanner did not run. "
-                    "ASH's own default is false, so leaving this unset does NOT fail "
-                    "a scan whose scanners were missing -- .status.incompleteScanners "
-                    "reports them either way, which is where to look before turning "
-                    "this on."
+                    "Passed to `ash merge`. ASH's own default is true, so leaving "
+                    "this unset ends a scan whose scanners did not all run in phase "
+                    "Incomplete (merge exit 1) with its partial results in .status. "
+                    "Setting it false accepts the gap: the phase then follows the "
+                    "findings alone, and .status.coverageComplete and "
+                    ".status.incompleteScanners still name what did not run."
                 ),
             },
             "outputFormats": {"type": "array", "items": {"type": "string"}},
@@ -321,15 +324,34 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
         "properties": {
             "phase": {
                 "type": "string",
-                "enum": ["Pending", "Scanning", "Merging", "Succeeded", "Failed", "Refused"],
+                "enum": [*NON_TERMINAL_PHASES, *TERMINAL_PHASES],
                 "description": (
-                    "Refused is distinct from Failed. Failed means the scan ran and "
-                    "the findings crossed the threshold, which is an answer. Refused "
+                    "The terminal phases are ash merge's three answers and one "
+                    "refusal. Clean is exit 0. Findings is exit 2. Incomplete is exit "
+                    "1 over a merged report that names a coverage gap: partial "
+                    "results, real findings from a set known to be short. Refused "
                     "means the operator does not have an answer and is declining to "
                     "synthesise one -- a missing shard, a merge that wrote no report, "
-                    "or a collector summary it could not read."
+                    "exit 1 with no coverage gap, or a collector summary it could "
+                    "not read."
                 ),
             },
+            "exitCode": {
+                "type": "integer",
+                "nullable": True,
+                "description": "ash merge's exit code: 0 clean, 2 findings, 1 incomplete.",
+            },
+            "coverageComplete": {
+                "type": "boolean",
+                "nullable": True,
+                "description": (
+                    "Whether the merged report covered everything, assessed the way "
+                    "ASH answers coverage_complete for an MCP scan. Reported whatever "
+                    "failOnIncompleteScanners says; null when it could not be assessed."
+                ),
+            },
+            "coverageSource": {"type": "string", "nullable": True},
+            "coverageGaps": {"type": "array", "items": {"type": "string"}},
             "shardCount": {"type": "integer"},
             "resultsPrefix": {"type": "string"},
             "resultsClaimName": {"type": "string"},
@@ -394,6 +416,11 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
                             "name": "Actionable",
                             "type": "integer",
                             "jsonPath": ".status.findings.actionable",
+                        },
+                        {
+                            "name": "Coverage",
+                            "type": "boolean",
+                            "jsonPath": ".status.coverageComplete",
                         },
                         {
                             "name": "Incomplete",

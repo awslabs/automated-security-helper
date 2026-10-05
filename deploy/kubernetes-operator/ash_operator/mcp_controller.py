@@ -47,6 +47,7 @@ from kubernetes.client.rest import ApiException
 
 from ash_operator import manifests
 from ash_operator.constants import (
+    ASH_CLI,
     CONFIG_MOUNT,
     GROUP,
     MCP_PLURAL,
@@ -61,8 +62,8 @@ LOG = logging.getLogger("ash_operator.mcp")
 CAPABILITY_PROBE = r"""
 set -u
 log() { printf '%s %s\n' "[ash-mcp-probe]" "$*" >&2; }
-HELP="$(COLUMNS=200 ash mcp --help 2>&1)" || {
-  log "FATAL: 'ash mcp --help' failed. This image has no usable ash mcp."
+HELP="$(COLUMNS=200 @ASH_CLI@ mcp --help 2>&1)" || {
+  log "FATAL: '@ASH_CLI@ mcp --help' failed. This image has no usable @ASH_CLI@ mcp."
   exit 65
 }
 if [ "${ASH_REQUIRE_STATELESS_HTTP:-0}" = "1" ]; then
@@ -91,7 +92,7 @@ if [ -n "${ASH_ALLOWED_HOSTS:-}" ]; then
   fi
 fi
 exit 0
-"""
+""".replace("@ASH_CLI@", ASH_CLI)
 
 
 @kopf.on.create(GROUP, VERSION, MCP_PLURAL)

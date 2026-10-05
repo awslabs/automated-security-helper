@@ -1,16 +1,16 @@
 {
-  "additionalPropertiesDroppedAlongsideProperties": 72,
-  "collapsedOptionals": 64,
-  "constRewrittenToEnum": 26,
+  "additionalPropertiesDroppedAlongsideProperties": 74,
+  "collapsedOptionals": 67,
+  "constRewrittenToEnum": 27,
   "droppedKeywords": {
-    "default": 297,
-    "title": 330
+    "default": 308,
+    "title": 341
   },
   "exclusiveBoundsRewritten": 1,
   "referenceCycles": [
     "AshConfig"
   ],
-  "sourceSchemaSha256": "cc7d048d8d24592c",
+  "sourceSchemaSha256": "7bdbe2fdad9bfe40",
   "unexpressible": [
     {
       "path": "/properties/build/anyOf/0/properties/custom_scanners/items/properties/context/anyOf/0/properties/config",
@@ -270,6 +270,14 @@
     },
     {
       "path": "/properties/reporters/properties/text/properties/options",
+      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
+    },
+    {
+      "path": "/properties/reporters/properties/unused-suppressions",
+      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
+    },
+    {
+      "path": "/properties/reporters/properties/unused-suppressions/properties/options",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {

@@ -62,13 +62,16 @@ class TestClassify:
 
 def summary_json(**overrides):
     body = {
-        "phase": "Succeeded",
+        "phase": "Clean",
         "shardCount": 2,
         "consumedShardIndices": [0, 1],
         "mergeExitCode": 0,
         "mergedShardCount": 2,
         "mergedShardIndices": [0, 1],
         "candidateRosterAgreed": True,
+        "coverageComplete": True,
+        "coverageSource": "ash-coverage-rule",
+        "coverageGaps": [],
         "findings": {"total": 3, "actionable": 2, "suppressed": 0},
         "scanners": [
             {"n": "bandit", "s": "FAILED", "o": 0, "d": True, "f": 3, "a": 2},
@@ -82,13 +85,14 @@ def summary_json(**overrides):
 class TestParse:
     def test_a_full_summary_parses(self):
         summary = parse_collector_summary(summary_json())
-        assert summary.phase == "Succeeded"
+        assert summary.phase == "Clean"
         assert summary.merge_exit_code == 0
+        assert summary.coverage_complete is True
         assert len(summary.scanners) == 2
 
     def test_a_truncated_message_is_not_read_as_clean(self):
         # The kubelet caps the message at 4 KiB. Truncation yields invalid JSON, and
-        # swallowing that would report Succeeded for a run whose outcome the
+        # swallowing that would report Clean for a run whose outcome the
         # operator never saw.
         summary = parse_collector_summary(summary_json()[:-40])
         assert summary.parse_error is not None
@@ -101,7 +105,7 @@ class TestParse:
 
 
 class TestStatus:
-    def test_a_clean_run_succeeds(self):
+    def test_a_clean_run_is_clean(self):
         status = status_from_summary(
             parse_collector_summary(
                 summary_json(
@@ -111,26 +115,76 @@ class TestStatus:
             ),
             expected_shard_count=2,
         )
-        assert status["phase"] == "Succeeded"
+        assert status["phase"] == "Clean"
+        assert status["exitCode"] == 0
+        assert status["coverageComplete"] is True
         assert status["incompleteScanners"] == []
         assert status["findings"]["actionable"] == 0
 
-    def test_a_missing_scanner_is_named_but_does_not_itself_fail_the_run(self):
-        # fail_on_incomplete_scanners defaults to False in ASH, so a MISSING scanner
-        # leaves the phase Succeeded. .status.incompleteScanners is where an adopter
-        # finds out which scanner did not run, which is the whole reason it is
-        # surfaced unconditionally rather than only when the gate is on.
-        status = status_from_summary(
-            parse_collector_summary(summary_json(mergeExitCode=0)), expected_shard_count=2
-        )
-        assert status["incompleteScanners"] == ["grype"]
-        assert status["phase"] == "Succeeded"
-
-    def test_a_non_zero_merge_exit_fails_the_run(self):
+    def test_exit_two_is_findings(self):
         status = status_from_summary(
             parse_collector_summary(summary_json(mergeExitCode=2)), expected_shard_count=2
         )
-        assert status["phase"] == "Failed"
+        assert status["phase"] == "Findings"
+        assert status["exitCode"] == 2
+        assert status["findings"]["actionable"] == 2
+
+    def test_exit_one_over_a_coverage_gap_is_incomplete_with_partial_results(self):
+        # The #640 case: fail_on_incomplete_scanners defaults on, so a MISSING scanner
+        # makes ash merge exit 1 while still writing the merged report. That is a
+        # third answer, not a refusal: the findings that came back are real.
+        status = status_from_summary(
+            parse_collector_summary(
+                summary_json(
+                    mergeExitCode=1,
+                    coverageComplete=False,
+                    coverageGaps=["scanner grype: missing_dependencies"],
+                )
+            ),
+            expected_shard_count=2,
+        )
+        assert status["phase"] == "Incomplete"
+        assert status["exitCode"] == 1
+        assert status["coverageComplete"] is False
+        assert status["coverageGaps"] == ["scanner grype: missing_dependencies"]
+        assert status["incompleteScanners"] == ["grype"]
+        assert status["findings"]["actionable"] == 2, "the partial results were dropped"
+
+    def test_exit_one_without_a_coverage_gap_is_refused_not_incomplete(self):
+        # Exit 1 is also ASH's "error during execution". Without a gap in the report
+        # there is no partial result to report, so reading it as Incomplete would
+        # present a crash as a coverage question.
+        status = status_from_summary(
+            parse_collector_summary(summary_json(mergeExitCode=1, coverageComplete=True)),
+            expected_shard_count=2,
+        )
+        assert status["phase"] == "Refused"
+
+    def test_exit_one_with_unassessed_coverage_is_refused(self):
+        status = status_from_summary(
+            parse_collector_summary(summary_json(mergeExitCode=1, coverageComplete=None)),
+            expected_shard_count=2,
+        )
+        assert status["phase"] == "Refused"
+
+    @pytest.mark.parametrize("code", [3, 5, 127, -9])
+    def test_an_undocumented_exit_code_is_refused(self, code):
+        status = status_from_summary(
+            parse_collector_summary(summary_json(mergeExitCode=code)), expected_shard_count=2
+        )
+        assert status["phase"] == "Refused"
+
+    def test_a_gap_with_the_gate_off_keeps_the_exit_code_phase_and_reports_the_gap(self):
+        # failOnIncompleteScanners: false. ash merge exits 0 over a MISSING scanner;
+        # the phase follows the exit code as ASH's own MCP status does, and the gap
+        # stays visible beside it rather than being reported as complete.
+        status = status_from_summary(
+            parse_collector_summary(summary_json(mergeExitCode=0, coverageComplete=False)),
+            expected_shard_count=2,
+        )
+        assert status["phase"] == "Clean"
+        assert status["coverageComplete"] is False
+        assert status["incompleteScanners"] == ["grype"]
 
     def test_a_short_walk_is_refused_even_if_the_merge_exited_zero(self):
         # The single failure mode the whole design is built against: a merge over a
@@ -178,7 +232,7 @@ class TestStatus:
         """The gap the old suite could not see.
 
         Before this, ``derive_phase`` never read ``candidateRosterAgreed``, so a scan
-        whose shards recorded no ``candidate_scanners`` at all reported ``Succeeded``
+        whose shards recorded no ``candidate_scanners`` at all reported success
         with ``candidateRosterAgreed: false`` in its own status. ``ash merge`` does not
         refuse that case -- it skips the union check -- so nothing else caught it.
         The e2e asserted the field was ``true``, which proves the provenance was
@@ -209,7 +263,7 @@ class TestStatus:
             parse_collector_summary(summary_json(candidateRosterAgreed=True, mergeExitCode=0)),
             expected_shard_count=2,
         )
-        assert status["phase"] == "Succeeded"
+        assert status["phase"] == "Clean"
         assert "refusalReason" not in status["merge"]
 
     def test_the_collector_never_sheds_the_roster_field(self):
@@ -222,8 +276,10 @@ class TestStatus:
         from ash_operator.entrypoints import collect
 
         payload = {
-            "phase": "Succeeded",
+            "phase": "Clean",
             "candidateRosterAgreed": True,
+            "coverageComplete": True,
+            "coverageGaps": [f"scanner s-{i}: error" for i in range(100)],
             "mergeExitCode": 0,
             "consumedShardIndices": [0, 1],
             "refusal": None,
@@ -252,6 +308,10 @@ class TestStatus:
         assert "candidateRosterAgreed" in shed, (
             f"the roster field was shed: {sorted(shed)}. derive_phase refuses on its "
             f"absence, so shedding it turns a detected hole into an unexplained refusal."
+        )
+        assert shed["coverageComplete"] is True, (
+            "coverageComplete was shed; without it exit 1 cannot be told apart from "
+            "an error and an Incomplete run would read as Refused"
         )
         assert len(written["text"].encode()) <= collect.TERMINATION_MESSAGE_BUDGET
 

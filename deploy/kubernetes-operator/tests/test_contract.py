@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import ast
+import re
+from pathlib import Path
+
 import pytest
 
 from ash_operator import contract
-from ash_operator.constants import MAX_SHARD_COUNT
+from ash_operator.constants import ASH_CLI, MAX_SHARD_COUNT
 
 
 class TestScanArgv:
@@ -16,7 +20,7 @@ class TestScanArgv:
             shard_index=2,
             shard_count=4,
         )
-        assert argv[:2] == ["ash", "scan"]
+        assert argv[:2] == [ASH_CLI, "scan"]
         i = argv.index("--shard-index")
         assert argv[i + 1] == "2"
         j = argv.index("--shard-count")
@@ -297,3 +301,63 @@ class TestMcpArgv:
     def test_a_mount_path_that_could_become_a_command_is_refused(self):
         with pytest.raises(contract.ContractError, match="entrypoint's shell"):
             contract.build_mcp_argv(mount_path="/mcp;id")
+
+
+class TestTheCliNameLivesInOneConstant:
+    """Renaming the ASH binary must be a one-line change in constants.py."""
+
+    PACKAGE = Path(contract.__file__).resolve().parent
+
+    def test_every_argv_builder_uses_the_constant(self):
+        assert contract.build_scan_argv(source_dir="/s", output_dir="/o")[0] == ASH_CLI
+        assert contract.build_merge_argv(results_dirs=None, output_dir=None)[0] == ASH_CLI
+        assert contract.build_mcp_argv()[0] == ASH_CLI
+
+    def test_no_module_spells_the_binary_name_itself(self):
+        """No code names the program; prose about ``ash merge`` is allowed.
+
+        Two shapes are code. A string constant that is exactly the program name, and
+        a line of shell -- in an entrypoint script, or in a multi-line string such as
+        the MCP capability probe -- that invokes it. Docstrings, comments and the
+        ``log`` lines of a script describe the command rather than run it.
+        """
+        invocation = re.compile(r"(?:^|[\s(;|&`])ash\s+(?:scan|merge|mcp)\b")
+
+        def shell_offenders(label: str, text: str, first_line: int) -> list[str]:
+            found = []
+            for offset, line in enumerate(text.splitlines()):
+                code = line.strip()
+                if not code or code.startswith(("#", "log ")):
+                    continue
+                if invocation.search(code):
+                    found.append(f"{label}:{first_line + offset}: {code}")
+            return found
+
+        offenders: list[str] = []
+        for path in sorted(self.PACKAGE.rglob("*.py")):
+            if path.name == "constants.py":
+                continue
+            label = str(path.relative_to(self.PACKAGE))
+            tree = ast.parse(path.read_text())
+            docstrings = {
+                id(node.body[0].value)
+                for node in ast.walk(tree)
+                if isinstance(
+                    node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+                )
+                and node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+            }
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                    continue
+                if id(node) in docstrings:
+                    continue
+                if node.value == "ash":
+                    offenders.append(f"{label}:{node.lineno}: {node.value!r}")
+                elif "\n" in node.value:
+                    offenders += shell_offenders(label, node.value, node.lineno)
+        for path in sorted(self.PACKAGE.rglob("*.sh")):
+            offenders += shell_offenders(str(path.relative_to(self.PACKAGE)), path.read_text(), 1)
+        assert not offenders, "the CLI name is spelled outside ASH_CLI:\n" + "\n".join(offenders)

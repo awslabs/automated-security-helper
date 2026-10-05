@@ -36,6 +36,7 @@ from ash_operator.constants import (
     ROLE_COLLECT,
     ROLE_SHARD,
     SCAN_PLURAL,
+    TERMINAL_PHASES,
     VERSION,
 )
 from ash_operator.contract import ContractError, validate_shard_selection
@@ -100,7 +101,7 @@ def reconcile_scan(spec, meta, status, patch, body, **_):
     batch, core = _apis()
     namespace = meta["namespace"]
 
-    if (status or {}).get("phase") in ("Succeeded", "Failed", "Refused"):
+    if (status or {}).get("phase") in TERMINAL_PHASES:
         # Terminal. Re-running would need a new CR: the results prefix is keyed on
         # this CR's UID, and republishing into it would put two runs' attempts
         # under one index.

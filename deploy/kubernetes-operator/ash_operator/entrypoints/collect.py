@@ -19,6 +19,14 @@ ServiceAccount token on this pod and no shared volume mounted into the operator.
 The kubelet caps the message at 4 KiB, so the summary has a budget and *says so*
 when it has to drop detail -- a silently truncated summary would be invalid JSON
 and the operator would report "unknown" for a run that succeeded.
+
+The verdict has three answers, because ``ash merge`` has three exit codes for a
+merged report: 0 clean, 2 findings, and 1 for a scan that finished with partial
+coverage. Exit 1 is also ASH's code for an error during execution, so it is never
+read alone: the run is ``Incomplete`` only when a merged report exists and that
+report names a coverage gap, assessed with the same function ASH uses to answer
+``coverage_complete`` for an MCP scan. Exit 1 with no gap is a refusal, not a
+partial result.
 """
 
 from __future__ import annotations
@@ -32,7 +40,17 @@ import sys
 from pathlib import Path
 
 from ash_operator.attempts import ShardSetError, resolve_shard_set, selected_dir
-from ash_operator.constants import RESULTS_FILENAME
+from ash_operator.constants import (
+    COMPLETE_SCANNER_STATUSES,
+    EXIT_CLEAN,
+    EXIT_FINDINGS,
+    EXIT_INCOMPLETE,
+    PHASE_CLEAN,
+    PHASE_FINDINGS,
+    PHASE_INCOMPLETE,
+    PHASE_REFUSED,
+    RESULTS_FILENAME,
+)
 
 # The kubelet truncates the termination message at 4096 bytes. Stay well inside it
 # so a message that reaches the operator is always parseable.
@@ -46,14 +64,15 @@ def log(message: str) -> None:
 def write_termination_message(path: str, payload: dict) -> None:
     """Write *payload* as JSON, shedding detail rather than being truncated.
 
-    ``candidateRosterAgreed``, ``phase``, ``refusal``, ``consumedShardIndices`` and
-    ``mergeExitCode`` are **not** in the shed list and must never be added to it.
+    ``candidateRosterAgreed``, ``phase``, ``refusal``, ``consumedShardIndices``,
+    ``mergeExitCode`` and ``coverageComplete`` are **not** in the shed list and must
+    never be added to it.
     The operator's ``derive_phase`` refuses when ``candidateRosterAgreed`` is not
     ``True``, so shedding it would turn a coverage hole the collector had already
     detected into a ``Refused`` with no stated reason -- or, if the refusal were
     relaxed to treat a missing key as fine, back into a silent success.
     """
-    shed_order = ["scanners", "discardedAttempts", "selectedAttempts"]
+    shed_order = ["scanners", "discardedAttempts", "selectedAttempts", "coverageGaps"]
     body = dict(payload)
     text = json.dumps(body, separators=(",", ":"), sort_keys=True)
     dropped: list[str] = []
@@ -68,6 +87,7 @@ def write_termination_message(path: str, payload: dict) -> None:
         body = {
             "phase": payload.get("phase", "Unknown"),
             "mergeExitCode": payload.get("mergeExitCode"),
+            "coverageComplete": payload.get("coverageComplete"),
             "omittedFromStatus": ["everything except the verdict"],
         }
         text = json.dumps(body, separators=(",", ":"), sort_keys=True)
@@ -103,6 +123,105 @@ def summarize_scanners(merged_results: dict, shard_owners: dict[str, int]) -> li
     return out
 
 
+def _gap_names(coverage: dict) -> list[str]:
+    """Compact, human-readable names for each gap in an ASH coverage payload."""
+    gaps = [
+        f"scanner {row.get('scanner')}: {row.get('reason')}"
+        for row in coverage.get("incomplete_scanners") or []
+    ]
+    if coverage.get("no_scanner_ran"):
+        gaps.append("no scanner ran")
+    gaps += [
+        f"converter {row.get('converter')}: {row.get('reason')}"
+        for row in coverage.get("incomplete_converters") or []
+    ]
+    gaps += [f"unevaluated rule {rule}" for rule in coverage.get("unevaluated_rules") or []]
+    gaps += [
+        f"stale content database {(row or {}).get('scanner', '?')}"
+        for row in coverage.get("stale_content_databases") or []
+    ]
+    return gaps
+
+
+def assess_coverage(merged: dict) -> dict:
+    """Whether the merged report covered everything, and how that was decided.
+
+    Prefers ASH's own answer: ``scan_tracking.assess_coverage`` over the merged
+    model, which is the function ASH's MCP server uses to report
+    ``coverage_complete``, and which reads the same ``scan_incompleteness`` object
+    the exit code is computed from. So the phase this collector reports and the exit
+    code ``ash merge`` returned cannot disagree about what counts as a gap.
+
+    This script runs in the scan image, and the image's ``python3`` is not
+    guaranteed to be the interpreter ASH was installed into -- ASH may live in a
+    ``uv tool`` or ``pipx`` environment, or predate those functions. Then the
+    answer falls back to the per-scanner statuses in the report, which see an
+    ERROR or MISSING scanner and a run where nothing reached a verdict, but not a
+    converter, rule or content-database gap. ``source`` says which happened, so a
+    weaker answer is visible in ``.status`` rather than presented as ASH's.
+    """
+    try:
+        from automated_security_helper.core.resource_management.scan_tracking import (
+            assess_coverage as ash_assess_coverage,
+        )
+        from automated_security_helper.core.resource_management.scan_tracking import (
+            coverage_has_gap,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+    except ImportError as err:
+        log(f"ASH's coverage assessment is not importable here ({err}); using scanner statuses")
+    else:
+        try:
+            results = AshAggregatedResults.model_validate(merged)
+            _gate_fires, coverage = ash_assess_coverage(results)
+        except Exception as err:  # noqa: BLE001 - reported, then the fallback answers
+            log(f"ASH's coverage assessment failed on the merged report ({err!r})")
+        else:
+            return {
+                "complete": not coverage_has_gap(coverage),
+                "source": "ash-coverage-rule",
+                "gaps": _gap_names(coverage),
+            }
+
+    statuses = {
+        name: (entry or {}).get("status")
+        for name, entry in (merged.get("scanner_results") or {}).items()
+    }
+    if not statuses:
+        return {"complete": None, "source": "scanner-statuses", "gaps": []}
+    gaps = sorted(
+        f"scanner {name}: {status}"
+        for name, status in statuses.items()
+        if status not in COMPLETE_SCANNER_STATUSES
+    )
+    if not gaps and all(status == "SKIPPED" for status in statuses.values()):
+        gaps = ["no scanner ran"]
+    return {"complete": not gaps, "source": "scanner-statuses", "gaps": gaps}
+
+
+def verdict_phase(*, exit_code: int | None, coverage_complete: bool | None) -> str:
+    """Map ``ash merge``'s exit code over a WRITTEN merged report to a phase.
+
+    Only called once the merged report exists; a merge that wrote none is refused
+    before this point. 0 is clean and 2 is findings, as ASH defines them. 1 is
+    ``Incomplete`` -- partial results, the findings that were reported are real but
+    the set is known to be short -- only when the report itself names a coverage
+    gap. Otherwise exit 1 is ASH's "error during execution" and the operator has no
+    answer to report. Any other code is not one ``ash merge`` documents.
+
+    A gap with exit 0 or 2 means ``fail_on_incomplete_scanners`` was turned off.
+    The phase follows the exit code then, as ASH's own MCP status does, and
+    ``coverageComplete: false`` stays in ``.status`` beside it.
+    """
+    if exit_code == EXIT_CLEAN:
+        return PHASE_CLEAN
+    if exit_code == EXIT_FINDINGS:
+        return PHASE_FINDINGS
+    if exit_code == EXIT_INCOMPLETE and coverage_complete is False:
+        return PHASE_INCOMPLETE
+    return PHASE_REFUSED
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--prefix", required=True, help="results prefix for this run")
@@ -130,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         selected = resolve_shard_set(prefix=args.prefix, shard_count=args.shard_count)
     except ShardSetError as err:
-        summary["phase"] = "Refused"
+        summary["phase"] = PHASE_REFUSED
         summary["refusal"] = str(err)[:1200]
         log(f"REFUSED: {err}")
         write_termination_message(args.termination_message_path, summary)
@@ -166,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
         os.makedirs(os.path.dirname(staged), exist_ok=True)
         shutil.copytree(item.directory, staged)
         if not Path(staged, RESULTS_FILENAME).is_file():
-            summary["phase"] = "Refused"
+            summary["phase"] = PHASE_REFUSED
             summary["refusal"] = (
                 f"staging shard {item.shard_index} left no {RESULTS_FILENAME} in {staged}"
             )
@@ -226,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
 
     merged_path = Path(args.merge_output, RESULTS_FILENAME)
     if not merged_path.is_file():
-        summary["phase"] = "Refused"
+        summary["phase"] = PHASE_REFUSED
         summary["refusal"] = (
             f"ash merge exited {completed.returncode} and wrote no {RESULTS_FILENAME}. "
             f"Its exit code alone cannot distinguish a refused coverage check from "
@@ -247,7 +366,22 @@ def main(argv: list[str] | None = None) -> int:
     }
     summary["mergedShardCount"] = meta.get("merged_shard_count")
     summary["mergedShardIndices"] = meta.get("merged_shard_indices")
-    summary["phase"] = "Succeeded" if completed.returncode == 0 else "Failed"
+
+    coverage = assess_coverage(merged)
+    summary["coverageComplete"] = coverage["complete"]
+    summary["coverageSource"] = coverage["source"]
+    summary["coverageGaps"] = coverage["gaps"]
+    summary["phase"] = verdict_phase(
+        exit_code=completed.returncode, coverage_complete=coverage["complete"]
+    )
+    if summary["phase"] == PHASE_REFUSED:
+        summary["refusal"] = (
+            f"ash merge exited {completed.returncode} and wrote a merged report, but "
+            f"the report names no coverage gap (coverage assessed from "
+            f"{coverage['source']}: complete={coverage['complete']}). Exit 1 without a "
+            f"gap is ASH's 'error during execution', so this run has no answer to "
+            f"report; the collector pod's log has ASH's error."
+        )
     write_termination_message(args.termination_message_path, summary)
     return completed.returncode
 

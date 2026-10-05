@@ -7,12 +7,14 @@ discarded -- which is what lets the merged report distinguish "not in my shard"
 from "ran and failed". Unioning the two dictionaries instead is the single mistake
 that turns a working merge into a report claiming nothing ran.
 
-``fail_on_incomplete_scanners`` defaults to **False** in ASH, so a backend that
-cannot report per-scanner status does not fail every scan -- it fails only
-deployments that opted in. That makes reporting this a latent trap rather than an
-immediate blocker, and is precisely why it is surfaced unconditionally here: an
-adopter who turns the gate on and then sees an opaque failure is a support burden
-either way, and the status is the only place they can see which scanner it was.
+``fail_on_incomplete_scanners`` defaults to **True** in ASH, so a scan whose
+scanners did not all run exits 1 with its partial results written, and this
+operator reports that as ``phase: Incomplete`` -- a third answer beside ``Clean``
+(exit 0) and ``Findings`` (exit 2), not a kind of failure and not a refusal. The
+per-scanner completeness and ``coverageComplete`` are surfaced unconditionally,
+including when an adopter turned the gate off: they have accepted the gap, not
+asked to be told there was none, and ``.status`` is the only place they can see
+which scanner it was.
 """
 
 from __future__ import annotations
@@ -24,7 +26,9 @@ from typing import Any
 from ash_operator.constants import (
     COMPLETE_SCANNER_STATUSES,
     KNOWN_SCANNER_STATUSES,
+    PHASE_REFUSED,
 )
+from ash_operator.entrypoints.collect import verdict_phase
 
 
 def classify_status(status: str | None) -> str:
@@ -65,6 +69,9 @@ class CollectorSummary:
     merged_shard_count: int | None = None
     merged_shard_indices: list[int] = field(default_factory=list)
     candidate_roster_agreed: bool | None = None
+    coverage_complete: bool | None = None
+    coverage_source: str | None = None
+    coverage_gaps: list[str] = field(default_factory=list)
     omitted: list[str] = field(default_factory=list)
     parse_error: str | None = None
 
@@ -75,7 +82,7 @@ def parse_collector_summary(message: str | None) -> CollectorSummary:
     A message the kubelet truncated is not valid JSON, and that has to read as
     "the operator does not know" rather than as a clean run. The collector sheds
     detail to stay inside the 4 KiB cap for exactly this reason, but an operator
-    that silently swallowed a parse failure would report Succeeded for a run whose
+    that silently swallowed a parse failure would report a clean run for a run whose
     outcome it never saw.
     """
     if not message:
@@ -111,6 +118,9 @@ def parse_collector_summary(message: str | None) -> CollectorSummary:
         merged_shard_count=raw.get("mergedShardCount"),
         merged_shard_indices=list(raw.get("mergedShardIndices") or []),
         candidate_roster_agreed=raw.get("candidateRosterAgreed"),
+        coverage_complete=raw.get("coverageComplete"),
+        coverage_source=raw.get("coverageSource"),
+        coverage_gaps=list(raw.get("coverageGaps") or []),
         omitted=list(raw.get("omittedFromStatus") or []),
     )
 
@@ -179,6 +189,14 @@ def status_from_summary(summary: CollectorSummary, *, expected_shard_count: int)
         )
 
     status: dict[str, Any] = {
+        # ash merge's own exit code, unreinterpreted: 0 clean, 2 findings, 1
+        # incomplete or an error. The phase below is what it means.
+        "exitCode": summary.merge_exit_code,
+        # From the merged report, assessed the way ASH answers coverage_complete
+        # for an MCP scan. None means the collector could not assess it.
+        "coverageComplete": summary.coverage_complete,
+        "coverageSource": summary.coverage_source,
+        "coverageGaps": summary.coverage_gaps,
         "scannerCompleteness": scanners,
         "incompleteScanners": incomplete,
         "merge": merge_block,
@@ -197,20 +215,25 @@ def status_from_summary(summary: CollectorSummary, *, expected_shard_count: int)
 
 
 def derive_phase(summary: CollectorSummary, *, complete_walk: bool) -> str:
-    """Return the terminal phase.
+    """Return the terminal phase: ``Clean``, ``Findings``, ``Incomplete`` or ``Refused``.
 
-    ``Refused`` is a distinct phase from ``Failed`` on purpose. Failed means the
-    scan ran and the findings crossed the threshold -- an answer. Refused means
-    the operator does not have an answer and is declining to synthesise one, which
-    is a different thing for a human to act on and a different thing for a
-    pipeline to alert on.
+    The first three are ``ash merge``'s three answers -- exit 0, exit 2, and exit 1
+    over a merged report that names a coverage gap -- mapped by
+    :func:`ash_operator.entrypoints.collect.verdict_phase`, the same function the
+    collector used, so the two cannot disagree. ``Incomplete`` carries partial
+    results: the findings in ``.status.findings`` are real, but the set is known
+    to be short, so clearing them does not clear the scan.
+
+    ``Refused`` means the operator does not have an answer and is declining to
+    synthesise one, which is a different thing for a human to act on and a
+    different thing for a pipeline to alert on.
 
     ``candidate_roster_agreed`` is one of those. The collector detects the case it
     names -- no shard recorded ``candidate_scanners``, or only some did, or the
     recorded sets disagree -- but for the all-absent case ``ash merge`` does **not**
     refuse: the union check is skipped, and a mid-rollout coverage hole merges into a
     report that reads as a complete scan. For a while this function read that field
-    not at all, so a scan with no provenance whatsoever reported ``Succeeded`` with
+    not at all, so a scan with no provenance whatsoever reported success with
     ``candidateRosterAgreed: false`` sitting in its own status. The path is reachable
     without anyone doing anything odd: an adopter's ``spec.image`` is an ASH build
     predating ``ShardAssignment`` stamping, which this operator explicitly supports.
@@ -225,13 +248,13 @@ def derive_phase(summary: CollectorSummary, *, complete_walk: bool) -> str:
     this key; :mod:`ash_operator.entrypoints.collect` says so at the shed list.
     """
     if summary.parse_error:
-        return "Refused"
+        return PHASE_REFUSED
     if summary.refusal or not complete_walk:
-        return "Refused"
+        return PHASE_REFUSED
     if summary.merge_exit_code is None:
-        return "Refused"
+        return PHASE_REFUSED
     if summary.candidate_roster_agreed is not True:
-        return "Refused"
-    if summary.merge_exit_code == 0:
-        return "Succeeded"
-    return "Failed"
+        return PHASE_REFUSED
+    return verdict_phase(
+        exit_code=summary.merge_exit_code, coverage_complete=summary.coverage_complete
+    )

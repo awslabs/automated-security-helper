@@ -13,15 +13,21 @@ import subprocess
 import time
 from pathlib import Path
 
+from ash_operator import constants
+
+# Both overridable so concurrent runs on one host -- or a CI runner and a developer
+# -- never share a cluster or an image tag. The images are only ever loaded into
+# kind (`kind load docker-image`); nothing in this harness pushes them anywhere.
 CLUSTER_NAME = os.environ.get("ASH_OPERATOR_E2E_CLUSTER", "ash-operator-e2e")
+IMAGE_TAG = os.environ.get("ASH_OPERATOR_E2E_IMAGE_TAG", "local")
 NAMESPACE = "ash-system"
-ASH_IMAGE = "ash-e2e:local"
+ASH_IMAGE = f"ash-e2e:{IMAGE_TAG}"
 # An ASH whose ScanPhase does not stamp candidate_scanners, for the provenance
 # negative control. See tests/e2e/Dockerfile.ash-nostamp.
-ASH_IMAGE_NOSTAMP = "ash-e2e-nostamp:local"
-OPERATOR_IMAGE = "ash-operator:local"
-GROUP = "ash.awslabs.github.io"
-TERMINAL = frozenset({"Succeeded", "Failed", "Refused"})
+ASH_IMAGE_NOSTAMP = f"ash-e2e-nostamp:{IMAGE_TAG}"
+OPERATOR_IMAGE = f"ash-operator:{IMAGE_TAG}"
+GROUP = constants.GROUP
+TERMINAL = frozenset(constants.TERMINAL_PHASES)
 
 E2E_DIR = Path(__file__).resolve().parent
 OPERATOR_DIR = E2E_DIR.parents[1]

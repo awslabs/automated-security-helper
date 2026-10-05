@@ -27,6 +27,7 @@ from tests.e2e.helpers import (
     OPERATOR_IMAGE,
     REPO_ROOT,
     kubectl,
+    kubectl_apply_stdin,
     run,
 )
 
@@ -172,7 +173,13 @@ def installed(cluster):
     # namespace has to exist first -- but the Deployment must not, or its ReplicaSet
     # fails to create a pod with "serviceaccount ash-operator not found" and spends a
     # restart backoff before the SA arrives.
-    kubectl("apply", "-f", str(OPERATOR_DIR / "manifests" / "operator.yaml"))
+    shipped = (OPERATOR_DIR / "manifests" / "operator.yaml").read_text()
+    # The shipped manifest names `ash-operator:local`. A run with its own image tag
+    # substitutes it here, and asserts that it did: an apply that silently kept the
+    # shipped name would run whatever image last carried that tag on the node.
+    shipped_image = "image: ash-operator:local"
+    assert shipped.count(shipped_image) == 1, "operator.yaml no longer names one image"
+    kubectl_apply_stdin(shipped.replace(shipped_image, f"image: {OPERATOR_IMAGE}"))
     kubectl("apply", "-f", str(OPERATOR_DIR / "manifests" / "rbac.yaml"))
     kubectl("-n", NAMESPACE, "rollout", "restart", "deployment/ash-operator", check=False)
     kubectl(

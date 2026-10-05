@@ -14,6 +14,12 @@ guard nobody can trigger is the only kind worth having here.
 
 from __future__ import annotations
 
+# ── The ASH command-line program ─────────────────────────────────────────────
+# The one place the operator names the binary it runs inside the scan image, for
+# `scan`, `merge` and `mcp` alike. Every argv builder, the MCP capability probe and
+# the e2e harness read it from here, so renaming the CLI is a one-line change.
+ASH_CLI = "ash"
+
 # ── API surface ──────────────────────────────────────────────────────────────
 # Reverse of the Maven/Java coordinate the project already chose for its CDK
 # constructs (``io.github.awslabs.ash``), so the API group is not a new
@@ -94,3 +100,24 @@ SEVERITY_LEVELS = ("ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
 # status added upstream fails a test here instead of being silently tolerated.
 COMPLETE_SCANNER_STATUSES = frozenset({"PASSED", "FAILED", "SKIPPED"})
 KNOWN_SCANNER_STATUSES = frozenset({"PASSED", "FAILED", "SKIPPED", "ERROR", "MISSING"})
+
+# ── Terminal phases ──────────────────────────────────────────────────────────
+# ``ash merge`` exits 0 for a clean scan, 2 for findings, and 1 for a scan that
+# finished with partial coverage (ERROR or MISSING scanners, a converter that did
+# not run, an unevaluated rule, a stale content database) -- the last only when
+# ``fail_on_incomplete_scanners`` is on, which is ASH's default. Each of the three
+# is a different answer, so each is its own phase. ``Refused`` is the operator
+# declining to report an answer it does not have; see ``results.derive_phase``.
+PHASE_CLEAN = "Clean"
+PHASE_FINDINGS = "Findings"
+PHASE_INCOMPLETE = "Incomplete"
+PHASE_REFUSED = "Refused"
+TERMINAL_PHASES = (PHASE_CLEAN, PHASE_FINDINGS, PHASE_INCOMPLETE, PHASE_REFUSED)
+NON_TERMINAL_PHASES = ("Pending", "Scanning", "Merging")
+
+# ``ash merge``'s exit codes, named. 1 also means "error during execution": the
+# collector tells the two apart by whether a merged report was written and whether
+# that report names a coverage gap.
+EXIT_CLEAN = 0
+EXIT_INCOMPLETE = 1
+EXIT_FINDINGS = 2

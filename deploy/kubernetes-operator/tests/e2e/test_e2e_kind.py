@@ -1,6 +1,6 @@
 """End to end against a real kind cluster.
 
-The five things this file has to demonstrate, and the order they matter in:
+The six things this file has to demonstrate, and the order they matter in:
 
 1. **A planted finding comes back.** A scan of a tree with a known bandit finding
    and a known planted credential must report them. Zero findings on this fixture
@@ -11,12 +11,16 @@ The five things this file has to demonstrate, and the order they matter in:
 3. **The fan-out happened.** N pods, each with a distinct shard index, and the merge
    consumed every one of them -- asserted from the provenance the shards stamped,
    not from the operator's own bookkeeping.
-4. **A missing shard is refused, never silently clean.** Asserted twice: once
+4. **A partial scan reads as Incomplete, with its partial results.** A scanner
+   that cannot run makes `ash merge` exit 1 under ASH's default
+   `fail_on_incomplete_scanners: true`; the run must end `Incomplete` with
+   `coverageComplete: false` and the findings that did come back, never `Clean`.
+5. **A missing shard is refused, never silently clean.** Asserted twice: once
    deterministically by removing a published shard and re-running the collector, and
    once by deleting a running pod, where the acceptable outcomes are "the retry
    republished and the run succeeded" and "the run was refused" but never "succeeded
    over a subset".
-5. **Nothing is keyed on shard index.** A second run with a different scanner roster
+6. **Nothing is keyed on shard index.** A second run with a different scanner roster
    must reassign scanners without the operator reusing anything from the first.
 """
 
@@ -29,6 +33,13 @@ import time
 import pytest
 import yaml
 
+from ash_operator.constants import (
+    ASH_CLI,
+    PHASE_CLEAN,
+    PHASE_FINDINGS,
+    PHASE_INCOMPLETE,
+    PHASE_REFUSED,
+)
 from tests.e2e.helpers import (
     ASH_IMAGE,
     ASH_IMAGE_NOSTAMP,
@@ -126,7 +137,7 @@ def wait_terminal(name: str, timeout: int = 900) -> dict:
         return None
 
     try:
-        return wait_for(check, timeout=timeout, what=f"AshScan/{name} to reach a terminal phase")
+        status = wait_for(check, timeout=timeout, what=f"AshScan/{name} to reach a terminal phase")
     except AssertionError:
         print(f"=== AshScan/{name} last observed phase: {seen[0]!r} ===")
         print(f"=== raw status: {json.dumps(scan_status(name))[:1500]} ===")
@@ -136,6 +147,14 @@ def wait_terminal(name: str, timeout: int = 900) -> dict:
         kubectl("-n", NAMESPACE, "get", "jobs", check=False)
         kubectl("-n", NAMESPACE, "get", "pods", check=False)
         raise
+    # The verdict fields, printed on success too, so a CI log shows what each run
+    # actually ended as rather than only that the assertions held.
+    summary = {
+        key: status.get(key)
+        for key in ("phase", "exitCode", "coverageComplete", "coverageGaps", "findings")
+    }
+    print(f"=== AshScan/{name} terminal: {json.dumps(summary, sort_keys=True)} ===")
+    return status
 
 
 def shard_pods(scan_uid: str) -> list[dict]:
@@ -174,7 +193,7 @@ class TestDirtyFixtureReportsItsFinding:
         assert result["phase"] in TERMINAL
 
     def test_it_is_not_refused(self, result):
-        assert result["phase"] != "Refused", (
+        assert result["phase"] != PHASE_REFUSED, (
             f"the run was refused: {result.get('merge', {}).get('refusalReason')}"
         )
 
@@ -191,9 +210,16 @@ class TestDirtyFixtureReportsItsFinding:
             f"ancestor of the source mount."
         )
 
-    def test_the_verdict_is_non_zero_because_of_those_findings(self, result):
-        assert result["phase"] == "Failed"
-        assert result["merge"]["exitCode"] != 0
+    def test_the_verdict_is_findings_with_ash_exit_code_two(self, result):
+        assert result["phase"] == PHASE_FINDINGS, result.get("merge")
+        assert result["exitCode"] == 2
+        assert result["merge"]["exitCode"] == 2
+
+    def test_the_coverage_was_complete(self, result):
+        # Findings with a gap would be exit 1 / Incomplete. Both selected scanners
+        # ran, so the report must say so, assessed by ASH's own rule.
+        assert result["coverageComplete"] is True, result.get("coverageGaps")
+        assert result["coverageSource"] == "ash-coverage-rule"
 
     def test_two_different_scanners_each_contributed(self, result):
         # Direct evidence that the fan-out contributed rather than merely ran: bandit
@@ -310,11 +336,13 @@ def clean_result(fixtures):
 
 
 class TestCleanFixtureNegativeControl:
-    def test_it_succeeds(self, clean_result):
-        assert clean_result["phase"] == "Succeeded", (
-            f"the clean fixture did not succeed: "
-            f"{result.get('merge', {}).get('refusalReason') or result}"
+    def test_it_is_clean(self, clean_result):
+        assert clean_result["phase"] == PHASE_CLEAN, (
+            f"the clean fixture did not come back Clean: "
+            f"{clean_result.get('merge', {}).get('refusalReason') or clean_result}"
         )
+        assert clean_result["exitCode"] == 0
+        assert clean_result["coverageComplete"] is True
 
     def test_it_reports_zero_actionable_findings(self, clean_result):
         # Without this, the dirty test shows only that the pipeline reports
@@ -336,6 +364,50 @@ class TestCleanFixtureNegativeControl:
 
     def test_the_merge_still_consumed_every_index(self, clean_result):
         assert clean_result["merge"]["consumedShardIndices"] == [0, 1, 2]
+
+
+@pytest.fixture(scope="module")
+def incomplete_result(fixtures):
+    # cfn-nag needs ruby, which the e2e image does not carry, so it is recorded
+    # MISSING while bandit runs and finds the planted B602/B307. One shard owns
+    # both, so `ash merge` cannot refuse the shard as having completed nothing; it
+    # writes the merged report and exits 1 for the gap, which is the #640 case.
+    apply_scan(
+        "partial-scan",
+        source_configmap="fixture-dirty",
+        shard_count=1,
+        scanners=["bandit", "cfn-nag"],
+    )
+    return wait_terminal("partial-scan")
+
+
+class TestAPartialScanIsIncomplete:
+    def test_the_phase_is_incomplete_not_clean_or_findings(self, incomplete_result):
+        assert incomplete_result["phase"] == PHASE_INCOMPLETE, (
+            f"phase {incomplete_result['phase']!r}, exit {incomplete_result.get('exitCode')}, "
+            f"gaps {incomplete_result.get('coverageGaps')}, "
+            f"refusal {incomplete_result.get('merge', {}).get('refusalReason')}"
+        )
+
+    def test_ash_merge_exited_one(self, incomplete_result):
+        assert incomplete_result["exitCode"] == 1
+
+    def test_the_gap_is_named(self, incomplete_result):
+        assert incomplete_result["coverageComplete"] is False
+        assert any("cfn-nag" in gap for gap in incomplete_result["coverageGaps"]), (
+            incomplete_result["coverageGaps"]
+        )
+        assert "cfn-nag" in incomplete_result["incompleteScanners"]
+
+    def test_the_partial_results_are_kept(self, incomplete_result):
+        # Incomplete is not a refusal: what did run is reported. Zero here would mean
+        # the partial results were dropped and the phase is the only signal left.
+        assert int(incomplete_result["findings"]["actionable"] or 0) >= 1, incomplete_result[
+            "findings"
+        ]
+        by_name = {s["name"]: s for s in incomplete_result["scannerCompleteness"]}
+        assert by_name["bandit"]["findingCount"] >= 1, by_name["bandit"]
+        assert by_name["cfn-nag"]["status"] == "MISSING", by_name["cfn-nag"]
 
 
 HOLE_JOB = textwrap.dedent(
@@ -387,7 +459,7 @@ HOLE_JOB = textwrap.dedent(
                     --prefix {prefix} --shard-count 3 \
                     --merge-output /workspace/out/merged \
                     --termination-message-path /dev/termination-log \
-                    -- ash merge --min-severity MEDIUM
+                    -- {ash_cli} merge --min-severity MEDIUM
               volumeMounts:
                 - name: ash-results
                   mountPath: /workspace/results
@@ -426,6 +498,7 @@ class TestAMissingShardIsRefused:
             configmap=status["configMapName"],
             image=ASH_IMAGE,
             prefix=status["resultsPrefix"],
+            ash_cli=ASH_CLI,
         )
         kubectl("-n", NAMESPACE, "delete", "job", "hole-probe", "--ignore-not-found")
         kubectl_apply_stdin(body)
@@ -453,7 +526,7 @@ class TestAMissingShardIsRefused:
 
     def test_the_refusal_names_the_missing_index(self, probe):
         summary = json.loads(probe["message"])
-        assert summary["phase"] == "Refused"
+        assert summary["phase"] == PHASE_REFUSED
         assert "[1]" in summary["refusal"], summary["refusal"]
 
     def test_the_refusal_explains_the_consequence_not_just_the_rule(self, probe):
@@ -476,7 +549,7 @@ class TestPodDeletionMidRun:
     even though the timing is not guaranteed. Two outcomes are acceptable -- the
     retry republished under a new attempt id and the run succeeded, or the Job gave
     up and the collector refused. The one unacceptable outcome is a terminal
-    Succeeded over a subset of the indices.
+    answer -- Clean, Findings or Incomplete -- over a subset of the indices.
     """
 
     @staticmethod
@@ -537,26 +610,26 @@ class TestPodDeletionMidRun:
         phase = status["phase"]
         consumed = status["merge"]["consumedShardIndices"]
         assert phase in TERMINAL
-        if phase == "Succeeded":
+        if phase != PHASE_REFUSED:
             assert consumed == [0, 1, 2], (
-                f"the run reported Succeeded having consumed {consumed} of 3 shards. "
+                f"the run reported {phase} having consumed {consumed} of 3 shards. "
                 f"A merge over a subset exits 0 and reports a clean scan, which is "
                 f"exactly the outcome that must never happen."
             )
-        else:
-            assert phase in {"Refused", "Failed"}
+        # The dirty fixture has findings, so an answer other than a refusal is Findings.
+        assert phase in {PHASE_REFUSED, PHASE_FINDINGS}, phase
 
     def test_the_retry_republished_under_a_new_attempt_id(self, outcome):
         """The one assertion that shows attempt qualification working in-cluster.
 
-        Keyed on whether the *walk completed*, not on whether the run succeeded. A
-        ``Failed`` phase already implies a complete walk -- an incomplete one yields
-        ``Refused`` -- and a dirty fixture always ends Failed because the merge finds
-        the planted findings. Gating on ``Succeeded`` made this skip on every run, so
-        the assertion existed and never executed.
+        Keyed on whether the *walk completed*, not on whether the run was clean. A
+        ``Findings`` phase already implies a complete walk -- an incomplete one yields
+        ``Refused`` -- and a dirty fixture always ends Findings because the merge
+        finds the planted findings. Gating on a clean phase made this skip on every
+        run, so the assertion existed and never executed.
         """
         status = outcome["status"]
-        if status["phase"] == "Refused":
+        if status["phase"] == PHASE_REFUSED:
             pytest.skip(
                 "the run was Refused, which is an acceptable outcome for a deleted "
                 "pod: the Job gave up and the collector named the missing index. "
@@ -590,7 +663,7 @@ class TestProvenanceAbsentIsRefused:
     report that reads as a complete scan of the whole tree, with a scanner having run
     nowhere. Nothing downstream can see it. For a while this operator detected exactly
     that condition, wrote ``candidateRosterAgreed: false`` into ``.status``, and
-    reported ``phase: Succeeded`` anyway.
+    reported success anyway.
     """
 
     @staticmethod
@@ -611,7 +684,7 @@ class TestProvenanceAbsentIsRefused:
         return status
 
     def test_the_run_is_refused(self, result):
-        assert result["phase"] == "Refused", (
+        assert result["phase"] == PHASE_REFUSED, (
             f"a scan whose shards recorded no candidate_scanners reported "
             f"{result['phase']!r}. `ash merge` does not refuse that case, so the "
             f"operator is the only thing that can -- and a detected coverage hole "
@@ -650,13 +723,13 @@ class TestProvenanceAbsentIsRefused:
 
     def test_the_patched_image_differs_only_in_that_field(self, result):
         # Same fixture, same scanners, same shard count as the dirty-scan arm, so the
-        # only difference between Succeeded there and Refused here is the stamping.
+        # only difference between Findings there and Refused here is the stamping.
         dirty = scan_status("dirty-scan")
         if not dirty:
             pytest.skip("the dirty-scan arm has not run in this session")
         assert dirty["merge"]["candidateRosterAgreed"] is True
-        assert dirty["phase"] == "Failed"
-        assert result["phase"] == "Refused"
+        assert dirty["phase"] == PHASE_FINDINGS
+        assert result["phase"] == PHASE_REFUSED
         assert dirty["merge"]["consumedShardIndices"] == result["merge"]["consumedShardIndices"]
 
 

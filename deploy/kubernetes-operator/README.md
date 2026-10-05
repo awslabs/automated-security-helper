@@ -11,7 +11,10 @@ kubectl apply -f manifests/          # namespace, RBAC, operator Deployment
 ```
 
 You must build the operator image yourself (`Dockerfile`), and you must supply an
-ASH image in `spec.image`. Neither is published anywhere, for the same reason ASH
+ASH image in `spec.image`. Nothing in this directory or its workflow pushes either
+one: the end-to-end test loads both into a kind cluster with
+`kind load docker-image`, and `tests/test_no_image_publish.py` fails if a registry
+login or push appears. Neither is published anywhere, for the same reason ASH
 publishes no container image: installing ASH by distribution name is actively
 unsafe, because the name `automated-security-helper` on PyPI is an unrelated
 placeholder package. A name-based install succeeds, leaves no `ash` on `PATH`, and
@@ -35,8 +38,14 @@ per shard:   ash scan --source-dir  /workspace/src \
 
 collector:   walk 0..N-1 by index; refuse a short set; then
              ash merge --results <one per shard> --output-dir ... --min-severity ...
-             verdict: this exit code, and only this one.
+             verdict: this exit code, and only this one:
+                      0 clean, 2 findings, 1 incomplete (partial results)
 ```
+
+The program name `ash` is held in one constant, `ASH_CLI` in
+`ash_operator/constants.py`. Every argv builder, the MCP capability probe and the
+e2e harness read it from there, and `tests/test_contract.py` fails if a module
+spells the name itself.
 
 The partition is a pure function of `(sorted, deduplicated, lower-cased scanner
 names, index, count)`, so pods never coordinate. The only thing distributed is two
@@ -137,10 +146,10 @@ comparison reports it missing.
 Pydantic emits JSON Schema 2020-12; `apiextensions.k8s.io/v1` accepts a restricted
 subset. Every transformation between the two is recorded in
 `generated/config-schema-translation.json`, so "what could not be expressed" is a
-measured list rather than a claim. As committed: 67 entries — 65 plugin-map nodes,
-one reference cycle, one mixed-type union — plus 64 `Optional[T]` collapses, 26
-`const`→`enum` rewrites, one numeric exclusive bound converted, and 297 defaults and
-330 titles dropped on purpose. The two CRDs render to 98,497 and 90,988 bytes, both
+measured list rather than a claim. As committed: 69 entries — 67 plugin-map nodes,
+one reference cycle, one mixed-type union — plus 67 `Optional[T]` collapses, 27
+`const`→`enum` rewrites, one numeric exclusive bound converted, and 308 defaults and
+341 titles dropped on purpose. The two CRDs render to 104,286 and 95,643 bytes, both
 inside the 262,144-byte annotation cap that plain `kubectl apply` needs, which
 `tests/test_crd_schema.py` pins so the number is not discovered in a pipeline.
 In detail:
@@ -151,7 +160,7 @@ In detail:
 * **One mixed-type union.** `build.custom_scanners[].args.extra_args[].value` is
   `str | int | float | bool`; a structural schema needs one type outside the
   junctor, so that leaf is unvalidated by the API server.
-* **Plugin maps, 65 nodes.** `scanners`, `reporters` and `converters` each declare
+* **Plugin maps, 67 nodes.** `scanners`, `reporters` and `converters` each declare
   the built-ins *and* a schema for anything a plugin module registers, which a
   structural schema cannot express together; so does every per-plugin config object
   beneath them. The built-ins stay validated and unknown keys gain
@@ -178,21 +187,46 @@ into the image you name in `spec.image`.
 
 ## Status
 
-`.status` reports per-scanner completeness unconditionally. It survives the shard
-boundary because `_adopt_owning_shard_results` keeps only the *owning* shard's entry
-for each scanner, keyed on `assigned_scanners`, so the merged report distinguishes
-"not in my shard" from "ran and failed".
+`.status.phase` ends in one of four terminal values. Three are `ash merge`'s three
+answers, as ASH defines its exit codes:
 
-Note that ASH's `fail_on_incomplete_scanners` defaults to **False**. A scanner that
-did not run therefore does **not** fail your scan unless you set
-`spec.failOnIncompleteScanners: true`. `.status.incompleteScanners` names them
-either way, which is the point of surfacing it: an adopter who turns the gate on and
-then sees an opaque failure is a support burden whether or not the status was there.
+| Phase | `ash merge` exit | Meaning |
+|---|---|---|
+| `Clean` | 0 | Nothing actionable at `minSeverity`. |
+| `Findings` | 2 | Actionable findings; `.status.findings` counts them. |
+| `Incomplete` | 1, with a merged report that names a coverage gap | Partial results. The findings reported are real, but some scanner, converter, rule or content database did not contribute, so clearing them does not clear the scan. |
+| `Refused` | any other outcome | The operator has no answer and declines to synthesise one. |
 
-`phase: Refused` is distinct from `phase: Failed`. Failed means the scan ran and the
-findings crossed the threshold — an answer. Refused means the operator does not have
-an answer and is declining to synthesise one: a missing shard, a merge that wrote no
-report, a collector summary it could not read, **or shards that recorded no
+`.status.exitCode` carries the merge's exit code unreinterpreted, and
+`.status.coverageComplete` says whether the merged report covered everything. The
+collector reads `ash_aggregated_results.json` and asks ASH's own
+`scan_tracking.assess_coverage`, the function ASH's MCP server uses to answer
+`coverage_complete`, so the phase and the exit code cannot disagree about what a gap
+is. The results file carries no `coverage_complete` field of its own; the answer is
+derived from the per-scanner, per-converter and content-database records in it.
+When the scan image's `python3` cannot import ASH (an ASH installed as a `uv tool`,
+say, or one predating that function), the collector falls back to the per-scanner
+statuses, which see ERROR, MISSING and a run where nothing reached a verdict but not
+a converter or rule gap, and `.status.coverageSource` reads `scanner-statuses`
+instead of `ash-coverage-rule`. `.status.coverageGaps` names each gap.
+
+Exit 1 is also ASH's code for an error during execution. So `Incomplete` needs the
+merged report to exist **and** to name a gap; exit 1 over a report with no gap is
+`Refused`, with a reason pointing at the collector's log.
+
+ASH's `fail_on_incomplete_scanners` defaults to **true**, and the operator leaves it
+there unless `spec.failOnIncompleteScanners` says otherwise. Setting it `false`
+accepts the gap: `ash merge` then exits 0 or 2, the phase follows that exit code as
+ASH's own MCP status does, and `coverageComplete: false` and
+`.status.incompleteScanners` stay beside it.
+
+Per-scanner completeness is reported unconditionally. It survives the shard boundary
+because `_adopt_owning_shard_results` keeps only the *owning* shard's entry for each
+scanner, keyed on `assigned_scanners`, so the merged report distinguishes "not in my
+shard" from "ran and failed".
+
+`Refused` covers a missing shard, a merge that wrote no report, exit 1 without a gap,
+a collector summary the operator could not read, **or shards that recorded no
 `candidate_scanners`**.
 
 That last one is the case worth spelling out. If no shard stamped
@@ -206,15 +240,15 @@ the likely cause: a `spec.image` whose ASH predates `ShardAssignment` stamping, 
 is a configuration this operator otherwise supports.
 
 For a while the collector detected exactly that condition, wrote
-`candidateRosterAgreed: false` into `.status`, and the operator reported `Succeeded`
+`candidateRosterAgreed: false` into `.status`, and the operator reported success
 anyway. Detecting a coverage hole and then reporting success is worse than not
 detecting it. `tests/e2e/Dockerfile.ash-nostamp` builds an ASH with the stamping
-removed — verifying at build time that the substitution actually applied, so a patch
-matching nothing cannot produce a vacuous pass — and
-`TestProvenanceAbsentIsRefused` runs a real scan with it and asserts the refusal,
-plus that the shards did run and the merge did execute, so the refusal is about
-provenance rather than about a broken image. A missing `candidateRosterAgreed` key
-refuses too, and `write_termination_message` is documented never to shed it.
+removed, verifying at build time that the substitution actually applied so a patch
+matching nothing cannot produce a vacuous pass, and `TestProvenanceAbsentIsRefused`
+runs a real scan with it and asserts the refusal, plus that the shards did run and
+the merge did execute, so the refusal is about provenance rather than about a broken
+image. A missing `candidateRosterAgreed` key refuses too, and
+`write_termination_message` is documented never to shed it, nor `coverageComplete`.
 
 The collector reports through its pod's **termination message**, which the operator
 reads from `pod.status.containerStatuses[].state.terminated.message`. That needs no
@@ -330,7 +364,7 @@ The observed symptom is worse than a crash. In a kind cluster with `args` and `e
 stripped, an AshScan still reached `phase: Scanning` and its shard Job ran to
 `Complete 3/3` — and then **hung there with no collector and no verdict**, because the
 Job watcher was dead. Restoring `args` made the operator create the collector
-immediately and the run finished `Failed` with 12 actionable findings. So a missing
+immediately and the run finished with 12 actionable findings. So a missing
 `--namespace` presents as a scan that appears to be working.
 
 If you want cluster-wide operation instead, pass `--all-namespaces` and convert the
@@ -359,73 +393,84 @@ path calls the API.
 `readOnlyRootFilesystem` is set on the *operator* container and deliberately **not**
 on the scan pods. It was measured elsewhere in this stack to make scanners report
 clean: a tool that cannot write where it expects to comes back MISSING rather than
-failing, and with `fail_on_incomplete_scanners` off by default a MISSING scanner
-merges into a report that reads as a complete scan. A hardening flag that converts a
-scanner into silence is worse than the write it prevents.
+failing. With `fail_on_incomplete_scanners` on, ASH's default, that turns every scan
+`Incomplete`; with it off, a MISSING scanner merges into a report that reads as a
+complete scan. A hardening flag that converts a scanner into a gap is worse than the
+write it prevents.
 
 ## Tests
 
 ```
-# unit -- no cluster, no docker
-PYTHONPATH=. python -m pytest tests -q
+# unit, no cluster and no docker
+PYTHONPATH=. uv run --no-project --python 3.12 --with ".[test]" python -m pytest tests
 
-# end to end -- builds two images, creates and deletes a kind cluster
-ASH_OPERATOR_E2E=1 PYTHONPATH=. python -m pytest tests/e2e -v
+# the same with ASH importable, so the equivalence arms run instead of skipping
+PYTHONPATH=. uv run --no-project --python 3.12 --with ../.. --with ".[test]" \
+  python -m pytest tests --ignore=tests/e2e
+
+# end to end: builds three images, creates and deletes a kind cluster
+ASH_OPERATOR_E2E=1 ASH_OPERATOR_E2E_CLUSTER=<unique-name> \
+  PYTHONPATH=. uv run --no-project --python 3.12 --with ".[test]" \
+  python -m pytest tests/e2e -v
 
 # the generated CRDs match what the generator emits
-python -m ash_operator.generate_manifests --check
+PYTHONPATH=. uv run --no-project --python 3.12 --with ../.. --with ".[test]" \
+  python -m ash_operator.generate_manifests --check
 
-uvx ruff@0.16.7 check . && uvx ruff@0.16.7 format --check .
+# from the repository root, with the repository's own ruff
+uv run --group dev ruff check deploy/kubernetes-operator
+uv run --group dev ruff format --check deploy/kubernetes-operator
 ```
 
-The e2e is skipped unless `ASH_OPERATOR_E2E=1`, and `pytest_report_header` prints
-which mode a run is in, because a suite reporting "all passed" while never having
-stood a cluster up is the same shape as a gate that proves nothing.
+`ASH_OPERATOR_E2E_CLUSTER` and `ASH_OPERATOR_E2E_IMAGE_TAG` name the kind cluster and
+the image tag, so two runs on one host never share either; the workflow sets both
+from the run id. The e2e is skipped unless `ASH_OPERATOR_E2E=1`, and
+`pytest_report_header` prints which mode a run is in, because a suite reporting "all
+passed" while never having stood a cluster up is the same shape as a gate that
+proves nothing.
 
 ### The unit suite runs twice, and the second run is the one that matters
 
 `lint-and-unit` runs the unit tests in two environments that differ in exactly one
 variable: whether ASH is importable.
 
-**Without ASH** is the operator's real runtime shape — it never imports ASH — and it is
-the only run that can catch an operator dependency that only works because ASH happened
-to pull it in. It also exercises `crd_schema.py`'s committed-schema fallback. In that
-run five tests skip: `209 passed, 5 skipped`.
+**Without ASH** is the operator's real runtime shape (it never imports ASH), and it
+is the only run that can catch an operator dependency that only works because ASH
+happened to pull it in. It also exercises `crd_schema.py`'s committed-schema fallback
+and the collector's scanner-status coverage fallback. Six tests skip there.
 
-**With ASH**, via `uv run --with <repo> --with ".[test]"`, those five execute:
-`214 passed`, no skips. They are the only arms that can detect a divergence from real
-ASH — shard-selection acceptance compared against ASH's own `validate_shard_selection`,
-the committed-vs-live schema digest, schema-source preference, full exposure of every
-`AshConfig` field, and the `ScannerStatus` vocabulary. A suite that skips them is
-confirming the operator against itself. Their skip messages say "a real gap in coverage,
-not a pass" for exactly that reason, and the second run is what closes it.
+**With ASH**, via `uv run --with <repo> --with ".[test]"`, those six execute with no
+skips. They are the only arms that can detect a divergence from real ASH:
+shard-selection acceptance compared against ASH's own `validate_shard_selection`, the
+committed-vs-live schema digest, schema-source preference, full exposure of every
+`AshConfig` field, the `ScannerStatus` vocabulary, and the collector's use of ASH's
+coverage rule. A suite that skips them is confirming the operator against itself.
 
-`uv` provisions its own 3.12, so this does not depend on the runner's system Python —
-ASH's floor is `>=3.10,<3.15` and a runner's `/usr/bin/python3` may be older.
+Two guards, because each catches what the other misses. **Any** skip in the with-ASH
+run fails the job: a skip there means ASH did not import and the arms did not
+execute. And each equivalence test is asserted to *collect* by node id, because a
+skip-count guard is also satisfied by deleting the tests.
 
-Two guards, because each catches what the other misses. **Any** skip in the with-ASH run
-fails the job: a skip there means ASH did not import and the arms did not execute. And
-each of the five is asserted to *collect* by node id, because a skip-count guard is also
-satisfied by deleting the tests — measured: renaming one of the five leaves the run at
-`213 passed, 1 skipped` with no skip naming it, which the count guard accepts and the
-node-id guard rejects.
-
-Building that control turned up a second way one of the five can vanish.
-`_COMMITTED_SCHEMA` is derived from `crd_schema.__file__` by walking up three parents,
-which reaches the repository root only when `ash_operator` is imported from the
-checkout. Import it from an installed wheel — which happens as soon as `PYTHONPATH`
-stops putting the source tree first — and the path resolves somewhere meaningless and
-the test skips for a reason that has nothing to do with ASH. The skip message now names
-both causes and prints the resolved `__file__`, and the with-ASH step's zero-skip rule
-means it cannot pass unnoticed.
+`_COMMITTED_SCHEMA` is derived from `crd_schema.__file__` by walking up three
+parents, which reaches the repository root only when `ash_operator` is imported from
+the checkout. Import it from an installed wheel, which happens as soon as
+`PYTHONPATH` stops putting the source tree first, and the path resolves somewhere
+meaningless and the test skips for a reason that has nothing to do with ASH. The skip
+message names both causes and prints the resolved `__file__`, and the with-ASH step's
+zero-skip rule means it cannot pass unnoticed.
 
 What it asserts, and why each one is there:
 
 * A tree with a **known** bandit finding and a **planted** credential reports them.
   Zero findings on that fixture fails the test — given point 5 above, a green scan
   of a dirty tree is reachable and is the failure that looks most like success.
-* **A negative control**: a clean tree reports zero findings *and* succeeds, with
-  both selected scanners `PASSED` and their dependencies satisfied. Without it, the
+* The dirty run ends `Findings` with `exitCode: 2` and `coverageComplete: true`.
+* **A negative control**: a clean tree ends `Clean` with zero findings, with both
+  selected scanners `PASSED` and their dependencies satisfied.
+* **A partial scan is `Incomplete`**: selecting `cfn-nag`, whose ruby toolchain the
+  e2e image does not carry, beside `bandit` makes `ash merge` exit 1 under ASH's
+  default gate. The run must end `Incomplete` with `coverageComplete: false`, the gap
+  named, and bandit's findings still reported. Without it, the
   first bullet shows only that the pipeline reports something.
 * **Fan-out**, not just the final number: three pods with three distinct indices,
   each index read out of the shard's own results rather than out of the pod spec;
@@ -436,8 +481,8 @@ What it asserts, and why each one is there:
   already succeeded has one published shard removed and the collector re-run against
   it, asserting a non-zero exit, a refusal naming index `[1]`, and that no merged
   report was written. And through the real path: a running shard pod is deleted, and
-  the run must end `Succeeded` having consumed every index, or `Refused` — never
-  `Succeeded` over a subset.
+  the run must end `Findings` having consumed every index, or `Refused`, and never
+  an answer over a subset.
 * **Nothing keyed on index**: two runs with different rosters and shard counts must
   produce different scanner ownership, different ConfigMap names and different
   results prefixes.
@@ -470,27 +515,15 @@ and no amount of widening the Role fixes it. `ash_operator/auth.py` reads the th
 projected files directly instead, and `tests/test_auth.py` pins the incompatibility
 so an upgrade that fixes it is noticed rather than leaving the workaround forever.
 
-**`nektos/act` runs `lint-and-unit` and `crd-drift`**, with `RUNNER_TOOL_CACHE` and
-`AGENT_TOOLSDIRECTORY` redirected away from the root-owned `/opt/hostedtoolcache`, and
-with `actions/upload-artifact` guarded by `!env.ACT`. `crd-drift` used to be impossible
-under act — act's checkout leaves no usable `.git` in the job container, so the gate
-failed with `fatal: not a git repository` — and that limitation dissolved when the gate
-stopped asking git anything. Measured: both jobs now exit 0 under act, `crd-drift`
-printing `3 generated file(s), 219418 bytes, match byte for byte`.
-
-`e2e-kind` is docker-in-docker and needs both
-`--container-daemon-socket /var/run/docker.sock` and
-`--container-options "--group-add <docker socket gid>"` — without the second, every
+**`nektos/act` has not been re-measured since the workflow moved to `uv`.** An
+earlier revision ran `lint-and-unit` and `crd-drift` under act. `e2e-kind` is
+docker-in-docker and needs both `--container-daemon-socket /var/run/docker.sock` and
+`--container-options "--group-add <docker socket gid>"` (without the second, every
 docker call inside the job fails with `permission denied while trying to connect to
-the Docker daemon socket` — plus `--network host`, because kind writes a kubeconfig
+the Docker daemon socket`) plus `--network host`, because kind writes a kubeconfig
 pointing at `127.0.0.1:<port>` and inside a job container that address is the
-container. Two workflow bugs were found *by* act and fixed: `/usr/local/bin` is not
-writable in act's images, and `pytest -q` emits **no** `N passed` line at all when
-stdout is not a TTY — the count you see in a terminal is a TTY-only rewrite — so a
-`grep '[0-9]+ passed'` guard reported failure on a run where 173 tests passed.
-Measured across the flag matrix: `-q`, `-q -rs`, `-q --color=no` and
-`-q --no-header --tb=no` all produce no count line to a file or pipe; without `-q`,
-with or without `-v`, the line is there. The workflow therefore does not use `-q`.
+container. `pytest -q` emits **no** `N passed` line at all when stdout is not a TTY,
+so the workflow does not use `-q`.
 
 **`resolve_results_file` and shared filesystems.** The attempt-qualified layout
 assumes `rename(2)` is atomic within the results volume. That holds for one POSIX

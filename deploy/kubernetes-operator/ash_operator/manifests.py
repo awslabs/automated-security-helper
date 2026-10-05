@@ -176,11 +176,12 @@ def _hardened_security_context() -> dict[str, Any]:
 
     ``readOnlyRootFilesystem`` is deliberately **absent** rather than true. It was
     measured elsewhere in this stack to make scanners report clean: a tool that
-    cannot write where it expects to comes back MISSING rather than failing, and
-    with ``fail_on_incomplete_scanners`` defaulting to False a MISSING scanner
-    merges into a report that reads as a complete scan. A hardening flag that
-    converts a scanner into silence is worse than the write it prevents. The
-    settings that are here cost nothing and give up nothing.
+    cannot write where it expects to comes back MISSING rather than failing. With
+    ``fail_on_incomplete_scanners`` on, which is ASH's default, that turns a working
+    scan into an ``Incomplete`` one; with it turned off, a MISSING scanner merges
+    into a report that reads as a complete scan. Either way a hardening flag that
+    converts a scanner into a gap is worse than the write it prevents. The settings
+    that are here cost nothing and give up nothing.
     """
     return {
         "allowPrivilegeEscalation": False,
