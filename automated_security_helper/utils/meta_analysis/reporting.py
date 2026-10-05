@@ -482,8 +482,13 @@ def generate_html_report(
     html.append(
         f"        <div class='stat'>Total Findings: {validation_results['summary']['total_findings']}</div>"
     )
+    # A run whose SARIF files hold no results has nothing to match; report 0%
+    # rather than dividing by zero.
+    total_findings = validation_results["summary"]["total_findings"]
+    matched_findings = validation_results["summary"]["matched_findings"]
+    matched_share = matched_findings / total_findings if total_findings else 0.0
     html.append(
-        f"        <div class='stat'>Matched Findings: {validation_results['summary']['matched_findings']} ({validation_results['summary']['matched_findings'] / validation_results['summary']['total_findings']:.2%})</div>"
+        f"        <div class='stat'>Matched Findings: {matched_findings} ({matched_share:.2%})</div>"
     )
     html.append("      </div>")
     html.append("      <div class='stats'>")
