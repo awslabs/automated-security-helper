@@ -76,6 +76,15 @@ data class AshScanResults(
     val unlocatableResults: Int = 0,
     /** Unsuppressed failures that produced at least one finding. */
     val surfacedResults: Int = 0,
+    /**
+     * Set when the document as a whole could not be read as SARIF -- not JSON (a truncated
+     * write), a root that is not an object, or no `runs` array -- and null otherwise.
+     *
+     * Separate from [problems] because the two mean different things. A problem is one part of
+     * a report that could not be read while the rest was; this is a report of which nothing
+     * was read, so its zero findings are not a result and the scan has to fail on it.
+     */
+    val unreadableReason: String? = null,
 ) {
     /**
      * Whether every result landed in exactly one bucket.

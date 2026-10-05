@@ -51,6 +51,21 @@ class AshSarifParserShapeTest {
     }
 
     @Test
+    fun aDocumentOfWhichNothingCanBeReadIsMarkedUnreadable() {
+        // Truncated mid-write, empty, a bare value, and an object that is not SARIF.
+        for (text in listOf("""{"version":"2.1.0","runs":[{"results":[""", "", "[]", "null", """{"version":"2.1.0"}""")) {
+            val parsed = AshSarifParser.parse(text)
+            assertTrue("must be unreadable: '$text'", parsed.unreadableReason != null)
+            assertEquals(listOf(parsed.unreadableReason), parsed.problems)
+        }
+        // A report with no runs in it is readable SARIF that found nothing, not an unreadable one,
+        // and neither is a report with one malformed part.
+        for (text in listOf("""{"runs":[]}""", run("7"))) {
+            assertNull(text, AshSarifParser.parse(text).unreadableReason)
+        }
+    }
+
+    @Test
     fun scannerNameFallsBackToTheDriverAndToNothing() {
         val withProperty = """{"level":"error","properties":{"scanner_name":"bandit"},"locations":[${loc()}]}"""
         val blankProperty = """{"level":"error","properties":{"scanner_name":"  "},"locations":[${loc()}]}"""

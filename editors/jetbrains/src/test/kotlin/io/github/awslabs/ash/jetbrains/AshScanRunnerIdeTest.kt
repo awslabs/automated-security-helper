@@ -659,4 +659,21 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         assertEquals(2, Files.readAllLines(count).size)
         AshScanService.getInstance(project).clear()
     }
+
+    fun testATruncatedOrNonSarifReportIsAFailureRatherThanNoFindings() {
+        // A report that cannot be parsed has told us nothing. Reading it as "no findings" would put
+        // a clean verdict over a file nobody could read.
+        val source = Files.createDirectories(workdir.resolve("project"))
+        val whole = sarif("app.py", "error", 2)
+        val bodies = listOf(whole.substring(0, whole.length / 2), "[]", "{\"version\": \"2.1.0\"}")
+        for ((i, body) in bodies.withIndex()) {
+            val output = Files.createDirectories(workdir.resolve("out-bad-$i"))
+            val script = stubAsh(sarifBody = body, exitCode = 2)
+            val outcome = AshScanRunner.run(script.toString(), source, output)
+            val failed = outcome as? AshScanRunner.Outcome.Failed
+            assertNotNull("an unreadable report must fail the scan: $body -> $outcome", failed)
+            assertTrue(failed!!.summary, failed.summary.contains("not a readable SARIF report"))
+            assertTrue(failed.summary, failed.summary.contains("not the same as finding nothing"))
+        }
+    }
 }

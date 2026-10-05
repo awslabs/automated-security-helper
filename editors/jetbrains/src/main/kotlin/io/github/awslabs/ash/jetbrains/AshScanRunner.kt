@@ -202,9 +202,21 @@ object AshScanRunner {
             )
         }
 
+        val results = AshSarifParser.parse(text)
+        if (results.unreadableReason != null) {
+            // Truncated, not JSON, or not SARIF at all. Nothing in it could be read, so it is not
+            // evidence of anything, least of all of a clean tree.
+            return Outcome.Failed(
+                "ASH wrote $sarifPath but it is not a readable SARIF report " +
+                    "(${results.unreadableReason}). No findings can be shown, and this is not " +
+                    "the same as finding nothing.",
+                outputTail,
+            )
+        }
+
         return Outcome.Completed(
             exitCode = output.exitCode,
-            results = AshSarifParser.parse(text),
+            results = results,
             sarifPath = sarifPath.toString(),
             scanners = readScannerStatus(statusPath, statusGuard),
             versionLine = versionLine,

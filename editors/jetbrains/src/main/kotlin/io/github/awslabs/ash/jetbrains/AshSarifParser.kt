@@ -6,8 +6,8 @@ package io.github.awslabs.ash.jetbrains
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.google.gson.JsonParseException
 import com.google.gson.JsonParser
-import com.google.gson.JsonSyntaxException
 
 /**
  * Reads an ASH SARIF report into [AshScanResults].
@@ -34,26 +34,22 @@ object AshSarifParser {
     private const val MAX_PROBLEMS = 50
 
     fun parse(sarifText: String): AshScanResults {
+        // JsonParseException, the parent of JsonSyntaxException, so a parse failure Gson reports
+        // under either type is an unreadable report rather than an exception that escapes.
         val root = try {
             JsonParser.parseString(sarifText)
-        } catch (e: JsonSyntaxException) {
-            return AshScanResults(
-                emptyList(),
-                listOf("SARIF is not valid JSON: ${e.message}"),
-            )
+        } catch (e: JsonParseException) {
+            return unreadable("SARIF is not valid JSON: ${e.message}")
         }
 
-        // JsonParser returns JsonNull rather than null for the literal `null`, so this one test
-        // covers it as well as an array or a bare value.
+        // JsonParser returns JsonNull rather than null for the literal `null`, and for an empty
+        // file, so this one test covers those as well as an array or a bare value.
         if (!root.isJsonObject) {
-            return AshScanResults(emptyList(), listOf("SARIF root is not a JSON object."))
+            return unreadable("SARIF root is not a JSON object.")
         }
 
         val runs = root.asJsonObject.optArray("runs")
-            ?: return AshScanResults(
-                emptyList(),
-                listOf("SARIF has no ${'"'}runs${'"'} array; nothing to read."),
-            )
+            ?: return unreadable("SARIF has no ${'"'}runs${'"'} array; nothing to read.")
 
         val findings = mutableListOf<AshFinding>()
         val problems = mutableListOf<String>()
@@ -78,6 +74,10 @@ object AshSarifParser {
             surfacedResults = tally.surfaced,
         )
     }
+
+    /** A document of which nothing could be read; see [AshScanResults.unreadableReason]. */
+    private fun unreadable(reason: String) =
+        AshScanResults(emptyList(), listOf(reason), unreadableReason = reason)
 
     /**
      * Per-result bucket counts, so every result can be shown to have landed somewhere.

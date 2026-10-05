@@ -354,6 +354,26 @@ class AshScanIntegrationTest : BasePlatformTestCase() {
         assertNull(noProject.getData(CommonDataKeys.PROJECT))
     }
 
+    fun testATruncatedReportClearsThePreviousFindingsAndIsAnError() {
+        openLeak()
+        stub("ashx", "exit2", exitCode = 2)
+        scan()
+        assertEquals(3, ashHighlights().size)
+
+        // The real exit-2 report cut in half, as a scan killed mid-write leaves it.
+        val real = Files.readString(resource("/real-cli/exit2/ash.sarif"))
+        val truncated = bin.resolve("truncated.sarif")
+        Files.writeString(truncated, real.substring(0, real.length / 2))
+        stub("ashx", "exit2", exitCode = 2, sarifOverride = truncated)
+
+        val failed = scan().single()
+
+        assertEquals(NotificationType.ERROR, failed.type)
+        assertEquals("ASH scan failed", failed.title)
+        assertTrue(failed.body, failed.body.contains("not a readable SARIF report"))
+        assertEquals("findings from the previous run must not survive", 0, ashHighlights().size)
+    }
+
     fun testTheActionIsDisabledWhileAScanRuns() {
         val action = AshScanAction()
         val event = TestActionEvent.createTestEvent(action, SimpleDataContext.getProjectContext(project))
