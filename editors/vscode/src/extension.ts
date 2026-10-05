@@ -247,6 +247,27 @@ export function resolveOutputDirectory(
   return { ok: true, dir: resolved };
 }
 
+/**
+ * Options `ash.extraArguments` may not carry, because the extension sets them.
+ *
+ * The setting is workspace-scoped, and click keeps the LAST occurrence of an
+ * option, so an appended `--output-dir` would replace the confined one checked by
+ * resolveOutputDirectory, and `--source-dir` would scan a directory other than the
+ * one whose findings are published. Neither has a short alias in `ash scan`.
+ */
+export const RESERVED_SCAN_OPTIONS: readonly string[] = ['--output-dir', '--source-dir'];
+
+/** The first reserved option in `extra`, in either `--opt value` or `--opt=value` form. */
+export function reservedOptionIn(extra: readonly string[]): string | undefined {
+  for (const argument of extra) {
+    const name = argument.split('=', 1)[0];
+    if (RESERVED_SCAN_OPTIONS.includes(name)) {
+      return name;
+    }
+  }
+  return undefined;
+}
+
 /** The message the one-time fallback notice shows. Exported so tests pin it. */
 export const FALLBACK_NOTICE =
   `ASH: "${DEFAULT_EXECUTABLE}" is not on PATH, so this extension is running ` +
@@ -358,6 +379,15 @@ async function scanAndPublish(
     return { status: 'bad-setting', detail: output.message };
   }
   const outputDir = output.dir;
+  const reserved = reservedOptionIn(settings.extraArguments);
+  if (reserved !== undefined) {
+    const detail =
+      `ash.extraArguments contains ${reserved}, which this extension sets itself. ` +
+      'Remove it; use ash.outputDirectory to choose where the scan writes.';
+    host.log(detail);
+    host.showError(`ASH: ${detail}`);
+    return { status: 'bad-setting', detail };
+  }
 
   // No working directory on the probe or the scan: see CommandOptions in ash-cli.ts.
   const resolved = await resolveExecutable(settings.executablePath, host.run);

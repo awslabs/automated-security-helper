@@ -571,6 +571,41 @@ describe('extra arguments', () => {
 
     expect(invocations[1].args.slice(-3)).toEqual(['--no-progress', '--scanners', 'detect-secrets']);
   });
+
+  // ash.extraArguments is workspace-scoped like ash.outputDirectory, and click
+  // takes the LAST occurrence of an option, so an appended --output-dir would
+  // replace the confined one and --source-dir would scan somewhere else.
+  it.each([
+    ['--output-dir', '/home/user'],
+    ['--output-dir=/home/user'],
+    ['--source-dir', '/'],
+    ['--source-dir=/'],
+  ])('refuse %s, run nothing and clear earlier findings', async (...extraArguments) => {
+    const { host, invocations, collection } = harness({ sarifFixture: 'planted-secret.sarif' });
+    seedPreviousFinding(collection);
+
+    const report = await runScanCommand(host, SOURCE_DIR, {
+      ...SETTINGS,
+      extraArguments: ['--offline', ...extraArguments],
+    });
+
+    expect(report.status).toBe('bad-setting');
+    expect(report.detail).toContain('ash.extraArguments');
+    expect(report.detail).toContain(extraArguments[0].split('=')[0]);
+    expect(invocations).toEqual([]);
+    expect(collection.totalDiagnostics()).toBe(0);
+  });
+
+  it('accept an option whose name only starts like a refused one', async () => {
+    const { host } = harness({ sarifFixture: 'planted-secret.sarif' });
+
+    const report = await runScanCommand(host, SOURCE_DIR, {
+      ...SETTINGS,
+      extraArguments: ['--output-formats', 'sarif'],
+    });
+
+    expect(report.status).toBe('ok');
+  });
 });
 
 describe('activation', () => {
