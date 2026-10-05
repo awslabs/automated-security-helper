@@ -229,3 +229,80 @@ def test_smoke_test_reaches_the_field_check_on_an_intact_archive(tmp_path):
         "ok": False,
         "reason": "manifest.json missing `manifest_version`",
     }, result
+
+
+# ---------------------------------------------------------------------------
+# Two more single-field corruptions that leave the central directory readable
+# and only fail when the member is opened. zipfile raises NotImplementedError
+# for a compression method it does not implement and RuntimeError for a member
+# whose encryption flag is set (it asks for a password). Neither is BadZipFile,
+# so both escaped the handlers above the same way zlib.error did.
+# ---------------------------------------------------------------------------
+
+_CENTRAL_SIG = b"PK\x01\x02"
+
+
+def _patch_header_field(
+    archive_bytes: bytes, local_offset: int, central_offset: int, value: int
+) -> bytes:
+    """Overwrite one 2-byte field of manifest.json's local AND central header.
+
+    Both copies are patched so the fixture does not depend on which header a
+    given Python's zipfile consults first.
+    """
+    with zipfile.ZipFile(__import__("io").BytesIO(archive_bytes)) as zf:
+        info = zf.getinfo("manifest.json")
+    data = bytearray(archive_bytes)
+    local = info.header_offset
+    data[local + local_offset : local + local_offset + 2] = value.to_bytes(2, "little")
+    central = data.index(_CENTRAL_SIG)
+    data[central + central_offset : central + central_offset + 2] = value.to_bytes(
+        2, "little"
+    )
+    return bytes(data)
+
+
+def _unknown_compression_method(archive_bytes: bytes) -> bytes:
+    # Compression method: local header offset 8, central header offset 10.
+    return _patch_header_field(archive_bytes, 8, 10, 99)
+
+
+def _encryption_bit_set(archive_bytes: bytes) -> bytes:
+    # General purpose flag: local header offset 6, central header offset 8.
+    # Bit 0 means "encrypted"; the archive is single-member and was written
+    # with no other flag bits that matter here, so setting bit 0 alone is the
+    # one-field change.
+    with zipfile.ZipFile(__import__("io").BytesIO(archive_bytes)) as zf:
+        flags = zf.getinfo("manifest.json").flag_bits
+    return _patch_header_field(archive_bytes, 6, 8, flags | 0x1)
+
+
+_HEADER_CORRUPTIONS = [
+    pytest.param(_unknown_compression_method, NotImplementedError, id="compression-99"),
+    pytest.param(_encryption_bit_set, RuntimeError, id="encryption-bit"),
+]
+
+
+@pytest.mark.parametrize(("corrupt", "raised"), _HEADER_CORRUPTIONS)
+def test_header_corruption_is_reported_not_raised(tmp_path, corrupt, raised):
+    corrupted = corrupt(mcpb_archive(MANIFEST))
+
+    # Pin the mechanism: the archive opens, and only the member read raises
+    # the exception class this case is about.
+    with zipfile.ZipFile(__import__("io").BytesIO(corrupted)) as zf:
+        assert zf.namelist() == ["manifest.json"]
+        with pytest.raises(raised):
+            zf.read("manifest.json")
+
+    errors = validate_mcpb_archive(_plugins_root(tmp_path, corrupted))
+    assert len(errors) == 1, (
+        f"expected exactly one unreadable-archive error, got {errors}"
+    )
+    assert "unreadable" in str(errors[0]).lower(), errors[0]
+
+
+@pytest.mark.parametrize(("corrupt", "raised"), _HEADER_CORRUPTIONS)
+def test_smoke_test_reports_a_header_corruption(tmp_path, corrupt, raised):
+    result = _smoke(tmp_path, corrupt(mcpb_archive(MANIFEST)))
+    assert result is not None and result.get("ok") is False, result
+    assert "not a valid ZIP" in result["reason"], result

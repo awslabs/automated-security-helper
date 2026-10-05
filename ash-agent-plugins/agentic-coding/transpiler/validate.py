@@ -720,9 +720,18 @@ def validate_mcpb_archive(plugins_root: Path) -> list[Error]:
     # UnicodeDecodeError for the same reason one layer up: json.loads on bytes
     # decodes as UTF-8 first, and invalid UTF-8 raises UnicodeDecodeError, which
     # is a ValueError but NOT a json.JSONDecodeError, so it escaped too.
+    #
+    # RuntimeError covers the two other ways a member read fails with the
+    # central directory intact: zipfile raises NotImplementedError (a
+    # RuntimeError subclass) for a compression method it does not implement,
+    # and RuntimeError itself for a member whose encryption flag is set (it
+    # wants a password). NotImplementedError is not listed separately because
+    # the entry would be dead. The try body is only zipfile and json calls, so
+    # catching RuntimeError here cannot hide an unrelated bug.
     except (
         zipfile.BadZipFile,
         zlib.error,
+        RuntimeError,
         json.JSONDecodeError,
         UnicodeDecodeError,
         KeyError,

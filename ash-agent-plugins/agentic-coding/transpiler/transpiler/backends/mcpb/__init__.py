@@ -122,8 +122,11 @@ class MCPBBackend(BaseBackend):
         container from the central directory, so a corrupt deflate stream gets
         past BadZipFile and surfaces from the member read as zlib.error, and a
         manifest that is not valid UTF-8 raises UnicodeDecodeError, which is not
-        a json.JSONDecodeError. validate.validate_mcpb_archive handles the same
-        two cases the same way."""
+        a json.JSONDecodeError. An unsupported compression method
+        (NotImplementedError, a RuntimeError subclass) and a set encryption bit
+        (RuntimeError) also fail only at the member read; catching RuntimeError
+        reports both as an invalid ZIP.
+        validate.validate_mcpb_archive handles the same cases the same way."""
         archive = ctx.out / "ash.mcpb"
         if not archive.exists():
             return {"ok": False, "reason": "ash.mcpb archive missing"}
@@ -138,7 +141,7 @@ class MCPBBackend(BaseBackend):
                     }
                 with zf.open("manifest.json") as f:
                     manifest = json.loads(f.read().decode("utf-8"))
-        except (zipfile.BadZipFile, zlib.error) as e:
+        except (zipfile.BadZipFile, zlib.error, RuntimeError) as e:
             return {"ok": False, "reason": f"ash.mcpb is not a valid ZIP: {e}"}
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             return {"ok": False, "reason": f"manifest.json inside archive invalid: {e}"}
