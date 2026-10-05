@@ -348,6 +348,42 @@ class TestTheTemplateUrlIsAddressable:
         )
 
 
+class TestTheConsoleRegionIsConsistent:
+    """The console host and ``?region=`` must name the same Region.
+
+    The renderer always builds them from one value, so only a hand edit of the committed
+    document can make them disagree. That is the case `check` exists for, and nothing
+    else catches it: the console reads ``?region=``, so the link opens and launches in a
+    Region other than the one its host name shows.
+    """
+
+    def _good(self, renderer):
+        stacks = renderer.load_templates()
+        plan, problems = renderer.parameter_plan(stacks)
+        assert not problems, problems
+        link = renderer.quick_create_url(
+            _hosting("my-bucket"), "AshFargate", "us-east-1", plan["AshFargate"]
+        )
+        assert renderer.validate_url(link, stacks, plan) == [], "control link rejected"
+        return link, stacks, plan
+
+    def test_a_host_region_that_disagrees_is_rejected(self, renderer):
+        link, stacks, plan = self._good(renderer)
+        broken = link.replace(
+            "https://us-east-1.console.", "https://eu-west-1.console.", 1
+        )
+        assert broken != link
+        found = renderer.validate_url(broken, stacks, plan)
+        assert any("disagree" in line for line in found), found
+
+    def test_a_query_region_that_disagrees_is_rejected(self, renderer):
+        link, stacks, plan = self._good(renderer)
+        broken = link.replace("?region=us-east-1#", "?region=eu-west-1#", 1)
+        assert broken != link
+        found = renderer.validate_url(broken, stacks, plan)
+        assert any("disagree" in line for line in found), found
+
+
 class TestParametersAreUrlEncoded:
     def test_the_template_url_and_every_value_round_trip(self, renderer):
         import urllib.parse
@@ -384,6 +420,17 @@ class TestTheHostingConfigIsValidated:
             ("bucket.", "begin and end"),
             ("my..bucket", "adjacent periods"),
             ("192.168.5.4", "IP address"),
+            # Every reserved prefix and suffix, so dropping either check, or any one
+            # entry from its tuple, fails here. The names are otherwise valid, so no
+            # other rule can produce the expected message.
+            ("xn--ash-templates", "prefix S3 reserves"),
+            ("sthree-ash-templates", "prefix S3 reserves"),
+            ("amzn-s3-demo-ash-templates", "prefix S3 reserves"),
+            ("ash-templates-s3alias", "suffix S3 reserves"),
+            ("ash-templates--ol-s3", "suffix S3 reserves"),
+            ("ash.templates.mrap", "suffix S3 reserves"),
+            ("ash-templates--x-s3", "suffix S3 reserves"),
+            ("ash-templates--table-s3", "suffix S3 reserves"),
         ],
     )
     def test_an_invalid_bucket_name_is_rejected(self, renderer, bucket, fragment):
