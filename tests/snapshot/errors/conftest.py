@@ -28,6 +28,24 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 
 
+@pytest.fixture(autouse=True)
+def _ruby_toolchain_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer cfn-nag's install probe as a machine with RubyGems and a C compiler.
+
+    Building the scanner set runs ``CfnNagScanner._missing_gem_prerequisites``, which
+    looks for ``gem`` and a compiler on PATH and logs a WARNING naming whatever is
+    missing. That warning is in the scan errors' output, so without this a snapshot
+    recorded whether the machine running the suite had Ruby installed. What the
+    installer prints for each missing prerequisite is snapshotted on purpose, host by
+    host, in tests/snapshot/dependencies.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
+        CfnNagScanner,
+    )
+
+    monkeypatch.setattr(CfnNagScanner, "_missing_gem_prerequisites", staticmethod(list))
+
+
 @pytest.fixture
 def in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Make ``tmp_path`` the working directory, so nothing reads the repo cwd."""
