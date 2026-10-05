@@ -396,6 +396,124 @@ class TestToolSelectionScopesFailures:
         assert "Broken" in result.output
 
 
+class TestToolSelectionInstallsOnlyWhatWasAsked:
+    """`--tool X` must run X's install commands and no other plugin's.
+
+    The exclusion half of --tool, and nothing else in this file covered it. The
+    tests above establish that a bad name is refused and that a targeted run does
+    not inherit an unrelated plugin's load failure; both of those pass whether or
+    not the filter narrows anything. Replacing the filter with `selected =
+    discovered` -- so --tool logged the request and then installed everything --
+    left the whole file green.
+
+    That matters beyond tidiness. The filter is what makes `--tool grype` cheap
+    enough for CI to call per scanner, and a --tool that quietly installs the
+    whole toolchain would show up as install time and as unexpected binaries in
+    the image, not as a failure anyone could trace back here.
+
+    The results table is read from the installer's console, pinned to a buffer
+    this class owns, not from ``result.output``. TestToolSelection below explains
+    why: CliRunner's capture can lose output on the first invocation in a worker,
+    and on a truncated capture a ``not in`` assertion holds for the wrong reason.
+    """
+
+    def _invoke(self, tmp_path, monkeypatch, args):
+        monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+        # width, so Rich does not wrap a name across two lines; no_color, so it does
+        # not interleave ANSI inside one.
+        panels = io.StringIO()
+        monkeypatch.setattr(
+            dependencies_module,
+            "console",
+            Console(file=panels, width=200, no_color=True),
+        )
+
+        def _scanner(name):
+            plugin = MagicMock()
+            plugin.config = SimpleNamespace(name=name)
+            plugin.command = name
+            plugin.get_installation_commands.return_value = [["echo", name]]
+            return plugin
+
+        alpha = _scanner("alpha-scanner")
+        beta = _scanner("beta-scanner")
+
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.load_plugins",
+            lambda *_a, **_k: {},
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.ash_plugin_manager",
+            SimpleNamespace(
+                plugin_modules=lambda kind: (
+                    [lambda **_kw: alpha, lambda **_kw: beta]
+                    if kind == "scanner"
+                    else []
+                )
+            ),
+        )
+        ran = []
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.run_command",
+            lambda cmd, shell=False: ran.append(cmd) or 0,
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.find_executable",
+            lambda cmd: f"/usr/bin/{cmd}",
+        )
+        result = runner.invoke(
+            dependencies_app,
+            ["--plugin-type", "scanner", "--bin-path", str(tmp_path / "bin"), *args],
+        )
+        return result, ran, panels.getvalue()
+
+    def test_a_targeted_run_installs_only_the_requested_tool(
+        self, tmp_path, monkeypatch
+    ):
+        result, ran, printed = self._invoke(
+            tmp_path, monkeypatch, ["--tool", "alpha-scanner"]
+        )
+        assert result.exit_code == EXIT_OK, printed
+        assert ran == [["echo", "alpha-scanner"]], (
+            "--tool alpha-scanner ran commands for a plugin it was not asked about"
+        )
+        # The requested tool is also reported, so a run that skipped every command
+        # would not satisfy this by doing nothing at all.
+        assert "alpha-scanner" in printed
+
+    def test_the_unselected_plugin_is_absent_from_the_report(
+        self, tmp_path, monkeypatch
+    ):
+        """A plugin that was filtered out must not appear in the results table.
+
+        Separate from the command assertion above because the two failed
+        differently: an implementation that filtered execution but still reported
+        every plugin would run the right commands and then tell the reader that
+        beta-scanner was considered, which is how a --tool run comes to look like
+        it covered more than it did.
+        """
+        _result, _ran, printed = self._invoke(
+            tmp_path, monkeypatch, ["--tool", "alpha-scanner"]
+        )
+        # Same buffer, positive first: the table was captured, so the absence below
+        # is a statement about the table and not about an empty capture.
+        assert "alpha-scanner" in printed
+        assert "beta-scanner" not in printed
+
+    def test_without_the_filter_both_plugins_install(self, tmp_path, monkeypatch):
+        """Positive control for the two tests above.
+
+        Without this, both would pass if the install loop simply never ran anything
+        -- the "a test that cannot fail" shape. This pins that the same fixture
+        does install both, and reports both, when nothing narrows it.
+        """
+        result, ran, printed = self._invoke(tmp_path, monkeypatch, [])
+        assert result.exit_code == EXIT_OK, printed
+        assert sorted(ran) == [["echo", "alpha-scanner"], ["echo", "beta-scanner"]]
+        assert "alpha-scanner" in printed
+        assert "beta-scanner" in printed
+
+
 class TestToolSelection:
     """Invoked through the CLI, isolated so it cannot leak into other tests.
 
