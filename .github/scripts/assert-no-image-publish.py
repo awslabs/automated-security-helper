@@ -31,8 +31,7 @@ EXEMPTIONS
 A line that matches a shape without publishing anything (a planted fixture inside
 another gate's self-test) is listed in EXEMPT with its file, its exact stripped text and
 a reason. An exemption that no longer matches a line fails, so one cannot outlive the
-line it was written for. This file and its unit test hold the shapes as data and are
-excluded by path.
+line it was written for. This file holds the shapes as data and is excluded by path.
 
 NO VACUOUS PASS
 
@@ -64,10 +63,7 @@ REQUIRED: Tuple[str, ...] = (
     "scripts/e2e/container.sh",
 )
 
-SELF: Tuple[str, ...] = (
-    ".github/scripts/assert-no-image-publish.py",
-    "tests/unit/test_assert_no_image_publish.py",
-)
+SELF: Tuple[str, ...] = (".github/scripts/assert-no-image-publish.py",)
 
 SHAPES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("docker push", re.compile(r"\bdocker\s+(?:image\s+)?push\b")),
