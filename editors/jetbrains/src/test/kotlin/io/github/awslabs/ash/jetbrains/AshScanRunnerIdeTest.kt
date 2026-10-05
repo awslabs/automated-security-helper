@@ -551,11 +551,17 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         // does the same: it records its cwd and writes the URI of $src/app.py relative to it. So a
         // runner that let the child inherit the IDE's cwd gets a URI like ../../tmp/.../app.py,
         // and every finding is keyed against a file that is not the one the user has open.
+        //
+        // The relative path is computed in POSIX sh, not with `realpath --relative-to`, which is
+        // GNU-only and absent on macOS. A file under the cwd gets its path below it; anything else
+        // gets its absolute path. Either way, a child in the wrong directory writes a URI that is
+        // not `app.py`.
         val (source, output) = dirs()
         Files.writeString(source.resolve("app.py"), "x\n")
         val cwd = workdir.resolve("cwd.txt")
         val script = rawStub(
-            "pwd -P > '$cwd'; rel=\$(realpath --relative-to=\"\$(pwd -P)\" \"\$src/app.py\"); " +
+            "here=\$(pwd -P); printf '%s\\n' \"\$here\" > '$cwd'; f=\"\$(cd \"\$src\" && pwd -P)/app.py\"; " +
+                "case \"\$f\" in \"\$here\"/*) rel=\"\${f#\"\$here\"/}\";; *) rel=\"\$f\";; esac; " +
                 "mkdir -p \"\$out/reports\"; " +
                 "printf '%s' '{\"version\":\"2.1.0\",\"runs\":[{\"results\":[{\"ruleId\":\"R\",\"level\":\"error\"," +
                 "\"message\":{\"text\":\"m\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"' " +
@@ -566,8 +572,8 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
 
         val completed = AshScanRunner.run(script.toString(), source, output) as AshScanRunner.Outcome.Completed
 
-        assertEquals("the child must run in the scanned directory", source.toRealPath().toString(), Files.readString(cwd).trim())
         assertEquals("app.py", completed.results.findings.single().filePath)
+        assertEquals("the child must run in the scanned directory", source.toRealPath().toString(), Files.readString(cwd).trim())
     }
 
     fun testTheProbeGivesTheChildNoStdinToWaitOn() {
