@@ -30,7 +30,7 @@ ash dependencies install --config .ash/.ash_community_plugins.yaml
 # Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
 # the latter resolves to whatever is newest, which is how a release published
 # mid-CI-run once turned every open pull request red.
-pip install 'ferret-scan>=2.4.5,<2.5.0'
+pip install 'ferret-scan>=2.4.5,<2.6.0'
 
 # Or build from source
 git clone https://github.com/awslabs/ferret-scan.git
@@ -284,7 +284,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: "==2.4.5"  # Exact version
+      tool_version: "==2.5.2"  # Exact version
 ```
 
 Or use a version range:
@@ -294,7 +294,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: ">=2.4.5,<2.5.0"  # Compatible range
+      tool_version: ">=2.4.5,<2.6.0"  # Compatible range
 ```
 
 To bypass version checks (not recommended for production):
@@ -310,7 +310,7 @@ scanners:
 ### Available Checks
 
 The authoritative list for your installed version is `ferret-scan --help checks` — do not
-hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5 the checks are:
+hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5 through v2.5.2 the checks are:
 
 - `BANK_ACCOUNT` - Bank account / IBAN / routing numbers
 - `CLOUD_RESOURCES` - Cloud resource identifiers (AWS ARNs, Azure/GCP/OCI/IBM/Alibaba IDs)

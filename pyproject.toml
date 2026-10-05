@@ -12,7 +12,7 @@ dependencies = [
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
  "importlib-metadata>=9.0.1,<10.0.0",
- "cattrs>=26.2.0,<27.0.0",
+ "cattrs>=26.2.1,<27.0.0",
  "docker>=7.2,<8.0.0",
  "GitPython>=3.1.62,<4.0.0",  # floor is advisory-driven: GHSA-59cr-6r3x-644w affects <= 3.1.61
  "gitdb>=4.0,<5.0.0",
@@ -33,7 +33,7 @@ dependencies = [
  "junitparser>=5.0,<6",
  "textual>=8.2,<9",
  "detect-secrets>=1.5,<2",
- "boto3>=1.43.102,<1.44",
+ "boto3>=1.43.103,<1.44",
  "cfn-flip>=1.3,<2",
  "mcp>=2.2.0,<3",
  "toml>=0.10,<1.0.0",
@@ -45,7 +45,7 @@ dependencies = [
  # advisories published 2026-09-29 cover (GHSA-ffc3-869f-jxw9 critical among them); every
  # one of them is fixed in 2.14.0.
  "pyjwt>=2.14,<3",
- "uvicorn>=0.53.0,<1",
+ "uvicorn>=0.54.0,<1",
  "jsonpatch>=1.33,<2",
 ]
 [project.optional-dependencies]
@@ -53,6 +53,24 @@ cdk = [
     "aws-cdk-lib>=2.269.0,<3.0.0",
     "cdk-nag>=3.0,<4.0.0",
     "constructs>=10.8,<11.0.0",
+]
+# Symbol-scoped suppressions (`symbol:` on a suppression entry) resolve the named
+# function or class to a line span by parsing the source file with tree-sitter.
+# An extra rather than a core requirement: these are native wheels, and tree-sitter
+# publishes no musllinux aarch64 wheel (tree-sitter-typescript and tree-sitter-java
+# publish no musllinux aarch64 wheel either), so as a core requirement they would
+# make a plain install need a C compiler on Alpine arm64. Without the extra a symbol
+# suppression matches nothing and the scan says which extra is missing.
+#
+# One wheel per grammar rather than tree-sitter-language-pack: language-pack 1.x
+# ships no grammars in its wheel and downloads parser shared libraries from a remote
+# manifest at runtime, which uv.lock cannot pin or hash and an offline scan cannot do.
+symbols = [
+    "tree-sitter>=0.26,<0.27",
+    "tree-sitter-java>=0.23.5,<0.24",
+    "tree-sitter-javascript>=0.25,<0.26",
+    "tree-sitter-python>=0.25,<0.26",
+    "tree-sitter-typescript>=0.23.2,<0.24",
 ]
 
 [[project.authors]]
@@ -88,7 +106,7 @@ dev = [
  "ruff>=0.16.9,<1.0.0",
  "pytest>=9.1,<10.0.0",
  "pytest-cov>=7.1,<8.0.0",
- "pytest-mock>=3.15,<4.0.0",
+ "pytest-mock>=3.16.0,<4.0.0",
  "mypy>=2.3,<3.0.0",
  "types-pyyaml>=6.0.12.20260906",
  "lazydocs>=0.4,<1.0.0",
@@ -122,7 +140,7 @@ dev = [
  # satellite to move a minor ahead of the parent. For type stubs that is a staleness question
  # rather than a runtime one, and it avoids having to widen twelve lines in lockstep every time
  # the ecosystem's minor rolls over.
- "types-boto3>=1.43.102,<2.0.0",
+ "types-boto3>=1.43.103,<2.0.0",
  "types-boto3-cloudformation>=1.43.62,<2.0.0",
  "types-boto3-dynamodb>=1.43.64,<2.0.0",
  "types-boto3-ec2>=1.43.100,<2.0.0",

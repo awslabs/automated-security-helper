@@ -47,6 +47,7 @@ class LintCategory(str, Enum):
     SUPPRESSION_EXPIRED = "suppression-expired"
     SUPPRESSION_UNUSED = "suppression-unused"
     SUPPRESSION_MULTILINE_REASON = "suppression-multiline-reason"
+    SUPPRESSION_SYMBOL = "suppression-symbol"
     IGNORE_PATH_ISSUE = "ignore-path-issue"
     LEGACY_NAME_VARIANT = "legacy-name-variant"
     LEGACY_NAME_CONFLICT = "legacy-name-conflict"
@@ -627,11 +628,17 @@ class ConfigLinter:
         if not isinstance(suppressions, list):
             return
 
+        reported_missing_symbols_extra = False
         for i, suppression in enumerate(suppressions):
             if not isinstance(suppression, dict):
                 continue
 
             path_prefix = f"global_settings.suppressions[{i}]"
+
+            if suppression.get("symbol") is not None:
+                reported_missing_symbols_extra = cls._check_suppression_symbol(
+                    suppression, path_prefix, result, reported_missing_symbols_extra
+                )
 
             # Check: line_start present but line_end missing
             line_start = suppression.get("line_start")
@@ -938,6 +945,86 @@ class ConfigLinter:
                 return report_path, report_timestamp
 
         return None, None
+
+    @classmethod
+    def _check_suppression_symbol(
+        cls,
+        suppression: Dict[str, Any],
+        path_prefix: str,
+        result: LintResult,
+        reported_missing_extra: bool,
+    ) -> bool:
+        """Check one suppression's ``symbol``. Returns the updated
+        ``reported_missing_extra``, so a missing extra is reported once per
+        config rather than once per entry.
+
+        Each issue here is one under which the entry can never match. An
+        unmatched suppression fails closed, so none of them hides a finding,
+        but each one is a suppression its author believes is in force.
+        """
+        from automated_security_helper.utils.symbol_spans import (
+            GRAMMARS_BY_EXTENSION,
+            SYMBOLS_EXTRA,
+            is_valid_symbol,
+            symbols_extra_available,
+        )
+
+        symbol = suppression.get("symbol")
+        if not isinstance(symbol, str) or not is_valid_symbol(symbol):
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.ERROR,
+                    category=LintCategory.SUPPRESSION_SYMBOL,
+                    message=(
+                        f"Suppression 'symbol' {symbol!r} is not a dotted qualified "
+                        f"name such as 'MyClass.my_method': identifiers joined by "
+                        f"'.', with no spaces, wildcards or call syntax"
+                    ),
+                    path=path_prefix,
+                )
+            )
+            return reported_missing_extra
+
+        path = suppression.get("path")
+        if isinstance(path, str):
+            last_segment = path.replace("\\", "/").rsplit("/", 1)[-1]
+            if "." in last_segment:
+                suffix = "." + last_segment.rsplit(".", 1)[1].lower()
+                if not any(c in suffix for c in "*?[") and (
+                    suffix not in GRAMMARS_BY_EXTENSION
+                ):
+                    result.issues.append(
+                        LintIssue(
+                            severity=LintSeverity.WARNING,
+                            category=LintCategory.SUPPRESSION_SYMBOL,
+                            message=(
+                                f"Suppression sets 'symbol' but its path {path!r} "
+                                f"only matches '{suffix}' files, which ASH has no "
+                                f"symbol grammar for (supported: "
+                                f"{', '.join(sorted(GRAMMARS_BY_EXTENSION))}), so "
+                                f"it never matches"
+                            ),
+                            path=path_prefix,
+                        )
+                    )
+
+        if not reported_missing_extra and not symbols_extra_available():
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.WARNING,
+                    category=LintCategory.SUPPRESSION_SYMBOL,
+                    message=(
+                        f"Suppressions that set 'symbol' need the optional "
+                        f"'{SYMBOLS_EXTRA}' extra, which is not installed here. "
+                        f"Until it is, they match nothing and the findings they "
+                        f"name stay visible. Install "
+                        f"automated-security-helper[{SYMBOLS_EXTRA}]"
+                    ),
+                    path=path_prefix,
+                )
+            )
+            return True
+        return reported_missing_extra
 
     @classmethod
     def _make_suppression_id(cls, suppression: Dict[str, Any]) -> str:

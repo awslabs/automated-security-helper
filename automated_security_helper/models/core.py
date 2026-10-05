@@ -13,9 +13,11 @@ from datetime import datetime, date
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
 )
+from automated_security_helper.utils.symbol_spans import is_valid_symbol
 
 if TYPE_CHECKING:
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+    from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 
 class ToolExtraArg(BaseModel):
@@ -72,10 +74,16 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
         str(line_start) if line_start is not None else "*",
         str(line_end_val) if line_end_val is not None else "*",
     ]
-    if any(suppression.get(f) for f in PACKAGE_SUPPRESSION_FIELDS):
+    symbol = suppression.get("symbol")
+    if symbol or any(suppression.get(f) for f in PACKAGE_SUPPRESSION_FIELDS):
         parts.append(
             "@".join(suppression.get(f) or "*" for f in PACKAGE_SUPPRESSION_FIELDS)
         )
+    # A symbol is a sixth part, and its presence always brings the fifth, so an
+    # id's part count says which fields it carries and a symbol can never be
+    # read as a package.
+    if symbol:
+        parts.append(symbol)
     return "|".join(parts)
 
 
@@ -126,6 +134,21 @@ class AshSuppression(IgnorePathWithReason):
             ),
         ),
     ] = None
+    symbol: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only suppress findings whose lines lie inside the "
+                "definition with this qualified name, e.g. 'MyClass.my_method', "
+                "in the finding's file. Names are dotted from the top of the "
+                "file, exact and case-sensitive. Resolved by parsing the file "
+                "with tree-sitter (Python, JavaScript, TypeScript, Java), which "
+                "needs the 'symbols' extra; a finding whose file cannot be "
+                "parsed never matches."
+            ),
+        ),
+    ] = None
 
     @field_validator("line_end")
     @classmethod
@@ -149,6 +172,22 @@ class AshSuppression(IgnorePathWithReason):
             raise ValueError(
                 "package_name, package_version and package_path must be omitted "
                 "rather than left blank"
+            )
+        return v
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, v):
+        """Reject a symbol that is not a dotted qualified name.
+
+        A malformed name could never equal a parsed definition's name, so the
+        entry would silently match nothing.
+        """
+        if v is not None and not is_valid_symbol(v):
+            raise ValueError(
+                f"symbol must be a dotted qualified name such as "
+                f"'MyClass.my_method' (identifiers joined by '.', no spaces, "
+                f"wildcards or call syntax): {v!r}"
             )
         return v
 
@@ -179,6 +218,10 @@ class AshSuppression(IgnorePathWithReason):
         ``name@version@path`` with ``*`` for each unset piece, so two entries
         that differ only by package do not share an id. Entries without
         package fields keep the four-part id they always had.
+
+        A suppression that sets ``symbol`` gets that fifth part (``*@*@*``
+        when no package field is set) and the symbol as a sixth. Entries
+        without a symbol keep the id they had before the field existed.
         """
         return suppression_id(self.model_dump())
 
@@ -207,17 +250,27 @@ class AshSuppression(IgnorePathWithReason):
             return None
         return (expiration_date - date.today()).days
 
-    def matches(self, finding: "FlatVulnerability") -> bool:
+    def matches(
+        self,
+        finding: "FlatVulnerability",
+        symbol_resolver: "SymbolResolver | None" = None,
+    ) -> bool:
         """Return True if ``finding`` is covered by this suppression rule.
 
         Checks rule_id (exact or glob), path (supports ``**``), optional line
-        range overlap, and the optional package fields. Expired suppressions
-        never match.
+        range overlap, the optional package fields, and the optional symbol.
+        Expired suppressions never match.
 
         Each package field that is set must match the finding's corresponding
         field. A finding that does not carry that field does not match: the
         scanner could not say which package it is about, so a package-scoped
         suppression must not assume it is the one intended.
+
+        A symbol is checked last, so a file is parsed only for a finding that
+        every other field already matches. It needs ``symbol_resolver``, which
+        reads the scanned source; without one a symbol-scoped suppression
+        matches nothing, and so does a finding with no line number or in a
+        file the resolver cannot parse.
         """
         if self.is_expired:
             return False
@@ -237,6 +290,13 @@ class AshSuppression(IgnorePathWithReason):
 
         if not self._package_matches(finding):
             return False
+
+        if self.symbol is not None:
+            if symbol_resolver is None:
+                return False
+            return symbol_resolver.contains(
+                finding.file_path, finding.line_start, finding.line_end, self.symbol
+            )
 
         return True
 

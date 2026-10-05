@@ -69,6 +69,52 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
+### Passing parameters as JSON
+
+`ash scan`, `ash build-image`, `ash report`, and `ash merge` accept `--cli-json-input`, which reads the command's parameters from a JSON object instead of, or as well as, flags. It follows the AWS CLI's `--cli-input-json` convention.
+
+```bash
+# Write a template listing every parameter of the command with its default
+ash scan --generate-cli-skeleton > scan-params.json
+
+# Run with it. A path, a file:// URI, and - (stdin) are all accepted
+ash scan --cli-json-input scan-params.json
+ash scan --cli-json-input file://scan-params.json
+cat scan-params.json | ash scan --cli-json-input -
+
+# Flags on the command line win over the file
+ash scan --cli-json-input file://scan-params.json --strategy sequential
+```
+
+```json
+{
+  "source_dir": "./src",
+  "scanners": ["bandit", "semgrep"],
+  "strategy": "sequential",
+  "offline": true,
+  "config_overrides": ["global_settings.severity_threshold=LOW"]
+}
+```
+
+**Keys.** A key is either the parameter name, which is what `--generate-cli-skeleton` writes (`source_dir`, `output_formats`), or one of the option's long flag spellings (`--source-dir`, `--formats`). The negative half of a boolean pair is not a key: write `"offline": false`, not `"--no-offline": true`. Every parameter the command takes is accepted, and both the accepted keys and the skeleton are read from the command's own option definitions, so a newly added flag is available here without further changes. Use the subcommand form; bare `ash --cli-json-input ...` is rejected as an unknown option.
+
+**Values.** A list parameter takes a JSON array; every other parameter takes a single string, number, or boolean. `null` means "not provided", which is how the skeleton marks a parameter whose default is computed at run time. Each value is converted and checked by the same parameter type the flag uses, so an invalid value fails just as the equivalent flag would, and the error names the JSON key.
+
+**Precedence**, highest first:
+
+1. A flag or positional argument given on the command line.
+2. A value in the `--cli-json-input` document.
+3. The parameter's environment variable, such as `ASH_SOURCE_DIR`.
+4. The parameter's default.
+
+The document ranks above environment variables because it is named on this invocation's command line. A list given on the command line replaces the document's list for that parameter rather than extending it, so `--scanners checkov` with `"scanners": ["bandit"]` in the file runs only `checkov`.
+
+**Interaction with `--config` and `--config-overrides`.** The document is resolved while the command line is parsed, before ASH reads any configuration. It only supplies parameter values: `"config"` in the document is the value of `--config`, and `"config_overrides"` is the list `--config-overrides` would have built. After that, configuration is resolved exactly as it is for flags: the configuration file is loaded, then each override is applied in order. A `--config-overrides` flag on the command line replaces the document's `config_overrides` list as a whole.
+
+**Errors.** The command exits 2 without running when the document cannot be read, is not valid JSON, is not a JSON object, repeats a key, names a key the command does not have (the message lists the valid ones), sets one parameter under two spellings, or holds a value the parameter's type rejects. Exit 2 is the same code an invalid flag produces.
+
+**Security.** The document is parsed as JSON and nothing else. No value is evaluated, and no environment-variable or `~` expansion is applied, which matches how a flag's value is treated once the shell has handed it over. Relative paths in values are relative to the working directory, as they are for flags.
+
 ## Core Commands
 
 ASH v3 provides several core commands:

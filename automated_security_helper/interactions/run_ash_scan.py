@@ -1215,7 +1215,30 @@ def _resolve_config_fail_on_incomplete_scanners(opts: ScanOptions) -> Optional[b
     return getattr(_load_config_file(opts), "fail_on_incomplete_scanners", None)
 
 
+# The values click's boolean type (typer's vendored copy included) reads as true. `ash scan` declares ASH_DEBUG and
+# ASH_VERBOSE as envvars of --debug/--verbose, so click parses them first and
+# rejects anything outside its set; this has to agree with click about what turns
+# them on, or `ASH_DEBUG=on` would pass the CLI and then do nothing. It is a
+# superset of the "true"/"1"/"yes" core/execution_engine.py accepts.
+_TRUE_ENV_VALUES = ("1", "true", "t", "yes", "y", "on")
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in _TRUE_ENV_VALUES
+
+
 def _resolve_log_level(opts: ScanOptions) -> AshLogLevel:
+    """The console log level: CLI flags, then ASH_DEBUG/ASH_VERBOSE, then INFO.
+
+    The environment used to be read only by the execution engine, for the Rich
+    live panel, so ``ASH_DEBUG=true`` with no flag left the console at INFO --
+    and the live panel is disabled in CI and in the container, where the env
+    var is the natural way to ask (#628). It is read here now, below every CLI
+    flag: a flag is the more specific request.
+
+    ``--log-level INFO`` cannot be told from the default, so it does not
+    override the environment; every other ``--log-level`` does.
+    """
     if opts.verbose:
         return AshLogLevel.VERBOSE
     if opts.debug:
@@ -1226,7 +1249,56 @@ def _resolve_log_level(opts: ScanOptions) -> AshLogLevel:
         or opts.log_level in [AshLogLevel.QUIET, AshLogLevel.ERROR, AshLogLevel.SIMPLE]
     ):
         return AshLogLevel.ERROR
+    if opts.log_level != AshLogLevel.INFO:
+        return opts.log_level
+    if _env_flag("ASH_DEBUG"):
+        return AshLogLevel.DEBUG
+    if _env_flag("ASH_VERBOSE"):
+        return AshLogLevel.VERBOSE
     return opts.log_level
+
+
+def _apply_log_level_env(opts: ScanOptions) -> None:
+    """Record an env-requested level on *opts* as the matching flag.
+
+    Done once, before anything reads the flags, because more than the console
+    reads them: container mode forwards ``--debug``/``--verbose`` into the
+    container, nix mode passes ``debug``, and the orchestrator is built with
+    ``verbose``/``debug``. Each of those reading the env itself would be four
+    copies of the precedence rule.
+    """
+    level = _resolve_log_level(opts)
+    if level == AshLogLevel.DEBUG and not opts.debug:
+        opts.debug = True
+    elif level == AshLogLevel.VERBOSE and not opts.verbose:
+        opts.verbose = True
+
+
+def _live_progress_enabled(opts: ScanOptions) -> bool:
+    """Whether the Rich live panel will run, and so own the console's log output.
+
+    One answer for both consumers. ``_setup_logger`` leaves the console handler
+    off when the panel is on, because the panel renders the log itself; the
+    orchestrator decides whether to start the panel. They used to compute this
+    separately and disagree: the orchestrator also refused the panel under CI and
+    for VERBOSE/DEBUG, ``_setup_logger`` did not, so ``ash --debug`` in a
+    terminal -- or any scan under ``CI`` that reached here with progress on --
+    had neither sink, and every log line was dropped.
+    """
+    return (
+        opts.progress
+        and not opts.quiet
+        and not opts.simple
+        and _resolve_log_level(opts)
+        not in [
+            AshLogLevel.QUIET,
+            AshLogLevel.SIMPLE,
+            AshLogLevel.VERBOSE,
+            AshLogLevel.DEBUG,
+        ]
+        and os.environ.get("CI") is None
+        and os.environ.get("ASH_IN_CONTAINER", "NO").upper() not in ["YES", "1", "TRUE"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1244,13 +1316,7 @@ def _setup_logger(opts: ScanOptions):
     return get_logger(
         level=final_logging_level,
         output_dir=opts.output_dir,
-        show_progress=(
-            opts.progress
-            and not opts.quiet
-            and not opts.simple
-            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-            not in ["YES", "1", "TRUE"]
-        ),
+        show_progress=_live_progress_enabled(opts),
         use_color=opts.color,
         simple_format=simple_logging,
         truncate_log=opts.existing_results is None,
@@ -1730,7 +1796,6 @@ def _run_local_mode(
                 f"Applying {len(opts.config_overrides or [])} configuration overrides"
             )
 
-        final_log_level = _resolve_log_level(opts)
         final_scanners = list(opts.scanners or [])
         if opts.mode == RunMode.precommit:
             fast_scanners = [
@@ -1742,19 +1807,7 @@ def _run_local_mode(
             ]
             final_scanners = list(set(final_scanners + fast_scanners))
 
-        final_show_progress = (
-            opts.progress
-            and final_log_level
-            not in [
-                AshLogLevel.QUIET,
-                AshLogLevel.SIMPLE,
-                AshLogLevel.VERBOSE,
-                AshLogLevel.DEBUG,
-            ]
-            and os.environ.get("CI") is None
-            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-            not in ["YES", "1", "TRUE"]
-        )
+        final_show_progress = _live_progress_enabled(opts)
 
         orchestrator = ASHScanOrchestrator.create(
             source_dir=opts.source_dir,
@@ -2816,6 +2869,7 @@ def run_ash_scan(
         allow_missing_projects=allow_missing_projects,
     )
 
+    _apply_log_level_env(opts)
     logger = _setup_logger(opts)
 
     if opts.workspace_plan is not None and opts.mode != RunMode.container:

@@ -1,11 +1,14 @@
 """ScannerExecutor — owns scanner task lifecycle for ScanPhase."""
 
+import threading
+import time
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.models.asharp_model import (
@@ -54,6 +57,73 @@ _TERMINAL_SCANNER_STATUSES = frozenset(
         ScannerStatus.MISSING,
     }
 )
+
+
+# How often a running scanner announces that it is still running. Long enough that
+# a normal scan logs nothing extra (most scanners finish inside a minute), short
+# enough that a hung one is named well before a CI job timeout kills the run.
+SCANNER_HEARTBEAT_INTERVAL_SECONDS = 60.0
+
+
+class _ScannerHeartbeat:
+    """Log "<scanner> still running (Ns elapsed)" at INFO while a scanner runs.
+
+    Why this exists
+    ---------------
+    Scanner subprocesses run buffered, so nothing about one is logged until it
+    exits. A scanner that hangs until the CI job is killed therefore produced no
+    line at any log level naming it (issue #628). The Rich live panel shows
+    elapsed time per task, but it is disabled in CI and in the container, which
+    are exactly where nobody can watch a terminal.
+
+    INFO rather than VERBOSE so it needs no flag: the case it serves is the one
+    where the operator did not know in advance to ask for more output. It runs on
+    a daemon thread so a scanner that never returns cannot keep the process
+    alive through it, and ``stop`` is idempotent so the ``finally`` that calls it
+    is safe however the scan ended.
+    """
+
+    def __init__(self, scanner_name: str, target_type: str, interval: float):
+        self._scanner_name = scanner_name
+        self._target_type = target_type
+        self._interval = interval
+        self._started = time.monotonic()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"ash-heartbeat-{scanner_name}",
+            daemon=True,
+        )
+
+    def start(self) -> "_ScannerHeartbeat":
+        if self._interval > 0:
+            self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            elapsed = int(time.monotonic() - self._started)
+            ASH_LOGGER.info(
+                f"{self._scanner_name} still running on {self._target_type} "
+                f"({elapsed}s elapsed)"
+            )
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=5)
+
+
+def _timed_out_after(scanner_plugin: Any) -> float | None:
+    """The timeout the plugin's tool was killed at, or None.
+
+    Coerced at the boundary like ``_target_count_attr``: a plugin is an arbitrary
+    object, and a MagicMock answers any attribute with a truthy mock.
+    """
+    value = getattr(scanner_plugin, "scan_timed_out_after", None)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
 
 
 def _target_count_attr(obj: Any, name: str) -> int | None:
@@ -241,6 +311,11 @@ class ScannerExecutor:
                     if scanner_config
                     else scanner_plugin.__class__.__name__
                 )
+                heartbeat = _ScannerHeartbeat(
+                    scanner_config_name,
+                    target_type,
+                    SCANNER_HEARTBEAT_INTERVAL_SECONDS,
+                )
                 try:
                     if scanner_config and scanner_config.enabled:
                         ASH_LOGGER.debug(
@@ -256,12 +331,18 @@ class ScannerExecutor:
                                 "scanners"
                             ).joinpath(scanner_config_name)
                         )
-                        raw_results = scanner_plugin.scan(
-                            target=scan_target,
-                            config=scanner_config,
-                            target_type=target_type,
-                            global_ignore_paths=self._global_ignore_paths,
-                        )
+                        if isinstance(scanner_plugin, PluginBase):
+                            scanner_plugin.clear_scan_timeout()
+                        heartbeat.start()
+                        try:
+                            raw_results = scanner_plugin.scan(
+                                target=scan_target,
+                                config=scanner_config,
+                                target_type=target_type,
+                                global_ignore_paths=self._global_ignore_paths,
+                            )
+                        finally:
+                            heartbeat.stop()
                         self._assess_content_databases(scanner_plugin, raw_results)
                     else:
                         ASH_LOGGER.warning(f"{scanner_config_name} is not enabled!")
@@ -271,6 +352,16 @@ class ScannerExecutor:
                         f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
                     )
                     err_str = f"Failed to execute {scanner_config_name} scanner on {target_type}: {e}"
+                    # Lead with the timeout when there was one. A scanner that
+                    # overrides scan() reports whatever the missing output caused
+                    # -- typically "No such file or directory" -- and only
+                    # _run_subprocess saw that the tool was killed.
+                    timed_out_after = _timed_out_after(scanner_plugin)
+                    if timed_out_after is not None and "timed out" not in str(e):
+                        err_str = (
+                            f"{scanner_config_name} timed out after "
+                            f"{timed_out_after}s on {target_type} and was killed: {e}"
+                        )
                     ASH_LOGGER.error(err_str)
                     raw_results = {
                         "errors": [err_str, *scanner_plugin.errors],

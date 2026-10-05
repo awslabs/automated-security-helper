@@ -65,10 +65,19 @@ runs:
       # extras, so cdk-nag was absent from every test run and nothing could exercise the
       # cdk-nag scanner against its real dependency. A breaking major bump of that
       # dependency was therefore invisible to CI.
-      run: uv sync --extra cdk
+      #
+      # --extra symbols installs tree-sitter and its grammars for symbol-scoped
+      # suppressions. They are native wheels, and this matrix is where every OS,
+      # architecture and Python version the project supports gets one installed and
+      # loaded.
+      run: uv sync --extra cdk --extra symbols
 
+    # ASH_REQUIRE_SYMBOLS_EXTRA turns the symbol tests' skip-when-absent into a hard
+    # failure, so a leg that stops installing the extra cannot pass by skipping them.
     - name: Run PyTest
       shell: bash
+      env:
+        ASH_REQUIRE_SYMBOLS_EXTRA: "1"
       run: uv run pytest
 
     # Runs the cdk-nag integration tests, which the default pytest invocation above does

@@ -377,6 +377,7 @@
                 "offline": false,
                 "scan_timeout": 1800,
                 "severity_threshold": null,
+                "skip_ash_output_dir": true,
                 "skip_frameworks": [],
                 "skip_path": [],
                 "tool_version": null
@@ -672,6 +673,19 @@
           "default": null,
           "description": "Rule ID to suppress",
           "title": "Rule Id"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches.",
+          "title": "Symbol"
         }
       },
       "required": [
@@ -1134,6 +1148,7 @@
             "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null,
+            "skip_ash_output_dir": true,
             "skip_frameworks": [],
             "skip_path": [],
             "tool_version": null
@@ -1280,6 +1295,12 @@
           "default": null,
           "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
+        },
+        "skip_ash_output_dir": {
+          "default": true,
+          "description": "Skip ASH's own output directory when it sits inside the scanned directory, so Checkov does not parse ASH's previous reports. Defaults to true; set to false to scan it anyway. Has no effect on Windows, where Checkov's --skip-path matching is unreliable.",
+          "title": "Skip Ash Output Dir",
+          "type": "boolean"
         },
         "skip_frameworks": {
           "default": [],
@@ -3185,6 +3206,7 @@
               "offline": false,
               "scan_timeout": 1800,
               "severity_threshold": null,
+              "skip_ash_output_dir": true,
               "skip_frameworks": [],
               "skip_path": [],
               "tool_version": null

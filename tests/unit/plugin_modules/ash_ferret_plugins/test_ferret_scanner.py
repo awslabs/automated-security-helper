@@ -4,6 +4,7 @@
 """Unit tests for FerretScanScanner plugin."""
 
 import json
+import os
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
@@ -1089,9 +1090,9 @@ class TestFerretScanScannerVersionSupport:
         The plugin declared a supported range and installed nothing, so callers
         ran `pip install ferret-scan` and got whatever was newest. On
         2026-08-20 that was 2.3.3, whose new API_KEY_OR_SECRET detector failed
-        the self-scan on two false positives. The plugin now pins conservatively
-        to the tested current line (>=2.4.5,<2.5.0), so both the CI-breaking
-        2.3.3 and any future 2.5.x are excluded until explicitly tested.
+        the self-scan on two false positives. The plugin now pins to the lines it
+        has been run against (>=2.4.5,<2.6.0), so the CI-breaking 2.3.3 and any
+        future 2.6.x are excluded until explicitly tested.
         """
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             DEFAULT_VERSION_CONSTRAINT,
@@ -1112,6 +1113,8 @@ class TestFerretScanScannerVersionSupport:
         specifier = packaging_requirements.Requirement(specs[0]).specifier
         assert "2.3.3" not in specifier
         assert "2.4.5" in specifier
+        assert "2.5.2" in specifier
+        assert "2.6.0" not in specifier
 
     def test_installation_command_honours_a_user_pin(self, mock_plugin_context):
         """An explicit tool_version must win over the plugin default."""
@@ -1315,3 +1318,290 @@ class TestFerretPluginValidation:
         assert result.returncode == 0, (
             f"Validation script failed:\n{result.stdout}\n{result.stderr}"
         )
+
+
+def _ferret_version_output(version: str) -> str:
+    """The first line ``ferret-scan --version`` prints, in the 2.4.5/2.5.2 format."""
+    return (
+        f"ferret-scan v{version} (commit: 0000000, built: 2026-09-24T20:48:16Z, "
+        "go: go1.27.1, platform: linux/amd64)"
+    )
+
+
+@pytest.mark.unit
+class TestFerretVersionWindowBoundaries:
+    """The supported window, at its edges, through every path that enforces it.
+
+    Three things apply the window and each could drift on its own: the runtime
+    check on the installed binary (fed from the real ``--version`` line), the
+    install constraint pip resolves, and the constants the docs restate. 2.4.4 and
+    2.6.0 sit just outside; 2.4.5 and 2.5.2 are the two binaries ASH was run
+    against end to end for this window.
+    """
+
+    CASES = [
+        ("2.4.4", False),
+        ("2.4.5", True),
+        ("2.5.0", True),
+        ("2.5.2", True),
+        ("2.6.0", False),
+    ]
+
+    @pytest.mark.parametrize(("version", "supported"), CASES)
+    @patch(
+        "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.subprocess.run"
+    )
+    @patch(
+        "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.find_executable"
+    )
+    def test_runtime_check_on_installed_binary(
+        self, mock_find_executable, mock_run, mock_plugin_context, version, supported
+    ):
+        mock_find_executable.return_value = "/usr/local/bin/ferret-scan"
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=_ferret_version_output(version) + "\n"
+        )
+
+        scanner = FerretScanScanner(context=mock_plugin_context)
+        is_compatible, installed, warning = scanner._check_version_compatibility()
+
+        assert installed == version
+        assert is_compatible is supported
+        if supported:
+            assert warning is None
+        elif version == "2.4.4":
+            assert "older than the minimum" in warning
+        else:
+            assert "newer than the maximum" in warning
+
+    @pytest.mark.parametrize(("version", "supported"), CASES)
+    def test_install_constraint_agrees_with_runtime_check(self, version, supported):
+        from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+            DEFAULT_VERSION_CONSTRAINT,
+            MAX_SUPPORTED_VERSION,
+            MIN_SUPPORTED_VERSION,
+            is_version_compatible,
+        )
+
+        packaging_specifiers = pytest.importorskip("packaging.specifiers")
+        specifier = packaging_specifiers.SpecifierSet(DEFAULT_VERSION_CONSTRAINT)
+
+        assert (version in specifier) is supported
+        assert (
+            is_version_compatible(version, MIN_SUPPORTED_VERSION, MAX_SUPPORTED_VERSION)
+            is supported
+        )
+
+    def test_recommended_version_is_inside_the_window(self):
+        from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+            MAX_SUPPORTED_VERSION,
+            MIN_SUPPORTED_VERSION,
+            RECOMMENDED_VERSION,
+            is_version_compatible,
+        )
+
+        assert RECOMMENDED_VERSION == "2.5.2"
+        assert is_version_compatible(
+            RECOMMENDED_VERSION, MIN_SUPPORTED_VERSION, MAX_SUPPORTED_VERSION
+        )
+
+
+def _ferret_result(rule_id: str, location: dict, line: int) -> dict:
+    return {
+        "ruleId": rule_id,
+        "level": "error",
+        "message": {"text": f"{rule_id} detected at line {line}"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": location,
+                    "region": {"startLine": line, "startColumn": 1, "endColumn": 20},
+                }
+            }
+        ],
+        "properties": {"confidence": 100, "confidenceLevel": "HIGH"},
+    }
+
+
+# (rule id, path relative to the scan target, line). The paths cover a nested file
+# and a directory name with a space, the two cases where a base-relative URI and
+# an absolute one are easiest to get out of step.
+_FERRET_FINDINGS = [
+    ("VISA", "sample.txt", 8),
+    ("API_KEY_OR_SECRET", "src/model.py", 9),
+    ("PERSON_NAME", "src/nested/deep/customer.txt", 2),
+    ("API_KEY_OR_SECRET", "src/my dir/note.py", 2),
+]
+
+
+def _ferret_sarif(target: Path, version: str) -> dict:
+    """SARIF in the location shape each ferret-scan line actually writes.
+
+    Taken from real runs of both binaries over the same tree: 2.4.5 writes an
+    absolute file URI per result and no base; 2.5.2 writes the path relative to
+    the scan target with ``uriBaseId: %SRCROOT%`` and declares that base in
+    ``run.originalUriBaseIds``.
+    """
+    run: dict = {
+        "tool": {
+            "driver": {
+                "name": "Ferret Scan",
+                "version": f"v{version}",
+                "informationUri": "https://github.com/awslabs/ferret-scan",
+                "rules": [],
+            }
+        },
+        "results": [],
+    }
+    for rule_id, rel, line in _FERRET_FINDINGS:
+        if version.startswith("2.4."):
+            location = {"uri": (target / rel).as_uri()}
+        else:
+            location = {"uri": rel, "uriBaseId": "%SRCROOT%"}
+        run["results"].append(_ferret_result(rule_id, location, line))
+    if not version.startswith("2.4."):
+        run["originalUriBaseIds"] = {"%SRCROOT%": {"uri": target.as_uri() + "/"}}
+    return {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/refs/heads/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [run],
+    }
+
+
+@pytest.mark.unit
+class TestFerretSarifShapeAcrossVersions:
+    """ASH has to report the same paths whichever supported ferret-scan wrote the SARIF."""
+
+    def _scan_with_sarif(self, mock_plugin_context, tmp_path, sarif: dict):
+        target = mock_plugin_context.source_dir
+        results_dir = tmp_path / "results"
+        scanner = FerretScanScanner(context=mock_plugin_context)
+        scanner.results_dir = results_dir
+        scanner.dependencies_satisfied = True
+
+        def fake_run(command, **kwargs):
+            out = Path(command[command.index("--output") + 1])
+            out.write_text(json.dumps(sarif), encoding="utf-8")
+            scanner.exit_code = 0
+            return {"stdout": "", "stderr": ""}
+
+        with (
+            patch.object(scanner, "_pre_scan", return_value=True),
+            patch.object(scanner, "_post_scan"),
+            patch.object(scanner, "_run_subprocess", side_effect=fake_run) as run,
+        ):
+            report = scanner.scan(target=target, target_type="source")
+        return report, run
+
+    def _reported_locations(self, report, source_dir):
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
+
+        assert isinstance(report, SarifReport)
+        sanitized = sanitize_sarif_paths(report, source_dir)
+        rows = []
+        for result in sanitized.runs[0].results:
+            artifact = result.locations[0].physicalLocation.root.artifactLocation
+            rows.append(
+                (
+                    result.ruleId,
+                    artifact.uri,
+                    artifact.uriBaseId,
+                    result.locations[0].physicalLocation.root.region.startLine,
+                )
+            )
+        return sorted(rows)
+
+    def _make_tree(self, source_dir: Path):
+        for _, rel, _ in _FERRET_FINDINGS:
+            path = source_dir / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("placeholder\n", encoding="utf-8")
+
+    @pytest.mark.parametrize("version", ["2.4.5", "2.5.2"])
+    def test_each_supported_shape_reports_source_relative_paths(
+        self, mock_plugin_context, tmp_path, version
+    ):
+        source_dir = mock_plugin_context.source_dir
+        self._make_tree(source_dir)
+        report, _ = self._scan_with_sarif(
+            mock_plugin_context, tmp_path, _ferret_sarif(source_dir, version)
+        )
+
+        rows = self._reported_locations(report, source_dir)
+
+        expected = sorted(
+            (rule_id, rel, None, line) for rule_id, rel, line in _FERRET_FINDINGS
+        )
+        assert len(rows) == len(_FERRET_FINDINGS) > 0
+        assert rows == expected
+
+    def test_2_5_shape_leaves_no_dangling_base_reference(
+        self, mock_plugin_context, tmp_path
+    ):
+        """Without resolution the URIs keep %SRCROOT% while ASH's runs never define it."""
+        source_dir = mock_plugin_context.source_dir
+        self._make_tree(source_dir)
+        report, _ = self._scan_with_sarif(
+            mock_plugin_context, tmp_path, _ferret_sarif(source_dir, "2.5.2")
+        )
+
+        dumped = json.loads(report.model_dump_json(by_alias=True, exclude_none=True))
+        assert "%SRCROOT%" not in json.dumps(dumped)
+        assert "originalUriBaseIds" not in dumped["runs"][0]
+        uris = [
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            for r in dumped["runs"][0]["results"]
+        ]
+        assert len(uris) == len(_FERRET_FINDINGS)
+        assert all(uri.startswith(source_dir.as_uri() + "/") for uri in uris)
+
+    def test_undeclared_base_is_left_as_written(self):
+        from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+            _resolve_sarif_uri_base_ids,
+        )
+
+        sarif = {
+            "runs": [
+                {
+                    "originalUriBaseIds": {"%SRCROOT%": {"uri": "file:///scan/root/"}},
+                    "results": [
+                        _ferret_result(
+                            "VISA", {"uri": "a.txt", "uriBaseId": "%SRCROOT%"}, 1
+                        ),
+                        _ferret_result(
+                            "VISA", {"uri": "b.txt", "uriBaseId": "OTHERROOT"}, 2
+                        ),
+                    ],
+                }
+            ]
+        }
+
+        _resolve_sarif_uri_base_ids(sarif)
+
+        run = sarif["runs"][0]
+        first, second = (
+            r["locations"][0]["physicalLocation"]["artifactLocation"]
+            for r in run["results"]
+        )
+        assert first == {"uri": "file:///scan/root/a.txt"}
+        assert second == {"uri": "b.txt", "uriBaseId": "OTHERROOT"}
+        # Still referenced by the second location, so the table has to stay.
+        assert "originalUriBaseIds" in run
+
+    def test_scan_opts_out_of_ferret_precommit_mode(
+        self, mock_plugin_context, tmp_path, monkeypatch
+    ):
+        """PRE_COMMIT=1 in ASH's environment must not reach ferret-scan as pre-commit mode."""
+        monkeypatch.setenv("PRE_COMMIT", "1")
+        source_dir = mock_plugin_context.source_dir
+        self._make_tree(source_dir)
+        _, run = self._scan_with_sarif(
+            mock_plugin_context, tmp_path, _ferret_sarif(source_dir, "2.5.2")
+        )
+
+        env = run.call_args.kwargs["env"]
+        assert env["FERRET_PRECOMMIT"] == "0"
+        # The opt-out is added on top of the inherited environment, not instead of it.
+        assert env["PRE_COMMIT"] == "1"
+        assert env.get("PATH") == os.environ.get("PATH")
