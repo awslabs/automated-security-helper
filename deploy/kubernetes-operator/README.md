@@ -14,6 +14,22 @@ Name the CRD files rather than the directory: `generated/` also holds
 `config-schema-translation.json`, a report for reviewers with no `kind`, and
 `kubectl apply -f generated/` stops on it.
 
+To upgrade, run the same two commands from the newer tree, with the newer operator
+image. A finished `AshScan` keeps its status and is not re-run, and a scan in flight
+is merged by the new operator. To uninstall, delete in the reverse order:
+
+```
+kubectl delete -f generated/crd-ashscans.yaml -f generated/crd-ashmcpservers.yaml  # every AshScan and AshMcpServer, and what they own
+kubectl delete -f manifests/         # namespace, RBAC, operator Deployment
+```
+
+The operator puts no finalizer on either kind, so the first command does not wait
+for the operator, and the garbage collector removes each scan's Jobs, pods,
+ConfigMap and results claim, and each MCP server's Deployment and Service. The
+results claim goes with its scan, so copy any report you want to keep first.
+`tests/e2e/test_e2e_lifecycle.py` runs both procedures on kind, upgrading from the
+operator as it was before its most recent code change.
+
 You must build the operator image yourself (`Dockerfile`), and you must supply an
 ASH image in `spec.image`. Nothing in this directory or its workflow pushes either
 one: the end-to-end test loads both into a kind cluster with
