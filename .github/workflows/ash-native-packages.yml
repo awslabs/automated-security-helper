@@ -72,11 +72,25 @@ on:
       - "pyproject.toml"
       - "hatch_build.py"
       - "LICENSE"
-  # Copied from ash-package.yml for the reasons documented there: `["**"]` so a PR
-  # stacked on a nested branch name still runs, and merge_group so a queued entry
-  # gets a verdict. No `paths` filter on these two, because merge_group accepts none.
+  # `["**"]` so a PR stacked on a nested branch name still runs, as in ash-package.yml.
+  # The paths filter matches push's, so a PR that touches none of these files does not
+  # start seventeen container legs. That cannot leave a required check pending: the
+  # required `required-checks` job lives in ash-unified-ci.yml and does not depend on
+  # this workflow. Keep the two lists identical.
   pull_request:
     branches: ["**"]
+    paths:
+      - ".github/workflows/ash-native-packages.yml"
+      - ".github/scripts/assert-artifact-contents.py"
+      - "packaging/*.py"
+      - "packaging/*.sh"
+      - "packaging/deb/**"
+      - "packaging/rpm/**"
+      - "automated_security_helper/**"
+      - "pyproject.toml"
+      - "hatch_build.py"
+      - "LICENSE"
+  # merge_group takes no paths filter, so a queued entry always gets a verdict.
   merge_group:
     types: [checks_requested]
   workflow_dispatch: {}
