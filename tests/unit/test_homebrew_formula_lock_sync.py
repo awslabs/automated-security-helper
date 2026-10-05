@@ -223,3 +223,81 @@ class TestNegativeControls:
         }
         with pytest.raises(refresh.RefreshError, match="brew audit"):
             refresh.sdist_of("pydantic", package)
+
+
+def _synthetic_lock(root_edges: str, packages: str) -> str:
+    """A minimal uv.lock: the root package, its edges, and the packages they name."""
+    return (
+        "version = 1\n"
+        "\n"
+        "[[package]]\n"
+        'name = "automated-security-helper"\n'
+        'version = "0.0.0"\n'
+        'source = { editable = "." }\n'
+        f"dependencies = [\n{root_edges}]\n" + packages
+    )
+
+
+def _locked(name: str, version: str = "1.0.0") -> str:
+    return f'\n[[package]]\nname = "{name}"\nversion = "{version}"\n'
+
+
+class TestEveryHomebrewPlatformIsWalked:
+    """The real lock has no platform-conditional runtime dependency today, so
+    walking one platform instead of four gives the same block from it. These locks
+    make each platform contribute something only it can, so a walk that skipped or
+    substituted any of them comes out short."""
+
+    def test_a_linux_only_dependency_is_in_the_closure(self, refresh, tmp_path):
+        lock = tmp_path / "uv.lock"
+        lock.write_text(
+            _synthetic_lock(
+                '    { name = "common" },\n'
+                '    { name = "linux-only", marker = "sys_platform == \'linux\'" },\n',
+                _locked("common") + _locked("linux-only"),
+            ),
+            encoding="utf-8",
+        )
+
+        closure = refresh.compute_closure(lock, "3.12")
+
+        assert sorted(closure) == ["common", "linux-only"]
+
+    def test_each_of_the_four_platforms_is_walked(self, refresh, tmp_path):
+        only = {
+            "only-darwin-arm64": "sys_platform == 'darwin' and platform_machine == 'arm64'",
+            "only-darwin-x86-64": "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+            "only-linux-aarch64": "sys_platform == 'linux' and platform_machine == 'aarch64'",
+            "only-linux-x86-64": "sys_platform == 'linux' and platform_machine == 'x86_64'",
+        }
+        edges = "".join(
+            f'    {{ name = "{name}", marker = "{marker}" }},\n'
+            for name, marker in only.items()
+        )
+        lock = tmp_path / "uv.lock"
+        lock.write_text(
+            _synthetic_lock(edges, "".join(_locked(name) for name in only)),
+            encoding="utf-8",
+        )
+
+        closure = refresh.compute_closure(lock, "3.12")
+
+        assert sorted(closure) == sorted(only)
+
+    def test_platforms_locking_different_versions_is_refused(self, refresh, tmp_path):
+        lock = tmp_path / "uv.lock"
+        lock.write_text(
+            _synthetic_lock(
+                '    { name = "split", version = "1.0.0", '
+                "marker = \"sys_platform == 'darwin'\" },\n"
+                '    { name = "split", version = "2.0.0", '
+                "marker = \"sys_platform == 'linux'\" },\n",
+                _locked("split", "1.0.0") + _locked("split", "2.0.0"),
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(
+            refresh.RefreshError, match="split: 1.0.0 elsewhere, 2.0.0 on .*-linux-gnu"
+        ):
+            refresh.compute_closure(lock, "3.12")
