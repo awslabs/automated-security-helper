@@ -42,6 +42,7 @@ on:
       - ".github/workflows/ash-package.yml"
       - ".github/workflows/ash-package-formats.yml"
       - "tests/unit/test_package_contents_gate.py"
+      - "tests/unit/test_package_formats_workflow.py"
       - "tests/unit/test_homebrew_formula_*.py"
   workflow_dispatch: {}
 
@@ -52,10 +53,11 @@ jobs:
   packages:
     name: Build, gate and install every native package
     uses: ./.github/workflows/ash-package.yml
-    # The msix job reads two optional signing secrets and falls back to a throwaway
-    # self-signed certificate when they are empty, so inheriting them changes nothing
-    # on a repository that has not configured them.
-    secrets: inherit
+    # No `secrets:`, on purpose. The msix job reads two optional signing secrets and,
+    # when they are empty (as they are in a called workflow that was passed none),
+    # build.ps1 signs with a throwaway self-signed certificate instead. Inheriting
+    # them would mean that once a real certificate is configured, every branch push
+    # produces a production-signed .msix of unreviewed code as a run artifact.
 
   unit:
     name: "unit: package-contents gate and Homebrew lock sync (${{ matrix.os }})"
@@ -90,6 +92,7 @@ jobs:
         run: >-
           uv run pytest -o addopts= -p no:cacheprovider
           tests/unit/test_package_contents_gate.py
+          tests/unit/test_package_formats_workflow.py
           tests/unit/test_homebrew_formula_lock_sync.py
           tests/unit/test_homebrew_formula_resources.py
           tests/unit/test_homebrew_formula_version.py
