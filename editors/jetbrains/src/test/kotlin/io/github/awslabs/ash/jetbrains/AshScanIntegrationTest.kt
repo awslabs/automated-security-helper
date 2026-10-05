@@ -10,6 +10,7 @@ import com.intellij.notification.NotificationType
 import com.intellij.notification.Notifications
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
+import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.TestActionEvent
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -18,6 +19,7 @@ import com.intellij.testFramework.fixtures.impl.TempDirTestFixtureImpl
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermission
+import kotlin.concurrent.thread
 
 /**
  * A scan from the action's entry point to the highlights in the editor, headless, against a
@@ -308,6 +310,49 @@ class AshScanIntegrationTest : BasePlatformTestCase() {
         assertEquals("ASH scan failed", failed.title)
         assertTrue(failed.body, failed.body.contains("ASH exited 3"))
         assertEquals("stale findings must not survive a failed scan", 0, ashHighlights().size)
+    }
+
+    fun testACancelledScanClearsThePreviousFindings() {
+        // The cancel arm has the same rule as the failed one. The scan's freshness guard deleted
+        // the report the previous findings came from before the child was started, so leaving
+        // them on screen under "No findings are shown" would present them as current.
+        openLeak()
+        stub("ashx", "exit2", exitCode = 2)
+        scan()
+        assertEquals(3, ashHighlights().size)
+
+        val started = bin.resolve("started")
+        val script = bin.resolve("ashx")
+        Files.writeString(
+            script,
+            "#!/bin/sh\n" +
+                "if [ \"\$1\" = --version ]; then echo 'awslabs/automated-security-helper v3.7.0'; exit 0; fi\n" +
+                "touch '$started'; sleep 300; exit 0\n",
+        )
+        val indicator = EmptyProgressIndicator()
+        var messages: List<AshScanController.Message>? = null
+        val worker = thread {
+            messages = AshScanController.scan(
+                project,
+                configured = null,
+                pathValue = bin.toString(),
+                indicator = indicator,
+                notice = AshCliLocator.FallbackNotice(),
+                sourceDir = sourceDir,
+            )
+        }
+        val deadline = System.currentTimeMillis() + 30_000
+        while (!Files.exists(started)) {
+            assertTrue("the stub never started", System.currentTimeMillis() < deadline)
+            Thread.sleep(20)
+        }
+        indicator.cancel()
+        worker.join(20_000)
+
+        assertFalse("the scan must stop when cancelled", worker.isAlive)
+        assertEquals("ASH scan cancelled", messages!!.single().title)
+        assertEquals("the service must hold nothing after a cancel", AshScanService.State.EMPTY, AshScanService.getInstance(project).current)
+        assertEquals("stale findings must not survive a cancelled scan", 0, ashHighlights().size)
     }
 
     fun testAProjectWithNoDirectoryIsReportedRatherThanScanned() {
