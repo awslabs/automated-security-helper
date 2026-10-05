@@ -102,6 +102,7 @@ user reads, so a change to any of them must show up as a snapshot diff.
 
 from __future__ import annotations
 
+import functools
 import json
 import platform
 import re
@@ -455,6 +456,20 @@ class SnapshotNormalizer:
         return value
 
 
+@functools.cache
+def _host_names() -> frozenset[str]:
+    """This machine's hostname and FQDN, looked up once per process.
+
+    ``default_normalizer`` runs for every snapshot test, and ``socket.getfqdn()`` is a
+    reverse DNS lookup, the one call on that path that can wait on the network. On the
+    macos-latest runners every test in test_snapshot_cli_help.py took about 35
+    seconds, against well under one on macos-14, Linux and Windows, and the
+    macos-latest unit-test legs ran out their 20-minute limit there. Neither name
+    changes while the process runs, so asking once is correct whatever the cause.
+    """
+    return frozenset({socket.gethostname(), socket.getfqdn()})
+
+
 #: The default ``--config`` of the ``ash config`` commands, which they print relative.
 ASH_DEFAULT_CONFIG = ".ash/.ash.yaml"
 
@@ -484,7 +499,7 @@ def default_normalizer(
     if version:
         normalizer.add_literal(str(version), "ASH_VERSION")
     normalizer.add_literal(platform.python_version(), "PYTHON_VERSION")
-    for name in {socket.gethostname(), socket.getfqdn()}:
+    for name in _host_names():
         # Short names ("localhost", a one-letter container id) would mask ordinary words.
         if (
             name
