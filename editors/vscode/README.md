@@ -33,7 +33,7 @@ diagnostics with what the scan found. `ASH: Clear findings` empties them.
 | Setting | Default | What it is for |
 |---|---|---|
 | `ash.executablePath` | empty | Empty runs `ashx` from PATH, and `ash` when no `ashx` is installed. Anything else is run exactly as given, with no fallback. Machine-scoped, so a cloned repository cannot set it. |
-| `ash.outputDirectory` | `.ash/ash_output` | Where the scan writes, relative to the workspace folder. It must resolve, symlinks included, to a folder inside the workspace: ASH clears directories under it before scanning, so an absolute path or an escape is refused and nothing runs. |
+| `ash.outputDirectory` | `.ash/ash_output` | Where the scan writes, relative to the workspace folder. It must resolve, symlinks included, to a folder inside the workspace: ASH clears directories under it before scanning, so an absolute path or an escape is refused and nothing runs. A symlink at `reports/`, `reports/ash.sarif` or `ash_aggregated_results.json` below it is refused too, before the previous report is deleted. |
 | `ash.extraArguments` | `[]` | Appended to `ash scan`, for example `--scanners detect-secrets` or `--offline`. `--output-dir` and `--source-dir` are refused, because the extension sets both. |
 | `ash.scanTimeoutSeconds` | `1800` | Seconds before a scan is stopped, with every process it started. `0` waits indefinitely. |
 
