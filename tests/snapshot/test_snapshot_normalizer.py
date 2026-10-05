@@ -172,6 +172,47 @@ class TestMasked:
         assert first.startswith("│ --bin-path  [default: <HOME>/.ash/bin]   ")
         assert first.endswith(" │")
 
+    @staticmethod
+    def _tmp_panel_line(tmp: str, width: int) -> str:
+        line = f"│ --output-dir  [default: {tmp}/ash]"
+        return line + " " * (width - len(line) - 1) + "│"
+
+    def test_panel_padding_after_a_mask_that_lengthens_the_line(self):
+        # "/tmp" -> "<SYSTEM_TMP>" grows the text by 8 characters. Temp dirs shorter
+        # than the token, as long, and longer all render one line, border in place.
+        rendered = set()
+        for tmp in ("/tmp", "/var/tmpdir1", "/private/var/folders/xy/T"):
+            normalizer = SnapshotNormalizer()
+            normalizer.add_root(PurePosixPath(tmp), "SYSTEM_TMP")
+            rendered.add(normalizer.text(self._tmp_panel_line(tmp, 60)))
+        assert len(rendered) == 1, rendered
+        (line,) = rendered
+        assert len(line) == 60
+        assert line.startswith("│ --output-dir  [default: <SYSTEM_TMP>/ash] ")
+        assert line.endswith(" │")
+
+    def test_panel_padding_when_a_lengthened_line_no_longer_fits(self):
+        # A 39-column panel: "/tmp" left 3 spaces before the border and "/tmpab" left
+        # 1, and "<SYSTEM_TMP>" fits in neither. Both hosts must still produce one
+        # line, with one space before the border, rather than each keeping its own
+        # padding.
+        rendered = set()
+        for tmp in ("/tmp", "/tmpab"):
+            normalizer = SnapshotNormalizer()
+            normalizer.add_root(PurePosixPath(tmp), "SYSTEM_TMP")
+            rendered.add(normalizer.text(self._tmp_panel_line(tmp, 39)))
+        assert rendered == {"│ --output-dir  [default: <SYSTEM_TMP>/ash] │"}
+
+    def test_panel_line_the_mask_overflows_keeps_one_space(self):
+        # The masked text is wider than the panel: no pad is negative, and two hosts
+        # whose short values each left a different number of spaces agree.
+        rendered = set()
+        for tmp, pad in (("/t", 2), ("/tm", 1)):
+            normalizer = SnapshotNormalizer()
+            normalizer.add_literal(tmp, "A_VERY_LONG_TOKEN")
+            rendered.add(normalizer.text(f"│ {tmp}/x" + " " * pad + "│"))
+        assert rendered == {"│ <A_VERY_LONG_TOKEN>/x │"}
+
 
 class TestSurvives:
     """What a user reads. A rule that ate any of these would hide a real change."""
@@ -381,6 +422,34 @@ class TestDurationOptOut:
     def test_the_fixture_defaults_without_the_marker(self, snapshot_normalizer):
         assert snapshot_normalizer.mask_durations is True
         assert snapshot_normalizer.mask_duration_keys is True
+
+
+class TestWorkingDirectoryRoot:
+    """<CWD> is registered only when it cannot shadow <REPO> or be shadowed by it."""
+
+    def test_a_subdirectory_of_the_repo_masks_as_repo(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT / "tests" / "snapshot")
+        n = default_normalizer()
+        path = REPO_ROOT / "tests" / "snapshot" / "conftest.py"
+        assert n.text(str(path)) == "<REPO>/tests/snapshot/conftest.py"
+
+    def test_the_repo_root_itself_masks_as_repo(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        assert default_normalizer().text(str(REPO_ROOT / "ash")) == "<REPO>/ash"
+
+    def test_a_parent_of_the_repo_is_not_registered(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT.parent)
+        out = default_normalizer().text(str(REPO_ROOT.parent / "elsewhere" / "x"))
+        assert "<CWD>" not in out
+
+    def test_a_directory_outside_the_repo_masks_as_cwd(self, monkeypatch, tmp_path):
+        # Not inside the repo checkout, and not a parent of it.
+        outside = tmp_path / "work"
+        outside.mkdir()
+        if outside.resolve().is_relative_to(REPO_ROOT.resolve()):
+            pytest.skip("the basetemp is inside the checkout")
+        monkeypatch.chdir(outside)
+        assert default_normalizer().text(str(outside / "a.txt")) == "<CWD>/a.txt"
 
 
 class TestFileUriSpellings:

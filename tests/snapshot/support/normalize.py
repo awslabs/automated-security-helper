@@ -68,10 +68,15 @@ What is masked, and why each is safe to mask
 - The padding in front of a rich panel's right border, on a line where a mask
   changed the text's length. rich pads ``│ [default: /home/me/.ash/bin]   │`` to the
   terminal width, so after masking, the space count still encodes how long the home
-  directory was. The space run before the closing ``│`` is resized so the line keeps
-  its rendered width. Only Unicode box verticals count as a border; a markdown
-  ``|`` table is left alone. A masked value long enough to wrap onto another line
-  on one machine and not another is not handled; snapshot at a width that fits it.
+  directory was. The space run before the closing ``│`` is recomputed from the line's
+  rendered width (its length before masking), so the border stays where rich drew it
+  whether the mask made the text shorter (``/home/runneradmin`` -> ``<HOME>``) or
+  longer (``/tmp`` -> ``<SYSTEM_TMP>``). When the masked text no longer fits in that
+  width, one space is kept before the border. Either way the result depends only on
+  the masked text and the panel width, not on how long the original value was. Only
+  Unicode box verticals count as a border; a markdown ``|`` table is left alone. A
+  masked value long enough to wrap onto another line on one machine and not another
+  is not handled; snapshot at a width that fits it.
 
 A path root is masked only where it starts a path and ends at a component boundary,
 so the system temp dir ``/tmp`` does not mask the middle of ``/home/u/tmp/x``.
@@ -177,10 +182,13 @@ _PANEL_LINE = re.compile(
 
 
 def _keep_panel_width(rendered: str, masked: str) -> str:
-    """Resize the padding before a panel's right border to undo a mask's length change.
+    """Re-pad a masked panel line to the width rich rendered it at.
 
     ``rendered`` and ``masked`` are the same text before and after masking. Lines are
-    paired by position, so this only runs when masking kept the line count.
+    paired by position, so this only runs when masking kept the line count. The pad is
+    computed from the line's rendered width and the masked content alone, never from
+    the old pad, so two machines whose masked values had different lengths produce the
+    same line. Content that no longer fits keeps one space before the border.
     """
     before_lines = rendered.split("\n")
     after_lines = masked.split("\n")
@@ -192,9 +200,8 @@ def _keep_panel_width(rendered: str, masked: str) -> str:
         match = _PANEL_LINE.match(after)
         if match is None:
             continue
-        pad = len(match["pad"]) + len(before) - len(after)
-        if pad >= 1:
-            after_lines[i] = match["body"] + " " * pad + match["end"]
+        pad = max(1, len(before) - len(match["body"]) - len(match["end"]))
+        after_lines[i] = match["body"] + " " * pad + match["end"]
     return "\n".join(after_lines)
 
 
@@ -411,7 +418,14 @@ def default_normalizer(
         normalizer.add_root(tmp, "TMP")
     normalizer.add_root(Path(tempfile.gettempdir()), "SYSTEM_TMP")
     normalizer.add_root(REPO_ROOT, "REPO")
-    normalizer.add_root(Path.cwd(), "CWD")
+    # pytest run from a subdirectory of the checkout would otherwise mask every repo
+    # path under it as <CWD>/..., and run from a parent of the checkout it would mask
+    # the repo's siblings by where the developer happened to stand. Either way the
+    # snapshot would depend on the directory pytest was started from.
+    cwd = Path.cwd().resolve()
+    repo = REPO_ROOT.resolve()
+    if not (cwd.is_relative_to(repo) or repo.is_relative_to(cwd)):
+        normalizer.add_root(cwd, "CWD")
     normalizer.add_root(Path.home(), "HOME")
     version = get_ash_version()
     if version:
