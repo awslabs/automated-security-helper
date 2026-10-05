@@ -235,3 +235,237 @@ class TestThePlanIsNotEmpty:
         assert total >= renderer.MIN_TOTAL_PARAM_ASSERTIONS, (
             f"only {total} parameter assertion(s); the gate would be near-vacuous"
         )
+
+
+def _hosting(bucket: str, bucket_region: str = "us-east-1", **extra):
+    hosting = {
+        "bucket": bucket,
+        "bucket_region": bucket_region,
+        "key_prefix": "",
+        "launch_regions": ["us-east-1"],
+    }
+    hosting.update(extra)
+    return hosting
+
+
+def _template_url_of(link: str) -> str:
+    """The decoded templateURL a rendered console link carries."""
+    import urllib.parse
+
+    fragment = link.split("#", 1)[1]
+    query = fragment.split("?", 1)[1]
+    return dict(urllib.parse.parse_qsl(query))["templateURL"]
+
+
+class TestTheTemplateUrlIsAddressable:
+    """The templateURL must be one S3 will serve over HTTPS for the configured bucket.
+
+    S3's virtual-hosted wildcard certificate (``*.s3.<region>.amazonaws.com``) matches one
+    DNS label, so a bucket whose name contains a period cannot be reached virtual-hosted
+    over HTTPS -- the TLS handshake fails before CloudFormation reads a byte. See
+    https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html. Such a
+    bucket has to use the path-style form, which the CloudFormation quick-create page lists
+    as supported:
+    https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-create-stacks-quick-create-links.html
+    """
+
+    def test_a_dotted_bucket_uses_path_style(self, renderer):
+        url = renderer.template_url(_hosting("my.bucket.name"), "AshFargate")
+        assert url == (
+            "https://s3.us-east-1.amazonaws.com/my.bucket.name/AshFargate.template.json"
+        )
+
+    def test_a_dotted_bucket_link_passes_the_validator(self, renderer):
+        stacks = renderer.load_templates()
+        plan, problems = renderer.parameter_plan(stacks)
+        assert not problems, problems
+        link = renderer.quick_create_url(
+            _hosting("my.bucket.name"), "AshFargate", "us-east-1", plan["AshFargate"]
+        )
+        assert renderer.validate_url(link, stacks, plan) == []
+        assert _template_url_of(link).startswith("https://s3.us-east-1.amazonaws.com/")
+
+    def test_a_dotted_bucket_virtual_hosted_link_is_rejected(self, renderer):
+        """The form the old renderer emitted, which is a TLS failure, must not pass."""
+        import urllib.parse
+
+        stacks = renderer.load_templates()
+        plan, _ = renderer.parameter_plan(stacks)
+        good = renderer.quick_create_url(
+            _hosting("my.bucket.name"), "AshFargate", "us-east-1", plan["AshFargate"]
+        )
+        broken = good.replace(
+            urllib.parse.quote(
+                "https://s3.us-east-1.amazonaws.com/my.bucket.name/", safe=""
+            ),
+            urllib.parse.quote(
+                "https://my.bucket.name.s3.us-east-1.amazonaws.com/", safe=""
+            ),
+        )
+        assert broken != good
+        found = renderer.validate_url(broken, stacks, plan)
+        assert any("period" in line for line in found), found
+
+    def test_a_dotless_bucket_stays_virtual_hosted(self, renderer):
+        url = renderer.template_url(_hosting("my-bucket-name"), "AshFargate")
+        assert url == (
+            "https://my-bucket-name.s3.us-east-1.amazonaws.com/AshFargate.template.json"
+        )
+
+    @pytest.mark.parametrize(
+        "region", ["us-east-1", "us-west-2", "eu-west-2", "ap-southeast-2"]
+    )
+    def test_the_bucket_region_is_the_endpoint_region(self, renderer, region):
+        assert renderer.hosting_problems(_hosting("my-bucket", region)) == []
+        assert renderer.template_url(_hosting("my-bucket", region), "AshFargate") == (
+            f"https://my-bucket.s3.{region}.amazonaws.com/AshFargate.template.json"
+        )
+        assert renderer.template_url(_hosting("my.bucket", region), "AshFargate") == (
+            f"https://s3.{region}.amazonaws.com/my.bucket/AshFargate.template.json"
+        )
+
+    def test_the_launch_region_is_independent_of_the_bucket_region(self, renderer):
+        stacks = renderer.load_templates()
+        plan, _ = renderer.parameter_plan(stacks)
+        link = renderer.quick_create_url(
+            _hosting("my-bucket", "eu-west-2"),
+            "AshFargate",
+            "us-east-1",
+            plan["AshFargate"],
+        )
+        assert link.startswith(
+            "https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#"
+        )
+        assert ".s3.eu-west-2.amazonaws.com/" in _template_url_of(link)
+        assert renderer.validate_url(link, stacks, plan) == []
+
+    def test_the_key_prefix_is_kept_and_encoded(self, renderer):
+        url = renderer.template_url(
+            _hosting("my-bucket", key_prefix="ash/v 1+x/"), "AshFargate"
+        )
+        assert url == (
+            "https://my-bucket.s3.us-east-1.amazonaws.com/ash/v%201%2Bx/AshFargate.template.json"
+        )
+
+
+class TestParametersAreUrlEncoded:
+    def test_the_template_url_and_every_value_round_trip(self, renderer):
+        import urllib.parse
+
+        stacks = renderer.load_templates()
+        plan, problems = renderer.parameter_plan(stacks)
+        assert not problems, problems
+        stack = "AshImagePipeline"
+        hosting = _hosting("my.bucket.name", key_prefix="ash/")
+        link = renderer.quick_create_url(hosting, stack, "us-east-1", plan[stack])
+
+        query = link.split("#", 1)[1].split("?", 1)[1]
+        # Nothing that would split or terminate the fragment's query survives raw.
+        for raw in (" ", "?", "*", "(", ")", "://"):
+            assert raw not in query, (raw, query)
+        decoded = dict(urllib.parse.parse_qsl(query))
+        assert decoded["templateURL"] == renderer.template_url(hosting, stack)
+        for name, value in plan[stack]:
+            assert decoded[f"param_{name}"] == value
+        assert any(" " in value for _, value in plan[stack]), (
+            "no planned value needs encoding, so this test checks nothing"
+        )
+
+
+class TestTheHostingConfigIsValidated:
+    @pytest.mark.parametrize(
+        ("bucket", "fragment"),
+        [
+            ("My-Bucket", "lowercase"),
+            ("my_bucket", "lowercase"),
+            ("ab", "3 and 63"),
+            ("a" * 64, "3 and 63"),
+            ("-bucket", "begin and end"),
+            ("bucket.", "begin and end"),
+            ("my..bucket", "adjacent periods"),
+            ("192.168.5.4", "IP address"),
+        ],
+    )
+    def test_an_invalid_bucket_name_is_rejected(self, renderer, bucket, fragment):
+        problems = renderer.hosting_problems(_hosting(bucket))
+        assert any(fragment in p for p in problems), problems
+
+    def test_a_bucket_without_a_region_is_rejected(self, renderer):
+        problems = renderer.hosting_problems(_hosting("my-bucket", ""))
+        assert any("bucket_region" in p for p in problems), problems
+
+    @pytest.mark.parametrize("region", ["cn-north-1", "us-gov-west-1", "us-east-one"])
+    def test_a_region_outside_the_aws_partition_is_rejected(self, renderer, region):
+        assert renderer.hosting_problems(_hosting("my-bucket", region))
+        assert renderer.hosting_problems(_hosting("my-bucket", launch_regions=[region]))
+
+    def test_the_shipping_default_is_valid(self, renderer):
+        assert renderer.hosting_problems(renderer.load_hosting()) == []
+
+
+class TestRenderedLinksPointAtCommittedTemplates:
+    """End to end: configure a bucket, render, then run `check` on what was rendered."""
+
+    @pytest.mark.parametrize("bucket", ["my-bucket-name", "my.bucket.name"])
+    def test_render_then_check(self, renderer, tmp_path, monkeypatch, capsys, bucket):
+        import json
+
+        config = tmp_path / "hosting.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "bucket": bucket,
+                    "bucket_region": "eu-west-2",
+                    "key_prefix": "ash/",
+                    "launch_regions": ["us-east-1", "eu-west-2"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        out = tmp_path / "quick-create-links.md"
+        monkeypatch.setattr(renderer, "HOSTING_CONFIG", config)
+        monkeypatch.setattr(renderer, "DOC_OUTPUT", out)
+
+        assert renderer.render(write=True) == 0, capsys.readouterr().err
+        text = out.read_text(encoding="utf-8")
+        links = renderer.CONSOLE_URL_RE.findall(text)
+        committed = {p.name for p in renderer.TEMPLATE_DIR.glob("*.template.json")}
+        assert len(links) == len(committed) * 2
+
+        for link in links:
+            url = _template_url_of(link)
+            assert url.rsplit("/", 1)[-1] in committed, url
+            if "." in bucket:
+                assert url.startswith(
+                    f"https://s3.eu-west-2.amazonaws.com/{bucket}/ash/"
+                )
+            else:
+                assert url.startswith(
+                    f"https://{bucket}.s3.eu-west-2.amazonaws.com/ash/"
+                )
+
+        assert renderer.check() == 0, capsys.readouterr().err
+
+    def test_render_refuses_an_invalid_bucket(
+        self, renderer, tmp_path, monkeypatch, capsys
+    ):
+        import json
+
+        config = tmp_path / "hosting.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "bucket": "My_Bucket",
+                    "bucket_region": "us-east-1",
+                    "key_prefix": "",
+                    "launch_regions": ["us-east-1"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        out = tmp_path / "quick-create-links.md"
+        monkeypatch.setattr(renderer, "HOSTING_CONFIG", config)
+        monkeypatch.setattr(renderer, "DOC_OUTPUT", out)
+        assert renderer.render(write=True) == 1
+        assert "My_Bucket" in capsys.readouterr().err
+        assert not out.exists()

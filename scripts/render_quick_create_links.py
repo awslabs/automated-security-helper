@@ -21,6 +21,16 @@ First, ``templateURL`` is REQUIRED and must be an S3 URL. Only three forms are a
 ``https://s3-<region>.amazonaws.com/<bucket>/<key>``. A GitHub raw URL does not work, and
 pointing at the repository is the obvious wrong thing to reach for.
 
+Which of the first two this renderer emits depends on the bucket name. The
+virtual-hosted form is the default, because S3 prefers it and the path-style form is
+slated for eventual deprecation. But S3's wildcard certificate for
+``*.s3.<region>.amazonaws.com`` matches a single DNS label, so a bucket whose name
+contains a period cannot be reached virtual-hosted over HTTPS: the TLS handshake fails
+before CloudFormation reads the template (AmazonS3/latest/userguide/VirtualHosting.html,
+and the "Avoid using periods" note in bucketnamingrules.html). A dotted bucket therefore
+gets the path-style form, which the quick-create page lists as supported and which S3
+still serves in every Region.
+
 Second, and this is the whole reason a gate exists rather than just a document:
 **CloudFormation silently ignores a ``param_`` name that the template does not declare**,
 and silently ignores any parameter whose ``NoEcho`` is true. A typo is not an error. The
@@ -89,6 +99,7 @@ import re
 import sys
 import urllib.parse
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = REPO_ROOT / "deploy" / "cdk" / "templates"
@@ -168,6 +179,22 @@ S3_URL_PATTERNS = (
 # Every console URL the renderer emits, for `check` to find in the rendered document.
 # Deliberately loose about what follows the fragment so that a MALFORMED link is still
 # found and then reported, rather than not matching and reading as absent.
+# S3 general purpose bucket naming rules, from AmazonS3/latest/userguide/bucketnamingrules.html.
+# Checked so that a typo in quick-create-hosting.json fails at render time with a reason,
+# rather than producing a link that opens the console and then cannot fetch its template.
+BUCKET_CHARS_RE = re.compile(r"^[a-z0-9.-]+$")
+BUCKET_IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+BUCKET_RESERVED_PREFIXES = ("xn--", "sthree-", "amzn-s3-demo-")
+BUCKET_RESERVED_SUFFIXES = ("-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3")
+
+# A Region code in the standard ``aws`` partition. The console host this renderer builds
+# (``<region>.console.aws.amazon.com``) and the S3 endpoint suffix (``amazonaws.com``)
+# are both specific to that partition; China and GovCloud use different hosts for each,
+# so a link built here for one of those Regions would point at a console that does not
+# serve it. Rejected rather than guessed at.
+AWS_PARTITION_REGION_RE = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d+$")
+NON_AWS_PARTITION_PREFIXES = ("cn-", "us-gov-", "us-iso", "eusc-")
+
 CONSOLE_URL_RE = re.compile(
     r"https://[a-z0-9-]+\.console\.aws\.amazon\.com/cloudformation/home\?[^\s)\]]+"
 )
@@ -177,7 +204,7 @@ CONSOLE_URL_RE = re.compile(
 NO_LINK_PLACEHOLDER = "`NO-BUCKET-CONFIGURED`"
 
 
-def load_hosting() -> dict[str, object]:
+def load_hosting() -> dict[str, Any]:
     """Read the hosting configuration, defaulting every key to "not configured"."""
     hosting = json.loads(HOSTING_CONFIG.read_text(encoding="utf-8"))
     return {
@@ -188,13 +215,98 @@ def load_hosting() -> dict[str, object]:
     }
 
 
-def load_templates() -> dict[str, dict[str, dict]]:
+def _region_problem(field: str, region: str) -> str | None:
+    if not AWS_PARTITION_REGION_RE.match(region):
+        return (
+            f"{field} {region!r} is not an AWS Region code (for example us-east-1 or "
+            "eu-west-2)."
+        )
+    if region.startswith(NON_AWS_PARTITION_PREFIXES):
+        return (
+            f"{field} {region!r} is outside the standard aws partition. Its console and "
+            "S3 endpoints use different host names, which this renderer does not build."
+        )
+    return None
+
+
+def hosting_problems(hosting: dict[str, Any]) -> list[str]:
+    """Every reason the hosting configuration cannot produce a working link.
+
+    An empty bucket is valid: it is the shipping default and renders no links. Once a
+    bucket is set, the name must be one S3 would have accepted at creation, and the
+    regions must be ones the generated host names exist for.
+    """
+    problems: list[str] = []
+    bucket = str(hosting.get("bucket") or "")
+    raw_regions = hosting.get("launch_regions") or []
+    regions = [str(r) for r in raw_regions] if isinstance(raw_regions, list) else []
+
+    for region in regions:
+        problem = _region_problem("launch_regions entry", region)
+        if problem:
+            problems.append(problem)
+
+    if not bucket:
+        return problems
+
+    where = f"bucket {bucket!r}"
+    if not 3 <= len(bucket) <= 63:
+        problems.append(f"{where} must be between 3 and 63 characters long.")
+    if not BUCKET_CHARS_RE.match(bucket):
+        problems.append(
+            f"{where} may contain only lowercase letters, numbers, periods and hyphens."
+        )
+    if not (bucket[0].isalnum() and bucket[-1].isalnum()):
+        problems.append(f"{where} must begin and end with a letter or number.")
+    if ".." in bucket:
+        problems.append(f"{where} must not contain two adjacent periods.")
+    if BUCKET_IP_RE.match(bucket):
+        problems.append(f"{where} must not be formatted as an IP address.")
+    if bucket.startswith(BUCKET_RESERVED_PREFIXES):
+        problems.append(f"{where} starts with a prefix S3 reserves.")
+    if bucket.endswith(BUCKET_RESERVED_SUFFIXES):
+        problems.append(f"{where} ends with a suffix S3 reserves.")
+
+    bucket_region = str(hosting.get("bucket_region") or "")
+    if not bucket_region:
+        problems.append(
+            f"{where} is set but bucket_region is empty. The template URL names the "
+            "bucket's Region endpoint, so it cannot be built without one."
+        )
+    else:
+        problem = _region_problem("bucket_region", bucket_region)
+        if problem:
+            problems.append(problem)
+
+    if not regions:
+        problems.append(
+            f"{where} is set but launch_regions is empty, so no link would be rendered."
+        )
+
+    key_prefix = str(hosting.get("key_prefix") or "")
+    if key_prefix.startswith("/"):
+        problems.append(
+            f"key_prefix {key_prefix!r} starts with '/'. S3 keys have no leading slash; "
+            "the template URL would name a different object."
+        )
+    return problems
+
+
+def _display(path: Path) -> str:
+    """A path for a message: repository-relative when it is inside the repository."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def load_templates() -> dict[str, dict[str, dict[str, Any]]]:
     """Every committed template's Parameters block, keyed by stack name.
 
     Discovered by glob rather than listed. A stack added to the CDK app and committed is
     covered the day it lands, and a stack removed stops being advertised.
     """
-    stacks: dict[str, dict[str, dict]] = {}
+    stacks: dict[str, dict[str, dict[str, Any]]] = {}
     for path in sorted(TEMPLATE_DIR.glob("*.template.json")):
         stack = path.name[: -len(".template.json")]
         document = json.loads(path.read_text(encoding="utf-8"))
@@ -202,7 +314,7 @@ def load_templates() -> dict[str, dict[str, dict]]:
     return stacks
 
 
-def is_noecho(spec: dict) -> bool:
+def is_noecho(spec: dict[str, Any]) -> bool:
     """Whether a parameter is NoEcho, accepting both the JSON and string spellings.
 
     CloudFormation accepts ``"NoEcho": true`` and ``"NoEcho": "true"``; cdk emits the
@@ -217,7 +329,7 @@ def is_noecho(spec: dict) -> bool:
 
 
 def parameter_plan(
-    stacks: dict[str, dict[str, dict]],
+    stacks: dict[str, dict[str, dict[str, Any]]],
 ) -> tuple[dict[str, list[tuple[str, str]]], list[str]]:
     """The (name, value) pairs each stack's link will carry, plus any problems found.
 
@@ -334,7 +446,7 @@ def parameter_plan(
     return plan, problems
 
 
-def required_without_default(params: dict[str, dict]) -> list[str]:
+def required_without_default(params: dict[str, dict[str, Any]]) -> list[str]:
     """Parameters the adopter must still type, because the template gives no default.
 
     A quick-create link cannot supply these -- there is no value to derive -- so the
@@ -348,16 +460,24 @@ def required_without_default(params: dict[str, dict]) -> list[str]:
     )
 
 
-def template_url(hosting: dict[str, object], stack: str) -> str:
-    """The virtual-hosted S3 URL for one stack's template."""
-    key = f"{hosting['key_prefix']}{stack}.template.json"
-    return (
-        f"https://{hosting['bucket']}.s3.{hosting['bucket_region']}.amazonaws.com/{key}"
-    )
+def template_url(hosting: dict[str, Any], stack: str) -> str:
+    """The S3 URL for one stack's template.
+
+    Virtual-hosted for a bucket name without periods, path-style for one with them. The
+    virtual-hosted wildcard certificate cannot match a dotted bucket name, so that form
+    fails TLS for it; see the module docstring. The key is percent-encoded as a path, so a
+    prefix with a space or ``+`` names the object it says.
+    """
+    bucket = str(hosting["bucket"])
+    region = str(hosting["bucket_region"])
+    key = urllib.parse.quote(f"{hosting['key_prefix']}{stack}.template.json", safe="/")
+    if "." in bucket:
+        return f"https://s3.{region}.amazonaws.com/{bucket}/{key}"
+    return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
 
 
 def quick_create_url(
-    hosting: dict[str, object],
+    hosting: dict[str, Any],
     stack: str,
     region: str,
     pairs: list[tuple[str, str]],
@@ -382,7 +502,9 @@ def quick_create_url(
 
 
 def validate_url(
-    url: str, stacks: dict[str, dict[str, dict]], plan: dict[str, list[tuple[str, str]]]
+    url: str,
+    stacks: dict[str, dict[str, dict[str, Any]]],
+    plan: dict[str, list[tuple[str, str]]],
 ) -> list[str]:
     """Every problem with one rendered quick-create link.
 
@@ -429,6 +551,17 @@ def validate_url(
         problems.append(
             f"{url}: no templateURL. It is REQUIRED -- the console cannot resolve a "
             "template without it."
+        )
+        return problems
+
+    template_host = urllib.parse.urlsplit(raw_template).hostname or ""
+    virtual_bucket = template_host.partition(".s3.")[0]
+    if ".s3." in template_host and "." in virtual_bucket:
+        problems.append(
+            f"{url}: templateURL {raw_template!r} addresses bucket {virtual_bucket!r} "
+            "virtual-hosted, but the name contains a period, so S3's wildcard "
+            "certificate does not match it and the HTTPS fetch fails. Use the "
+            "path-style form https://s3.<region>.amazonaws.com/<bucket>/<key>."
         )
         return problems
 
@@ -518,8 +651,8 @@ def validate_url(
 
 
 def render_tables(
-    hosting: dict[str, object],
-    stacks: dict[str, dict[str, dict]],
+    hosting: dict[str, Any],
+    stacks: dict[str, dict[str, dict[str, Any]]],
     plan: dict[str, list[tuple[str, str]]],
 ) -> dict[str, str]:
     """The generated regions of the document."""
@@ -598,6 +731,7 @@ def render_text() -> tuple[str, list[str]]:
     hosting = load_hosting()
     stacks = load_templates()
     plan, problems = parameter_plan(stacks)
+    problems = hosting_problems(hosting) + problems
     if problems:
         return "", problems
 
@@ -628,7 +762,7 @@ def render(write: bool) -> int:
 
     if write:
         DOC_OUTPUT.write_text(text, encoding="utf-8")
-        sys.stdout.write(f"rendered {DOC_OUTPUT.relative_to(REPO_ROOT)}\n")
+        sys.stdout.write(f"rendered {_display(DOC_OUTPUT)}\n")
     else:
         sys.stdout.write(text)
     return 0
@@ -639,10 +773,11 @@ def check() -> int:
     hosting = load_hosting()
     stacks = load_templates()
     plan, problems = parameter_plan(stacks)
+    problems = hosting_problems(hosting) + problems
 
     if not DOC_OUTPUT.exists():
         sys.stderr.write(
-            f"{DOC_OUTPUT.relative_to(REPO_ROOT)} does not exist. Run "
+            f"{_display(DOC_OUTPUT)} does not exist. Run "
             "'python3 scripts/render_quick_create_links.py render'.\n"
         )
         return 1
@@ -768,6 +903,18 @@ def self_test() -> int:
                 ),
             ),
             "not one of the three S3 forms",
+        ),
+        (
+            "dotted bucket addressed virtual-hosted",
+            good.replace(
+                urllib.parse.quote(template_url(hosting, stack), safe=""),
+                urllib.parse.quote(
+                    f"https://my.dotted.bucket.s3.us-east-1.amazonaws.com/"
+                    f"{stack}.template.json",
+                    safe="",
+                ),
+            ),
+            "contains a period",
         ),
         (
             "illegal stack name",

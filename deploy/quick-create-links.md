@@ -89,7 +89,8 @@ the larger templates — the upload it describes is the same upload these links 
    `key_prefix`. The prefix must match where you actually put them — `ash/` for the command
    above, including the trailing slash. `launch_regions` lists the regions to emit a link
    for; the stack is created in the region in the link, which is independent of where the
-   bucket lives.
+   bucket lives. The renderer refuses a bucket name S3 would not have accepted, and a
+   region outside the standard `aws` partition, whose console and S3 host names differ.
 
 3. **Re-render:**
 
@@ -153,6 +154,13 @@ Two of its properties are the reason nothing here is hand-written.
 `https://s3-<region>.amazonaws.com/<bucket>/<key>`. A link pointing at this repository's
 raw file URL does not work.
 
+The renderer uses the virtual-hosted form unless the bucket name contains a period. S3's
+wildcard certificate for `*.s3.<region>.amazonaws.com` matches only one DNS label, so a
+dotted bucket cannot be fetched virtual-hosted over HTTPS — see
+[Virtual hosting of general purpose buckets](https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html).
+For a dotted bucket the renderer emits the path-style form instead, and `check` rejects a
+virtual-hosted URL for one.
+
 More important: **CloudFormation silently ignores a `param_` name the template does not
 declare**, and silently ignores any parameter whose `NoEcho` is true. A typo is not an
 error. The console opens, the parameter is absent, the template's default quietly applies,
@@ -169,6 +177,7 @@ hand-edited link is a red build rather than something an adopter finds at launch
 
 That check carries its own positive control. `--self-test` feeds the validator a
 deliberately misspelled `param_` name, a `NoEcho` parameter, a value that disagrees with
-the template, a raw GitHub URL and an illegal stack name, and fails unless every one is
-rejected — plus a correct link that must be accepted, because a validator that rejected
-everything would otherwise pass all five and prove nothing.
+the template, a raw GitHub URL, a dotted bucket addressed virtual-hosted, an illegal stack
+name and a declared parameter outside the plan, and fails unless every one is rejected —
+plus a correct link that must be accepted, because a validator that rejected everything
+would otherwise pass every negative case and prove nothing.
