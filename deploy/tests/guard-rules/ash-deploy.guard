@@ -1,0 +1,138 @@
+#
+# cfn-guard rules for the committed CloudFormation templates under deploy/cdk/templates/.
+#
+# WHY A LOCAL RULE SET RATHER THAN THE PUBLISHED REGISTRY. The AWS Guard Rules
+# Registry (rules/aws, commit 7f7340c, cfn-guard 3.2.1) fails every one of the six
+# templates: one rule on AshImagePipeline, three on AshEksOperator, four each on
+# AshCodeCommitGate and AshAgentCore, six on AshDistributedPipeline and fourteen on
+# AshFargate. Some of those are choices the stacks make on purpose and document
+# next to the resource, for example the EC2 network-interface actions IAM only
+# accepts with Resource "*", and Lambda custom-resource handlers with no
+# dead-letter queue and no VPC when the adopter supplies none. The rest have not
+# been triaged rule by rule. Gating on the registry would mean suppressing rules
+# or gating on a set that is red today, and this gate does neither. These rules
+# state what the stacks DO promise, so a change that breaks one turns the gate red.
+#
+# Every rule is checked for coverage by deploy/tests/cfn-lint-guard.py: a rule
+# that matches no resource in any committed template is a failure, not a pass,
+# unless it is listed there as a rule for a resource type the stacks do not yet
+# create. Today that list holds one rule, EKS_CLUSTER_ENDPOINT_NOT_OPEN, kept
+# because the EKS stack installs into an existing cluster and a later stack that
+# creates one must not ship an endpoint open to the internet.
+#
+# Every rule also has at least one mutant in that script: a copy of a committed
+# template with one property broken, which must fail that rule and no other. The
+# mutants are generated at run time and never committed, and the script's
+# self-test runs them on every CI run.
+#
+
+let s3_buckets = Resources.*[ Type == 'AWS::S3::Bucket' ]
+
+rule S3_BUCKET_BLOCKS_PUBLIC_ACCESS when %s3_buckets !empty {
+    %s3_buckets.Properties.PublicAccessBlockConfiguration {
+        BlockPublicAcls == true
+        BlockPublicPolicy == true
+        IgnorePublicAcls == true
+        RestrictPublicBuckets == true
+    }
+}
+
+rule S3_BUCKET_ENCRYPTED when %s3_buckets !empty {
+    %s3_buckets.Properties.BucketEncryption.ServerSideEncryptionConfiguration !empty
+}
+
+let kms_keys = Resources.*[ Type == 'AWS::KMS::Key' ]
+
+rule KMS_KEY_ROTATION_ENABLED when %kms_keys !empty {
+    %kms_keys.Properties.EnableKeyRotation == true
+}
+
+let log_groups = Resources.*[ Type == 'AWS::Logs::LogGroup' ]
+
+rule LOG_GROUP_RETAINED_AND_ENCRYPTED when %log_groups !empty {
+    %log_groups.Properties {
+        RetentionInDays exists
+        KmsKeyId exists
+    }
+}
+
+# Identity policies only. A KMS key policy grants kms:* to the account root by
+# design, and resource policies are not where a wildcard grant to a principal in
+# this stack would come from.
+let identity_statements = Resources.*[
+    Type in ['AWS::IAM::Policy', 'AWS::IAM::ManagedPolicy']
+].Properties.PolicyDocument.Statement[*]
+
+# The `exists` filter is load-bearing here and in sg_inline_ingress below. Without
+# it, one role with no inline Policies makes cfn-guard 3.2.1 treat the whole query
+# as empty and skip the block, so a wildcard in another role's inline policy passes.
+# The self-test caught exactly that on the security group form.
+let role_inline_statements = Resources.*[
+    Type == 'AWS::IAM::Role'
+    Properties.Policies exists
+].Properties.Policies[*].PolicyDocument.Statement[*]
+
+rule IAM_NO_WILDCARD_OR_NEGATED_ALLOW when %identity_statements !empty {
+    %identity_statements[ Effect == 'Allow' ] {
+        NotAction !exists
+        NotResource !exists
+        Action[*] != '*'
+        Action[*] != /:\*$/
+    }
+    when %role_inline_statements !empty {
+        %role_inline_statements[ Effect == 'Allow' ] {
+            NotAction !exists
+            NotResource !exists
+            Action[*] != '*'
+            Action[*] != /:\*$/
+        }
+    }
+}
+
+# A literal open CIDR fails. A CidrIp that is an intrinsic, such as the Ref to
+# AshFargate's McpIngressCidr parameter, is not a value guard can compare, so it is
+# accepted here; that parameter's AllowedPattern rejects a /0 prefix, which
+# deploy/cdk/test/ash-fargate-stack.test.ts asserts.
+let sg_ingress_rules = Resources.*[ Type == 'AWS::EC2::SecurityGroupIngress' ].Properties
+let sg_inline_ingress = Resources.*[
+    Type == 'AWS::EC2::SecurityGroup'
+    Properties.SecurityGroupIngress exists
+].Properties.SecurityGroupIngress[*]
+
+rule SECURITY_GROUP_INGRESS_NOT_OPEN_TO_THE_INTERNET when %sg_ingress_rules !empty {
+    %sg_ingress_rules {
+        CidrIp !exists or CidrIp is_struct or CidrIp != '0.0.0.0/0'
+        CidrIpv6 !exists or CidrIpv6 is_struct or CidrIpv6 != '::/0'
+    }
+    when %sg_inline_ingress !empty {
+        %sg_inline_ingress {
+            CidrIp !exists or CidrIp is_struct or CidrIp != '0.0.0.0/0'
+            CidrIpv6 !exists or CidrIpv6 is_struct or CidrIpv6 != '::/0'
+        }
+    }
+}
+
+let load_balancers = Resources.*[ Type == 'AWS::ElasticLoadBalancingV2::LoadBalancer' ]
+
+rule LOAD_BALANCER_IS_INTERNAL when %load_balancers !empty {
+    %load_balancers.Properties.Scheme == 'internal'
+}
+
+let lambda_permissions = Resources.*[ Type == 'AWS::Lambda::Permission' ]
+
+rule LAMBDA_PERMISSION_NAMES_A_PRINCIPAL when %lambda_permissions !empty {
+    %lambda_permissions.Properties.Principal != '*'
+}
+
+# EKS defaults to a public endpoint reachable from 0.0.0.0/0 when neither
+# property is set, so a missing EndpointPublicAccess counts as public. Written as
+# two clauses because guard reads one line as an OR and separate lines as an AND:
+# private, or public with a non-empty allowlist that excludes the whole internet.
+let eks_clusters = Resources.*[ Type == 'AWS::EKS::Cluster' ]
+
+rule EKS_CLUSTER_ENDPOINT_NOT_OPEN when %eks_clusters !empty {
+    %eks_clusters.Properties.ResourcesVpcConfig {
+        EndpointPublicAccess == false or PublicAccessCidrs !empty
+        EndpointPublicAccess == false or PublicAccessCidrs[*] !in ['0.0.0.0/0', '::/0']
+    }
+}
