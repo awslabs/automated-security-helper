@@ -304,10 +304,11 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
             "scanServiceAccountName": {
                 "type": "string",
                 "description": (
-                    "ServiceAccount for the shard and collector pods. Its token is "
-                    "never mounted (automountServiceAccountToken: false) -- a pod "
-                    "running scanners over foreign source has no business holding an "
-                    "API credential, and nothing in the scan path calls the API."
+                    "ServiceAccount for the shard and collector pods. Defaults to "
+                    "ash-scan, which manifests/rbac.yaml creates with no rules. Its "
+                    "token is never mounted (automountServiceAccountToken: false) -- a "
+                    "pod running scanners over foreign source has no business holding "
+                    "an API credential, and nothing in the scan path calls the API."
                 ),
             },
             "resources": _resources_schema("Resources for each shard pod."),
@@ -514,7 +515,14 @@ def build_mcp_crd() -> dict[str, Any]:
                 },
                 "required": ["headerName", "valueFrom"],
             },
-            "serviceAccountName": {"type": "string"},
+            "serviceAccountName": {
+                "type": "string",
+                "description": (
+                    "ServiceAccount for the MCP server pod. Defaults to ash-scan, which "
+                    "manifests/rbac.yaml creates with no rules. Its token is never "
+                    "mounted (automountServiceAccountToken: false)."
+                ),
+            },
             "runAsUser": {"type": "integer", "minimum": 1},
             "resources": _resources_schema("Resources for the MCP server pod."),
             "config": config_schema,

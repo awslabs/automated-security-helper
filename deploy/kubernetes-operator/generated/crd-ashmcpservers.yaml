@@ -116,6 +116,8 @@ spec:
                 - valueFrom
               serviceAccountName:
                 type: string
+                description: 'ServiceAccount for the MCP server pod. Defaults to ash-scan, which manifests/rbac.yaml
+                  creates with no rules. Its token is never mounted (automountServiceAccountToken: false).'
               runAsUser:
                 type: integer
                 minimum: 1

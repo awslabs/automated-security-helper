@@ -217,9 +217,10 @@ spec:
                 minimum: 1
               scanServiceAccountName:
                 type: string
-                description: 'ServiceAccount for the shard and collector pods. Its token is never mounted
-                  (automountServiceAccountToken: false) -- a pod running scanners over foreign source
-                  has no business holding an API credential, and nothing in the scan path calls the API.'
+                description: 'ServiceAccount for the shard and collector pods. Defaults to ash-scan, which
+                  manifests/rbac.yaml creates with no rules. Its token is never mounted (automountServiceAccountToken:
+                  false) -- a pod running scanners over foreign source has no business holding an API
+                  credential, and nothing in the scan path calls the API.'
               resources:
                 type: object
                 description: Resources for each shard pod.

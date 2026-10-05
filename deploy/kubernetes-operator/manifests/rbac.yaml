@@ -40,9 +40,11 @@ kind: ServiceAccount
 metadata:
   name: ash-scan
   namespace: ash-system
-# No Role and no RoleBinding for this one, on purpose. It exists so shard and
-# collector pods do not run as `default`, whose token an adopter may have bound to
-# something. automountServiceAccountToken is false on every pod that uses it.
+# No Role and no RoleBinding for this one, on purpose. It exists so shard,
+# collector and MCP server pods do not run as `default`, whose token an adopter may
+# have bound to something. The operator uses it unless a CR names another account
+# (constants.SCAN_SERVICE_ACCOUNT). automountServiceAccountToken is false on every
+# pod that uses it.
 ---
 # Cluster-scoped, because a CustomResourceDefinition is a cluster-scoped object and
 # kopf must read the ones it serves to learn their schema. Read-only, and named:

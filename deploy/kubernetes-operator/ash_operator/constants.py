@@ -20,6 +20,14 @@ from __future__ import annotations
 # the e2e harness read it from here, so renaming the CLI is a one-line change.
 ASH_CLI = "ash"
 
+# ── Pod identity ─────────────────────────────────────────────────────────────
+# The ServiceAccount every shard, collector and MCP server pod runs as unless the
+# CR names another. manifests/rbac.yaml creates it with no Role and no RoleBinding,
+# so a pod using it holds no grant even if its token were mounted (it is not). The
+# alternative, `default`, is an account an adopter may already have bound to
+# something.
+SCAN_SERVICE_ACCOUNT = "ash-scan"
+
 # ── API surface ──────────────────────────────────────────────────────────────
 # Reverse of the Maven/Java coordinate the project already chose for its CDK
 # constructs (``io.github.awslabs.ash``), so the API group is not a new

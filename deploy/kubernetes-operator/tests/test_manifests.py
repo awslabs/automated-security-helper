@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -31,6 +32,7 @@ SPEC = {
     "minSeverity": "MEDIUM",
 }
 PREFIX = "/workspace/results/run-11111111-2222-3333-4444-555555555555"
+RBAC_YAML = Path(__file__).resolve().parents[1] / "manifests" / "rbac.yaml"
 
 
 def shard_job(spec=None, **kwargs):
@@ -473,3 +475,53 @@ def test_the_completion_index_label_is_the_one_kubernetes_sets():
     # Pinned because the operator attributes a pod to a shard with it, and reading
     # the wrong label yields shardIndex -1 on every pod with no error anywhere.
     assert JOB_COMPLETION_INDEX_LABEL == "batch.kubernetes.io/job-completion-index"
+
+
+class TestPodServiceAccount:
+    """Every pod the operator creates runs as the rule-less ``ash-scan`` account.
+
+    rbac.yaml creates ``ash-scan`` with no Role and no RoleBinding so that these pods
+    do not run as ``default``, whose token an adopter may have bound to something.
+    That only holds if the builders default to it rather than to ``default``.
+    """
+
+    def service_accounts(self, spec=None, mcp_spec=None):
+        return {
+            "shard": shard_job(spec)["spec"]["template"]["spec"]["serviceAccountName"],
+            "collect": collect_job(spec)["spec"]["template"]["spec"]["serviceAccountName"],
+            "mcp": mcp_deployment(mcp_spec)["spec"]["template"]["spec"]["serviceAccountName"],
+        }
+
+    def test_the_default_is_the_rule_less_account_not_default(self):
+        assert self.service_accounts() == {
+            "shard": "ash-scan",
+            "collect": "ash-scan",
+            "mcp": "ash-scan",
+        }
+
+    def test_an_empty_name_falls_back_to_the_rule_less_account(self):
+        accounts = self.service_accounts(
+            spec={"scanServiceAccountName": ""},
+            mcp_spec={"image": "ash:local", "serviceAccountName": ""},
+        )
+        assert set(accounts.values()) == {"ash-scan"}
+
+    def test_a_named_account_is_honored(self):
+        accounts = self.service_accounts(
+            spec={"scanServiceAccountName": "mine"},
+            mcp_spec={"image": "ash:local", "serviceAccountName": "mine"},
+        )
+        assert set(accounts.values()) == {"mine"}
+
+    def test_the_default_account_is_shipped_and_bound_to_nothing(self):
+        docs = [d for d in yaml.safe_load_all(RBAC_YAML.read_text()) if d]
+        names = {d["metadata"]["name"] for d in docs if d["kind"] == "ServiceAccount"}
+        assert manifests.SCAN_SERVICE_ACCOUNT in names
+        bound = {
+            s["name"]
+            for d in docs
+            if d["kind"] in ("RoleBinding", "ClusterRoleBinding")
+            for s in d.get("subjects", [])
+            if s.get("kind") == "ServiceAccount"
+        }
+        assert manifests.SCAN_SERVICE_ACCOUNT not in bound

@@ -50,6 +50,7 @@ from ash_operator.constants import (
     ROLE_COLLECT,
     ROLE_MCP,
     ROLE_SHARD,
+    SCAN_SERVICE_ACCOUNT,
     SHARD_ENTRYPOINT_FILENAME,
     SOURCE_MOUNT,
     TMP_MOUNT,
@@ -323,7 +324,8 @@ def build_shard_job(
                     # A pod that scans foreign source has no business holding an
                     # API token. Nothing in the shard path talks to the API server.
                     "automountServiceAccountToken": False,
-                    "serviceAccountName": spec.get("scanServiceAccountName", "default"),
+                    "serviceAccountName": spec.get("scanServiceAccountName")
+                    or SCAN_SERVICE_ACCOUNT,
                     "securityContext": {
                         "runAsNonRoot": True,
                         "runAsUser": int(spec.get("runAsUser") or 1000),
@@ -432,7 +434,8 @@ def build_collect_job(
                 "spec": {
                     "restartPolicy": "Never",
                     "automountServiceAccountToken": False,
-                    "serviceAccountName": spec.get("scanServiceAccountName", "default"),
+                    "serviceAccountName": spec.get("scanServiceAccountName")
+                    or SCAN_SERVICE_ACCOUNT,
                     "securityContext": {
                         "runAsNonRoot": True,
                         "runAsUser": int(spec.get("runAsUser") or 1000),
@@ -605,7 +608,7 @@ def build_mcp_deployment(
                 "metadata": {"labels": labels},
                 "spec": {
                     "automountServiceAccountToken": False,
-                    "serviceAccountName": spec.get("serviceAccountName", "default"),
+                    "serviceAccountName": spec.get("serviceAccountName") or SCAN_SERVICE_ACCOUNT,
                     "securityContext": {
                         "runAsNonRoot": True,
                         "runAsUser": int(spec.get("runAsUser") or 1000),

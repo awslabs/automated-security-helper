@@ -385,7 +385,9 @@ matters more than what is:
 * **`pods/exec`, `nodes`, `namespaces`, `clusterroles`, `rolebindings`, `escalate`,
   `bind`** — none. No rule can widen the operator's own privileges.
 
-The scan pods use a ServiceAccount with **no rules at all**, and
+The scan and MCP server pods use the `ash-scan` ServiceAccount unless the CR names
+another (`spec.scanServiceAccountName` on an `AshScan`, `spec.serviceAccountName` on
+an `AshMcpServer`). `ash-scan` has **no rules at all**, and every pod sets
 `automountServiceAccountToken: false`. A pod running third-party scanners over
 foreign source has no business holding an API credential, and nothing in the scan
 path calls the API.
