@@ -437,6 +437,17 @@
 
 ### Fixes
 
+- **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
+  `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
+  Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan
+  target with `uriBaseId: %SRCROOT%`, a base ASH's aggregated report never defined; the
+  plugin resolves them back to absolute URIs, so 2.4.5 and 2.5.2 produce the same paths
+  in every report. Its `--exclude` no longer matches raw substrings, so ASH's `.git`
+  ignore path stops skipping `.github/` and patterns like `test-results/**` now take
+  effect. Separately, the plugin now passes `FERRET_PRECOMMIT=0`: under ASH's own
+  pre-commit hook, ferret-scan detected pre-commit mode from `PRE_COMMIT=1`, exited 1
+  on findings (reported as a scanner failure) and narrowed its results.
+
 - **SARIF upload can hold `security-events: write`.** `run-ash-security-scan.yml`
   declares only contents, checks and pull-requests, and a called workflow can only
   narrow its caller's token, so its "Upload ASH SARIF file" step never had

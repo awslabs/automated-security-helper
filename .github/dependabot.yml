@@ -137,6 +137,27 @@ updates:
     # repository's uv.lock was never updated -- 22 of the last 22 Python bumps changed
     # pyproject.toml alone -- so a strategy that only moves the locked version would have
     # had nothing to move, and updates would have stopped instead of flowing.
+    #
+    # THIS SETTING DOES NOT TAKE EFFECT TODAY, and the paragraphs above describe what it is
+    # meant to do, not what happens. Dependabot drops it before the uv updater runs: every
+    # uv job definition for this repository carries `"requirements-update-strategy": null`
+    # (for example the job behind PR #702), so the updater falls back to its own guess. For
+    # this project the guess is "application", and the log says `Requirements update
+    # strategy bump_versions` once per dependency. That is why patch releases still raise
+    # floors. The updater itself handles increase-if-necessary correctly, in every section
+    # this file has: fed the strategy directly, it leaves all six of #702's requirements
+    # unchanged, including the [dependency-groups] dev and [build-system] hatchling entries.
+    # The value is lost between this file and the job, which is GitHub's side and not
+    # anything this repository can configure. Upstream report:
+    # https://github.com/dependabot/dependabot-core/issues/16112
+    #
+    # It is kept so it takes effect once that is fixed. `lockfile-only` is the one value that
+    # does reach a uv job (it travels as a separate `lockfile-only` flag), and it is still
+    # rejected, for the reason above, which holds for uv too: a release outside the declared
+    # range ends with the log line "No update possible" and no pull request. Almost every
+    # requirement in pyproject.toml has an upper bound, so that would cover every major and,
+    # for the `<X.Y` caps, every minor. It also blocks transitive security updates for uv
+    # (dependabot-core#16449).
     versioning-strategy: increase-if-necessary
     # 5 is the default open-pull-requests-limit, it counts version updates only, and on
     # reaching it Dependabot stops raising them -- silently, since nothing reports a
@@ -218,6 +239,12 @@ updates:
   #
   # Same strategy as the root project, for the same reason: leave a requirement alone when
   # it already admits the new release and move the locked version instead.
+  #
+  # It is dropped here too (`"requirements-update-strategy": null` in this entry's jobs). This
+  # project still keeps its floors, but only because the updater's fallback guesses "library"
+  # for it and logs `Requirements update strategy widen_ranges`, which also leaves a satisfied
+  # requirement alone. The guess comes from a PyPI lookup of the project name, so the setting
+  # below is not what decides the outcome. See the root uv entry above.
   - package-ecosystem: "uv"
     directory: "/ash-agent-plugins/agentic-coding/transpiler"
     schedule:

@@ -4,6 +4,7 @@
 """Module containing the Ferret Scan sensitive data detection scanner implementation."""
 
 import json
+import os
 import shlex
 import logging
 import re
@@ -11,6 +12,7 @@ import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked 
 import sys
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
+from urllib.parse import urljoin
 
 from pydantic import Field, model_validator
 
@@ -48,13 +50,26 @@ DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
 MIN_SUPPORTED_VERSION = "2.4.5"
 
 # Maximum supported ferret-scan version (exclusive - versions >= this may have breaking changes)
-MAX_SUPPORTED_VERSION = "2.5.0"
+MAX_SUPPORTED_VERSION = "2.6.0"
 
 # Default version constraint for installation (if using uv tool)
-DEFAULT_VERSION_CONSTRAINT = ">=2.4.5,<2.5.0"
+DEFAULT_VERSION_CONSTRAINT = f">={MIN_SUPPORTED_VERSION},<{MAX_SUPPORTED_VERSION}"
 
-# Recommended version for best compatibility
-RECOMMENDED_VERSION = "2.4.5"
+# Recommended version for best compatibility. 2.4.5 and 2.5.2 were both run
+# through ASH against the same fixtures; 2.5.2 reports a subset of 2.4.5's
+# findings on them (it drops PHONE false positives on card numbers and IBANs)
+# and applies ASH's ignore paths as written (see _resolve_sarif_uri_base_ids
+# and DEVELOPMENT.md section 9 for the two shape changes 2.5.x brought).
+RECOMMENDED_VERSION = "2.5.2"
+
+# ferret-scan switches into pre-commit mode from the environment alone
+# (PRE_COMMIT, PRE_COMMIT_HOOK, GIT_HOOK_TYPE, ...; before 2.5.2 also PRE_COMMIT_HOME).
+# In that mode a scan with findings exits 1, which is outside success_exit_codes,
+# and the active profile narrows the result set. ASH runs under pre-commit via its
+# own hook, so the plugin always sets ferret-scan's documented opt-out. Measured on
+# 2.4.5 and 2.5.2: PRE_COMMIT=1 gives exit 1 and 1 of 2 findings; adding
+# FERRET_PRECOMMIT=0 restores exit 0 and both findings.
+FERRET_SUBPROCESS_ENV_OVERRIDES = {"FERRET_PRECOMMIT": "0"}
 
 # ============================================================================
 # UNSUPPORTED OPTIONS DOCUMENTATION
@@ -179,6 +194,71 @@ def is_version_compatible(version: str, min_version: str, max_version: str) -> b
     )
 
 
+def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
+    """Rewrite base-relative artifact URIs in ferret-scan SARIF to absolute ones, in place.
+
+    ferret-scan 2.4.x writes every result as an absolute ``file://`` URI.
+    2.5.1 (ferret-scan #720) writes ``{"uri": "src/x.py", "uriBaseId":
+    "%SRCROOT%"}`` and declares the scan target in ``run.originalUriBaseIds``.
+    ASH builds its own runs and does not carry ``originalUriBaseIds`` over, so
+    without this the aggregated ``ash.sarif`` references a ``%SRCROOT%`` that
+    nothing defines. Two more things break with the relative form: ferret's root
+    is the scan target, which for a ``converted`` scan is not the source
+    directory, and ASH only percent-decodes ``file://`` URIs, so a path with a
+    space would never match a file or a suppression.
+
+    Resolving against the declared base gives back the 2.4.x shape that ASH's
+    path sanitizing already handles, so both lines produce the same URIs. A
+    location whose ``uriBaseId`` is not declared is left as written, and
+    ``originalUriBaseIds`` is dropped only when nothing still references it.
+    """
+    if not isinstance(sarif, dict):
+        return
+    for run in sarif.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        bases = run.get("originalUriBaseIds")
+        if not isinstance(bases, dict) or not bases:
+            continue
+
+        unresolved = False
+        artifact_locations = []
+        for result in run.get("results") or []:
+            if not isinstance(result, dict):
+                continue
+            if isinstance(result.get("analysisTarget"), dict):
+                artifact_locations.append(result["analysisTarget"])
+            for key in ("locations", "relatedLocations"):
+                for location in result.get(key) or []:
+                    physical = (
+                        location.get("physicalLocation")
+                        if isinstance(location, dict)
+                        else None
+                    )
+                    if isinstance(physical, dict) and isinstance(
+                        physical.get("artifactLocation"), dict
+                    ):
+                        artifact_locations.append(physical["artifactLocation"])
+
+        for artifact in artifact_locations:
+            base_id = artifact.get("uriBaseId")
+            if base_id is None:
+                continue
+            base = bases.get(base_id)
+            base_uri = base.get("uri") if isinstance(base, dict) else None
+            uri = artifact.get("uri")
+            if not base_uri or not isinstance(uri, str):
+                unresolved = True
+                continue
+            if not base_uri.endswith("/"):
+                base_uri += "/"
+            artifact["uri"] = urljoin(base_uri, uri)
+            del artifact["uriBaseId"]
+
+        if not unresolved:
+            del run["originalUriBaseIds"]
+
+
 class FerretScannerConfigOptions(ScannerOptionsBase):
     """Configuration options for the Ferret scanner.
 
@@ -204,7 +284,7 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         str,
         Field(
             description="Specific checks to run, comma-separated. As of ferret-scan "
-            "v2.4.5: BANK_ACCOUNT, CLOUD_RESOURCES, CREDIT_CARD, DATE_OF_BIRTH, "
+            "v2.4.5 through v2.5.2: BANK_ACCOUNT, CLOUD_RESOURCES, CREDIT_CARD, DATE_OF_BIRTH, "
             "DRIVERS_LICENSE, EMAIL, INTELLECTUAL_PROPERTY, IP_ADDRESS, MEDICAL_ID, "
             "METADATA, OTP, PASSPORT, PERSON_NAME, PHONE, PHYSICAL_ADDRESS, SECRETS, "
             "SOCIAL_MEDIA, SSN, VIN, or 'all'. The authoritative list for the installed "
@@ -1002,6 +1082,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 results_dir=target_results_dir,
                 stdout_preference="write",
                 stderr_preference="write",
+                env={**os.environ, **FERRET_SUBPROCESS_ENV_OVERRIDES},
                 timeout=self._effective_scan_timeout(),
             )
 
@@ -1035,6 +1116,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             try:
                 with open(results_file, "r", encoding="utf-8") as f:
                     scanner_results = json.load(f)
+
+                _resolve_sarif_uri_base_ids(scanner_results)
 
                 sarif_report: SarifReport = SarifReport.model_validate(scanner_results)
 

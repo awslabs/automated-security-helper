@@ -40,8 +40,8 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--quiet` | bool | False |  | Hide all log output |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
 | `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
-| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
-| `--debug`, `-d` | bool | False |  | Enable debug logging |
+| `--verbose`, `-v` | bool | False | ASH_VERBOSE | Enable verbose logging. Any log flag on the command line overrides ASH_VERBOSE. |
+| `--debug`, `-d` | bool | False | ASH_DEBUG | Enable debug logging. Any log flag on the command line overrides ASH_DEBUG. |
 | `--color` | bool | True |  | Enable/disable colorized output |
 | `--fail-on-findings` | bool |  |  | Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value. |
 | `--fail-on-incomplete-scanners` | bool |  |  | Exit 1 when a selected scanner did not complete -- ERROR (ran and failed) or MISSING (dependencies unavailable, so it never ran). Without this, a run where nothing ran exits 0, the same code as a clean scan, because no scanner produced any finding. SKIPPED scanners are ones you did not select and never trip it, so --scanners and --exclude-scanners both narrow what is gated. Independent of --fail-on-findings, and takes precedence over it when both would fail: a partial scan's findings are real but its clean bill of health is not. Defaults to unset, which prefers the configuration value and then on. Pass --no-fail-on-incomplete-scanners to accept a partial scan's exit code, or --exclude-scanners for a tool you do not have, which records it SKIPPED and says so in the report. |
@@ -68,6 +68,8 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--ash-revision-to-install` | str |  |  | ASH branch or tag to install in the container image for usage during containerized scans |
 | `--custom-containerfile` | str |  |  | Path to a custom container definition (e.g. Dockerfile) that you would like to build *after* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate. |
 | `--custom-build-arg` | List[str] |  |  | Custom build arguments to pass to the container build |
+| `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
 ### `ash build-image`
 
@@ -95,6 +97,8 @@ Builds the ASH container image then runs a scan with it.
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
+| `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
 ### `ash report`
 
@@ -110,6 +114,8 @@ Generate a report from ASH scan results using the specified reporter plugin.
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
+| `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
 ### `ash merge`
 
@@ -128,6 +134,8 @@ Merges the results of a sharded scan into one unified report.
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
+| `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
 ### `ash mcp`
 

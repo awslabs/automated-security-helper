@@ -14,6 +14,26 @@ from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 _find_executable_cache: dict[str, str | None] = {}
 
+# Exit code reported for a command killed at its timeout, matching coreutils
+# ``timeout(1)``. run_command keeps its own -1 for compatibility; see there.
+TIMEOUT_RETURNCODE = 124
+
+
+class TimedOutProcess(subprocess.CompletedProcess):
+    """A CompletedProcess for a command that was killed at its timeout.
+
+    ``run_command_with_output_handling`` reports a timeout as ``timed_out: True``
+    in its dict. Anything that converts that dict into a ``CompletedProcess`` has
+    to keep the fact, and a plain ``CompletedProcess`` has no field for it:
+    ``UVToolRunner.run_tool`` used to rebuild the result from returncode, stdout
+    and stderr alone, so every uv-run scanner (checkov, bandit, semgrep) reported
+    a timeout as the missing results file it left behind. Returning this type
+    instead lets the flag survive the conversion without changing the return
+    type callers already check for.
+    """
+
+    timed_out = True
+
 
 def clear_find_executable_cache() -> None:
     """Clear the find_executable lookup cache.
@@ -230,7 +250,9 @@ def run_command(
         )
         if check:
             raise
-        return subprocess.CompletedProcess(
+        # -1 rather than TIMEOUT_RETURNCODE because callers and tests already pin
+        # it; the type carries the timeout so nothing has to infer it from the code.
+        return TimedOutProcess(
             args=e.cmd,
             returncode=-1,
             stdout=e.stdout or "",
@@ -247,6 +269,28 @@ def run_command(
             stdout="",
             stderr=f"Error: {str(e)}",
         )
+
+
+def _write_stream_log(
+    results_dir: Optional[Union[str, Path]],
+    class_name: Optional[str],
+    stream_name: str,
+    preference: str,
+    text: str,
+) -> None:
+    """Write one captured stream to ``<results_dir>/<class_name>.<stream>.log``."""
+    if results_dir is None or preference not in ["write", "both"]:
+        return
+    results_dir_path = Path(results_dir)
+    results_dir_path.mkdir(parents=True, exist_ok=True)
+    filename = f"{class_name}.{stream_name}.log" if class_name else f"{stream_name}.log"
+    with open(
+        results_dir_path.joinpath(filename),
+        "w",
+        encoding="utf-8",
+        errors="replace",
+    ) as log_file:
+        log_file.write(text)
 
 
 def run_command_with_output_handling(
@@ -315,43 +359,15 @@ def run_command_with_output_handling(
 
         response = {"returncode": returncode}
 
-        # Process stdout
-        if result.stdout:
-            if results_dir is not None and stdout_preference in ["write", "both"]:
-                results_dir_path = Path(results_dir)
-                results_dir_path.mkdir(parents=True, exist_ok=True)
-                stdout_filename = (
-                    f"{class_name}.stdout.log" if class_name else "stdout.log"
-                )
-                with open(
-                    results_dir_path.joinpath(stdout_filename),
-                    "w",
-                    encoding="utf-8",
-                    errors="replace",
-                ) as stdout_file:
-                    stdout_file.write(result.stdout)
-
-            if stdout_preference in ["return", "both"]:
-                response["stdout"] = result.stdout
-
-        # Process stderr
-        if result.stderr:
-            if results_dir is not None and stderr_preference in ["write", "both"]:
-                results_dir_path = Path(results_dir)
-                results_dir_path.mkdir(parents=True, exist_ok=True)
-                stderr_filename = (
-                    f"{class_name}.stderr.log" if class_name else "stderr.log"
-                )
-                with open(
-                    results_dir_path.joinpath(stderr_filename),
-                    "w",
-                    encoding="utf-8",
-                    errors="replace",
-                ) as stderr_file:
-                    stderr_file.write(result.stderr)
-
-            if stderr_preference in ["return", "both"]:
-                response["stderr"] = result.stderr
+        for stream_name, preference, text in (
+            ("stdout", stdout_preference, result.stdout),
+            ("stderr", stderr_preference, result.stderr),
+        ):
+            if not text:
+                continue
+            _write_stream_log(results_dir, class_name, stream_name, preference, text)
+            if preference in ["return", "both"]:
+                response[stream_name] = text
 
         return response
 
@@ -368,16 +384,26 @@ def run_command_with_output_handling(
         # caller below and lands in the scanner's stderr, which must stay verbatim.
         ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
         partial = {}
-        for stream_name in ("stdout", "stderr"):
+        for stream_name, preference in (
+            ("stdout", stdout_preference),
+            ("stderr", stderr_preference),
+        ):
             captured = getattr(e, stream_name, None)
             if not captured:
                 continue
             if isinstance(captured, bytes):
                 captured = captured.decode("utf-8", errors="replace")
             partial[stream_name] = captured
+            # Written where a completed run's output goes. What a tool printed
+            # before it was killed is usually the only clue to why it hung, and
+            # returning it was not enough: scanners default to "write", so the
+            # partial stderr reached no file and no log.
+            _write_stream_log(
+                results_dir, class_name, stream_name, preference, captured
+            )
         return {
             "error": error_msg,
-            "returncode": 124,
+            "returncode": TIMEOUT_RETURNCODE,
             "timed_out": True,
             "stderr": f"{partial.get('stderr', '')}\n{error_msg}".strip(),
             **{k: v for k, v in partial.items() if k == "stdout"},

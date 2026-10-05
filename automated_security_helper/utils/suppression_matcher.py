@@ -14,6 +14,7 @@ from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.utils.path_matching import _recursive_glob_match
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 # Regex patterns for inline suppression comments.
 # Supported formats (hash-style for Python/Ruby/YAML/Shell):
@@ -46,13 +47,15 @@ class InlineSuppression:
 
 
 def matches_suppression(
-    finding: FlatVulnerability, suppression: AshSuppression
+    finding: FlatVulnerability,
+    suppression: AshSuppression,
+    symbol_resolver: Optional[SymbolResolver] = None,
 ) -> bool:
     """Thin wrapper around ``AshSuppression.matches`` kept for backward compatibility.
 
     Prefer ``suppression.matches(finding)`` in new code.
     """
-    return suppression.matches(finding)
+    return suppression.matches(finding, symbol_resolver)
 
 
 def _rule_id_matches(finding_rule_id: Optional[str], suppression_rule_id: str) -> bool:
@@ -160,7 +163,9 @@ def _line_range_matches(
 
 
 def should_suppress_finding(
-    finding: FlatVulnerability, suppressions: List[AshSuppression]
+    finding: FlatVulnerability,
+    suppressions: List[AshSuppression],
+    symbol_resolver: Optional[SymbolResolver] = None,
 ) -> Tuple[bool, Optional[AshSuppression]]:
     """
     Determine if a finding should be suppressed based on the suppression rules.
@@ -168,6 +173,8 @@ def should_suppress_finding(
     Args:
         finding: The finding to check
         suppressions: List of suppression rules to check against
+        symbol_resolver: Resolves ``symbol`` on a suppression to source spans.
+            Without it, a suppression that sets ``symbol`` matches nothing.
 
     Returns:
         A tuple of (should_suppress, matching_suppression)
@@ -190,7 +197,7 @@ def should_suppress_finding(
                 )
                 continue
 
-        if matches_suppression(finding, suppression):
+        if matches_suppression(finding, suppression, symbol_resolver):
             return True, suppression
 
     return False, None

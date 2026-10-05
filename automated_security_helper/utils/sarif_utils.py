@@ -29,9 +29,13 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
-from automated_security_helper.utils.package_identity import extract_package_identity
+from automated_security_helper.utils.package_identity import (
+    extract_package_identity,
+    extract_root_advisories,
+)
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
+from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_matcher import file_path_matches
 
 
@@ -520,13 +524,14 @@ def _apply_config_suppression(
     suppressions: list,
     flat_finding: "FlatVulnerability",
     used_suppressions: set | None,
+    symbol_resolver: SymbolResolver | None = None,
 ) -> bool:
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
     """
     should_suppress, matching_suppression = should_suppress_finding(
-        flat_finding, suppressions
+        flat_finding, suppressions, symbol_resolver
     )
     if not should_suppress:
         return False
@@ -601,6 +606,90 @@ def _apply_inline_suppression(
     return False
 
 
+def _suppress_transitive_of_suppressed_roots(
+    sarif_report: SarifReport, normalize
+) -> None:
+    """Suppress a transitive finding when every root finding it stems from is.
+
+    npm-audit reports an advisory on the vulnerable package and then once more
+    on each package whose dependency chain reaches it, as an
+    ``npm-audit-transitive-<package>`` result with no advisory id. Those results
+    list the direct findings they stem from under ``root_advisories``. Without
+    this pass a suppression on the advisory left every one of them failing the
+    scan, so each needed its own entry.
+
+    A root reference is satisfied only by a result in this report with the same
+    rule id and the same ``package_path`` (the URI when the reference has no
+    path) that is itself suppressed. A reference with no such result -- the
+    root was dropped by an ignore path, or reported by nothing -- or one whose
+    result is not suppressed leaves the transitive finding visible. Rule ids are
+    not changed, so existing suppressions on transitive findings keep matching.
+
+    ``normalize`` maps a URI or package path to the scan-root-relative form the
+    config pass compares, as ``(value, is_location)``.
+    """
+    by_path: dict[tuple[str, str], list[Result]] = {}
+    by_uri: dict[tuple[str, str], list[Result]] = {}
+    transitive: list[Result] = []
+    for run in sarif_report.runs:
+        for result in run.results or []:
+            if not result.ruleId:
+                continue
+            if extract_root_advisories(result.properties):
+                transitive.append(result)
+            _, _, package_path = extract_package_identity(result.properties)
+            if package_path:
+                key = (result.ruleId, normalize(package_path, False))
+                by_path.setdefault(key, []).append(result)
+            for location in result.locations or []:
+                if not (
+                    location.physicalLocation
+                    and location.physicalLocation.root.artifactLocation
+                    and location.physicalLocation.root.artifactLocation.uri
+                ):
+                    continue
+                uri = location.physicalLocation.root.artifactLocation.uri
+                by_uri.setdefault((result.ruleId, normalize(uri, True)), []).append(
+                    result
+                )
+
+    for result in transitive:
+        if result.suppressions:
+            continue
+        refs = extract_root_advisories(result.properties)
+        described = []
+        for ref in refs:
+            if not ref:
+                break
+            if "package_path" in ref:
+                key = (ref["rule_id"], normalize(ref["package_path"], False))
+                matches = by_path.get(key, [])
+                where = ref["package_path"]
+            else:
+                key = (ref["rule_id"], normalize(ref["uri"], True))
+                matches = by_uri.get(key, [])
+                where = ref["uri"]
+            if not matches or not all(m.suppressions for m in matches):
+                break
+            described.append(f"{ref['rule_id']} at {where}")
+        else:
+            roots = ", ".join(described)
+            ASH_LOGGER.verbose(
+                f"Suppressing rule '{escape_markup(result.ruleId)}': every root "
+                f"advisory is suppressed ({escape_markup(roots)})",
+                extra=NO_MARKUP,
+            )
+            result.suppressions = [
+                Suppression(
+                    kind=Kind1.inSource,
+                    justification=(
+                        f"(ASH) Suppressed because every root advisory is "
+                        f"suppressed: {roots}"
+                    ),
+                )
+            ]
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
@@ -663,6 +752,15 @@ def apply_suppressions_to_sarif(
             _source_dir_basename = PurePosixPath(_source_dir_basename_str)
 
     _inline_suppression_cache: dict[str, list] = {}
+
+    # Built only when an entry sets `symbol`, so a config without one never
+    # touches tree-sitter. The resolver parses a file only when every other
+    # field of a symbol-scoped entry already matches a finding in it.
+    _symbol_resolver: SymbolResolver | None = (
+        SymbolResolver(plugin_context.source_dir)
+        if any(getattr(s, "symbol", None) for s in suppressions)
+        else None
+    )
 
     # Whether the output directory contains the source directory, in which case the
     # output-path exclusion below is not applied at all.
@@ -857,7 +955,11 @@ def apply_suppressions_to_sarif(
 
                 if flat_finding:
                     config_suppressed = _apply_config_suppression(
-                        result, suppressions, flat_finding, used_suppressions
+                        result,
+                        suppressions,
+                        flat_finding,
+                        used_suppressions,
+                        _symbol_resolver,
                     )
                     if config_suppressed and len(result.suppressions or []) >= 1:
                         updated_results.append(result)
@@ -905,6 +1007,18 @@ def apply_suppressions_to_sarif(
             updated_results.append(result)
 
         run.results = updated_results
+
+    if not ignore_suppressions:
+        _suppress_transitive_of_suppressed_roots(
+            sarif_report,
+            lambda value, is_location: _normalize_sarif_uri(
+                value,
+                _source_dir_prefix,
+                _source_dir_prefix_with_slash,
+                _source_dir_prefix_no_drive,
+                _source_dir_basename if is_location else None,
+            ),
+        )
 
     # Reported after every run, and only when something was removed.
     #
