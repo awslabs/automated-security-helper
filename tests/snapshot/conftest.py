@@ -19,11 +19,18 @@ apply the one shared :class:`SnapshotNormalizer`; never normalize inside a test.
 
 from __future__ import annotations
 
+import logging
 import os
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
+import rich
+import rich.console
+from rich._log_render import LogRender
+from rich.text import Text
 from syrupy.assertion import SnapshotAssertion
 
 from tests.snapshot.support.extensions import (
@@ -81,6 +88,148 @@ def _pinned_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
     for name, value in pinned_terminal_env().items():
         monkeypatch.setenv(name, value)
+    # rich.print() renders through one process-wide Console, created on first use and
+    # keeping the width it saw then. Another test in the same worker can create it
+    # under a different COLUMNS, so it is discarded and rebuilt under the pinned env.
+    monkeypatch.setattr(rich, "_console", None)
+    # The same for the Consoles ASH modules build at import time (cli/dependencies.py
+    # has one). A Console that read COLUMNS when it was constructed keeps that width,
+    # and the import happened at collection, under the developer's shell. Clearing the
+    # stored size makes it read the pinned COLUMNS when it renders.
+    for console in _module_level_consoles():
+        monkeypatch.setattr(console, "_width", None)
+        monkeypatch.setattr(console, "_height", None)
+    # On Windows, a console whose stream is not a real console counts as "legacy
+    # Windows", and rich then subtracts one from COLUMNS: every rich.print line would
+    # wrap at 99 there and 100 everywhere else. The streams under test are capture
+    # buffers on every OS, so the legacy renderer never runs; only the width differs.
+    monkeypatch.setattr(rich.console, "detect_legacy_windows", lambda: False)
+    # ASH's log handler builds its Console with an empty environment, so COLUMNS does
+    # not reach it and its width is whatever os.get_terminal_size reports: a
+    # developer's terminal under `-n 0 -s`, rich's fallback of 80 under xdist. Log
+    # lines carry absolute paths (the scanned directory, report locations), and rich
+    # folds a long path wherever the column ends, so at any realistic width the fold
+    # point depends on how long the machine's temp dir is, and a folded path cannot be
+    # masked. The log console is therefore given a width no log line reaches, which
+    # leaves every path whole. rich.print and typer's error boxes read COLUMNS, which
+    # takes precedence over this, so they stay at the pinned 100.
+    monkeypatch.setattr(os, "get_terminal_size", _wide_log_terminal)
+    # rich's log handler prints the wall-clock time on a line, then leaves the column
+    # blank on every following line until the second changes. Whether a slow line
+    # shows a new time is a race with the clock, so the time column renders one
+    # constant token: the first line of each handler shows it, and no later one does.
+    monkeypatch.setattr(LogRender, "__call__", _log_render_without_clock)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_ash_loggers() -> Iterator[None]:
+    """Give every snapshot the logging state of a freshly started ``ash`` process.
+
+    ``get_logger`` attaches a handler to the ``ash`` logger (and to named children
+    such as ``ash.cli.config.lint``) that lives for the rest of the process, at the
+    level the command that called it chose. A command that logs before it calls
+    ``get_logger`` itself would otherwise print through whichever handler, at
+    whichever level, the previous test in the same xdist worker left behind -- so
+    its snapshot would depend on test order. A fresh process has no handler on
+    ``ash`` (propagation is off), so such a record goes to logging's last-resort
+    handler: stderr, WARNING and above, message text only. That is restored here,
+    and the previous state is put back afterwards for the rest of the suite.
+    """
+    saved = []
+    for logger in _ash_loggers():
+        saved.append((logger, logger.handlers, logger.level, logger.propagate))
+        logger.handlers = []
+        logger.setLevel(logging.NOTSET)
+        # Only the root of ASH's hierarchy has propagation off at import time.
+        logger.propagate = logger.name != "ash"
+    try:
+        yield
+    finally:
+        for logger in _ash_loggers():
+            # Handlers the test's command attached, typically a file handler on a log
+            # in tmp_path. Closed so Windows can delete the temp dir. pytest's own
+            # capture handlers are attached for this teardown phase and are left to
+            # pytest.
+            ours = [h for h in logger.handlers if not _is_pytest_handler(h)]
+            for handler in ours:
+                handler.close()
+            logger.handlers = [h for h in logger.handlers if _is_pytest_handler(h)]
+        for logger, handlers, level, propagate in saved:
+            logger.handlers = handlers
+            logger.setLevel(level)
+            logger.propagate = propagate
+
+
+@pytest.hookimpl(wrapper=True, trylast=True)
+def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
+    """Run the test body with no logging handler that a real ``ash`` would not have.
+
+    pytest's logging plugin attaches its capture handlers to the root logger, and to
+    the non-propagating ``ash`` logger, when the call phase starts -- after every
+    fixture, so :func:`_fresh_ash_loggers` cannot see them. Left in place they take
+    the records a real process prints through logging's last-resort handler
+    (stderr, WARNING and above): ASH logging before it has configured its own
+    handler, and every module logger that propagates to the root. Those lines are
+    part of what an operator sees, so they are detached for the test body and put
+    back before the logging plugin's own teardown removes them. ``trylast`` makes
+    this wrapper the innermost, so it runs after the plugin attached them.
+    """
+    detached = []
+    for logger in (logging.getLogger(), *_ash_loggers()):
+        if logger.handlers:
+            detached.append((logger, logger.handlers))
+            logger.handlers = []
+    try:
+        return (yield)
+    finally:
+        for logger, handlers in detached:
+            # The test may have configured its own handlers on the same logger;
+            # _fresh_ash_loggers closes those afterwards.
+            logger.handlers = [*handlers, *logger.handlers]
+
+
+def _is_pytest_handler(handler: logging.Handler) -> bool:
+    return type(handler).__module__.startswith("_pytest")
+
+
+def _ash_loggers() -> list[logging.Logger]:
+    names = [
+        name
+        for name in logging.root.manager.loggerDict
+        if name == "ash" or name.startswith("ash.")
+    ]
+    return [
+        logger
+        for logger in (logging.getLogger(name) for name in names)
+        if isinstance(logger, logging.Logger)
+    ]
+
+
+def _module_level_consoles() -> list[rich.console.Console]:
+    """Every rich Console held at module scope by an imported ASH module."""
+    found: dict[int, rich.console.Console] = {}
+    for name, module in list(sys.modules.items()):
+        if module is None or not name.startswith("automated_security_helper"):
+            continue
+        for value in list(vars(module).values()):
+            if isinstance(value, rich.console.Console):
+                found[id(value)] = value
+    return list(found.values())
+
+
+_LOG_CONSOLE_COLUMNS = 1000
+
+
+def _wide_log_terminal(*_args: object) -> os.terminal_size:
+    return os.terminal_size((_LOG_CONSOLE_COLUMNS, 50))
+
+
+_real_log_render = LogRender.__call__
+
+
+def _log_render_without_clock(self: LogRender, *args: Any, **kwargs: Any) -> Any:
+    kwargs["time_format"] = lambda _when: Text("[<LOG_TIME>]")
+    return _real_log_render(self, *args, **kwargs)
 
 
 @pytest.fixture

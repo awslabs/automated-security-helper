@@ -173,3 +173,86 @@ class TestSurvives:
             "finding_count": 7,
             "line": 12,
         }
+
+
+class TestMaskedForErrorOutput:
+    """Rules added for CLI error output, each paired with what must survive it."""
+
+    def test_rich_traceback_panel(self, normalizer):
+        text = (
+            "ERROR    boom\n"
+            "         ╭──── Traceback (most recent call last) ────╮\n"
+            "         │ /src/run_ash_scan.py:1792 in _run_local_mode │\n"
+            "         │ ❱ 1792 │ orchestrator = create(            │\n"
+            "         ╰───────────────────────────────────────────╯\n"
+            "         RuntimeError: boom\n"
+            "ERROR (1) Exiting due to exception during ASH scan: boom\n"
+        )
+        assert normalizer.text(text) == (
+            "ERROR    boom\n"
+            "         <TRACEBACK>\n"
+            "         RuntimeError: boom\n"
+            "ERROR (1) Exiting due to exception during ASH scan: boom\n"
+        )
+
+    def test_rich_traceback_panel_with_safe_box(self, normalizer):
+        text = (
+            "┌── Traceback (most recent call last) ──┐\n"
+            "│ C:\\src\\app.py:3 in main              │\n"
+            "└───────────────────────────────────────┘\n"
+            "ValueError: bad\n"
+        )
+        assert normalizer.text(text) == "<TRACEBACK>\nValueError: bad\n"
+
+    def test_plain_traceback(self, normalizer):
+        text = (
+            "ash: fatal error: RuntimeError: boom\n"
+            "Traceback (most recent call last):\n"
+            '  File "/src/automated_security_helper/cli/main.py", line 12, in run\n'
+            "    app()\n"
+            "    ~~~^^\n"
+            "RuntimeError: boom\n"
+        )
+        assert normalizer.text(text) == (
+            "ash: fatal error: RuntimeError: boom\n<TRACEBACK>\nRuntimeError: boom\n"
+        )
+
+    def test_pydantic_error_url_version(self, normalizer):
+        text = (
+            "For further information visit https://errors.pydantic.dev/2.13/v/bool_type"
+        )
+        assert normalizer.text(text) == (
+            "For further information visit "
+            "https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type"
+        )
+
+    def test_root_followed_by_a_sentence_period(self):
+        n = SnapshotNormalizer()
+        n.add_root(Path("/work/run-1"), "TMP")
+        assert n.text("No ignore files under /work/run-1.") == (
+            "No ignore files under <TMP>."
+        )
+
+
+class TestSurvivesErrorOutputRules:
+    def test_a_root_inside_a_longer_path(self):
+        n = SnapshotNormalizer()
+        n.add_root(Path("/tmp"), "SYSTEM_TMP")
+        text = "under /home/u/jobs/tmp/run and /tmpfoo/x"
+        assert n.text(text) == text
+
+    def test_the_word_traceback_in_a_message(self, normalizer):
+        text = "Traceback (most recent call last) is not printed for usage errors.\n"
+        assert normalizer.text(text) == text
+
+    def test_box_that_is_not_a_traceback(self, normalizer):
+        text = (
+            "╭─ Error ──────────────────────╮\n"
+            "│ Invalid value: 'pdf'         │\n"
+            "╰──────────────────────────────╯\n"
+        )
+        assert normalizer.text(text) == text
+
+    def test_other_urls_keep_their_versions(self, normalizer):
+        text = "see https://docs.pydantic.dev/2.13/concepts/ and v2.13"
+        assert normalizer.text(text) == text

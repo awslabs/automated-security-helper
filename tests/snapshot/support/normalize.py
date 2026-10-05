@@ -27,6 +27,13 @@ What is masked, and why each is safe to mask
   OCSF's ``"time": 1791220796403`` epoch milliseconds. Structured data already masks these
   by key; this is the same rule for JSON a command printed rather than returned.
 - UUIDs, the ASH version, the Python version and the hostname.
+- The pydantic minor version in its ``errors.pydantic.dev/<version>/`` help links, which
+  a dependency bump changes in every config-error message.
+- The frames of a traceback, rich's panel or CPython's plain one, as ``<TRACEBACK>``.
+  Frames quote paths, line numbers and source lines from every file the exception
+  passed through, so they move with unrelated edits. The fact that a traceback was
+  shown, and the ``ExcType: message`` line after it, are kept: a message that turns
+  into a traceback, or back, still shows up as a diff.
 - Trailing whitespace on each line, which rich pads tables with.
 - The padding in front of a rich panel's right border, on a line where a mask
   changed the text's length. rich pads ``│ [default: /home/me/.ash/bin]   │`` to the
@@ -35,6 +42,9 @@ What is masked, and why each is safe to mask
   its rendered width. Only Unicode box verticals count as a border; a markdown
   ``|`` table is left alone. A masked value long enough to wrap onto another line
   on one machine and not another is not handled; snapshot at a width that fits it.
+
+A path root is masked only where it starts a path and ends at a component boundary,
+so the system temp dir ``/tmp`` does not mask the middle of ``/home/u/tmp/x``.
 
 What is deliberately NOT masked: counts, severities, rule ids, messages, relative
 paths, ordering, column layout, box-drawing characters and emoji. Those are what a
@@ -145,6 +155,33 @@ _VOLATILE_JSON_NUMBER = re.compile(
     + r')"(\s*:\s*)-?\d+(?:\.\d+)?\b'
 )
 
+# A rich traceback panel, which ASH's log handler draws for logger.exception(). Its
+# frames quote file paths, line numbers and source lines from wherever the exception
+# passed, so any edit to those files would move the snapshot. The corners are rounded
+# by default and square where rich's safe_box is on (ASH turns it on for Windows).
+_RICH_TRACEBACK = re.compile(
+    r"^([ \t]*)[╭┌]─+ Traceback \(most recent call last\) ─+[╮┐]\n"
+    r"(?:.*\n)*?"
+    r"\1[╰└]─+[╯┘]$",
+    re.MULTILINE,
+)
+
+# CPython's own traceback: the header, then indented "File ..." and source lines. The
+# closing "ExcType: message" line is not indented, so it is not consumed.
+_PLAIN_TRACEBACK = re.compile(
+    r"^([ \t]*)Traceback \(most recent call last\):\n(?:\1[ \t]+.*\n)+",
+    re.MULTILINE,
+)
+
+# pydantic links each validation error to a page under its own minor version, so a
+# dependency bump would otherwise change every config-error snapshot.
+_PYDANTIC_ERROR_URL = re.compile(r"(https://errors\.pydantic\.dev/)[0-9][\w.]*/")
+
+# A root only masks a whole path component sequence: "/tmp" must not match inside
+# "/home/u/tmp/x" or at the start of "/tmpfoo".
+_ROOT_BEFORE = r"(?<![\w.\-/\\])"
+_ROOT_AFTER = r"(?![\w\-]|\.\w)"
+
 
 def _path_spellings(path: PurePath) -> list[str]:
     """Every way ASH might print ``path``: native, POSIX, JSON-escaped and as a URI."""
@@ -189,20 +226,35 @@ class SnapshotNormalizer:
 
     # ------------------------------------------------------------------ text --
 
-    def _replacements(self) -> list[tuple[str, str]]:
-        pairs: list[tuple[str, str]] = []
+    def _replacements(self) -> list[tuple[str, str, bool]]:
+        """(spelling, token, is_path) triples, longest spelling first."""
+        triples: list[tuple[str, str, bool]] = []
         for path, token in self.roots:
-            pairs.extend((spelling, token) for spelling in _path_spellings(path))
-        pairs.extend(self.extra_literals.items())
+            triples.extend(
+                (spelling, token, True) for spelling in _path_spellings(path)
+            )
+        triples.extend(
+            (literal, token, False) for literal, token in self.extra_literals.items()
+        )
         # Longest first, so a tmp dir inside the repo masks as <TMP>, not <REPO>/...
-        return sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)
+        return sorted(triples, key=lambda triple: len(triple[0]), reverse=True)
 
     def text(self, value: str) -> str:
         out = value.replace("\r\n", "\n").replace("\r", "\n")
         out = _ANSI.sub("", out)
+        out = _RICH_TRACEBACK.sub(r"\1<TRACEBACK>", out)
+        out = _PLAIN_TRACEBACK.sub(r"\1<TRACEBACK>\n", out)
         rendered = out
-        for literal, token in self._replacements():
-            out = out.replace(literal, token)
+        for spelling, token, is_path in self._replacements():
+            if is_path:
+                out = re.sub(
+                    _ROOT_BEFORE + re.escape(spelling) + _ROOT_AFTER,
+                    lambda _m, token=token: token,
+                    out,
+                )
+            else:
+                out = out.replace(spelling, token)
+        out = _PYDANTIC_ERROR_URL.sub(r"\1<PYDANTIC_VERSION>/", out)
         tokens = sorted({token for _, token in self.roots}, key=len, reverse=True)
         if tokens:
             # Separators after a token: <TMP>\a\b and <TMP>\\a\\b (JSON) both become <TMP>/a/b.
