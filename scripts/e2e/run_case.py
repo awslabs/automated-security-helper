@@ -11,8 +11,11 @@ that has to be identical across them:
 1. copies the case's fixture into <work>/<case>/src, so the scan never writes into the
    checkout and never sees the repository's own .ash configuration;
 2. runs `<cli> scan --source-dir <src> --output-dir <work>/<case>/out --no-progress
-   --scanners <the case's scanners> [extra args]` with the case's environment applied
-   on top of this process's environment;
+   --scanners <the case's scanners> <the case's args> [extra args]` with the case's
+   environment applied on top of this process's environment. The case's args are part
+   of the case: the incomplete case needs `--config-overrides
+   scanners.opengrep.enabled=true` because opengrep is disabled by default on Windows,
+   and a disabled scanner is SKIPPED instead of MISSING;
 3. hands the exit code and output directory to assert_outcome.check_outcome.
 
 It exits 0 when the outcome matches, 1 when it does not, and 3 on a usage error.
@@ -89,6 +92,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     out = root / "out"
     shutil.copytree(args.fixtures / case["source"], src)
 
+    case_args = case.get("args") or []
+    if not isinstance(case_args, list) or not all(
+        isinstance(a, str) for a in case_args
+    ):
+        print(
+            f"error: [{label}] the case's args must be a list of strings, not {case_args!r}",
+            file=sys.stderr,
+        )
+        return 3
+
     env = dict(os.environ)
     env.update({str(k): str(v) for k, v in (case.get("env") or {}).items()})
     command = [
@@ -101,6 +114,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--no-progress",
         "--scanners",
         ",".join(case["scanners"]),
+        *case_args,
         *args.extra,
     ]
     log = root / "scan.log"

@@ -21,12 +21,13 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "e2e" / "assert_outcome.py"
+RUN_CASE = REPO_ROOT / "scripts" / "e2e" / "run_case.py"
 CASES = REPO_ROOT / "tests" / "e2e" / "fixtures" / "cases.json"
 
 
-def _load():
-    spec = importlib.util.spec_from_file_location("ash_e2e_assert_outcome", SCRIPT)
-    assert spec is not None and spec.loader is not None, SCRIPT
+def _load(path=SCRIPT, name="ash_e2e_assert_outcome"):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None, path
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -136,6 +137,8 @@ def test_every_case_is_well_formed(name):
     source = CASES.parent / case["source"]
     assert source.is_dir() and any(source.iterdir()), source
     assert isinstance(case.get("env"), dict)
+    assert isinstance(case.get("args"), list)
+    assert all(isinstance(a, str) for a in case["args"])
 
 
 def test_the_cases_cover_all_three_exit_codes():
@@ -149,6 +152,55 @@ def test_incomplete_trigger_blanks_the_rule_cache():
     # populated cache cannot turn the trigger off.
     env = ao.load_case(CASES, "incomplete")["env"]
     assert env == {"ASH_OFFLINE": "YES", "OPENGREP_RULES_CACHE_DIR": ""}
+
+
+def test_incomplete_trigger_turns_opengrep_on():
+    # opengrep's config is disabled by default on Windows
+    # (OpengrepScannerConfig.enabled), and a config-disabled scanner is recorded
+    # SKIPPED even when --scanners names it, so without this override the windows
+    # legs exit 2 instead of 1. See the Windows rows in tests/e2e/README.md.
+    args = ao.load_case(CASES, "incomplete")["args"]
+    assert args == ["--config-overrides", "scanners.opengrep.enabled=true"]
+
+
+def test_run_case_passes_the_case_args_to_the_scan(tmp_path, monkeypatch):
+    # Every channel that runs a case through run_case.py gets the case's args, ahead of
+    # any extra arguments the caller adds.
+    run_case = _load(RUN_CASE, "ash_e2e_run_case")
+    cli = tmp_path / "fake-ashx"
+    cli.write_text("", encoding="utf-8")
+    seen = []
+
+    class _Done:
+        returncode = 1
+
+    def fake_run(command, **kwargs):
+        seen.append(list(command))
+        return _Done()
+
+    monkeypatch.setattr(run_case.subprocess, "run", fake_run)
+    rc = run_case.main(
+        [
+            "--cli",
+            str(cli),
+            "--case",
+            "incomplete",
+            "--work",
+            str(tmp_path / "work"),
+            "--",
+            "--extra-flag",
+        ]
+    )
+    assert rc == 1  # the fake scan wrote no reports
+    assert len(seen) == 1
+    command = seen[0]
+    scanners_at = command.index("--scanners")
+    assert command[scanners_at + 1] == "detect-secrets,opengrep"
+    assert command[scanners_at + 2 :] == [
+        "--config-overrides",
+        "scanners.opengrep.enabled=true",
+        "--extra-flag",
+    ]
 
 
 def test_findings_fixture_plants_the_published_example_key():

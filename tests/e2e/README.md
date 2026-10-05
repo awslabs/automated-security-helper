@@ -10,17 +10,18 @@ the verdict is `scripts/e2e/assert_outcome.py`.
 scratch directory and runs:
 
 ```
-ashx scan --source-dir <copy> --output-dir <scratch> --no-progress --scanners <scanners>
+ashx scan --source-dir <copy> --output-dir <scratch> --no-progress --scanners <scanners> <args>
 ```
 
 with the case's `env` applied. `scripts/e2e/run_case.py` does this for any channel that
-ends in a local executable.
+ends in a local executable, and appends the case's `args` for it. A channel that builds
+its own command line has to append them as well.
 
-| case | source | scanners | env | exit | findings |
-|---|---|---|---|---|---|
-| findings | findings/ | detect-secrets | none | 2 | exactly 3, from detect-secrets |
-| clean | clean/ | detect-secrets | none | 0 | 0 |
-| incomplete | findings/ | detect-secrets, opengrep | `ASH_OFFLINE=YES`, `OPENGREP_RULES_CACHE_DIR=` (empty) | 1 | 3, and opengrep MISSING |
+| case | source | scanners | args | env | exit | findings |
+|---|---|---|---|---|---|---|
+| findings | findings/ | detect-secrets | none | none | 2 | exactly 3, from detect-secrets |
+| clean | clean/ | detect-secrets | none | none | 0 | 0 |
+| incomplete | findings/ | detect-secrets, opengrep | `--config-overrides scanners.opengrep.enabled=true` | `ASH_OFFLINE=YES`, `OPENGREP_RULES_CACHE_DIR=` (empty) | 1 | 3, and opengrep MISSING |
 
 `findings/leak.py` plants AWS's published example secret access key, which is
 non-functional by construction. detect-secrets reports three rules on it:
@@ -66,10 +67,21 @@ statuses.
 | T1 online | image | detect-secrets,opengrep | none | 2 | opengrep PASSED |
 | T2 | image | detect-secrets,cfn-nag | none | 2 | cfn-nag SKIPPED (no templates to scan) |
 | T3 | image | detect-secrets,opengrep, with `.ash/.ash.yaml` setting opengrep `config: /nonexistent/ruleset.yml` | none | 2 | opengrep PASSED; the bad config did not produce an ERROR |
+| T1 | venv, Windows simulated | detect-secrets,opengrep | ASH_OFFLINE=YES, cache empty | 2 | opengrep SKIPPED, "scanner config disabled" |
+| T1 + override | venv, Windows simulated | detect-secrets,opengrep, `--config-overrides scanners.opengrep.enabled=true` | ASH_OFFLINE=YES, cache empty | 1 | opengrep MISSING |
+| T1 + override | venv | same | same | 1 | opengrep MISSING, as without the override |
 
-The chosen trigger is T1: `--scanners detect-secrets,opengrep` with `ASH_OFFLINE=YES` and
-`OPENGREP_RULES_CACHE_DIR` set to an empty string. It works the same way everywhere.
-Offline opengrep reads its rules only from the directory that variable names
+"Windows simulated" means the same Linux venv, with `platform.system()` patched to return
+`Windows` while the opengrep scanner module was imported and restored before the scan
+ran. That patch targets the platform default that decides this outcome:
+`OpengrepScannerConfig.enabled` defaults to `platform.system().lower() != "windows"`, and
+a scanner whose config is disabled is recorded SKIPPED even when `--scanners` names it,
+so it never reaches the rule-cache check. On Windows the bare trigger exits 2.
+
+The chosen trigger is T1 with the override: `--scanners detect-secrets,opengrep
+--config-overrides scanners.opengrep.enabled=true`, with `ASH_OFFLINE=YES` and
+`OPENGREP_RULES_CACHE_DIR` set to an empty string. The override turns opengrep on where
+its default is off and changes nothing where it is already on. Offline opengrep reads its rules only from the directory that variable names
 (`_grep_scanner_base.py`). An empty value fails closed and marks the scanner MISSING
 before anything runs. That holds whether or not the opengrep binary is installed, and
 with or without network. The control row shows that the cache is the cause: point the
@@ -84,7 +96,9 @@ Rejected:
   reachable, and it is SKIPPED in the image when the tree has no templates.
 - T3 (a nonexistent opengrep config). It did not produce an ERROR.
 
-Not measured locally: macOS and Windows bare venvs. The `wheel` job in ash-e2e.yml runs
-the incomplete case on ubuntu-latest, macos-latest and windows-latest, so its first run
-is that measurement. The trigger does not depend on the platform. It depends on an
-environment variable that ASH reads the same way everywhere.
+Not measured locally: macOS and real Windows bare venvs. The `wheel` job in ash-e2e.yml
+runs the incomplete case on ubuntu-latest, macos-latest and windows-latest, so its first
+run is that measurement. With the override, the trigger rests on an environment variable
+that ASH reads the same way everywhere and on a config value the case sets explicitly.
+The simulation covers the platform default that is known to differ. It does not cover
+anything else Windows might do differently.
