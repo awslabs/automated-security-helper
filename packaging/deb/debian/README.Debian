@@ -1,11 +1,11 @@
-ash for Debian and Ubuntu
+@ASH_PKG@ for Debian and Ubuntu
 =========================
 
 Why this package needs a Python index at install time
 -----------------------------------------------------
 
 The package bundles ASH's own wheel and nothing else. Its post-install step creates
-a virtualenv under /usr/lib/ash/venv and installs that wheel into it, which resolves
+a virtualenv under /usr/lib/@ASH_PKG@/venv and installs that wheel into it, which resolves
 ASH's 27 runtime dependencies from whatever Python index the host is configured for.
 Those dependency versions are resolved at install time within the ranges the wheel
 declares, so they float between installs and are not hash-checked.
@@ -13,7 +13,7 @@ declares, so they float between installs and are not hash-checked.
 This is not an oversight. ASH's own code may ship in a package published by the
 project; third-party code may not. Carrying exactly one wheel is the guard that
 keeps this package on the right side of that line, because it can be checked by
-counting the files under /usr/lib/ash/wheels/ rather than by judging each
+counting the files under /usr/lib/@ASH_PKG@/wheels/ rather than by judging each
 dependency one at a time.
 
 Building a self-contained offline package for your own hosts is fine, and the
@@ -22,7 +22,7 @@ publishes, not about what the bytes are allowed to do.
 
 On a host with no reachable index, stage one before installing. Resolve the
 dependencies from ASH's own wheel -- the release asset, or the copy this package
-installs under /usr/lib/ash/wheels/ -- on a machine that can reach an index. Do NOT
+installs under /usr/lib/@ASH_PKG@/wheels/ -- on a machine that can reach an index. Do NOT
 run `pip download automated-security-helper`: that name on PyPI belongs to an
 unrelated third party, not to this project.
 
@@ -48,22 +48,22 @@ Scanners are not installed by this package
 
 ASH drives third-party scanners; it does not contain them. After installing:
 
-  ash dependencies install              # everything ASH can provision
-  ash dependencies install --tool grype # or one at a time
+  @ASH_CLI@ dependencies install              # everything ASH can provision
+  @ASH_CLI@ dependencies install --tool grype # or one at a time
 
 Files
 -----
 
-  /usr/lib/ash/wheels/   ASH's wheel, the package's only payload
-  /usr/lib/ash/venv      symlink to the live /usr/lib/ash/venv-<id>/, which
+  /usr/lib/@ASH_PKG@/wheels/   ASH's wheel, the package's only payload
+  /usr/lib/@ASH_PKG@/venv      symlink to the live /usr/lib/@ASH_PKG@/venv-<id>/, which
                          postinst creates; prerm removes both on `remove` only
-  /usr/bin/ash           wrapper that execs the venv entry point
-  /usr/share/doc/ash/    this file and the license (copyright)
+  /usr/bin/@ASH_CLI@           wrapper that execs the venv entry point
+  /usr/share/doc/@ASH_PKG@/    this file and the license (copyright)
 
 The venv is built on the target rather than shipped, because a virtualenv records
 absolute paths and the interpreter ABI of the machine that created it. On upgrade,
 postinst builds the new venv in its own venv-<id> directory and only then renames a
-new symlink over /usr/lib/ash/venv, so the command works throughout the upgrade, and
+new symlink over /usr/lib/@ASH_PKG@/venv, so the command works throughout the upgrade, and
 an upgrade that cannot reach an index leaves the previous version working. Re-run
 the step once the index is reachable with:
 

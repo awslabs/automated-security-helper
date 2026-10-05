@@ -160,6 +160,11 @@ jobs:
           uv run --no-project python packaging/assert-paths-filter.py \
             --wheel "$(ls "$RUNNER_TEMP"/paths-wheel/*.whl)"
 
+      # Toolchain-free: the name check runs before either build looks for its tool.
+      - name: The deb and rpm builds refuse the same names, and the docs follow them
+        shell: bash
+        run: bash packaging/test-build-names.sh
+
       - name: The findings assertion can reject a scan that found nothing
         run: uv run --no-project python packaging/assert-scan-findings.py --self-test
 

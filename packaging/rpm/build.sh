@@ -20,6 +20,10 @@ REPO_ROOT="$(cd "$SPECDIR/../.." && pwd)"
 . "$SPECDIR/../cli-name.sh"
 : "${ASH_CLI_NAME:?packaging/cli-name.sh did not set ASH_CLI_NAME}"
 : "${ASH_PKG_NAME:?packaging/cli-name.sh did not set ASH_PKG_NAME}"
+# The check packaging/deb/build.sh runs, so the two builds refuse the same names.
+# rpmbuild alone refuses '/', '*' and whitespace in Name but accepts uppercase and
+# '_', which dpkg refuses; the names also reach %postun's rm -rf as path components.
+ash_check_names || exit 1
 
 [ -f "$WHEEL" ] || { echo "error: no such wheel: $WHEEL" >&2; exit 1; }
 command -v rpmbuild >/dev/null || { echo "error: rpmbuild not found" >&2; exit 1; }
@@ -43,7 +47,8 @@ TOP="$(mktemp -d)"
 trap 'rm -rf "$TOP"' EXIT
 mkdir -p "$TOP"/{SOURCES,SPECS,BUILD,BUILDROOT,RPMS,SRPMS}
 cp "$WHEEL" "$TOP/SOURCES/"
-cp "$SPECDIR/README.rpm" "$TOP/SOURCES/"
+# Substituted, because it names the package's paths, which follow ASH_PKG_NAME.
+ash_substitute_names "$SPECDIR/README.rpm" "$TOP/SOURCES/README.rpm"
 cp "$REPO_ROOT/LICENSE" "$TOP/SOURCES/"
 cp "$SPECDIR/ash.spec" "$TOP/SPECS/"
 

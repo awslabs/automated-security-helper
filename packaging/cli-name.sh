@@ -20,7 +20,42 @@
 # from the old name also needs Replaces/Conflicts (deb) and Obsoletes (rpm) for the
 # old name, which these files do not carry yet.
 #
-# Keep each assignment on one line with no quoting: the payload checker reads them
+# Both names must match ASH_NAME_PATTERN below, which is Debian's rule for a package
+# name. Both builds call ash_check_names, and the payload checker applies the same
+# pattern, so the deb build, the rpm build and the checker refuse the same names. rpm
+# alone would accept uppercase and `_`. Each name is also substituted into the
+# maintainer scripts' rm -rf paths, into sed expressions and into file names, so it
+# must be a plain path component; the pattern guarantees that.
+# packaging/test-build-names.sh holds the three consumers to this.
+#
+# Keep each name assignment on one line with no quoting: the payload checker reads them
 # with a regular expression rather than a shell.
 ASH_CLI_NAME=ash
 ASH_PKG_NAME=ash
+
+# An extended regular expression, matched against the whole name.
+ASH_NAME_PATTERN='[a-z0-9][a-z0-9+.-]+'
+
+# Exits non-zero, naming the offender, unless both names match ASH_NAME_PATTERN.
+ash_check_names() {
+  ash_check_one_name ASH_PKG_NAME "${ASH_PKG_NAME-}" &&
+    ash_check_one_name ASH_CLI_NAME "${ASH_CLI_NAME-}"
+}
+
+ash_check_one_name() {
+  if ! printf '%s\n' "$2" | grep -Eqx "$ASH_NAME_PATTERN"; then
+    echo "error: $1 '$2' (packaging/cli-name.sh) is not a valid package or command name: it must match $ASH_NAME_PATTERN, Debian policy 5.6.1." >&2
+    return 1
+  fi
+}
+
+# Copies file $1 to $2 with @ASH_PKG@ and @ASH_CLI@ replaced by the two names, for the
+# docs the packages ship. Fails if a token survives. Call ash_check_names first: the
+# names go into a sed expression unescaped, which the pattern makes safe.
+ash_substitute_names() {
+  sed -e "s/@ASH_PKG@/${ASH_PKG_NAME}/g" -e "s/@ASH_CLI@/${ASH_CLI_NAME}/g" "$1" > "$2" || return 1
+  if grep -q '@ASH_PKG@\|@ASH_CLI@' "$2"; then
+    echo "error: an @ASH_PKG@ or @ASH_CLI@ token survived substitution in $2" >&2
+    return 1
+  fi
+}

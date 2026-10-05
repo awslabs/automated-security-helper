@@ -26,12 +26,10 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 . "$HERE/../cli-name.sh"
 : "${ASH_CLI_NAME:?packaging/cli-name.sh did not set ASH_CLI_NAME}"
 : "${ASH_PKG_NAME:?packaging/cli-name.sh did not set ASH_PKG_NAME}"
-# Debian policy 5.6.1. Checked here because the name is also substituted into the
-# maintainer scripts' rm -rf paths, so it must be a plain path component.
-if ! printf '%s\n' "$ASH_PKG_NAME" | grep -Eqx '[a-z0-9][a-z0-9+.-]+'; then
-  echo "error: ASH_PKG_NAME '$ASH_PKG_NAME' is not a valid Debian package name." >&2
-  exit 1
-fi
+# Debian policy 5.6.1, checked by the same function packaging/rpm/build.sh calls, so
+# the two builds refuse the same names. The names are also substituted into the
+# maintainer scripts' rm -rf paths, so each must be a plain path component.
+ash_check_names || exit 1
 PKG="$ASH_PKG_NAME"
 
 [ -f "$WHEEL" ] || { echo "error: no such wheel: $WHEEL" >&2; exit 1; }
@@ -69,7 +67,9 @@ install -m 0644 "$WHEEL" "$STAGE/usr/lib/$PKG/wheels/"
 
 # postinst's failure message points users here, so the doc has to be in the package.
 # An error message citing a path the package never installed is worse than no message.
-install -m 0644 "$HERE/debian/README.Debian" "$STAGE/usr/share/doc/$PKG/README.Debian"
+# Substituted, because it names the package's paths, which follow ASH_PKG_NAME.
+ash_substitute_names "$HERE/debian/README.Debian" "$STAGE/usr/share/doc/$PKG/README.Debian"
+chmod 0644 "$STAGE/usr/share/doc/$PKG/README.Debian"
 # Debian policy 12.5: every binary package ships its license as
 # /usr/share/doc/<package>/copyright.
 install -m 0644 "$REPO_ROOT/LICENSE" "$STAGE/usr/share/doc/$PKG/copyright"

@@ -69,17 +69,20 @@ is a URL and a sha256, so no dependency source enters the tree. Read
 
 ## Install shape, common to the deb and the rpm
 
-Both packages install the same way, so a bug in one is a bug in the other:
+Both packages install the same way, so a bug in one is a bug in the other. Below,
+`<pkgname>` is `ASH_PKG_NAME` and `<cli>` is `ASH_CLI_NAME`, both set in
+`packaging/cli-name.sh` and both `ash` today. The READMEs the packages ship are
+written with `@ASH_PKG@` and `@ASH_CLI@` and substituted at build time.
 
-- `/usr/lib/ash/wheels/` — ASH's wheel, the only payload.
-- `/usr/lib/ash/venv` — a symlink to `/usr/lib/ash/venv-<id>/`, which the
+- `/usr/lib/<pkgname>/wheels/` — ASH's wheel, the only payload.
+- `/usr/lib/<pkgname>/venv` — a symlink to `/usr/lib/<pkgname>/venv-<id>/`, which the
   post-install step creates; never shipped inside the package. A venv built on the
   build host would carry absolute paths and the build host's interpreter ABI, so it
   cannot be relocated to the target, and for the same reason an upgrade builds the
   new venv in its own directory and swaps the symlink by rename rather than moving a
   venv.
-- `/usr/bin/ash` — a wrapper execing the venv's entry point. A symlink into the venv
-  would work for `ash` but breaks `sys.executable` discovery for the container runner,
+- `/usr/bin/<cli>` — a wrapper execing the venv's entry point. A symlink into the venv
+  would work for the command itself but breaks `sys.executable` discovery for the container runner,
   which shells out to itself.
 
 Removal drops the venv, because `pip` created it after install and no package manager

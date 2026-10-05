@@ -232,14 +232,27 @@ def read_name(variable: str) -> str:
     no dependency beyond the standard library. A missing or unparsable file is an
     error rather than a fallback to a default: a guessed name would pin a path the
     package may not carry.
+
+    The name must match the file's own ASH_NAME_PATTERN, which both builds apply
+    through ash_check_names, so a name the builds refuse is refused here too rather
+    than pinned. The pattern is read from the file, not repeated here.
     """
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli-name.sh")
     with open(path, "r", encoding="utf-8") as handle:
-        for line in handle:
-            match = re.match(rf"^{variable}=([A-Za-z0-9.+_-]+)\s*$", line)
-            if match:
-                return match.group(1)
-    raise ValueError(f"{path} has no `{variable}=<name>` line")
+        text = handle.read()
+    pattern = re.search(r"^ASH_NAME_PATTERN='([^']+)'\s*$", text, re.MULTILINE)
+    if pattern is None:
+        raise ValueError(f"{path} has no `ASH_NAME_PATTERN='<regex>'` line")
+    match = re.search(rf"^{variable}=(.*?)\s*$", text, re.MULTILINE)
+    if match is None:
+        raise ValueError(f"{path} has no `{variable}=<name>` line")
+    name = match.group(1)
+    if re.fullmatch(pattern.group(1), name) is None:
+        raise ValueError(
+            f"{variable} {name!r} (packaging/cli-name.sh) is not a valid package or "
+            f"command name: it must match {pattern.group(1)}, Debian policy 5.6.1."
+        )
+    return name
 
 
 CLI_NAME = read_name("ASH_CLI_NAME")
