@@ -1538,7 +1538,11 @@ members = [ ".",]
 [tool.uv.sources]
 
 [tool.hatch.build.targets.sdist]
-include = [ "automated_security_helper", "Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
+# "/Dockerfile" is anchored to the project root. hatch reads include entries as
+# gitignore patterns, so a bare "Dockerfile" matched every file of that name at any
+# depth and shipped tests/test_data/snapshot_fixture/repo/Dockerfile in the sdist,
+# which .github/scripts/assert-artifact-contents.py refuses (a top-level tests/).
+include = [ "automated_security_helper", "/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
 
 [tool.hatch.build.targets.wheel]
 include = [ "automated_security_helper", "automated_security_helper/assets", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
