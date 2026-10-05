@@ -97,12 +97,18 @@ jobs:
           # `app-id` is deprecated in v3 in favor of `client-id`.
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          # Without these the token carries every permission the installation
-          # has. `gh pr create` needs pull-requests: write. contents: read is
-          # requested so the repository lookups gh makes first cannot 403; on a
-          # public repository it exposes nothing new. If the App was not granted
-          # both, this step fails here, before anything is bumped or pushed.
-          permission-contents: read
+          # Without this the token carries every permission the installation
+          # has. `gh pr create --head <pushed branch>` makes three calls: the
+          # RepositoryInfo and PullRequestForBranch GraphQL queries, then the
+          # createPullRequest mutation. The first reads repository metadata,
+          # which every installation token has; the other two need Pull
+          # requests read and write. GitHub lists `POST /repos/{owner}/{repo}/pulls`
+          # under "Pull requests: write" with no additional permissions
+          # (https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps#repository-permissions-for-pull-requests).
+          # So no contents permission is requested, and the App is not granted
+          # one: asking for a permission the installation lacks fails the mint.
+          # If the App lacks pull-requests: write, this step fails here, before
+          # anything is bumped or pushed.
           permission-pull-requests: write
 
       # Deliberately left on the default GITHUB_TOKEN. Handing the App token to

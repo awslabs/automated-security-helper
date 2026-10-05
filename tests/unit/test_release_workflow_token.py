@@ -209,15 +209,29 @@ def test_the_mint_uses_client_id_not_the_deprecated_app_id(workflow):
 def test_the_app_token_is_scoped_to_what_pr_creation_needs(workflow):
     """Without `permission-*` inputs the token gets every installation permission.
 
-    Contents must stay read-only: the push is GITHUB_TOKEN's job, and Apps with
-    write access to code are not granted on these organizations.
+    `gh pr create` needs Pull requests read and write, plus repository metadata,
+    which every installation token carries without asking.
     """
     inputs = _mint_step(workflow).get("with") or {}
     granted = {k: v for k, v in inputs.items() if k.startswith("permission-")}
     assert granted == {
-        "permission-contents": "read",
         "permission-pull-requests": "write",
     }, f"The App token permissions are not the minimal set: {granted!r}"
+
+
+def test_the_app_token_requests_no_contents_permission(workflow):
+    """The App is registered with no Contents permission at all, not even read.
+
+    create-github-app-token fails the mint when it asks for a permission the
+    installation does not hold, so a `permission-contents` input of any value
+    would break every App-backed release. The push is GITHUB_TOKEN's job, and
+    Apps with access to code are not granted on these organizations.
+    """
+    inputs = _mint_step(workflow).get("with") or {}
+    assert "permission-contents" not in inputs, (
+        "The App token requests a contents permission the App does not have: "
+        f"{inputs.get('permission-contents')!r}"
+    )
 
 
 def test_the_fallback_says_so_on_the_pr(workflow):
