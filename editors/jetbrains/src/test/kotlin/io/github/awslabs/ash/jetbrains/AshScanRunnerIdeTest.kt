@@ -474,9 +474,15 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
 
     fun testAScanThatOutlivesItsDeadlineIsAFailure() {
         val (source, output) = dirs()
-        val script = rawStub("sleep 20; exit 0")
-        val failed = AshScanRunner.run(script.toString(), source, output, timeoutMillis = 500) as AshScanRunner.Outcome.Failed
+        val script = rawStub("exec sleep 20")
+        var outcome: AshScanRunner.Outcome? = null
+        val worker = thread { outcome = AshScanRunner.run(script.toString(), source, output, timeoutMillis = 3_000) }
+        val stubs = StubProcesses.awaitDescendants("sleep")
+        worker.join(20_000)
+
+        val failed = outcome as AshScanRunner.Outcome.Failed
         assertTrue(failed.summary, failed.summary.contains("timed out"))
+        StubProcesses.assertAllExited(stubs)
     }
 
     fun testAnExecutableThatVanishesAfterTheProbeIsReported() {
@@ -607,7 +613,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         // POSIX and 1 on Windows. None of those is ASH's verdict, so none may be reported as one.
         val source = Files.createDirectories(workdir.resolve("project"))
         val started = workdir.resolve("started")
-        val script = rawStub("touch '$started'; sleep 300; exit 0")
+        val script = rawStub("touch '$started'; exec sleep 300")
         val indicator = EmptyProgressIndicator()
         var messages: List<AshScanController.Message>? = null
 
@@ -615,6 +621,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
             messages = AshScanController.scan(project, script.toString(), indicator = indicator, sourceDir = source)
         }
         awaitFile(started)
+        val stubs = StubProcesses.awaitDescendants("sleep")
         indicator.cancel()
         worker.join(20_000)
 
@@ -623,6 +630,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         assertEquals("ASH scan cancelled", message.title)
         assertEquals(NotificationType.WARNING, message.type)
         assertFalse("a cancel is not an exit code: ${message.body}", message.body.contains("exited"))
+        StubProcesses.assertAllExited(stubs)
     }
 
     fun testCancellingDuringTheProbeStopsItAtOnceAndIsReportedAsCancelled() {
@@ -630,12 +638,13 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         // Cancel for all of it and then report the executable as not ASH, which it is.
         val (source, output) = dirs()
         val started = workdir.resolve("started")
-        val script = rawStub("exit 0", versionBody = "touch '$started'; sleep 300")
+        val script = rawStub("exit 0", versionBody = "touch '$started'; exec sleep 300")
         val indicator = EmptyProgressIndicator()
         var outcome: AshScanRunner.Outcome? = null
 
         val worker = thread { outcome = AshScanRunner.run(script.toString(), source, output, indicator) }
         awaitFile(started)
+        val stubs = StubProcesses.awaitDescendants("sleep")
         val cancelledAt = System.nanoTime()
         indicator.cancel()
         worker.join(20_000)
@@ -644,6 +653,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         assertFalse("the probe must stop when cancelled", worker.isAlive)
         assertEquals(AshScanRunner.Outcome.Cancelled, outcome)
         assertTrue("the probe took $elapsed ms to honor the cancel", elapsed < 10_000)
+        StubProcesses.assertAllExited(stubs)
     }
 
     fun testASecondScanWhileOneRunsIsRefusedAndTheFirstStillReportsItsResult() {

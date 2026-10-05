@@ -321,13 +321,46 @@ class AshScanIntegrationTest : BasePlatformTestCase() {
         scan()
         assertEquals(3, ashHighlights().size)
 
+        val messages = scanAndCancel(versionBody = "echo 'awslabs/automated-security-helper v3.7.0'", scanBody = "exec sleep 300")
+
+        assertEquals("ASH scan cancelled", messages.single().title)
+        assertEquals("the service must hold nothing after a cancel", AshScanService.State.EMPTY, AshScanService.getInstance(project).current)
+        assertEquals("stale findings must not survive a cancelled scan", 0, ashHighlights().size)
+    }
+
+    fun testACancelDuringTheProbeAlsoClearsThePreviousFindings() {
+        // A cancel during the identity probe comes before the freshness guard, so the previous
+        // report is still on disk. It is still not this run's result, and the cancel message says
+        // no findings are shown, so the findings are cleared here too.
+        openLeak()
+        stub("ashx", "exit2", exitCode = 2)
+        scan()
+        assertEquals(3, ashHighlights().size)
+        val previousReport = sourceDir.resolve(".ash/ash_output/reports/ash.sarif")
+        assertTrue("the first scan must have left a report", Files.isRegularFile(previousReport))
+
+        val messages = scanAndCancel(versionBody = "exec sleep 300", scanBody = "exit 0")
+
+        assertEquals("ASH scan cancelled", messages.single().title)
+        assertTrue("a cancel during the probe must not reach the freshness guard", Files.isRegularFile(previousReport))
+        assertEquals("the service must hold nothing after a cancel", AshScanService.State.EMPTY, AshScanService.getInstance(project).current)
+        assertEquals("stale findings must not survive a cancelled probe", 0, ashHighlights().size)
+    }
+
+    /**
+     * Replaces ashx with a stub that runs [versionBody] for --version and [scanBody] for the scan,
+     * each after touching a marker, starts a scan, and cancels it once a `sleep` is running.
+     * Also checks that nothing the stub started outlives the cancel.
+     */
+    private fun scanAndCancel(versionBody: String, scanBody: String): List<AshScanController.Message> {
         val started = bin.resolve("started")
+        Files.deleteIfExists(started)
         val script = bin.resolve("ashx")
         Files.writeString(
             script,
             "#!/bin/sh\n" +
-                "if [ \"\$1\" = --version ]; then echo 'awslabs/automated-security-helper v3.7.0'; exit 0; fi\n" +
-                "touch '$started'; sleep 300; exit 0\n",
+                "if [ \"\$1\" = --version ]; then touch '$started'; $versionBody; exit 0; fi\n" +
+                "touch '$started'; $scanBody\n",
         )
         val indicator = EmptyProgressIndicator()
         var messages: List<AshScanController.Message>? = null
@@ -346,13 +379,13 @@ class AshScanIntegrationTest : BasePlatformTestCase() {
             assertTrue("the stub never started", System.currentTimeMillis() < deadline)
             Thread.sleep(20)
         }
+        val stubs = StubProcesses.awaitDescendants("sleep")
         indicator.cancel()
         worker.join(20_000)
 
         assertFalse("the scan must stop when cancelled", worker.isAlive)
-        assertEquals("ASH scan cancelled", messages!!.single().title)
-        assertEquals("the service must hold nothing after a cancel", AshScanService.State.EMPTY, AshScanService.getInstance(project).current)
-        assertEquals("stale findings must not survive a cancelled scan", 0, ashHighlights().size)
+        StubProcesses.assertAllExited(stubs)
+        return messages!!
     }
 
     fun testAProjectWithNoDirectoryIsReportedRatherThanScanned() {
