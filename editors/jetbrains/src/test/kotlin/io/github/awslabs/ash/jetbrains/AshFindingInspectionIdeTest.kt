@@ -30,7 +30,7 @@ class AshFindingInspectionIdeTest : BasePlatformTestCase() {
 
     private val source = """
         import os
-        PASSWORD = "hunter2"
+        value = eval(user_input)
         os.system("rm -rf /")
         print("ok")
     """.trimIndent()
@@ -89,7 +89,7 @@ class AshFindingInspectionIdeTest : BasePlatformTestCase() {
             AshSarifParser.parse(
                 sarifFor(
                     path,
-                    resultAt("B105", line = 2, level = "error"),
+                    resultAt("B307", line = 2, level = "error"),
                     resultAt("B605", line = 3, level = "warning"),
                     resultAt("B101", line = 4, level = "note"),
                 ),
@@ -112,7 +112,7 @@ class AshFindingInspectionIdeTest : BasePlatformTestCase() {
         val file = myFixture.configureByText("insecure.py", source)
         AshScanService.getInstance(project).update(
             AshSarifParser.parse(
-                sarifFor(file.virtualFile.path, resultAt("B105", line = 2, level = "Level.error")),
+                sarifFor(file.virtualFile.path, resultAt("B307", line = 2, level = "Level.error")),
             ),
         )
         assertEquals(listOf(2 to HighlightSeverity.ERROR), ashHighlights())
@@ -136,19 +136,19 @@ class AshFindingInspectionIdeTest : BasePlatformTestCase() {
 
     fun testHighlightCoversTheReportedLineNotTheOneBelowIt() {
         // The off-by-one, asserted against real document text rather than a fake oracle.
-        // A finding on line 2 must underline the PASSWORD line, and the assertion names the
+        // A finding on line 2 must underline the eval line, and the assertion names the
         // text so an off-by-one shows up as "got print(\"ok\")" rather than as a number.
         val file = myFixture.configureByText("insecure.py", source)
         AshScanService.getInstance(project).update(
             AshSarifParser.parse(
-                sarifFor(file.virtualFile.path, resultAt("B105", line = 2, level = "error")),
+                sarifFor(file.virtualFile.path, resultAt("B307", line = 2, level = "error")),
             ),
         )
         val info = myFixture.doHighlighting().single { it.description?.startsWith("ASH") == true }
         val highlighted = myFixture.editor.document.getText(
             com.intellij.openapi.util.TextRange(info.startOffset, info.endOffset),
         )
-        assertEquals("""PASSWORD = "hunter2"""", highlighted)
+        assertEquals("value = eval(user_input)", highlighted)
     }
 
     fun testNoScanMeansNoAshHighlights() {
@@ -166,7 +166,7 @@ class AshFindingInspectionIdeTest : BasePlatformTestCase() {
         val file = myFixture.configureByText("insecure.py", source)
         val otherPath = file.virtualFile.parent.path + "/other.py"
         AshScanService.getInstance(project).update(
-            AshSarifParser.parse(sarifFor(otherPath, resultAt("B105", line = 2, level = "error"))),
+            AshSarifParser.parse(sarifFor(otherPath, resultAt("B307", line = 2, level = "error"))),
         )
         assertEquals(emptyList<Pair<Int, HighlightSeverity>>(), ashHighlights())
     }
@@ -177,7 +177,7 @@ class AshFindingInspectionIdeTest : BasePlatformTestCase() {
         val file = myFixture.configureByText("insecure.py", source)
         AshScanService.getInstance(project).update(
             AshSarifParser.parse(
-                sarifFor(file.virtualFile.path, resultAt("B105", line = 40, level = "error")),
+                sarifFor(file.virtualFile.path, resultAt("B307", line = 40, level = "error")),
             ),
         )
         assertEquals(emptyList<Pair<Int, HighlightSeverity>>(), ashHighlights())
