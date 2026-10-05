@@ -954,7 +954,8 @@ def run_fixture(
     if path_first is not None:
         bin_dir = os.path.join(root, *path_first.split("/"))
         for name in os.listdir(bin_dir):
-            os.chmod(os.path.join(bin_dir, name), 0o755)
+            # Owner-only: this process is the only one that runs these stand-ins.
+            os.chmod(os.path.join(bin_dir, name), 0o700)
         os.environ["PATH"] = bin_dir + os.pathsep + (saved_path or "")
     try:
         inputs = wheel_inputs(root, out_dir, layers)
