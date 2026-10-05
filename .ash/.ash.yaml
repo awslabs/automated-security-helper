@@ -649,18 +649,6 @@ global_settings:
         assert that a scan exited 0. Three rules fire on it, the same three the
         .deb and .rpm verifications see. The fixture is the assertion; removing
         it would make the suite vacuous. See editors/vscode/README.md.
-    # === the shared e2e fixtures under tests/e2e/fixtures ===
-    #
-    # Every e2e channel copies this file into a scratch tree and scans it there, so this
-    # repository-relative path never matches inside an e2e run and the assertion that
-    # three findings come back is unaffected. Scoped to the one exact path.
-    - rule_id: "SECRET-*"
-      path: tests/e2e/fixtures/findings/leak.py
-      reason: >-
-        AWS's published example secret access key, planted so every install channel's
-        e2e can assert that a real scan exits 2 with exactly three detect-secrets
-        findings. The fixture is the assertion; removing it would make every channel's
-        findings and incomplete cases vacuous. See tests/e2e/README.md.
     # === the Kubernetes operator under deploy/kubernetes-operator ===
     #
     # Twenty findings arrived with the operator. Five were fixed at the source and are

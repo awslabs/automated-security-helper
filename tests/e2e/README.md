@@ -25,8 +25,9 @@ ends in a local executable.
 `findings/leak.py` plants AWS's published example secret access key, which is
 non-functional by construction. detect-secrets reports three rules on it:
 SECRET-SECRET-KEYWORD, SECRET-BASE64-HIGH-ENTROPY-STRING and SECRET-AWS-ACCESS-KEY. The
-repository's own scan suppresses that one path in `.ash/.ash.yaml`. The channels scan a
-copy, so the suppression never applies inside an e2e run.
+repository's own scan already suppresses it through the `SECRET-*` entry for `tests/**`
+in `.ash/.ash.yaml`, so the fixture needs no entry of its own. The channels scan a copy,
+so that suppression never applies inside an e2e run.
 
 The incomplete case reuses the findings tree on purpose. Exit 1 has to win over exit 2.
 A channel that ignored incomplete coverage would report 2 here, and that fails.
