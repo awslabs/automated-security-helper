@@ -123,20 +123,23 @@ async def test_the_in_process_registry_matches_the_committed_golden() -> None:
 async def test_the_comparison_can_fail() -> None:
     """Guard the guard: a changed prompt description must produce a problem.
 
-    Without this, a compare_all that returned [] for everything -- or a live
-    capture that came back empty and matched an equally empty golden -- would
-    keep the test above green while checking nothing.
+    Without this, a compare_all that returned [] for everything -- or an
+    in-process capture that came back empty and matched an equally empty golden
+    -- would keep the test above green while checking nothing. The capture is
+    compared against a mutated copy of itself rather than against the golden, so
+    this stays a statement about the comparison even while the golden is stale.
     """
+    import copy
+
     script = _load_compare_script()
-    golden = script.load_golden(script.DEFAULT_GOLDEN)
     live = await _in_process_surface(script)
-    prompt = next(iter(live["prompts"]))
-    live["prompts"][prompt]["description"] += " (changed)"
+    assert live["tools"] and live["resources"] and live["prompts"]
+    mutated = copy.deepcopy(live)
+    prompt = next(iter(mutated["prompts"]))
+    mutated["prompts"][prompt]["description"] += " (changed)"
 
-    problems = script.compare_all(live, golden)
+    problems = script.compare_all(mutated, live)
 
-    assert problems == [
-        problem for problem in problems if problem.startswith(f"prompt {prompt}:")
-    ]
-    assert len(problems) == 1
-    assert "+" in problems[0] and "(changed)" in problems[0]
+    assert len(problems) == 1, problems
+    assert problems[0].startswith(f"prompt {prompt}: description changed.")
+    assert "(changed)" in problems[0]
