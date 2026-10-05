@@ -106,7 +106,17 @@ jobs:
     #
     # Testing inside a container PUBLISHES NOTHING. It pulls a public base image, builds in it,
     # and throws the container away.
-    container: gradle:jdk21
+    #
+    # --init, so the container has a PID 1 that reaps orphans. Actions starts a job container
+    # with `tail -f /dev/null` as PID 1, and tail never calls wait. The cancel and timeout
+    # tests kill a stub shell whose `sleep` child is then reparented to PID 1; without a reaper
+    # it stays a zombie, ProcessHandle.isAlive() reports a zombie as alive, and
+    # StubProcesses.assertAllExited fails five tests on a process that is already dead.
+    # Measured by running these steps in this image the way Actions does: the zombies were
+    # all children of tail. docker-init (tini) is what --init runs, and it reaps them.
+    container:
+      image: gradle:jdk21
+      options: --init
 
     steps:
       # Before checkout. actions/checkout needs git in the image; gradle:jdk21 ships it, and
