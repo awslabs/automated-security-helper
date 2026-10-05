@@ -132,12 +132,19 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # actions/checkout leaves the workspace owned by a different user than the container runs
-      # as often enough that git refuses to read it. The coverage gate shells out to
-      # `git ls-files`, so an unreadable repository would surface as every source file being
-      # reported absent from the coverage report.
-      - name: Let git read the checkout
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # The build must not run as root, and the container does (gradle:jdk21 has no USER, and
+      # actions/checkout and the Docker-side plumbing expect root, so the job is not started
+      # with --user). Root ignores file permissions, so the runner tests for unreadable and
+      # undeletable reports cannot exercise what they test; they check for that and fail
+      # rather than pass vacuously. verify-in-container.sh therefore re-executes as the
+      # checkout's owner via run-unprivileged.sh, and this step makes that owner the image's
+      # unprivileged `gradle` user (uid 1000) rather than root, which is who checkout wrote
+      # the files as. Running as the owner is also what lets git read the checkout: the
+      # coverage gate shells out to `git ls-files`, and git refuses a repository owned by
+      # someone else.
+      - name: Hand the checkout to the image's unprivileged gradle user
+        shell: bash
+        run: chown -R gradle:gradle "$GITHUB_WORKSPACE"
 
       # No `if:` anywhere in this job, and no Docker-based action in it. A Docker-based action's
       # image is pulled in the job's PREPARE phase, BEFORE its `if:` is evaluated, so a
@@ -190,6 +197,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Not as root, for the reason the build job gives; run-unprivileged.sh runs Gradle as the
+      # checkout's owner, and this makes that the image's gradle user.
+      - name: Hand the checkout to the image's unprivileged gradle user
+        run: chown -R gradle:gradle "$GITHUB_WORKSPACE"
+
       # verifyPlugin fails the task on a compatibility problem by default (failureLevel
       # COMPATIBILITY_PROBLEMS), so the exit status is the verdict. Deprecated-API usages are
       # reported in the log without failing, which is what DaemonCodeAnalyzer.restart() needs:
@@ -198,4 +210,4 @@ jobs:
         working-directory: editors/jetbrains
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon --console=plain verifyPlugin
+          bash ./run-unprivileged.sh ./gradlew --no-daemon --console=plain verifyPlugin

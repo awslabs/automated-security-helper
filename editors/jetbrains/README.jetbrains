@@ -160,6 +160,13 @@ verification runs in a container.
   docker run --rm -v "$PWD":/work -w /work/editors/jetbrains gradle:jdk21 \
       ./verify-in-container.sh
 
+The image runs as root, and the build must not: root ignores file permissions, and the runner
+tests for unreadable and undeletable reports fail by design under it, naming root as the cause.
+So when started as root the script re-executes as the owner of the checkout (your host uid,
+with the mount above) through run-unprivileged.sh, and refuses to run if the checkout itself is
+owned by root. CI checks out as root, so it first hands the checkout to the image's `gradle`
+user.
+
 That is the same script .github/workflows/ash-jetbrains-ci.yml runs. A verification that exists
 twice drifts, and the copy in CI is the one nobody runs by hand, which is why the steps are in
 the script rather than in the workflow YAML.
