@@ -144,8 +144,9 @@ describe('authorization is wired, and wired in the right order', () => {
     // exists and every credential fetch fails, which looks like a cluster problem.
     expect(document).toContain('sts:AssumeRole');
     expect(document).toContain('sts:TagSession');
-    // Ships empty on purpose: the operator does not exist in this tree, so any
-    // permission set here would be invented. See the stack header.
+    // Ships empty on purpose: the default plugin set makes no AWS calls and an opted-in
+    // plugin's needs depend on each AshScan, so any permission set here would be
+    // invented. See the stack header.
     expect(role.ManagedPolicyArns ?? []).toEqual([]);
     expect(role.Policies ?? []).toEqual([]);
   });
@@ -236,13 +237,66 @@ describe('authorization is wired, and wired in the right order', () => {
       .filter((s: any) => [s.Resource].flat().some((r: any) => r === '*'))
       .flatMap((s: any) => [s.Action].flat())
       .sort();
+    // Exactly the list the Lambda developer guide requires for a VPC-attached function.
+    // Written out rather than read from LAMBDA_VPC_ENI_ACTIONS, so a change to that
+    // constant shows up here as a failing test.
     expect(wildcardActions).toEqual([
+      'ec2:AssignPrivateIpAddresses',
       'ec2:CreateNetworkInterface',
       'ec2:DeleteNetworkInterface',
       'ec2:DescribeNetworkInterfaces',
+      'ec2:DescribeSubnets',
+      'ec2:UnassignPrivateIpAddresses',
     ]);
     // eks:DescribeCluster must NOT be one of them: it is scoped to the named cluster.
     expect(wildcardActions).not.toContain('eks:DescribeCluster');
+  });
+});
+
+describe('the EC2 grant is usable by the Lambda service only', () => {
+  /*
+   * The ENI actions are granted on "*" because the Lambda service needs them to attach
+   * the function to a VPC. Without a Deny, the function's own code could call them too.
+   * The Lambda developer guide's fix is a Deny keyed on lambda:SourceFunctionArn, which
+   * only calls from function code carry.
+   */
+  const denies = Object.entries<any>(TEMPLATE.findResources('AWS::IAM::Policy')).filter(([id]) =>
+    id.startsWith('InstallerEc2CodeDeny'),
+  );
+
+  test('one deny policy, attached to the installer role', () => {
+    expect(denies).toHaveLength(1);
+    expect(JSON.stringify(denies[0][1].Properties.Roles)).toContain('InstallerRole');
+  });
+
+  test('it denies every EC2 action the role allows on a wildcard, keyed on this function', () => {
+    const allowed = Object.entries<any>(TEMPLATE.findResources('AWS::IAM::Policy'))
+      .filter(([id]) => id.startsWith('InstallerRoleDefaultPolicy'))
+      .flatMap(([, p]) => p.Properties.PolicyDocument.Statement)
+      .filter((s: any) => s.Effect === 'Allow' && s.Resource === '*')
+      .flatMap((s: any) => [s.Action].flat())
+      .filter((a: string) => a.startsWith('ec2:'));
+    // Non-vacuity: an empty allow list would make the subset check below pass trivially.
+    expect(allowed.length).toBeGreaterThan(0);
+
+    const [statement] = denies[0][1].Properties.PolicyDocument.Statement;
+    expect(statement.Effect).toBe('Deny');
+    expect(statement.Resource).toBe('*');
+    const denied = new Set([statement.Action].flat());
+    expect(allowed.filter((a: string) => !denied.has(a))).toEqual([]);
+
+    // The condition must name THIS function. A Deny with no condition would also block
+    // the Lambda service and break the VPC attachment; one naming another function
+    // would block nothing.
+    const fn = Object.keys(TEMPLATE.findResources('AWS::Lambda::Function'))[0];
+    expect(statement.Condition).toEqual({
+      ArnEquals: { 'lambda:SourceFunctionArn': { 'Fn::GetAtt': [fn, 'Arn'] } },
+    });
+  });
+
+  test('the function does not depend on the deny, so there is no cycle', () => {
+    const fn = Object.values<any>(TEMPLATE.findResources('AWS::Lambda::Function'))[0];
+    expect([fn.DependsOn ?? []].flat().join(',')).not.toContain('InstallerEc2CodeDeny');
   });
 });
 
@@ -985,6 +1039,54 @@ describe('the VPC opt-in', () => {
     // The false branch removes the property outright rather than sending an empty
     // list, which Lambda rejects.
     expect(vpcConfig['Fn::If'][2]).toEqual({ Ref: 'AWS::NoValue' });
+  });
+
+  test('a Rule refuses subnets without security groups, and the reverse', () => {
+    /*
+     * Evaluated here the way CloudFormation evaluates it, with the parameter values
+     * substituted, so the test exercises the assertion's logic and not only its
+     * presence. Each CommaDelimitedList is represented by its first element, which is
+     * all the assertion reads.
+     */
+    const rule = JSON_TEMPLATE.Rules?.VpcSubnetsAndSecurityGroupsTogether;
+    expect(rule).toBeDefined();
+    const [assertion] = rule.Assertions;
+    const evaluate = (node: any, params: Record<string, string>): any => {
+      if (typeof node !== 'object' || node === null) return node;
+      const [fn] = Object.keys(node);
+      const args = node[fn];
+      switch (fn) {
+        case 'Fn::Or':
+          return args.some((a: any) => evaluate(a, params));
+        case 'Fn::And':
+          return args.every((a: any) => evaluate(a, params));
+        case 'Fn::Not':
+          return !evaluate(args[0], params);
+        case 'Fn::Equals':
+          return evaluate(args[0], params) === evaluate(args[1], params);
+        case 'Fn::Select':
+          expect(args[0]).toBe(0);
+          return evaluate(args[1], params);
+        case 'Ref':
+          expect(params).toHaveProperty(args);
+          return params[args];
+        default:
+          throw new Error('unexpected function in rule: ' + fn);
+      }
+    };
+    const cases: [string, string, boolean][] = [
+      ['', '', true],
+      ['subnet-a', 'sg-a', true],
+      ['subnet-a', '', false],
+      ['', 'sg-a', false],
+    ];
+    for (const [subnet, group, ok] of cases) {
+      expect({
+        subnet,
+        group,
+        ok: evaluate(assertion.Assert, { VpcSubnetIds: subnet, VpcSecurityGroupIds: group }),
+      }).toEqual({ subnet, group, ok });
+    }
   });
 
   test('the condition keys on the first subnet being empty', () => {

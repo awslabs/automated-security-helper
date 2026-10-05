@@ -86,8 +86,9 @@
  *
  * What bounds it instead: the policy is attached to ONE role that only Lambda can
  * assume, that role holds no other Kubernetes access, and its AWS permissions are
- * `eks:DescribeCluster` on the named cluster plus its own log stream and nothing
- * else. An adopter who wants the grant gone after installation can delete the
+ * `eks:DescribeCluster` on the named cluster, `eks:DescribeAddon` on that cluster's
+ * add-ons, its own log stream, and the EC2 network-interface actions Lambda needs for
+ * an optional VPC attachment (denied to the function's own code). An adopter who wants the grant gone after installation can delete the
  * access entry -- but CloudFormation owns it, so it will be recreated on the next
  * stack update. That is a real limitation, not a hypothetical one.
  *
@@ -258,6 +259,7 @@ import {
   CfnCondition,
   CfnOutput,
   CfnParameter,
+  CfnRule,
   CustomResource,
   Duration,
   Fn,
@@ -550,19 +552,9 @@ import urllib.request
 import boto3
 from botocore.signers import RequestSigner
 
-# Interpolated at synth time from the TypeScript constants above, which are the
-# single source of truth for what this stack installs.
-#
-# test/ash-eks-operator-stack.test.ts compares them AS A SET against a second copy
-# of the same table, so an over-grant is caught as loudly as a missing grant.
-#
-# WHAT THAT TEST DOES NOT DO, STATED SO NOBODY RELIES ON IT: it does not read the
-# operator's manifests/rbac.yaml. Both copies were TRANSCRIBED BY HAND from it, and
-# nothing couples the two, so when the operator's real RBAC changes nothing in this
-# repository will report that the transcription has gone stale. The file itself is at
-# deploy/kubernetes-operator/manifests/rbac.yaml in this repository -- an earlier
-# version of this comment said another repository, which was wrong -- so re-checking
-# means opening it, not recalling it.
+# Interpolated at synth time from the TypeScript constants in
+# ash-eks-operator-stack.ts. Those are hand transcriptions of the operator's
+# manifests/rbac.yaml; see THE OPERATOR CONTRACT in that file's header.
 GROUP = "${ASH_OPERATOR_API_GROUP}"
 VERSION = "${ASH_OPERATOR_API_VERSION}"
 CRDS = ${pythonLiteral(ASH_OPERATOR_CRDS)}
@@ -1041,20 +1033,10 @@ def respond(event, status, reason, physical_id, data=None):
     The body is bounded to RESPONSE_MAX_BYTES here rather than trusted to be small.
     See the stack header under PRECONDITIONS for the S3 egress requirement.
     """
-    # BOUNDED IN SERIALIZED BYTES, NOT CHARACTERS. reason[:1000] was a character slice
-    # while json.dumps defaults to ensure_ascii=True, so 1,000 non-ASCII characters
-    # became 6,000 bytes of escapes against a 4,096-byte cap -- on an ERROR message,
-    # i.e. when the response matters most. Reachable: call() decodes failures with
-    # errors="replace" and every U+FFFD escapes to six bytes.
-    #
-    # ensure_ascii=False makes a byte budget mean something. A byte slice can split a
-    # character, so the tail is re-decoded with errors="ignore".
-    #
-    # WHAT ENFORCES THE CAP: the [:1000] PRE-SLICE, not the loop. An earlier comment
-    # here claimed the loop, wrongly. The unshrinkable fields total ~700 bytes, so the
-    # body lands near 1.7 KB and the loop NEVER ITERATES today -- it is belt-and-braces
-    # for when one of them grows. The loop exits on an empty reason, which is not the
-    # same as the body fitting, so the residual is handled below.
+    # Bounded in serialized BYTES, not characters: with ensure_ascii=True each U+FFFD
+    # that call() produces escapes to six bytes. The [:1000] pre-slice enforces the
+    # cap today; the loop is a backstop if the fixed fields grow. A byte slice can
+    # split a character, so the tail is re-decoded with errors="ignore".
     def serialize(reason_bytes):
         return json.dumps(
             {
@@ -1289,6 +1271,20 @@ def handler(event, context):
     respond(event, status, reason, physical_id, data)
 `;
 
+/**
+ * The EC2 actions a VPC-attached Lambda's execution role must allow, as listed under
+ * "Required IAM permissions" in the Lambda developer guide's configuration-vpc.html.
+ * Shared by the allow and the code-side deny so the two cannot list different actions.
+ */
+export const LAMBDA_VPC_ENI_ACTIONS = [
+  'ec2:CreateNetworkInterface',
+  'ec2:DescribeNetworkInterfaces',
+  'ec2:DescribeSubnets',
+  'ec2:DeleteNetworkInterface',
+  'ec2:AssignPrivateIpAddresses',
+  'ec2:UnassignPrivateIpAddresses',
+] as const;
+
 // The ServiceAccount names are OPERATOR_SERVICE_ACCOUNT and SCAN_SERVICE_ACCOUNT,
 // declared at the top of this file and interpolated into the applier. There is
 // deliberately no second copy here: a local constant duplicating one of them is how
@@ -1430,6 +1426,30 @@ export class AshEksOperatorStack extends Stack {
       ),
     });
 
+    /**
+     * Subnets and security groups are supplied together or not at all, enforced as
+     * a template Rule so CloudFormation refuses the parameters before it creates
+     * anything. Without it, subnets with no security group pass the console and fail
+     * when Lambda rejects the VpcConfig, after the access entry and roles already
+     * exist. Security groups with no subnets are worse: `HasVpcConfig` is false, the
+     * groups are silently ignored, and an adopter who meant to attach the function to
+     * a private endpoint gets an unattached one that fails on connect.
+     */
+    const noSubnets = Fn.conditionEquals(Fn.select(0, subnetIds.valueAsList), '');
+    const noSecurityGroups = Fn.conditionEquals(Fn.select(0, securityGroupIds.valueAsList), '');
+    new CfnRule(this, 'VpcSubnetsAndSecurityGroupsTogether', {
+      assertions: [
+        {
+          assert: Fn.conditionOr(
+            Fn.conditionAnd(noSubnets, noSecurityGroups),
+            Fn.conditionAnd(Fn.conditionNot(noSubnets), Fn.conditionNot(noSecurityGroups)),
+          ),
+          assertDescription:
+            'VpcSubnetIds and VpcSecurityGroupIds must be set together or both left empty.',
+        },
+      ],
+    });
+
     // -----------------------------------------------------------------------
     // The installer function and the identity it uses.
     // -----------------------------------------------------------------------
@@ -1496,22 +1516,24 @@ export class AshEksOperatorStack extends Stack {
     );
 
     /**
-     * Attaching a function to a VPC needs these three EC2 actions, and they only
-     * accept `*` -- the network interface does not exist when the policy is
-     * evaluated, so there is no ARN to name. Granted unconditionally rather than
-     * behind `HasVpcConfig`, because a conditional IAM policy resource whose
-     * condition is false leaves a role that cannot attach itself to the VPC an
-     * adopter just configured, and the failure reads as an unrelated Lambda
-     * error. The cost of the wider grant is bounded: this role can create and
-     * delete ENIs, and it cannot read or write anything else.
+     * The EC2 actions Lambda needs to attach a function to a VPC: the full list the
+     * Lambda developer guide gives under "Required IAM permissions" in
+     * configuration-vpc.html, which also says to allow them on `"Resource": "*"`.
+     * An earlier revision granted three of the six and omitted
+     * `ec2:DescribeSubnets`, `ec2:AssignPrivateIpAddresses` and
+     * `ec2:UnassignPrivateIpAddresses`.
+     *
+     * Granted unconditionally, not behind `HasVpcConfig`. The same page says Lambda
+     * deletes the Hyperplane ENI up to 20 minutes after VPC config is removed, using
+     * the execution role's permissions to do it. If this grant left with the
+     * VpcConfig, a stack update that removes VpcConfig would also remove the
+     * permission Lambda needs to clean up, and the ENI would be orphaned.
+     *
+     * The function's own code cannot use these actions; see `InstallerEc2CodeDeny`.
      */
     installerRole.addToPolicy(
       new iam.PolicyStatement({
-        actions: [
-          'ec2:CreateNetworkInterface',
-          'ec2:DescribeNetworkInterfaces',
-          'ec2:DeleteNetworkInterface',
-        ],
+        actions: [...LAMBDA_VPC_ENI_ACTIONS],
         resources: ['*'],
       }),
     );
@@ -1538,6 +1560,36 @@ export class AshEksOperatorStack extends Stack {
       // error. Everything is now interpolated into the applier from the constants
       // at the top of this file, which is also what lets the test set-compare the
       // RBAC against the operator's own rbac.yaml.
+    });
+
+    /**
+     * The least-privilege pattern the Lambda developer guide recommends under
+     * "Security best practices" in configuration-vpc.html. The EC2 actions above
+     * are granted for the Lambda SERVICE to manage the VPC interface, but an
+     * execution role's permissions also reach the function's own code. Calls the
+     * code makes carry `lambda:SourceFunctionArn`, and service-side ENI management
+     * does not, so a Deny keyed on that condition keeps the service working while
+     * blocking the code. The applier never calls EC2, so this denies nothing it
+     * uses.
+     *
+     * A separate policy rather than another statement on the role's default policy:
+     * the function depends on the default policy, so referencing the function's ARN
+     * from it would be a dependency cycle. This policy depends on the function
+     * instead. It is created after the function, which is fine, because it only
+     * removes access.
+     */
+    new iam.Policy(this, 'InstallerEc2CodeDeny', {
+      roles: [installerRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.DENY,
+          actions: [...LAMBDA_VPC_ENI_ACTIONS, 'ec2:DetachNetworkInterface'],
+          resources: ['*'],
+          conditions: {
+            ArnEquals: { 'lambda:SourceFunctionArn': installer.functionArn },
+          },
+        }),
+      ],
     });
 
     /**
@@ -1594,8 +1646,8 @@ export class AshEksOperatorStack extends Stack {
       assumedBy: new iam.ServicePrincipal('pods.eks.amazonaws.com'),
       description:
         'The ASH operator\'s AWS identity, assumed through EKS Pod Identity. Ships with NO ' +
-        'policies attached: the operator does not exist in this repository yet, so any ' +
-        'permission set here would be a guess. Attach what your scans actually need.',
+        'policies attached: the default plugin set makes no AWS calls, and what an opted-in ' +
+        'plugin needs depends on each AshScan. Attach what your scans actually need.',
     });
 
     /**
@@ -1668,7 +1720,7 @@ export class AshEksOperatorStack extends Stack {
     // cdk-nag.
     // -----------------------------------------------------------------------
 
-    // One entry, covering both of this role's wildcards by name. Deliberately not
+    // One entry, covering each of this role's wildcards by name. Deliberately not
     // `suppressLambdaLogWildcard`: its reason claims the log-stream suffix is the
     // only wildcard, which is false here. See the helper's own header.
     //

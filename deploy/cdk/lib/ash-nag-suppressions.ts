@@ -596,8 +596,8 @@ export function suppressLambdaLogWildcard(scope: IConstruct): void {
  * ------------------------------------------
  * It was, and the reason that shipped was false. That helper states "the only
  * wildcard is the log-stream suffix", which is true of every other Lambda in this
- * app and untrue here: attaching a function to a VPC also needs three EC2 network
- * interface actions, and one of them accepts no resource ARN. A suppression whose
+ * app and untrue here: attaching a function to a VPC also needs six EC2 actions,
+ * which the Lambda developer guide says to allow on "*". A suppression whose
  * reason understates what it is excusing is worse than none, because the reason is
  * serialized into the committed template and a reviewer reads it instead of the
  * policy. Same failure mode the header of this file is about, so it gets its own
@@ -611,12 +611,12 @@ export function suppressEksInstallerRoleWildcards(scope: IConstruct): void {
         'THREE wildcards, all resource-side and all irreducible. (1) The log-stream suffix ' +
         "\":*\" on the function's OWN log group, carrying logs:CreateLogStream and " +
         'logs:PutLogEvents: Lambda creates a stream per execution environment, so the name ' +
-        'is not knowable at deploy time. (2) "*" on ' +
-        'ec2:CreateNetworkInterface, ec2:DescribeNetworkInterfaces and ' +
-        'ec2:DeleteNetworkInterface, which is what attaching the function to a VPC for a ' +
-        'private-only cluster endpoint requires -- IAM defines the Describe action with no ' +
-        'resource ARN, so "*" is the only value it accepts, and the interface does not exist ' +
-        'when the policy is evaluated. (3) The add-on ARN suffix "/*/*" on ' +
+        'is not knowable at deploy time. (2) "*" on ec2:CreateNetworkInterface, ' +
+        'ec2:DescribeNetworkInterfaces, ec2:DescribeSubnets, ec2:DeleteNetworkInterface, ' +
+        'ec2:AssignPrivateIpAddresses and ec2:UnassignPrivateIpAddresses: the set the Lambda ' +
+        'guide requires, on "*", to attach a function to a VPC (for a private-only cluster ' +
+        'endpoint). A separate Deny keyed on the source-function ARN condition blocks the ' +
+        'function\'s own code from them, so only the Lambda service can use the grant. (3) The add-on ARN suffix "/*/*" on ' +
         'eks:DescribeAddon, which is the add-on name and the id EKS assigns it -- the probe ' +
         'asks about one specific add-on name and neither segment is knowable at deploy time. ' +
         'Scoped to the named cluster, not to all clusters. The one action left is ' +

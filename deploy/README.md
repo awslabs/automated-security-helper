@@ -52,7 +52,8 @@ of them for you:
   stack creates cannot be created at all.
 - The cluster's **platform version must support access entries**.
 - A **private-only API endpoint** means supplying `VpcSubnetIds` and
-  `VpcSecurityGroupIds` so the installer can reach it.
+  `VpcSecurityGroupIds` so the installer can reach it. Supply both or neither; the
+  template refuses one without the other before it creates anything.
 - If you do attach it to a VPC, it needs egress to **three** services, not two: EKS,
   STS, and **S3**. S3 is the one that gets missed and it fails worst — CloudFormation's
   response URL is a presigned S3 URL, so an installer that can reach EKS and STS but
