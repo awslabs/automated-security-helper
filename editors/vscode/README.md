@@ -148,6 +148,9 @@ jest holds `src/coverage.ts` to it and
 
 A result ASH suppressed keeps its `kind` and `level` and gains a `suppressions`
 entry, so it is identified by that entry alone and is counted, not published.
+A suppression hides the result when its `state` is `accepted`, null, absent or
+unreadable. `underReview`, `rejected` and any other string leave it shown, so only
+a recorded decision hides a finding.
 Results whose `kind` is not `fail` are counted the same way. A SARIF location is
 resolved whether it is relative to the scanned folder, relative to a `uriBaseId`
 the run declares (ASH's workspace mode writes `PROJECTROOT`), a `file:` URI, or an

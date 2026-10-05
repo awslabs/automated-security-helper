@@ -199,7 +199,10 @@ function readScannerName(result: Record<string, unknown>): string | undefined {
  *   `accepted`      -> suppressed.
  *   `underReview`   -> shown. An undecided suppression must not hide a finding.
  *   `rejected`      -> shown. The team decided not to suppress it.
- *   anything else   -> suppressed. Somebody recorded a suppression and its state
+ *   another string  -> shown. `pending`, an empty string or a value from a newer
+ *                      schema is not a decision to hide the finding, and a
+ *                      security finding is only hidden on a decision.
+ *   not a string    -> suppressed. Somebody recorded a suppression and its state
  *                      cannot be read; a malformed entry is treated the same way.
  *
  * The key is `state` because ASH's own model
@@ -219,8 +222,7 @@ export function isSuppressed(result: Record<string, unknown>): boolean {
     if (typeof state !== 'string') {
       return true;
     }
-    const lowered = state.toLowerCase();
-    return lowered !== 'underreview' && lowered !== 'rejected';
+    return state.toLowerCase() === 'accepted';
   });
 }
 

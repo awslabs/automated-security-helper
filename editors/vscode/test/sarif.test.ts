@@ -360,6 +360,19 @@ describe('isSuppressed', () => {
     ).toBe(true);
   });
 
+  it('reads accepted in any case', () => {
+    expect(isSuppressed({ suppressions: [{ kind: 'external', state: 'ACCEPTED' }] })).toBe(true);
+  });
+
+  // A state string that is none of the three SARIF values is not a decision
+  // anybody made to hide the finding. Hiding it would let a typo, or a value
+  // from a newer schema, silence a security finding.
+  it('shows a finding whose only suppression has an unknown state string', () => {
+    expect(isSuppressed({ suppressions: [{ kind: 'external', state: 'pending' }] })).toBe(false);
+    expect(isSuppressed({ suppressions: [{ kind: 'external', state: '' }] })).toBe(false);
+    expect(isSuppressed({ suppressions: [{ kind: 'external', state: 'accepted ' }] })).toBe(false);
+  });
+
   it('honors a suppression it cannot read, at either depth', () => {
     expect(isSuppressed({ suppressions: [12345] })).toBe(true);
     expect(isSuppressed({ suppressions: [{ state: 12345 }] })).toBe(true);
