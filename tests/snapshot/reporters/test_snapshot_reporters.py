@@ -35,23 +35,41 @@ def test_every_registered_reporter_is_snapshotted():
     """The registry and the snapshotted set are the same set of names.
 
     Read from both places a reporter can be registered: the plugin packages'
-    ``ASH_REPORTERS`` lists, which plugin discovery reads, and the decorator
-    registry, filtered to ASH's own plugin modules so a test double registered
-    elsewhere in the session cannot affect the answer.
+    ``ASH_REPORTERS`` lists, which plugin discovery reads, and every class under
+    ``automated_security_helper.plugin_modules`` that ``@ash_reporter_plugin``
+    marked. The second is found by importing the modules rather than by reading
+    the plugin manager's registry, which is process-global state that only the
+    manager may touch (tests/unit/workspace/test_project_isolation.py).
     """
-    from automated_security_helper.plugins import ash_plugin_manager
+    import importlib
+    import pkgutil
+
+    import automated_security_helper.plugin_modules as plugin_modules
 
     classes = reporter_classes()
     assert set(classes) == set(BUILTIN_REPORTER_NAMES) | set(AWS_REPORTER_NAMES)
 
-    registered = {
-        name
-        for name, registration in ash_plugin_manager.plugin_library.reporters.items()
-        if registration.plugin_module_path.startswith(
-            "automated_security_helper.plugin_modules."
+    decorated: set[str] = set()
+    unimportable: dict[str, str] = {}
+    for info in pkgutil.walk_packages(
+        plugin_modules.__path__, prefix=f"{plugin_modules.__name__}."
+    ):
+        try:
+            module = importlib.import_module(info.name)
+        except ImportError as exc:  # an optional scanner dependency, say
+            unimportable[info.name] = str(exc)
+            continue
+        decorated.update(
+            obj.__name__
+            for obj in vars(module).values()
+            if isinstance(obj, type)
+            and getattr(obj, "ash_plugin_type", None) == "reporter"
+            and obj.__module__ == module.__name__
         )
-    }
-    assert registered == {cls.__name__ for cls in classes.values()}
+    # A reporter module that cannot be imported would be missing from both
+    # sides of the comparison, so it has to fail here instead.
+    assert not {name for name in unimportable if "reporter" in name}, unimportable
+    assert decorated == {cls.__name__ for cls in classes.values()}
 
 
 @pytest.mark.parametrize("variant", MODEL_VARIANTS)
