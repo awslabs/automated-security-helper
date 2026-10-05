@@ -54,6 +54,17 @@ The `--version` probe that runs before the scan is asynchronous too, with a
 one-minute limit, since a cold Python start can take seconds. A second
 `ASH: Scan workspace` while one is running returns the running scan's result.
 
+## Restricted Mode
+
+The extension does not run in an untrusted workspace (`capabilities.untrustedWorkspaces`
+is `supported: false`). A scan runs ASH over the workspace, and ASH reads the
+workspace's own `.ash/.ash.yaml`, whose `ash_plugin_modules` imports Python
+modules, so opening a repository and scanning it can run code that repository
+supplies. `limited` support with `restrictedConfigurations` was considered and
+rejected: it would only stop the repository's `.vscode/settings.json` from
+changing this extension's settings, and the code path above goes through none of
+them. Trust the workspace to scan it.
+
 ## Which executable runs
 
 `ashx` is the v4 entry point and the default. When `ash.executablePath` is empty

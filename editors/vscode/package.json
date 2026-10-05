@@ -27,6 +27,12 @@
   "homepage": "https://github.com/awslabs/automated-security-helper",
   "main": "./out/extension.js",
   "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "A scan runs ASH over the workspace, and ASH reads the workspace's own .ash/.ash.yaml, which can load Python plugin modules and so run code the repository supplies. Trust the workspace to scan it."
+    }
+  },
   "contributes": {
     "commands": [
       {
