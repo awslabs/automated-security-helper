@@ -18,7 +18,8 @@ What is masked, and why each is safe to mask
   (``<TMP>``, ``<REPO>`` ...) in every spelling ASH can emit: native, POSIX,
   JSON-escaped and ``file://`` URI. After the token, backslashes become ``/``, so a
   Windows path and a POSIX path snapshot identically.
-- Timestamps. ISO-8601 instants, ``ASH-YYYYMMDD[HHMMSS]`` report ids, and today's date
+- Timestamps. ISO-8601 instants, ``ASH-YYYYMMDD[HHMMSS]`` report ids, the
+  ``scan-YYYYMMDDHHMMSS`` id MCP get_scan_results mints per call, and today's date
   (plus yesterday and tomorrow, so a run that crosses midnight still matches). A date
   a fixture chose, such as a suppression's expiry, is not today and survives.
 - The time column of ASH's console log (rich's ``RichHandler``), which prints each
@@ -98,6 +99,9 @@ _LOG_TIME = re.compile(r"\[\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\]")
 # salted per process (PYTHONHASHSEED), so the number changes on every run. Only a
 # quoted value (an attribute, or the JS string argument that refers to it) is masked.
 _JQ_ELEMENT_ID = re.compile(r"(?<=['\"])((?:btn-)?jq-)\d+(?=['\"])")
+# The MCP get_scan_results scan_id: "scan-" + the local date-time it was read at
+# (core/resource_management/scan_tracking.py mints it on every call).
+_MCP_RESULTS_SCAN_ID = re.compile(r"\bscan-\d{14}\b")
 
 # A number followed by a time unit: 1.2s, 350ms, 3 seconds, 0:00:01, 1m 2s, 2h 3m.
 _DURATION = re.compile(
@@ -286,6 +290,7 @@ class SnapshotNormalizer:
         out = _REPORT_ID.sub("ASH-<REPORT_ID>", out)
         out = _LOG_TIME.sub("[<LOG_TIME>]", out)
         out = _JQ_ELEMENT_ID.sub(r"\1<HASH_ID>", out)
+        out = _MCP_RESULTS_SCAN_ID.sub("scan-<SCAN_TIMESTAMP>", out)
         today = date.today()
         for day in (today - timedelta(days=1), today, today + timedelta(days=1)):
             out = out.replace(day.isoformat(), "<TODAY>")

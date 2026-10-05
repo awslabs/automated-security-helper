@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -93,6 +93,20 @@ class TestMasked:
             "<button id='btn-jq-<HASH_ID>' "
             "onclick=\"copyToClipboard('jq-<HASH_ID>')\">Copy</button>"
         )
+
+    def test_a_root_at_a_path_boundary(self):
+        n = SnapshotNormalizer()
+        n.add_root(PurePosixPath("/tmp"), "SYSTEM_TMP")
+        out = n.text("wrote /tmp/x and file:///tmp/y, then '/tmp' ended at /tmp.")
+        assert out == (
+            "wrote <SYSTEM_TMP>/x and <SYSTEM_TMP>/y, then '<SYSTEM_TMP>' ended at "
+            "<SYSTEM_TMP>."
+        )
+
+    def test_mcp_results_scan_id(self, normalizer):
+        # Minted from the wall clock on every get_scan_results call.
+        out = normalizer.text("'scan_id': 'scan-20261005181909'")
+        assert out == "'scan_id': 'scan-<SCAN_TIMESTAMP>'"
 
     @pytest.mark.parametrize(
         "duration", ["1.25s", "350ms", "3 seconds", "0:00:01", "1m 2s", "12 sec"]
@@ -286,3 +300,17 @@ class TestSurvivesErrorOutputRules:
     def test_other_urls_keep_their_versions(self, normalizer):
         text = "see https://docs.pydantic.dev/2.13/concepts/ and v2.13"
         assert normalizer.text(text) == text
+
+    def test_scan_ids_that_are_not_a_timestamp(self, normalizer):
+        # A registry scan id, a shorter digit run, and a scan- prefix glued to
+        # more digits than a date-time has, all stay as written.
+        text = "scan-1 scan-2026100518 scan-202610051819091 rescan-20261005181909x"
+        assert normalizer.text(text) == text
+
+    def test_a_root_inside_a_longer_path_component(self):
+        # "/tmp" is the system temp dir on Linux CI and not on macOS or Windows, so
+        # masking it inside another name would make one snapshot differ by OS.
+        n = SnapshotNormalizer()
+        n.add_root(PurePosixPath("/tmp"), "SYSTEM_TMP")
+        text = "/var/tmp/a /tmpfile dir/tmpk2x_.yaml /tmp-old /tmp.d"
+        assert n.text(text) == text
