@@ -1,0 +1,566 @@
+{
+  "//": [
+    "Coverage verdicts ASH's own assess_coverage reaches, which src/coverage.ts must reproduce.",
+    "",
+    "Each case names a real results file under test/fixtures/scans/ (captured from `ash scan`",
+    "and path-sanitized) and a list of [path, value] edits applied to a copy of it. Two suites",
+    "read this file and must agree with it: test/coverage.test.ts runs src/coverage.ts, and",
+    "tests/unit/test_vscode_coverage_parity.py runs ASH's assess_coverage on the same",
+    "edited documents. An edit to either implementation that moves a verdict fails one of them.",
+    "",
+    "`incomplete_scanners`, `incomplete_converters` and `stale_content_databases` list names",
+    "only; the Python side reduces its payload to the same shape before comparing."
+  ],
+  "cases": [
+    {
+      "base": "scans/findings/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "real findings scan, exit 2, one result suppressed",
+      "set": []
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "real clean scan, exit 0",
+      "set": []
+    },
+    {
+      "base": "scans/incomplete/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [
+          "semgrep"
+        ],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "real incomplete scan, exit 1, semgrep ERROR",
+      "set": []
+    },
+    {
+      "base": "scans/missing/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [
+          "cfn-nag"
+        ],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "real scan, exit 1, cfn-nag MISSING and nothing found",
+      "set": []
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": true,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "every scanner skipped, so nothing was measured",
+      "set": [
+        [
+          [
+            "scanner_results",
+            "detect-secrets",
+            "status"
+          ],
+          "SKIPPED"
+        ],
+        [
+          [
+            "scanner_results",
+            "detect-secrets",
+            "excluded"
+          ],
+          true
+        ]
+      ]
+    },
+    {
+      "base": "scans/findings/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [
+          "detect-secrets"
+        ],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a scanner that ran and lost one of four targets",
+      "set": [
+        [
+          [
+            "additional_reports",
+            "detect-secrets",
+            "source",
+            "targets_attempted"
+          ],
+          4
+        ],
+        [
+          [
+            "additional_reports",
+            "detect-secrets",
+            "source",
+            "targets_failed"
+          ],
+          1
+        ]
+      ]
+    },
+    {
+      "base": "scans/findings/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a failure count with no attempt count is not a claim",
+      "set": [
+        [
+          [
+            "additional_reports",
+            "detect-secrets",
+            "source",
+            "targets_failed"
+          ],
+          3
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [
+          "archive"
+        ],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a converter that failed",
+      "set": [
+        [
+          [
+            "converter_results",
+            "archive",
+            "failure"
+          ],
+          "archive converter raised"
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [
+          "jupyter"
+        ],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a converter whose tool is missing and that had inputs",
+      "set": [
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "dependencies_satisfied"
+          ],
+          false
+        ],
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "candidate_inputs"
+          ],
+          2
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a converter whose tool is missing and that had nothing to convert",
+      "set": [
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "dependencies_satisfied"
+          ],
+          false
+        ],
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "candidate_inputs"
+          ],
+          0
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "an excluded converter that failed is not a gap",
+      "set": [
+        [
+          [
+            "converter_results",
+            "archive",
+            "failure"
+          ],
+          "archive converter raised"
+        ],
+        [
+          [
+            "converter_results",
+            "archive",
+            "excluded"
+          ],
+          true
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": [
+          "RULE-X"
+        ]
+      },
+      "name": "a rule that raised instead of reaching a verdict",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolExecutionNotifications"
+          ],
+          [
+            {
+              "associatedRule": {
+                "id": "RULE-X"
+              },
+              "level": "error",
+              "message": {
+                "text": "rule RULE-X raised"
+              }
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a warning-level notification costs no coverage",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolExecutionNotifications"
+          ],
+          [
+            {
+              "associatedRule": {
+                "id": "RULE-X"
+              },
+              "level": "warning",
+              "message": {
+                "text": "rule RULE-X was slow"
+              }
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "an unevaluated rule whose not-evaluated results are all suppressed",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolExecutionNotifications"
+          ],
+          [
+            {
+              "associatedRule": {
+                "id": "RULE-X"
+              },
+              "level": "error",
+              "message": {
+                "text": "rule RULE-X raised"
+              }
+            }
+          ]
+        ],
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "results"
+          ],
+          [
+            {
+              "kind": "notApplicable",
+              "level": "none",
+              "message": {
+                "text": "not evaluated"
+              },
+              "ruleId": "RULE-X",
+              "suppressions": [
+                {
+                  "justification": "reviewed",
+                  "kind": "external"
+                }
+              ]
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": [
+          "the template could not be parsed"
+        ]
+      },
+      "name": "an error-level notification that names no rule",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolExecutionNotifications"
+          ],
+          [
+            {
+              "level": "error",
+              "message": {
+                "text": "  the template could not be parsed  "
+              }
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [
+          "grype-db"
+        ],
+        "unevaluated_rules": []
+      },
+      "name": "a content database past its bound under the fail policy",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolConfigurationNotifications"
+          ],
+          [
+            {
+              "descriptor": {
+                "id": "ASH-CONTENT-DB-STALE"
+              },
+              "level": "error",
+              "message": {
+                "text": "Content database grype-db is stale"
+              },
+              "properties": {
+                "content_database": {
+                  "bound_is_tool_default": false,
+                  "bound_source": "default",
+                  "built": "2026-01-01T00:00:00Z",
+                  "max_age_seconds": 86400,
+                  "measured_at": "2026-10-01T00:00:00Z",
+                  "measured_by": "grype db status",
+                  "name": "grype-db",
+                  "policy": "fail",
+                  "refresh": "grype db update",
+                  "scanner": "grype"
+                }
+              }
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "the same stale database under the warn policy is not a gap",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolConfigurationNotifications"
+          ],
+          [
+            {
+              "descriptor": {
+                "id": "ASH-CONTENT-DB-STALE"
+              },
+              "level": "warning",
+              "message": {
+                "text": "Content database grype-db is stale"
+              },
+              "properties": {
+                "content_database": {
+                  "bound_is_tool_default": false,
+                  "bound_source": "default",
+                  "built": "2026-01-01T00:00:00Z",
+                  "max_age_seconds": 86400,
+                  "measured_at": "2026-10-01T00:00:00Z",
+                  "measured_by": "grype db status",
+                  "name": "grype-db",
+                  "policy": "warn",
+                  "refresh": "grype db update",
+                  "scanner": "grype"
+                }
+              }
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": true,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a scan phase that recorded a roster and no scanner results",
+      "set": [
+        [
+          [
+            "scanner_results"
+          ],
+          {}
+        ],
+        [
+          [
+            "additional_reports"
+          ],
+          {}
+        ]
+      ]
+    }
+  ]
+}

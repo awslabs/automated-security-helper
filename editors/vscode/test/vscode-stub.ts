@@ -188,6 +188,7 @@ export const state = {
   workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
   configuration: new Map<string, unknown>(),
   errors: [] as string[],
+  warnings: [] as string[],
   infos: [] as string[],
   channels: [] as OutputChannel[],
   collections: [] as DiagnosticCollection[],
@@ -198,10 +199,13 @@ export function resetState(): void {
   state.workspaceFolders = undefined;
   state.configuration = new Map();
   state.errors = [];
+  state.warnings = [];
   state.infos = [];
   state.channels = [];
   state.collections = [];
   state.commands = new Map();
+  progress.calls = [];
+  progress.cancel = undefined;
 }
 
 export const languages = {
@@ -212,7 +216,39 @@ export const languages = {
   },
 };
 
+export enum ProgressLocation {
+  SourceControl = 1,
+  Window = 10,
+  Notification = 15,
+}
+
+/** What the last withProgress call asked for, and a way to press its Cancel. */
+export const progress = {
+  calls: [] as { title?: string; cancellable?: boolean; location: ProgressLocation }[],
+  cancel: undefined as (() => void) | undefined,
+};
+
 export const window = {
+  withProgress<T>(
+    options: { title?: string; cancellable?: boolean; location: ProgressLocation },
+    task: (
+      reporter: { report(value: unknown): void },
+      token: { onCancellationRequested(listener: () => void): Disposable },
+    ) => Thenable<T>,
+  ): Thenable<T> {
+    progress.calls.push(options);
+    const listeners: (() => void)[] = [];
+    progress.cancel = () => listeners.forEach((listener) => listener());
+    return task(
+      { report: () => undefined },
+      {
+        onCancellationRequested(listener: () => void): Disposable {
+          listeners.push(listener);
+          return { dispose: () => listeners.splice(listeners.indexOf(listener), 1) };
+        },
+      },
+    );
+  },
   createOutputChannel(name: string): OutputChannel {
     const channel = new OutputChannel(name);
     state.channels.push(channel);
@@ -220,6 +256,10 @@ export const window = {
   },
   showErrorMessage(message: string): Promise<undefined> {
     state.errors.push(message);
+    return Promise.resolve(undefined);
+  },
+  showWarningMessage(message: string): Promise<undefined> {
+    state.warnings.push(message);
     return Promise.resolve(undefined);
   },
   showInformationMessage(message: string): Promise<undefined> {
@@ -241,6 +281,20 @@ export const workspace = {
     };
   },
 };
+
+/** `vscode.Memento` over a Map, so a test can read what the extension persisted. */
+export class Memento {
+  public readonly values = new Map<string, unknown>();
+
+  public get<T>(key: string, fallback: T): T {
+    return this.values.has(key) ? (this.values.get(key) as T) : fallback;
+  }
+
+  public update(key: string, value: unknown): Promise<void> {
+    this.values.set(key, value);
+    return Promise.resolve();
+  }
+}
 
 export const commands = {
   registerCommand(id: string, callback: (...args: unknown[]) => unknown): Disposable {

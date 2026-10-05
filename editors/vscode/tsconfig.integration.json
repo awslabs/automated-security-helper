@@ -1,0 +1,12 @@
+{
+  "//": "Builds the @vscode/test-electron suite under test/integration/ into out-integration/. Separate from tsconfig.json so nothing here can reach out/, which is the only directory .vscodeignore lets into the .vsix, and from tsconfig.test.json, which emits nothing and carries jest's types rather than mocha's. esModuleInterop is on here only, for mocha's `export =` default import; the extension itself compiles without it.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "out-integration",
+    "esModuleInterop": true,
+    "types": ["node", "vscode", "mocha"]
+  },
+  "include": ["test/integration/**/*.ts"],
+  "exclude": ["node_modules", "out", "out-integration"]
+}

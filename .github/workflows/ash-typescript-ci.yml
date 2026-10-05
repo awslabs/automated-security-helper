@@ -252,20 +252,22 @@ jobs:
           # held.
           #
           # Measured on the run that added it: 6 files, 309 statements, 99.67%
-          # statements and 99.66% lines. The floors below sit just under that for
-          # the reason given above -- a source file added later raises both
-          # legitimately.
+          # statements and 99.66% lines. Re-measured when src/coverage.ts landed:
+          # 7 files, 621 statements, 99.19% statements and 99.18% lines. The floors
+          # below sit just under that for the reason given above -- a source file
+          # added later raises both legitimately.
           - package: vscode
             dir: editors/vscode
             threshold: '{"global":{"statements":90,"lines":90}}'
-            min_files: 6
-            min_statements: 300
+            min_files: 7
+            min_statements: 600
             # vsix-contents.ts is this package's equivalent of the file that was
             # actually hidden: nothing in src/ imports it, only src/verify-vsix.ts
             # and a test do, so it is the first thing a narrowed `roots` would drop
             # from the report -- and it is the publishing-boundary check, so losing
-            # its coverage silently is the worst of the three.
-            require: "--require src/vsix-contents.ts --require src/extension.ts"
+            # its coverage silently is the worst of the three. coverage.ts is the
+            # one that decides whether a scan is reported incomplete.
+            require: "--require src/vsix-contents.ts --require src/extension.ts --require src/coverage.ts"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

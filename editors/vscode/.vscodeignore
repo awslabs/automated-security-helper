@@ -17,6 +17,12 @@ src/**
 test/**
 tsconfig.json
 tsconfig.test.json
+tsconfig.integration.json
+eslint.config.mjs
+
+# The integration suite's compiled output and the VS Code build it downloads.
+out-integration/**
+.vscode-test/**
 *.tsbuildinfo
 
 # Dependencies. This package has no runtime dependencies at all, so `vsce` should
