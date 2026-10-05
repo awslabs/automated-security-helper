@@ -32,9 +32,15 @@ ASH_VENV=/usr/lib/ash/venv
 FIXTURE_DIR=/opt/ash-fixture
 SCAN_OUT=/tmp/ash-scan-out
 SCAN_USER=ashscan
-# Pinned: the standalone uv installer follows `latest` otherwise. This is the floor
-# pyproject.toml declares for uv, so the tool is one ASH itself supports.
-UV_VERSION="${UV_VERSION:-0.12.15}"
+# Pinned to the floor pyproject.toml declares for uv (uv>=0.12.19,<0.13), so the tool
+# is one ASH itself supports. Installed from the GitHub release tarball and checked
+# against the SHA-256 digests below before it is unpacked; the digests were measured
+# from the downloaded tarballs and match the .sha256 files published beside them. No
+# environment override: a different version needs different digests, so changing it
+# is an edit to these three lines together.
+UV_VERSION=0.12.19
+UV_SHA256_X86_64=23bf5552d220e0842b65c862097b2ebaeba0064b74eda5e565e77fd25969d8c8
+UV_SHA256_AARCH64=0804e9b164c64b6914182d5920c08551958a095986f10a3731056df701126436
 # The interpreter the gates run under. uv downloads its own, so nothing installed here
 # satisfies a dependency of the package under test.
 GATE_PYTHON="${GATE_PYTHON:-3.12}"
@@ -75,11 +81,32 @@ vl_install_harness_tools() {
     command -v "$tool" >/dev/null 2>&1 || vl_fail "harness tool $tool is still absent after installing it"
   done
   if ! command -v uv >/dev/null 2>&1; then
-    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" \
-      | env UV_INSTALL_DIR=/usr/local/bin INSTALLER_NO_MODIFY_PATH=1 sh >/dev/null 2>&1
+    vl_install_uv
   fi
   case "$(uv --version)" in *" $UV_VERSION"*) ;; *) vl_fail "uv reports '$(uv --version)', not the pinned $UV_VERSION" ;; esac
   vl_say "   harness: uv $UV_VERSION, useradd, su (none of them a package dependency)"
+}
+
+# Downloads the pinned uv release tarball, refuses it unless its SHA-256 matches the
+# digest pinned above, and installs the binary to /usr/local/bin. Replaces piping the
+# upstream install script into sh, which ran whatever that URL served.
+vl_install_uv() {
+  local triple sha tmp
+  case "$(uname -m)" in
+    x86_64) triple=x86_64-unknown-linux-gnu sha="$UV_SHA256_X86_64" ;;
+    aarch64 | arm64) triple=aarch64-unknown-linux-gnu sha="$UV_SHA256_AARCH64" ;;
+    *) vl_fail "no pinned uv checksum for architecture $(uname -m)" ;;
+  esac
+  tmp="$(mktemp -d)"
+  curl -fsSL -o "$tmp/uv.tar.gz" \
+    "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${triple}.tar.gz" \
+    || vl_fail "could not download uv $UV_VERSION for $triple"
+  if ! printf '%s  %s\n' "$sha" "$tmp/uv.tar.gz" | sha256sum -c --quiet - >/dev/null 2>&1; then
+    vl_fail "uv-${triple}.tar.gz has SHA-256 $(sha256sum "$tmp/uv.tar.gz" | cut -d' ' -f1), not the pinned $sha"
+  fi
+  tar -xzf "$tmp/uv.tar.gz" -C "$tmp"
+  install -m 0755 "$tmp/uv-${triple}/uv" /usr/local/bin/uv
+  rm -rf "$tmp"
 }
 
 vl_gate_python() {
