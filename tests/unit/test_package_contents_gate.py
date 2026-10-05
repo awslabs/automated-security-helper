@@ -104,6 +104,12 @@ def _msix(gate, tmp_path: Path, members: dict[str, bytes], name="x.msix") -> str
     return str(gate.write_zip(tmp_path / name, members))
 
 
+def _multi_block_png(gate, size: int) -> bytes:
+    """A PNG-headed asset of `size` bytes whose blocks all differ from each other."""
+    head = gate.fixture_png()
+    return head + bytes(i % 251 for i in range(size - len(head)))
+
+
 class TestFixturesHaveTheRealStructure:
     def test_msix_fixture_matches_the_ci_built_package(self, gate):
         assert sorted(gate.fixture_msix_members()) == REAL_MSIX_MEMBERS
@@ -191,6 +197,55 @@ class TestMsix:
         verdict, detail = _verdict(gate, _msix(gate, tmp_path, members))
 
         assert verdict == "rejected" and "block hashes" in detail
+
+    def test_a_multi_block_member_altered_past_its_first_block_is_rejected(
+        self, gate, tmp_path
+    ):
+        """Every block is compared, not only the first one.
+
+        The other tamper fixtures are under 64 KiB, so they are one block each and a
+        check that compared only the first block hash would still catch them.
+        """
+        # Four blocks, and under the gate's 256 KiB ceiling for a container member.
+        big = _multi_block_png(gate, 3 * 64 * 1024 + 1000)
+        members = gate.fixture_msix_members({"assets/big.png": big})
+        assert _verdict(gate, _msix(gate, tmp_path, members, "ok.msix"))[0] == (
+            "accepted"
+        )
+
+        tampered = bytearray(big)
+        tampered[2 * 64 * 1024 + 7] ^= 1  # inside the third of four blocks
+        members["assets/big.png"] = bytes(tampered)
+
+        verdict, detail = _verdict(gate, _msix(gate, tmp_path, members))
+
+        assert verdict == "rejected" and "block hashes" in detail
+
+    def test_block_hashes_match_a_pinned_makeappx_style_block_map(self, gate, tmp_path):
+        """Pin the algorithm to literal hashes rather than to the gate's own constant.
+
+        fixture_blockmap shares MSIX_BLOCK_BYTES with the gate, so a changed block size
+        changes both sides and every other test stays green. These two hashes are
+        SHA-256 over 64 KiB blocks, base64-encoded (the AppxBlockMap format), computed
+        once outside the gate and cross-checked with `split -b 65536` and
+        `openssl dgst -sha256 -binary | base64`.
+        """
+        pinned = _multi_block_png(gate, 100_000)
+        members = gate.fixture_msix_members()
+        members["assets/pinned.png"] = pinned
+        entry = (
+            '<File Name="assets\\pinned.png" Size="100000">'
+            '<Block Hash="Zp/oZY/Bg0s1NYhoYx0LJJ2uwhx59ORWNAdHkPeDz7o="/>'
+            '<Block Hash="QDBGn7Jgr12+O9K1X0GXhxkciTn3RZwCtE5T+aZyyDM="/>'
+            "</File>"
+        ).encode()
+        members["AppxBlockMap.xml"] = members["AppxBlockMap.xml"].replace(
+            b"</BlockMap>", entry + b"</BlockMap>"
+        )
+
+        verdict, detail = _verdict(gate, _msix(gate, tmp_path, members))
+
+        assert verdict == "accepted", detail
 
     def test_an_undeclared_exe_is_rejected_even_if_managed(self, gate, tmp_path):
         members = gate.fixture_msix_members({"trivy.exe": gate.fixture_managed_pe()})
