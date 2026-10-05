@@ -135,6 +135,111 @@ def _pinned_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(LogRender, "__call__", _log_render_without_clock)
 
 
+#: Where ASH's own plugins live. A fresh ``ash`` process registers these and nothing
+#: else unless its config names more (no snapshot test's config does).
+_BUILTIN_PLUGIN_PACKAGE = "automated_security_helper.plugin_modules.ash_builtin"
+
+
+def _is_builtin_plugin_module(module_path: str) -> bool:
+    if module_path == _BUILTIN_PLUGIN_PACKAGE or module_path.startswith(
+        _BUILTIN_PLUGIN_PACKAGE + "."
+    ):
+        return True
+    # Core modules may subscribe handlers too; the other plugin packages
+    # (ash_aws_plugins, ash_ferret_plugins, ...) are what a config opts into.
+    return module_path.startswith(
+        "automated_security_helper."
+    ) and not module_path.startswith("automated_security_helper.plugin_modules.")
+
+
+@pytest.fixture(autouse=True)
+def _builtin_plugins_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every snapshot the plugin registry of a freshly started ``ash`` process.
+
+    Plugins register into one module-level ``ash_plugin_manager`` when their module is
+    first imported, and ``plugin_modules()`` memoises what it resolved. So once any
+    test in an xdist worker imports ``ash_aws_plugins`` (the pinned clock does, to
+    patch two AWS reporters' ``datetime``) or ``ash_ferret_plugins``, every later
+    snapshot in that worker lists ferret-scan, trivy-repo and the AWS reporters,
+    installs their dependencies, and runs aws-security-hub's validation against
+    whatever AWS credentials the machine has. Measured: the full suite failed 31
+    snapshots this way, and ``-n 0`` with the AWS reporter tests first reproduced
+    it inside tests/snapshot alone.
+
+    For the test, the registry keeps only ASH's built-in registrations (in their
+    original order), the event handlers keep only ASH's own, and the resolution
+    cache starts empty; all three are put back afterwards for the rest of the
+    suite. A built-in that an earlier test unregistered is not quietly re-added:
+    the fixture fails, because a fresh process would have it.
+    """
+    from automated_security_helper.plugin_modules import ash_builtin
+    from automated_security_helper.plugins import ash_plugin_manager
+
+    library = ash_plugin_manager.plugin_library
+    for kind, declared in (
+        ("converters", ash_builtin.ASH_CONVERTERS),
+        ("scanners", ash_builtin.ASH_SCANNERS),
+        ("reporters", ash_builtin.ASH_REPORTERS),
+    ):
+        builtin = {
+            name: registration
+            for name, registration in getattr(library, kind).items()
+            if _is_builtin_plugin_module(registration.plugin_module_path)
+        }
+        missing = sorted(
+            cls.__name__ for cls in declared if cls.__name__ not in builtin
+        )
+        if missing:
+            raise RuntimeError(
+                f"built-in {kind} missing from the plugin registry before this "
+                f"snapshot test (an earlier test removed them): {missing}"
+            )
+        monkeypatch.setattr(library, kind, builtin)
+    monkeypatch.setattr(
+        library,
+        "event_handlers",
+        {
+            event: [
+                callback
+                for callback in callbacks
+                if _is_builtin_plugin_module(getattr(callback, "__module__", "") or "")
+            ]
+            for event, callbacks in library.event_handlers.items()
+        },
+    )
+    monkeypatch.setattr(ash_plugin_manager, "_resolved_plugins", {})
+
+
+@pytest.fixture(autouse=True)
+def _no_real_aws(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """No snapshot may reach AWS with the machine's credentials.
+
+    The AWS reporter tests stub every client call; this is the floor under them and
+    under any other test: placeholder keys, no profile, no config or credentials
+    file, no instance metadata. A call that slips past a stub fails to authenticate
+    instead of acting on a real account (one did, with an expired token, before
+    _builtin_plugins_only existed).
+    """
+    for name in (
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_SESSION_TOKEN",
+        "AWS_SECURITY_TOKEN",
+        "AWS_ROLE_ARN",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    missing = str(tmp_path / "no-aws-config")
+    monkeypatch.setenv("AWS_CONFIG_FILE", missing)
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", missing)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "snapshot-test-not-a-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "snapshot-test-not-a-secret")
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+
 @pytest.fixture(autouse=True)
 def _fresh_ash_loggers() -> Iterator[None]:
     """Give every snapshot the logging state of a freshly started ``ash`` process.
