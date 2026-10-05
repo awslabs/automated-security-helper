@@ -3,9 +3,11 @@ name: ASH - Create Release
 on:
   workflow_dispatch:
 
+# Read-only default; the job below declares the write scopes it needs. A
+# job-level block replaces this one, so a job added here later starts with
+# read access instead of inheriting write.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: create-release
@@ -16,6 +18,11 @@ jobs:
     name: Bump version and create release PR
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # contents: write pushes the release branch with GITHUB_TOKEN;
+    # pull-requests: write is the fallback PR path when no App token is set.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       # GitHub does not start workflow runs for events authenticated with
       # GITHUB_TOKEN. The release PR was opened with it, so it arrived with none of
