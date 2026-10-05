@@ -278,9 +278,11 @@ of them on every pull request and fails if the result differs from what is commi
 stale artifact is a red build rather than something an adopter discovers at launch time.
 
 The gate also runs `terraform fmt -check -recursive`, initializes and validates every
-Terraform module and example, and requires that the CDK app register cdk-nag as a CDK
-Aspect so that every stack is scanned. Suppress a cdk-nag finding next to the resource,
-with a reason:
+Terraform module and example, compares the CloudFormation and Terraform representations
+against each other (see [Keeping CloudFormation and Terraform in
+step](#keeping-cloudformation-and-terraform-in-step)), and requires that the CDK app
+register cdk-nag as a CDK Aspect so that every stack is scanned. Suppress a cdk-nag
+finding next to the resource, with a reason:
 
 ```js
 NagSuppressions.addResourceSuppressions(scope, [
@@ -350,6 +352,102 @@ should be **unusable rather than plausible**, so that a wrong value fails loudly
 resolving to something. A syntactically valid stand-in gets deployed; an obviously broken one
 gets replaced. That holds for a bucket in a launch URL the same way it holds for a checksum,
 a signing identity, or an account id.
+
+## Keeping CloudFormation and Terraform in step
+
+`cdk/` and `terraform/` are two independent implementations of the same five targets.
+Every check described above validates one representation against *its own* source, so
+none of them would notice the two drifting apart: add a resource to the CDK app,
+regenerate the template, and the drift gate passes while the Terraform module quietly
+stops describing the same deployment.
+
+`deploy/tests/iac-equivalence.py` is the check that compares them. It runs in the same
+workflow, needs no credentials or network, and can be run by hand:
+
+```console
+python3 deploy/tests/iac-equivalence.py
+```
+
+Each CloudFormation stack is compared against the **union** of the Terraform modules
+that implement it, because a template has to deploy on its own with no build step ahead
+of it, while Terraform composes. `ash-image-pipeline` is part of every pair for that
+reason:
+
+| Stack | Terraform counterpart |
+| --- | --- |
+| `AshImagePipeline` | `ash-image-pipeline` |
+| `AshAgentCore` | `ash-image-pipeline` + `agentcore` |
+| `AshCodeCommitGate` | `ash-image-pipeline` + `codecommit-gate` |
+| `AshDistributedPipeline` | `ash-image-pipeline` + `codepipeline-executor` |
+| `AshFargate` | `ash-image-pipeline` + `fargate` (network from `aws-ia/vpc/aws`) |
+
+### What it checks, and what it does not
+
+It compares **which kinds of resource each side provisions** — a presence census over a
+canonical vocabulary that maps CloudFormation types onto Terraform types.
+
+Nothing unclassified is skipped, at either level:
+
+- A **resource type** the vocabulary has never seen is a hard failure. That is what
+  makes a new resource in either representation a red build.
+- A **committed template** named in neither the pair table nor
+  `STACKS_WITHOUT_TERRAFORM` is a hard failure. Templates are discovered by globbing
+  `cdk/templates/`, never from a list, because a list cannot report the thing it is
+  missing. If you add a stack with no Terraform module, record it in
+  `STACKS_WITHOUT_TERRAFORM` with the reason and what an adopter of that target loses —
+  a missing counterpart is a named entry, not an absence. Such a stack gets no census,
+  but its resource types are still checked against the vocabulary.
+
+Read this list before treating a green check as "the two sides agree", because it is
+narrower than it sounds:
+
+- **Properties are not compared.** Both sides declaring an `S3` bucket is a match even
+  if one encrypts with a customer-managed key and the other with `AES256`. This is not
+  hypothetical — it is the live KMS divergence recorded below.
+- **Counts are not compared.** CDK synthesizes an implicit `AWS::IAM::Policy` per
+  `grant*()` call, so the two sides never agree on resource counts and cannot be made
+  to. `AshDistributedPipeline` carries 88 resources against 20 in Terraform.
+- **Named resources are not matched.** Nothing checks that a role on one side is the
+  *same* role as one on the other, only that both sides have roles.
+- **IAM policy content is not read.** A statement granting `*` on one side is invisible.
+- **External modules are not read.** The Fargate network comes from `aws-ia/vpc/aws`;
+  its resource kinds are recorded as unverified, not confirmed.
+- **Only a module's root `.tf` files are read.** A resource in a nested directory
+  that the module calls as a local `module` is not counted. No module has one today;
+  adding one means extending the check. Commented-out blocks (`#`, `//`, `/* */`) are
+  not counted.
+- **Property-equivalent Terraform resources are excluded by name**, because
+  CloudFormation expresses them as properties — `aws_s3_bucket_versioning`,
+  `aws_s3_bucket_server_side_encryption_configuration` and six others. Deleting one of
+  those outright would *not* fail this check.
+- **Conditional resources count as present.** A `resource` block behind `count = 0`,
+  or a CloudFormation resource behind a false `Condition`, still counts.
+
+Closing the first and last of those means mapping properties across two schemas that
+disagree about shape. That is the right next increment and it is deliberately not part
+of this one.
+
+### The divergences that exist today
+
+The five pairs do not currently match. Every difference is itemized in the script's
+`BASELINE`, one entry per pair per resource kind with the reason it exists — there is
+no wildcard and no pattern. An unlisted divergence fails the build; so does a baseline
+entry that no longer matches, because a baseline that outlives what it describes becomes
+the blanket exclusion it was written to avoid.
+
+An entry can stop matching three ways, and the check distinguishes them because they
+call for opposite actions. Both sides declaring the kind now means it was fixed — delete
+the entry. **Neither side declaring it is not a fix**: it is consistent with the kind
+having been removed from the side that had it, and the entry is then the only remaining
+record of that, so the check says so rather than telling you to delete it. Only the other
+side declaring it means the divergence reversed rather than closed.
+
+The one worth knowing about without opening the file: **every CDK stack creates a
+customer-managed KMS key and no Terraform module does.** The modules take an optional
+`kms_key_arn` and fall back to `AES256` or the AWS-managed key when it is null, so the
+two representations hand an adopter a different default encryption posture. Which
+default is right is an open decision — a customer-managed key carries a recurring
+per-key cost, which is the reason the Terraform side gives for not imposing one.
 
 ## Constraints and assumptions
 

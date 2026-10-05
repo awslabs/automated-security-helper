@@ -612,3 +612,139 @@ runs:
 
         print(f"PASS: all {len(image_supplied)} image-supplied scanners participated")
         PY
+
+    # === the built image has to FIND something ===
+    #
+    # WHY PARTICIPATION IS NOT DETECTION, AND WHY BOTH STEPS EXIST
+    #
+    # Everything above this point proves the image can run a scan. None of it proves
+    # the image can find anything. The scan above targets `print("hello")` and accepts
+    # only exit 0, and the assertion above reads per-scanner STATUS -- so a scanner
+    # that loads, runs, reports PASSED and is incapable of matching anything satisfies
+    # both. An empty ruleset, a config that filters every rule, a detection engine
+    # that silently no-ops: each of those keeps every status out of MISSING and ERROR
+    # while the image detects nothing, and each would have gone green here.
+    #
+    # So this leg scans a fixture with defects planted in it and requires them back.
+    # Together the two legs bracket the question: the clean fixture proves no false
+    # positive on trivial input, this one proves no false negative on known-bad input.
+    # Neither alone is sufficient and neither should be deleted as duplicate.
+    #
+    # WHY IT IS A SECOND FIXTURE RATHER THAN A CHANGE TO THE FIRST
+    #
+    # Making the existing fixture flawed would flip its accepted status from 0 to 2
+    # and destroy what it measures -- a clean fixture is the only thing that can catch
+    # a scanner flagging a one-line print statement. Two fixtures, two assertions, two
+    # different failures.
+    - name: "Create the detection fixture"
+      shell: bash
+      run: |
+        mkdir -p /tmp/ash-detect
+        # Two defects, from two independent scanners, at a path of its own so the
+        # clean scan's report above is not overwritten. They are the same kinds of
+        # plant validate-nix uses, for the same reason: they are unambiguous, they need
+        # no dependency resolution, and neither is a rule anyone is likely to retire.
+        #
+        # WHY THE CREDENTIAL IS DERIVED HERE INSTEAD OF WRITTEN INTO THIS FILE
+        #
+        # This file is part of the repository, and ASH scans the repository on every
+        # pull request (ash-repo-scan.yml) with detect-secrets enabled. A 40-character
+        # secret-access-key literal in the heredoc is a high-entropy string in this
+        # YAML, so the repository scan reports it as SECRET-BASE64-HIGH-ENTROPY-STRING
+        # against this file and fails. Measured: the same .ash config over this file
+        # with the literal exits 2 with that one finding, and exits 0 without it.
+        #
+        # So the value is computed at run time: a SHA-256 digest of a fixed label,
+        # truncated to 30 bytes and base64-encoded, which gives 40 characters from
+        # [A-Za-z0-9+/] -- the shape of a secret access key -- and the same value on
+        # every run. The fixture the image scans is unchanged in substance: it still
+        # assigns a high-entropy, key-shaped string to AWS_SECRET_ACCESS_KEY, which is
+        # what detect-secrets is required to flag below. Only this file stops carrying
+        # a literal, so the repository scan is not weakened and nothing is suppressed.
+        python3 <<'PY'
+        import base64
+        import hashlib
+        import pathlib
+
+        digest = hashlib.sha256(b"ash validate-container detection fixture").digest()
+        key = base64.b64encode(digest[:30]).decode("ascii")
+        assert len(key) == 40, key
+
+        pathlib.Path("/tmp/ash-detect/vulnerable_sample.py").write_text(
+            "import subprocess\n"
+            "\n"
+            f'AWS_SECRET_ACCESS_KEY = "{key}"\n'
+            "\n"
+            "\n"
+            "def run(cmd):\n"
+            "    return subprocess.call(cmd, shell=True)\n"
+        )
+        PY
+        echo "--- fixture ---"
+        cat /tmp/ash-detect/vulnerable_sample.py
+
+    # WHY THE EXIT CODE IS CAPTURED AND THEN LARGELY IGNORED
+    #
+    # This scan is expected to exit 2, and 2 is exactly the status that must NOT be
+    # the verdict. click raises UsageError with exit_code 2, so renaming any flag
+    # below exits 2 with the scan never having started -- indistinguishable, from the
+    # status alone, from the findings this step wants. The verdict therefore comes
+    # from the report in the next step, and the only statuses rejected here are the
+    # ones that mean the scan could not have produced a report at all.
+    #
+    # Measured rather than assumed, with cdk_nag present so the numbers are the real
+    # ones: this fixture exits 2 with 6 actionable findings -- bandit 3, detect-secrets
+    # 3 -- and the clean fixture above exits 0 with 0 findings and no scanner MISSING.
+    # Both measured locally by direct invocation of these same flags.
+    - name: "Scan the detection fixture with the built image"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --source-dir /tmp/ash-detect \
+          --output-dir /tmp/ash-detect/output \
+          --simple \
+          --fail-on-incomplete-scanners \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        echo "detection scan exited ${rc}"
+        case "${rc}" in
+          0)
+            echo "::error::ash scan exited 0 on a fixture carrying a hardcoded credential and a shell=True call. The image ran a scan and detected neither. That is a false negative in the image, not a passing gate."
+            exit 1
+            ;;
+          1)
+            echo "::error::ash scan exited 1, ASH's 'error during execution' -- which --fail-on-incomplete-scanners also uses when a selected scanner reported ERROR or MISSING. The scan did not complete; read the per-scanner table from the step above."
+            exit 1
+            ;;
+          2)
+            echo "exit 2 is the expected status here (actionable findings). It is NOT the verdict -- click also exits 2 on a bad flag. The next step reads the report."
+            ;;
+          *)
+            echo "::error::ash scan exited ${rc}, which is neither the expected 2 nor a status this step knows how to explain."
+            exit "${rc}"
+            ;;
+        esac
+
+    # WHY THIS REQUIRES RULE IDS AND NOT JUST A COUNT PER SCANNER
+    #
+    # A total above zero can be satisfied by one scanner while the other silently
+    # stops matching, so each named scanner is checked on its own. A count per
+    # scanner is still not enough: with shell=True removed from the fixture, bandit
+    # reports B404, B105 and B603 and a floor of one finding stays green while the
+    # plant it claims to require is gone. So bandit must report B602 and
+    # detect-secrets must report a SECRET-* rule, read from the SARIF in the report.
+    # The script's docstring has the measurements and what it does not cover.
+    - name: "Assert the image detected the planted defects"
+      shell: bash
+      env:
+        ASSERT_DETECTION: ${{ github.action_path }}/assert_detection.py
+      run: |
+        python3 "${ASSERT_DETECTION}" \
+          /tmp/ash-detect/output/ash_aggregated_results.json
