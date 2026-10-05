@@ -532,6 +532,8 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         assertTrue(failed.summary, failed.summary.contains("wrote no SARIF"))
     }
 
+    private fun millisSince(startNanos: Long): Long = (System.nanoTime() - startNanos) / 1_000_000
+
     fun testTheScanRunsInTheSourceDirectorySoRelativeUrisMatchTheScannedTree() {
         // ASH writes SARIF URIs relative to its WORKING DIRECTORY, not to --source-dir. This stub
         // does the same: it records its cwd and writes the URI of $src/app.py relative to it. So a
@@ -554,5 +556,31 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
 
         assertEquals("the child must run in the scanned directory", source.toRealPath().toString(), Files.readString(cwd).trim())
         assertEquals("app.py", completed.results.findings.single().filePath)
+    }
+
+    fun testTheProbeGivesTheChildNoStdinToWaitOn() {
+        // A child that reads stdin must see end-of-file at once. Given an open pipe instead, this
+        // one would wait out the probe's 30 s deadline and real ASH would be reported as not ASH.
+        val script = rawStub("exit 0", versionBody = "read x; echo 'awslabs/automated-security-helper v4.0.0'")
+
+        val start = System.nanoTime()
+        val verdict = AshScanRunner.probe(script.toString())
+        val elapsed = millisSince(start)
+
+        assertTrue("$verdict", verdict is AshIdentityProbe.Verdict.IsAsh)
+        assertTrue("the probe waited $elapsed ms on stdin", elapsed < 5_000)
+    }
+
+    fun testTheScanGivesTheChildNoStdinToWaitOn() {
+        // The same for the scan, whose deadline is 30 minutes in the IDE.
+        val (source, output) = dirs()
+        val script = rawStub("read x; mkdir -p \"\$out/reports\"; echo '{\"runs\":[]}' > \"\$out/reports/ash.sarif\"; exit 0")
+
+        val start = System.nanoTime()
+        val outcome = AshScanRunner.run(script.toString(), source, output, timeoutMillis = 15_000)
+        val elapsed = millisSince(start)
+
+        assertTrue("$outcome", outcome is AshScanRunner.Outcome.Completed)
+        assertTrue("the scan waited $elapsed ms on stdin", elapsed < 5_000)
     }
 }
