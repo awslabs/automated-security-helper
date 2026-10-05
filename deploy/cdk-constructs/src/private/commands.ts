@@ -57,7 +57,7 @@ export interface CommonCommandOptions {
   readonly outputDirectory: string;
   /** Lowest severity that produces a non-zero exit code. */
   readonly severityThreshold: ASHSeverityThreshold;
-  /** Extra arguments appended verbatim to the `ash scan` invocation. */
+  /** Extra arguments appended verbatim to the `ashx scan` invocation. */
   readonly extraScanArguments: string[];
 }
 
@@ -95,6 +95,20 @@ export interface InstallOptions {
  */
 export const DEFAULT_ASH_REF = 'v3.7.0';
 
+/** The canonical ASH command. */
+export const ASH_CLI = 'ashx';
+
+/**
+ * ASH's deprecated alias, and the only name a v3 release provides.
+ *
+ * `DEFAULT_ASH_REF` is still a v3 tag, so the unsharded scan, which v3 can run,
+ * falls back to this name rather than fail on an `ashx` the release never had.
+ * Shard and merge need a v4 ref anyway (v3 has neither `--shard-index` nor
+ * `merge`), so they use `ASH_CLI` directly. Drop the fallback once
+ * `DEFAULT_ASH_REF` is a v4 tag.
+ */
+export const ASH_CLI_V3 = 'ash';
+
 /** Default repository ASH is installed from. */
 export const DEFAULT_ASH_REPOSITORY =
   'https://github.com/awslabs/automated-security-helper.git';
@@ -112,11 +126,11 @@ function gitRequirement(sourceRepository: string, ref: string): string {
 }
 
 /**
- * Render the commands that put an `ash` executable on `PATH`.
+ * Render the commands that put an `ashx` executable on `PATH`.
  *
  * Nothing here installs by distribution name. ASH is not published to PyPI, and
  * the name `automated-security-helper` there is an unrelated placeholder
- * package, so a name-based install would silently succeed, leave no `ash` on
+ * package, so a name-based install would silently succeed, leave no `ashx` on
  * `PATH`, and put a third party's code in the scan container. Installing from
  * the git repository at a pinned ref is what this repository documents for CI.
  *
@@ -177,22 +191,31 @@ function assertGitRef(ref: string): string {
 }
 
 /**
- * Render the command that invokes `ash` itself, honouring the install mode.
+ * Render the command that invokes ASH itself, honouring the install mode.
  *
  * `UVX` has no installed executable, so its scan resolves the repository through
  * `uvx --from`. The explicit `--from` form is used rather than `uvx <spec>`
- * because the executable is named `ash` while the distribution is named
+ * because the executable is named `ashx` while the distribution is named
  * `automated-security-helper`, and `--from` is what states that difference.
+ *
+ * With `v3Compatible`, the command must also run on a v3 ref (see `ASH_CLI_V3`).
+ * An installed executable is resolved at run time, `ashx` first. `uvx` cannot be
+ * probed that way: it reports a missing executable with exit code 1, which is
+ * also ASH's scanner-error code, so try-`ashx`-then-retry could not tell a
+ * missing name from a failed scan. The deprecated `ash`, which both majors
+ * provide, is used there instead.
  */
-function ashInvocation(install: InstallOptions): string {
+function ashInvocation(install: InstallOptions, v3Compatible = false): string {
   if (install.mode !== ASHInstallMode.UVX) {
-    return 'ash';
+    return v3Compatible
+      ? `"$(command -v ${ASH_CLI} || echo ${ASH_CLI_V3})"`
+      : ASH_CLI;
   }
   const requirement = gitRequirement(
     install.sourceRepository,
     install.version ?? DEFAULT_ASH_REF,
   );
-  return `uvx --from ${requirement} ash`;
+  return `uvx --from ${requirement} ${v3Compatible ? ASH_CLI_V3 : ASH_CLI}`;
 }
 
 /**
@@ -208,7 +231,7 @@ export function scanCommands(
   install: InstallOptions,
 ): string[] {
   const argv = [
-    ashInvocation(install),
+    ashInvocation(install, true),
     'scan',
     '--source-dir',
     shellArg(options.sourceDirectory),
@@ -232,7 +255,7 @@ export function scanCommands(
  * merge from ever running, which would replace the aggregate verdict with a
  * partial one. The merge step is the only step allowed to fail on findings.
  *
- * No `--min-severity` here, deliberately. On `ash scan` that option changes only
+ * No `--min-severity` here, deliberately. On `ashx scan` that option changes only
  * that scan's exit code, and a shard's exit code is discarded by design, so
  * passing it would read as if it set the severity floor while having no effect
  * on anything. The floor belongs on the command that owns the verdict, which is
@@ -264,7 +287,7 @@ export function shardScanCommands(
  * and one exit code.
  *
  * One `--results` per shard, each a directory. Passing a single parent directory
- * holding every shard is refused by `ash merge`, on the grounds that it would
+ * holding every shard is refused by `ashx merge`, on the grounds that it would
  * make the merged set depend on whatever else happens to be in the tree,
  * including a previous merged report.
  *

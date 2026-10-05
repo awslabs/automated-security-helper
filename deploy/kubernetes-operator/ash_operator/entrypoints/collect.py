@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The collector: index walk, then ``ash merge``, then a summary the operator reads.
+"""The collector: index walk, then ``ashx merge``, then a summary the operator reads.
 
-Runs in the *same image as the shards*, on purpose. ``ash merge`` consumes results
+Runs in the *same image as the shards*, on purpose. ``ashx merge`` consumes results
 written by whatever ASH produced each shard and copes with version skew; a
 collector running a different ASH than the shards would introduce that skew rather
 than tolerate it.
@@ -20,7 +20,7 @@ The kubelet caps the message at 4 KiB, so the summary has a budget and *says so*
 when it has to drop detail -- a silently truncated summary would be invalid JSON
 and the operator would report "unknown" for a run that succeeded.
 
-The verdict has three answers, because ``ash merge`` has three exit codes for a
+The verdict has three answers, because ``ashx merge`` has three exit codes for a
 merged report: 0 clean, 2 findings, and 1 for a scan that finished with partial
 coverage. Exit 1 is also ASH's code for an error during execution, so it is never
 read alone: the run is ``Incomplete`` only when a merged report exists and that
@@ -150,7 +150,7 @@ def assess_coverage(merged: dict) -> dict:
     model, which is the function ASH's MCP server uses to report
     ``coverage_complete``, and which reads the same ``scan_incompleteness`` object
     the exit code is computed from. So the phase this collector reports and the exit
-    code ``ash merge`` returned cannot disagree about what counts as a gap.
+    code ``ashx merge`` returned cannot disagree about what counts as a gap.
 
     This script runs in the scan image, and the image's ``python3`` is not
     guaranteed to be the interpreter ASH was installed into -- ASH may live in a
@@ -205,14 +205,14 @@ def assess_coverage(merged: dict) -> dict:
 
 
 def verdict_phase(*, exit_code: int | None, coverage_complete: bool | None) -> str:
-    """Map ``ash merge``'s exit code over a WRITTEN merged report to a phase.
+    """Map ``ashx merge``'s exit code over a WRITTEN merged report to a phase.
 
     Only called once the merged report exists; a merge that wrote none is refused
     before this point. 0 is clean and 2 is findings, as ASH defines them. 1 is
     ``Incomplete`` -- partial results, the findings that were reported are real but
     the set is known to be short -- only when the report itself names a coverage
     gap. Otherwise exit 1 is ASH's "error during execution" and the operator has no
-    answer to report. Any other code is not one ``ash merge`` documents.
+    answer to report. Any other code is not one ``ashx merge`` documents.
 
     A gap with exit 0 or 2 means ``fail_on_incomplete_scanners`` was turned off.
     The phase follows the exit code then, as ASH's own MCP status does, and
@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "merge_argv",
         nargs=argparse.REMAINDER,
-        help="the ash merge argv, after --; --results flags are appended by this script",
+        help="the ashx merge argv, after --; --results flags are appended by this script",
     )
     args = parser.parse_args(argv)
 
@@ -314,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             shard_candidates[item.shard_index] = sorted(candidates)
 
     # Measured rather than assumed: every shard should have resolved the same
-    # candidate set. `ash merge` refuses a disagreement, but only when the field is
+    # candidate set. `ashx merge` refuses a disagreement, but only when the field is
     # present on every shard -- a set where some shards omit it is refused too,
     # while a set where *none* carries it is accepted with the hole intact. So
     # report what was actually recorded instead of asserting it was fine.
@@ -339,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     # ── 3. merge. This exit code is the verdict. ─────────────────────────────
     merge_argv = [arg for arg in args.merge_argv if arg != "--"]
     if not merge_argv:
-        raise SystemExit("no ash merge argv was supplied after --")
+        raise SystemExit("no ashx merge argv was supplied after --")
     full_argv = list(merge_argv)
     for directory in results_dirs:
         full_argv += ["--results", directory]
@@ -352,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     if not merged_path.is_file():
         summary["phase"] = PHASE_REFUSED
         summary["refusal"] = (
-            f"ash merge exited {completed.returncode} and wrote no {RESULTS_FILENAME}. "
+            f"ashx merge exited {completed.returncode} and wrote no {RESULTS_FILENAME}. "
             f"Its exit code alone cannot distinguish a refused coverage check from "
             f"findings, so the missing file is what this reports."
         )
@@ -381,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if summary["phase"] == PHASE_REFUSED:
         summary["refusal"] = (
-            f"ash merge exited {completed.returncode} and wrote a merged report, but "
+            f"ashx merge exited {completed.returncode} and wrote a merged report, but "
             f"the report names no coverage gap (coverage assessed from "
             f"{coverage['source']}: complete={coverage['complete']}). Exit 1 without a "
             f"gap is ASH's 'error during execution', so this run has no answer to "

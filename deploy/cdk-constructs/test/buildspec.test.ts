@@ -9,6 +9,7 @@ import {
   DEFAULT_ASH_REPOSITORY,
   InstallOptions,
   mergeCommands,
+  scanCommands,
   shellArg,
 } from '../src/private/commands';
 import { ASHInstallMode, ASHSeverityThreshold } from '../src';
@@ -97,7 +98,7 @@ describe('generated buildspecs install ASH from git, not by name', () => {
     '%s never installs by distribution name',
     (filename) => {
       // ASH is not on PyPI; that name belongs to an unrelated placeholder
-      // package. A name-based install would succeed and leave no `ash` on PATH.
+      // package. A name-based install would succeed and leave no `ashx` on PATH.
       const contents = contentsOf(filename);
       expect(contents).not.toMatch(/install\s+"?automated-security-helper"?[\s"]/);
       expect(contents).not.toMatch(/automated-security-helper==/);
@@ -231,14 +232,14 @@ describe('the env-driven merge loop matches the literal merge command', () => {
     )[0];
 
     expect(literal).toBe(
-      'ash merge --results "out/shard-0" --results "out/shard-1" ' +
+      'ashx merge --results "out/shard-0" --results "out/shard-1" ' +
         '--results "out/shard-2" --output-dir ".ash/ash_output" --min-severity low',
     );
 
     const loop = mergeLoopCommands().join('\n');
     expect(loop).toContain('--results "$shard_dir"');
     expect(loop).toContain(
-      'ash merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"',
+      'ashx merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"',
     );
   });
 
@@ -246,6 +247,51 @@ describe('the env-driven merge loop matches the literal merge command', () => {
     expect(() => mergeCommands([], 'out', ASHSeverityThreshold.LOW, PIP_INSTALL)).toThrow(
       /at least one results path/,
     );
+  });
+});
+
+describe('the unsharded scan resolves ashx at run time, with ash as the v3 fallback', () => {
+  // The default ref is a v3 tag, which ships only `ash`; a v4 install has both,
+  // and its `ash` is a deprecated alias. So the rendered command is run here
+  // against stand-in executables rather than pattern-matched.
+  const { spawnSync } = require('child_process') as typeof import('child_process');
+  const os = require('os') as typeof import('os');
+
+  function runScan(names: string[]): { status: number | null; ran: string } {
+    const [command] = scanCommands(
+      {
+        sourceDirectory: '.',
+        outputDirectory: 'out',
+        severityThreshold: ASHSeverityThreshold.LOW,
+        extraScanArguments: [],
+      },
+      PIP_INSTALL,
+    );
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ash-cli-'));
+    for (const name of names) {
+      fs.writeFileSync(path.join(dir, name), `#!/bin/sh\necho ${name} "$@"\n`, { mode: 0o755 });
+    }
+    const result = spawnSync('sh', ['-c', command], {
+      encoding: 'utf-8',
+      env: { PATH: `${dir}:/usr/bin:/bin` },
+    });
+    return { status: result.status, ran: (result.stdout ?? '').trim() };
+  }
+
+  test('ashx is run when both names are installed', () => {
+    const { status, ran } = runScan(['ashx', 'ash']);
+    expect(status).toBe(0);
+    expect(ran).toMatch(/^ashx scan --source-dir /);
+  });
+
+  test('ash is run on a v3 install, which has no ashx', () => {
+    const { status, ran } = runScan(['ash']);
+    expect(status).toBe(0);
+    expect(ran).toMatch(/^ash scan --source-dir /);
+  });
+
+  test('a missing ASH still fails the build', () => {
+    expect(runScan([]).status).not.toBe(0);
   });
 });
 

@@ -2,9 +2,9 @@
 
 Everything here is either a Kubernetes identifier the CRDs and the controller
 must agree on, or a path baked into the volume layout. The paths are *not*
-user-configurable, and that is deliberate: ``ash scan`` checks source/output
+user-configurable, and that is deliberate: ``ashx scan`` checks source/output
 collision by equality only (``cli/scan.py`` compares the two absolute paths),
-while ``ash merge`` checks equality **or** ancestry and its own docstring says so.
+while ``ashx merge`` checks equality **or** ancestry and its own docstring says so.
 So ``--output-dir /src`` with ``--source-dir /src/app`` passes the scan check, and
 the symptom is a green scan reporting zero findings rather than an error. Letting
 an adopter set these paths would hand them that trap; owning them removes it by
@@ -18,7 +18,9 @@ from __future__ import annotations
 # The one place the operator names the binary it runs inside the scan image, for
 # `scan`, `merge` and `mcp` alike. Every argv builder, the MCP capability probe and
 # the e2e harness read it from here, so renaming the CLI is a one-line change.
-ASH_CLI = "ash"
+# ``ashx`` is the canonical v4 name. ``ash`` still exists in the image as a
+# deprecated alias that prints a warning on every run, so it is not used here.
+ASH_CLI = "ashx"
 
 # ── Pod identity ─────────────────────────────────────────────────────────────
 # The ServiceAccount every shard, collector and MCP server pod runs as unless the
@@ -119,7 +121,7 @@ SEVERITY_LEVELS = ("ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
 
 # ── Scanner status vocabulary ────────────────────────────────────────────────
 # Classification tests membership of the COMPLETE set rather than absence from
-# the incomplete one. ``ash merge`` makes the same choice and records why: it
+# the incomplete one. ``ashx merge`` makes the same choice and records why: it
 # consumes results written by whatever ASH produced each shard, so a fan-out
 # whose pods are mid-upgrade can hand it a status string neither set knows. "Is
 # it one of the two bad ones" answers no for such a status and reports the shard
@@ -129,7 +131,7 @@ COMPLETE_SCANNER_STATUSES = frozenset({"PASSED", "FAILED", "SKIPPED"})
 KNOWN_SCANNER_STATUSES = frozenset({"PASSED", "FAILED", "SKIPPED", "ERROR", "MISSING"})
 
 # ── Terminal phases ──────────────────────────────────────────────────────────
-# ``ash merge`` exits 0 for a clean scan, 2 for findings, and 1 for a scan that
+# ``ashx merge`` exits 0 for a clean scan, 2 for findings, and 1 for a scan that
 # finished with partial coverage (ERROR or MISSING scanners, a converter that did
 # not run, an unevaluated rule, a stale content database) -- the last only when
 # ``fail_on_incomplete_scanners`` is on, which is ASH's default. Each of the three
@@ -142,7 +144,7 @@ PHASE_REFUSED = "Refused"
 TERMINAL_PHASES = (PHASE_CLEAN, PHASE_FINDINGS, PHASE_INCOMPLETE, PHASE_REFUSED)
 NON_TERMINAL_PHASES = ("Pending", "Scanning", "Merging")
 
-# ``ash merge``'s exit codes, named. 1 also means "error during execution": the
+# ``ashx merge``'s exit codes, named. 1 also means "error during execution": the
 # collector tells the two apart by whether a merged report was written and whether
 # that report names a coverage gap.
 EXIT_CLEAN = 0

@@ -4,7 +4,7 @@ Scans every pull request on an existing CodeCommit repository with ASH and posts
 the result back to the pull request.
 
 Flow: EventBridge rule on `CodeCommit Pull Request State Change` -> container
-Lambda -> `ash scan` -> `PostCommentForPullRequest`, and optionally an approval
+Lambda -> `ashx scan` -> `PostCommentForPullRequest`, and optionally an approval
 rule.
 
 ## Your repository is never created or deleted
@@ -49,21 +49,21 @@ schedule exists to prevent.
 
 ## Three outcomes, and why the exit code is not enough
 
-The verdict is `ash scan`'s exit code, mapped directly:
+The verdict is `ashx scan`'s exit code, mapped directly:
 
-| `ash scan` exit | Outcome | Comment says |
+| `ashx scan` exit | Outcome | Comment says |
 |---|---|---|
 | 0 | `pass` | No actionable findings at or above `min_severity` |
 | 2 | `findings` | Actionable findings, plus the severity table |
 | anything else | `error` | Explicitly **not** a pass, with the exit code and log tail |
 
 **The handler does not compare severities to reach that verdict.** It hands
-`--min-severity` to ASH and reports what ASH decided. `ash scan` routes its exit
-code through `_compute_exit_code` — the same function `ash merge` uses — so this
+`--min-severity` to ASH and reports what ASH decided. `ashx scan` routes its exit
+code through `_compute_exit_code` — the same function `ashx merge` uses — so this
 gate cannot disagree with a scan, or with the `codepipeline-executor` module, about
 identical findings. A severity table reimplemented here would be another copy of
 the one `automated_security_helper/utils/severity_ladder.py` exists to consolidate,
-and when it drifted this gate would pass pull requests that `ash scan` fails.
+and when it drifted this gate would pass pull requests that `ashx scan` fails.
 
 Severity counts *are* read from the results file, but only to render the comment
 table. A missing table never downgrades a clean verdict.
@@ -145,7 +145,7 @@ fetch what it needs.
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-pr-gate"` | |
 | `trigger_events` | — | `list(string)` | created + source branch updated | The two that change what would merge. |
-| `min_severity` | — | `string` | `"low"` | Passed to `ash scan --min-severity`. A floor, so lower is stricter — see below. |
+| `min_severity` | — | `string` | `"low"` | Passed to `ashx scan --min-severity`. A floor, so lower is stricter — see below. |
 | `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `create_approval_rule_template` | — | `bool` | `false` | Changes your repository's settings. |
 | `manage_approval_state` | — | `bool` | `false` | Only ever approves, only on a clean scan. |
@@ -209,7 +209,7 @@ results model permits extra fields and has carried severity counts both nested
 under `severity_counts` and flat on `summary_stats`. The handler accepts either,
 and if it finds neither it simply omits the table from the comment. That is safe
 precisely because these counts do not decide anything — the verdict is already
-`ash scan`'s exit code, so a report-shape change costs a table, not a correct
+`ashx scan`'s exit code, so a report-shape change costs a table, not a correct
 pass or fail.
 
 ## What is first-party and what is not

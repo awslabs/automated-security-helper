@@ -96,7 +96,7 @@ describe('sharded scan contract', () => {
     // An empty directory is exactly what an early-failing shard leaves behind, so
     // a directory check would pass it.
     const [, spec] = Object.entries(buildSpecsByName(template)).find(([, s]) =>
-      s.includes('ash merge'),
+      s.includes('ashx merge'),
     )!;
     expect(spec).toContain('shard-results/shard-');
     expect(spec).toContain('ash_aggregated_results.json');
@@ -106,7 +106,7 @@ describe('sharded scan contract', () => {
     // Distinct from the partial case: merging nothing would exit 0 and report a
     // clean scan for a repository nothing scanned.
     const [, spec] = Object.entries(buildSpecsByName(template)).find(([, s]) =>
-      s.includes('ash merge'),
+      s.includes('ashx merge'),
     )!;
     expect(spec).toContain('ASH_PRESENT');
     expect(spec).toContain('-eq 0');
@@ -148,7 +148,7 @@ describe('sharded scan contract', () => {
       expect(spec).toContain('python3 /tmp/ash-s3-sync.py upload ./ash-shard-output');
     }
 
-    const [, mergeSpec] = Object.entries(specs).find(([, s]) => s.includes('ash merge'))!;
+    const [, mergeSpec] = Object.entries(specs).find(([, s]) => s.includes('ashx merge'))!;
     expect(mergeSpec).toContain('python3 /tmp/ash-s3-sync.py download');
     expect(mergeSpec).toContain('python3 /tmp/ash-s3-sync.py upload ./ash-merged-output');
   });
@@ -194,7 +194,7 @@ describe('sharded scan contract', () => {
 
   test('the merge action passes one repeatable --results per shard', () => {
     const [, spec] = Object.entries(buildSpecsByName(template)).find(([, s]) =>
-      s.includes('ash merge'),
+      s.includes('ashx merge'),
     )!;
     for (let index = 0; index < 4; index += 1) {
       expect(spec).toContain(`--results ./shard-results/shard-${index}`);
@@ -206,7 +206,7 @@ describe('sharded scan contract', () => {
     // Merging four of five shards would report a clean scan for scanners that
     // never ran, which is worse than failing.
     const [, spec] = Object.entries(buildSpecsByName(template)).find(([, s]) =>
-      s.includes('ash merge'),
+      s.includes('ashx merge'),
     )!;
     expect(spec).toContain('Refusing to merge a partial');
     expect(spec).toContain('exit 1');
@@ -260,7 +260,7 @@ describe('shard count is a synthesis-time decision', () => {
       .Properties.Stages;
     expect(stages.find((s: { Name: string }) => s.Name === 'Scan').Actions).toHaveLength(7);
     const [, spec] = Object.entries(buildSpecsByName(template)).find(([, s]) =>
-      s.includes('ash merge'),
+      s.includes('ashx merge'),
     )!;
     expect(spec).toContain('--results ./shard-results/shard-6');
   });

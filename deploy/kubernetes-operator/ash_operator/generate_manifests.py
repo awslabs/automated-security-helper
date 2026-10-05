@@ -194,7 +194,7 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
                     "builds its own. Installing ASH by distribution name is also "
                     "wrong -- the name automated-security-helper on PyPI is an "
                     "unrelated placeholder, so a name-based install succeeds, leaves "
-                    "no ash on PATH, and puts a third party's code in the scan "
+                    "no ashx on PATH, and puts a third party's code in the scan "
                     "container."
                 ),
             },
@@ -255,7 +255,7 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
-                    "Extra `ash scan` flags. --shard-index, --shard-count, "
+                    "Extra `ashx scan` flags. --shard-index, --shard-count, "
                     "--source-dir, --output-dir, --min-severity, --fail-on-findings "
                     "and --fail-on-incomplete-scanners are refused here: the first "
                     "four are computed by the operator, and the last three decide "
@@ -268,8 +268,8 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
                 "type": "string",
                 "enum": list(SEVERITY_LEVELS),
                 "description": (
-                    "Severity floor for the merged verdict, passed to `ash merge` "
-                    "only. On `ash scan` it changes just that scan's exit code, and a "
+                    "Severity floor for the merged verdict, passed to `ashx merge` "
+                    "only. On `ashx scan` it changes just that scan's exit code, and a "
                     "shard's exit code is discarded, so setting it per shard would "
                     "read as a gate that never fires."
                 ),
@@ -278,7 +278,7 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
             "failOnIncompleteScanners": {
                 "type": "boolean",
                 "description": (
-                    "Passed to `ash merge`. ASH's own default is true, so leaving "
+                    "Passed to `ashx merge`. ASH's own default is true, so leaving "
                     "this unset ends a scan whose scanners did not all run in phase "
                     "Incomplete (merge exit 1) with its partial results in .status. "
                     "Setting it false accepts the gap: the phase then follows the "
@@ -333,7 +333,7 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
                 "type": "string",
                 "enum": [*NON_TERMINAL_PHASES, *TERMINAL_PHASES],
                 "description": (
-                    "The terminal phases are ash merge's three answers and one "
+                    "The terminal phases are ashx merge's three answers and one "
                     "refusal. Clean is exit 0. Findings is exit 2. Incomplete is exit "
                     "1 over a merged report that names a coverage gap: partial "
                     "results, real findings from a set known to be short. Refused "
@@ -346,7 +346,7 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
             "exitCode": {
                 "type": "integer",
                 "nullable": True,
-                "description": "ash merge's exit code: 0 clean, 2 findings, 1 incomplete.",
+                "description": "ashx merge's exit code: 0 clean, 2 findings, 1 incomplete.",
             },
             "coverageComplete": {
                 "type": "boolean",
@@ -479,7 +479,7 @@ def build_mcp_crd() -> dict[str, Any]:
                     "behind anything that may route consecutive requests to "
                     "different replicas, so effectively required whenever replicas > "
                     "1. An init container refuses to start -- exit 65 -- if this is "
-                    "set and the image's ash mcp has no --stateless-http, because "
+                    "set and the image's ashx mcp has no --stateless-http, because "
                     "without the flag the server runs stateful, answers 404 to every "
                     "injected session id, and still passes its health check."
                 ),

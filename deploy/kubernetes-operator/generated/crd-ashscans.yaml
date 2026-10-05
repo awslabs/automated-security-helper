@@ -63,8 +63,8 @@ spec:
                 description: 'ASH container image. Required with no default: ASH publishes no image to
                   any public registry and will not, so every deployment builds its own. Installing ASH
                   by distribution name is also wrong -- the name automated-security-helper on PyPI is
-                  an unrelated placeholder, so a name-based install succeeds, leaves no ash on PATH, and
-                  puts a third party''s code in the scan container.'
+                  an unrelated placeholder, so a name-based install succeeds, leaves no ashx on PATH,
+                  and puts a third party''s code in the scan container.'
               imagePullPolicy:
                 type: string
                 enum:
@@ -167,7 +167,7 @@ spec:
                 type: array
                 items:
                   type: string
-                description: 'Extra `ash scan` flags. --shard-index, --shard-count, --source-dir, --output-dir,
+                description: 'Extra `ashx scan` flags. --shard-index, --shard-count, --source-dir, --output-dir,
                   --min-severity, --fail-on-findings and --fail-on-incomplete-scanners are refused here:
                   the first four are computed by the operator, and the last three decide the run''s verdict,
                   which belongs to the merge. A shard runs only its slice, so a shard that finds nothing
@@ -180,14 +180,14 @@ spec:
                 - MEDIUM
                 - HIGH
                 - CRITICAL
-                description: Severity floor for the merged verdict, passed to `ash merge` only. On `ash
+                description: Severity floor for the merged verdict, passed to `ashx merge` only. On `ashx
                   scan` it changes just that scan's exit code, and a shard's exit code is discarded, so
                   setting it per shard would read as a gate that never fires.
               failOnFindings:
                 type: boolean
               failOnIncompleteScanners:
                 type: boolean
-                description: 'Passed to `ash merge`. ASH''s own default is true, so leaving this unset
+                description: 'Passed to `ashx merge`. ASH''s own default is true, so leaving this unset
                   ends a scan whose scanners did not all run in phase Incomplete (merge exit 1) with its
                   partial results in .status. Setting it false accepts the gap: the phase then follows
                   the findings alone, and .status.coverageComplete and .status.incompleteScanners still
@@ -381,7 +381,7 @@ spec:
                     description: 'Whether to exit with non-zero code if findings are detected
 
 
-                      IGNORED BY THE OPERATOR: Set on `ash merge` from spec.failOnFindings instead. A
+                      IGNORED BY THE OPERATOR: Set on `ashx merge` from spec.failOnFindings instead. A
                       shard''s exit code is discarded, so setting it here would read as a gate that never
                       fires.'
                     type: boolean
@@ -398,8 +398,8 @@ spec:
                       is recorded SKIPPED and the report then says what was not measured.
 
 
-                      IGNORED BY THE OPERATOR: Set on `ash merge` from spec.failOnIncompleteScanners instead,
-                      for the same reason as fail_on_findings.'
+                      IGNORED BY THE OPERATOR: Set on `ashx merge` from spec.failOnIncompleteScanners
+                      instead, for the same reason as fail_on_findings.'
                     type: boolean
                   content_db_staleness:
                     description: What a scan does when a scanner's content database (grype's or trivy's
@@ -1973,7 +1973,7 @@ spec:
                 - Findings
                 - Incomplete
                 - Refused
-                description: 'The terminal phases are ash merge''s three answers and one refusal. Clean
+                description: 'The terminal phases are ashx merge''s three answers and one refusal. Clean
                   is exit 0. Findings is exit 2. Incomplete is exit 1 over a merged report that names
                   a coverage gap: partial results, real findings from a set known to be short. Refused
                   means the operator does not have an answer and is declining to synthesise one -- a missing
@@ -1982,7 +1982,7 @@ spec:
               exitCode:
                 type: integer
                 nullable: true
-                description: 'ash merge''s exit code: 0 clean, 2 findings, 1 incomplete.'
+                description: 'ashx merge''s exit code: 0 clean, 2 findings, 1 incomplete.'
               coverageComplete:
                 type: boolean
                 nullable: true

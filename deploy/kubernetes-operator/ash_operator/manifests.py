@@ -72,13 +72,13 @@ _COLLECTOR_MODULES = ("constants", "attempts")
 # The MCP server's entrypoint. The auth header value is read from the environment
 # *inside this script*, which is the whole point: an earlier version put the literal
 # string "${ASH_MCP_AUTH_HEADER_VALUE}" into argv and ran `sh -c 'exec "$0" "$@"'`,
-# and a positional parameter's value is never re-expanded -- so `ash` compared
+# and a positional parameter's value is never re-expanded -- so `ashx` compared
 # incoming headers against those 28 characters. Anyone sending the literal
 # authenticated; the holder of the real secret got 401. A variable referenced in the
 # script *text* is expanded by the shell, which is why the flag is appended here
 # rather than passed in.
 #
-# The empty-value case is refused rather than degraded. `ash mcp` would reject a
+# The empty-value case is refused rather than degraded. `ashx mcp` would reject a
 # header name with no value anyway, but exiting 78 (EX_CONFIG) with a message naming
 # the Secret key is a better failure than a crash loop whose cause is upstream
 # argument validation. Failing closed matters here: the alternative reading -- start
@@ -262,7 +262,7 @@ def build_shard_job(
     # ordering: `$(VAR)` resolves only against variables defined *earlier* in the
     # same container's list, and the Job controller appends
     # JOB_COMPLETION_INDEX rather than prepending it, so the reference would stay
-    # a literal string and `ash scan` would be handed "$(JOB_COMPLETION_INDEX)"
+    # a literal string and `ashx scan` would be handed "$(JOB_COMPLETION_INDEX)"
     # where it wants an integer. The shell sees the real environment and has
     # neither problem.
     scan_argv = contract.build_scan_argv(
@@ -520,7 +520,7 @@ def build_results_pvc(*, scan: dict[str, Any], spec: dict[str, Any]) -> dict[str
 def build_mcp_deployment(
     *, server: dict[str, Any], spec: dict[str, Any], configmap_name: str, has_config: bool
 ) -> dict[str, Any]:
-    """Return the Deployment for a long-lived ``ash mcp`` server.
+    """Return the Deployment for a long-lived ``ashx mcp`` server.
 
     A different deployment shape from the shard dispatcher, and the CRD is separate
     for that reason: this is one long-lived process serving MCP over HTTP, not a
@@ -580,7 +580,7 @@ def build_mcp_deployment(
         mounts.append({"name": "ash-config", "mountPath": CONFIG_MOUNT, "readOnly": True})
 
     # tcpSocket, not httpGet, and this was measured rather than chosen on taste.
-    # `ash mcp --transport streamable-http --mount-path /mcp` answers **401** to a
+    # `ashx mcp --transport streamable-http --mount-path /mcp` answers **401** to a
     # bare GET on that path, and 401 to a well-formed `initialize` POST without a
     # session -- the MCP SDK will not serve a request that is not a protocol
     # handshake. A kubelet httpGet probe treats only 200-399 as success, so an

@@ -107,7 +107,7 @@
  * `ContainerUri`. No `Command`, no `EntryPoint`, no `Args`. The MCP invocation
  * therefore cannot come from this template and must be inside the image — which
  * is what the `mcp` flavor in `ash-image-build.ts` builds. ASH's own image ends
- * with `CMD ["ash"]`, so pointing AgentCore straight at it would start a process
+ * with `CMD ["ashx"]`, so pointing AgentCore straight at it would start a process
  * that prints help and exits.
  *
  * WHY THERE IS NO `--allowed-host` HERE
@@ -356,7 +356,7 @@ export class AshAgentCoreStack extends Stack {
          * nothing here excuses running stateful.
          *
          * This is maintainer decision D6's second option, taken because the first
-         * -- pointing `DEFAULT_ASH_VERSION` at a ref whose `ash mcp` accepts the
+         * -- pointing `DEFAULT_ASH_VERSION` at a ref whose `ashx mcp` accepts the
          * flag -- needs a release that does not exist yet. Delete this line when
          * it does, rather than carrying both.
          */

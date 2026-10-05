@@ -62,7 +62,8 @@ describe('AgentCore runtime contract', () => {
       Source: Match.objectLike({ BuildSpec: spec }),
     });
     const buildSpec = JSON.stringify(spec.asObject());
-    expect(buildSpec).toContain('ash mcp --transport streamable-http');
+    expect(buildSpec).toContain('ASH_CLI=ashx');
+    expect(buildSpec).toContain('mcp --transport streamable-http');
     expect(buildSpec).toContain('ASH_MCP_HOST:-0.0.0.0');
     expect(buildSpec).toContain('ASH_MCP_PORT:-8000');
     expect(buildSpec).toContain('ASH_MCP_MOUNT_PATH:-/mcp');
@@ -128,7 +129,7 @@ describe('AgentCore runtime contract', () => {
 
   test('the runtime resolves the contradiction between its own two defaults', () => {
     /*
-     * AshVersion defaults to a release whose `ash mcp` has no --stateless-http,
+     * AshVersion defaults to a release whose `ashx mcp` has no --stateless-http,
      * and McpStatelessHttp defaults to true. The entrypoint refuses that pair and
      * exits 65, so this template could not deploy with the values it ships --
      * the symptom being a health-check timeout that names no cause.

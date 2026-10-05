@@ -500,11 +500,11 @@ def build_config_schema(
 
 _OVERRIDDEN_BY_OPERATOR = {
     "fail_on_findings": (
-        "Set on `ash merge` from spec.failOnFindings instead. A shard's exit code "
+        "Set on `ashx merge` from spec.failOnFindings instead. A shard's exit code "
         "is discarded, so setting it here would read as a gate that never fires."
     ),
     "fail_on_incomplete_scanners": (
-        "Set on `ash merge` from spec.failOnIncompleteScanners instead, for the "
+        "Set on `ashx merge` from spec.failOnIncompleteScanners instead, for the "
         "same reason as fail_on_findings."
     ),
 }

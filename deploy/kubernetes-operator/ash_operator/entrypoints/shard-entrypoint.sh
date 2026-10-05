@@ -19,7 +19,7 @@
 #      ash_operator/attempts.py for what that does and does not guarantee.
 #
 # Deliberately not `set -e`: the scan is expected to exit non-zero and every
-# failure below is checked explicitly. Under `set -e` the `ash scan` line would
+# failure below is checked explicitly. Under `set -e` the `ashx scan` line would
 # end the script before the liveness check ran, and the pod would fail with the
 # scan's exit code -- which is the one number that cannot be interpreted.
 set -u
@@ -32,7 +32,7 @@ die() { log "FATAL: $*"; exit 1; }
 # `$(JOB_COMPLETION_INDEX)` from another env var's value: `$(VAR)` in a manifest
 # resolves only against variables defined earlier in the same container's list,
 # and the Job controller appends this one, so the reference would stay a literal
-# string and `ash scan` would be handed it where it wants an integer.
+# string and `ashx scan` would be handed it where it wants an integer.
 ASH_SHARD_INDEX="${ASH_SHARD_INDEX:-${JOB_COMPLETION_INDEX:-}}"
 : "${ASH_SHARD_INDEX:?neither ASH_SHARD_INDEX nor JOB_COMPLETION_INDEX is set; the Job is not completionMode: Indexed}"
 : "${ASH_SHARD_COUNT:?ASH_SHARD_COUNT is unset}"
@@ -58,7 +58,7 @@ esac
 [ "${ASH_SHARD_INDEX}" -lt "${ASH_SHARD_COUNT}" ] || die "ASH_SHARD_INDEX ${ASH_SHARD_INDEX} is not < ASH_SHARD_COUNT ${ASH_SHARD_COUNT}"
 
 # --- 1. config ---------------------------------------------------------------
-# ASH_CONFIG is the documented envvar form of `ash scan --config`. When the CR
+# ASH_CONFIG is the documented envvar form of `ashx scan --config`. When the CR
 # carried no config block the operator does not create the file, and ASH_CONFIG
 # must then be unset rather than pointing at a missing path, or every scan logs a
 # missing-file notice that reads like a failure.
@@ -78,7 +78,7 @@ mkdir -p "${ASH_OUTPUT_MOUNT}" || die "cannot create ${ASH_OUTPUT_MOUNT}"
 # --- 2. scan -----------------------------------------------------------------
 # Identical argv on every pod except the two integers. The partition is a pure
 # function of (sorted, deduped, lower-cased scanner names, index, count), so pods
-# never coordinate. Running `ash scan` unmodified is what makes ScanPhase stamp
+# never coordinate. Running `ashx scan` unmodified is what makes ScanPhase stamp
 # candidate_scanners onto the results, which is the only check that can see a
 # split-brain scanner roster.
 #
@@ -89,7 +89,7 @@ log "shard ${ASH_SHARD_INDEX} of ${ASH_SHARD_COUNT}, attempt ${ASH_ATTEMPT_ID}"
 log "argv: $* --shard-index ${ASH_SHARD_INDEX} --shard-count ${ASH_SHARD_COUNT}"
 "$@" --shard-index "${ASH_SHARD_INDEX}" --shard-count "${ASH_SHARD_COUNT}"
 ASH_EXIT=$?
-log "ash scan exited ${ASH_EXIT}"
+log "ashx scan exited ${ASH_EXIT}"
 
 # --- 3. liveness -------------------------------------------------------------
 printf '%s\n' "${ASH_EXIT}" >"${ASH_OUTPUT_MOUNT}/.shard-exit-code" 2>/dev/null || true

@@ -5,7 +5,7 @@ detail-type, scoped to one repository. The handler clones the pull request's
 source branch, runs an ASH scan over it, and posts the outcome back to the pull
 request with `PostCommentForPullRequest`.
 
-The verdict is `ash scan`'s exit code, not a judgment made here:
+The verdict is `ashx scan`'s exit code, not a judgment made here:
 
 *   **0 -> pass** - no actionable findings at or above the configured severity.
 *   **2 -> findings** - actionable findings at or above it.
@@ -15,11 +15,11 @@ The verdict is `ash scan`'s exit code, not a judgment made here:
 
 Severity counts are read from the results file too, but only to render the comment
 table. They are deliberately not compared against a threshold here. ASH routes
-that comparison through ``_compute_exit_code``, the same function `ash merge` uses,
+that comparison through ``_compute_exit_code``, the same function `ashx merge` uses,
 so a gate verdict and a scan verdict cannot disagree about identical findings. A
 severity table reimplemented in this handler would be another copy of the one that
 ``automated_security_helper/utils/severity_ladder.py`` exists to consolidate, and
-when it drifted this gate would pass pull requests that `ash scan` fails.
+when it drifted this gate would pass pull requests that `ashx scan` fails.
 
 Reporting "no findings" for a scan that never ran would be the worst failure this
 handler could have, so an unrecognized exit code is reported as unknown rather
@@ -51,7 +51,12 @@ WORK_ROOT = pathlib.Path("/tmp/ash-gate")  # noqa: S108 - the only writable path
 
 RESULTS_FILENAME = "ash_aggregated_results.json"
 
-#: Threshold handed to `ash scan --min-severity`, evaluated by ASH; this module
+#: The canonical ASH command. ``ash`` is a deprecated alias of it and the only name
+#: a v3 image has, but this gate always passes --fail-on-incomplete-scanners,
+#: which v3 does not accept, so it needs a v4 image under either name.
+ASH_CLI = "ashx"
+
+#: Threshold handed to `ashx scan --min-severity`, evaluated by ASH; this module
 #: never compares against it.
 #:
 #: A FLOOR on what counts as actionable, so a lower value is a stricter gate --
@@ -61,7 +66,7 @@ RESULTS_FILENAME = "ash_aggregated_results.json"
 #: never toward one passing with findings.
 DEFAULT_MIN_SEVERITY = "low"
 
-#: Exit codes `ash scan` uses, via _compute_exit_code.
+#: Exit codes `ashx scan` uses, via _compute_exit_code.
 EXIT_CLEAN = 0
 EXIT_FINDINGS = 2
 
@@ -150,7 +155,7 @@ OFFLINE_VALUES = {"YES", "TRUE", "1"}
 #:
 #: Every spelling ASH accepts is listed, enumerated from the real click command rather
 #: than derived by hand, because a near-miss reads like a closed hole and is not one.
-#: `ash scan` sets ignore_unknown_options, so a token this set does not name is
+#: `ashx scan` sets ignore_unknown_options, so a token this set does not name is
 #: collected into ctx.args instead of being refused, and `click` does not accept
 #: abbreviated long options -- verified against click 8.3.3 and typer 0.27.2, where
 #: --no-fail-on-incomplete leaves the parameter at its default. The --opt=value form
@@ -180,7 +185,7 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         "--all-enabled-plugins",
         "--mode",
         # One shard of a split scan runs a disjoint subset of the scanners and records
-        # the others as excluded. Sharding is recombinable by `ash merge`; this gate
+        # the others as excluded. Sharding is recombinable by `ashx merge`; this gate
         # does not merge, so a shard here is just a partial scan reporting itself as a
         # whole one.
         "--shard-index",
@@ -309,7 +314,7 @@ def _is_offline_scan() -> bool:
 
 
 def _scan_env() -> dict[str, str]:
-    """The environment `ash scan` runs under. Passing it is not optional.
+    """The environment `ashx scan` runs under. Passing it is not optional.
 
     WHAT GOES WRONG WITHOUT IT, MEASURED ON THE CDK FLAVOR OF THIS SAME IMAGE
     ------------------------------------------------------------------------
@@ -608,7 +613,7 @@ def run_scan(
     # Extras first, the gate's own options last. The refusal above is the guard; this
     # ordering is what still holds if the guard is ever incomplete, since a spelling it
     # does not know about then resolves before the gate's value rather than after it.
-    argv = ["ash", "scan", *extra_tokens, *gate_owned]
+    argv = [ASH_CLI, "scan", *extra_tokens, *gate_owned]
 
     # env= is load-bearing, not hygiene: without it the child inherits Lambda's
     # PATH merged with the image's ENVs, which point every scanner's cache at the
@@ -616,14 +621,14 @@ def run_scan(
     # caches are unreachable, which handler reads as outcome "error".
     result = _run(argv, env=_scan_env())
     log_tail = (result.stderr or result.stdout or "").strip()[-4000:]
-    LOGGER.info("ash scan exited %d", result.returncode)
+    LOGGER.info("ashx scan exited %d", result.returncode)
     return result.returncode, output_dir, log_tail
 
 
 def read_severity_counts(output_dir: pathlib.Path) -> dict[str, int] | None:
     """Read per-severity counts for the comment table. Display only.
 
-    These counts never decide the outcome — `ash scan`'s exit code does. So None
+    These counts never decide the outcome — `ashx scan`'s exit code does. So None
     here means "no table in the comment", not "error": a scan can legitimately
     exit 0 while this returns None if the report shape changes, and downgrading a
     clean verdict over a missing table would be its own false signal.
@@ -677,7 +682,7 @@ def build_comment(
             "**The scan did not complete, so this pull request has not been assessed.**",
             "",
             (
-                f"This is not a pass. `ash scan` exited {scan_exit}; treat the result as "
+                f"This is not a pass. `ashx scan` exited {scan_exit}; treat the result as "
                 "unknown and check the Lambda logs."
             ),
         ]

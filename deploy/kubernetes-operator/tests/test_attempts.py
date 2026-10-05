@@ -135,7 +135,7 @@ class TestRetryOverwrite:
         assert first[0].discarded_attempt_ids == ("job-0-aaa",)
 
     def test_a_file_changed_after_publication_is_refused(self, tmp_path):
-        # This is the overwrite the scheme exists to detect. `ash merge` cannot see
+        # This is the overwrite the scheme exists to detect. `ashx merge` cannot see
         # it: one file at one path, present and parseable.
         prefix = run_prefix(str(tmp_path), "scan-uid-6")
         directory = publish(prefix, 0, "job-0-a", shard_count=1)

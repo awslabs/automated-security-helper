@@ -99,7 +99,7 @@ def test_the_scan_argv_forces_incomplete_scanners_to_fail(gate, monkeypatch, tmp
 
 
 def _resolve_scan_params(argv: list[str]) -> dict[str, Any]:
-    """Resolve an ``ash scan`` argv through the real CLI and return the parameter values.
+    """Resolve an ``ashx scan`` argv through the real CLI and return the parameter values.
 
     Membership in argv is not the property that matters. ``click`` resolves a repeated option
     to its LAST occurrence, so a flag can sit in argv and still resolve to the opposite value --
@@ -116,7 +116,7 @@ def _resolve_scan_params(argv: list[str]) -> dict[str, Any]:
 
     from automated_security_helper.cli.main import app
 
-    assert argv[:2] == ["ash", "scan"], f"unexpected argv prefix: {argv[:2]}"
+    assert argv[:2] == ["ashx", "scan"], f"unexpected argv prefix: {argv[:2]}"
     scan_command = typer.main.get_command(app).commands["scan"]
     return scan_command.make_context("scan", argv[2:], resilient_parsing=False).params
 
@@ -504,7 +504,7 @@ def test_a_reserved_option_would_really_have_narrowed_the_scan(
 
     A refusal is only worth its cost to an operator if the token it refuses would have changed
     what ASH does. Each case here is resolved through the real CLI, so the assertion is on the
-    value ASH would have used rather than on a token being present in a list. ``ash scan`` sets
+    value ASH would have used rather than on a token being present in a list. ``ashx scan`` sets
     ignore_unknown_options, so a spelling ASH does not declare leaves the parameter at its
     default and these assertions fail -- which is what makes this a control and not a
     restatement.
@@ -513,7 +513,7 @@ def test_a_reserved_option_would_really_have_narrowed_the_scan(
     resolves ``-c/tmp/none.yaml`` to the same value as ``-c /tmp/none.yaml``, and no amount of
     splitting on ``=`` recovers the ``-c`` from the attached form.
     """
-    params = _resolve_scan_params(["ash", "scan", *argv_tail])
+    params = _resolve_scan_params(["ashx", "scan", *argv_tail])
 
     assert params[parameter] == expected, (
         f"{argv_tail} resolves {parameter} to {params[parameter]!r}, not {expected!r}; if this "

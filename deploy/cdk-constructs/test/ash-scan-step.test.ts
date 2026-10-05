@@ -46,7 +46,7 @@ describe('unsharded scan', () => {
 
     template.hasResourceProperties('AWS::CodeBuild::Project', {
       Source: Match.objectLike({
-        BuildSpec: Match.stringLikeRegexp('ash scan'),
+        BuildSpec: Match.stringLikeRegexp('command -v ashx [|][|] echo ash[)][^ ]* scan'),
       }),
     });
   });
@@ -117,7 +117,7 @@ describe('sharded scan', () => {
       .filter((a) => a.name.includes('Shard'))
       .flatMap((a) => a.outputs);
 
-    expect(command).toContain('ash merge');
+    expect(command).toContain('ashx merge');
     expect(command.match(/--results/g)).toHaveLength(3);
 
     // Each --results points at the CodeBuild directory for one shard artifact,
@@ -255,7 +255,7 @@ describe('severityThreshold', () => {
     });
     const shards = ashActions(actions).filter((a) => a.name.includes('Shard'));
 
-    // On `ash scan`, --min-severity changes only that scan's exit code, and a
+    // On `ashx scan`, --min-severity changes only that scan's exit code, and a
     // shard's exit code is discarded by design. Passing it to a shard would read
     // as if it set the floor while changing nothing; the floor goes to merge.
     expect(shards).toHaveLength(3);
@@ -344,7 +344,9 @@ describe('install modes', () => {
     const spec = JSON.parse((scan![1] as any).Properties.Source.BuildSpec);
 
     expect(spec.phases.install.commands).toEqual([]);
-    expect(spec.phases.build.commands.join('\n')).toContain('ash scan');
+    expect(spec.phases.build.commands.join('\n')).toContain(
+      '"$(command -v ashx || echo ash)" scan',
+    );
   });
 
   test('UVX resolves the git repository at scan time, installing nothing first', () => {
@@ -355,6 +357,22 @@ describe('install modes', () => {
     expect(spec.phases.build.commands.join('\n')).toContain(
       'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0" ash scan',
     );
+  });
+
+  test('UVX runs ashx for shards and the merge, which need a v4 ref anyway', () => {
+    // The unsharded UVX scan above keeps the deprecated `ash`, because uvx cannot
+    // fall back and the default ref is a v3 tag with no `ashx`. Shards and the
+    // merge use flags and a command v3 does not have, so they get the canonical name.
+    const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, shardCount: 2 });
+    const projects = template.findResources('AWS::CodeBuild::Project');
+    const commands = Object.entries(projects)
+      .filter(([id]) => id.includes('SecurityScan'))
+      .map(([, p]) => JSON.parse((p as any).Properties.Source.BuildSpec).phases.build.commands.join('\n'))
+      .join('\n');
+
+    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ashx scan /m);
+    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ashx merge /m);
+    expect(commands).not.toMatch(/" ash (scan|merge) /);
   });
 
   test('rejects a non-https repository at synth', () => {
@@ -376,7 +394,7 @@ describe('install modes', () => {
   ])('%s never installs ASH by distribution name', (installMode) => {
     // ASH is not published to PyPI. The name `automated-security-helper` there is
     // an unrelated placeholder package, so a name-based install would succeed,
-    // leave no `ash` on PATH, and pull a third party's code into the scan
+    // leave no `ashx` on PATH, and pull a third party's code into the scan
     // container. Every install has to name the git repository.
     const { template } = synthesizeWithStep({ installMode, shardCount: 2 });
     const projects = template.findResources('AWS::CodeBuild::Project');

@@ -39,12 +39,12 @@ output "merged_results_location_template" {
 }
 
 output "min_severity" {
-  description = "Threshold passed to `ash merge --min-severity`. ASH evaluates it; this module does not."
+  description = "Threshold passed to `ashx merge --min-severity`. ASH evaluates it; this module does not."
   value       = var.min_severity
 }
 
 output "fail_on_findings" {
-  description = "Whether `--fail-on-findings` is passed to `ash merge`, making actionable findings fail the pipeline."
+  description = "Whether `--fail-on-findings` is passed to `ashx merge`, making actionable findings fail the pipeline."
   value       = var.fail_on_findings
 }
 

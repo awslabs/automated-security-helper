@@ -131,7 +131,7 @@ class TestStatus:
 
     def test_exit_one_over_a_coverage_gap_is_incomplete_with_partial_results(self):
         # The #640 case: fail_on_incomplete_scanners defaults on, so a MISSING scanner
-        # makes ash merge exit 1 while still writing the merged report. That is a
+        # makes ashx merge exit 1 while still writing the merged report. That is a
         # third answer, not a refusal: the findings that came back are real.
         status = status_from_summary(
             parse_collector_summary(
@@ -175,7 +175,7 @@ class TestStatus:
         assert status["phase"] == "Refused"
 
     def test_a_gap_with_the_gate_off_keeps_the_exit_code_phase_and_reports_the_gap(self):
-        # failOnIncompleteScanners: false. ash merge exits 0 over a MISSING scanner;
+        # failOnIncompleteScanners: false. ashx merge exits 0 over a MISSING scanner;
         # the phase follows the exit code as ASH's own MCP status does, and the gap
         # stays visible beside it rather than being reported as complete.
         status = status_from_summary(
@@ -233,7 +233,7 @@ class TestStatus:
 
         Before this, ``derive_phase`` never read ``candidateRosterAgreed``, so a scan
         whose shards recorded no ``candidate_scanners`` at all reported success
-        with ``candidateRosterAgreed: false`` in its own status. ``ash merge`` does not
+        with ``candidateRosterAgreed: false`` in its own status. ``ashx merge`` does not
         refuse that case -- it skips the union check -- so nothing else caught it.
         The e2e asserted the field was ``true``, which proves the provenance was
         present and says nothing about its absence.

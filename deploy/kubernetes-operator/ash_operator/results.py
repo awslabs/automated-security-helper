@@ -38,7 +38,7 @@ def classify_status(status: str | None) -> str:
     one, and that direction is the whole point. The pods in a fan-out can be
     mid-upgrade, so this can be handed a status string neither set knows. "Is it
     one of the two bad ones" answers *no* for such a string and reports the shard
-    complete -- reading an unrecognised status as success. ``ash merge`` makes the
+    complete -- reading an unrecognised status as success. ``ashx merge`` makes the
     same choice for the same reason and has a test class named after it.
 
     SKIPPED counts as complete because it means "not selected", which is a
@@ -149,7 +149,7 @@ def status_from_summary(summary: CollectorSummary, *, expected_shard_count: int)
         "consumedShardIndices": consumed,
         "expectedShardCount": expected_shard_count,
         # Not the same question as "did every index resolve". The merged report
-        # records what `ash merge` itself believed it consumed, from the provenance
+        # records what `ashx merge` itself believed it consumed, from the provenance
         # inside the result files. Reporting both means a disagreement between the
         # collector's walk and the merge's own accounting is visible instead of
         # averaged away.
@@ -162,7 +162,7 @@ def status_from_summary(summary: CollectorSummary, *, expected_shard_count: int)
         merge_block["discardedAttempts"] = summary.discarded_attempts
     if summary.selected_attempts:
         merge_block["selectedAttempts"] = summary.selected_attempts
-    # Always reported, including when it is None. `ash merge` refuses a roster
+    # Always reported, including when it is None. `ashx merge` refuses a roster
     # disagreement only when every shard recorded candidate_scanners; a set where
     # none did is accepted with a coverage hole intact, so "we would have been told"
     # is not a safe assumption and this field says which case happened. derive_phase
@@ -174,7 +174,7 @@ def status_from_summary(summary: CollectorSummary, *, expected_shard_count: int)
             "no shard recorded candidate_scanners, or the shards did not agree on it. "
             "That field is the only check that can see a coverage hole where two "
             "executors partitioned different scanner sets without overlapping, and "
-            "`ash merge` does not refuse when it is absent from every shard -- it "
+            "`ashx merge` does not refuse when it is absent from every shard -- it "
             "skips the union check and merges. So a scanner may have run nowhere and "
             "the report would read as a complete scan. Most likely cause: spec.image "
             "is an ASH build that predates ShardAssignment stamping.",
@@ -189,7 +189,7 @@ def status_from_summary(summary: CollectorSummary, *, expected_shard_count: int)
         )
 
     status: dict[str, Any] = {
-        # ash merge's own exit code, unreinterpreted: 0 clean, 2 findings, 1
+        # ashx merge's own exit code, unreinterpreted: 0 clean, 2 findings, 1
         # incomplete or an error. The phase below is what it means.
         "exitCode": summary.merge_exit_code,
         # From the merged report, assessed the way ASH answers coverage_complete
@@ -217,7 +217,7 @@ def status_from_summary(summary: CollectorSummary, *, expected_shard_count: int)
 def derive_phase(summary: CollectorSummary, *, complete_walk: bool) -> str:
     """Return the terminal phase: ``Clean``, ``Findings``, ``Incomplete`` or ``Refused``.
 
-    The first three are ``ash merge``'s three answers -- exit 0, exit 2, and exit 1
+    The first three are ``ashx merge``'s three answers -- exit 0, exit 2, and exit 1
     over a merged report that names a coverage gap -- mapped by
     :func:`ash_operator.entrypoints.collect.verdict_phase`, the same function the
     collector used, so the two cannot disagree. ``Incomplete`` carries partial
@@ -230,7 +230,7 @@ def derive_phase(summary: CollectorSummary, *, complete_walk: bool) -> str:
 
     ``candidate_roster_agreed`` is one of those. The collector detects the case it
     names -- no shard recorded ``candidate_scanners``, or only some did, or the
-    recorded sets disagree -- but for the all-absent case ``ash merge`` does **not**
+    recorded sets disagree -- but for the all-absent case ``ashx merge`` does **not**
     refuse: the union check is skipped, and a mid-rollout coverage hole merges into a
     report that reads as a complete scan. For a while this function read that field
     not at all, so a scan with no provenance whatsoever reported success with

@@ -52,7 +52,7 @@ class TestOutputEscapesSource:
             assert_output_escapes_source(source_dir="/src", output_dir="/src")
 
     def test_an_output_dir_that_is_an_ancestor_is_refused(self):
-        # `ash scan` accepts this: it compares the two paths for equality only, and
+        # `ashx scan` accepts this: it compares the two paths for equality only, and
         # /src != /src/app. The symptom is a report of zero findings, because
         # apply_suppressions_to_sarif excludes findings whose location resolves
         # inside output_dir, which when output_dir is an ancestor is every finding.
