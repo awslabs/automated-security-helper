@@ -287,6 +287,24 @@ vl_assert_venv_layout() {
   vl_say "   venv layout: $ASH_VENV -> $(readlink "$ASH_VENV"), no other venv present"
 }
 
+# Puts the host back on the layout the packages used before the symlink swap: the live
+# venv as a real directory AT /usr/lib/ash/venv, built from the wheel the package
+# installed, with the interpreter the current venv uses. The next install has to migrate
+# it, which is the one path through the post-install step that moves a directory.
+vl_make_directory_layout() {
+  local wheel="$1" py
+  py="$(readlink -f "$ASH_VENV/bin/python3")"
+  [ -x "$py" ] || vl_fail "cannot find the interpreter behind $ASH_VENV"
+  rm -rf "$ASH_VENV" /usr/lib/ash/venv-*
+  "$py" -m venv "$ASH_VENV"
+  "$ASH_VENV/bin/pip" install --quiet --disable-pip-version-check "$wheel"
+  if [ -L "$ASH_VENV" ] || [ ! -d "$ASH_VENV" ]; then
+    vl_fail "$ASH_VENV is not a plain directory, so the migration is not exercised"
+  fi
+  "$ASH_VENV/bin/$ASH_CLI_NAME" --version >/dev/null || vl_fail "the directory-layout venv does not run"
+  vl_say "   directory layout in place: $ASH_VENV is a real directory built with $py"
+}
+
 # Samples, every 50 ms for as long as an install runs, whether the command and the
 # interpreter behind /usr/lib/ash/venv exist. Any miss is a moment in which the
 # installed CLI could not have started.

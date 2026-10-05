@@ -11,7 +11,8 @@
 #   assert             build, gate the payload, install, scan, purge (the default)
 #   upgrade            install N-1 built from $PREV_DIST, upgrade to N, require the venv
 #                      to be replaced; then fail an upgrade on purpose and require the
-#                      working install to survive it; then purge
+#                      working install to survive it; then migrate a venv left as a
+#                      directory by an older release to the symlink layout; then purge
 #   negative-findings  the fixture with its finding removed must FAIL the findings gate
 #   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code gate
 #   negative-install   a package whose postinst fails must FAIL the install step
@@ -79,6 +80,18 @@ deb_install() {
     return 1
   fi
   sed -n -E 's/^Setting up ((python3|ash)[^ ]* .*)/   Setting up \1/p' /tmp/apt-install.log
+}
+
+# `apt-get install --reinstall` with the same checks as deb_install.
+deb_install_reinstall() {
+  local pkg="$1" rc=0
+  apt-get install -y -q --reinstall "$pkg" >/tmp/apt-install.log 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    tail -n 30 /tmp/apt-install.log >&2
+    vl_fail "apt-get install --reinstall $(basename "$pkg") exited $rc"
+  fi
+  [ "$(dpkg-query -W -f='${Status}' ash)" = "install ok installed" ] \
+    || vl_fail "ash is not 'install ok installed' after the reinstall"
 }
 
 key_dependency_installed() {
@@ -214,8 +227,16 @@ if [ "$MODE" = upgrade ]; then
   dpkg --configure -a >/tmp/dpkg-configure.log 2>&1 || { tail -n 20 /tmp/dpkg-configure.log >&2; vl_fail "dpkg --configure -a failed"; }
   [ "$(dpkg-query -W -f='${Status}' ash)" = "install ok installed" ] || vl_fail "ash is not configured after recovery"
   vl_assert_installed_version "$VERSION"
+  vl_assert_venv_layout
 
-  echo "== 9. purge leaves nothing behind"
+  echo "== 9. a host still on the directory layout is migrated to the symlink"
+  vl_make_directory_layout "$(one_wheel /usr/lib/ash/wheels)"
+  deb_install_reinstall "$DEB"
+  vl_assert_installed_version "$VERSION"
+  vl_assert_venv_layout
+  echo "   OK: the directory venv was replaced by a link and nothing was left behind"
+
+  echo "== 10. purge leaves nothing behind"
   purge_and_check
   echo; echo "DEB UPGRADE VERIFICATION PASSED"
   exit 0

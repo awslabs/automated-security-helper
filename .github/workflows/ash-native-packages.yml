@@ -52,6 +52,8 @@ name: ASH - Native Packages (deb, rpm)
 # throughout. Each then fails an upgrade on purpose (Python index unreachable) and requires
 # the previous working install to survive, and the deb legs also require prerm to keep
 # the venv on `upgrade` and `failed-upgrade`.
+# Last, each rebuilds the venv as a plain directory, the layout earlier builds of
+# these packages used, and requires a reinstall to migrate it to the symlink.
 #
 # Testing in a distribution image PUBLISHES NOTHING. Nothing here uploads a package.
 

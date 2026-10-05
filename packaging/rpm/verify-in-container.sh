@@ -12,7 +12,8 @@
 #   assert             build, gate the payload, install, scan, erase (the default)
 #   upgrade            install N-1 built from $PREV_DIST, upgrade to N, require the venv
 #                      to be replaced; then fail an upgrade on purpose and require the
-#                      working install to survive it; then erase
+#                      working install to survive it; then migrate a venv left as a
+#                      directory by an older release to the symlink layout; then erase
 #   negative-findings  the fixture with its finding removed must FAIL the findings gate
 #   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code gate
 #   negative-install   a package whose %post fails must FAIL the install step
@@ -227,8 +228,16 @@ if [ "$MODE" = upgrade ]; then
   echo "== 7. the documented recovery works once the index is back"
   rpm_install reinstall "$RPM"
   vl_assert_installed_version "$VERSION"
+  vl_assert_venv_layout
 
-  echo "== 8. erase leaves nothing behind"
+  echo "== 8. a host still on the directory layout is migrated to the symlink"
+  vl_make_directory_layout "$(one_wheel /usr/lib/ash/wheels)"
+  rpm_install reinstall "$RPM"
+  vl_assert_installed_version "$VERSION"
+  vl_assert_venv_layout
+  echo "   OK: the directory venv was replaced by a link and nothing was left behind"
+
+  echo "== 9. erase leaves nothing behind"
   erase_and_check
   echo; echo "RPM UPGRADE VERIFICATION PASSED"
   exit 0
