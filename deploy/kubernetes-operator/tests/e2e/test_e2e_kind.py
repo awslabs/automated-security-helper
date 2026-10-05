@@ -43,134 +43,22 @@ from ash_operator.constants import (
 from tests.e2e.helpers import (
     ASH_IMAGE,
     ASH_IMAGE_NOSTAMP,
-    E2E_DIR,
     GROUP,
     NAMESPACE,
     TERMINAL,
+    apply_fixture_configmap,
+    apply_scan,
     kubectl,
     kubectl_apply_stdin,
     kubectl_json,
-    operator_logs,
+    scan_status,
+    scan_uid,
+    shard_pods,
     wait_for,
+    wait_terminal,
 )
 
 pytestmark = pytest.mark.e2e
-
-
-def apply_fixture_configmap(name: str, fixture: str) -> None:
-    # `create --dry-run=client | apply` rather than `create`, so re-running the suite
-    # against a fresh cluster and against a warm one behave the same.
-    rendered = kubectl(
-        "-n",
-        NAMESPACE,
-        "create",
-        "configmap",
-        name,
-        f"--from-file={E2E_DIR / 'fixtures' / fixture}",
-        "--dry-run=client",
-        "-o",
-        "yaml",
-    ).stdout
-    kubectl_apply_stdin(rendered)
-
-
-def apply_scan(
-    name: str,
-    *,
-    source_configmap: str,
-    shard_count: int = 3,
-    scanners: list[str] | None = None,
-    backoff_limit: int = 0,
-    min_severity: str = "MEDIUM",
-    extra_spec: dict | None = None,
-) -> None:
-    spec = {
-        "image": ASH_IMAGE,
-        "imagePullPolicy": "Never",
-        "shardCount": shard_count,
-        "minSeverity": min_severity,
-        "backoffLimit": backoff_limit,
-        "scanServiceAccountName": "ash-scan",
-        "source": {"configMap": {"name": source_configmap}},
-        "results": {"size": "1Gi", "accessModes": ["ReadWriteOnce"]},
-        # One shard at a time, so a ReadWriteOnce claim on a single-node kind
-        # cluster works. The partition is unaffected -- it is a function of the
-        # roster and the two integers, not of how many pods run at once.
-        "parallelism": 1,
-        "scanners": scanners or ["bandit", "detect-secrets"],
-        "config": {
-            "project_name": name,
-            "global_settings": {"severity_threshold": "MEDIUM"},
-        },
-    }
-    if extra_spec:
-        spec.update(extra_spec)
-    body = {
-        "apiVersion": f"{GROUP}/v1alpha1",
-        "kind": "AshScan",
-        "metadata": {"name": name, "namespace": NAMESPACE},
-        "spec": spec,
-    }
-    kubectl_apply_stdin(yaml.safe_dump(body))
-
-
-def scan_status(name: str) -> dict:
-    obj = kubectl_json("-n", NAMESPACE, "get", "ashscan", name)
-    return obj.get("status") or {}
-
-
-def wait_terminal(name: str, timeout: int = 900) -> dict:
-    # The last observed phase is tracked explicitly rather than left to wait_for's
-    # "last saw" reporting. wait_for prints the predicate's return value, which is
-    # None for "not yet" -- so a timeout read "last saw None", which looks like an
-    # empty .status and sends the reader after the wrong thing. It happened: under
-    # nektos/act this timed out and the message implied the operator had written no
-    # status at all, when in fact the phase was Scanning and the scan was simply
-    # slower than the budget.
-    seen: list[str | None] = [None]
-
-    def check():
-        status = scan_status(name)
-        seen[0] = status.get("phase")
-        if seen[0] in TERMINAL:
-            return status
-        return None
-
-    try:
-        status = wait_for(check, timeout=timeout, what=f"AshScan/{name} to reach a terminal phase")
-    except AssertionError:
-        print(f"=== AshScan/{name} last observed phase: {seen[0]!r} ===")
-        print(f"=== raw status: {json.dumps(scan_status(name))[:1500]} ===")
-        print("=== operator logs ===")
-        print(operator_logs(300))
-        print("=== jobs ===")
-        kubectl("-n", NAMESPACE, "get", "jobs", check=False)
-        kubectl("-n", NAMESPACE, "get", "pods", check=False)
-        raise
-    # The verdict fields, printed on success too, so a CI log shows what each run
-    # actually ended as rather than only that the assertions held.
-    summary = {
-        key: status.get(key)
-        for key in ("phase", "exitCode", "coverageComplete", "coverageGaps", "findings")
-    }
-    print(f"=== AshScan/{name} terminal: {json.dumps(summary, sort_keys=True)} ===")
-    return status
-
-
-def shard_pods(scan_uid: str) -> list[dict]:
-    listing = kubectl_json(
-        "-n",
-        NAMESPACE,
-        "get",
-        "pods",
-        "-l",
-        f"{GROUP}/scan-uid={scan_uid},{GROUP}/role=shard",
-    )
-    return listing["items"]
-
-
-def scan_uid(name: str) -> str:
-    return kubectl_json("-n", NAMESPACE, "get", "ashscan", name)["metadata"]["uid"]
 
 
 @pytest.fixture(scope="module", autouse=True)
