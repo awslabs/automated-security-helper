@@ -48,6 +48,12 @@ from automated_security_helper.utils.log import ASH_LOGGER
 PACKAGE_NAME_KEY = "package_name"
 PACKAGE_VERSION_KEY = "package_version"
 PACKAGE_PATH_KEY = "package_path"
+ROOT_ADVISORIES_KEY = "root_advisories"
+"""Property on an npm-audit transitive result: the direct findings it stems from.
+
+A list of ``{"rule_id", "package_path", "uri"}`` dicts, ``package_path`` only
+when known. See :func:`extract_root_advisories`.
+"""
 
 NPM_LOCKFILE_NAMES = frozenset({"package-lock.json", "npm-shrinkwrap.json"})
 
@@ -282,3 +288,34 @@ def extract_package_identity(
         return value if isinstance(value, str) and value else None
 
     return _get(PACKAGE_NAME_KEY), _get(PACKAGE_VERSION_KEY), _get(PACKAGE_PATH_KEY)
+
+
+def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
+    """Read the ``root_advisories`` list from a SARIF result's properties.
+
+    Accepts a PropertyBag, a dict, or None. Returns an empty list when the
+    property is absent. Raises nothing on a malformed list: an entry without a
+    string ``rule_id``, or with neither ``package_path`` nor ``uri``, is kept as
+    an empty dict so the caller cannot match it and fails closed.
+    """
+    if properties is None:
+        return []
+    if hasattr(properties, "model_dump"):
+        properties = properties.model_dump(exclude_none=True)
+    if not isinstance(properties, dict):
+        return []
+    raw = properties.get(ROOT_ADVISORIES_KEY)
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for item in raw:
+        ref: Dict[str, str] = {}
+        if isinstance(item, dict) and isinstance(item.get("rule_id"), str):
+            for key in ("rule_id", "package_path", "uri"):
+                value = item.get(key)
+                if isinstance(value, str) and value:
+                    ref[key] = value
+            if "package_path" not in ref and "uri" not in ref:
+                ref = {}
+        out.append(ref)
+    return out

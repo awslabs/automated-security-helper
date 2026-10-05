@@ -200,15 +200,9 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         if self.use_uv_tool:
             installation_info = self._get_tool_installation_info()
             if installation_info.get("available"):
-                source = installation_info.get("preferred_source", "unknown")
-                if source == "uv":
-                    self._plugin_log("Semgrep already installed via UV tool")
-                elif source == "pre_installed":
-                    self._plugin_log(
-                        f"Using pre-installed semgrep at {installation_info.get('pre_installed_path')}"
-                    )
-                self.dependencies_satisfied = True
-                return True
+                # Runs a verified binary on PATH directly instead of re-resolving
+                # through uv, and fails offline with the missing extras named (#520).
+                return self._select_tool_execution(installation_info)
 
             self._plugin_log(
                 "Semgrep not found via UV tool, attempting explicit installation..."
