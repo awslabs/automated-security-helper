@@ -1590,10 +1590,10 @@ export class AshEksOperatorStack extends Stack {
      * A separate policy rather than another statement on the role's default policy:
      * the function depends on the default policy, so referencing the function's ARN
      * from it would be a dependency cycle. This policy depends on the function
-     * instead. It is created after the function, which is fine, because it only
-     * removes access.
+     * instead. It is created after the function, so the install below depends on it:
+     * otherwise the first apply could run before the deny is attached.
      */
-    new iam.Policy(this, 'InstallerEc2CodeDeny', {
+    const denyPolicy = new iam.Policy(this, 'InstallerEc2CodeDeny', {
       roles: [installerRole],
       statements: [
         new iam.PolicyStatement({
@@ -1734,6 +1734,7 @@ export class AshEksOperatorStack extends Stack {
      * otherwise -- nothing in the custom resource references the entry.
      */
     install.node.addDependency(entry);
+    install.node.addDependency(denyPolicy);
     // The association only needs the namespace to exist eventually, but ordering
     // it after the install keeps a deleted stack from removing the namespace
     // while the association still points into it.

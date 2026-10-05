@@ -298,6 +298,16 @@ describe('the EC2 grant is usable by the Lambda service only', () => {
     const fn = Object.values<any>(TEMPLATE.findResources('AWS::Lambda::Function'))[0];
     expect([fn.DependsOn ?? []].flat().join(',')).not.toContain('InstallerEc2CodeDeny');
   });
+
+  test('the install waits for the deny, so the first apply already runs under it', () => {
+    // The deny is created after the function. Without this ordering CloudFormation may
+    // invoke the installer before the deny is attached.
+    const install = Object.values<any>(JSON_TEMPLATE.Resources).find(
+      (r) => r.Type === 'AWS::CloudFormation::CustomResource',
+    );
+    expect(denies).toHaveLength(1);
+    expect([install.DependsOn ?? []].flat()).toContain(denies[0][0]);
+  });
 });
 
 describe('the installer function as a custom-resource responder', () => {

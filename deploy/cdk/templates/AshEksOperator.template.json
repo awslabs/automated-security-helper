@@ -469,7 +469,8 @@
     }
    },
    "DependsOn": [
-    "InstallerAccess"
+    "InstallerAccess",
+    "InstallerEc2CodeDeny0202AC72"
    ],
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"
