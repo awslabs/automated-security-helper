@@ -220,9 +220,13 @@ jobs:
         run: kind delete cluster --name "$ASH_OPERATOR_E2E_CLUSTER"
 
       - name: Upload the e2e log
-        if: ${{ always() && !env.ACT }}
+        # Failure evidence only. A green run's log says nothing the job summary does
+        # not, and the artifact store is public, so it is kept off green runs. It is
+        # allowlisted in .github/scripts/assert-publish-surfaces.py.
+        if: ${{ failure() && !env.ACT }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ash-operator-e2e-log
           path: ${{ env.OPERATOR_DIR }}/e2e.log
           if-no-files-found: warn
+          retention-days: 7

@@ -417,6 +417,20 @@ ALLOWLIST: tuple[Entry, ...] = (
             "assembly rather than the whole of cdk.out."
         ),
     ),
+    Entry(
+        file=".github/workflows/ash-kubernetes-operator.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes="name=ash-operator-e2e-log path=${{ env.OPERATOR_DIR }}/e2e.log",
+        reason=(
+            "Failure evidence only (if: failure()), 7-day retention: the pytest -v "
+            "log of the Kubernetes operator's kind end-to-end run. Test names, "
+            "assertion output and the tail of kubectl and operator logs from a "
+            "throwaway cluster, scanning committed fixtures whose only credential is "
+            "AWS's documentation example key. One text file, not build output; the "
+            "operator and ASH images stay on the runner."
+        ),
+    ),
     # -- Standalone caches ----------------------------------------------------
     # The grype database: restored everywhere, saved only from a push to the default
     # branch, keyed on the time bucket content_databases.py derives from the bound grype
