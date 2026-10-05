@@ -619,6 +619,27 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         assertFalse("a cancel is not an exit code: ${message.body}", message.body.contains("exited"))
     }
 
+    fun testCancellingDuringTheProbeStopsItAtOnceAndIsReportedAsCancelled() {
+        // The probe has a 30 s deadline. A probe that ignored the indicator would hold a pressed
+        // Cancel for all of it and then report the executable as not ASH, which it is.
+        val (source, output) = dirs()
+        val started = workdir.resolve("started")
+        val script = rawStub("exit 0", versionBody = "touch '$started'; sleep 300")
+        val indicator = EmptyProgressIndicator()
+        var outcome: AshScanRunner.Outcome? = null
+
+        val worker = thread { outcome = AshScanRunner.run(script.toString(), source, output, indicator) }
+        awaitFile(started)
+        val cancelledAt = System.nanoTime()
+        indicator.cancel()
+        worker.join(20_000)
+        val elapsed = millisSince(cancelledAt)
+
+        assertFalse("the probe must stop when cancelled", worker.isAlive)
+        assertEquals(AshScanRunner.Outcome.Cancelled, outcome)
+        assertTrue("the probe took $elapsed ms to honor the cancel", elapsed < 10_000)
+    }
+
     fun testASecondScanWhileOneRunsIsRefusedAndTheFirstStillReportsItsResult() {
         // Two scans would share <project>/.ash/ash_output: the second's freshness guard deletes the
         // first's report, and either can read the other's file half-written. So the second is

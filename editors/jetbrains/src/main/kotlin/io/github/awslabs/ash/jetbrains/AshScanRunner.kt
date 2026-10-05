@@ -112,7 +112,11 @@ object AshScanRunner {
         indicator: ProgressIndicator? = null,
         timeoutMillis: Int = 30 * 60 * 1000,
     ): Outcome {
-        val versionLine = when (val verdict = probe(executable)) {
+        val verdict = probe(executable, indicator)
+        // A cancel during the probe kills it, and what it printed by then is not a verdict on
+        // whether the executable is ASH.
+        if (indicator?.isCanceled == true) return Outcome.Cancelled
+        val versionLine = when (verdict) {
             is AshIdentityProbe.Verdict.NotAsh -> return Outcome.Failed(verdict.message, null)
             is AshIdentityProbe.Verdict.IsAsh -> verdict.versionLine
         }
@@ -227,11 +231,20 @@ object AshScanRunner {
     /**
      * Runs `<executable> --version` and classifies the answer. A process that cannot start is
      * reported as not ASH, with the reason, rather than thrown.
+     *
+     * @param indicator when given, a cancel kills the probe at once instead of after its
+     *   [AshIdentityProbe.TIMEOUT_SECONDS] deadline. The caller checks the indicator afterwards,
+     *   because the verdict of a killed probe means nothing.
      */
-    fun probe(executable: String): AshIdentityProbe.Verdict {
+    fun probe(executable: String, indicator: ProgressIndicator? = null): AshIdentityProbe.Verdict {
         val output = try {
-            CapturingProcessHandler(commandLine(executable, "--version"))
-                .runProcess(AshIdentityProbe.TIMEOUT_SECONDS * 1000)
+            val handler = CapturingProcessHandler(commandLine(executable, "--version"))
+            val timeoutMillis = AshIdentityProbe.TIMEOUT_SECONDS * 1000
+            if (indicator == null) {
+                handler.runProcess(timeoutMillis)
+            } else {
+                handler.runProcessWithProgressIndicator(indicator, timeoutMillis, true)
+            }
         } catch (e: Exception) {
             return AshIdentityProbe.Verdict.NotAsh(
                 "Could not start '$executable': ${e::class.simpleName}: ${e.message}. Install " +
