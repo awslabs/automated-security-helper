@@ -107,6 +107,18 @@ object AshScanController {
                 )
             }
 
+            is AshScanRunner.Outcome.Cancelled -> {
+                // Cleared for the same reason as a failure: the report the previous findings
+                // came from was removed before this run started.
+                service.clear()
+                messages += Message(
+                    NotificationType.WARNING,
+                    "ASH scan cancelled",
+                    "The scan was cancelled and ASH was stopped before it finished. No findings " +
+                        "are shown, and this is not a clean result.",
+                )
+            }
+
             is AshScanRunner.Outcome.Completed -> {
                 service.update(outcome.results, sourceDir.toString())
                 messages += report(outcome)

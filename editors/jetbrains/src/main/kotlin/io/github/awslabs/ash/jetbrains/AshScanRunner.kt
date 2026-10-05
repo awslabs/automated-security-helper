@@ -89,6 +89,11 @@ object AshScanRunner {
         /** The scan did not get far enough to produce a readable report of this run. */
         data class Failed(val summary: String, val detail: String?) : Outcome
 
+        /**
+         * The user cancelled, and the child was killed. Its exit code is the kill's, not ASH's
+         * verdict -- 137 or 143 on POSIX, 1 on Windows -- so it is not read as one.
+         */
+        data object Cancelled : Outcome
     }
 
     /**
@@ -146,6 +151,11 @@ object AshScanRunner {
             return Outcome.Failed("Could not start '$executable'.", "${e::class.simpleName}: ${e.message}")
         }
         val outputTail = tail(output)
+
+        // Before every exit-code check. A killed child's exit code would otherwise be reported
+        // as "ASH exited 137 ... an invalid configuration", or on Windows as "exited 1 and wrote
+        // no SARIF", after the user pressed Cancel.
+        if (output.isCancelled) return Outcome.Cancelled
 
         if (output.isTimeout) {
             return Outcome.Failed("ASH scan timed out after ${timeoutMillis / 60000} minute(s).", outputTail)

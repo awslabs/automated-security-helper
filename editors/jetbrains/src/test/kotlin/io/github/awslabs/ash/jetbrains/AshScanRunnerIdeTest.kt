@@ -3,11 +3,14 @@
 
 package io.github.awslabs.ash.jetbrains
 
+import com.intellij.notification.NotificationType
+import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermission
+import kotlin.concurrent.thread
 
 /**
  * End-to-end tests for actually launching the CLI and reading what it wrote.
@@ -532,6 +535,15 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         assertTrue(failed.summary, failed.summary.contains("wrote no SARIF"))
     }
 
+    /** Waits for a stub to create [marker], so a test acts while the stub is mid-scan. */
+    private fun awaitFile(marker: Path, timeoutMillis: Long = 30_000) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (!Files.exists(marker)) {
+            assertTrue("the stub never created $marker", System.currentTimeMillis() < deadline)
+            Thread.sleep(20)
+        }
+    }
+
     private fun millisSince(startNanos: Long): Long = (System.nanoTime() - startNanos) / 1_000_000
 
     fun testTheScanRunsInTheSourceDirectorySoRelativeUrisMatchTheScannedTree() {
@@ -582,5 +594,28 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
 
         assertTrue("$outcome", outcome is AshScanRunner.Outcome.Completed)
         assertTrue("the scan waited $elapsed ms on stdin", elapsed < 5_000)
+    }
+
+    fun testCancellingAScanSaysItWasCancelledRatherThanBlamingAnExitCode() {
+        // Pressing Cancel kills the child, which then exits 137 (SIGKILL) or 143 (SIGTERM) on
+        // POSIX and 1 on Windows. None of those is ASH's verdict, so none may be reported as one.
+        val source = Files.createDirectories(workdir.resolve("project"))
+        val started = workdir.resolve("started")
+        val script = rawStub("touch '$started'; sleep 300; exit 0")
+        val indicator = EmptyProgressIndicator()
+        var messages: List<AshScanController.Message>? = null
+
+        val worker = thread {
+            messages = AshScanController.scan(project, script.toString(), indicator = indicator, sourceDir = source)
+        }
+        awaitFile(started)
+        indicator.cancel()
+        worker.join(20_000)
+
+        assertFalse("the scan must stop when cancelled", worker.isAlive)
+        val message = messages!!.single()
+        assertEquals("ASH scan cancelled", message.title)
+        assertEquals(NotificationType.WARNING, message.type)
+        assertFalse("a cancel is not an exit code: ${message.body}", message.body.contains("exited"))
     }
 }
