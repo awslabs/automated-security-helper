@@ -44,6 +44,12 @@ group gets SIGTERM, then SIGKILL after five seconds, even when ASH itself has
 already exited, because a scanner that ignores SIGTERM outlives it; on Windows
 `taskkill /T /F` walks the tree. Without that, the scanners ASH starts would keep
 running and writing into the output directory after the scan was reported stopped.
+The group kill has one limit: a process that moved itself into a new session or
+group (`setsid`, Python's `start_new_session=True`) is outside the group and keeps
+running. No ASH code does that today, but a scanner or a container CLI could. So
+the extension does not wait on such a process: once the scan's own process has
+exited, it gives the output pipes two seconds to close and then stops waiting,
+so the scan always settles and the next one can start.
 The `--version` probe that runs before the scan is asynchronous too, with a
 one-minute limit, since a cold Python start can take seconds. A second
 `ASH: Scan workspace` while one is running returns the running scan's result.

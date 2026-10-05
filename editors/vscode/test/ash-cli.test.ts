@@ -17,6 +17,9 @@
  * would sit.
  */
 
+import { ChildProcess } from 'child_process';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 import {
   ASH_FALLBACK_EXECUTABLE,
   ASH_IDENTITY_MARKER,
@@ -29,7 +32,9 @@ import {
   AsyncCommandOptions,
   AsyncCommandResult,
   AsyncCommandRunner,
+  EXIT_DRAIN_MS,
   KILL_GRACE_MS,
+  Spawner,
   TreeKiller,
   classifyExit,
   killProcessTree,
@@ -541,6 +546,100 @@ describe('spawnAsyncRunner', () => {
 
     expect(result).toMatchObject({ status: 0, timedOut: false });
   });
+});
+
+/**
+ * A child process that emits what the test tells it to and nothing else, so a
+ * child that exits while something else still holds its pipes can be modelled
+ * exactly: 'exit' arrives and 'close' never does.
+ */
+class FakeChild extends EventEmitter {
+  public readonly stdout = new PassThrough();
+  public readonly stderr = new PassThrough();
+  public readonly pid = 4242;
+  public readonly kill = jest.fn(() => true);
+}
+
+function fakeSpawner(child: FakeChild): Spawner {
+  return () => child as unknown as ChildProcess;
+}
+
+const NO_KILL: TreeKiller = { platform: 'linux', kill: () => undefined, spawnTaskkill: () => undefined };
+
+describe('spawnAsyncRunner when the pipes outlive the child', () => {
+  it('settles after a short drain when the child exits and never closes', async () => {
+    const child = new FakeChild();
+    const pending = spawnAsyncRunner('ash', [], {}, NO_KILL, fakeSpawner(child), 50);
+    child.stdout.write('partial output');
+    await new Promise((resolve) => setImmediate(resolve));
+    child.emit('exit', 2, null);
+
+    const result = await pending;
+
+    expect(result).toMatchObject({ status: 2, stdout: 'partial output', timedOut: false, cancelled: false });
+    // The pipes are given up on, so a grandchild still writing to them cannot
+    // keep the extension host's end open.
+    expect(child.stdout.destroyed).toBe(true);
+    expect(child.stderr.destroyed).toBe(true);
+  });
+
+  it('settles a cancelled scan whose child exits and never closes', async () => {
+    const child = new FakeChild();
+    const kills: [number, string][] = [];
+    const killer: TreeKiller = { ...NO_KILL, kill: (pid, signal) => void kills.push([pid, signal]) };
+    const controller = new AbortController();
+    const pending = spawnAsyncRunner('ash', [], { signal: controller.signal }, killer, fakeSpawner(child), 50);
+
+    controller.abort();
+    expect(kills).toEqual([[-4242, 'SIGTERM']]);
+    child.emit('exit', null, 'SIGTERM');
+
+    const result = await pending;
+    expect(result).toMatchObject({ status: null, cancelled: true, timedOut: false });
+    expect(classifyExit(result)).toBe('cancelled');
+  });
+
+  it('still prefers close, which carries every byte, when it arrives inside the drain', async () => {
+    const child = new FakeChild();
+    const pending = spawnAsyncRunner('ash', [], {}, NO_KILL, fakeSpawner(child), 10_000);
+    child.emit('exit', 0, null);
+    child.stdout.end('late bytes');
+    await new Promise((resolve) => setImmediate(resolve));
+    child.emit('close', 0, null);
+
+    expect(await pending).toMatchObject({ status: 0, stdout: 'late bytes' });
+  });
+
+  it('resolves a real cancel when a grandchild in its own session holds stdout', async () => {
+    // setsid puts the grandchild outside the process group, so the group kill
+    // cannot reach it, and it holds the stdout pipe, so 'close' never fires.
+    // Before the drain this never resolved.
+    const holder = [
+      "const { spawn } = require('child_process');",
+      "const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: true, stdio: ['ignore', 'inherit', 'ignore'] });",
+      "process.stdout.write(String(g.pid) + '\\n');",
+      'setTimeout(() => {}, 60000);',
+    ].join(' ');
+    const controller = new AbortController();
+    const pending = spawnAsyncRunner(process.execPath, ['-e', holder], { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    controller.abort();
+    const started = Date.now();
+
+    const result = await pending;
+    const grandchild = Number(result.stdout.trim());
+    try {
+      expect(result.cancelled).toBe(true);
+      expect(Date.now() - started).toBeLessThan(EXIT_DRAIN_MS + 3000);
+      expect(grandchild).toBeGreaterThan(0);
+      // The documented limit: a process that left the group survives the stop.
+      expect(alive(grandchild)).toBe(true);
+    } finally {
+      if (grandchild > 0 && alive(grandchild)) {
+        process.kill(grandchild, 'SIGKILL');
+      }
+    }
+  }, 15_000);
 });
 
 describe('killProcessTree', () => {

@@ -33,7 +33,7 @@
  * and it starts a logging session -- which is why this file uses the long form.
  */
 
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, SpawnOptions, spawn } from 'child_process';
 
 /** What a spawned command produced. Modelled on `child_process.SpawnSyncReturns`. */
 export interface CommandResult {
@@ -89,6 +89,21 @@ export const DEFAULT_SCAN_TIMEOUT_SECONDS = 30 * 60;
 
 /** Grace between SIGTERM and SIGKILL when a scan is stopped. */
 export const KILL_GRACE_MS = 5_000;
+
+/**
+ * How long to wait for the pipes to close after the child has exited.
+ *
+ * 'close' waits for every process holding the child's stdout and stderr, not
+ * only the child. A grandchild that left the process group (setsid, or
+ * `start_new_session` in Python) and kept the pipes would hold 'close' off
+ * forever, and with it the progress notification and the one-scan-at-a-time
+ * lock. After 'exit' the remaining output is normally already in the pipe, so a
+ * short drain loses nothing a healthy run writes.
+ */
+export const EXIT_DRAIN_MS = 2_000;
+
+/** `child_process.spawn`, injected so a child that exits without closing is testable. */
+export type Spawner = (executable: string, args: string[], options: SpawnOptions) => ChildProcess;
 
 /** Per-stream cap on captured output. The tail is kept; it holds the reason. */
 const MAX_CAPTURED_CHARS = 4 * 1024 * 1024;
@@ -160,6 +175,12 @@ const realTreeKiller: TreeKiller = {
  *
  * Returns the SIGKILL timer, which is unref'd. Callers let it fire even after the
  * child closes: the rest of the group can outlive the leader.
+ *
+ * THE LIMIT OF A GROUP KILL. A process that put itself in a new session or group
+ * (setsid, `start_new_session=True`) is no longer in the group and survives both
+ * signals. No ASH code does that today; a scanner or a container CLI could. Such
+ * a process is left running, and spawnAsyncRunner stops waiting for it after
+ * EXIT_DRAIN_MS so the scan still settles.
  */
 export function killProcessTree(
   child: Pick<ChildProcess, 'pid' | 'kill'>,
@@ -210,6 +231,8 @@ export function spawnAsyncRunner(
   args: readonly string[],
   options: AsyncCommandOptions = {},
   killer: TreeKiller = realTreeKiller,
+  spawner: Spawner = spawn,
+  drainMs: number = EXIT_DRAIN_MS,
 ): Promise<AsyncCommandResult> {
   return new Promise((resolve) => {
     if (options.signal?.aborted === true) {
@@ -219,7 +242,7 @@ export function spawnAsyncRunner(
 
     // No `cwd`: see CommandOptions. The child inherits the extension host's
     // working directory, which a workspace does not choose.
-    const child = spawn(executable, [...args], {
+    const child = spawner(executable, [...args], {
       windowsHide: true,
       // A process-group leader on POSIX, so killProcessTree can signal the group.
       // Not on Windows, where detached means a new console window.
@@ -231,6 +254,7 @@ export function spawnAsyncRunner(
     let stderr = '';
     let stoppedBecause: 'timeout' | 'cancel' | undefined;
     let settled = false;
+    let drainTimer: NodeJS.Timeout | undefined;
 
     const stop = (why: 'timeout' | 'cancel'): void => {
       if (stoppedBecause !== undefined || settled) {
@@ -251,6 +275,9 @@ export function spawnAsyncRunner(
       settled = true;
       if (timer !== undefined) {
         clearTimeout(timer);
+      }
+      if (drainTimer !== undefined) {
+        clearTimeout(drainTimer);
       }
       // The SIGKILL timer is left to fire. 'close' means the direct child and its pipes
       // are done, not its process group: a scanner that ignored SIGTERM and does
@@ -276,6 +303,16 @@ export function spawnAsyncRunner(
     });
     child.on('error', (error) => settle({ status: null, stdout, stderr, error }));
     child.on('close', (code) => settle({ status: code, stdout, stderr }));
+    // 'close' is preferred because it carries every byte, but it is not waited for
+    // past EXIT_DRAIN_MS: after that whoever still holds the pipes is not the
+    // child, and the streams are destroyed so this end lets go of them too.
+    child.on('exit', (code) => {
+      drainTimer = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle({ status: code, stdout, stderr });
+      }, drainMs);
+    });
   });
 }
 
