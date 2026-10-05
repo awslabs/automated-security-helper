@@ -73,8 +73,9 @@ on:
       - "pyproject.toml"
       - "hatch_build.py"
       # Wheel inputs outside the package tree: the hook copies Dockerfile into the
-      # wheel, README.md is its METADATA, LICENSE and NOTICE are its license files,
-      # and hatchling leaves out every file .gitignore ignores.
+      # wheel, README.md is its METADATA, LICENSE and NOTICE are its license files
+      # (pyproject's license-files names exactly these two), and hatchling leaves out
+      # every file .gitignore ignores.
       # packaging/assert-paths-filter.py measures this list against a wheel it
       # builds under an audit hook.
       - "Dockerfile"
@@ -100,8 +101,9 @@ on:
       - "pyproject.toml"
       - "hatch_build.py"
       # Wheel inputs outside the package tree: the hook copies Dockerfile into the
-      # wheel, README.md is its METADATA, LICENSE and NOTICE are its license files,
-      # and hatchling leaves out every file .gitignore ignores.
+      # wheel, README.md is its METADATA, LICENSE and NOTICE are its license files
+      # (pyproject's license-files names exactly these two), and hatchling leaves out
+      # every file .gitignore ignores.
       # packaging/assert-paths-filter.py measures this list against a wheel it
       # builds under an audit hook.
       - "Dockerfile"
@@ -161,15 +163,20 @@ jobs:
       # A wheel input missing from the paths filters is a change that reaches the
       # packages with every leg below skipped. The checker builds the wheel itself,
       # in-process under an audit hook, and records every repository file the build
-      # opens. `--with hatchling` resolves the newest release, as `uv build` does for
-      # [build-system] requires, and the checker refuses to measure if the installed
-      # hatchling does not satisfy that requirement.
+      # opens. Without `--isolated`, `--with hatchling` adds nothing when the
+      # interpreter uv picks already has a hatchling, whatever its version: a .venv
+      # in or above the checkout (one with hatchling 1.32.0 was picked that way,
+      # under a 1.32.4 floor). `--isolated` builds a fresh environment, so the newest
+      # release is resolved, as `uv build` does for [build-system] requires. The
+      # checker still refuses to measure if the installed hatchling does not satisfy
+      # that requirement, so a stale one turns this step red rather than measuring a
+      # different build.
       - name: The paths filters cover every input to the wheel
         shell: bash
         run: |
           set -euo pipefail
-          uv run --no-project --with hatchling python packaging/assert-paths-filter.py --self-test
-          uv run --no-project --with hatchling python packaging/assert-paths-filter.py
+          uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py --self-test
+          uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py
 
       # Toolchain-free: the name check runs before either build looks for its tool.
       - name: The deb and rpm builds refuse the same names, and the docs follow them
