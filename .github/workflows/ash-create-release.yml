@@ -153,8 +153,8 @@ jobs:
       - name: Smoke test release artifacts
         if: steps.bump.outputs.bumped == 'true'
         run: |
-          uv run ash --help
-          uv run ash config validate
+          uv run ashx --help
+          uv run ashx config validate
           uv run python -m pytest tests/unit/cli/test_config_init.py -x -q --no-header --no-cov
 
       - name: Create release PR

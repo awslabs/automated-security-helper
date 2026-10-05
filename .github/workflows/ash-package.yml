@@ -289,7 +289,11 @@ jobs:
           # The console script, not `python -m`: the entry point is what the deb,
           # rpm, MSIX, Flatpak, Chocolatey and winget packages put on PATH, and it
           # is declared in wheel metadata that a plain import would not exercise.
-          /tmp/ash-wheel-check/bin/ash --version
+          /tmp/ash-wheel-check/bin/ashx --version
+          # The wheel also declares the deprecated `ash` alias, which pip, pipx and
+          # Homebrew installs still put on PATH: same exit code and --version output
+          # as `ashx`, plus exactly one deprecation line on stderr.
+          PATH="/tmp/ash-wheel-check/bin:${PATH}" bash .github/actions/validate-install/assert-deprecated-alias.sh
 
       - name: Upload wheel and sdist
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -374,7 +378,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # Longer than the 25 minutes the .deb and .rpm jobs get: this one downloads a 633 MB
-    # runtime before it can build, and then its first `ash` invocation resolves ASH's 27
+    # runtime before it can build, and then its first `ashx` invocation resolves ASH's 27
     # runtime dependencies from a Python index, which the other two do at install time.
     timeout-minutes: 40
     steps:
@@ -409,7 +413,7 @@ jobs:
   #   * Microsoft's MSIX support matrix has columns for Windows Server 2019 and 2022 and
   #     none for 2025, and windows.appExecutionAlias is documented as NOT supported on
   #     Server 2019 with no statement either way for later releases. So whether typing
-  #     `ash` works on this runner is not something documentation answers.
+  #     `ashx` works on this runner is not something documentation answers.
   #     verify-on-windows.ps1 therefore MEASURES alias availability and warns rather than
   #     failing when they are absent, and falls back to the packaged executables so the
   #     scan assertion still runs. If the deployment stack turns out to be unavailable on

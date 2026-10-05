@@ -512,7 +512,7 @@ jobs:
       # a single failed install is the difference between green and a confusing red.
       - name: Install scanner dependencies
         shell: bash
-        run: ash dependencies install
+        run: ashx dependencies install
       # One shell for both platforms, so there is one command to reason about.
       # The path is relative, so Git Bash on Windows does not rewrite it.
       # --timeout is passed explicitly so it sits next to timeout-minutes above.
@@ -591,7 +591,7 @@ jobs:
       # than surfacing as "the fixture produced zero findings".
       - name: Install scanner dependencies
         shell: bash
-        run: ash dependencies install
+        run: ashx dependencies install
       - name: Verify a workspace scan keeps its projects apart
         shell: bash
         # The gate builds its workspace with tempfile.mkdtemp(). Pointing the temp
@@ -874,10 +874,11 @@ jobs:
   #    supposed to report. That step is the leg's verdict; the per-method steps
   #    deliberately do not decide it.
   #
-  # 2. Which install each method's `ash` actually is. Five methods in one job share
-  #    a PATH, and pip and pipx both put an `ash` on it. The step order below is
-  #    load-bearing for that reason: pipx runs FIRST, while its shim is the only
-  #    `ash` on the machine, so `pipx: verify` cannot be answered by pip's copy.
+  # 2. Which install each method's `ashx` actually is. Five methods in one job share
+  #    a PATH, and pip and pipx both put an `ashx` (and the deprecated `ash` alias)
+  #    on it. The step order below is load-bearing for that reason: pipx runs FIRST,
+  #    while its shim is the only `ashx` on the machine, so `pipx: verify` cannot be
+  #    answered by pip's copy.
   #    pip runs second, and setup-python writes its own bin directory to
   #    GITHUB_PATH, which prepends ahead of the image's default PATH -- so pip's
   #    entry point wins the lookup for every later step. Reordering these two

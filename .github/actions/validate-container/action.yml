@@ -25,12 +25,12 @@ runs:
 
     # WHY A SCAN LEG EXISTS AT ALL
     #
-    # This action used to end at `ash build-image --force`. `build-image` proves the
+    # This action used to end at `ashx build-image --force`. `build-image` proves the
     # Dockerfile still builds under a given runtime; it says nothing about whether ASH
     # can scan with the result, which is the only reason the image is built. So podman
     # and finch were the two runtimes in the matrix whose image nobody ever ran, while
     # the five methods that do scan (pip, pipx, uvx, mcp, nix) all exercise
-    # `ash scan --source-dir /tmp/ash-selftest ... --phases scan --phases report`.
+    # `ashx scan --source-dir /tmp/ash-selftest ... --phases scan --phases report`.
     #
     # A runtime with a build leg and no scan leg is precisely that defect, so the
     # runtimes carrying one are named here rather than assumed. Adding a runtime to the
@@ -52,7 +52,7 @@ runs:
 
     # WHY EVERY BUILD STEP PASSES --no-run
     #
-    # `ash build-image` defaults to building AND scanning: cli/image.py passes
+    # `ashx build-image` defaults to building AND scanning: cli/image.py passes
     # `run=not no_run`, and it never passes `source_dir`, so run_ash_scan.py resolves
     # the source to `Path.cwd()` -- this checkout. A build step written as a plain
     # `run:` therefore scanned ASH's own repository and exited with that scan's status,
@@ -93,9 +93,9 @@ runs:
         #
         # So the shape test is "the command is the first thing on the line, after an
         # optional `run:`", which catches both forms. Four kinds of line in this file
-        # name `ash build-image` without being an invocation of it, and all four must
+        # name `ashx build-image` without being an invocation of it, and all four must
         # stay excluded: the prose at the top, the two comment blocks, this check's own
-        # source, and the `echo "::error::ash build-image ..."` in the retry loop.
+        # source, and the `echo "::error::ashx build-image ..."` in the retry loop.
         #
         # The count is asserted too. Without it a future edit that hides an invocation
         # from the shape test would leave this passing on whatever it still sees, which
@@ -105,7 +105,7 @@ runs:
         for line in lines:
             stripped = line.strip()
             command = stripped[4:].strip() if stripped.startswith("run:") else stripped
-            if not command.startswith("ash build-image"):
+            if not command.startswith("ashx build-image"):
                 continue
             runtime = next((r for r in expected if f"--oci-runner {r}" in command), None)
             found.setdefault(runtime, []).append(command)
@@ -168,7 +168,7 @@ runs:
     - name: "podman: build image"
       if: inputs.runtime == 'podman'
       shell: bash
-      run: ash build-image --oci-runner podman --force --no-run
+      run: ashx build-image --oci-runner podman --force --no-run
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -196,7 +196,7 @@ runs:
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
-      run: ash build-image --oci-runner finch --force --no-run
+      run: ashx build-image --oci-runner finch --force --no-run
 
     # === nerdctl ===
     #
@@ -351,7 +351,7 @@ runs:
       if: inputs.runtime == 'nerdctl'
       shell: bash
       env:
-        # The tag ash build-image applies: build_target is forced to "ci" whenever
+        # The tag ashx build-image applies: build_target is forced to "ci" whenever
         # CI is set, so this is the image the load above would have created.
         IMAGE: automated-security-helper:ci
         ATTEMPTS: "3"
@@ -373,7 +373,7 @@ runs:
           # race being matched below -- it would fail the first `grep` and abort,
           # reporting a build break that never happened. Flag order matches those
           # two legs on attempt 1: --oci-runner nerdctl --force --no-run.
-          ash build-image --oci-runner nerdctl "${force_args[@]}" --no-run 2>&1 | tee "${log}"
+          ashx build-image --oci-runner nerdctl "${force_args[@]}" --no-run 2>&1 | tee "${log}"
           rc="${PIPESTATUS[0]}"
           set -e
 
@@ -412,7 +412,7 @@ runs:
           # wrapper rather than the race itself, and the match should survive
           # nerdctl rewording its wrapper while the upstream race is still open.
           if ! grep -qE 'parent snapshot.*does not exist' "${log}"; then
-            echo "::error::ash build-image --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
+            echo "::error::ashx build-image --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
             exit "${rc}"
           fi
 
@@ -439,6 +439,26 @@ runs:
           sleep 10
         done
         exit "${rc}"
+
+    # === the built image's commands ===
+    #
+    # The image keeps the deprecated `ash` console script next to `ashx`, as pip and
+    # Homebrew do, so a container caller that still types `ash` keeps working. This
+    # runs the same check validate-install runs after pip and pipx, inside the image
+    # the scan below uses: `ash` returns `ashx`'s exit code and --version output and
+    # prints exactly one deprecation line on stderr. The script is mounted read-only
+    # rather than copied into the image, so the image under test is the one that
+    # was built. ENTRYPOINT is empty in the Dockerfile, so `bash` here is the
+    # command and not an argument to something else.
+    - name: "The image's ashx works and its deprecated ash alias warns once"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+        IMAGE: automated-security-helper:ci
+      run: |
+        ${OCI_RUNNER_WRAPPER:-} "${RUNTIME}" run --rm \
+          -v "${GITHUB_ACTION_PATH}/../validate-install/assert-deprecated-alias.sh:/tmp/assert-deprecated-alias.sh:ro" \
+          "${IMAGE}" bash /tmp/assert-deprecated-alias.sh
 
     # === the built image has to run ===
     #
@@ -472,7 +492,7 @@ runs:
       # 1 stays rejected, and now has something to reject: see the flag below.
       run: |
         set +e
-        ash scan \
+        ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --source-dir /tmp/ash-selftest \
@@ -484,7 +504,7 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ]; then
-          echo "::error::ash scan --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
+          echo "::error::ashx scan --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
           case "$rc" in
             1) echo "::error::1 is ASH's 'error during execution', which --fail-on-incomplete-scanners also uses for a scan where a selected scanner reported ERROR or MISSING. Read the per-scanner table below." ;;
             2) echo "::error::2 means either actionable findings on a fixture that is one print statement, or a click UsageError -- a flag above was renamed or removed and the scan never ran." ;;
@@ -702,7 +722,7 @@ runs:
         RUNTIME: ${{ inputs.runtime }}
       run: |
         set +e
-        ash scan \
+        ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --source-dir /tmp/ash-detect \
@@ -716,18 +736,18 @@ runs:
         echo "detection scan exited ${rc}"
         case "${rc}" in
           0)
-            echo "::error::ash scan exited 0 on a fixture carrying a hardcoded credential and a shell=True call. The image ran a scan and detected neither. That is a false negative in the image, not a passing gate."
+            echo "::error::ashx scan exited 0 on a fixture carrying a hardcoded credential and a shell=True call. The image ran a scan and detected neither. That is a false negative in the image, not a passing gate."
             exit 1
             ;;
           1)
-            echo "::error::ash scan exited 1, ASH's 'error during execution' -- which --fail-on-incomplete-scanners also uses when a selected scanner reported ERROR or MISSING. The scan did not complete; read the per-scanner table from the step above."
+            echo "::error::ashx scan exited 1, ASH's 'error during execution' -- which --fail-on-incomplete-scanners also uses when a selected scanner reported ERROR or MISSING. The scan did not complete; read the per-scanner table from the step above."
             exit 1
             ;;
           2)
             echo "exit 2 is the expected status here (actionable findings). It is NOT the verdict -- click also exits 2 on a bad flag. The next step reads the report."
             ;;
           *)
-            echo "::error::ash scan exited ${rc}, which is neither the expected 2 nor a status this step knows how to explain."
+            echo "::error::ashx scan exited ${rc}, which is neither the expected 2 nor a status this step knows how to explain."
             exit "${rc}"
             ;;
         esac

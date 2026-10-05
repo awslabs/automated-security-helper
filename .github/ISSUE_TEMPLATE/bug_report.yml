@@ -52,7 +52,7 @@ body:
       label: Steps to Reproduce
       description: Minimal steps to reproduce the behavior.
       placeholder: |
-        1. Run `ash ...`
+        1. Run `ashx ...`
         2. Observe ...
     validations:
       required: true
