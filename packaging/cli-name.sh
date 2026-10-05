@@ -1,4 +1,4 @@
-# shellcheck shell=sh disable=SC2034
+# shellcheck shell=bash disable=SC2034
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -42,8 +42,10 @@ ash_check_names() {
     ash_check_one_name ASH_CLI_NAME "${ASH_CLI_NAME-}"
 }
 
+# A whole-string match, as Python's re.fullmatch is: grep -x matches line by line, so
+# it accepted a name with an embedded newline whose first line was valid.
 ash_check_one_name() {
-  if ! printf '%s\n' "$2" | grep -Eqx "$ASH_NAME_PATTERN"; then
+  if ! [[ $2 =~ ^($ASH_NAME_PATTERN)$ ]]; then
     echo "error: $1 '$2' (packaging/cli-name.sh) is not a valid package or command name: it must match $ASH_NAME_PATTERN, Debian policy 5.6.1." >&2
     return 1
   fi

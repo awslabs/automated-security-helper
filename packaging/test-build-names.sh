@@ -82,11 +82,14 @@ for variable in ASH_PKG_NAME ASH_CLI_NAME; do
   # Each bad name is one a builder would otherwise act on: a path separator or a
   # traversal reaches rm -rf in the maintainer scripts, a glob or a space splits it,
   # and uppercase or `_` is legal to rpm and refused by dpkg, which is the
-  # disagreement this test exists for.
-  for bad in '../etc' 'a/b' 'a*' 'a b' '$(id)' 'Ash' 'a_b' '-ash' 'a'; do
+  # disagreement this test exists for. A name with a newline is valid on its first
+  # line alone, so a line-by-line match (grep -x) accepts it where Python's
+  # fullmatch refuses it.
+  for bad in '../etc' 'a/b' 'a*' 'a b' '$(id)' 'Ash' 'a_b' '-ash' 'a' $'ash\n../etc' $'ash\n'; do
     check_name "$variable" "$bad" refuse
   done
-  for good in ash ashx ash-tool ash2.0+x; do
+  # ashx and automated-security-helper are the planned rename targets.
+  for good in ash ashx automated-security-helper ash-tool ash2.0+x; do
     check_name "$variable" "$good" accept
   done
 done
