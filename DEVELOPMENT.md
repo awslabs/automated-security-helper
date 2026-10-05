@@ -105,6 +105,106 @@ uv run pytest tests/integration/ -v
 uv run pytest tests/integration/scanners/ -v
 ```
 
+## Snapshot tests
+
+What ASH prints and writes is pinned by snapshot tests, so a change to user-visible
+output fails CI until someone has looked at it and said why it changed.
+
+### What is snapshotted
+
+- `tests/snapshot/`: syrupy snapshot tests of CLI output, reports and other rendered
+  output. Snapshots live next to their test module, in
+  `tests/snapshot/**/__snapshots__/<test_module>.ambr` for structured data and
+  `__snapshots__/<test_module>/<test_name>.<ext>` for whole rendered documents.
+- `.github/actions/validate-mcp/tool_surface.golden.json`: the MCP tool surface a client
+  sees, compared against the live server by the `validate-mcp` action.
+
+The Snapshot-Update rule below also covers the other committed files that a generator
+writes in full and CI regenerates and compares: the JSON schemas in
+`automated_security_helper/schemas/*.json`, `docs/content/docs/cli-reference-generated.md`,
+and the MCP tool reference in
+`ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md`. The full
+list, and why each candidate is in or out, is the `GOLDEN` table in
+`.github/scripts/check-snapshot-trailers.py`.
+
+### Normalization
+
+Snapshots must be identical on every machine, so values that change from run to run
+(temp paths, the repository root, timestamps, durations, ids, versions) are masked by one
+normalizer, `SnapshotNormalizer` in `tests/snapshot/support/normalize.py`. The `snapshot`
+and `text_snapshot` fixtures in `tests/snapshot/conftest.py` apply it, and they also pin
+the terminal (width, no colour, no TTY) and unset the CI variables that change ASH's
+output. Do not normalize inside a test. If a test produces a value that varies, register
+it with the normalizer (`add_root`, `add_literal`) or extend the normalizer, together with
+a test in `tests/snapshot/test_snapshot_normalizer.py` showing what it masks and what it
+leaves alone.
+
+### When a snapshot test fails
+
+1. Run the tests and read the diff syrupy prints:
+
+   ```bash
+   uv run pytest tests/snapshot
+   ```
+
+2. Decide whether the new output is what you intended. If it is not, fix the code.
+3. If it is, rewrite the snapshots for the tests you changed:
+
+   ```bash
+   uv run pytest tests/snapshot/test_<area>.py --snapshot-update
+   ```
+
+4. Review what changed, file by file:
+
+   ```bash
+   git diff -- '**/__snapshots__/**'
+   ```
+
+5. Commit the code change and its snapshots together, with a trailer saying why the
+   output changed:
+
+   ```bash
+   git commit --trailer "Snapshot-Update: the summary table now shows suppressed findings"
+   ```
+
+The `snapshot-trailers` CI job fails if a golden file changed in a commit that has no
+non-empty `Snapshot-Update:` trailer. The trailer has to be on a commit that touched the
+file, so a separate follow-up commit that only adds it does not count. To fix:
+
+- if the change is in your latest commit, run
+  `git commit --amend --no-edit --trailer "Snapshot-Update: <why>"`;
+- if it is in an earlier commit, run the `git rebase ... --exec ...` command printed in the
+  CI error, which amends only the commits that touched that file.
+
+Then run `git push --force-with-lease`. Pull requests are squash-merged with every commit
+message kept, and the check reads trailers from each commit's section of the squash
+message, so the trailer survives the merge.
+
+CI never passes `--snapshot-update`, and `tests/snapshot/conftest.py` refuses it when `CI`
+or `GITHUB_ACTIONS` is set. `tests/snapshot/test_snapshot_policy.py` fails if any workflow,
+action, script or pytest configuration passes `--snapshot-update` or
+`--snapshot-warn-unused`. A missing snapshot fails.
+
+### Orphaned snapshots
+
+A snapshot that no test asserts any more fails CI. syrupy reports an unused snapshot in a
+test module that still exists. If you delete or rename a test module, syrupy never opens
+its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
+`test_snapshot_policy.py`) checks that every file under a `tests/**/__snapshots__/`
+directory belongs to a `<test_module>.py` next to that directory, and that no
+`__snapshots__` directory is empty. When you rename a module, move its snapshots with it;
+when you delete one, delete its snapshots. Either change needs a `Snapshot-Update:`
+trailer like any other.
+
+### Output that differs by operating system
+
+When output really differs by platform (path separators, line endings, a Windows-only
+message), render every variant on every OS: call the code with the platform as an input
+and snapshot each variant under its own name, for example
+`text_snapshot("md")(name="windows")`. Do not skip a snapshot test on some platforms, and
+do not keep a separate snapshot per runner. A skipped variant is never compared, and its
+snapshot looks unused to the runs that skip it.
+
 ## Development Commands
 
 - Format and lint code:
