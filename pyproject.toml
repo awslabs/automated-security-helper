@@ -321,6 +321,10 @@ version_files = [
     # It pins no ASH version, ref or install command, so it carries no literal that
     # can go stale -- which is the whole failure this list exists to prevent.
     "editors/vscode/package.json:^  \"version\"",
+    # The Kubernetes operator's own project file. Anchored at the start of the line
+    # because its kopf and kubernetes pins live in a dependencies array whose
+    # entries are indented strings, never a bare `version =` key.
+    "deploy/kubernetes-operator/pyproject.toml:^version",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-
