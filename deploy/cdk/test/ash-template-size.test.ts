@@ -195,9 +195,11 @@
  *
  *   wc -c templates/*.template.json
  *
- * What is worth stating, because it is a threshold rather than a measurement: the TIGHTEST
- * inline margin is AshAgentCore's, and as of this writing it is roughly 1.3 KB under the
- * budget — which the assertions below enforce and will report on if it erodes. Every
+ * What is worth stating, because it is a threshold rather than a measurement: every inline
+ * template is held under the budget by the assertions below, which name the one that
+ * erodes. Which template has the tightest margin is not recorded here. This note once
+ * named AshAgentCore, and AshEksOperator then landed with less headroom and made it
+ * wrong, which is the stale-prose hazard described above. Every
  * number in the paragraphs that follow is provenance for a change already landed and is
  * left as written; treat them as history, not as current state.
  *
