@@ -1104,3 +1104,49 @@ class TestInputChanged:
         app.on_input_changed(event)
         assert app.search_query == ""
         app._populate_table.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# extract_findings against real SARIF models
+# ---------------------------------------------------------------------------
+
+
+def _findings_from_result(**result_fields):
+    """Run extract_findings over one SARIF result built from the real schema."""
+    from types import SimpleNamespace
+
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+    result = {
+        "ruleId": "R0",
+        "message": {"text": "a finding"},
+        "properties": {"scanner_details": {"tool_name": "bandit"}},
+    }
+    result.update(result_fields)
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "t"}}, "results": [result]}],
+        }
+    )
+    return extract_findings(SimpleNamespace(sarif=report))
+
+
+class TestExtractFindingsRuleIndex:
+    def test_rule_index_zero_is_kept(self):
+        """ruleIndex 0 is the first rule, not a missing one.
+
+        `result.ruleIndex or -1` mapped it to -1, the "no index" sentinel.
+        """
+        assert [f["id"] for f in _findings_from_result(ruleIndex=0)] == [0]
+
+    def test_rule_index_positive_is_kept(self):
+        assert [f["id"] for f in _findings_from_result(ruleIndex=3)] == [3]
+
+    def test_rule_index_null_becomes_minus_one(self):
+        assert [f["id"] for f in _findings_from_result(ruleIndex=None)] == [-1]
+
+    def test_null_code_flows_does_not_crash(self):
+        """`"codeFlows": null` is valid input and used to raise TypeError."""
+        findings = _findings_from_result(ruleIndex=0, codeFlows=None)
+        assert [f["rule_id"] for f in findings] == ["R0"]
