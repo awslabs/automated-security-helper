@@ -196,6 +196,51 @@ jobs:
           # green check saying otherwise.
           if-no-files-found: error
 
+  # The extension inside a real VS Code. jest (ash-typescript-ci.yml) drives the
+  # same code through a stub of the `vscode` module; this drives it through the
+  # real one: command dispatch, the diagnostics API, settings, globalState, and a
+  # child process on a PATH the test controls. The CLI is
+  # test/integration/ash-stub.ts replaying scans captured from real `ash scan`
+  # runs, so the extension reads bytes ASH wrote. See test/integration/run.ts.
+  integration:
+    name: integration tests in a real VS Code
+    # Pinned rather than ubuntu-latest because the apt package names below are
+    # release-specific: libasound2t64 is the 24.04 name.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: editors/vscode
+    env:
+      # The build these tests were last run against. A floating `stable` would let
+      # an upstream release change the result of an unchanged commit.
+      ASH_IT_VSCODE_VERSION: "1.140.0"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No `cache:` here, unlike the package job: an Actions cache is readable by
+      # anyone on a public repository, so each one is a recorded decision in
+      # .github/scripts/assert-publish-surfaces.py, and this job does not need one.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: npm ci
+
+      # VS Code is an Electron app: it needs an X server, and these shared
+      # libraries, which a headless runner does not promise.
+      - name: Install a virtual display and Electron's runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libnss3 libgbm1 libasound2t64
+
+      - name: Run the integration suite under Xvfb
+        run: xvfb-run -a npm run test:integration
+
   # ASH's own coverage rule over the cases src/coverage.ts is tested against.
   # coverage_complete is not a field of ash_aggregated_results.json, so the
   # extension re-derives it, and this is what keeps the re-derivation honest: the
@@ -211,9 +256,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Cache off: an Actions cache is readable by anyone on a public repository,
-      # so each one is a recorded decision in .github/scripts/assert-publish-surfaces.py,
-      # and this job does not need one.
+      # Cache off for the same reason as the integration job's setup-node.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false

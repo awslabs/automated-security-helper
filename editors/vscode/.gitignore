@@ -34,3 +34,8 @@ coverage/
 # token and that is exactly the file it would land in.
 .npmrc
 .vsce
+
+# The @vscode/test-electron suite: its compiled output, and the VS Code build it
+# downloads (a few hundred MB, never committed).
+out-integration/
+.vscode-test/

@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// ESLint flat config for the extension and its jest suite.
+// ESLint flat config for the extension, its jest suite and its integration suite.
 //
 // Type-aware, because the rule this package most needs is one only type
 // information can check: a floating promise in an extension is a failure nobody
@@ -11,13 +11,13 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['out/**', 'coverage/**', 'node_modules/**', '.vscode-test/**', 'eslint.config.mjs'],
+    ignores: ['out/**', 'out-integration/**', 'coverage/**', 'node_modules/**', '.vscode-test/**', 'eslint.config.mjs'],
   },
   ...tseslint.configs.recommended,
   {
     languageOptions: {
       parserOptions: {
-        project: ['./tsconfig.json', './tsconfig.test.json'],
+        project: ['./tsconfig.json', './tsconfig.test.json', './tsconfig.integration.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },

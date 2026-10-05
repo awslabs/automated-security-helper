@@ -70,16 +70,21 @@
     "compile": "tsc --project tsconfig.json",
     "lint": "eslint src test --max-warnings 0",
     "test": "jest",
+    "compile:integration": "tsc --project tsconfig.integration.json",
+    "test:integration": "npm run compile && npm run compile:integration && node out-integration/test/integration/run.js",
     "package": "vsce package --out ash-vscode.vsix",
     "verify:vsix": "node out/verify-vsix.js ash-vscode.vsix"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^22.19.0",
     "@types/vscode": "~1.85.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.6.0",
     "eslint": "^10.11.0",
     "jest": "^30.5.0",
+    "mocha": "^12.0.2",
     "ts-jest": "^29.4.12",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.70.1"
@@ -92,6 +97,10 @@
     ],
     "testMatch": [
       "**/*.test.ts"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/test/integration/"
     ],
     "transform": {
       "^.+\\.ts$": [
