@@ -85,8 +85,8 @@
       Usage: ash scan [OPTIONS]
       Try 'ash scan --help' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
-      │ --cli-json-input: params.json is not valid JSON: Illegal trailing comma before end of object:    │
-      │ line 1 column 21 (char 20)                                                                       │
+      │ --cli-json-input: params.json is not valid JSON: Expecting ',' delimiter: line 1 column 22 (char │
+      │ 21)                                                                                              │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   
     ''',

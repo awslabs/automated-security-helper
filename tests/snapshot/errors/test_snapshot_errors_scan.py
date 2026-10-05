@@ -180,7 +180,11 @@ class TestCliJsonInputRefusals:
         assert run_cli([*SCAN, "--cli-json-input", "params.json"]) == snapshot
 
     def test_invalid_json(self, run_cli, snapshot, in_tmp):
-        _write(in_tmp / "params.json", '{"output_dir": "out",}')
+        # A missing comma, not a trailing one: json's message for a trailing comma
+        # changed in Python 3.13 ("Illegal trailing comma before end of object"
+        # instead of "Expecting property name enclosed in double quotes"), and this
+        # one reads the same on 3.10 through 3.14.
+        _write(in_tmp / "params.json", '{"output_dir": "out" "x"}')
         assert run_cli([*SCAN, "--cli-json-input", "params.json"]) == snapshot
 
     def test_duplicate_key(self, run_cli, snapshot, in_tmp):
