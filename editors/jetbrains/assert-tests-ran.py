@@ -11,7 +11,7 @@ doLast that fails on a zero test count.
 The doLast is not sufficient, and this file exists because a negative control proved it. With
 the test sources moved aside, Gradle reported:
 
-    > Task :unitTest NO-SOURCE
+    > Task :test NO-SOURCE
     BUILD SUCCESSFUL
 
 A task Gradle skips as NO-SOURCE never runs its actions, so the in-task guard was never
@@ -60,8 +60,8 @@ import pathlib
 import sys
 
 # defusedxml rather than xml.etree, and with no fallback deliberately: if it is not importable
-# this gate must stop rather than parse anyway and report a test count. A gate that still says
-# "161 tests ran" after losing its parser is the silent pass this file exists to remove.
+# this gate must stop rather than parse anyway and report a test count. A gate that still prints
+# a test count after losing its parser is the silent pass this file exists to remove.
 # verify-in-container.sh step 3 provisions it, since gradle:jdk21 ships python3 and no package
 # manager. Only fromstring is needed here, so the stdlib module is no longer imported at all.
 #

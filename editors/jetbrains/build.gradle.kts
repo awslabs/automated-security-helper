@@ -191,7 +191,7 @@ tasks.test {
     // A Gradle test task with no tests SUCCEEDS, so this counts what ran and fails on zero.
     //
     // It is NOT the gate, and the difference was measured rather than reasoned about. With the
-    // test sources moved aside, Gradle reported "Task :unitTest NO-SOURCE" and BUILD
+    // test sources moved aside, Gradle reported "Task :test NO-SOURCE" and BUILD
     // SUCCESSFUL: a task skipped as NO-SOURCE never runs its actions, so this block was never
     // reached in the one case it was written for. assertTestsRan below is the gate, because it
     // is a separate task that reads artifacts and therefore fires whether or not this task
