@@ -983,6 +983,56 @@ describe('the scan runs without blocking, and can be stopped', () => {
   });
 });
 
+describe('a failed scan clears the previous findings', () => {
+  /** A collection already holding a finding from an earlier, successful scan. */
+  function withEarlierFindings(h: Harness): Harness {
+    h.collection.set(vscode.Uri.file(path.join(SOURCE_DIR, 'earlier.py')), [
+      new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1), 'from the scan before'),
+    ]);
+    return h;
+  }
+
+  const FAILURES: [string, () => Harness, ScanSettings][] = [
+    ['scan-failed (exit 3)', () => harness({ sarifFixture: 'planted-secret.sarif', scanStatus: 3 }), SETTINGS],
+    ['scan-failed (exit 1, no report)', () => harness({ scanStatus: 1 }), SETTINGS],
+    [
+      'stale-report',
+      () =>
+        harness({
+          previous: { [SARIF_FILE]: readFileSync(path.join(FIXTURES, 'planted-secret.sarif'), 'utf8') },
+          undeletable: [SARIF_FILE],
+          scanWrites: false,
+        }),
+      SETTINGS,
+    ],
+    ['no-report', () => harness({ scanStatus: 0 }), SETTINGS],
+    ['unreadable-report', () => harness({ sarifText: '{"not": "sarif"}' }), SETTINGS],
+    ['wrong-executable', () => harness({ onPath: [] }), SETTINGS],
+  ];
+
+  it.each(FAILURES)('on %s', async (expected, make, settings) => {
+    const h = withEarlierFindings(make());
+    expect(h.collection.totalDiagnostics()).toBe(1);
+
+    const report = await runScanCommand(h.host, SOURCE_DIR, settings);
+
+    expect(expected.startsWith(report.status)).toBe(true);
+    expect(h.collection.totalDiagnostics()).toBe(0);
+    expect(state.errors.length).toBeGreaterThan(0);
+  });
+
+  it('but an incomplete exit 1 keeps its partial findings on screen', async () => {
+    const h = withEarlierFindings(captured('incomplete'));
+
+    const report = await runScanCommand(h.host, SOURCE_DIR, SETTINGS);
+
+    expect(report.status).toBe('incomplete');
+    // The earlier file's finding is replaced by this scan's three, not kept.
+    expect(h.collection.totalDiagnostics()).toBe(3);
+    expect(h.collection.uris()).toEqual([vscode.Uri.file(path.join(SOURCE_DIR, 'planted_secret.py')).toString()]);
+  });
+});
+
 describe('one scan at a time', () => {
   it('hands a second invocation the running scan instead of starting another', async () => {
     state.workspaceFolders = [{ uri: { fsPath: FIXTURES } }];

@@ -14,6 +14,8 @@ one release behind `package.json` from the first bump onward and read as drift.
 - `ash.scanTimeoutSeconds` (default 1800, `0` to wait indefinitely) stops a scan
   that runs too long. Cancel and the timeout both stop the scan's whole process
   tree, including a scanner that ignores SIGTERM after ASH has exited.
+- A failed, stale, cancelled or otherwise unusable scan clears the previous
+  findings instead of leaving them on screen. `incomplete` still publishes.
 
 ## Exit codes, coverage and the ashx entry point
 

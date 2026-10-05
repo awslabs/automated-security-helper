@@ -76,6 +76,14 @@ export type ScanStatus =
   | 'unreadable-report'
   | 'cancelled';
 
+/**
+ * The only statuses that leave findings on screen. Every other one clears the
+ * collection, the way the JetBrains plugin drops its annotations on any failure:
+ * findings left over from an earlier scan, next to an error about this one, read
+ * as this scan's result.
+ */
+const STATUSES_THAT_PUBLISH: ReadonlySet<ScanStatus> = new Set<ScanStatus>(['ok', 'incomplete']);
+
 export interface ScanReport {
   readonly status: ScanStatus;
   /** Present only when the scan reached the publish step. */
@@ -231,6 +239,18 @@ function readCoverage(host: ScanHost, report: ReportFile): CoverageAssessment | 
  * the whole of it -- including every failure branch -- is reachable from a test.
  */
 export async function runScanCommand(
+  host: ScanHost,
+  sourceDir: string | undefined,
+  settings: ScanSettings,
+): Promise<ScanReport> {
+  const report = await scanAndPublish(host, sourceDir, settings);
+  if (!STATUSES_THAT_PUBLISH.has(report.status)) {
+    host.collection.clear();
+  }
+  return report;
+}
+
+async function scanAndPublish(
   host: ScanHost,
   sourceDir: string | undefined,
   settings: ScanSettings,

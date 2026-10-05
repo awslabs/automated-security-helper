@@ -241,7 +241,10 @@ suite('ASH in a real VS Code', () => {
   });
 
   test('stops a scan that outruns ash.scanTimeoutSeconds, without blocking the editor', async () => {
+    // Findings on screen first, so the test also shows a failed scan clears them.
     await arrange('findings');
+    await scan();
+    assert.ok(ashDiagnostics(SECRET_FILE).length > 0);
     if (MODE === 'stub') {
       fs.writeFileSync(SCENARIO_FILE, JSON.stringify({ fixture: 'findings', hangSeconds: 120 }));
     }
@@ -259,6 +262,7 @@ suite('ASH in a real VS Code', () => {
       assert.ok(Date.now() - started < 15_000, 'the timeout did not stop the scan');
       // The extension host kept running timers while the scan ran.
       assert.ok(ticks >= 10, `the extension host was blocked: ${ticks} ticks`);
+      assert.strictEqual(ashDiagnostics(SECRET_FILE).length, 0);
     } finally {
       await setSetting('scanTimeoutSeconds', undefined, vscode.ConfigurationTarget.Global);
     }

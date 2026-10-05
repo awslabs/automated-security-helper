@@ -104,6 +104,11 @@ returns a distinct status for each, and every one of them puts a message on scre
 | `unreadable-report` | A report exists and is not SARIF. |
 | `cancelled` | The scan was cancelled from its progress notification. |
 
+Only `ok` and `incomplete` leave findings on screen. Every other status clears the
+previous scan's findings and shows its message, as the JetBrains plugin does:
+findings left from an earlier scan next to an error about this one read as this
+scan's result.
+
 ### The exit-code contract
 
 ASH exits 0 for a clean scan and 2 for findings; both publish. Exit 1 is two
