@@ -46,8 +46,9 @@
 name: ASH - IaC Drift
 
 on:
-  # Push on main only, for the reasons set out at length on ash-unified-ci.yml's
-  # triggers. In short: the active "Protect main" ruleset requires the merge queue for
+  # Push on main, plus the v4 branches covered at the end of this comment. Main gets
+  # push for the reasons set out at length on ash-unified-ci.yml's triggers. In
+  # short: the active "Protect main" ruleset requires the merge queue for
   # main and this workflow runs on merge_group, so anything reaching main through the
   # queue is already gated -- but the ruleset also grants one repository role an
   # always-on bypass, and a merge taken under it lands on main with none of these nine
