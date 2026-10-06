@@ -17,7 +17,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    SPAWN_FAILURE_RETURNCODE,
+    find_executable,
+)
 
 from pydantic import Field
 from typing import (
@@ -413,6 +416,19 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     # has a different convention.
     success_exit_codes: ClassVar[Set[int]] = {0, 1}
 
+    def _exit_code_accepted(self, success_codes: Optional[Set[int]] = None) -> bool:
+        """Whether ``self.exit_code`` says the tool ran to completion.
+
+        ``SPAWN_FAILURE_RETURNCODE`` (127) never does, even for a scanner that
+        lists it: it is what ASH reports for a command the OS could not start,
+        and a tool that never ran found nothing.
+        """
+        if success_codes is None:
+            success_codes = self.success_exit_codes
+        if self.exit_code == SPAWN_FAILURE_RETURNCODE:
+            return False
+        return self.exit_code in success_codes
+
     # Log level used for the empty-target preamble message. Defaults to INFO;
     # bandit overrides to VERBOSE since python-only repos commonly trip it.
     empty_target_log_level: ClassVar[int] = logging.INFO
@@ -463,7 +479,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 arguments=final_args[1:],
                 startTimeUtc=self.start_time,
                 endTimeUtc=self.end_time,
-                executionSuccessful=(self.exit_code in success_codes),
+                executionSuccessful=self._exit_code_accepted(success_codes),
                 exitCode=self.exit_code,
                 exitCodeDescription="\n".join(self.errors) if self.errors else "",
                 workingDirectory=working_dir,
@@ -719,6 +735,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     "longer, or set it to null to leave this scanner unbounded."
                 )
 
+            # Likewise "could not start" rather than the missing results file. The
+            # exit code is 127, which no scanner accepts, so this is reported as
+            # an error either way; this check only makes the message name it.
+            if isinstance(response, dict) and response.get("spawn_failed"):
+                raise ScannerError(
+                    f"{self.__class__.__name__} could not start its tool, so it "
+                    f"produced no results file: {response.get('stderr') or response.get('error')}"
+                )
+
             raw = self._read_results_file(results_file)
             if raw is None:
                 # Empty result file: defer to _handle_empty_results so
@@ -797,7 +822,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         detail = f"{self.__class__.__name__} scan failed: {exc}"
 
-        accepted = self.exit_code in self.success_exit_codes
+        accepted = self._exit_code_accepted()
         verdict = (
             "an accepted exit code for this scanner"
             if accepted
