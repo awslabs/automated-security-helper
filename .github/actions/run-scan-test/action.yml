@@ -393,6 +393,14 @@ runs:
         ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
         ASH_TEST_OFFLINE: ${{ inputs.offline }}
+        # Layer-cache export: max from a push to main, nothing from anything else.
+        # Every run reads (cache-from); only main writes, so a pull request restores
+        # the layers main built and never adds a copy of its own. The maintainer
+        # accepted that these layers are restorable by any workflow run in this
+        # repository, approved fork pull requests included -- see the
+        # ASH_GHA_BUILD_CACHE_EXPORT entry in .github/scripts/assert-publish-surfaces.py.
+        # Only docker legs honor it; run_ash_container ignores it for other runtimes.
+        ASH_GHA_BUILD_CACHE_EXPORT: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'max' || 'none' }}
       run: |
         echo "Testing ASH using Python (Container) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         ash --version
@@ -400,11 +408,36 @@ runs:
         if [ "${ASH_TEST_OFFLINE}" = "true" ]; then
           OFFLINE_FLAG="--offline"
         fi
+        # Teed so the cache report below can count the build steps the layer cache
+        # served. pipefail (bash's default here) keeps ash's exit status.
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         else
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         fi
+
+    - name: "Cache report: image-layers"
+      if: >-
+        !cancelled()
+        && inputs.method == 'python-container'
+        && inputs.oci-runner == 'docker'
+      shell: bash
+      run: |
+        # Same `cache <name>: ...` line as every other cache. buildkit prints
+        # `#N CACHED` for each step the cache served and `#N [stage x/y]` for every
+        # step, and names a failed cache import on its own line.
+        log="${RUNNER_TEMP}/ash-container-build.log"
+        if [ ! -s "$log" ]; then
+          echo "cache image-layers: no build log" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        total=$(grep -cE '^#[0-9]+ \[' "$log" || true)
+        cached=$(grep -cE '^#[0-9]+ CACHED' "$log" || true)
+        import=ok
+        if grep -qE 'importing cache manifest' "$log" && grep -qE '^#[0-9]+ ERROR' "$log"; then
+          import=error
+        fi
+        echo "cache image-layers: ${cached}/${total} build steps cached, import ${import}" | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Validate No Plugin Errors (Python Container)
       if: inputs.method == 'python-container'

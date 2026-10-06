@@ -480,21 +480,47 @@ def _gha_layer_cache_args(
     scope = (
         f"ash-{build_target}-{platform.machine()}-{'offline' if offline else 'online'}"
     )
-    return [
-        "--cache-from",
-        f"type=gha,scope={scope}",
-        # mode=min rather than mode=max. The Actions cache is capped at 10 GB per
-        # repository and evicts by least-recent access across every workflow, so
-        # exporting each intermediate stage of a multi-GB scanner image, once per
-        # scope, risks evicting the setup-uv cache that the unit-test matrix
-        # restores -- a failure that would surface in an unrelated job.
-        #
+    # Cache service v2 whenever the runner offers it. buildkit's gha backend
+    # defaults to v1 unless told otherwise, and on github.com the v1 service no
+    # longer answers: every import and export in this repository's scan legs came
+    # back `failed to parse error response 400: Our services aren't available
+    # right now` (run 37499915881, job 112397773175), and ignore-error turned that
+    # into a silent, total cache miss on every build. ACTIONS_RESULTS_URL is the v2
+    # endpoint, so its presence is what selects v2; a runner that only provides
+    # ACTIONS_CACHE_URL (an older GitHub Enterprise Server) keeps v1.
+    version = ",version=2" if os.environ.get("ACTIONS_RESULTS_URL") else ""
+    args = ["--cache-from", f"type=gha{version},scope={scope}"]
+
+    # Which layers to export, if any: ASH_GHA_BUILD_CACHE_EXPORT is none, min or
+    # max, and unset means min.
+    #
+    # min stays the default. The Actions cache is capped at 10 GB per repository
+    # and evicts by least-recent access across every workflow, so exporting each
+    # intermediate stage of a multi-GB scanner image, once per scope, can evict
+    # caches unrelated jobs restore. A caller opts into max deliberately, and
+    # into none to read without writing. This repository's CI exports max from
+    # pushes to main and nothing from pull requests -- the maintainer's decision
+    # recorded in .github/scripts/assert-publish-surfaces.py -- so every pull
+    # request reads the layers main wrote and none adds its own copy.
+    #
+    # An unrecognized value exports nothing rather than guessing: the cost is a
+    # cold cache, never an unintended write.
+    export = os.environ.get("ASH_GHA_BUILD_CACHE_EXPORT", "").strip().lower() or "min"
+    if export not in ("none", "min", "max"):
+        ASH_LOGGER.warning(
+            f"ASH_GHA_BUILD_CACHE_EXPORT={export!r} is not none, min or max; "
+            "not exporting the layer cache"
+        )
+        export = "none"
+    if export != "none":
         # ignore-error keeps a cache-service outage from failing the build. A
         # transient 400 from this export step took three scan cells down, while
         # the import above degraded to a plain cache miss on its own.
-        "--cache-to",
-        f"type=gha,mode=min,ignore-error=true,scope={scope}",
-    ]
+        args += [
+            "--cache-to",
+            f"type=gha{version},mode={export},ignore-error=true,scope={scope}",
+        ]
+    return args
 
 
 # The build-context name the cached base-image layout is attached under, and therefore the value

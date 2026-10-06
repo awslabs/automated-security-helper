@@ -408,11 +408,115 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
   # ---------------------------------------------------------------------------
+  # Warm the ASH image's layer cache before the scan legs build it
+  # ---------------------------------------------------------------------------
+  #
+  # The python-container docker legs build the ASH image with buildx and a GitHub
+  # Actions layer cache (run_ash_container._gha_layer_cache_args). On a push to
+  # main they would all start cold at once and each export the same layers. This
+  # job builds once per architecture first and exports with mode=max, and
+  # scan-validation `needs` it, so on main the legs restore a warm cache instead.
+  #
+  # Pushes to main only. A pull request never exports layers (the legs read with
+  # ASH_GHA_BUILD_CACHE_EXPORT=none), so warming would build an image for nothing.
+  # Skipped, this job costs no runner and delays nothing: scan-validation's
+  # `!cancelled()` runs it either way.
+  #
+  # The concurrency group is the cache key -- one per architecture -- so at most one
+  # cold build per key runs at a time across runs; a later push to main waits for
+  # the first to finish and then builds against a warm cache. GitHub keeps one
+  # pending job per group and cancels an older pending one when a newer queues,
+  # which is harmless here: the cancelled run's scan legs still run, against
+  # whatever the cache holds. That is also why this job is not in required-checks'
+  # `needs` -- its verdict is speed, never correctness (see _UNGATED in
+  # .github/scripts/assert-required-checks-census.py).
+  #
+  # Layers are exported to the repository's Actions cache, which any workflow run
+  # in this repository can restore, approved fork pull requests included. The
+  # maintainer accepted that exposure for build layers only; pushing the image to a
+  # registry and uploading it as an artifact stay forbidden. See the
+  # ASH_GHA_BUILD_CACHE_EXPORT entries in .github/scripts/assert-publish-surfaces.py.
+  warm-image-layers:
+    name: "warm image layers (${{ matrix.os }})"
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: ash-image-layer-cache-${{ matrix.os }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # Same hand-off, with the same masking, as run-scan-test's step of this name;
+      # its comment carries the trade-off.
+      - name: Expose the Actions cache credentials to ASH's build
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL']) {
+              const value = process.env[name]
+              if (value) {
+                core.setSecret(value)
+                core.exportVariable(name, value)
+              } else {
+                core.info(`${name} is not set on this runner; skipping`)
+              }
+            }
+      # The legs build FROM the verified base-image layout this action hands over,
+      # so the warm build has to as well, or its layers key differently and nothing
+      # it exports is ever reused.
+      - name: Pre-pull the base image
+        uses: ./.github/actions/prepull-base-image
+        with:
+          oci-runner: docker
+          runner-wrapper: ""
+      - name: Build the image and export its layers
+        shell: bash
+        env:
+          ASH_GHA_BUILD_CACHE_EXPORT: max
+        run: |
+          start=$(date +%s)
+          ash build-image --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          echo "image build took $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: "Cache report: image-layers"
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          log="${RUNNER_TEMP}/ash-container-build.log"
+          total=$(grep -cE '^#[0-9]+ \[' "$log" || true)
+          cached=$(grep -cE '^#[0-9]+ CACHED' "$log" || true)
+          echo "cache image-layers: ${cached}/${total} build steps cached" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Revoke the Actions cache credentials from the job environment
+        if: always()
+        shell: bash
+        run: |
+          for name in ACTIONS_RUNTIME_TOKEN ACTIONS_CACHE_URL ACTIONS_RESULTS_URL; do
+            echo "${name}=" >> "$GITHUB_ENV"
+          done
+
+  # ---------------------------------------------------------------------------
   # Scan validation: method x platform (matches ash-repo-scan-validation.yml)
   # Uses Python 3.12 exclusively.
   # ---------------------------------------------------------------------------
   scan-validation:
     name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.offline && ' [offline]' || '' }}${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
+    # After the layer-cache warm-up on main; on a pull request that job is skipped
+    # and this runs at once. `!cancelled()` rather than the implicit success(), so
+    # a skipped, failed or concurrency-cancelled warm-up never stops a scan leg.
+    needs: [warm-image-layers]
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     # Container-runtime cells are far slower than docker/python-local and were
     # being cancelled at exactly 20.3 min by the previous flat 20. Measured:
