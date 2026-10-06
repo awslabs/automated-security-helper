@@ -110,8 +110,13 @@ Two other files appear alongside it, and both are the launcher's.
 The launcher decides whether to bootstrap by looking for the marker, not by looking for
 a console script, because pip writes the console scripts before the last of
 site-packages and a bootstrap interrupted near the end would otherwise leave something
-that looks finished. Deleting the marker is the supported way to force a rebuild on the
-next `ashx`; the run will remove what is there and install again. The lock is what stops
+that looks finished. The marker's first line names the wheel the venv was built from,
+and the launcher rebuilds when that is not the wheel the installed package carries.
+Windows keeps LocalCache when a package is updated, so without that check an update
+would leave the new launcher running the old version's ASH. A same-version reinstall
+carries the same wheel and keeps the venv. Deleting the marker is the supported way to
+force a rebuild on the next `ashx`; the run will remove what is there and install
+again. The lock is what stops
 two shells running `ashx` for the first time at the same moment from installing over each
 other -- the second waits for the first and then finds the work done. If a run is killed
 hard the lock file is left behind, which is harmless: it holds no lock once the process
