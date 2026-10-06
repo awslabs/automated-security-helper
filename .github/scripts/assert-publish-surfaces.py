@@ -508,8 +508,10 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
+        publishes="enable-cache=true save-cache=${{ github.event_name == 'push' }}",
+        reason=_UV_CACHE_REASON
+        + " Saved from a push only, which narrows who writes the entry: a pull"
+        " request restores its base branch's copy and no longer saves its own.",
     ),
     Entry(
         file=".github/workflows/ash-upgrade-paths.yml",
@@ -522,8 +524,10 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
+        publishes="enable-cache=true save-cache=${{ github.event_name == 'push' }}",
+        reason=_UV_CACHE_REASON
+        + " Saved from a push only, which narrows who writes the entry: a pull"
+        " request restores its base branch's copy and no longer saves its own.",
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",
