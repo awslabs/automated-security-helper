@@ -291,21 +291,37 @@ def is_zizmor_input(relative_path: PurePath) -> bool:
     )
 
 
-def _physical_locations(result) -> List:
-    """Every physical location in a result: its locations, related locations
-    and code-flow steps (zizmor puts one in each)."""
+def _locations(result) -> List:
+    """Every location in a result: its locations, related locations and
+    code-flow steps (zizmor puts a physical location in each)."""
     locations = list(result.locations or []) + list(result.relatedLocations or [])
     for code_flow in result.codeFlows or []:
         for thread_flow in code_flow.threadFlows or []:
             for step in thread_flow.locations or []:
                 if step.location is not None:
                     locations.append(step.location)
-    physical = []
-    for location in locations:
-        root = getattr(location.physicalLocation, "root", None)
-        if root is not None:
-            physical.append(root)
-    return physical
+    return locations
+
+
+def _verbatim_path(location) -> Optional[str]:
+    """The input path zizmor was given, as zizmor records it for this location.
+
+    zizmor 1.29/1.30 put it in each logical location's
+    ``properties.symbolic.key.Local.verbatim_path``. None when absent, which
+    leaves the suffix match in ``ZizmorScanner._rebased_uri`` to decide.
+    """
+    for logical in getattr(location, "logicalLocations", None) or []:
+        properties = getattr(logical, "properties", None)
+        extra = (getattr(properties, "model_extra", None) or {}) if properties else {}
+        symbolic = extra.get("symbolic")
+        if not isinstance(symbolic, dict):
+            continue
+        key = symbolic.get("key")
+        local = key.get("Local") if isinstance(key, dict) else None
+        verbatim = local.get("verbatim_path") if isinstance(local, dict) else None
+        if isinstance(verbatim, str) and verbatim:
+            return verbatim
+    return None
 
 
 class ZizmorScannerConfigOptions(ScannerOptionsBase):
@@ -313,8 +329,9 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "Path to a zizmor configuration file, relative to the source "
-                "directory, passed as `--config`. When unset, zizmor discovers "
+                "Path to a zizmor configuration file, passed as `--config`. "
+                "Relative paths are resolved against the source directory; "
+                "absolute paths are used as given. When unset, zizmor discovers "
                 "`zizmor.yml` or `.github/zizmor.yml` in the repository itself."
             ),
         ),
@@ -798,7 +815,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             return self._empty_report().model_dump(by_alias=True, exclude_none=True)
         return super()._read_results_file(results_file)
 
-    def _rebased_uri(self, uri: str) -> str:
+    def _rebased_uri(self, uri: str, verbatim: Optional[str] = None) -> str:
         """``uri`` as the path of the input it names, relative to ``source_dir``.
 
         zizmor writes a URI relative to the root of the git repository enclosing
@@ -808,15 +825,32 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         ASH's path sanitizer leaves a relative URI alone, so scanning a
         subdirectory of a repository (or a worktree nested under another
         checkout) would report paths that do not exist under the source
-        directory and that no ``path`` suppression matches. Every URI therefore
-        names one of the files this scan passed, by suffix, and is rewritten to
-        that file. A URI that matches no input, or more than one, is left as
-        zizmor wrote it.
+        directory and that no ``path`` suppression matches.
+
+        ``verbatim`` is the input path zizmor recorded beside the location (see
+        :func:`_verbatim_path`). When it is one of this scan's inputs and it and
+        the URI end in the same path components, it names the file outright; that is what keeps a
+        workflow in a nested repository (a submodule, a vendored checkout) apart
+        from a file at the same relative path in the outer one, where zizmor's
+        URIs for the two are identical. Otherwise the URI is matched against the
+        inputs by suffix and rewritten to the single input it names. A URI that
+        matches no input, or more than one, is left as zizmor wrote it.
         """
         text = uri.removeprefix("file://")
         uri_parts = PurePath(text.replace("\\", "/")).parts
         if not uri_parts:
             return uri
+        if verbatim is not None:
+            arguments = {self._input_argument(path) for path in self._last_inputs}
+            verbatim_parts = PurePath(verbatim.replace("\\", "/")).parts
+            # Either may be the longer: a scanned subdirectory makes the URI carry
+            # a prefix the input lacks, a nested repository the reverse.
+            shorter = min(len(uri_parts), len(verbatim_parts))
+            if (
+                verbatim in arguments
+                and uri_parts[-shorter:] == verbatim_parts[-shorter:]
+            ):
+                return verbatim
         matches = [
             path
             for path in self._last_inputs
@@ -835,10 +869,13 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """Rebase result URIs, then apply the severity mapping in the module docstring."""
         for run in sarif_report.runs or []:
             for result in run.results or []:
-                for physical in _physical_locations(result):
+                for location in _locations(result):
+                    physical = getattr(location.physicalLocation, "root", None)
                     artifact = getattr(physical, "artifactLocation", None)
                     if artifact is not None and artifact.uri:
-                        artifact.uri = self._rebased_uri(artifact.uri)
+                        artifact.uri = self._rebased_uri(
+                            artifact.uri, _verbatim_path(location)
+                        )
                 extra = {}
                 if result.properties is not None:
                     extra = result.properties.model_extra or {}

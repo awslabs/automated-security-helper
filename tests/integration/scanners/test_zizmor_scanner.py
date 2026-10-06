@@ -125,6 +125,26 @@ def test_real_zizmor_paths_are_relative_to_a_scanned_subdirectory(tmp_path):
     assert REQUIRED_FINDINGS <= found, found
 
 
+def test_real_zizmor_keeps_a_nested_repository_apart_from_the_outer_one(tmp_path):
+    """Same relative path in an outer and a nested repository: each finding stays put."""
+    source_dir = tmp_path / "outer"
+    workflows = source_dir / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    shutil.copy(FIXTURE_REPO / ".github/workflows/clean.yml", workflows / "ci.yml")
+    nested = source_dir / "vendor" / "lib"
+    (nested / ".github" / "workflows").mkdir(parents=True)
+    shutil.copy(
+        FIXTURE_REPO / ".github/workflows/vulnerable.yml",
+        nested / ".github" / "workflows" / "ci.yml",
+    )
+    subprocess.run(["git", "init", "-q", str(source_dir)], check=True)
+    subprocess.run(["git", "init", "-q", str(nested)], check=True)
+    _, report = _scan(source_dir)
+    found = {(rule, uri) for rule, uri, _ in _findings(report)}
+    assert ("zizmor/template-injection", "vendor/lib/.github/workflows/ci.yml") in found
+    assert not any(uri == ".github/workflows/ci.yml" for _, uri in found), found
+
+
 def test_real_zizmor_with_nothing_to_audit_is_skipped_cleanly(tmp_path):
     source_dir = tmp_path / "src"
     source_dir.mkdir()

@@ -348,6 +348,13 @@ def test_tokens_and_zizmor_env_never_reach_zizmor_offline(repo, monkeypatch):
     assert env["UNRELATED_VARIABLE"] == "kept"
 
 
+def test_token_variables_are_stripped_whatever_their_case(repo, monkeypatch):
+    """Windows environment names are case-insensitive, so ``Gh_Token`` is GH_TOKEN."""
+    monkeypatch.setenv("Gh_Token", "value-that-must-not-leak")
+    _, _, env = _argv_and_env(_scanner(repo), repo)
+    assert not any(key.upper() == "GH_TOKEN" for key in env)
+
+
 def test_online_audits_drops_offline_and_passes_the_token_through(repo, monkeypatch):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.setenv("GH_TOKEN", "token-value")
@@ -481,6 +488,46 @@ def test_an_ambiguous_or_unknown_uri_is_left_alone(repo):
     assert scanner._rebased_uri("repo/a/action.yml") == "repo/a/action.yml"
 
 
+def test_verbatim_path_separates_a_nested_repository_from_the_outer_one(repo):
+    """zizmor writes the same URI for ``ci.yml`` in an outer and a nested repository.
+
+    Its URI is relative to each file's own git root, so a vendored checkout's
+    workflow and the outer one at the same relative path both come back as
+    ``.github/workflows/ci.yml``. The input path zizmor records beside each
+    location tells them apart.
+    """
+    scanner = _scanner(repo)
+    outer = repo.absolute() / ".github/workflows/ci.yml"
+    nested = repo.absolute() / "vendor/lib/.github/workflows/ci.yml"
+    scanner._last_inputs = [outer, nested]
+    uri = ".github/workflows/ci.yml"
+    assert scanner._rebased_uri(uri) == uri  # ambiguous by suffix alone
+    assert (
+        scanner._rebased_uri(uri, "vendor/lib/.github/workflows/ci.yml")
+        == "vendor/lib/.github/workflows/ci.yml"
+    )
+    assert scanner._rebased_uri(uri, ".github/workflows/ci.yml") == uri
+    # A recorded path that is not one of this scan's inputs is not trusted.
+    assert scanner._rebased_uri(uri, "elsewhere/.github/workflows/ci.yml") == uri
+    # Nor is one naming a different file.
+    assert scanner._rebased_uri(uri, "vendor/lib/.github/workflows/other.yml") == uri
+
+
+def test_verbatim_path_is_read_from_the_sarif(repo):
+    """End to end through _post_process_sarif: the vendored copy keeps its path."""
+    data = json.loads(CAPTURED_SARIF.read_text())
+    vendored = "vendor/lib/.github/workflows/vulnerable.yml"
+    (repo / vendored).parent.mkdir(parents=True)
+    shutil.copy(repo / ".github/workflows/vulnerable.yml", repo / vendored)
+    text = json.dumps(data).replace(
+        '"verbatim_path": ".github/workflows/vulnerable.yml"',
+        f'"verbatim_path": "{vendored}"',
+    )
+    _, report = _scan_with_output(repo, text)
+    uris = {row[1] for row in _summarize(report)}
+    assert uris == {vendored, "actions/greet/action.yml"}
+
+
 # --------------------------------------------------------------------------- #
 # No inputs, rejected inputs, failures
 # --------------------------------------------------------------------------- #
@@ -529,6 +576,14 @@ def test_an_unparseable_input_is_a_failed_target(repo):
     )
     assert scanner.targets_attempted == len(EXPECTED_INPUTS) - 1
     assert scanner.targets_failed == 1
+
+
+def test_failed_targets_never_exceed_attempted_targets(repo):
+    scanner, _ = _scan_with_output(
+        repo, CAPTURED_SARIF.read_text(), stderr=PARSE_FAILURE * 9
+    )
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == len(EXPECTED_INPUTS)
 
 
 def test_network_warnings_are_not_counted_as_rejected_inputs(repo):

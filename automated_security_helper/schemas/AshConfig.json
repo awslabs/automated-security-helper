@@ -4291,7 +4291,7 @@
             }
           ],
           "default": null,
-          "description": "Path to a zizmor configuration file, relative to the source directory, passed as `--config`. When unset, zizmor discovers `zizmor.yml` or `.github/zizmor.yml` in the repository itself.",
+          "description": "Path to a zizmor configuration file, passed as `--config`. Relative paths are resolved against the source directory; absolute paths are used as given. When unset, zizmor discovers `zizmor.yml` or `.github/zizmor.yml` in the repository itself.",
           "title": "Config File"
         },
         "install_timeout": {

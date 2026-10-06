@@ -54,7 +54,7 @@ scanners:
     enabled: true
     options:
       persona: regular        # regular, pedantic or auditor
-      config_file: null       # path to a zizmor config, relative to the source dir
+      config_file: null       # zizmor config; relative to the source dir, or absolute
       online_audits: false    # see "Network access and tokens"
       tool_version: ">=1.29.0,<2.0.0"
       install_timeout: 300
@@ -65,9 +65,14 @@ scanners:
 - `persona`: zizmor's [persona](https://docs.zizmor.sh/usage/#using-personas).
   `regular` has the fewest false positives, `pedantic` adds code-smell findings,
   and `auditor` reports everything.
-- `config_file`: passed as `--config`. Without it, zizmor reads a `zizmor.yml` or
-  `.github/zizmor.yml` it finds in the repository, as it does when run by hand.
-  A configured file that does not exist fails the scan rather than being ignored.
+- `config_file`: passed as `--config`. A relative path is resolved against the
+  source directory; an absolute path may point outside it (a config shared across
+  repositories). Without it, zizmor reads a `zizmor.yml` or `.github/zizmor.yml` it
+  finds in the repository, as it does when run by hand. A configured file that
+  does not exist fails the scan rather than being ignored. zizmor quotes the
+  offending text of a config it cannot parse in its error, and that error reaches
+  ASH's log and the scanner's stderr log, so do not point this at a file holding
+  anything else.
 - `tool_version`: the pip-style constraint for installing zizmor.
 
 ## Network access and tokens
