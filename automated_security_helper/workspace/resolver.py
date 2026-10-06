@@ -473,10 +473,10 @@ def _resolve_project_config(
             message is re-issued with the project key so the operator knows which
             of N projects to look at.
     """
-    config_path = find_config_file(candidate.resolved)
-    if config_path is None and default_config is not None:
-        config_path = Path(default_config)
     try:
+        config_path = find_config_file(candidate.resolved)
+        if config_path is None and default_config is not None:
+            config_path = Path(default_config)
         config = resolve_config(
             config_path=config_path,
             source_dir=candidate.resolved,

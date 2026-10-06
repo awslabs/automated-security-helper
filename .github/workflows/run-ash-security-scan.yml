@@ -80,7 +80,7 @@ on:
         default: ""
         type: string
       collect-sarif-report:
-        description: "Whether to collect the ash.ghas.sarif report using github/codeql-action/upload-sarif for GitHub Advanced Security Code Scanning results"
+        description: "Whether to collect the ash.ghas.sarif report using github/codeql-action/upload-sarif for GitHub Advanced Security Code Scanning results. Works on same-repo pull requests only; for other events set this to false and call upload-ash-sarif.yml"
         required: false
         default: true
         type: boolean
@@ -753,6 +753,19 @@ jobs:
         run: |
           echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the ash_output artifact."
 
+      # This step never holds security-events: write. The `permissions:` block at
+      # the top of this file does not list it, and a called workflow can only
+      # narrow its caller's token, so a caller that grants it still loses it here.
+      # Uploads from a same-repo pull_request succeed anyway; on workflow_dispatch
+      # the step fails with "Resource not accessible by integration".
+      #
+      # The permission is not added to this file, at workflow or job level,
+      # because GitHub validates every permission a called workflow declares at
+      # startup, including on a job whose `if:` is false. Every caller that does
+      # not grant it would fail before any job ran, including those that pass
+      # `collect-sarif-report: false`. A caller that wants uploads on every event
+      # should set `collect-sarif-report: false` and call upload-ash-sarif.yml in
+      # a job of its own, granting security-events: write to that job only.
       - name: Upload ASH SARIF file
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())

@@ -20,7 +20,7 @@ from automated_security_helper.config.resolve_config import (
     find_config_file,
     resolve_config,
 )
-from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
 
@@ -58,7 +58,7 @@ def list_plugins(
         typer.Option(
             "--config",
             "-c",
-            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
             envvar="ASH_CONFIG",
         ),
     ] = None,

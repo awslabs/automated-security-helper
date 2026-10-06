@@ -5,54 +5,31 @@ from typing import Dict, List, Any, Optional
 from pydantic import ValidationError
 import yaml
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.config_sources import (
+    _resolve_dict_key,
+    default_confinement_root,
+    describe_config_path,
+    discover_config_source,
+    log_config_discovery,
+)
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
 def find_config_file(search_dir: Path | None = None) -> Optional[Path]:
-    """Search for an ASH config file in search_dir, then search_dir/.ash/.
+    """Return the config source a scan of search_dir would use, or None.
 
-    Iterates ASH_CONFIG_FILE_NAMES in order; checks the directory itself first,
-    then the .ash/ subdirectory. Returns the first match, or None.
+    Applies the discovery precedence in ``config_sources.discover_config_source``:
+    ASH_CONFIG_FILE_NAMES in order (each in search_dir, then search_dir/.ash/),
+    then the ashrc names, then a pyproject.toml with a [tool.ash] table. The
+    result can therefore be a TOML file; callers that edit the file in place
+    must check its format.
     """
     if search_dir is None:
         search_dir = Path.cwd()
-    for name in ASH_CONFIG_FILE_NAMES:
-        for candidate in [search_dir / name, search_dir / ".ash" / name]:
-            if candidate.exists():
-                return candidate
-    return None
-
-
-def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
-    """Return the key `container` already uses for `key`, if it differs only in '-' vs '_'.
-
-    The dict an override is applied to comes from `model_dump()` without
-    `by_alias=True`, so a section with an alias is keyed by its Python field name
-    -- `cdk_nag`, not `cdk-nag`. Operators type the spelling in their own config
-    file, which for those sections is the alias; this option's own documented
-    example is a kebab-case key. Writing the typed spelling verbatim added a
-    second section beside the dumped one, and since pydantic resolves an alias
-    ahead of a field name the new one won revalidation -- so the override applied
-    and every other field under that section came back as a default.
-
-    Only a key that already exists is ever followed. A name absent under both
-    spellings is created exactly as typed, which is what keeps a plugin-supplied
-    section (an extra key, present under one spelling only) reachable.
-
-    Comparing the two spellings is equivalent to consulting the alias map here
-    because every alias declared anywhere under `AshConfig` is its field name
-    with '_' replaced by '-'; that held for 9 of 9 aliases across 75 models when
-    this was written, walking `model_fields` from `AshConfig` down.
-    """
-    if key in container:
-        return key
-    for variant in (key.replace("-", "_"), key.replace("_", "-")):
-        if variant != key and variant in container:
-            return variant
-    return key
+    selected = discover_config_source(search_dir).selected
+    return selected.path if selected is not None else None
 
 
 def _apply_config_override(
@@ -240,6 +217,12 @@ def resolve_config(
                 return apply_config_overrides(config, config_overrides)
             return config
 
+        # Only a source_dir the caller passed may widen where `extends` bases
+        # may live. The cwd fallback below must not: `ash report --config
+        # <file>` run from a home directory would otherwise let that file's
+        # bases reach anywhere under it.
+        confinement_source_dir = source_dir
+
         # Resolve cwd default at call time, not import time.
         if source_dir is None:
             source_dir = Path.cwd()
@@ -247,28 +230,22 @@ def resolve_config(
         if isinstance(source_dir, str):
             source_dir = Path(source_dir)
 
-        # Check for config file if not explicitly provided
+        # Check for config file if not explicitly provided. The precedence, and
+        # why sources are selected rather than merged, is documented in
+        # config/config_sources.py.
+        confine_to = None
         if config_path is None:
             ASH_LOGGER.verbose(
                 "No configuration file provided, checking for default paths"
             )
-            for item in ASH_CONFIG_FILE_NAMES:
-                for poss_dir in [
-                    source_dir,
-                    source_dir.joinpath(".ash"),
-                ]:
-                    try:
-                        possible_config_path = poss_dir.joinpath(item)
-                        if possible_config_path.exists():
-                            config_path = possible_config_path
-                            ASH_LOGGER.verbose(
-                                f"Found configuration file at: {config_path.as_posix()}"
-                            )
-                            break
-                    except (AttributeError, TypeError) as e:
-                        ASH_LOGGER.debug(f"Error checking config path: {e}")
-                if config_path is not None:
-                    break
+            discovery = discover_config_source(source_dir)
+            log_config_discovery(discovery)
+            if discovery.selected is not None:
+                config_path = discovery.selected.path
+                confine_to = source_dir
+                ASH_LOGGER.verbose(
+                    f"Found configuration file at: {config_path.as_posix()}"
+                )
 
         if config_path is None:
             if fallback_to_default:
@@ -299,7 +276,13 @@ def resolve_config(
                 return config  # Return default config if specified file doesn't exist
 
             ASH_LOGGER.debug("Validating file config")
-            config = AshConfig.from_file(config_path=Path(config_path))
+            if confine_to is None:
+                confine_to = default_confinement_root(
+                    config_path, confinement_source_dir
+                )
+            config = AshConfig.from_file(
+                config_path=Path(config_path), confine_to=confine_to
+            )
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 
             # Apply config overrides if provided
@@ -326,7 +309,8 @@ def resolve_config(
         except ValidationError as e:
             ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
             raise ASHConfigValidationError(
-                f"Configuration validation failed for '{config_path}': {str(e)}. "
+                f"Configuration validation failed for "
+                f"'{describe_config_path(config_path)}': {str(e)}. "
                 "Run 'ash config lint' to identify and fix issues."
             ) from e
 

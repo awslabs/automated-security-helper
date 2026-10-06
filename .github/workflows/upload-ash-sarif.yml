@@ -1,0 +1,79 @@
+name: "ASH SARIF Upload"
+#  Uploads the ash.ghas.sarif report from a run-ash-security-scan.yml job in the
+#  same workflow run to GitHub Advanced Security code scanning.
+#
+#  WHY THIS IS A SEPARATE WORKFLOW
+#
+#  A called workflow can only narrow the token its caller grants, never widen it,
+#  and run-ash-security-scan.yml declares contents, checks and pull-requests only.
+#  So its own "Upload ASH SARIF file" step never holds `security-events: write`,
+#  whatever the caller grants. It still uploads on a same-repo pull_request, but
+#  on workflow_dispatch it fails with "Resource not accessible by integration".
+#
+#  Adding the permission to that workflow was measured and rejected. GitHub checks
+#  every permission a called workflow declares when the run starts, and that
+#  includes a job-level `permissions:` on a job whose `if:` is false, whether the
+#  `if:` is a literal or an input. A caller that does not grant the permission
+#  fails before any job starts:
+#
+#    The nested job 'upload' is requesting 'security-events: write', but is only
+#    allowed 'security-events: none'.
+#
+#  That would break every existing caller that never granted it, including
+#  callers that pass `collect-sarif-report: false`. Keeping the permission in its
+#  own workflow means only callers that call this one have to grant it.
+#
+#  USAGE
+#
+#    jobs:
+#      ash:
+#        uses: ./.github/workflows/run-ash-security-scan.yml
+#        permissions:
+#          contents: read
+#          checks: write
+#          pull-requests: write
+#        with:
+#          collect-sarif-report: false # this workflow uploads instead
+#      sarif:
+#        needs: ash
+#        # A scan that fails on findings still wrote its report, so upload on
+#        # failure too. Not when the scan job was skipped or cancelled.
+#        if: needs.ash.result == 'success' || needs.ash.result == 'failure'
+#        uses: ./.github/workflows/upload-ash-sarif.yml
+#        permissions:
+#          contents: read
+#          security-events: write
+#
+#  The report is read from the `ash_output` artifact the scan job uploads, so the
+#  scan job must have run with the default output layout in the same workflow run.
+permissions:
+  contents: read # Required for the checkout that upload-sarif reads commit details from
+  security-events: write # Required to upload SARIF results to code scanning
+on:
+  workflow_call: {}
+
+jobs:
+  upload-sarif:
+    name: Upload SARIF to code scanning
+    # Same exclusion as the upload step in run-ash-security-scan.yml.
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download ASH output artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash_output
+          path: ${{ runner.temp }}/ash_output
+
+      - name: Upload ASH SARIF file
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ runner.temp }}/ash_output/reports/ash.ghas.sarif
+          wait-for-processing: true
+          category: ash
