@@ -25,7 +25,7 @@ from textual.widgets import (
 
 from automated_security_helper.config.ash_config import add_suppression_to_config
 from automated_security_helper.config.resolve_config import find_config_file
-from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.schemas.sarif_schema_model import Result
@@ -1034,7 +1034,7 @@ def findings_command(
             "-c",
             help=(
                 "Path to the configuration file where suppressions should be "
-                f"saved. By default, ASH searches for {ASH_CONFIG_FILE_NAMES}."
+                f"saved. By default, ASH searches for {ASH_CONFIG_SOURCES_DESCRIPTION}."
             ),
             envvar="ASH_CONFIG",
         ),

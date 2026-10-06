@@ -597,6 +597,30 @@
     15 were already suppressed; on a tree where they are not, the scanner's
     high-severity count drops by however many of its rules raised.
 
+### Configuration sources
+
+- **`pyproject.toml [tool.ash]` and `ashrc` files are config sources (#313).**
+  Without `--config`, ASH uses the first of: the existing `.ash.*` / `ash.*` names
+  (root, then `.ash/`, in their existing order), then `.ashrc.{toml,yaml,yml,json}`
+  and `ashrc.{toml,yaml,yml,json}` at the root, then a `pyproject.toml` that has a
+  `[tool.ash]` table. Sources are never merged: the one used is logged, and every
+  other source found is logged as ignored. The older names still win, so a
+  repository with `.ash/.ash.yaml` keeps its settings; when one of them shadows a
+  newer source the warning says those names are deprecated. Results still go to
+  `.ash/`.
+
+- **A config can `extends` other configs and `patch` the result (#289).**
+  `extends` names one or more base files (relative to the extending file);
+  mappings merge key by key, lists and scalars from the extending file replace the
+  base's, and `patch` applies RFC 6902 `add`/`remove`/`replace`/`test` operations
+  afterwards. Bases must resolve inside the scanned repository, symlinks included,
+  and URLs are refused. A missing base, a cycle, or a chain past 10 levels or 50
+  files fails the load instead of falling back to the default config.
+  `ash config validate` and `ash config lint` follow the chain and print it.
+  `ash config validate` and `ash config lint` without `--config` now check the
+  config a scan of the current directory would use, instead of always
+  `.ash/.ash.yaml`.
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat
