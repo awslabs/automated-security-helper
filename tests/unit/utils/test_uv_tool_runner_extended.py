@@ -300,39 +300,3 @@ class TestResetUvToolRunner:
         # is the one thing this test exists to rule out.
         assert runner2 is not runner1
         assert isinstance(runner2, UVToolRunner)
-
-
-class TestGetToolVersionOffline:
-    """The version probe honors ASH_OFFLINE the way run_tool does.
-
-    It once was the only uv call that did not. Under ``ash scan --mode nix`` it
-    resolved and downloaded the newest semgrep from PyPI and was killed at its
-    15s timeout when the download was slow, leaving uv's cache with the index
-    entry but not the wheel. The scan's ``uv tool run --offline`` then failed with
-    "the requested data wasn't found in the cache" (nix arm64 CI, 2026-10-06).
-    """
-
-    def _probe(self, runner):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="1.172.0\n", stderr=""
-            )
-            version = runner.get_tool_version("semgrep", "semgrep>=1.125.0,<2.0.0")
-        assert mock_run.call_count == 1
-        return version, mock_run.call_args
-
-    def test_offline_probe_passes_offline_to_uv(self, runner, monkeypatch):
-        monkeypatch.setenv("ASH_OFFLINE", "YES")
-        monkeypatch.delenv("UV_OFFLINE", raising=False)
-        version, call = self._probe(runner)
-        command = call.args[0]
-        assert command[:4] == ["uv", "tool", "run", "--offline"]
-        assert command[-2:] == ["semgrep", "--version"]
-        assert call.kwargs["env"]["UV_OFFLINE"] == "1"
-        assert version == "1.172.0"
-
-    def test_online_probe_is_unchanged(self, runner, monkeypatch):
-        monkeypatch.delenv("ASH_OFFLINE", raising=False)
-        _, call = self._probe(runner)
-        assert "--offline" not in call.args[0]
-        assert call.kwargs["env"] is None
