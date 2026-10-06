@@ -9,26 +9,49 @@
  * the PATH run.ts set up (no `ashx`) and a later one changes it (adds `ashx`).
  *
  * In stub mode each scenario replays a captured scan from test/fixtures/scans/.
- * In real mode (ASH_IT_REAL_ASH_DIR) the same outcomes come from genuine scans,
- * chosen with `--scanners` and a workspace `.ash/.ash.yaml`:
+ * In real mode (ASH_IT_REAL_ASH_DIR) every scan is a genuine one over the shared
+ * e2e cases in tests/e2e/fixtures/cases.json, the same three every install
+ * channel runs: the workspace holds a copy of the case's fixture, the case's
+ * scanners and args go in through `ash.extraArguments`, and its environment is
+ * set on the extension host, whose environment the scan inherits. After each one,
+ * scripts/e2e/assert_outcome.py judges the output directory the extension wrote,
+ * so the editor-side assertions here and the channel-wide verdict cover the same
+ * scan:
  *
- *   findings    detect-secrets with SECRET-SECRET-KEYWORD suppressed -> exit 2
- *   incomplete  cfn-nag,detect-secrets on a PATH without cfn-nag    -> exit 1
- *   clean       detect-secrets with SECRET-* suppressed              -> exit 0
+ *   findings    detect-secrets                          -> exit 2, 3 findings
+ *   incomplete  detect-secrets,opengrep, offline, no
+ *               rule cache (see tests/e2e/README.md)    -> exit 1, opengrep MISSING
+ *   clean       detect-secrets on a tree with no secret -> exit 0
  */
 
 import * as assert from 'assert';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ScanReport } from '../../../src/extension';
 
 const MODE = process.env.ASH_IT_MODE ?? 'stub';
+const CLI_NAME = process.env.ASH_IT_CLI_NAME ?? 'ashx';
 const WORKSPACE = process.env.ASH_IT_WORKSPACE ?? '';
 const ASHX_DIR = process.env.ASH_IT_ASHX_DIR ?? '';
-const ASH_DIR = process.env.ASH_IT_ASH_DIR ?? '';
+const REAL_ASH_DIR = process.env.ASH_IT_REAL_ASH_DIR ?? '';
 const SCENARIO_FILE = process.env.ASH_STUB_SCENARIO_FILE ?? '';
-const SECRET_FILE = vscode.Uri.file(path.join(WORKSPACE, 'planted_secret.py'));
+const E2E_FIXTURES = process.env.ASH_IT_E2E_FIXTURES ?? '';
+const CASES_FILE = process.env.ASH_IT_CASES_FILE ?? '';
+const ASSERT_OUTCOME = process.env.ASH_IT_ASSERT_OUTCOME ?? '';
+const PYTHON = process.env.ASH_IT_PYTHON ?? 'python3';
+const EXTENSION_ID = process.env.ASH_IT_EXTENSION_ID ?? '';
+const EXTENSIONS_DIR = process.env.ASH_IT_EXTENSIONS_DIR ?? '';
+const EXPECT_VERSION = process.env.ASH_IT_EXPECT_VERSION ?? '';
+
+/** The file each mode's findings land on. */
+const SECRET_FILE = vscode.Uri.file(
+  path.join(WORKSPACE, MODE === 'stub' ? 'planted_secret.py' : 'leak.py'),
+);
+
+/** Where the extension tells ASH to write, its `ash.outputDirectory` default. */
+const OUTPUT_DIR = path.join(WORKSPACE, '.ash', 'ash_output');
 
 type Outcome = 'findings' | 'incomplete' | 'clean';
 
@@ -39,29 +62,52 @@ interface Expected {
   readonly incompleteScanner?: string;
 }
 
+/** One case from tests/e2e/fixtures/cases.json. */
+interface E2eCase {
+  readonly source: string;
+  readonly scanners: readonly string[];
+  readonly args?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly expect_rc: number;
+  readonly findings?: number;
+  readonly incomplete_scanner?: string;
+}
+
 const STUB_EXPECTED: Record<Outcome, Expected> = {
   findings: { exitCode: 2, diagnostics: 2, suppressed: 1 },
   incomplete: { exitCode: 1, diagnostics: 3, suppressed: 0, incompleteScanner: 'semgrep' },
   clean: { exitCode: 0, diagnostics: 0, suppressed: 0 },
 };
 
-const REAL_EXPECTED: Record<Outcome, Expected> = {
-  findings: { exitCode: 2, diagnostics: 2, suppressed: 1 },
-  incomplete: { exitCode: 1, diagnostics: 2, suppressed: 1, incompleteScanner: 'cfn-nag' },
-  clean: { exitCode: 0, diagnostics: 0, suppressed: 3 },
+/** The rules each mode's findings scan reports on SECRET_FILE, and on which line. */
+const FINDINGS_RULES: Record<string, { readonly codes: readonly string[]; readonly line: number }> = {
+  // The captured scan has SECRET-SECRET-KEYWORD suppressed.
+  stub: { codes: ['SECRET-AWS-ACCESS-KEY', 'SECRET-BASE64-HIGH-ENTROPY-STRING'], line: 24 },
+  // tests/e2e/README.md: detect-secrets reports these three on leak.py's line 3.
+  real: {
+    codes: ['SECRET-AWS-ACCESS-KEY', 'SECRET-BASE64-HIGH-ENTROPY-STRING', 'SECRET-SECRET-KEYWORD'],
+    line: 2,
+  },
 };
 
-function ashConfig(ruleId: string): string {
-  return [
-    'project_name: vscode-integration',
-    'fail_on_findings: true',
-    'global_settings:',
-    '  suppressions:',
-    `    - rule_id: "${ruleId}"`,
-    '      path: planted_secret.py',
-    '      reason: integration fixture',
-    '',
-  ].join('\n');
+function loadCase(outcome: Outcome): E2eCase {
+  const parsed = JSON.parse(fs.readFileSync(CASES_FILE, 'utf8')) as {
+    cases?: Record<string, E2eCase>;
+  };
+  const found = parsed.cases?.[outcome];
+  assert.ok(found !== undefined, `${CASES_FILE} has no case "${outcome}"`);
+  return found;
+}
+
+function realExpected(e2e: E2eCase): Expected {
+  assert.ok(typeof e2e.findings === 'number', 'the real suite needs an exact finding count');
+  return {
+    exitCode: e2e.expect_rc,
+    diagnostics: e2e.findings,
+    // The e2e fixtures carry no suppressions.
+    suppressed: 0,
+    incompleteScanner: e2e.incomplete_scanner,
+  };
 }
 
 /**
@@ -91,20 +137,70 @@ async function setSetting(
   throw new Error(`ash.${key} did not become ${wanted} in the extension host`);
 }
 
+/** Environment variables the previous real case set, to unset before the next. */
+let caseEnvKeys: string[] = [];
+
 /** Sets up one outcome for the next scan and returns what it must produce. */
 async function arrange(outcome: Outcome): Promise<Expected> {
   if (MODE === 'stub') {
     fs.writeFileSync(SCENARIO_FILE, JSON.stringify({ fixture: outcome }));
     return STUB_EXPECTED[outcome];
   }
-  fs.mkdirSync(path.join(WORKSPACE, '.ash'), { recursive: true });
-  fs.writeFileSync(
-    path.join(WORKSPACE, '.ash', '.ash.yaml'),
-    ashConfig(outcome === 'clean' ? 'SECRET-*' : 'SECRET-SECRET-KEYWORD'),
+  const e2e = loadCase(outcome);
+  // The workspace becomes exactly the case's fixture. .vscode holds the workspace
+  // settings this suite writes, so it stays; the previous output goes, so nothing
+  // judged below can be left over from an earlier scan.
+  for (const entry of fs.readdirSync(WORKSPACE)) {
+    if (entry !== '.vscode') {
+      fs.rmSync(path.join(WORKSPACE, entry), { recursive: true, force: true });
+    }
+  }
+  fs.cpSync(path.join(E2E_FIXTURES, e2e.source), WORKSPACE, { recursive: true });
+  // The scan is a child of this process with no `env` of its own, so it inherits
+  // process.env as it is when the scan starts.
+  for (const key of caseEnvKeys) {
+    delete process.env[key];
+  }
+  caseEnvKeys = Object.keys(e2e.env ?? {});
+  for (const [key, value] of Object.entries(e2e.env ?? {})) {
+    process.env[key] = value;
+  }
+  await setSetting(
+    'extraArguments',
+    ['--scanners', e2e.scanners.join(','), ...(e2e.args ?? [])],
+    vscode.ConfigurationTarget.Workspace,
   );
-  const scanners = outcome === 'incomplete' ? 'cfn-nag,detect-secrets' : 'detect-secrets';
-  await setSetting('extraArguments', ['--scanners', scanners], vscode.ConfigurationTarget.Workspace);
-  return REAL_EXPECTED[outcome];
+  return realExpected(e2e);
+}
+
+/**
+ * Real mode: the shared verdict over the output the extension's scan wrote. A
+ * no-op in stub mode, whose replayed scans write no aggregated results.
+ */
+function assertContract(outcome: Outcome, report: ScanReport): void {
+  if (MODE !== 'real') {
+    return;
+  }
+  const verdict = spawnSync(
+    PYTHON,
+    [
+      ASSERT_OUTCOME,
+      '--case',
+      outcome,
+      '--cases',
+      CASES_FILE,
+      '--output-dir',
+      OUTPUT_DIR,
+      '--rc',
+      String(report.exitCode),
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.strictEqual(
+    verdict.status,
+    0,
+    `assert_outcome rejected the ${outcome} scan:\n${verdict.stdout}${verdict.stderr}${verdict.error?.message ?? ''}`,
+  );
 }
 
 async function scan(): Promise<ScanReport> {
@@ -117,6 +213,17 @@ function ashDiagnostics(uri: vscode.Uri): vscode.Diagnostic[] {
   return vscode.languages
     .getDiagnostics(uri)
     .filter((diagnostic) => (diagnostic.source ?? '').startsWith('ASH'));
+}
+
+/** Every ASH diagnostic in the window, on any file. */
+function allAshDiagnostics(): number {
+  return vscode.languages
+    .getDiagnostics()
+    .reduce(
+      (total, [, diagnostics]) =>
+        total + diagnostics.filter((diagnostic) => (diagnostic.source ?? '').startsWith('ASH')).length,
+      0,
+    );
 }
 
 /** Which stub wrappers the CLI was invoked through, in order. */
@@ -141,7 +248,18 @@ suite('ASH in a real VS Code', () => {
   suiteSetup(() => {
     assert.ok(WORKSPACE !== '' && fs.existsSync(WORKSPACE), `no workspace at ${WORKSPACE}`);
     assert.strictEqual(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, WORKSPACE);
-    assert.ok(!fs.existsSync(path.join(ASHX_DIR, 'ashx')), 'the suite must start with no ashx');
+    assert.ok(!fs.existsSync(path.join(ASHX_DIR, CLI_NAME)), `the suite must start with no ${CLI_NAME}`);
+    if (EXTENSIONS_DIR !== '') {
+      // The installed .vsix, and not some other copy, has to be what answers.
+      const extension = vscode.extensions.getExtension(EXTENSION_ID);
+      assert.ok(extension !== undefined, `${EXTENSION_ID} is not loaded`);
+      assert.strictEqual((extension.packageJSON as { version?: string }).version, EXPECT_VERSION);
+      const root = path.resolve(EXTENSIONS_DIR) + path.sep;
+      assert.ok(
+        path.resolve(extension.extensionPath).startsWith(root),
+        `${EXTENSION_ID} was loaded from ${extension.extensionPath}, not from ${root}`,
+      );
+    }
   });
 
   setup(() => resetCalls());
@@ -154,6 +272,7 @@ suite('ASH in a real VS Code', () => {
     assert.strictEqual(first.executable, 'ash');
     assert.strictEqual(first.fallbackNotice, 'shown');
     assert.strictEqual(first.status, 'ok', first.detail);
+    assertContract('findings', first);
     if (MODE === 'stub') {
       // ashx probed and missing, then ash probed and scanned.
       assert.deepStrictEqual(invokedAs(), ['ash', 'ash']);
@@ -163,6 +282,7 @@ suite('ASH in a real VS Code', () => {
     assert.strictEqual(second.executable, 'ash');
     assert.strictEqual(second.fallbackNotice, 'already-shown');
     assert.strictEqual(second.exitCode, expected.exitCode);
+    assertContract('findings', second);
   });
 
   test('puts exit 2 findings in the editor and leaves the suppressed one out', async () => {
@@ -174,14 +294,17 @@ suite('ASH in a real VS Code', () => {
     assert.strictEqual(report.exitCode, 2);
     assert.strictEqual(report.coverage?.coverage_complete, true);
     assert.strictEqual(report.summary?.suppressed, expected.suppressed);
+    assertContract('findings', report);
+    const rules = FINDINGS_RULES[MODE];
     const diagnostics = ashDiagnostics(SECRET_FILE);
     assert.strictEqual(diagnostics.length, expected.diagnostics);
+    assert.strictEqual(allAshDiagnostics(), expected.diagnostics, 'findings landed on other files');
     assert.deepStrictEqual(
       diagnostics.map((diagnostic) => String(diagnostic.code)).sort(),
-      ['SECRET-AWS-ACCESS-KEY', 'SECRET-BASE64-HIGH-ENTROPY-STRING'],
+      rules.codes,
     );
     for (const diagnostic of diagnostics) {
-      assert.strictEqual(diagnostic.range.start.line, 24);
+      assert.strictEqual(diagnostic.range.start.line, rules.line);
       assert.strictEqual(diagnostic.severity, vscode.DiagnosticSeverity.Error);
       assert.strictEqual(diagnostic.source, 'ASH (detect-secrets)');
     }
@@ -203,6 +326,7 @@ suite('ASH in a real VS Code', () => {
       (report.detail ?? '').includes(`scanner ${expected.incompleteScanner ?? ''}`),
       report.detail,
     );
+    assertContract('incomplete', report);
     // Exit 1 with results is never a plain failure: the findings are on screen.
     assert.strictEqual(ashDiagnostics(SECRET_FILE).length, expected.diagnostics);
     assert.ok(expected.diagnostics > 0);
@@ -216,7 +340,9 @@ suite('ASH in a real VS Code', () => {
 
     assert.strictEqual(report.status, 'ok', report.detail);
     assert.strictEqual(report.exitCode, 0);
+    assertContract('clean', report);
     assert.strictEqual(ashDiagnostics(SECRET_FILE).length, 0);
+    assert.strictEqual(allAshDiagnostics(), 0);
   });
 
   test('reports an exit 1 that wrote nothing as a failed scan, not an incomplete one', async () => {
@@ -247,9 +373,15 @@ suite('ASH in a real VS Code', () => {
     assert.ok(ashDiagnostics(SECRET_FILE).length > 0);
     if (MODE === 'stub') {
       fs.writeFileSync(SCENARIO_FILE, JSON.stringify({ fixture: 'findings', hangSeconds: 120 }));
+    } else {
+      // A genuine scan of the fixture can finish inside 2s, so real mode runs the
+      // installed ASH behind a wrapper that sleeps first (see run.ts).
+      await setSetting(
+        'executablePath',
+        process.env.ASH_IT_SLOW_EXECUTABLE,
+        vscode.ConfigurationTarget.Global,
+      );
     }
-    // In real mode no hang is needed: ASH takes several seconds to start, so a
-    // genuine scan outruns 2s.
     await setSetting('scanTimeoutSeconds', 2, vscode.ConfigurationTarget.Global);
     try {
       const started = Date.now();
@@ -265,23 +397,28 @@ suite('ASH in a real VS Code', () => {
       assert.strictEqual(ashDiagnostics(SECRET_FILE).length, 0);
     } finally {
       await setSetting('scanTimeoutSeconds', undefined, vscode.ConfigurationTarget.Global);
+      if (MODE !== 'stub') {
+        await setSetting('executablePath', undefined, vscode.ConfigurationTarget.Global);
+      }
     }
   });
 
   test('runs ashx once it is installed', async () => {
-    const ashx = path.join(ASHX_DIR, 'ashx');
+    const ashx = path.join(ASHX_DIR, CLI_NAME);
     if (MODE === 'stub') {
       fs.writeFileSync(ashx, process.env.ASH_IT_ASHX_WRAPPER ?? '', { mode: 0o755 });
     } else {
-      fs.symlinkSync(path.join(ASH_DIR, 'ash'), ashx);
+      // The installed v4 entry point itself, not the legacy one under a new name.
+      fs.symlinkSync(path.join(REAL_ASH_DIR, CLI_NAME), ashx);
     }
     const expected = await arrange('findings');
 
     const report = await scan();
 
-    assert.strictEqual(report.executable, 'ashx');
+    assert.strictEqual(report.executable, CLI_NAME);
     assert.strictEqual(report.fallbackNotice, undefined);
     assert.strictEqual(report.exitCode, expected.exitCode);
+    assertContract('findings', report);
     if (MODE === 'stub') {
       assert.deepStrictEqual(invokedAs(), ['ashx', 'ashx']);
     }
