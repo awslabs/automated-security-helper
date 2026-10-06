@@ -161,6 +161,30 @@ class TestFormulaIsGeneratedFromTheLock:
         assert "aws-cdk-lib" not in closure
         assert "pytest" not in closure
 
+    def test_the_symbols_extra_stays_out(self, refresh):
+        """tree-sitter and its grammars ride on the optional symbols extra only.
+
+        They are native wheels, and the formula installs with --no-binary=:all:,
+        so a symbols resource would compile tree-sitter from source on every
+        `brew install`. The names are read from the lock's own record of the
+        extra, so the check cannot pass by naming packages the lock never had.
+        """
+        lock = tomllib.loads(LOCK.read_text(encoding="utf-8"))
+        root = next(
+            p for p in lock["package"] if p["name"] == "automated-security-helper"
+        )
+        symbols = {
+            refresh.canonical(edge["name"])
+            for edge in root["optional-dependencies"]["symbols"]
+        }
+        assert "tree-sitter" in symbols, symbols
+
+        closure = refresh.compute_closure(
+            LOCK, refresh.formula_python_version(_formula())
+        )
+
+        assert not symbols & set(closure), sorted(symbols & set(closure))
+
 
 class TestNegativeControls:
     def test_a_perturbed_hash_in_the_closure_is_reported_as_drift(
