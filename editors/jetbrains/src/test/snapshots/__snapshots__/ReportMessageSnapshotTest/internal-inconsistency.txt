@@ -1,0 +1,7 @@
+type=INFORMATION
+title: ASH scan finished
+body:
+1 finding(s): 1 error.<br>
+1 scanner(s) completed.<br>
+awslabs/automated-security-helper v4.0.0, exit code 2. Report: /project/.ash/ash_output/reports/ash.sarif<br>
+<b>Internal inconsistency:</b> 5 result(s) were read but 1 were accounted for. Some findings may be missing from the editor.

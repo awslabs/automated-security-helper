@@ -36,11 +36,16 @@ class AshScanAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.getData(CommonDataKeys.PROJECT) ?: return
         val configured = AshSettings.getInstance().executablePath
-        object : Task.Backgroundable(project, "Running ASH security scan", true) {
+        object : Task.Backgroundable(project, TASK_TITLE, true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 AshScanController.scan(project, configured, indicator = indicator)
             }
         }.queue()
+    }
+
+    companion object {
+        /** The background task's title, which the IDE shows in the status bar while a scan runs. */
+        const val TASK_TITLE = "Running ASH security scan"
     }
 }

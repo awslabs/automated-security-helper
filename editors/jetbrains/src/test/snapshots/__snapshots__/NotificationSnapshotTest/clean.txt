@@ -1,0 +1,10 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ashx scan
+
+notification group=ASH type=INFORMATION
+title: ASH scan finished
+body:
+ASH reported no findings that can be shown in the editor.<br>
+10 scanner(s) completed.<br>
+awslabs/automated-security-helper v3.7.0, exit code 0. Report: <PROJECT>/.ash/ash_output/reports/ash.sarif

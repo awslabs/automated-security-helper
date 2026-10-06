@@ -1,0 +1,11 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ashx scan
+
+notification group=ASH type=ERROR
+title: ASH scan failed
+body:
+ASH wrote <PROJECT>/.ash/ash_output/reports/ash.sarif but it is not a readable SARIF report (SARIF is not valid JSON: com.google.gson.stream.MalformedJsonException: Unterminated string at line 1 column 2291 path $.runs[0].results[0].properties.tags[0]
+See https://github.com/google/gson/blob/main/Troubleshooting.md#malformed-json). No findings can be shown, and this is not the same as finding nothing.<br>
+<br>
+<pre></pre>

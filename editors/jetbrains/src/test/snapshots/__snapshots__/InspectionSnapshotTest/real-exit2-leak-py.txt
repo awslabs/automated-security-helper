@@ -1,0 +1,17 @@
+file: leak.py
+highlights: 3
+
+2:1-2:67 ERROR
+  text: AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  description: ASH [detect-secrets SECRET-AWS-ACCESS-KEY]: Secret of type 'AWS Access Key' detected in file 'leak.py' at line 2
+  tooltip: <html>ASH [detect-secrets SECRET-AWS-ACCESS-KEY]: Secret of type 'AWS Access Key' detected in file 'leak.py' at line 2 <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>
+
+2:1-2:67 ERROR
+  text: AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  description: ASH [detect-secrets SECRET-BASE64-HIGH-ENTROPY-STRING]: Secret of type 'Base64 High Entropy String' detected in file 'leak.py' at line 2
+  tooltip: <html>ASH [detect-secrets SECRET-BASE64-HIGH-ENTROPY-STRING]: Secret of type 'Base64 High Entropy String' detected in file 'leak.py' at line 2 <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>
+
+2:1-2:67 ERROR
+  text: AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  description: ASH [detect-secrets SECRET-SECRET-KEYWORD]: Secret of type 'Secret Keyword' detected in file 'leak.py' at line 2
+  tooltip: <html>ASH [detect-secrets SECRET-SECRET-KEYWORD]: Secret of type 'Secret Keyword' detected in file 'leak.py' at line 2 <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>

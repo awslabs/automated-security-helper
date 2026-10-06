@@ -172,11 +172,51 @@ jacoco {
 // service, the scan action and the end-to-end scan be MEASURED instead of excluded with a line
 // budget. assert-coverage.py's floors make sure this keeps working: if JaCoCo goes back to
 // seeing nothing, the line denominator stays full and the ratio collapses to 0%, which fails.
+// SNAPSHOTS: THE UPDATE FLAG, AND WHERE THE FILES ARE
+//
+// `-Psnapshot-update` is the only way a snapshot is written: the same name as core ASH's
+// `pytest --snapshot-update`, so a contributor meets one flag. Without it a missing or changed
+// snapshot fails (see src/test/kotlin/.../snapshot/Snapshots.kt). It is refused here, at
+// configuration, when CI or GITHUB_ACTIONS is "true", so a workflow that passed it would fail
+// before any test ran; the helper refuses it again in the test JVM for a run that bypasses this
+// file. No workflow passes it, and check-editor-snapshot-trailers.py --policy fails one that does.
+//
+// The `__snapshots__` directory component is what core ASH's golden-file check keys on, so the
+// trailer rule applies to these files under either script.
+val snapshotUpdate = providers.gradleProperty("snapshot-update").isPresent
+if (snapshotUpdate) {
+    val ci = listOf("CI", "GITHUB_ACTIONS").filter { System.getenv(it).equals("true", ignoreCase = true) }
+    if (ci.isNotEmpty()) {
+        throw GradleException(
+            "-Psnapshot-update refused: ${ci.joinToString(" and ")} is true. Snapshots are updated " +
+                "on a developer's machine and committed with a Snapshot-Update trailer; CI only compares.",
+        )
+    }
+}
+val structuralSnapshots = layout.projectDirectory.dir("src/test/snapshots/__snapshots__")
+val structuralSnapshotUsage = layout.buildDirectory.file("snapshot-usage/test.txt")
+
 tasks.test {
     useJUnit()
 
     // The IntelliJ test fixtures expect headless AWT.
     systemProperty("java.awt.headless", "true")
+
+    // The snapshots are an input, so editing one reruns the suite instead of restoring a cached
+    // green result; the usage list is an output, so a cached run restores the list the orphan
+    // check reads along with the result it belongs to.
+    inputs.files(fileTree(structuralSnapshots)).withPropertyName("snapshots")
+    outputs.file(structuralSnapshotUsage).withPropertyName("snapshotUsage")
+    systemProperty("ash.snapshot.dir", structuralSnapshots.asFile.absolutePath)
+    systemProperty("ash.snapshot.update", snapshotUpdate.toString())
+    systemProperty("ash.snapshot.usage", structuralSnapshotUsage.get().asFile.absolutePath)
+    if (snapshotUpdate) {
+        // An update run writes into src/, which Gradle does not track as an output, so it must
+        // never be skipped or served from the cache.
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("-Psnapshot-update writes snapshots") { true }
+    }
+    doFirst { structuralSnapshotUsage.get().asFile.delete() }
 
     extensions.configure<JacocoTaskExtension> {
         isIncludeNoLocationClasses = true
@@ -302,10 +342,41 @@ val assertCoverage = tasks.register<Exec>("assertCoverage") {
     )
 }
 
+// The orphan check: a snapshot file no test asserted in this run fails, including every snapshot
+// of a test class that was deleted or renamed, which no per-class check can see. It reads the
+// usage list the snapshot helper appends to, so it is only meaningful after a full run of the
+// suite; assertTestsRan, which `check` also runs, is what guarantees the run was full. With
+// -Psnapshot-update it deletes the unused files instead, as syrupy's update does.
+val assertSnapshotsUsed = tasks.register<Exec>("assertSnapshotsUsed") {
+    group = "verification"
+    description = "Fails on a snapshot file that no test asserted."
+    dependsOn(tasks.test)
+    workingDir = layout.projectDirectory.asFile
+    // A filtered run asserts a subset, so every other snapshot would read as unused, and under
+    // -Psnapshot-update it would be DELETED. Refused rather than tolerated.
+    val testFilter = tasks.test.get().filter as org.gradle.api.internal.tasks.testing.filter.DefaultTestFilter
+    doFirst {
+        if (testFilter.includePatterns.isNotEmpty() || testFilter.commandLineIncludePatterns.isNotEmpty()) {
+            throw GradleException(
+                "assertSnapshotsUsed needs a full run of the test suite, and this one was filtered " +
+                    "(--tests). Run it without a filter.",
+            )
+        }
+    }
+    commandLine(
+        listOf(
+            "python3",
+            "assert-snapshots-used.py",
+            "--snapshot-dir", "src/test/snapshots/__snapshots__",
+            "--usage", "build/snapshot-usage/test.txt",
+        ) + (if (snapshotUpdate) listOf("--delete-unused") else emptyList()),
+    )
+}
+
 tasks.check {
     // assertTestsRan explicitly, because it is the only one of the three that can fail when
     // the test task is skipped as NO-SOURCE.
-    dependsOn(tasks.test, assertTestsRan, assertCoverage)
+    dependsOn(tasks.test, assertTestsRan, assertCoverage, assertSnapshotsUsed)
 
     // The platform's own two checks, which the IntelliJ Platform Gradle plugin provides and
     // does not wire into `check` itself. They are the only things that read META-INF/plugin.xml

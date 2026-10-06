@@ -1,0 +1,19 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ashx scan
+
+notification group=ASH type=WARNING
+title: ASH scan incomplete
+body:
+ASH reported this scan INCOMPLETE (exit 1): it did not cover everything it was asked to. Showing the 3 finding(s) it did produce: 3 error. Findings from the parts that did not run are absent.<br>
+<br>
+The status file names no scanner that failed to complete; ASH's own output gives the reason:<br>
+<pre>ERROR (1) Exiting because the scan was incomplete: 1 selected scanner(s) did not
+evaluate everything they were given
+  cfn-nag: MISSING
+ERROR means the scanner ran and failed; MISSING means its dependencies were
+unavailable; a target count means the scanner ran but could not read that many
+of its inputs. Install the missing tools, fix or exclude the unreadable targets,
+exclude the scanners with --exclude-scanners, or drop
+--fail-on-incomplete-scanners to accept a partial scan.</pre><br>
+awslabs/automated-security-helper v3.7.0, exit code 1. Report: <PROJECT>/.ash/ash_output/reports/ash.sarif

@@ -1,0 +1,7 @@
+type=WARNING
+title: ASH scan incomplete
+body:
+ASH reported this scan INCOMPLETE (exit 1): it did not cover everything it was asked to. It produced no findings that can be shown, which is not a clean result.<br>
+<br>
+The status file names no scanner that failed to complete; ASH's own output gives the reason, and it printed nothing.<br>
+awslabs/automated-security-helper v4.0.0, exit code 1. Report: /project/.ash/ash_output/reports/ash.sarif

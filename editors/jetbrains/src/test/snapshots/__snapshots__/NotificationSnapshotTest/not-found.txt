@@ -1,0 +1,9 @@
+progress:
+  Looking for the ASH executable
+
+notification group=ASH type=ERROR
+title: ASH CLI not found
+body:
+Neither 'ashx' nor 'ash' was found on PATH. This plugin runs the ASH CLI you installed; it does not bundle one. Install ASH (for example 'pipx install automated-security-helper' or 'uv tool install automated-security-helper'), or set the full path to it in Settings | Tools | ASH. An IDE started from a desktop launcher does not always inherit the PATH a terminal has, so a full path is the reliable fix.<br>
+<br>
+Searched 1 PATH entry, including: <BIN>
