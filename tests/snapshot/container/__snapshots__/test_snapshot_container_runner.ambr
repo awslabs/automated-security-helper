@@ -1,0 +1,169 @@
+# serializer version: 1
+# name: TestBuildFailure.test_build_image_no_run_after_failed_build
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      Error: building at STEP "RUN grype --version": exit status 127
+  
+    ''',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Building image automated-security-helper:non-root -- this may take a few minutes during the first build...
+      Error building ASH image: Command '['/usr/bin/docker', 'build', '--build-arg', 'UID=1000', '--build-arg', 'GID=1000', '--tag', 'automated-security-helper:non-root', '--target', 'non-root', '--file', '<TMP>/Dockerfile', '--build-arg', 'INSTALL_ASH_REVISION=LOCAL', '--build-arg', 'OFFLINE=NO', '--build-arg', 'OFFLINE_SEMGREP_RULESETS=p/ci', '--build-arg', 'BUILD_DATE_EPOCH=1768478400', '<TMP>']' returned non-zero exit status 1.
+                   ERROR    Container execution failed with code 1
+                   ERROR    Container stderr:
+                            Error: building at STEP "RUN grype --version": exit status 127
+      
+      
+      Container Error Output:
+      Error: building at STEP "RUN grype --version": exit status 127
+      
+  
+    ''',
+  })
+# ---
+# name: TestBuildFailure.test_build_image_no_run_succeeds
+  dict({
+    'exit_code': 0,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Building image automated-security-helper:non-root -- this may take a few minutes during the first build...
+      Successfully tagged image
+  
+    ''',
+  })
+# ---
+# name: TestBuildFailure.test_scan_after_failed_build
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      Error: building at STEP "RUN grype --version": exit status 127
+  
+    ''',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Building image automated-security-helper:non-root -- this may take a few minutes during the first build...
+      Error building ASH image: Command '['/usr/bin/docker', 'build', '--build-arg', 'UID=1000', '--build-arg', 'GID=1000', '--tag', 'automated-security-helper:non-root', '--target', 'non-root', '--file', '<TMP>/Dockerfile', '--build-arg', 'INSTALL_ASH_REVISION=LOCAL', '--build-arg', 'OFFLINE=NO', '--build-arg', 'OFFLINE_SEMGREP_RULESETS=p/ci', '--build-arg', 'BUILD_DATE_EPOCH=1768478400', '<TMP>']' returned non-zero exit status 1.
+                   ERROR    Container execution failed with code 1
+                   ERROR    Container stderr:
+                            Error: building at STEP "RUN grype --version": exit status 127
+      
+      
+      Container Error Output:
+      Error: building at STEP "RUN grype --version": exit status 127
+      
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+  
+    ''',
+  })
+# ---
+# name: TestDockerfileLookup.test_no_build_outside_a_checkout
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Dockerfile not found at <TMP>/Dockerfile
+                   ERROR    Container execution failed with code 1
+                   ERROR    Container stderr:
+                            Dockerfile not found at <TMP>/Dockerfile
+      
+      Container Error Output:
+      Dockerfile not found at
+      <TMP>/Dockerfile
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+  
+    ''',
+  })
+# ---
+# name: TestRefusals.test_non_numeric_container_uid
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Container UID must be a numeric value
+      [<LOG_TIME>] ERROR    Container execution failed with code 1
+                   ERROR    Container stderr:
+                            Container UID must be a numeric value
+      
+      Container Error Output:
+      Container UID must be a numeric value
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+  
+    ''',
+  })
+# ---
+# name: TestRefusals.test_unsafe_revision
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Invalid ASH revision value: 'main;touch pwned'. Only alphanumeric characters, dots, hyphens, underscores, and forward slashes are allowed.
+                   ERROR    Container execution failed with code 1
+                   ERROR    Container stderr:
+                            Invalid ASH revision value: 'main;touch pwned'
+      
+      Container Error Output:
+      Invalid ASH revision value: 'main;touch pwned'
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+  
+    ''',
+  })
+# ---
+# name: TestRunnerSelection.test_build_image_without_a_runner
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Unable to resolve an OCI runner
+      [<LOG_TIME>] ERROR    Container execution failed with code 1
+                   ERROR    Container stderr:
+                            Unable to resolve an OCI runner
+      
+      Container Error Output:
+      Unable to resolve an OCI runner
+  
+    ''',
+  })
+# ---
+# name: TestRunnerSelection.test_named_runner_not_installed
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Unable to resolve an OCI runner
+      [<LOG_TIME>] ERROR    Container execution failed with code 1
+                   ERROR    Container stderr:
+                            Unable to resolve an OCI runner
+      
+      Container Error Output:
+      Unable to resolve an OCI runner
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+  
+    ''',
+  })
+# ---
+# name: TestRunnerSelection.test_no_runner_on_path
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Unable to resolve an OCI runner
+      [<LOG_TIME>] ERROR    Container execution failed with code 1
+                   ERROR    Container stderr:
+                            Unable to resolve an OCI runner
+      
+      Container Error Output:
+      Unable to resolve an OCI runner
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+  
+    ''',
+  })
+# ---
