@@ -2,7 +2,7 @@
 
 This guide covers running the ASH MCP server over the streamable-HTTP transport so remote clients can drive scans against their own source trees and configs. It is the deployment counterpart to the local stdio transport documented in [ASH MCP Server Guide](../mcp-server-guide.md).
 
-The behaviour described here lands under Track 10 of the ASH v3.x refactor (sections 10.1 through 10.7 in `tasks/todo.md`).
+The behaviour described here lands under Track 10 of the ASH 3.x refactor (sections 10.1 through 10.7 in `tasks/todo.md`).
 
 ## When to use streamable-HTTP vs stdio
 

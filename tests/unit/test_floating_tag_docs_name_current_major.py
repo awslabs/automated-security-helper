@@ -29,8 +29,11 @@ What this asserts
 The major comes from ``[tool.commitizen] version`` in pyproject.toml, for the reason
 recorded in ``test_version_template_round_trip.py``.
 
-A "floating-tag line" is a line that mentions a floating tag, or an ASH install ref
-at a bare major (``automated-security-helper.git@v4`` with no minor). Within such a
+A "floating-tag line" is a line that mentions a floating tag, names a major series
+(``v4.x``), or carries an ASH install ref at a bare major
+(``automated-security-helper.git@v4`` with no minor). The series form is there
+because a sentence can describe the tip without saying "floating tag" ("a `v4` Git
+tag that always points to the latest stable v4.x release"). Within such a
 line the majors read are `` `vN` ``, ``@vN`` (not followed by a dot or digit) and
 ``vN.x``. Pinned refs such as ``@v4.0.0`` and unrelated actions such as
 ``actions/checkout@v3`` are on other lines or do not match.
@@ -65,6 +68,7 @@ _BARE_MAJOR_INSTALL_REF = re.compile(
     rf"{_REPO_NAME}(?:\.git)?@v\d+(?![\d.])", re.IGNORECASE
 )
 _FLOATING_MENTION = re.compile(r"floating[- ]tag", re.IGNORECASE)
+_MAJOR_SERIES = re.compile(r"\bv\d+\.x\b")
 _MAJOR_TOKENS = (
     re.compile(r"`v(\d+)`"),
     re.compile(r"@v(\d+)(?![\d.])"),
@@ -99,7 +103,11 @@ def floating_tag_majors(text: str) -> list[tuple[int, int, str]]:
     """Return (line number, major, line) for every major named on a floating-tag line."""
     found = []
     for number, line in enumerate(text.splitlines(), start=1):
-        if not (_FLOATING_MENTION.search(line) or _BARE_MAJOR_INSTALL_REF.search(line)):
+        if not (
+            _FLOATING_MENTION.search(line)
+            or _MAJOR_SERIES.search(line)
+            or _BARE_MAJOR_INSTALL_REF.search(line)
+        ):
             continue
         for token in _MAJOR_TOKENS:
             for match in token.finditer(line):
@@ -207,6 +215,14 @@ class TestTheCheckCanFail:
             "      - uses: actions/checkout@v3\n"
         )
         assert floating_tag_majors(text) == []
+
+    def test_a_major_series_is_a_floating_tag_line(self):
+        line = (
+            "We maintain a `v3` Git tag that always points to the latest stable "
+            "v3.x release. This means you can use `@v3` in your installation commands."
+        )
+        assert len(_wrong_majors(line, 4)) == 3
+        assert _wrong_majors(line, 3) == []
 
     def test_a_bare_major_install_ref_is_a_floating_tag_line(self):
         text = f'alias ashx="uvx git+https://github.com/awslabs/{_REPO_NAME}.git@v3"'

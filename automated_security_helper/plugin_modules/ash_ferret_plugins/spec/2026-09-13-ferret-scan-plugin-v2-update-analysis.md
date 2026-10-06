@@ -158,7 +158,7 @@ path containing it. Update docs; keep the join behaviour.
 
 ### 5.5 Medium — config double-discovery / precedence (P2)
 The plugin auto-discovers `ferret.yaml`/`.ferret.yaml`/`.ash/ferret*.yaml` in the source
-dir and passes `--config`. Independently, ferret-scan v2.x now auto-discovers
+dir and passes `--config`. Independently, ferret-scan 2.x now auto-discovers
 `config.yaml`/`ferret.yaml` in the **scanned tree (CWD)** even without `--config`. With
 ASH `os.chdir(source_dir)`, a stray config in the target could take effect and could
 even **disable detection** (TM-13). Consider passing an explicit `--config` always, and
