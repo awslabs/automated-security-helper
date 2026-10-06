@@ -232,7 +232,9 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
 class CfnLintScannerConfig(ScannerPluginConfigBase):
     name: Literal["cfn-lint"] = "cfn-lint"
     # Opt-in: off until enabled here or named in --scanners. See
-    # ScannerPluginBase.OPT_IN.
+    # ScannerPluginBase.OPT_IN. The ClassVar lets a serialized config leave the
+    # untouched default out (ScannerConfigSegment).
+    OPT_IN: ClassVar[bool] = True
     enabled: bool = False
     options: Annotated[
         CfnLintScannerConfigOptions,
