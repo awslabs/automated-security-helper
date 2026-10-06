@@ -12,9 +12,12 @@ those. This file follows that path end to end, from the host environment to the
 argv, so that an env var which changed the host's console but not the
 container's would fail here.
 
-Nothing is built or run. ``run_ash_container`` is replaced by a recorder at the
-point ``_run_container_mode`` calls it, and the recorded flags are handed to the
-real ``_assemble_run_command``.
+The tests call the public ``run_ash_scan`` with ``mode=RunMode.container``, so the
+``_apply_log_level_env`` call inside it is part of what is tested: a run that
+skipped it would leave ``debug`` and ``verbose`` False here. Nothing is built or
+run. ``run_ash_container`` is replaced by a recorder at the point
+``_run_container_mode`` calls it, and the recorded flags are handed to the real
+``_assemble_run_command``.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from automated_security_helper.core.enums import ExecutionStrategy
+from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.interactions.run_ash_container import (
     _assemble_run_command,
@@ -49,10 +52,14 @@ def _container_kwargs(monkeypatch, tmp_path: Path) -> Dict[str, Any]:
         raise _Stop
 
     monkeypatch.setattr(ras, "run_ash_container", recorder)
-    opts = ras.ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
-    ras._apply_log_level_env(opts)
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
     with pytest.raises(_Stop):
-        ras._run_container_mode(opts, ras.ASH_LOGGER)
+        ras.run_ash_scan(
+            source_dir=str(source_dir),
+            output_dir=str(tmp_path / "out"),
+            mode=RunMode.container,
+        )
     assert len(recorded) == 1
     return recorded[0]
 
