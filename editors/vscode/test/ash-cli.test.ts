@@ -17,7 +17,7 @@
  * would sit.
  */
 
-import { ChildProcess } from 'child_process';
+import { ChildProcess, SpawnOptions } from 'child_process';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import {
@@ -497,32 +497,6 @@ describe('spawnAsyncRunner', () => {
     expect(result.stdout).toBe(process.cwd());
   });
 
-  // ASH reads ASH_DEBUG and ASH_VERBOSE as its log level when no flag is given.
-  // The extension passes no `env`, so the child inherits the extension host's
-  // environment; an `env` option that dropped them would make a user's
-  // ASH_DEBUG=true silently do nothing for scans started from the editor.
-  it('passes ASH_DEBUG and ASH_VERBOSE from the host environment to the child', async () => {
-    const saved = { debug: process.env.ASH_DEBUG, verbose: process.env.ASH_VERBOSE };
-    process.env.ASH_DEBUG = 'true';
-    process.env.ASH_VERBOSE = '1';
-    try {
-      const result = await spawnAsyncRunner(process.execPath, [
-        '-e',
-        'process.stdout.write(JSON.stringify([process.env.ASH_DEBUG, process.env.ASH_VERBOSE]))',
-      ]);
-
-      expect(JSON.parse(result.stdout)).toEqual(['true', '1']);
-    } finally {
-      for (const [name, value] of [['ASH_DEBUG', saved.debug], ['ASH_VERBOSE', saved.verbose]] as const) {
-        if (value === undefined) {
-          delete process.env[name];
-        } else {
-          process.env[name] = value;
-        }
-      }
-    }
-  });
-
   it('resolves with ENOENT rather than rejecting when the executable does not exist', async () => {
     const result = await spawnAsyncRunner('ash-that-is-not-installed-anywhere', ['--version']);
 
@@ -644,6 +618,31 @@ function fakeSpawner(child: FakeChild): Spawner {
 }
 
 const NO_KILL: TreeKiller = { platform: 'linux', kill: () => undefined, spawnTaskkill: () => undefined };
+
+describe('spawnAsyncRunner environment', () => {
+  // ASH reads ASH_DEBUG and ASH_VERBOSE as its log level when no flag is given.
+  // With no `env` in the spawn options, Node hands the child the extension
+  // host's own environment, so a user's ASH_DEBUG=true applies to scans started
+  // from the editor. An `env` option would replace that environment wholesale.
+  // Checked at the spawner seam because jest gives each test file its own copy
+  // of process.env, which a real child would never see.
+  it('passes no env option, so the child inherits ASH_DEBUG and ASH_VERBOSE', async () => {
+    const child = new FakeChild();
+    let seen: SpawnOptions | undefined;
+    const spawner: Spawner = (_command, _args, options) => {
+      seen = options;
+      return child as unknown as ChildProcess;
+    };
+
+    const pending = spawnAsyncRunner('ash', ['scan'], {}, NO_KILL, spawner, 10);
+    child.emit('exit', 0, null);
+    child.emit('close', 0, null);
+    await pending;
+
+    expect(seen).toBeDefined();
+    expect(seen).not.toHaveProperty('env');
+  });
+});
 
 describe('spawnAsyncRunner when the pipes outlive the child', () => {
   it('settles after a short drain when the child exits and never closes', async () => {
