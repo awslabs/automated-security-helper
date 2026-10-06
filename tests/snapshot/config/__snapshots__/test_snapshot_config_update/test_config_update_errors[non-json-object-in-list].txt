@@ -1,0 +1,11 @@
+$ ash config update ash.yaml --set 'global_settings.ignore_paths+=[{path: '"'"'dist/**'"'"', reason: '"'"'x'"'"'}]'
+[<LOG_TIME>] INFO     Applied modification: global_settings.ignore_paths+=[{path: 'dist/**', reason:
+                      'x'}]
+Failed to validate config after applying modifications: 2 validation errors for AshConfig
+global_settings.ignore_paths.0
+  Input should be a valid dictionary or instance of IgnorePathWithReason [type=model_type, input_value="{path: 'dist/**'", input_type=str]
+    For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/model_type
+global_settings.ignore_paths.1
+  Input should be a valid dictionary or instance of IgnorePathWithReason [type=model_type, input_value="reason: 'x'}", input_type=str]
+    For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/model_type
+[exit code: 1]

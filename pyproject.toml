@@ -180,6 +180,13 @@ dev = [
  # child, so those tests need a real HTTP endpoint. The extra is what pulls in
  # flask/flask-cors for moto.server.ThreadedMotoServer.
  "moto[server]>=5.2.3,<6",
+ # Snapshot tests for everything ASH prints or writes (tests/snapshot). syrupy rather
+ # than a hand-rolled golden helper because it already does the three things the
+ # policy depends on: a missing or changed snapshot fails, only --snapshot-update
+ # writes, and a snapshot no test asserts any more fails the session as unused. It
+ # also merges its report across pytest-xdist workers, which this suite runs under.
+ # Its only runtime dependency is pytest.
+ "syrupy>=5.0,<6.0.0",
 ]
 
 [build-system]
@@ -1535,7 +1542,11 @@ members = [ ".",]
 [tool.uv.sources]
 
 [tool.hatch.build.targets.sdist]
-include = [ "automated_security_helper", "Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
+# "/Dockerfile" is anchored to the project root. hatch reads include entries as
+# gitignore patterns, so a bare "Dockerfile" matched every file of that name at any
+# depth and shipped tests/test_data/snapshot_fixture/repo/Dockerfile in the sdist,
+# which .github/scripts/assert-artifact-contents.py refuses (a top-level tests/).
+include = [ "automated_security_helper", "/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
 
 [tool.hatch.build.targets.wheel]
 include = [ "automated_security_helper", "automated_security_helper/assets", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]

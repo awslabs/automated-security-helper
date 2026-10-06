@@ -1,0 +1,74 @@
+
+╭───────────────────────────────────────── 📊 ASH Scan Results Help ──────────────────────────────────────────╮
+│ How to read this table:                                                                                     │
+│ - *Severity levels*:                                                                                        │
+│   - Suppressed (S): Findings that have been explicitly suppressed and don't affect scanner status           │
+│   - Critical (C): Highest severity findings that require immediate attention                                │
+│   - High (H): Serious findings that should be addressed soon                                                │
+│   - Medium (M): Moderate risk findings                                                                      │
+│   - Low (L): Lower risk findings                                                                            │
+│   - Info (I): Informational findings with minimal risk                                                      │
+│ - *Duration (Time)*: Time taken by the scanner to complete its execution                                    │
+│ - *Actionable (Action)*: Number of findings at or above the threshold severity level that require attention │
+│ - *Result*:                                                                                                 │
+│   - PASSED = No findings at or above threshold                                                              │
+│   - FAILED = Findings at or above threshold                                                                 │
+│   - MISSING = Required dependencies not available                                                           │
+│   - SKIPPED = Scanner explicitly disabled                                                                   │
+│   - ERROR = Scanner execution error                                                                         │
+│ - *Threshold (Thresh)*: The minimum severity level that will cause a scanner to fail                        │
+│   - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL                                                            │
+│   - Source: (g)lobal, (c)onfig, (s)canner                                                                   │
+│   - Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure     │
+│ - *Statistics calculation*:                                                                                 │
+│   - All statistics are calculated from the final aggregated SARIF report                                    │
+│   - Suppressed findings are counted separately and do not contribute to actionable findings                 │
+│   - Scanner status is determined by comparing actionable findings to the threshold                          │
+│                                                                                                             │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+                                                ASH Scan Results Summary
+┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━┳━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Scanner       ┃ Suppressed ┃ Critical ┃ High ┃ Medium ┃ Low ┃ Info ┃ Duration ┃ Actionable ┃ Result  ┃ Threshold     ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━╇━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ bandit        │ 1          │ 0        │ 1    │ 2      │ 1   │ 0    │ 12.5s    │ 3          │ FAILED  │ MEDIUM        │
+│               │            │          │      │        │     │      │          │            │         │ (global)      │
+│ cdk-nag       │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ 7s       │ 0          │ PASSED  │ MEDIUM        │
+│               │            │          │      │        │     │      │          │            │         │ (global)      │
+│ checkov       │ 0          │ 0        │ 0    │ 0      │ 2   │ 1    │ 500ms    │ 0          │ PASSED  │ MEDIUM        │
+│               │            │          │      │        │     │      │          │            │         │ (global)      │
+│ detect-secre… │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ 250ms    │ 0          │ SKIPPED │ MEDIUM        │
+│               │            │          │      │        │     │      │          │            │         │ (global)      │
+│ grype         │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ MISSING │ MEDIUM        │
+│               │            │          │      │        │     │      │          │            │         │ (global)      │
+│ npm-audit     │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ 1s       │ 0          │ ERROR   │ MEDIUM        │
+│               │            │          │      │        │     │      │          │            │         │ (global)      │
+│ opengrep      │ 0          │ 0        │ 1    │ 0      │ 0   │ 0    │ 1m 35s   │ 0          │ PASSED  │ CRITICAL      │
+│               │            │          │      │        │     │      │          │            │         │ (config)      │
+│ semgrep       │ 2          │ 1        │ 0    │ 0      │ 0   │ 2    │ 48s      │ 1          │ FAILED  │ MEDIUM        │
+│               │            │          │      │        │     │      │          │            │         │ (global)      │
+│ syft          │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ SKIPPED │ MEDIUM        │
+│               │            │          │      │        │     │      │          │            │         │ (global)      │
+└───────────────┴────────────┴──────────┴──────┴────────┴─────┴──────┴──────────┴────────────┴─────────┴───────────────┘
+                                                    source-dir: '.'
+                                             output-dir: '.ash/ash_output'
+
+Incomplete coverage: cdk-nag evaluated 6 of 10 target(s); 4 could not be evaluated and contributed no findings. See the
+scanner's exitCodeDescription in its SARIF report for the reason per target.
+Stale content database: Content database grype-db (grype): the time it was built could not be read (ValueError: grype
+executable not found), so it cannot be shown to be inside its 120h bound (grype's own bound). The scan fails: a clean
+result from a stale database is not evidence of a clean target. To refresh it, run `grype db update` with network
+access, or rebuild the offline image (`ash build-image --offline`) so it downloads a current database. To scan against
+it anyway, pass --allow-stale-content-db or set `content_db_staleness: warn` in the ASH config.
+Stale content database (warning): Content database opengrep-offline-rules (opengrep) is stale: downloaded
+2025-12-16T05:00:00Z, 30d 7h old, past its 720h bound (ASH's bound); age read from the download time in
+`.ash-rules-fetched-at` in the cache directory, else the oldest rules file's mtime. The scan ran against it anyway
+because content_db_staleness is warn, so it may be missing advisories or rules published since. To refresh it, rebuild
+the offline image (`ash build-image --offline`), which downloads the rulesets again, or download them into
+$OPENGREP_RULES_CACHE_DIR and record the time in .ash-rules-fetched-at.
+Stale content database: Content database semgrep-offline-rules (semgrep) is stale: downloaded 2025-12-13T08:00:00Z, 33d
+4h old, past its 720h bound (ASH's bound); age read from the download time in `.ash-rules-fetched-at` in the cache
+directory, else the oldest rules file's mtime. The scan fails: a clean result from a stale database is not evidence of a
+clean target. To refresh it, rebuild the offline image (`ash build-image --offline`), which downloads the rulesets
+again, or download them into $SEMGREP_RULES_CACHE_DIR and record the time in .ash-rules-fetched-at. To scan against it
+anyway, pass --allow-stale-content-db or set `content_db_staleness: warn` in the ASH config.

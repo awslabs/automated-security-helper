@@ -13,6 +13,11 @@ on:
       - ".pre-commit-hooks.yaml"
       - "Formula/**"
       - ".github/workflows/ash-install-methods.yml"
+      # The nix leg's action and the snapshot module it runs, with that module's
+      # snapshots: a change to any of them is only checked by this workflow.
+      - ".github/actions/validate-nix/**"
+      - "tests/snapshot/container/runtime/test_snapshot_container_nix_runtime.py"
+      - "tests/snapshot/container/runtime/__snapshots__/test_snapshot_container_nix_runtime.ambr"
   workflow_dispatch:
 
 permissions:

@@ -1,0 +1,425 @@
+$ ash plugin list -c custom.yaml --include-plugin-config
+[<LOG_TIME>] INFO     Using config file specified at: custom.yaml
+             INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+ASH Scanners
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Name           ┃ Enabled ┃ Class                ┃ Module                ┃ Plugin Config          ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ bandit         │ False   │ BanditScanner        │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "bandit",    │
+│                │         │                      │                       │   "enabled": false,    │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "confidence_level… │
+│                │         │                      │                       │ "all",                 │
+│                │         │                      │                       │     "ignore_nosec":    │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │     "excluded_paths":  │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "additional_forma… │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "tool_version":    │
+│                │         │                      │                       │ ">=1.7.0,<2.0.0",      │
+│                │         │                      │                       │     "install_timeout": │
+│                │         │                      │                       │ 300                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ cdk-nag        │ True    │ CdkNagScanner        │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "cdk-nag",   │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "nag_packs": {     │
+│                │         │                      │                       │       "AwsSolutionsCh… │
+│                │         │                      │                       │ true,                  │
+│                │         │                      │                       │       "HIPAASecurityC… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │       "NIST80053R4Che… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │       "NIST80053R5Che… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │       "PCIDSS321Check… │
+│                │         │                      │                       │ false                  │
+│                │         │                      │                       │     },                 │
+│                │         │                      │                       │     "include_complian… │
+│                │         │                      │                       │ false                  │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ cfn-nag        │ True    │ CfnNagScanner        │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "cfn-nag",   │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800                   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ checkov        │ True    │ CheckovScanner       │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "checkov",   │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "skip_path": [],   │
+│                │         │                      │                       │     "additional_forma… │
+│                │         │                      │                       │ [                      │
+│                │         │                      │                       │       "cyclonedx_json" │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "frameworks": [    │
+│                │         │                      │                       │       "all"            │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "skip_frameworks": │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "skip_ash_output_… │
+│                │         │                      │                       │ true,                  │
+│                │         │                      │                       │     "tool_version":    │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "install_timeout": │
+│                │         │                      │                       │ 300                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ detect-secrets │ True    │ DetectSecretsScanner │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name":              │
+│                │         │                      │                       │ "detect-secrets",      │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "baseline_file":   │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_settings": { │
+│                │         │                      │                       │       "version": null, │
+│                │         │                      │                       │       "generated_at":  │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │       "plugins_used":  │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │       "filters_used":  │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │       "results": {}    │
+│                │         │                      │                       │     },                 │
+│                │         │                      │                       │     "skip_generated_l… │
+│                │         │                      │                       │ true                   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ grype          │ True    │ GrypeScanner         │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "grype",     │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "offline": false   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ npm-audit      │ True    │ NpmAuditScanner      │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "npm-audit", │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ opengrep       │ True    │ OpengrepScanner      │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "opengrep",  │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "config": "p/ci",  │
+│                │         │                      │                       │     "exclude": [       │
+│                │         │                      │                       │       "*-converted.py… │
+│                │         │                      │                       │       "*_report_resul… │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "exclude_rule":    │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "severity": [],    │
+│                │         │                      │                       │     "metrics": "auto", │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "patterns": [],    │
+│                │         │                      │                       │     "version":         │
+│                │         │                      │                       │ "v1.15.1"              │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ semgrep        │ True    │ SemgrepScanner       │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "semgrep",   │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "config": "p/ci",  │
+│                │         │                      │                       │     "exclude": [       │
+│                │         │                      │                       │       "*-converted.py… │
+│                │         │                      │                       │       "*_report_resul… │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "exclude_rule":    │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "severity": [],    │
+│                │         │                      │                       │     "metrics": "auto", │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "tool_version":    │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "install_timeout": │
+│                │         │                      │                       │ 300                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ syft           │ True    │ SyftScanner          │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "syft",      │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "exclude": [],     │
+│                │         │                      │                       │     "additional_outpu… │
+│                │         │                      │                       │ [                      │
+│                │         │                      │                       │       "syft-table"     │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "offline": false   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+└────────────────┴─────────┴──────────────────────┴───────────────────────┴────────────────────────┘
+ASH Converters
+┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Name    ┃ Enabled ┃ Class            ┃ Module                      ┃ Plugin Config               ┃
+┡━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ archive │ True    │ ArchiveConverter │ automated_security_helper.… │ {                           │
+│         │         │                  │                             │   "name": "archive",        │
+│         │         │                  │                             │   "enabled": true,          │
+│         │         │                  │                             │   "options": {}             │
+│         │         │                  │                             │ }                           │
+├─────────┼─────────┼──────────────────┼─────────────────────────────┼─────────────────────────────┤
+│ jupyter │ True    │ JupyterConverter │ automated_security_helper.… │ {                           │
+│         │         │                  │                             │   "name": "jupyter",        │
+│         │         │                  │                             │   "enabled": true,          │
+│         │         │                  │                             │   "options": {              │
+│         │         │                  │                             │     "tool_version":         │
+│         │         │                  │                             │ ">=7.16.0,<8.0.0",          │
+│         │         │                  │                             │     "install_timeout": 300  │
+│         │         │                  │                             │   }                         │
+│         │         │                  │                             │ }                           │
+└─────────┴─────────┴──────────────────┴─────────────────────────────┴─────────────────────────────┘
+ASH Reporters
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ Name                ┃ Enabled ┃ Class               ┃ Module               ┃ Plugin Config       ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ csv                 │ True    │ CsvReporter         │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name": "csv",    │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {},    │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "csv"               │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ cyclonedx           │ True    │ CycloneDXReporter   │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name":           │
+│                     │         │                     │                      │ "cyclonedx",        │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {},    │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "cdx.json"          │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ flat-json           │ True    │ FlatJSONReporter    │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name":           │
+│                     │         │                     │                      │ "flat-json",        │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {      │
+│                     │         │                     │                      │     "include_scann… │
+│                     │         │                     │                      │ true,               │
+│                     │         │                     │                      │     "include_summa… │
+│                     │         │                     │                      │ true,               │
+│                     │         │                     │                      │     "include_metad… │
+│                     │         │                     │                      │ true                │
+│                     │         │                     │                      │   },                │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "flat.json"         │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ github-ghas         │ True    │ GHASReporter        │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name":           │
+│                     │         │                     │                      │ "github-ghas",      │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {      │
+│                     │         │                     │                      │     "exclude_suppr… │
+│                     │         │                     │                      │ true                │
+│                     │         │                     │                      │   },                │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "ghas.sarif"        │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ gitlab-cyclonedx    │ True    │ GitLabCycloneDXRep… │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name":           │
+│                     │         │                     │                      │ "gitlab-cyclonedx", │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {      │
+│                     │         │                     │                      │     "category":     │
+│                     │         │                     │                      │ "production",       │
+│                     │         │                     │                      │     "package_manag… │
+│                     │         │                     │                      │ null,               │
+│                     │         │                     │                      │     "language_over… │
+│                     │         │                     │                      │ null,               │
+│                     │         │                     │                      │     "input_file_pa… │
+│                     │         │                     │                      │ null                │
+│                     │         │                     │                      │   },                │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "gl-dependency-sca… │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ gitlab-sast         │ True    │ GitLabSASTReporter  │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name":           │
+│                     │         │                     │                      │ "gitlab-sast",      │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {      │
+│                     │         │                     │                      │     "exclude_suppr… │
+│                     │         │                     │                      │ false               │
+│                     │         │                     │                      │   },                │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "gl-sast-report.js… │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ html                │ True    │ HtmlReporter        │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name": "html",   │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {},    │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "html"              │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ junitxml            │ True    │ JunitXmlReporter    │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name":           │
+│                     │         │                     │                      │ "junitxml",         │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {      │
+│                     │         │                     │                      │     "respect_sever… │
+│                     │         │                     │                      │ true                │
+│                     │         │                     │                      │   },                │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "junit.xml"         │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ markdown            │ False   │ MarkdownReporter    │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name":           │
+│                     │         │                     │                      │ "markdown",         │
+│                     │         │                     │                      │   "enabled": false, │
+│                     │         │                     │                      │   "options": {      │
+│                     │         │                     │                      │     "include_summa… │
+│                     │         │                     │                      │ true,               │
+│                     │         │                     │                      │     "include_findi… │
+│                     │         │                     │                      │ false,              │
+│                     │         │                     │                      │     "include_detai… │
+│                     │         │                     │                      │ true,               │
+│                     │         │                     │                      │     "max_detailed_… │
+│                     │         │                     │                      │ 20,                 │
+│                     │         │                     │                      │     "top_hotspots_… │
+│                     │         │                     │                      │ 10,                 │
+│                     │         │                     │                      │     "use_collapsib… │
+│                     │         │                     │                      │ true,               │
+│                     │         │                     │                      │     "compact":      │
+│                     │         │                     │                      │ false               │
+│                     │         │                     │                      │   },                │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "summary.md"        │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ ocsf                │ True    │ OcsfReporter        │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name": "ocsf",   │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {},    │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "ocsf.json"         │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ sarif               │ True    │ SarifReporter       │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name": "sarif",  │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {},    │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "sarif"             │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ spdx                │ False   │ SpdxReporter        │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name": "spdx",   │
+│                     │         │                     │                      │   "enabled": false, │
+│                     │         │                     │                      │   "options": {},    │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "spdx.json"         │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ text                │ True    │ TextReporter        │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name": "text",   │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {      │
+│                     │         │                     │                      │     "include_summa… │
+│                     │         │                     │                      │ true,               │
+│                     │         │                     │                      │     "include_findi… │
+│                     │         │                     │                      │ false,              │
+│                     │         │                     │                      │     "include_detai… │
+│                     │         │                     │                      │ false,              │
+│                     │         │                     │                      │     "max_detailed_… │
+│                     │         │                     │                      │ 20,                 │
+│                     │         │                     │                      │     "top_hotspots_… │
+│                     │         │                     │                      │ 20                  │
+│                     │         │                     │                      │   },                │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "summary.txt"       │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ unused-suppressions │ True    │ UnusedSuppressions… │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name":           │
+│                     │         │                     │                      │ "unused-suppressio… │
+│                     │         │                     │                      │   "enabled": true,  │
+│                     │         │                     │                      │   "options": {      │
+│                     │         │                     │                      │     "output_format… │
+│                     │         │                     │                      │ "both"              │
+│                     │         │                     │                      │   },                │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "unused-suppressio… │
+│                     │         │                     │                      │ }                   │
+├─────────────────────┼─────────┼─────────────────────┼──────────────────────┼─────────────────────┤
+│ yaml                │ False   │ YamlReporter        │ automated_security_… │ {                   │
+│                     │         │                     │                      │   "name": "yaml",   │
+│                     │         │                     │                      │   "enabled": false, │
+│                     │         │                     │                      │   "options": {},    │
+│                     │         │                     │                      │   "extension":      │
+│                     │         │                     │                      │ "yaml"              │
+│                     │         │                     │                      │ }                   │
+└─────────────────────┴─────────┴─────────────────────┴──────────────────────┴─────────────────────┘
+[exit code: 0]

@@ -1,0 +1,32 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Bandit",
+          "version": "1.8.6",
+          "rules": [
+            {
+              "id": "B602",
+              "name": "subprocess_popen_with_shell_equals_true",
+              "shortDescription": {"text": "subprocess call with shell=True identified, security issue."}
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "B602",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {"text": "subprocess call with shell=True identified, security issue."},
+          "locations": [
+            {"physicalLocation": {"artifactLocation": {"uri": "app.py"}, "region": {"startLine": 7, "endLine": 7}}}
+          ],
+          "properties": {"issue_severity": "HIGH", "issue_confidence": "HIGH"}
+        }
+      ]
+    }
+  ]
+}

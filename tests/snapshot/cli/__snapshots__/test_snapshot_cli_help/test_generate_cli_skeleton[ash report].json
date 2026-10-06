@@ -1,0 +1,10 @@
+{
+  "report_format": "markdown",
+  "output_dir": null,
+  "log_level": "INFO",
+  "config": null,
+  "config_overrides": null,
+  "verbose": false,
+  "debug": false,
+  "color": true
+}
