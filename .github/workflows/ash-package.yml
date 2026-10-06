@@ -590,17 +590,34 @@ jobs:
     name: "native: chocolatey (windows-latest)"
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 30
+    # The e2e leg installs three times and upgrades once, and every install builds a venv
+    # and resolves ASH's runtime dependencies from a Python index. It also builds an N-1
+    # wheel.
+    timeout-minutes: 50
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # N-1 is built from v4-capabilities' tree (scripts/e2e/prev_tree.py), so that ref has
+      # to exist locally. Two commits, not one: on a push to v4-capabilities HEAD is that
+      # ref, and prev_tree.py then builds N-1 from HEAD's first parent instead.
+      - name: Fetch the N-1 ref
+        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
 
       - name: Download the wheel built and gated by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: dist
+
+      # uv runs the e2e harness (scripts/e2e) and builds the N-1 wheel. No cache: an e2e
+      # leg is a fresh install by definition, and a saved Actions cache is a publish
+      # surface (.github/scripts/assert-publish-surfaces.py) this job has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
 
       # `shell: pwsh` is the default on windows-latest and is stated anyway, because
       # the body is a PowerShell script invocation and the difference matters: pwsh
@@ -609,14 +626,20 @@ jobs:
       # before. Nothing is globbed here; the path is literal and the wheel is found by
       # the script itself.
       #
-      # $Repo is interpolated directly rather than passed through env:, for the same
-      # reason the artifact-contents step interpolates its two paths: `env:` plus
+      # $Repo and $Work are interpolated directly rather than passed through env:, for
+      # the same reason the artifact-contents step interpolates its two paths: `env:` plus
       # "$REPO" would reintroduce a shell dependency, since pwsh expands $env:REPO and
-      # not $REPO. github.workspace is not event payload, so it is not an injection
-      # surface.
-      - name: Build the Chocolatey package, install it, and run a real scan
+      # not $REPO. github.workspace and runner.temp are not event payload, so they are
+      # not an injection surface.
+      #
+      # The script runs the three e2e cases (exit 2, 0 and 1) against the installed shim,
+      # upgrades from N-1, uninstalls twice, and shows each gate failing on a planted
+      # defect, including a package whose install script exits 1.
+      - name: Build N and N-1, install, scan, upgrade, uninstall, negative controls
         shell: pwsh
-        run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}"
+        env:
+          E2E_PREV_REF: origin/v4-capabilities
+        run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}" -Work "${{ runner.temp }}\ash-choco-e2e"
 
   # The winget manifest set, checked against Microsoft's published JSON Schemas.
   #

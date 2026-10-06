@@ -18,7 +18,10 @@ name: ASH - Package Formats
 #
 # The paths filter is safe here and would not be on the gate: this is not a required
 # check, so a push it skips is a push nobody waits on. It names every input the
-# called jobs build from or verify.
+# called jobs build from or verify. That includes the product itself
+# (automated_security_helper/** and the build hook), because the Chocolatey job runs
+# the e2e scans and upgrade from tests/e2e and scripts/e2e: a code change that broke
+# an installed package has to rebuild it.
 #
 # NO concurrency BLOCK, DELIBERATELY. The called workflow declares
 # `group: ${{ github.workflow }}-${{ github.ref }}`, and in a called workflow
@@ -36,6 +39,10 @@ on:
     paths:
       - "packaging/**"
       - "Formula/**"
+      - "automated_security_helper/**"
+      - "hatch_build.py"
+      - "scripts/e2e/**"
+      - "tests/e2e/**"
       - "uv.lock"
       - "pyproject.toml"
       - ".github/scripts/assert-artifact-contents.py"
@@ -44,6 +51,7 @@ on:
       - "tests/unit/test_package_contents_gate.py"
       - "tests/unit/test_package_formats_workflow.py"
       - "tests/unit/test_homebrew_formula_*.py"
+      - "tests/unit/test_e2e_prev_tree.py"
   workflow_dispatch: {}
 
 permissions:
@@ -96,3 +104,4 @@ jobs:
           tests/unit/test_homebrew_formula_lock_sync.py
           tests/unit/test_homebrew_formula_resources.py
           tests/unit/test_homebrew_formula_version.py
+          tests/unit/test_e2e_prev_tree.py
