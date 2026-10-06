@@ -49,7 +49,7 @@ concurrency:
 
 env:
   # Channels whose job below is a placeholder. See PENDING CHANNELS above.
-  E2E_PENDING: homebrew mcpb
+  E2E_PENDING: mcpb
 
 jobs:
   contract:
@@ -168,17 +168,50 @@ jobs:
           E2E_IMAGE_TAG: ash-e2e-container:${{ github.run_id }}-${{ github.run_attempt }}
         run: bash scripts/e2e/container.sh "$RUNNER_TEMP/e2e-container"
 
-  # Placeholder for WP4: Homebrew from a local tap whose formula points at this commit.
+  # Homebrew from head. Formula/ash.rb names a release tag, so installing it verbatim
+  # would test that release. scripts/e2e/homebrew.sh installs a copy whose one `url`
+  # line points at a `git archive` tarball of this commit, from a throwaway local tap,
+  # and changes nothing else in the formula. Each leg compiles every resource from its
+  # sdist (five are Rust extensions), so the legs run side by side: fresh install with
+  # the three cases and `brew test`; N-1 to N `brew upgrade` and `brew cleanup`; and a
+  # formula missing one resource, which must install and then fail its scan.
   homebrew:
-    name: "e2e: Homebrew from head"
+    name: "e2e: Homebrew from head (${{ matrix.leg }})"
     needs: contract
-    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
     runs-on: macos-latest
-    timeout-minutes: 5
+    # The upgrade leg builds the formula twice.
+    timeout-minutes: 150
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [fresh, upgrade, negative]
+    env:
+      HOMEBREW_NO_ANALYTICS: "1"
     steps:
-      - run: echo "placeholder; see E2E_PENDING"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # N-1 is built from v4-capabilities' tree, as in the wheel job, and for the same
+      # reason two commits: on a push to v4-capabilities HEAD is that ref, and
+      # homebrew.sh then takes HEAD's first parent instead.
+      - name: Fetch the N-1 ref
+        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+
+      # Recorded, not assumed: the harness runs on the image's python3, never on the
+      # keg's, because the uninstall checks run after the keg is gone.
+      - name: Record the Homebrew and Python the image shipped
+        run: |
+          set -euo pipefail
+          brew --version
+          python3 --version
+
+      - name: Build from head, install, scan, then ${{ matrix.leg }}
+        env:
+          E2E_LEG: ${{ matrix.leg }}
+          E2E_PREV_REF: origin/v4-capabilities
+          E2E_HARNESS_PYTHON: python3
+        run: bash scripts/e2e/homebrew.sh "$E2E_LEG" "$RUNNER_TEMP/e2e-homebrew"
 
   # Placeholder for WP9: the MCPB bundle launched through the MCP inspector.
   mcpb:

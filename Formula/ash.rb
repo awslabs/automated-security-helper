@@ -7,6 +7,14 @@ class Ash < Formula
   # pyproject.toml. tests/unit/test_homebrew_formula_version.py fails if this
   # drifts from the packaged version, because a stale-but-real tag installs an
   # old ASH without failing anything.
+  #
+  # This line is the release form, and it is the only line CI does not test as
+  # written. Installed verbatim it builds the tagged release, not the commit
+  # under test, and the test block below needs a release that has `ashx`. So
+  # CI installs a copy written by scripts/e2e/brew_formula.py, which points
+  # this line at a `git archive` tarball of the commit and changes nothing else
+  # (tests/unit/test_e2e_brew_formula.py holds it to that). Edit the formula
+  # here, never in the copy.
   url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.0"
   license "Apache-2.0"
 
@@ -73,7 +81,7 @@ class Ash < Formula
   # with `--no-deps`, so pip resolves nothing: it installs exactly the sdists
   # staged from these stanzas plus ASH itself. A requirement with no stanza is
   # not an error, it is a package that never arrives -- `brew install` reports
-  # success and the first `ash` run dies on ModuleNotFoundError. This formula
+  # success and the first `ashx` run dies on ModuleNotFoundError. This formula
   # shipped in that state, with zero resources, and `ruby -c` was green on it
   # the whole time.
   #
@@ -473,17 +481,41 @@ class Ash < Formula
 
   # END generated resources
 
+  # The formula is named `ash` and the file is Formula/ash.rb: that is the
+  # distribution identifier (`brew install ash`, and a [tool.commitizen]
+  # version_files entry), not the command. virtualenv_install_with_resources links
+  # every console script the wheel declares, so `ashx` (the v4 command), the
+  # deprecated `ash` and `ashv3`, and `automated-security-helper` are all on PATH.
+  # Homebrew is one of the three channels that keep the deprecated `ash`; the
+  # others are pip and the container image.
   def install
     virtualenv_install_with_resources
+  end
+
+  def caveats
+    <<~EOS
+      The command is `ashx`:
+        ashx --help
+        ashx dependencies install   # provision the scanners ASH can install
+
+      `ash` still works but is deprecated: it prints a one-line warning to stderr
+      and then runs `ashx`. On many hosts `ash` is also the Almquist shell, so
+      scripts should call `ashx`.
+    EOS
   end
 
   test do
     # The console script under test, named once so that renaming it is a one-line
     # change in this block.
-    ash = bin/"ash"
-    assert_match "automated-security-helper", shell_output("#{ash} --version")
+    ashx = bin/"ashx"
+    assert_match "automated-security-helper", shell_output("#{ashx} --version")
 
-    # `ash --version` is not evidence the venv is complete. Because pip ran with
+    # The deprecated alias this channel keeps must still run and must say it is
+    # deprecated, on stderr, in the one line cli/deprecations.py prints.
+    assert_match "the 'ash' command is deprecated",
+                 shell_output("#{bin}/ash --version 2>&1 >/dev/null")
+
+    # `ashx --version` is not evidence the venv is complete. Because pip ran with
     # `--no-deps`, a missing resource leaves a module absent rather than failing
     # the build, and ASH imports most of its plugin tree lazily -- so the
     # version print can succeed on an install that cannot scan anything. This
@@ -509,7 +541,7 @@ class Ash < Formula
       AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     PYTHON
 
-    system ash, "scan",
+    system ashx, "scan",
            "--source-dir", testpath,
            "--output-dir", testpath/"ash_output",
            "--scanners", "detect-secrets",
@@ -519,7 +551,7 @@ class Ash < Formula
     sarif = JSON.parse((testpath/"ash_output/reports/ash.sarif").read)
     findings = sarif.fetch("runs").sum { |run| run.fetch("results", []).length }
     assert_operator findings, :>, 0,
-                    "ash scan reported 0 findings on a fixture planted with an " \
+                    "ashx scan reported 0 findings on a fixture planted with an " \
                     "AWS secret, so this install cannot be shown to scan"
   end
 end
