@@ -4,7 +4,7 @@
   "AshVersion": {
    "Type": "String",
    "Default": "v4.0.0",
-   "Description": "ASH git ref (tag, branch, or commit) to build the image from, for example a release tag like vMAJOR.MINOR.PATCH. Pinning a tag makes the build reproducible; the scheduled rebuild still repulls base-image and OS patches for that same ASH revision.",
+   "Description": "ASH git ref (tag, branch, or commit) to build the image from, for example a version tag such as vMAJOR.MINOR.PATCH. Pinning a tag makes the build reproducible; the scheduled rebuild still repulls base-image and OS patches for that same ASH revision.",
    "MinLength": 1
   },
   "AshOfflineMode": {

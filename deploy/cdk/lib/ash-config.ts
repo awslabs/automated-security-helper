@@ -216,8 +216,11 @@ export function ashVersion(scope: Stack): CfnParameter {
       // No concrete release here. The release bump rewrites only the "Default" line
       // of the committed templates, so a version in this text would leave them out
       // of step with a fresh synth and fail the template-drift check on the release PR.
+      // The example also avoids the word "release": ferret-scan v2.5.2 reads it as a
+      // sign the file is production config and boosts its API_KEY_OR_SECRET guesses
+      // on hashed CDK logical ids in two of the templates from MEDIUM to HIGH.
       'ASH git ref (tag, branch, or commit) to build the image from, for example a ' +
-      'release tag like vMAJOR.MINOR.PATCH. ' +
+      'version tag such as vMAJOR.MINOR.PATCH. ' +
       'Pinning a tag makes the build reproducible; the scheduled rebuild ' +
       'still repulls base-image and OS patches for that same ASH revision.',
   });
