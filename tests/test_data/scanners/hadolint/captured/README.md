@@ -2,7 +2,7 @@
 
 Real output of hadolint 2.15.1 (the version pinned in
 `automated_security_helper/utils/tool_downloads.py`), used by
-`tests/unit/plugin_modules/ash_builtin/test_hadolint_scanner.py`.
+`tests/unit/plugin_modules/ash_builtin/test_hadolint_scanner_behavior.py`.
 `tests/integration/scanners/test_hadolint_scanner.py` re-runs the binary and
 fails if these files no longer match what it writes, so regenerate them when
 the pin moves.

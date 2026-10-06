@@ -637,6 +637,36 @@ class TestLargeTreesAndBudgets:
         assert not stub.resolve().is_relative_to(tree.resolve())
         assert stub != outside
 
+    @pytest.mark.skipif(os.name == "nt", reason="no /dev/zero or FIFOs on Windows")
+    @pytest.mark.parametrize("kind", ["device", "fifo", "directory"])
+    def test_a_discovered_config_that_is_not_a_regular_file_is_not_read(
+        self, tree, tmp_path, on_path, monkeypatch, kind
+    ):
+        """hadolint would open it itself; /dev/zero exhausts its memory."""
+        if kind == "device":
+            (tree / ".hadolint.yaml").symlink_to("/dev/zero")
+        elif kind == "fifo":
+            fifo = tmp_path / "fifo"
+            os.mkfifo(fifo)
+            (tree / ".hadolint.yml").symlink_to(fifo)
+        else:
+            (tree / ".hadolint.yaml").mkdir()
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeHadolint()
+        _run(scanner, fake, monkeypatch)
+        argv = fake.calls[0]["argv"]
+        stub = Path(argv[argv.index("--config") + 1])
+        assert stub.read_text().strip() == "{}"
+
+    def test_no_config_at_all_passes_no_config(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        """No --config, so hadolint's user-level config still applies."""
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeHadolint()
+        _run(scanner, fake, monkeypatch)
+        assert all("--config" not in call["argv"] for call in fake.calls)
+
     @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
     def test_an_explicitly_configured_config_outside_the_tree_is_used(
         self, tree, tmp_path, on_path, monkeypatch

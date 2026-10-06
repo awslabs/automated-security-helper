@@ -320,15 +320,20 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         rejected = False
         for name in DEFAULT_CONFIG_CANDIDATES:
             candidate = source_dir / name
-            if not candidate.is_file():
+            if not os.path.lexists(candidate):
                 continue
             resolved = candidate.resolve()
-            # Discovered in the scanned tree, so held to it, as Dockerfiles are.
-            # A config the operator names explicitly (above) may live anywhere.
-            if not resolved.is_relative_to(source_dir.resolve()):
+            # Discovered in the scanned tree, so held to it, as Dockerfiles are:
+            # a regular file inside the tree, or nothing. Anything else -- a link
+            # out of the tree, or to a device or FIFO, which hadolint would read
+            # from (/dev/zero exhausts its memory) -- is rejected. A config the
+            # operator names explicitly (above) may live anywhere.
+            if not candidate.is_file() or not resolved.is_relative_to(
+                source_dir.resolve()
+            ):
                 self._plugin_log(
-                    f"Ignoring {candidate.as_posix()}: it resolves to "
-                    f"{resolved.as_posix()}, outside the scanned tree.",
+                    f"Ignoring {candidate.as_posix()}: it is not a regular file "
+                    f"inside the scanned tree (resolves to {resolved.as_posix()}).",
                     level=logging.WARNING,
                 )
                 rejected = True

@@ -3,7 +3,7 @@
 
 """hadolint, run for real: the pinned binary, through `ash scan`, on the fixtures.
 
-The unit tests in tests/unit/plugin_modules/ash_builtin/test_hadolint_scanner.py
+The unit tests in tests/unit/plugin_modules/ash_builtin/test_hadolint_scanner_behavior.py
 read SARIF captured from hadolint 2.15.1. These tests run the binary itself, so
 they also prove the captured files are what that binary writes today.
 
