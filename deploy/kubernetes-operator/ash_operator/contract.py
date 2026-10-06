@@ -291,7 +291,7 @@ def build_merge_argv(
 def build_mcp_argv(
     *,
     transport: str = "streamable-http",
-    host: str = "0.0.0.0",  # noqa: S104 - a Service-backed pod must bind all interfaces
+    host: str = "0.0.0.0",  # noqa: S104  # nosec B104 - a Service-backed pod binds all interfaces
     port: int = 8000,
     mount_path: str = "/mcp",
     stateless_http: bool = False,

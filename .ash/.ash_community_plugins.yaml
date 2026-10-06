@@ -1108,11 +1108,13 @@ global_settings:
     # The Kubernetes operator under deploy/kubernetes-operator
     # =====================================================================
     #
-    # Twelve findings in this mode when the operator arrived. Six are bandit rules
-    # whose decisions are recorded in .ash/.ash.yaml under the same heading and are
-    # repeated here, path for path, because this file does not read that one. The
-    # other six come from the two scanners only this mode runs. Every entry names
-    # one file, so the rest of the operator is still scanned with nothing excused.
+    # Twelve findings in this mode when the operator arrived. Six are bandit rules.
+    # The two planted ones below are repeated from .ash/.ash.yaml, path for path,
+    # because this file does not read that one. The other four (B104 on the 0.0.0.0
+    # bind, B108 on TMP_MOUNT) are a `# nosec` on their own lines in the source, so
+    # neither config lists them. The remaining six come from the two scanners only
+    # this mode runs. Every entry names one file, so the rest of the operator is
+    # still scanned with nothing excused.
     - rule_id: B602
       path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/vulnerable.py
       reason: >-
@@ -1124,29 +1126,6 @@ global_settings:
       reason: >-
         A deliberate eval, planted beside the B602 for the same e2e assertion. Same
         entry as in .ash/.ash.yaml.
-    - rule_id: B104
-      path: deploy/kubernetes-operator/ash_operator/contract.py
-      reason: >-
-        The default host of build_mcp_argv. The MCP server runs in a pod behind a
-        ClusterIP Service, which routes to the pod IP, so a loopback bind would be
-        unreachable. Same entry as in .ash/.ash.yaml.
-    - rule_id: B104
-      path: deploy/kubernetes-operator/ash_operator/manifests.py
-      reason: >-
-        build_mcp_deployment passes the same all-interfaces host to build_mcp_argv,
-        for the same reason. Same entry as in .ash/.ash.yaml.
-    - rule_id: B104
-      path: deploy/kubernetes-operator/tests/test_manifests.py
-      reason: >-
-        Asserts that the MCP Deployment's command binds all interfaces; the address
-        is the value under test. Same entry as in .ash/.ash.yaml.
-    - rule_id: B108
-      path: deploy/kubernetes-operator/ash_operator/constants.py
-      reason: >-
-        TMP_MOUNT is where each pod mounts its own emptyDir, a path inside the
-        container that this process never writes. The volume is private to one pod
-        and deleted with it, so the shared-/tmp attacks B108 describes do not apply.
-        Same entry as in .ash/.ash.yaml.
     # ferret-scan's unquoted-assignment heuristic, described in the
     # API_KEY_OR_SECRET block near the top of this file. Reasons paraphrase the
     # lines for the reason given there.

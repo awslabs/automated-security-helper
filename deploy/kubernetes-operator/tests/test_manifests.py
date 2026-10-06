@@ -497,7 +497,7 @@ class TestMcpShapes:
             server=MCP, spec={"image": "ash:local"}, configmap_name="cm", has_config=False
         )
         command = deployment["spec"]["template"]["spec"]["containers"][0]["command"]
-        assert "0.0.0.0" in command  # noqa: S104 - asserting the bind address
+        assert "0.0.0.0" in command  # noqa: S104  # nosec B104 - asserting the bind address
 
     def test_the_probes_are_tcp_not_http(self):
         # Measured: `ashx mcp` answers 401 to a bare GET on its mount path, and a

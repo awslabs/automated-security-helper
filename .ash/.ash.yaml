@@ -478,32 +478,11 @@ global_settings:
       reason: >-
         The ash-config-schema-sha256 annotation, the same generated schema digest as
         config-schema-translation.json.
-    - rule_id: B104
-      path: deploy/kubernetes-operator/ash_operator/contract.py
-      reason: >-
-        The default host of build_mcp_argv. The MCP server runs in a pod behind a
-        ClusterIP Service, and a Service routes to the pod IP, so a loopback bind
-        would be unreachable. Same requirement as the AgentCore bind tested in
-        tests/unit/cli/test_mcp_sse_host_binding.py.
-    - rule_id: B104
-      path: deploy/kubernetes-operator/ash_operator/manifests.py
-      reason: >-
-        build_mcp_deployment passes the same all-interfaces host to build_mcp_argv,
-        for the same reason: the Service has to reach the pod IP.
-    - rule_id: B104
-      path: deploy/kubernetes-operator/tests/test_manifests.py
-      reason: >-
-        Asserts that the MCP Deployment's command binds 0.0.0.0. The address is the
-        value under test, as in tests/unit/cli/test_mcp_sse_host_binding.py.
-    - rule_id: B108
-      path: deploy/kubernetes-operator/ash_operator/constants.py
-      reason: >-
-        TMP_MOUNT is where each pod mounts its own emptyDir, a path inside the
-        container rather than one this process writes. The volume is private to one
-        pod and deleted with it, so the shared-/tmp symlink attacks B108 describes do
-        not apply. It has to be /tmp itself: tools that ignore TMPDIR write to /tmp by
-        name, and moving the mount would send those writes to the container's
-        writable layer instead of the volume.
+    #
+    # bandit B104 (the 0.0.0.0 bind in contract.py, manifests.py and
+    # tests/test_manifests.py) and B108 (TMP_MOUNT in constants.py) are not listed
+    # here. Each is a `# nosec` on its one line, with the reason beside it, so
+    # anything else in those files is still scanned.
     #
     # checkov on manifests/operator.yaml. Eight rules fired when the operator was
     # first scanned with the kubernetes framework. Five were fixed in the manifest

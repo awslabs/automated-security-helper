@@ -549,7 +549,7 @@ def build_mcp_deployment(
 
     argv = contract.build_mcp_argv(
         transport=transport,
-        host="0.0.0.0",  # noqa: S104 - must bind all interfaces to be Service-routable
+        host="0.0.0.0",  # noqa: S104  # nosec B104 - must bind all interfaces for the Service
         port=port,
         mount_path=mount_path,
         stateless_http=bool(spec.get("statelessHttp", False)),

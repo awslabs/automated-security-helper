@@ -83,7 +83,7 @@ ATOMIC_WRITER_SOURCES = frozenset({"configMap", "secret"})
 # A mount path inside a container, not a path this process writes to. The pod backs
 # it with an emptyDir, so it is private to one pod and gone when the pod is; the
 # symlink attacks S108 is about need a shared /tmp on a host.
-TMP_MOUNT = "/tmp"  # noqa: S108
+TMP_MOUNT = "/tmp"  # noqa: S108  # nosec B108 - the pod's own emptyDir, see above
 
 CONFIG_FILENAME = ".ash.yaml"
 CONFIG_PATH = f"{CONFIG_MOUNT}/{CONFIG_FILENAME}"
