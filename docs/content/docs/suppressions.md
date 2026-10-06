@@ -181,7 +181,7 @@ uv tool install "automated-security-helper[symbols]"
 The ASH container image includes it. Without it, an entry that sets `symbol`
 matches nothing: the findings it names stay visible, the scan logs a warning
 naming the missing extra, the entry shows up in the unused-suppressions report,
-and `ash config lint` warns about it.
+and `ashx config lint` warns about it.
 
 ### Supported languages
 
@@ -212,7 +212,7 @@ an `if` or `try` block at module level is just `name`. Python's `<locals>`
 marker is not part of it.
 
 A `symbol` that isn't a dotted list of identifiers, such as
-`MyClass.my_method()` or `MyClass::my_method`, is an error in `ash config lint`,
+`MyClass.my_method()` or `MyClass::my_method`, is an error in `ashx config lint`,
 and a scan refuses to load a config that contains one.
 
 ### What counts as inside

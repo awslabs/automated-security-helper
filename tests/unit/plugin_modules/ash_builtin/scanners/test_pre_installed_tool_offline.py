@@ -215,6 +215,7 @@ def test_offline_pre_installed_bandit_without_sarif_is_missing_with_a_named_reas
     assert reason is not None
     assert "missing extra: sarif" in reason
     assert "uv tool install 'bandit[sarif,toml]>=1.7.0,<2.0.0'" in reason
+    assert "ashx build-image --offline" in reason
 
 
 def test_online_pre_installed_bandit_without_sarif_keeps_uv(

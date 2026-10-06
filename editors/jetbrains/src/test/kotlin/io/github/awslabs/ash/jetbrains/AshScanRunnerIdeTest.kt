@@ -123,7 +123,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
     """.trimIndent()
 
     fun testTheScanInheritsTheIdeEnvironmentSoAshDebugReachesIt() {
-        val commandLine = AshScanRunner.commandLine("ash", "scan")
+        val commandLine = AshScanRunner.commandLine("ashx", "scan")
 
         assertEquals(GeneralCommandLine.ParentEnvironmentType.CONSOLE, commandLine.parentEnvironmentType)
         assertEquals(emptyMap<String, String>(), commandLine.environment)

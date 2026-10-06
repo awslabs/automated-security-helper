@@ -3,7 +3,7 @@
 
 """``--cli-json-input`` and ``--generate-cli-skeleton`` (issue #290).
 
-The scan tests drive the real ``ash`` Typer app through ``CliRunner`` with
+The scan tests drive the real ``ashx`` Typer app through ``CliRunner`` with
 ``run_ash_scan`` patched out, so what is asserted is the value the scan command
 would have handed to the scan, after click has parsed, cast and defaulted it.
 That is the only place a precedence bug or a skipped type check is visible.

@@ -496,7 +496,7 @@ class UVToolMixin:
                 f"Offline mode: {self.command} at {executable} cannot be used: "
                 f"{verdict.detail}. uv cannot fetch what is missing while offline. "
                 f"Install it before going offline, e.g. `uv tool install "
-                f"'{requirement}'`, or rebuild the image with `ash build-image --offline`."
+                f"'{requirement}'`, or rebuild the image with `ashx build-image --offline`."
             )
             self.dependency_unavailable_reason = reason
             self._plugin_log(reason, level=logging.ERROR)

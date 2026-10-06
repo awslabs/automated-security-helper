@@ -104,19 +104,19 @@ ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reas
 
 ### Passing parameters as JSON
 
-`ash scan`, `ash build-image`, `ash report`, and `ash merge` accept `--cli-json-input`, which reads the command's parameters from a JSON object instead of, or as well as, flags. It follows the AWS CLI's `--cli-input-json` convention.
+`ashx scan`, `ashx build-image`, `ashx report`, and `ashx merge` accept `--cli-json-input`, which reads the command's parameters from a JSON object instead of, or as well as, flags. It follows the AWS CLI's `--cli-input-json` convention.
 
 ```bash
 # Write a template listing every parameter of the command with its default
-ash scan --generate-cli-skeleton > scan-params.json
+ashx scan --generate-cli-skeleton > scan-params.json
 
 # Run with it. A path, a file:// URI, and - (stdin) are all accepted
-ash scan --cli-json-input scan-params.json
-ash scan --cli-json-input file://scan-params.json
-cat scan-params.json | ash scan --cli-json-input -
+ashx scan --cli-json-input scan-params.json
+ashx scan --cli-json-input file://scan-params.json
+cat scan-params.json | ashx scan --cli-json-input -
 
 # Flags on the command line win over the file
-ash scan --cli-json-input file://scan-params.json --strategy sequential
+ashx scan --cli-json-input file://scan-params.json --strategy sequential
 ```
 
 ```json
@@ -129,7 +129,7 @@ ash scan --cli-json-input file://scan-params.json --strategy sequential
 }
 ```
 
-**Keys.** A key is either the parameter name, which is what `--generate-cli-skeleton` writes (`source_dir`, `output_formats`), or one of the option's long flag spellings (`--source-dir`, `--formats`). The negative half of a boolean pair is not a key: write `"offline": false`, not `"--no-offline": true`. Every parameter the command takes is accepted, and both the accepted keys and the skeleton are read from the command's own option definitions, so a newly added flag is available here without further changes. Use the subcommand form; bare `ash --cli-json-input ...` is rejected as an unknown option.
+**Keys.** A key is either the parameter name, which is what `--generate-cli-skeleton` writes (`source_dir`, `output_formats`), or one of the option's long flag spellings (`--source-dir`, `--formats`). The negative half of a boolean pair is not a key: write `"offline": false`, not `"--no-offline": true`. Every parameter the command takes is accepted, and both the accepted keys and the skeleton are read from the command's own option definitions, so a newly added flag is available here without further changes. Use the subcommand form; bare `ashx --cli-json-input ...` is rejected as an unknown option.
 
 **Values.** A list parameter takes a JSON array; every other parameter takes a single string, number, or boolean. `null` means "not provided", which is how the skeleton marks a parameter whose default is computed at run time. Each value is converted and checked by the same parameter type the flag uses, so an invalid value fails just as the equivalent flag would, and the error names the JSON key.
 

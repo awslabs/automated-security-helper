@@ -750,7 +750,7 @@ class TestApplyToSarif:
             }
         ]
         # The linter rebuilds the same id from that report entry, so
-        # `ash config lint --fix-unused` comments out the right entry.
+        # `ashx config lint --fix-unused` comments out the right entry.
         assert (
             ConfigLinter._make_suppression_id(reporter._suppression_to_dict(gone))
             == gone.id

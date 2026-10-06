@@ -1184,7 +1184,7 @@ def _resolve_config_fail_on_incomplete_scanners(opts: ScanOptions) -> Optional[b
     return getattr(_load_config_file(opts), "fail_on_incomplete_scanners", None)
 
 
-# The values click's boolean type (typer's vendored copy included) reads as true. `ash scan` declares ASH_DEBUG and
+# The values click's boolean type (typer's vendored copy included) reads as true. `ashx scan` declares ASH_DEBUG and
 # ASH_VERBOSE as envvars of --debug/--verbose, so click parses them first and
 # rejects anything outside its set; this has to agree with click about what turns
 # them on, or `ASH_DEBUG=on` would pass the CLI and then do nothing. It is a

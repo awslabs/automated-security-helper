@@ -634,7 +634,7 @@ describe('spawnAsyncRunner environment', () => {
       return child as unknown as ChildProcess;
     };
 
-    const pending = spawnAsyncRunner('ash', ['scan'], {}, NO_KILL, spawner, 10);
+    const pending = spawnAsyncRunner('ashx', ['scan'], {}, NO_KILL, spawner, 10);
     child.emit('exit', 0, null);
     child.emit('close', 0, null);
     await pending;

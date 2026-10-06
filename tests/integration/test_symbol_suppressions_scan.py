@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan`` end to end with a suppression scoped by ``symbol``.
+"""``ashx scan`` end to end with a suppression scoped by ``symbol``.
 
 bandit reports B602 three times in the fixture: inside ``risky``, inside its
 sibling ``also_risky``, and at module level. One suppression names ``risky``.
@@ -10,7 +10,7 @@ the same file and must stay visible, which is the narrowness this feature
 exists for. A second entry names a function that does not exist, and must land
 in the unused-suppressions report.
 
-The scan runs as a subprocess of the installed ``ash`` entry point, so the
+The scan runs as a subprocess of the installed ``ashx`` entry point, so the
 config is read, validated and applied by the same code a user runs.
 """
 
@@ -96,8 +96,8 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
         encoding="utf-8",
     )
 
-    ash = shutil.which("ash", path=str(Path(sys.executable).parent))
-    assert ash, f"no ash entry point beside {sys.executable}"
+    ash = shutil.which("ashx", path=str(Path(sys.executable).parent))
+    assert ash, f"no ashx entry point beside {sys.executable}"
     proc = subprocess.run(
         [
             ash,
