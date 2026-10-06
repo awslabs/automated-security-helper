@@ -1,0 +1,61 @@
+# serializer version: 1
+# name: test_excepthook_fails
+  dict({
+    'stderr': '''
+      ash: fatal error: ImportError: cannot import name 'Model' from 'x'
+      ImportError: cannot import name 'Model' from 'x'
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: test_main_exits_1_with_the_report
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      <TRACEBACK>
+      ImportError: cannot import name 'Model' from 'x'
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: test_no_stream_object_left
+  dict({
+    'stderr': '''
+      ash: fatal error: ImportError: cannot import name 'Model' from 'x'
+      ImportError: cannot import name 'Model' from 'x'
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: test_reported_through_excepthook
+  dict({
+    'stderr': '''
+      ImportError: cannot import name 'Model' from 'x'
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: test_started_without_either_stream
+  dict({
+    'stderr': '''
+      ash: fatal error: started with no usable stdout/stderr; ASH reattached them to report the failure below.
+      ImportError: cannot import name 'Model' from 'x'
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: test_started_without_stderr
+  dict({
+    'stderr': '''
+      ash: fatal error: started with no usable stderr; ASH reattached it to report the failure below.
+      ImportError: cannot import name 'Model' from 'x'
+  
+    ''',
+    'stdout': '',
+  })
+# ---

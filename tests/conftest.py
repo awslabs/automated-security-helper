@@ -376,6 +376,12 @@ def pytest_configure(config):
     )
     config.addinivalue_line("markers", "model: Tests related to data models")
     config.addinivalue_line("markers", "serial: Tests that should not run in parallel")
+    for marker, flag in _RUNTIME_SNAPSHOT_MARKERS.items():
+        config.addinivalue_line(
+            "markers",
+            f"{marker}: snapshot of output that needs a real runtime; deselected "
+            f"unless {flag} is given",
+        )
 
 
 def pytest_addoption(parser):
@@ -392,6 +398,13 @@ def pytest_addoption(parser):
         default=False,
         help="Run integration tests",
     )
+    for marker, flag in _RUNTIME_SNAPSHOT_MARKERS.items():
+        parser.addoption(
+            flag,
+            action="store_true",
+            default=False,
+            help=f"Run the {marker} snapshot tests (needs that runtime on this host)",
+        )
     parser.addoption(
         "--run-changed-only",
         action="store_true",
@@ -405,8 +418,36 @@ def pytest_addoption(parser):
     )
 
 
+#: Snapshot tests of output only a real container runtime or Nix can produce, and the
+#: flag that selects each set. The CI legs that have the runtime pass the flag; every
+#: other run DESELECTS these tests rather than skipping them. tryfirst because
+#: syrupy's own pytest_collection_modifyitems records the items it is handed, and it
+#: checks a test-less snapshot as unused only when every item it recorded was also
+#: selected (SnapshotReport.unused in syrupy/report.py). Removing them first keeps a
+#: default run's two sets equal, so that check stays on. The marked modules
+#: also live in their own directory (tests/snapshot/container/runtime/), because
+#: syrupy reads a whole __snapshots__ directory once any test beside it asserts.
+_RUNTIME_SNAPSHOT_MARKERS = {
+    "container_runtime": "--run-container-snapshots",
+    "nix_runtime": "--run-nix-snapshots",
+}
+
+
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     """Modify the collected test items based on command-line options."""
+    deselected = [
+        item
+        for item in items
+        if any(
+            item.get_closest_marker(marker) is not None and not config.getoption(flag)
+            for marker, flag in _RUNTIME_SNAPSHOT_MARKERS.items()
+        )
+    ]
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = [item for item in items if item not in deselected]
+
     # Skip slow tests unless --run-slow is specified
     if not config.getoption("--run-slow"):
         skip_slow = pytest.mark.skip(reason="Need --run-slow option to run")

@@ -229,21 +229,20 @@ global_settings:
     # Reach for a path entry below only where per-line marking is not available:
     # a generated or vendored file nobody hand-edits, a format with no comment
     # syntax, or a pattern spread over more lines than is reasonable to mark.
-    # The entries that follow predate this note and are left alone; narrowing
-    # them is a separate change with its own review.
-    - rule_id: "SECRET-*"
-      path: "tests/**"
-      reason: "Test fixtures contain intentional secret patterns for validation"
-    - rule_id: "SECRET-*"
-      path: "scripts/**"
-      reason: "Build scripts contain seeded test data generators"
+    #
+    # There are no directory-wide entries left. `SECRET-*` over `tests/**` and
+    # `scripts/**` hid 31 findings; each is now a pragma on its line, and
+    # tests/unit/config/test_no_directory_glob_secret_suppressions.py fails if a
+    # directory glob for this rule family comes back. Some sit on the line above
+    # as `# pragma: allowlist nextline secret` instead, in two cases: where ruff
+    # format would wrap the line and carry a trailing pragma off the line it
+    # covers, and where ferret-scan reads the file, because ferret counts the
+    # word "secret" in a trailing comment as evidence and raised three such
+    # lines to high confidence.
     # === detect-secrets: specific source files ===
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
       reason: "Module processes secret-related strings — keyword matches are inherent"
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: "docs/**"
-      reason: "Documentation examples showing detection patterns"
     - rule_id: SECRET-SECRET-KEYWORD
       path: deploy/terraform/modules/ash-image-pipeline/files/ash-container-init
       reason: >-
@@ -474,7 +473,7 @@ global_settings:
     #
     # Every other bandit finding in this repository is being FIXED rather than
     # suppressed — a bare `except: pass` in shipped code is a defect whatever a
-    # scanner thinks of it. These six files are the exception, and each is listed
+    # scanner thinks of it. These eight files are the exception, and each is listed
     # individually rather than behind a `tests/**` glob so that a new test cannot
     # inherit a suppression nobody looked at. That also matches the only bandit
     # precedent already in this file, which names a single path.
@@ -534,8 +533,9 @@ global_settings:
         message to prove ASH's own SARIF post-processor masks the password body to
         asterisks — the test at line 722 asserts the literal never survives into the
         output. The heuristic flags the fixture that exists to verify the heuristic.
-    # B108 — one finding. Same shape as the codecommit-gate entry above: the
-    # hardcoded /tmp is a path INSIDE the build container, where it is correct.
+    # B108 — two files, 11 findings. In the first, the hardcoded /tmp is a path
+    # INSIDE the build container, the same shape as the codecommit-gate entry above.
+    # In the second, /tmp is the input under test and no file is ever opened there.
     - rule_id: B108
       path: tests/unit/deploy/buildspec_extraction.py
       reason: >-
@@ -544,6 +544,15 @@ global_settings:
         constant has to match what the template emits. It is not a path this test
         process writes: the comment above it records that tests rewrite it to a
         per-test temporary path through `rewrite_helper_path`.
+    - rule_id: B108
+      path: tests/snapshot/test_snapshot_normalizer.py
+      reason: >-
+        These tests check that the snapshot normalizer masks the system temp
+        directory, so "/tmp" and look-alikes such as "/tmpab" and "/var/tmp/a" are
+        the strings being masked, passed to PurePosixPath, add_root and text(). No
+        file is created, opened or written under any of them. Writing the literal
+        some other way would only hide it from bandit; the test needs that exact
+        string.
     # === bandit subprocess family: unfixable in a tool that runs other tools ===
     #
     # B404 fires on `import subprocess` itself, before any call is examined. ASH's
@@ -2610,13 +2619,13 @@ global_settings:
     - rule_id: "CKV_DOCKER_2"
       path: "automated_security_helper/assets/Dockerfile"
       reason: "Generated Dockerfile for CLI tool — HEALTHCHECK not applicable"
-    # === GitHub Actions rules (YAML — no inline suppression) ===
-    - path: ".github/**/*.yml"
-      rule_id: "yaml.github-actions.security.*"
-      reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
-    - path: "ash-agent-plugins/**/.github/**/*.yml"
-      rule_id: "yaml.github-actions.security.*"
-      reason: "Same rationale as the root .github rule: interpolations are author-defined inputs.*/matrix.*, not attacker-controlled github.event.* context. The repo pins actions by major tag by convention (see .github/workflows)."
+    # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
+    # over every workflow on the claim that interpolations were author-defined;
+    # removing it surfaced shell injection through `${{ inputs.* }}` in
+    # run-scan-test, a `curl | sh` install in validate-install and unpinned
+    # actions in the nested ash-agent-plugins workflow, all fixed in the files.
+    # A future false positive takes `# nosemgrep: <rule>` on its line, which
+    # opengrep and semgrep both honor in YAML.
     # === AshEksOperator ===
     #
     # Every entry below is scoped to the one template, and each finding was read in
@@ -2775,6 +2784,19 @@ global_settings:
         (aws-cdk-lib alone is about 7,500 files of third-party JavaScript).
     - path: "tests/test_data/**"
       reason: This is test data that is used during unit testing only and is not part of the core application.
+    # Spelled "tests/**/__snapshots__/**/*", not "tests/**/__snapshots__/**": ASH's
+    # path matcher (utils/path_matching.py _recursive_glob_match) ignores a trailing
+    # "**" once the pattern has more than one segment, so the shorter spelling
+    # matches no file under the directory. Measured with file_path_matches, which
+    # the SARIF ignore filter uses: "/**" matched 0 of 2 snapshot paths, "/**/*" 2 of 2.
+    - path: "tests/**/__snapshots__/**/*"
+      reason: >-
+        Recorded output of the snapshot tests under tests/, most of it ASH's reports
+        on the deliberately insecure fixture under tests/test_data/snapshot_fixture.
+        The reports quote that fixture's findings (a placeholder password, a
+        shell=True call), so scanning them would report tests/test_data a second time
+        through its own snapshots. Limited to tests/ so a __snapshots__ directory
+        anywhere else in the repository is still scanned.
     - path: "automated_security_helper/assets/ASH_COMMIT*"
       reason: This file is generated by the build process and does not contain any secrets or sensitive information.
     # Byte-for-byte copies of two tracked files, staged into assets/ by

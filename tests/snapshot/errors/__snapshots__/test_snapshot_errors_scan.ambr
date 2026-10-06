@@ -1,0 +1,561 @@
+# serializer version: 1
+# name: TestArgumentRefusals.test_invalid_output_format
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ Invalid value: 'pdf' is not a valid format. Valid formats are: aggregated, text, flat-json,      │
+      │ yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom            │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestArgumentRefusals.test_misspelled_option
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] ERROR    probe: the scan reached the orchestrator with source_dir '.' (relative to the working directory), which exists=True
+                            <TRACEBACK>
+                            RuntimeError: probe: the scan reached the orchestrator with source_dir '.' (relative to the working directory), which exists=True
+      ERROR (1) Exiting due to exception during ASH scan: probe: the scan reached the orchestrator with
+      source_dir '.' (relative to the working directory), which exists=True
+  
+    ''',
+  })
+# ---
+# name: TestArgumentRefusals.test_nonexistent_source_dir
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      Source directory does not exist: does-not-exist. Check --source-dir (or ASH_SOURCE_DIR).
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestArgumentRefusals.test_unknown_subcommand
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash [OPTIONS] COMMAND [ARGS]...
+      Try 'ash --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ No such command 'scna'. Did you mean 'scan'?                                                     │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestArgumentRefusals.test_use_existing_without_results
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      --use-existing was given, but there are no existing results to use: out/ash_aggregated_results.json does not exist. Run a scan first, or point --output-dir at the output of a previous one.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_duplicate_key
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: params.json is not valid JSON: key 'output_dir' appears more than once         │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_invalid_json
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: params.json is not valid JSON: Expecting ',' delimiter: line 1 column 22 (char │
+      │ 21)                                                                                              │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_missing_file
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: cannot read nowhere.json: [Errno 2] No such file or directory: 'nowhere.json'  │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_refused[boolean_for_a_string_parameter]
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: invalid value for key 'min_severity' in params.json: a JSON boolean is only    │
+      │ accepted for a true/false parameter                                                              │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_refused[document_is_not_an_object]
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: params.json must contain a JSON object whose keys are parameter names, not a   │
+      │ list                                                                                             │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_refused[int_parameter_given_a_word]
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: invalid value for key 'shard_index' in params.json: Invalid value for          │
+      │ '--shard-index' (env var: 'ASH_SHARD_INDEX'): 'first' is not a valid int.                        │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_refused[list_parameter_given_a_string]
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: invalid value for key 'scanners' in params.json: expected a JSON array,        │
+      │ because this parameter takes a list                                                              │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_refused[object_value]
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: invalid value for key 'source_dir' in params.json: expected a string, number   │
+      │ or boolean                                                                                       │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_refused[same_parameter_twice]
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: keys 'output_dir' and '--output-dir' in params.json both set the parameter     │
+      │ 'output_dir'.                                                                                    │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_refused[scalar_parameter_given_a_list]
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: invalid value for key 'output_dir' in params.json: expected a single value,    │
+      │ not a JSON array                                                                                 │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestCliJsonInputRefusals.test_refused[unknown_key]
+  dict({
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ash scan [OPTIONS]
+      Try 'ash scan --help' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ --cli-json-input: unknown key 'output_dirr' in params.json. Valid keys are the parameter names   │
+      │ source_dir, output_dir, scanners, exclude_scanners, ash_plugin_modules, config_overrides,        │
+      │ offline, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, inspect, │
+      │ use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, config,  │
+      │ verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners, allow_stale_content_db,    │
+      │ simple, ignore_suppressions, min_severity, compact_report, changed_files_only, base_ref,         │
+      │ shard_index, shard_count, workspace, workspace_config, allow_missing_projects, dry_run, build,   │
+      │ run, force, oci_runner, build_target, container_uid, container_gid, ash_revision_to_install,     │
+      │ custom_containerfile, custom_build_arg; each option's long flag spelling is accepted as well.    │
+      │ Run with --generate-cli-skeleton for a template.                                                 │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestIncompleteScanExit.test_exit_message[converter_did_not_run]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      
+      ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they
+      were given
+        jupyter: dependencies unavailable, so it never ran
+      A converter that did not run leaves its inputs unscanned, so the scanners saw fewer files than this
+      repository holds. Install the converter's tool, disable the converter if its inputs are not wanted,
+      or drop --fail-on-incomplete-scanners to accept a partial scan. A converter with nothing to convert
+      never reports here.
+  
+    ''',
+  })
+# ---
+# name: TestIncompleteScanExit.test_exit_message[no_recorded_cause]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      ERROR (1) Exiting due to exception during ASH scan
+  
+    ''',
+  })
+# ---
+# name: TestIncompleteScanExit.test_exit_message[scanner_could_not_read_targets]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      
+      ERROR (1) Exiting because the scan was incomplete: 1 selected scanner(s) did not evaluate everything
+      they were given
+        cfn-nag: PASSED (4 of 10 targets unreadable)
+      ERROR means the scanner ran and failed; MISSING means its dependencies were unavailable; a target
+      count means the scanner ran but could not read that many of its inputs. Install the missing tools,
+      fix or exclude the unreadable targets, exclude the scanners with --exclude-scanners, or drop
+      --fail-on-incomplete-scanners to accept a partial scan.
+  
+    ''',
+  })
+# ---
+# name: TestIncompleteScanExit.test_exit_message[scanners_did_not_run]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      
+      ERROR (1) Exiting because the scan was incomplete: 2 selected scanner(s) did not evaluate everything
+      they were given
+        grype: MISSING
+        semgrep: ERROR
+      ERROR means the scanner ran and failed; MISSING means its dependencies were unavailable; a target
+      count means the scanner ran but could not read that many of its inputs. Install the missing tools,
+      fix or exclude the unreadable targets, exclude the scanners with --exclude-scanners, or drop
+      --fail-on-incomplete-scanners to accept a partial scan.
+  
+    ''',
+  })
+# ---
+# name: TestIncompleteScanExit.test_exit_message[stale_content_database]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      
+      ERROR (1) Exiting because 1 content database(s) are past their declared age bound
+        Content database grype-db (grype) is stale: built 2020-01-01T00:00:00Z, 30d 0h old, past its 120h
+      bound (grype's own bound); age read from grype db status. The scan fails: a clean result from a
+      stale database is not evidence of a clean target. To refresh it, run 'grype db update'. To scan
+      against it anyway, pass --allow-stale-content-db or set `content_db_staleness: warn` in the ASH
+      config.
+  
+    ''',
+  })
+# ---
+# name: TestIncompleteScanExit.test_exit_message[stale_database_and_missing_scanner]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      
+      ERROR (1) Exiting because 1 content database(s) are past their declared age bound
+        Content database grype-db (grype) is stale: built 2020-01-01T00:00:00Z, 30d 0h old, past its 120h
+      bound (grype's own bound); age read from grype db status. The scan fails: a clean result from a
+      stale database is not evidence of a clean target. To refresh it, run 'grype db update'. To scan
+      against it anyway, pass --allow-stale-content-db or set `content_db_staleness: warn` in the ASH
+      config.
+      
+      ERROR (1) Exiting because the scan was incomplete: 1 selected scanner(s) did not evaluate everything
+      they were given
+        grype: MISSING
+      ERROR means the scanner ran and failed; MISSING means its dependencies were unavailable; a target
+      count means the scanner ran but could not read that many of its inputs. Install the missing tools,
+      fix or exclude the unreadable targets, exclude the scanners with --exclude-scanners, or drop
+      --fail-on-incomplete-scanners to accept a partial scan.
+  
+    ''',
+  })
+# ---
+# name: TestScanFailures.test_invalid_configuration
+  dict({
+    'exit_code': 3,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Using config file specified at: bad.yaml
+                   INFO     Initializing ASH v<ASH_VERSION>
+                   ERROR    Configuration validation failed: 1 validation error for AshConfig
+                            fail_on_findings
+                              Input should be a valid boolean
+                                For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
+      ERROR (3) Invalid configuration: Configuration validation failed for 'bad.yaml': 1 validation error
+      for AshConfig
+      fail_on_findings
+        Input should be a valid boolean
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config
+      lint' to identify and fix issues.
+  
+    ''',
+  })
+# ---
+# name: TestScanFailures.test_selection_cancels_itself
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Initializing ASH v<ASH_VERSION>
+                   INFO     Initializing execution engine
+                   INFO     Excluding scanners: ['bandit']
+      ERROR (1) Every scanner named by --scanners is also named by --exclude-scanners, so the selection
+      cancels itself: selected bandit; excluded bandit. Refused rather than guessed: an empty allowlist
+      means 'every scanner' further down, so this would silently run the scanners you excluded and skip
+      the ones you chose. Drop one of the two flags.
+  
+    ''',
+  })
+# ---
+# name: TestScanFailures.test_unexpected_exception
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] ERROR    simulated failure inside the scan
+                            <TRACEBACK>
+                            RuntimeError: simulated failure inside the scan
+      ERROR (1) Exiting due to exception during ASH scan: simulated failure inside the scan
+  
+    ''',
+  })
+# ---
+# name: TestScanFailures.test_unknown_scanner
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Initializing ASH v<ASH_VERSION>
+                   INFO     Initializing execution engine
+                   INFO     ASH Orchestrator and ScanExecutionEngine initialized
+                   INFO     Identifying non-ignored files to include in scans
+                   INFO     No ignore files were found under <TMP>, so no ignore rules removed anything from the scan set.
+                   INFO     ASH_INCLUSIONS excluded 0 files from the scan set
+                   INFO     Found 1 files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified.
+                   INFO     Executing phases: ['scan']
+                   INFO     ===== ASH Security Scan Starting =====
+                   INFO     Executing phases: scan
+                   INFO     ASH Security Scan started
+                   INFO
+                            ----- Starting phase: SCAN -----
+                   INFO     Building scanner tasks...
+                   WARNING  No registered scanner matches not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+                   INFO
+                            Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+                   INFO     ===== ASH Security Scan Completed in 0s =====
+                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+      ERROR (1) None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag,
+      cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than
+      scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded
+      SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself
+      clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them
+      all.
+  
+    ''',
+  })
+# ---
+# name: TestShardSelectionRefusals.test_refused[combined_with_workspace]
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ash merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via --source-dir and shard that.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestShardSelectionRefusals.test_refused[count_without_index]
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      --shard-count requires --shard-index as well. Sharding splits one scan across several executors, so a shard is only meaningful as 'index of count'; acting on --shard-count alone would scan part of the repository and report it as a whole scan.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestShardSelectionRefusals.test_refused[count_zero]
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      --shard-count must be at least 1, got 0.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestShardSelectionRefusals.test_refused[index_out_of_range]
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      --shard-index must satisfy 0 <= index < --shard-count, got index=3 with count=3. Indices are zero-based, so a 3-way split uses 0 through 2.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestShardSelectionRefusals.test_refused[index_without_count]
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      --shard-index requires --shard-count as well. Sharding splits one scan across several executors, so a shard is only meaningful as 'index of count'; acting on --shard-index alone would scan part of the repository and report it as a whole scan.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestWorkspaceRefusals.test_project_config_invalid
+  dict({
+    'exit_code': 3,
+    'stderr': '''
+      Configuration validation failed: 1 validation error for AshConfig
+      fail_on_findings
+        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
+      Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash/.ash.yaml': 1 validation error for AshConfig
+      fail_on_findings
+        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestWorkspaceRefusals.test_project_folder_missing
+  dict({
+    'exit_code': 4,
+    'stderr': '''
+      Workspace '<TMP>/team.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:
+        - 'service-b' does not exist as a directory at '<TMP>/service-b'
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestWorkspaceRefusals.test_refused[auto_with_no_workspace_file]
+  dict({
+    'exit_code': 4,
+    'stderr': '''
+      No '*.code-workspace' file found in '<TMP>'. Pass '--workspace <file>' to name one explicitly, or drop '--workspace' to scan a single directory.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestWorkspaceRefusals.test_refused[dry_run_outside_workspace_mode]
+  dict({
+    'exit_code': 4,
+    'stderr': '''
+      --dry-run only applies in workspace mode; pass '--workspace <file>' or '--workspace auto' as well.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestWorkspaceRefusals.test_refused[two_workspace_flags_outside_workspace_mode]
+  dict({
+    'exit_code': 4,
+    'stderr': '''
+      --allow-missing-projects and --workspace-config only applies in workspace mode; pass '--workspace <file>' or '--workspace auto' as well.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestWorkspaceRefusals.test_refused[workspace_file_does_not_exist]
+  dict({
+    'exit_code': 4,
+    'stderr': '''
+      workspace file 'missing.code-workspace' does not exist
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestWorkspaceRefusals.test_refused[workspace_with_source_dir]
+  dict({
+    'exit_code': 4,
+    'stderr': '''
+      --workspace and --source-dir are mutually exclusive. In workspace mode the directory holding the workspace file is the scan root, so honouring both would leave it ambiguous which tree was scanned. Note that --source-dir is also set by the ASH_SOURCE_DIR environment variable, which counts as setting it.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: TestWorkspaceRefusals.test_workspace_file_is_not_json
+  dict({
+    'exit_code': 4,
+    'stderr': '''
+      workspace file '<TMP>/broken.code-workspace' is not valid JSON: Expecting property name enclosed in double quotes: line 1 column 3 (char 2).
+  
+    ''',
+    'stdout': '',
+  })
+# ---

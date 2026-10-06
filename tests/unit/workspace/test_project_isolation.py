@@ -965,8 +965,17 @@ class TestPluginManagerSingletonState:
     def _hits(cls, patterns, *, skip_files=()) -> Dict[str, str]:
         found: Dict[str, str] = {}
         skipped = set(skip_files)
+        repo_root = Path(__file__).resolve().parents[3]
         for path in cls._source_files():
-            if path.name in skipped:
+            # A bare name skips that file anywhere; a path with a "/" skips only the
+            # file at that repo-relative path (for a name as common as conftest.py).
+            resolved = path.resolve()
+            relative = (
+                resolved.relative_to(repo_root).as_posix()
+                if resolved.is_relative_to(repo_root)
+                else None
+            )
+            if path.name in skipped or relative in skipped:
                 continue
             for number, line in enumerate(
                 path.read_text(encoding="utf-8").splitlines(), start=1
@@ -1051,7 +1060,7 @@ class TestPluginManagerSingletonState:
         shape that reintroduces the registry defect, so it has to be a deliberate
         decision rather than a drive-by.
 
-        Two files are allowed in, and the widened walk is what surfaced them:
+        Four files are allowed in; the widened walk surfaced the first two:
 
         * ``plugin_manager.py`` owns the attributes.
         * ``tests/unit/plugins/test_plugin_system.py`` is the test *of* the plugin
@@ -1059,13 +1068,27 @@ class TestPluginManagerSingletonState:
           There is no manager API for "forget every handler", and a test resetting
           process-global state is the opposite of the hazard here -- it prevents
           leakage between cases rather than causing it between projects.
+        * ``tests/snapshot/conftest.py`` (by path, not by name) narrows the
+          registry to ASH's built-in plugins for each snapshot test and puts it
+          back afterwards, so a snapshot shows what a fresh ``ash`` process
+          registers rather than whatever earlier tests in the worker imported.
+          Same category as the one above: it stops leakage between tests.
+        * ``tests/snapshot/test_snapshot_plugin_registry.py`` is the test of that
+          conftest code: it reads the registry to prove a plugin first imported
+          inside a snapshot test is merged back afterwards, and removes the probe
+          plugin it registered.
 
         Anything else, in production or in a new test, fails this and has to
         justify itself.
         """
         offenders = self._hits(
             self._REGISTRY_PATTERNS,
-            skip_files=("plugin_manager.py", "test_plugin_system.py"),
+            skip_files=(
+                "plugin_manager.py",
+                "test_plugin_system.py",
+                "tests/snapshot/conftest.py",
+                "tests/snapshot/test_snapshot_plugin_registry.py",
+            ),
         )
         assert offenders == {}, (
             "the plugin manager's registry state is now reached from outside the "

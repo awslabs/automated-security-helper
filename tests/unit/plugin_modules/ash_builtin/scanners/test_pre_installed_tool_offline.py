@@ -179,9 +179,13 @@ def test_offline_pre_installed_bandit_scans_instead_of_erroring(
 
     assert report.runs is not None and report.runs[0].results == []
     assert host.ran_direct, "the verified binary on PATH must be what ran"
-    offline_resolves = [
-        c for c in host.calls if c[1:3] == ["tool", "run"] and "--offline" in c
-    ]
+    uv_runs = [c for c in host.calls if c[1:3] == ["tool", "run"]]
+    # The version probe may ask uv, but only offline: an online probe is a
+    # network install under ASH_OFFLINE, and it is what left uv's cache
+    # half-filled when its timeout cut it off.
+    probes = [c for c in uv_runs if c[-1] == "--version"]
+    assert all("--offline" in c for c in probes), probes
+    offline_resolves = [c for c in uv_runs if c[-1] != "--version"]
     assert offline_resolves == [], (
         "an offline `uv tool run --from` re-resolve is the reported failure; "
         f"it must not be attempted for a verified pre-installed tool: {offline_resolves}"

@@ -44,7 +44,7 @@ FIXTURE = (
 )
 
 STAR_ACCESS_POLICY = "CFN_NAG_APPSEC-IAM-RestrictPublicAccess-StarAccessPolicy"
-STAR_ACCESS_VERB = "CFN_NAG_APPSEC-IAM-LeastPrivilege-ResourcePolicyStarVerb"
+STAR_ACCESS_VERB = "CFN_NAG_APPSEC-IAM-LeastPrivilege-ResourcePolicyStarVerb"  # pragma: allowlist secret
 
 
 def _cfn_nag_scan() -> str:

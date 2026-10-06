@@ -48,6 +48,12 @@ repos:
         # deploy/cdk/test/ash-template-size.test.ts), and the exclusion is still
         # needed without it.
         #
+        # tests/snapshot/**/__snapshots__/ is excluded for the same reason: each file
+        # is the byte-for-byte output ASH printed, and the test compares those bytes.
+        # --autofix sorts keys and reindents, which rewrote the --generate-cli-skeleton
+        # snapshots out of the parameter order a user sees and failed every one, and
+        # some .json snapshots are not JSON at all (the s3 reporter writes a URL).
+        #
         # The npm manifests under deploy/ and editors/ are excluded for the same
         # reason: npm owns them.
         # This hook sorts keys (it is not passed --no-sort-keys), so on any commit
@@ -56,7 +62,7 @@ repos:
         # lockfile, which is why lockfile commits used to be made with this hook
         # skipped. editors/vscode is the third npm tree and needs the same
         # exclusion: without it the hook rewrites 3,261 lines of its lockfile.
-        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^(deploy|editors)/[^/]+/package(-lock)?\.json$'
+        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^(deploy|editors)/[^/]+/package(-lock)?\.json$|^tests/snapshot/.*/__snapshots__/'
         args:
           - "--autofix"
           - "--indent=2"

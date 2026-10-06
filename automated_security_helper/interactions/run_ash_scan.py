@@ -49,8 +49,14 @@ from automated_security_helper.core.unified_metrics import (
     format_duration,
     get_unified_scanner_metrics,
 )
-from automated_security_helper.interactions.run_ash_container import run_ash_container
-from automated_security_helper.interactions.run_ash_nix import run_ash_nix
+from automated_security_helper.interactions.run_ash_container import (
+    container_was_started,
+    run_ash_container,
+)
+from automated_security_helper.interactions.run_ash_nix import (
+    NixModeRefused,
+    run_ash_nix,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.atomic_write import write_text_atomically
@@ -1558,6 +1564,17 @@ def _run_container_mode(
             f"Stderr length: {len(container_result.stderr) if hasattr(container_result, 'stderr') else 'N/A'}"
         )
 
+    if not container_was_started(container_result):
+        # A refusal before any container ran: no runner, a non-numeric UID or GID, an
+        # unsafe revision, a missing Dockerfile, a failed build, an unusable source or
+        # output directory. run_ash_container has already printed why (a failed build's
+        # own output streams to the terminal as it runs), and there is nothing more to
+        # report. Going on would log "Container execution failed" for a container that
+        # never started and then look for a results file nothing could have written,
+        # ending in a "Results file not found" that names the wrong problem. The status
+        # is the refusal's own; a failed build keeps the runner's code.
+        sys.exit(getattr(container_result, "returncode", 1) or 1)
+
     if hasattr(container_result, "returncode") and container_result.returncode != 0:
         logger.error(
             f"Container execution failed with code {container_result.returncode}"
@@ -1675,7 +1692,14 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
     # that exists on PATH and fails is otherwise indistinguishable from a scan that ran.
     _discard_prior_run_artifacts(opts, logger)
 
-    nix_result = run_ash_nix(debug=opts.debug)
+    try:
+        nix_result = run_ash_nix(debug=opts.debug)
+    except NixModeRefused as e:
+        # `nix` missing, or the recursion guard. A refusal, so a message and exit 1 like
+        # the CLI's other refused invocations (cli/scan.py:_fail_usage), not a traceback.
+        # stderr via typer.echo: the message names a URL and flags, not Rich markup.
+        typer.echo(str(e), err=True)
+        sys.exit(1)
 
     if nix_result.returncode != 0:
         # Reported rather than fatal. A scan that finds something exits non-zero by design,

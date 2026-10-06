@@ -1,0 +1,77 @@
+# serializer version: 1
+# name: test_ash_version_in_image
+  dict({
+    'exit_code': 0,
+    'stdout': '''
+      awslabs/automated-security-helper v<ASH_VERSION>
+  
+    ''',
+  })
+# ---
+# name: test_bash_wrapper_scan_of_the_fixture
+  dict({
+    'announced_the_run': True,
+    'exit_code': 2,
+    'last_line': 'ERROR (2) Exiting due to 1 actionable findings found in ASH scan',
+  })
+# ---
+# name: test_container_exit_status_for_an_invalid_config
+  dict({
+    'exit_code': 3,
+    'host_output_after_container': '''
+                   ERROR    Container execution failed with code 3
+                   ERROR    The container exited with 3 (invalid config), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
+  
+    ''',
+  })
+# ---
+# name: test_container_scan_of_the_fixture
+  dict({
+    'exit_code': 2,
+    'host_output_after_container': '''
+                   ERROR    Container execution failed with code 2
+      
+      === ASH Scan Completed in <DURATION>: Next Steps ===
+      View detailed findings...
+        - SARIF: '<TMP>/out/reports/ash.sarif'
+        - JUnit: '<TMP>/out/reports/ash.junit.xml'
+        - ASH aggregated results JSON available at: '<TMP>/out/ash_aggregated_results.json'
+      
+      === Actionable findings detected! ===
+      To investigate...
+        1. Open one of the summary reports for a user-friendly table of the findings:
+          - HTML report of all findings: '<TMP>/out/reports/ash.html'
+          - Markdown summary: '<TMP>/out/reports/ash.summary.md'
+          - Text summary: '<TMP>/out/reports/ash.summary.txt'
+        2. Use ash report to view a short text summary of the scan in your terminal
+        3. Use ash inspect findings to explore the findings interactively
+        4. Review scanner-specific reports and outputs in the '<TMP>/out/scanners' directory
+      
+      === ASH Exit Codes ===
+        0: Success - No actionable findings or not configured to fail on findings
+        1: Error during execution
+        2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
+      ERROR (2) Exiting due to 1 actionable findings found in ASH scan
+  
+    ''',
+  })
+# ---
+# name: test_powershell_wrapper_default_runner_discovery
+  dict({
+    'exit_code': 0,
+    'first_error_line': '',
+  })
+# ---
+# name: test_powershell_wrapper_scan_of_the_fixture
+  dict({
+    'announced_the_run': True,
+    'exit_code': 2,
+    'last_line': '2',
+  })
+# ---
+# name: test_powershell_wrapper_without_a_runner
+  dict({
+    'exit_code': 1,
+    'first_error_line': 'Invoke-ASH: Unable to resolve an OCI_RUNNER -- exiting',
+  })
+# ---

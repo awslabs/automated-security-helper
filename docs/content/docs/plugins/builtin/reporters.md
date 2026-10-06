@@ -396,10 +396,13 @@ reporters:
 ```
 
 **Key Features**:
-- License identification
-- Copyright information
-- Package relationships
-- File-level details
+- SPDX 2.3 JSON, built from the same CycloneDX SBOM as the `cyclonedx` reporter
+- Declared licenses, when the SBOM gives an SPDX license ID or expression
+- Package versions and `purl` external references
+- `DESCRIBES` and `CONTAINS` relationships from the scanned project to each package
+
+Package-level only: there are no file entries, and download location, concluded
+license and copyright text are `NOASSERTION`.
 
 **Use Cases**:
 - License compliance

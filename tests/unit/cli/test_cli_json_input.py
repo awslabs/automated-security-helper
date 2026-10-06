@@ -300,6 +300,11 @@ class TestScanJsonInputErrors:
 
     def test_no_environment_expansion_in_values(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("ASH_TEST_290", "expanded")
+        # The scan refuses a source directory that does not exist, so the literal,
+        # unexpanded name has to exist (relative to the working directory) for the
+        # assertion below to be reached.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "$ASH_TEST_290").mkdir()
         params = _write(tmp_path, {"source_dir": "$ASH_TEST_290"})
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(app, ["scan", "--cli-json-input", str(params)])

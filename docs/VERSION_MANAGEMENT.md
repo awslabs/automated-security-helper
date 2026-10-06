@@ -160,6 +160,8 @@ Releases are managed with [commitizen](https://commitizen-tools.github.io/commit
 
 To cut a release, run **Actions > ASH - Create Release > Run workflow**. This creates a release PR with the version bump, changelog update, and documentation regeneration. After merging, a tag and GitHub Release are created automatically.
 
+Until the release App described in `DEVELOPMENT.md` under "Release App setup" is configured, the release PR's required checks wait for a maintainer to select **Approve workflows to run** on the PR.
+
 ### Manual Version Bumping (Local)
 
 ```bash

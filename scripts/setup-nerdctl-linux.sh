@@ -31,7 +31,7 @@ set -euo pipefail
 
 NERDCTL_VERSION="2.3.5"
 # sha256 of nerdctl-full-2.3.5-linux-amd64.tar.gz, from the release SHA256SUMS.
-NERDCTL_SHA256_AMD64="b697295c623639734aaab737523c808fd3cc8d3046039fd94fff1744e4c317aa"
+NERDCTL_SHA256_AMD64="b697295c623639734aaab737523c808fd3cc8d3046039fd94fff1744e4c317aa"  # pragma: allowlist secret
 
 # WHY NOT `dpkg --print-architecture`
 #

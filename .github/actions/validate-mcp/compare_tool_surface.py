@@ -21,8 +21,32 @@ it spends the reader's trust and teaches them to re-run red legs.
 
 This script makes the install load-bearing. It speaks the protocol the way a
 client does: the inspector spawns `ashx mcp` over stdio, performs the
-initialization handshake, calls `tools/list`, and prints the server's reply.
+initialization handshake, calls one list method, and prints the server's reply.
 That reply is compared against `tool_surface.golden.json`.
+
+WHICH SURFACES
+--------------
+One spawn per list method, because the inspector CLI runs one method per
+invocation. Each surface is a top-level key of the golden, keyed inside by the
+field a client addresses the entry by:
+
+* `tools` -- `tools/list`, by `name`: description, inputSchema, outputSchema
+* `resources` -- `resources/list`, by `uri`: name, title, description,
+  mimeType, annotations, size
+* `resourceTemplates` -- `resources/templates/list`, by `uriTemplate`: the same
+  fields as a resource. ASH registers no template today, so this is `{}`; it is
+  pinned anyway so the first template to appear is a reviewed addition rather
+  than an unnoticed one.
+* `prompts` -- `prompts/list`, by `name`: title, description, and the
+  `arguments` list (each argument's name, description and `required` flag)
+
+`SURFACES` below is the table that drives all four; adding a surface is one row
+there and a regeneration. The list replies are declarative, exactly as
+`tools/list` is: what a resource *returns* and what a prompt *renders* are
+runtime values and are pinned by syrupy snapshots under tests/snapshot/mcp, not
+here. tests/unit/cli/mcp/test_mcp_wire_golden_in_process.py asserts the same
+golden against the in-process registry with this module's normalization, which
+is what covers the Windows legs this step skips.
 
 WHAT THIS COVERS THAT tests/unit/cli/mcp/test_tool_surface_parity.py CANNOT
 --------------------------------------------------------------------------
@@ -55,6 +79,10 @@ Every normalizer below removes a difference that was *measured* to appear
 between two honest runs. Nothing is normalized speculatively. Over-normalizing
 is how a golden quietly stops detecting anything, so each entry names what was
 measured and how to re-measure it.
+
+The same three rules apply to every surface. None of them is surface-specific,
+which is the point: one normalization, so the four surfaces cannot drift into
+four different definitions of "unchanged".
 
 1. `description` -> `inspect.cleandoc`.
 
@@ -120,9 +148,15 @@ A golden comparison that passes when the golden is missing is worse than no
 check at all, so:
 
 * a missing golden file is a hard failure and is never auto-created
-* a golden that parses but names zero tools is a hard failure
-* a live surface with zero tools is a hard failure, so a broken invocation that
-  emits `{"tools": []}` cannot match an empty golden
+* a golden that lacks one of the surface keys is a hard failure, so a golden
+  written before a surface was added cannot pass by not mentioning it
+* a golden that parses but names zero tools, resources or prompts is a hard
+  failure
+* a live surface with zero tools, resources or prompts is a hard failure, so a
+  broken invocation that emits `{"tools": []}` cannot match an empty golden.
+  `resourceTemplates` is the one surface allowed to be empty, because empty is
+  what ASH serves; it is captured from the same server that just answered the
+  three non-empty methods, so an empty reply there is not a dead handshake.
 * `--update` is the only code path that writes the golden, and CI never passes it
 """
 
@@ -136,14 +170,12 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_GOLDEN = HERE / "tool_surface.golden.json"
-
-# The fields of a `tools/list` entry this check pins. `name` is the dict key.
-COMPARED_FIELDS = ("description", "inputSchema", "outputSchema")
 
 # JSON Schema keywords whose array value is a set, so sorting is lossless.
 SET_VALUED_ARRAY_KEYS = frozenset({"required", "enum"})
@@ -153,6 +185,65 @@ SET_VALUED_ARRAY_KEYS = frozenset({"required", "enum"})
 # print the `tools/list` reply, so both are "the call worked" as far as capturing
 # goes; the portability verdict is reported separately below.
 INSPECTOR_STRICT_FINDINGS_EXIT = 6
+
+
+@dataclass(frozen=True)
+class Surface:
+    """One list method of the MCP wire surface, and how the golden stores it.
+
+    `key` is both the array key in the server's reply and the top-level key in
+    the golden. `identity` is the field a client addresses an entry by, which is
+    what the golden keys entries on. `fields` are the entry fields compared; the
+    identity is the dict key and is not repeated inside the entry.
+    """
+
+    key: str
+    method: str
+    identity: str
+    fields: Tuple[str, ...]
+    noun: str
+    may_be_empty: bool = False
+    strict: bool = False
+
+
+TOOLS = Surface(
+    key="tools",
+    method="tools/list",
+    identity="name",
+    fields=("description", "inputSchema", "outputSchema"),
+    noun="tool",
+    # --strict only means something for tools/list: it checks tool schemas.
+    strict=True,
+)
+RESOURCES = Surface(
+    key="resources",
+    method="resources/list",
+    identity="uri",
+    fields=("name", "title", "description", "mimeType", "annotations", "size"),
+    noun="resource",
+)
+RESOURCE_TEMPLATES = Surface(
+    key="resourceTemplates",
+    method="resources/templates/list",
+    identity="uriTemplate",
+    fields=("name", "title", "description", "mimeType", "annotations"),
+    noun="resource template",
+    may_be_empty=True,
+)
+PROMPTS = Surface(
+    key="prompts",
+    method="prompts/list",
+    identity="name",
+    fields=("title", "description", "arguments"),
+    noun="prompt",
+)
+
+#: Every surface the golden pins, in the order they are captured and reported.
+SURFACES: Tuple[Surface, ...] = (TOOLS, RESOURCES, RESOURCE_TEMPLATES, PROMPTS)
+
+# The fields of a `tools/list` entry this check pins. Kept as a name because it
+# predates the other surfaces and is the tools row of SURFACES.
+COMPARED_FIELDS = TOOLS.fields
 
 
 def _sort_set_valued(value: Any, key: str | None = None) -> Any:
@@ -173,40 +264,49 @@ def _sort_set_valued(value: Any, key: str | None = None) -> Any:
     return value
 
 
-def normalize_tools(tools: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Turn a `tools/list` array into the name-keyed shape the golden stores.
+def normalize_entries(
+    entries: List[Dict[str, Any]], surface: Surface = TOOLS
+) -> Dict[str, Dict[str, Any]]:
+    """Turn a list reply into the identity-keyed shape the golden stores.
 
-    Keying by name is what makes this a set comparison rather than a byte diff:
-    the order the server happens to list its tools in becomes irrelevant, and a
-    tool that appears or disappears shows up as a key difference with its own
-    message instead of as a shifted array.
+    Keying by identity is what makes this a set comparison rather than a byte
+    diff: the order the server happens to list entries in becomes irrelevant,
+    and an entry that appears or disappears shows up as a key difference with
+    its own message instead of as a shifted array.
     """
     out: Dict[str, Dict[str, Any]] = {}
-    for tool in tools:
-        name = tool.get("name")
-        if not name:
+    for item in entries:
+        ident = item.get(surface.identity)
+        if not ident:
             raise SystemExit(
-                f"FAIL: a tools/list entry has no name: {json.dumps(tool)[:200]}"
+                f"FAIL: a {surface.method} entry has no {surface.identity}: "
+                f"{json.dumps(item)[:200]}"
             )
-        if name in out:
+        if ident in out:
             raise SystemExit(
-                f"FAIL: the server returned two tools named {name!r}. The wire "
-                "surface must have unique names; a client keyed by name would "
+                f"FAIL: the server returned two {surface.noun}s with "
+                f"{surface.identity} {ident!r}. The wire surface must have unique "
+                f"{surface.identity}s; a client keyed by {surface.identity} would "
                 "silently lose one of them."
             )
         entry: Dict[str, Any] = {}
-        for field in COMPARED_FIELDS:
-            if field not in tool:
+        for field in surface.fields:
+            if field not in item:
                 continue
-            value = tool[field]
+            value = item[field]
             if field == "description":
                 # See NORMALIZATION note 1.
                 value = inspect.cleandoc(value or "")
             else:
                 value = _sort_set_valued(value)
             entry[field] = value
-        out[name] = entry
+        out[ident] = entry
     return out
+
+
+def normalize_tools(tools: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """`normalize_entries` for `tools/list`, under the name it was written with."""
+    return normalize_entries(tools, TOOLS)
 
 
 def _pretty(value: Any) -> List[str]:
@@ -215,9 +315,12 @@ def _pretty(value: Any) -> List[str]:
 
 
 def capture(
-    inspector: str, ash: str, extra_args: List[str] | None = None
+    inspector: str,
+    ash: str,
+    extra_args: List[str] | None = None,
+    surface: Surface = TOOLS,
 ) -> Tuple[Dict[str, Any], int, str]:
-    """Run one real handshake and return (payload, portability_exit, stderr).
+    """Run one real handshake and return (payload, inspector_exit, stderr).
 
     Argument order is load-bearing and not obvious. The target command must come
     immediately after `--cli`, before `--method`. Moving `--method tools/list`
@@ -231,59 +334,75 @@ def capture(
     target, and it needs no port, no TLS and no auth header, so the check tests
     the protocol rather than a listener configuration.
 
-    Treating exit 6 as a successful capture is measured, not assumed. Against a
-    stub server that answers `tools/list` with a property whose schema is the bare
+    Treating exit 6 as a successful capture is measured, not assumed, and applies
+    only to `tools/list`, the one method run with `--strict`. Against a stub
+    server that answers `tools/list` with a property whose schema is the bare
     boolean `true`, inspector 2.8.0 prints the full `tools/list` reply on stdout,
     the per-tool error detail on stderr, and exits 6. So a portability error does
     not cost the golden comparison: both verdicts are reported from one spawn.
+    The other three methods run without `--strict`, measured to exit 0 against
+    `ash mcp` with inspector 2.8.0, so anything else from them is a failure.
     """
-    cmd = [inspector, "--cli", ash, "mcp", "--method", "tools/list", "--strict"]
+    cmd = [inspector, "--cli", ash, "mcp", "--method", surface.method]
+    if surface.strict:
+        cmd.append("--strict")
     cmd.extend(extra_args or [])
+    accepted = (0, INSPECTOR_STRICT_FINDINGS_EXIT) if surface.strict else (0,)
     print(f"$ {' '.join(cmd)}", flush=True)
     proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode not in (0, INSPECTOR_STRICT_FINDINGS_EXIT):
+    if proc.returncode not in accepted:
         sys.stdout.write(proc.stdout)
         sys.stderr.write(proc.stderr)
         raise SystemExit(
-            f"FAIL: the MCP Inspector exited {proc.returncode}. That is neither a "
-            f"clean run (0) nor a schema-portability finding "
-            f"({INSPECTOR_STRICT_FINDINGS_EXIT}), so the handshake itself did not "
-            "complete -- the server did not start, did not negotiate, or did not "
-            "answer tools/list. The inspector output is above."
+            f"FAIL: the MCP Inspector exited {proc.returncode} on {surface.method}. "
+            f"Accepted exits for this method are {list(accepted)}, so the handshake "
+            "itself did not complete -- the server did not start, did not "
+            f"negotiate, or did not answer {surface.method}. The inspector output "
+            "is above."
         )
     if not proc.stdout.strip():
         sys.stderr.write(proc.stderr)
         raise SystemExit(
             f"FAIL: the MCP Inspector exited {proc.returncode} but printed no "
-            "tools/list reply. Nothing was measured, so this cannot be reported "
-            "as a pass. The inspector stderr is above."
+            f"{surface.method} reply. Nothing was measured, so this cannot be "
+            "reported as a pass. The inspector stderr is above."
         )
     try:
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
         sys.stdout.write(proc.stdout[:4000])
         raise SystemExit(
-            f"FAIL: the MCP Inspector's tools/list reply is not JSON: {exc}"
+            f"FAIL: the MCP Inspector's {surface.method} reply is not JSON: {exc}"
         ) from exc
     return payload, proc.returncode, proc.stderr
 
 
-def live_surface(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    tools = payload.get("tools")
-    if not isinstance(tools, list) or not tools:
+def live_surface(
+    payload: Dict[str, Any], surface: Surface = TOOLS
+) -> Dict[str, Dict[str, Any]]:
+    entries = payload.get(surface.key)
+    if not isinstance(entries, list):
         raise SystemExit(
-            "FAIL: the server returned no tools. An empty live surface would "
-            "compare equal to an empty golden, so it is refused here rather "
+            f"FAIL: the {surface.method} reply has no {surface.key!r} array. "
+            f"Reply was: {json.dumps(payload)[:400]}"
+        )
+    if not entries and not surface.may_be_empty:
+        raise SystemExit(
+            f"FAIL: the server returned no {surface.noun}s. An empty live surface "
+            "would compare equal to an empty golden, so it is refused here rather "
             f"than reported as a match. Reply was: {json.dumps(payload)[:400]}"
         )
-    return normalize_tools(tools)
+    return normalize_entries(entries, surface)
 
 
-def load_golden(path: Path) -> Dict[str, Dict[str, Any]]:
-    """Read the golden, refusing every shape that would make the check vacuous."""
+def load_golden(path: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Read the golden, refusing every shape that would make the check vacuous.
+
+    Returns one identity-keyed dict per surface, keyed by `Surface.key`.
+    """
     if not path.is_file():
         raise SystemExit(
-            f"FAIL: the golden MCP tool surface is missing: {path}\n"
+            f"FAIL: the golden MCP wire surface is missing: {path}\n"
             "\n"
             "This step does not auto-create it. A golden comparison that passes "
             "when the golden is absent asserts nothing while looking green, "
@@ -291,7 +410,7 @@ def load_golden(path: Path) -> Dict[str, Dict[str, Any]]:
             "\n"
             "If the file was deleted by accident, restore it from git:\n"
             f"    git checkout -- {_repo_relative(path)}\n"
-            "If the tool surface genuinely changed and the golden needs to be "
+            "If the wire surface genuinely changed and the golden needs to be "
             "rewritten, regenerate it deliberately and review the diff:\n"
             "    python .github/actions/validate-mcp/compare_tool_surface.py --update"
         )
@@ -301,13 +420,31 @@ def load_golden(path: Path) -> Dict[str, Dict[str, Any]]:
         raise SystemExit(
             f"FAIL: the golden at {path} is not valid JSON: {exc}"
         ) from exc
-    tools = raw.get("tools")
-    if not isinstance(tools, dict) or not tools:
-        raise SystemExit(
-            f"FAIL: the golden at {path} names no tools. An empty golden matches "
-            "anything, so it is refused. Regenerate it with --update."
-        )
-    return tools
+    golden: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for surface in SURFACES:
+        if surface.key not in raw:
+            raise SystemExit(
+                f"FAIL: the golden at {path} has no {surface.key!r} key, so it "
+                f"records nothing about {surface.method}. A surface the golden "
+                "does not mention cannot be compared, and passing it would hide "
+                "every change to it. Regenerate it with --update and review the "
+                "addition."
+            )
+        entries = raw[surface.key]
+        if not isinstance(entries, dict):
+            raise SystemExit(
+                f"FAIL: the golden at {path} stores {surface.key!r} as "
+                f"{type(entries).__name__}, not an object keyed by "
+                f"{surface.identity}. Regenerate it with --update."
+            )
+        if not entries and not surface.may_be_empty:
+            raise SystemExit(
+                f"FAIL: the golden at {path} names no {surface.noun}s. An empty "
+                "golden matches anything, so it is refused. Regenerate it with "
+                "--update."
+            )
+        golden[surface.key] = entries
+    return golden
 
 
 def _repo_relative(path: Path) -> str:
@@ -324,41 +461,48 @@ def _repo_relative(path: Path) -> str:
 
 
 def compare(
-    live: Dict[str, Dict[str, Any]], golden: Dict[str, Dict[str, Any]]
+    live: Dict[str, Dict[str, Any]],
+    golden: Dict[str, Dict[str, Any]],
+    surface: Surface = TOOLS,
 ) -> List[str]:
     """Return one human-readable problem block per difference; empty means match."""
     problems: List[str] = []
+    noun = surface.noun.upper()
 
     vanished = sorted(set(golden) - set(live))
     appeared = sorted(set(live) - set(golden))
 
     if vanished:
         problems.append(
-            "TOOL(S) GONE FROM THE WIRE SURFACE: "
+            f"{noun}(S) GONE FROM THE WIRE SURFACE: "
             + ", ".join(vanished)
-            + "\n  The golden says a client can call these and the server no "
+            + "\n  The golden says a client can use these and the server no "
             "longer offers them. Every client written against them breaks."
         )
     if appeared:
         problems.append(
-            "NEW TOOL(S) ON THE WIRE SURFACE: "
+            f"NEW {noun}(S) ON THE WIRE SURFACE: "
             + ", ".join(appeared)
             + "\n  The server offers these and the golden does not record them. "
-            "A new tool is a published API: document it, then regenerate the "
-            "golden so the addition is reviewed rather than discovered."
+            f"A new {surface.noun} is a published API: document it, then "
+            "regenerate the golden so the addition is reviewed rather than "
+            "discovered."
         )
 
-    for name in sorted(set(live) & set(golden)):
-        for field in COMPARED_FIELDS:
-            want = golden[name].get(field)
-            got = live[name].get(field)
+    for ident in sorted(set(live) & set(golden)):
+        label = ident if surface is TOOLS else f"{surface.noun} {ident}"
+        for field in surface.fields:
+            want = golden[ident].get(field)
+            got = live[ident].get(field)
             if want == got:
                 continue
             if want is None:
-                problems.append(f"{name}: gained a {field} the golden does not record.")
+                problems.append(
+                    f"{label}: gained a {field} the golden does not record."
+                )
                 continue
             if got is None:
-                problems.append(f"{name}: lost the {field} the golden records.")
+                problems.append(f"{label}: lost the {field} the golden records.")
                 continue
             if field == "description":
                 want_lines = str(want).splitlines()
@@ -370,34 +514,50 @@ def compare(
                 difflib.unified_diff(
                     want_lines,
                     got_lines,
-                    fromfile=f"golden/{name}.{field}",
-                    tofile=f"live/{name}.{field}",
+                    fromfile=f"golden/{surface.key}/{ident}.{field}",
+                    tofile=f"live/{surface.key}/{ident}.{field}",
                     lineterm="",
                 )
             )
-            problems.append(f"{name}: {field} changed.\n{diff}")
+            problems.append(f"{label}: {field} changed.\n{diff}")
 
     return problems
 
 
-def write_golden(path: Path, live: Dict[str, Dict[str, Any]]) -> None:
-    """Rewrite the golden from a live capture.
+def compare_all(
+    live: Dict[str, Dict[str, Dict[str, Any]]],
+    golden: Dict[str, Dict[str, Dict[str, Any]]],
+) -> List[str]:
+    """`compare` over every surface, in SURFACES order."""
+    problems: List[str] = []
+    for surface in SURFACES:
+        problems.extend(
+            compare(live.get(surface.key, {}), golden.get(surface.key, {}), surface)
+        )
+    return problems
+
+
+def golden_document(live: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Any]:
+    """The golden file's content for a live capture of every surface.
 
     The leading `_` keys are for the reader, not the comparison -- `load_golden`
-    reads only `tools`. They are deliberately static text: a provenance field
-    that churned between captures (the interpreter version used, say) would put
-    noise in every regeneration and train reviewers to wave the diff through,
+    reads only the surface keys. They are deliberately static text: a provenance
+    field that churned between captures (the interpreter version used, say) would
+    put noise in every regeneration and train reviewers to wave the diff through,
     which is the habit this whole check is meant to break.
     """
-    document = {
+    document: Dict[str, Any] = {
         "_comment": (
-            "Golden copy of the ASH MCP server's tools/list reply, as a real "
-            "client receives it over stdio. Compared by "
+            "Golden copy of the ASH MCP server's tools/list, resources/list, "
+            "resources/templates/list and prompts/list replies, as a real client "
+            "receives them over stdio. Compared by "
             ".github/actions/validate-mcp/compare_tool_surface.py, which the "
-            "validate-mcp composite action runs in CI. Read that script before "
-            "editing this file: it explains which fields are normalized and why, "
-            "and why regenerating rather than reading a diff is the wrong "
-            "instinct. Do not hand-edit -- regenerate."
+            "validate-mcp composite action runs in CI, and against the "
+            "in-process registry by "
+            "tests/unit/cli/mcp/test_mcp_wire_golden_in_process.py. Read that "
+            "script before editing this file: it explains which fields are "
+            "normalized and why, and why regenerating rather than reading a diff "
+            "is the wrong instinct. Do not hand-edit -- regenerate."
         ),
         "_regenerate": (
             "python .github/actions/validate-mcp/compare_tool_surface.py --update"
@@ -407,10 +567,17 @@ def write_golden(path: Path, live: Dict[str, Dict[str, Any]]) -> None:
             "object keys: sorted (JSON objects are unordered per RFC 8259)",
             "required/enum arrays: sorted (both are sets per JSON Schema)",
         ],
-        "tools": live,
     }
+    for surface in SURFACES:
+        document[surface.key] = live[surface.key]
+    return document
+
+
+def write_golden(path: Path, live: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+    """Rewrite the golden from a live capture of every surface."""
     path.write_text(
-        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(golden_document(live), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -420,7 +587,7 @@ def main() -> int:
         "--golden",
         type=Path,
         default=DEFAULT_GOLDEN,
-        help="Path to the golden tool surface (default: %(default)s)",
+        help="Path to the golden wire surface (default: %(default)s)",
     )
     parser.add_argument(
         "--inspector",
@@ -466,11 +633,18 @@ def main() -> int:
     if not Path(ash).exists():
         raise SystemExit(f"FAIL: ASH executable not found ({args.ash!r}).")
 
-    payload, portability_exit, inspector_stderr = capture(
-        inspector, ash, args.inspector_args
-    )
-    live = live_surface(payload)
-    sys.stderr.write(inspector_stderr)
+    live: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    portability_exit = 0
+    for surface in SURFACES:
+        payload, exit_code, inspector_stderr = capture(
+            inspector, ash, args.inspector_args, surface
+        )
+        live[surface.key] = live_surface(payload, surface)
+        sys.stderr.write(inspector_stderr)
+        if surface.strict:
+            portability_exit = exit_code
+
+    counts = ", ".join(f"{len(live[s.key])} {s.key}" for s in SURFACES)
 
     if args.update:
         try:
@@ -478,8 +652,8 @@ def main() -> int:
         except SystemExit:
             before = {}
         write_golden(args.golden, live)
-        changed = compare(live, before) if before else []
-        print(f"\nWrote {args.golden} with {len(live)} tools.")
+        changed = compare_all(live, before) if before else []
+        print(f"\nWrote {args.golden} with {counts}.")
         if before and not changed:
             print("The surface was already current; the golden is unchanged.")
         elif before:
@@ -487,13 +661,11 @@ def main() -> int:
         return 0
 
     golden = load_golden(args.golden)
-    problems = compare(live, golden)
+    problems = compare_all(live, golden)
 
-    print(
-        f"\nCompared {len(live)} live tool(s) against {len(golden)} in "
-        f"{args.golden.name}."
-    )
-    print(f"Fields compared per tool: {', '.join(COMPARED_FIELDS)}.")
+    print(f"\nCompared {counts} live against {args.golden.name}.")
+    for surface in SURFACES:
+        print(f"Fields compared per {surface.noun}: {', '.join(surface.fields)}.")
 
     failed = False
 
@@ -504,7 +676,7 @@ def main() -> int:
             print(block)
             print()
         print(
-            "The golden records the tools/list reply a client receives. If this "
+            "The golden records the list replies a client receives. If this "
             "change is intended, regenerate it and put the diff in the pull "
             "request so a reviewer sees the API change:\n"
             "    python .github/actions/validate-mcp/compare_tool_surface.py --update\n"

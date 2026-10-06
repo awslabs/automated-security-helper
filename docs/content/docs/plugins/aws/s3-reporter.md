@@ -233,8 +233,13 @@ Files are uploaded with the following naming pattern:
 ```
 
 For example:
-- `ash-reports/ash-report-2024-01-15T10:30:00Z.json`
-- `security-scans/ash-report-2024-01-15T10:30:00Z.yaml`
+- `ash-reports/ash-report-2024-01-15T10:30:00+00:00.json`
+- `security-scans/ash-report-2024-01-15T10:30:00+00:00.yaml`
+
+`{timestamp}` is the scan's `metadata.generated_at`, so each scan gets its own
+object, and re-running `ash report --format s3` against the same results replaces
+that scan's object rather than adding another. In a workspace scan the project key
+is inserted after the prefix: `{key_prefix}{project}/ash-report-{timestamp}.{extension}`.
 
 ### Local Backup
 
@@ -242,6 +247,23 @@ The reporter also creates a local copy of the uploaded report in:
 ```
 {output_dir}/reports/s3-report.{extension}
 ```
+
+### Upload receipt
+
+`{output_dir}/reports/ash.s3.json` records where the report went:
+
+```json
+{
+  "url": "s3://my-security-reports/ash-reports/ash-report-2024-01-15T10:30:00+00:00.json",
+  "bucket": "my-security-reports",
+  "key": "ash-reports/ash-report-2024-01-15T10:30:00+00:00.json",
+  "file_format": "json",
+  "local_copy": "/path/to/output/reports/s3-report.json"
+}
+```
+
+If the upload fails, no receipt is written and the reporter is logged as having
+produced no report.
 
 ## Troubleshooting
 

@@ -235,7 +235,7 @@ reporters:
 
 [SPDX](https://spdx.dev/) (Software Package Data Exchange) is a Linux Foundation standard focused on license compliance and software composition.
 
-> **Note:** The SPDX reporter is currently a stub and is disabled by default. It does not yet produce valid SPDX 2.3 JSON -- the output is a raw YAML model dump. A proper SPDX document generator is planned for a future release.
+The SPDX reporter is disabled by default. It writes an SPDX 2.3 JSON document built from the scan's CycloneDX SBOM, so both reports list the same components. The document describes a root package for the scanned project, which contains one package per SBOM component, with its version, its `purl` as an external reference, and its declared license when the SBOM gives an SPDX license ID or expression. Fields ASH cannot know, such as download location, concluded license and copyright text, are `NOASSERTION`. With no SBOM scanner in the run, the document contains only the root package.
 
 **Configuration:**
 ```yaml

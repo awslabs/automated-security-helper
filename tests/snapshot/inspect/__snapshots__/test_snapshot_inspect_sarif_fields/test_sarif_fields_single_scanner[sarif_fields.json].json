@@ -1,0 +1,29 @@
+{
+  "runs[].results[].ruleId": {
+    "bandit": true
+  },
+  "runs[].results[].level": {
+    "bandit": true
+  },
+  "runs[].results[].message.text": {
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.artifactLocation.uri": {
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.region.startLine": {
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.region.endLine": {
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.region.snippet.text": {
+    "bandit": true
+  },
+  "runs[].results[].fingerprints.bandit/v1": {
+    "bandit": true
+  },
+  "runs[].results[].properties": {
+    "bandit": true
+  }
+}

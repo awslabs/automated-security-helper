@@ -1,0 +1,11 @@
+$ ash config lint -c broken.yaml
+Linting configuration file: broken.yaml
+
+Found 1 issue(s):
+  ❌ Failed to parse config file: while parsing a flow sequence
+  in "broken.yaml", line 1, column 15
+expected ',' or ']', but got '<stream end>'
+  in "broken.yaml", line 2, column 1
+
+  Errors: 1
+[exit code: 1]

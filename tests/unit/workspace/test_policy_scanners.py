@@ -149,7 +149,7 @@ def _project(root, name, body=None, secret=False):
         # A detect-secrets keyword hit. Deliberately a made-up literal, and
         # deliberately not a token shaped like any real credential format.
         (project / "src" / "settings.py").write_text(
-            'aws_secret_access_key = "notarealsecretjustatestfixture0000000000"\n',
+            'aws_secret_access_key = "notarealsecretjustatestfixture0000000000"\n',  # pragma: allowlist secret
             encoding="utf-8",
         )
     if body is not None:

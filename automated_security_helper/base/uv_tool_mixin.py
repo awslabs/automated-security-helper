@@ -15,6 +15,7 @@ which are defined on PluginBase.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -436,6 +437,9 @@ class UVToolMixin:
         * A tool uv cannot see, verified NOT to satisfy it: offline, the
           dependency is unsatisfied and ``dependency_unavailable_reason`` says
           what is missing. Online, keep uv, which can resolve the missing pieces.
+          Offline, a tool from the Nix store that cannot be verified at all is
+          treated the same way: ``--mode nix`` promises the pinned tool, and the
+          uv fallback would run an unpinned one or fail on an uncached wheel.
         * Anything else (not verifiable, or a uv-visible tool whose PATH
           executable does not verify): keep uv, the previous behavior, rather
           than guess. If that resolve then fails offline,
@@ -492,15 +496,47 @@ class UVToolMixin:
             self.dependencies_satisfied = True
             return True
 
+        # A tool from the Nix store is the pinned one `--mode nix` exists to run.
+        # Falling back to `uv tool run --offline` would run whatever PyPI build
+        # uv's cache happens to hold, or fail on the first wheel it lacks, so a
+        # Nix tool that cannot be verified is as unusable offline as one that
+        # verifiably falls short.
+        from_nix = verdict.from_nix or os.path.realpath(executable).startswith(
+            "/nix/store/"
+        )
+
         # Only for a tool uv cannot see. When uv can, the executable on PATH may
         # be a different install than uv's, so failing it says nothing about
         # whether `uv tool run --offline` will work.
-        if verdict.status == "unsatisfied" and offline and source == "pre_installed":
+        if (
+            offline
+            and source == "pre_installed"
+            and (
+                verdict.status == "unsatisfied"
+                or (verdict.status == "unverifiable" and from_nix)
+            )
+        ):
+            if from_nix:
+                remedy = (
+                    "It comes from the Nix flake, so ASH will not substitute a uv "
+                    "install for it. Pin a build in flake.nix that satisfies "
+                    f"{requirement!r}, or set this scanner's tool_version to the "
+                    "version the flake provides."
+                )
+            else:
+                remedy = (
+                    "uv cannot fetch what is missing while offline. Install it "
+                    f"before going offline, e.g. `uv tool install '{requirement}'`, "
+                    "or rebuild the image with `ashx build-image --offline`."
+                )
+            cannot = (
+                "cannot be used"
+                if verdict.status == "unsatisfied"
+                else "could not be verified"
+            )
             reason = (
-                f"Offline mode: {self.command} at {executable} cannot be used: "
-                f"{verdict.detail}. uv cannot fetch what is missing while offline. "
-                f"Install it before going offline, e.g. `uv tool install "
-                f"'{requirement}'`, or rebuild the image with `ashx build-image --offline`."
+                f"Offline mode: {self.command} at {executable} {cannot}: "
+                f"{verdict.detail}. {remedy}"
             )
             self.dependency_unavailable_reason = reason
             self._plugin_log(reason, level=logging.ERROR)

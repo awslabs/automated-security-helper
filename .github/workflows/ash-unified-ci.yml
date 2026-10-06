@@ -30,13 +30,13 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 90 jobs and
-  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~192 runner
-  # jobs instead of ~96. The duplicate verdict on a queued merge is the price of
+  # Sized off a count rather than a guess: this workflow expands to 91 jobs and
+  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~194 runner
+  # jobs instead of ~97. The duplicate verdict on a queued merge is the price of
   # covering the bypassed one, and it was accepted deliberately. It used to be ~350
   # against ~175, before install-validation's five cheap install methods stopped being
   # 105 separate legs, which nearly halves what this deliberate duplication costs.
-  # The 90 is derived from a census rather than being one -- see the note on the
+  # The 91 is derived from a census rather than being one -- see the note on the
   # required-checks job for which link in that chain was actually measured.
   #
   # Both counts are job counts, from
@@ -282,6 +282,43 @@ jobs:
         run: |
           uv run --group dev --with 'ty==0.0.84' ty --version
           uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/
+
+  # A changed snapshot or other golden file must arrive in a commit whose
+  # `Snapshot-Update:` trailer says why the output changed; see DEVELOPMENT.md
+  # "Snapshot tests" and the docstring of the script below.
+  #
+  # Its own job rather than a `lint` step because it needs the full history and
+  # `lint` does not: `fetch-depth: 0` is what puts both ends of the event's range, and
+  # every commit between them, in the clone. It is in required-checks' `needs` like
+  # every other job, and it has no job-level `if:` -- the census refuses a skipped
+  # result, and every event this workflow runs on has a defined range (the script
+  # documents how each one is chosen, including workflow_dispatch).
+  #
+  # Python on the runner image is enough: the script is stdlib only and calls git, so
+  # there is no setup-python or uv step to fail on a registry round trip.
+  snapshot-trailers:
+    name: snapshot-trailers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # --self-test runs FIRST, for the reason given on the publish-surfaces step in
+      # `lint`: a checker that has degenerated into finding nothing exits 0 and reads
+      # as a clean tree. `set -e` so a failing self-test stops the step.
+      - name: Assert every golden-file change carries a Snapshot-Update trailer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-snapshot-trailers.py --self-test
+          python3 .github/scripts/check-snapshot-trailers.py
+      # syrupy fails the session for a snapshot its collected module no longer asserts,
+      # but a snapshot whose module was deleted or renamed is never opened, so it
+      # cannot be reported there. This maps each one back to its module.
+      - name: Assert every snapshot belongs to an existing test module
+        shell: bash
+        run: python3 .github/scripts/check-snapshot-trailers.py --orphans
 
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
@@ -1153,8 +1190,8 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Every job above names itself from its matrix, so this workflow contributes 115 check runs
-  # to a pull request and not one of their names is stable. A ruleset's
+  # Most jobs above name themselves from their matrix, so this workflow contributes 116 check
+  # runs to a pull request and few of their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` means enumerating all 25 of its names -- and then any matrix edit either orphans
   # a required context that no longer runs, which leaves a pull request pending forever, or
@@ -1169,26 +1206,26 @@ jobs:
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 115 is this workflow's own contribution: 90 jobs, plus the 25 `PyTest - ...` check runs
+  # 116 is this workflow's own contribution: 91 jobs, plus the 25 `PyTest - ...` check runs
   # that mikepenz/action-junit-report publishes from inside the unit-test legs -- one per leg.
   # Those 25 are not jobs and land in a separate check suite, so a job census alone undercounts
   # what this file puts on a pull request -- that gap is most of why the old figure of 84 looked
   # defensible.
   #
-  # The 90 is arithmetic on a measured anchor, and the chain is worth keeping because each link
+  # The 91 is arithmetic on a measured anchor, and the chain is worth keeping because each link
   # is a different kind of claim. Run 35370310502 reported `total_count` 168 with 168 rows
   # received, `unit-test` 25 and `install-validation` 113 by name, and `required-checks` absent
   # because it is `needs`-gated and is not created until the run resolves: 168 + 1 = 169 jobs,
   # measured. `integration-test` landed after that run, so the pre-collapse figure is 170, and
   # the run has never been re-taken to confirm it. Folding pip, pipx, uvx, pre-commit and mcp
-  # into the single `bundle` method took install-validation from 113 legs to 33, so 170 - 80 = 90.
-  # Only the 169 was counted; 170 and 90 are derived, and a fresh census is what would settle
-  # them. The 25 `PyTest - ...` runs are derived from the unit-test leg count by the one-per-leg
+  # into the single `bundle` method took install-validation from 113 legs to 33, so 170 - 80 = 90,
+  # and the unmatrixed snapshot-trailers job makes it 91. Only the 169 was counted; 170, 90 and
+  # 91 are derived, and a fresh census is what would settle them. The 25 `PyTest - ...` runs are derived from the unit-test leg count by the one-per-leg
   # rule #602 measured at 20 legs, not counted again, and the collapse does not touch them.
   #
-  # Where 90 comes from, per job: lint 1, unit-test 25, scan-validation 24,
-  # external-target-scan 2, multi-project-attribution 2, deploy-aws-helpers 1,
-  # integration-test 1, install-validation 33, required-checks 1.
+  # Where 91 comes from, per job: lint 1, snapshot-trailers 1, unit-test 25,
+  # scan-validation 24, external-target-scan 2, multi-project-attribution 2,
+  # deploy-aws-helpers 1, integration-test 1, install-validation 33, required-checks 1.
   #
   # unit-test reached 25 from three independent changes that all had to land: adding 3.14 to the
   # axis (18 -> 23), removing the macos-14 exclusion for 3.10 and 3.11 (#599), and nothing in
@@ -1210,8 +1247,9 @@ jobs:
   # ash-install-methods.yml still shares are those last four. Its pip, pipx, uvx, pre-commit,
   # mcp and nix legs now have the namespace to themselves.
   # ash-install-methods.yml is path-filtered to pyproject.toml, hatch_build.py,
-  # automated_security_helper/**, .pre-commit-hooks.yaml, Formula/** and itself, so whether it
-  # runs is decided by whether the commit touches those paths. A CI-plumbing commit like the
+  # automated_security_helper/**, .pre-commit-hooks.yaml, Formula/**, itself, and the nix
+  # leg's action and snapshot module, so whether it runs is decided by whether the commit
+  # touches those paths. A CI-plumbing commit like the
   # one measured here triggers no run of it -- confirmed by querying that workflow for runs on
   # the branch and getting zero, rather than assuming the filter excluded it -- and sees 186
   # check runs over 185 names. A commit touching package code triggers both surfaces and sees
@@ -1227,8 +1265,8 @@ jobs:
   # NOT restated for this branch -- that commit predates Python 3.14, so re-labelling its numbers
   # would be inventing a measurement rather than citing one. What can be said is the delta this
   # file contributes: 25 more jobs and 5 more `PyTest - ...` runs than at b5111830, then one more
-  # job for integration-test and 80 fewer for the install-validation collapse, so a comparable
-  # CI-plumbing commit would see 137 rather than 186. That is arithmetic on a measured baseline,
+  # job for integration-test, 80 fewer for the install-validation collapse and one more for
+  # snapshot-trailers, so a comparable CI-plumbing commit would see 138 rather than 186. That is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
   # This job's name does not depend on the matrix, so it can be required once and stay correct
@@ -1271,6 +1309,7 @@ jobs:
     if: always()
     needs:
       - lint
+      - snapshot-trailers
       - unit-test
       - scan-validation
       - external-target-scan

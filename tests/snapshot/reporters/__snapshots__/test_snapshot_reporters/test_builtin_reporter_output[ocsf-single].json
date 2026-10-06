@@ -1,0 +1,531 @@
+[
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "subprocess call with shell=True identified, security issue.",
+      "title": "B602 in app.py - subprocess call with shell=True identified, security issue.",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 9,
+            "file": {
+              "name": "app.py",
+              "path": "app/app.py",
+              "type_id": 1
+            },
+            "start_line": 9
+          }
+        ],
+        "cve": {
+          "desc": "subprocess call with shell=True identified, security issue.",
+          "uid": "B602"
+        },
+        "desc": "subprocess call with shell=True identified, security issue.",
+        "severity": "ERROR",
+        "title": "B602"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
+      "title": "B105 in app.py - Possible hardcoded password: 'hunter2-not-a-real-secret'",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 2,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 5,
+            "file": {
+              "name": "app.py",
+              "path": "app/app.py",
+              "type_id": 1
+            },
+            "start_line": 5
+          }
+        ],
+        "cve": {
+          "desc": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
+          "uid": "B105"
+        },
+        "desc": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
+        "severity": "NOTE",
+        "title": "B105"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "S3 Bucket has an ACL defined which allows public READ access.",
+      "title": "CKV_AWS_20 in main.tf - S3 Bucket has an ACL defined which allows public READ access.",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 9,
+            "file": {
+              "name": "main.tf",
+              "path": "infra/main.tf",
+              "type_id": 1
+            },
+            "start_line": 6
+          }
+        ],
+        "cve": {
+          "desc": "S3 Bucket has an ACL defined which allows public READ access.",
+          "uid": "CKV_AWS_20"
+        },
+        "desc": "S3 Bucket has an ACL defined which allows public READ access.",
+        "severity": "ERROR",
+        "title": "CKV_AWS_20"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Ensure the S3 bucket has access logging enabled",
+      "title": "CKV_AWS_18 in main.tf - Ensure the S3 bucket has access logging enabled",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 4,
+            "file": {
+              "name": "main.tf",
+              "path": "infra/main.tf",
+              "type_id": 1
+            },
+            "start_line": 2
+          }
+        ],
+        "cve": {
+          "desc": "Ensure the S3 bucket has access logging enabled",
+          "uid": "CKV_AWS_18"
+        },
+        "desc": "Ensure the S3 bucket has access logging enabled",
+        "severity": "WARNING",
+        "title": "CKV_AWS_18"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Ensure the last USER is not root",
+      "title": "CKV_DOCKER_8 in Dockerfile - Ensure the last USER is not root",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 5,
+            "file": {
+              "name": "Dockerfile",
+              "path": "Dockerfile",
+              "type_id": 1
+            },
+            "start_line": 5
+          }
+        ],
+        "cve": {
+          "desc": "Ensure the last USER is not root",
+          "uid": "CKV_DOCKER_8"
+        },
+        "desc": "Ensure the last USER is not root",
+        "severity": "WARNING",
+        "title": "CKV_DOCKER_8"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Ensure that HEALTHCHECK instructions have been added to container images",
+      "title": "CKV_DOCKER_2 in Dockerfile - Ensure that HEALTHCHECK instructions have been added to container images",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 2,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 6,
+            "file": {
+              "name": "Dockerfile",
+              "path": "Dockerfile",
+              "type_id": 1
+            },
+            "start_line": 1
+          }
+        ],
+        "cve": {
+          "desc": "Ensure that HEALTHCHECK instructions have been added to container images",
+          "uid": "CKV_DOCKER_2"
+        },
+        "desc": "Ensure that HEALTHCHECK instructions have been added to container images",
+        "severity": "NOTE",
+        "title": "CKV_DOCKER_2"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "The last user in the container is 'root'. Switch back to an unprivileged user.",
+      "title": "dockerfile.security.last-user-is-root.last-user-is-root in Dockerfile - The last user in the container is 'root'. Switch...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 2,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 5,
+            "file": {
+              "name": "Dockerfile",
+              "path": "Dockerfile",
+              "type_id": 1
+            },
+            "start_line": 5
+          }
+        ],
+        "cve": {
+          "desc": "The last user in the container is 'root'. Switch back to an unprivileged user.",
+          "uid": "dockerfile.security.last-user-is-root.last-user-is-root"
+        },
+        "desc": "The last user in the container is 'root'. Switch back to an unprivileged user.",
+        "severity": "NOTE",
+        "title": "dockerfile.security.last-user-is-root.last-user-is-root"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Command string built with an f-string; prefer an argument list.",
+      "title": "python.lang.best-practice.unpinned-shell-command in app.py - Command string built with an f-string; prefer an argument l...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 1,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 9,
+            "file": {
+              "name": "app.py",
+              "path": "app/app.py",
+              "type_id": 1
+            },
+            "start_line": 9
+          }
+        ],
+        "cve": {
+          "desc": "Command string built with an f-string; prefer an argument list.",
+          "uid": "python.lang.best-practice.unpinned-shell-command"
+        },
+        "desc": "Command string built with an f-string; prefer an argument list.",
+        "severity": "NONE",
+        "title": "python.lang.best-practice.unpinned-shell-command"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Secret of type Secret Keyword detected in file app/app.py at line 5",
+      "title": "SECRET-SECRET-KEYWORD in app.py - Secret of type Secret Keyword detected in file app/app.py at line 5",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "Suppressed",
+    "status_detail": "kind: inSource; justification: (ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret",
+    "status_id": 3,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 5,
+            "file": {
+              "name": "app.py",
+              "path": "app/app.py",
+              "type_id": 1
+            },
+            "start_line": 5
+          }
+        ],
+        "cve": {
+          "desc": "Secret of type Secret Keyword detected in file app/app.py at line 5",
+          "uid": "SECRET-SECRET-KEYWORD"
+        },
+        "desc": "Secret of type Secret Keyword detected in file app/app.py at line 5",
+        "severity": "ERROR",
+        "title": "SECRET-SECRET-KEYWORD"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
+      "title": "CVE-2018-18074-requests in requirements.txt - A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 1,
+            "file": {
+              "name": "requirements.txt",
+              "path": "requirements.txt",
+              "type_id": 1
+            },
+            "start_line": 1
+          }
+        ],
+        "cve": {
+          "desc": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
+          "uid": "CVE-2018-18074-requests"
+        },
+        "desc": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
+        "severity": "ERROR",
+        "title": "CVE-2018-18074-requests"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
+      "title": "CVE-2023-32681-requests in requirements.txt - A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at r...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 1,
+            "file": {
+              "name": "requirements.txt",
+              "path": "requirements.txt",
+              "type_id": 1
+            },
+            "start_line": 1
+          }
+        ],
+        "cve": {
+          "desc": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
+          "uid": "CVE-2023-32681-requests"
+        },
+        "desc": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
+        "severity": "WARNING",
+        "title": "CVE-2023-32681-requests"
+      }
+    ]
+  }
+]
