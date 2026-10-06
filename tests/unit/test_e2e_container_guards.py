@@ -64,6 +64,12 @@ def test_publish_guard_reads_the_container_channel():
         "      - uses: docker/login-action@0123456789abcdef0123456789abcdef01234567 # v3",
         "  sudo nerdctl push example/ash",
         "  docker buildx build -t example/ash --push .",
+        '"$OCI" push "$TAG_FRESH"',
+        "$OCI image push example/ash",
+        '"${RUNNER}" login ghcr.io',
+        "  --push \\",
+        "docker manifest push ghcr.io/example/ash",
+        "docker buildx imagetools create -t ghcr.io/example/ash:1 example/ash:1",
     ],
 )
 def test_publish_guard_fails_a_planted_push(tmp_path, capsys, line):

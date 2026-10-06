@@ -17,9 +17,11 @@ WHAT IS CHECKED
 
 Every tracked file under the CI roots below, line by line, against the shapes that log in
 to a registry or push to one: `docker push`, `docker image push`, `docker login`,
-`podman`/`buildah`/`nerdctl`/`finch`/`crane`/`oras` push, `skopeo copy`, `buildx ...
---push`, a registry or `push=true` build output, `push: true`, and the login and
-build-and-push actions. Lines that are wholly a `#` or `//` comment are skipped, so
+`docker manifest push`, `podman`/`buildah`/`nerdctl`/`finch`/`crane`/`oras` push, a
+runtime held in a shell variable followed by push or login (`"$OCI" push`), `skopeo
+copy`, `buildx imagetools create`, `--push` on any line (a continued `buildx build`
+puts it on its own), a registry or `push=true` build output, `push: true`, and the
+login and build-and-push actions. Lines that are wholly a `#` or `//` comment are skipped, so
 prose can say what is forbidden.
 
 The roots are the CI surface only. deploy/cdk and deploy/terraform push images on
@@ -66,10 +68,12 @@ REQUIRED: Tuple[str, ...] = (
 SELF: Tuple[str, ...] = (".github/scripts/assert-no-image-publish.py",)
 
 SHAPES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
-    ("docker push", re.compile(r"\bdocker\s+(?:image\s+)?push\b")),
+    ("docker push", re.compile(r"\bdocker\s+(?:image\s+|manifest\s+)?push\b")),
     (
         "docker push (argv form)",
-        re.compile(r"[\"']docker[\"']\s*,\s*(?:[\"']image[\"']\s*,\s*)?[\"']push[\"']"),
+        re.compile(
+            r"[\"']docker[\"']\s*,\s*(?:[\"'](?:image|manifest)[\"']\s*,\s*)?[\"']push[\"']"
+        ),
     ),
     ("docker login", re.compile(r"\bdocker\s+login\b")),
     ("docker login (argv form)", re.compile(r"[\"']docker[\"']\s*,\s*[\"']login[\"']")),
@@ -78,8 +82,19 @@ SHAPES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
         re.compile(r"\b(?:podman|buildah|nerdctl|finch|crane|oras)\s+push\b"),
     ),
     ("runtime login", re.compile(r"\b(?:podman|buildah|nerdctl|finch)\s+login\b")),
+    # The runtime held in a variable, as container.sh ("$OCI") and validate-container
+    # run it: any shell variable followed by push or login, optionally through the
+    # image or manifest subcommand.
+    (
+        "variable runtime push or login",
+        re.compile(
+            r"[\"']?\$\{?\w+\}?[\"']?\s+(?:image\s+|manifest\s+)?(?:push|login)\b"
+        ),
+    ),
     ("skopeo copy", re.compile(r"\bskopeo\s+copy\b")),
-    ("buildx --push", re.compile(r"\bbuildx\b.*\s--push\b")),
+    ("buildx imagetools create", re.compile(r"\bimagetools\s+create\b")),
+    # On any line: a continued `docker buildx build \` puts --push on a line of its own.
+    ("--push", re.compile(r"(?:^|\s)--push(?![\w-])")),
     ("registry output", re.compile(r"\btype=registry\b|\bpush=true\b")),
     ("push: true", re.compile(r"\bpush:\s*[\"']?true\b")),
     (
@@ -206,6 +221,15 @@ PLANTED_BAD = (
     "- uses: docker/build-push-action@0123456789abcdef0123456789abcdef01234567 # v6",
     "- uses: aws-actions/amazon-ecr-login@0123456789abcdef0123456789abcdef01234567 # v2",
     "- uses: redhat-actions/push-to-registry@0123456789abcdef0123456789abcdef01234567 # v2",
+    '"$OCI" push "$TAG_FRESH"',
+    "$OCI image push example/ash",
+    '"${RUNNER}" login ghcr.io',
+    "'$OCI' manifest push example/ash",
+    "  --push \\",
+    "--push",
+    "docker manifest push ghcr.io/example/ash",
+    'run(["docker", "manifest", "push", IMAGE])',
+    "docker buildx imagetools create -t ghcr.io/example/ash:1 example/ash:1",
 )
 
 PLANTED_GOOD = (
@@ -220,6 +244,10 @@ PLANTED_GOOD = (
     "push:",
     "  branches: [main]",
     "pushd /tmp",
+    '"$OCI" image inspect "$TAG_FRESH"',
+    '"$OCI" pull "$BASE"',
+    "git push --push-option=ci.skip origin HEAD",
+    "docker buildx imagetools inspect example/ash",
 )
 
 
