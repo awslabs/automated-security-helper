@@ -68,6 +68,40 @@ def _validate_ash_revision(revision: str) -> bool:
     return _SAFE_REVISION_PATTERN.match(revision) is not None
 
 
+# ---------------------------------------------------------------------------
+# Refusals: results that never reached a container
+# ---------------------------------------------------------------------------
+
+#: Set on a result run_ash_container returns before any container ran.
+_NOT_STARTED_ATTR = "ash_container_not_started"
+
+
+def _not_started(result):
+    """Mark ``result`` as a refusal: run_ash_container stopped before the run phase.
+
+    The refusals (no runner, a non-numeric UID or GID, an unsafe revision, a missing
+    Dockerfile, a failed build, an unusable source or output directory) come back as a
+    non-zero ``CompletedProcess`` or ``CalledProcessError``, exactly like a container
+    that ran and exited 1. A status of 1 is also a verdict the in-container CLI reaches
+    from a results file, so on the status alone the caller cannot tell "the scan found
+    problems" from "no scan was attempted", and went on to look for a results file that
+    nothing could have written. The mark is what separates them. It is set on the object
+    rather than carried by a subclass so that a build's ``CalledProcessError`` reaches the
+    caller unchanged, with its own returncode and output.
+    """
+    setattr(result, _NOT_STARTED_ATTR, True)
+    return result
+
+
+def container_was_started(result) -> bool:
+    """Whether ``result`` came from a container run rather than a refusal before one.
+
+    Compared with ``is True`` so that only the mark set by :func:`_not_started` counts:
+    a stand-in result whose attributes all exist (a ``MagicMock``) still reads as a run.
+    """
+    return getattr(result, _NOT_STARTED_ATTR, False) is not True
+
+
 def get_ash_revision() -> str | None:
     """
     Get the revision of the Automated Security Helper repo to install based on how the
@@ -1078,17 +1112,21 @@ def run_ash_container(
         host_gid = subprocess_utils.get_host_gid()
     except Exception as e:
         typer.secho(f"Error getting user ID information: {e}", fg=typer.colors.RED)
-        return create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
+        return _not_started(
+            create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
+        )
 
     # Validate container UID and GID if specified
     if container_uid is not None:
         if not container_uid.isdigit():
             typer.secho("Container UID must be a numeric value", fg=typer.colors.RED)
-            return create_completed_process(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr="Container UID must be a numeric value",
+            return _not_started(
+                create_completed_process(
+                    args=[],
+                    returncode=1,
+                    stdout="",
+                    stderr="Container UID must be a numeric value",
+                )
             )
     else:
         container_uid = str(host_uid)
@@ -1096,11 +1134,13 @@ def run_ash_container(
     if container_gid is not None:
         if not container_gid.isdigit():
             typer.secho("Container GID must be a numeric value", fg=typer.colors.RED)
-            return create_completed_process(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr="Container GID must be a numeric value",
+            return _not_started(
+                create_completed_process(
+                    args=[],
+                    returncode=1,
+                    stdout="",
+                    stderr="Container GID must be a numeric value",
+                )
             )
     else:
         container_gid = str(host_gid)
@@ -1110,7 +1150,9 @@ def run_ash_container(
         resolved_oci_runner = _resolve_oci_runner(oci_runner)
     except RuntimeError as e:
         typer.secho(str(e), fg=typer.colors.RED)
-        return create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
+        return _not_started(
+            create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
+        )
 
     oci_command_prefix = _get_oci_wrapper_prefix()
 
@@ -1128,11 +1170,13 @@ def run_ash_container(
                 "and forward slashes are allowed.",
                 fg=typer.colors.RED,
             )
-            return create_completed_process(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr=f"Invalid ASH revision value: {resolved_revision!r}",
+            return _not_started(
+                create_completed_process(
+                    args=[],
+                    returncode=1,
+                    stdout="",
+                    stderr=f"Invalid ASH revision value: {resolved_revision!r}",
+                )
             )
 
     # Resolve Dockerfile path
@@ -1140,7 +1184,9 @@ def run_ash_container(
         dockerfile_path = _find_dockerfile(resolved_revision)
     except FileNotFoundError as e:
         typer.secho(str(e), fg=typer.colors.RED)
-        return create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
+        return _not_started(
+            create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
+        )
 
     # Resolve build target
     resolved_build_target = (
@@ -1206,9 +1252,11 @@ def run_ash_container(
                 if hasattr(e, "stderr"):
                     print(f"Build stderr: {e.stderr}")
             if isinstance(e, CalledProcessError):
-                return e
-            return create_completed_process(
-                args=[], returncode=1, stdout="", stderr=str(e)
+                return _not_started(e)
+            return _not_started(
+                create_completed_process(
+                    args=[], returncode=1, stdout="", stderr=str(e)
+                )
             )
 
     # Run phase
@@ -1218,8 +1266,10 @@ def run_ash_container(
                 source_dir = validate_path(source_dir)
             except ValueError as e:
                 typer.secho(str(e), fg=typer.colors.RED)
-                return create_completed_process(
-                    args=[], returncode=1, stdout="", stderr=str(e)
+                return _not_started(
+                    create_completed_process(
+                        args=[], returncode=1, stdout="", stderr=str(e)
+                    )
                 )
 
         if not source_dir:
@@ -1235,8 +1285,10 @@ def run_ash_container(
                 typer.secho(
                     f"Error creating output directory: {e}", fg=typer.colors.RED
                 )
-                return create_completed_process(
-                    args=[], returncode=1, stdout="", stderr=str(e)
+                return _not_started(
+                    create_completed_process(
+                        args=[], returncode=1, stdout="", stderr=str(e)
+                    )
                 )
         else:
             output_dir = source_dir.joinpath("ash_output")
