@@ -28,10 +28,14 @@ nothing, which is the failure this whole fixture is about.
 So the template literal is extracted directly. That is safe here, and checked
 rather than assumed:
 
-* `CODECOMMIT_GATE_HANDLER` contains no `${...}` interpolation, so it is a plain
-  string and extracting it is lossless. `extract_handler_source` asserts that; if
-  an interpolation is ever added, this raises instead of silently returning a
-  half-rendered script.
+* The only interpolations `CODECOMMIT_GATE_HANDLER` may contain are bare
+  references to string constants declared in the same file as
+  `export const NAME = '...';` -- today `${ASH_CLI}` and `${ASH_CLI_V3}`, which
+  keep the command name in one place. Those are rendered exactly as the
+  TypeScript would render them, by reading the constant's literal, so the
+  rendering is lossless. Any other interpolation (an expression, a call, an
+  imported or non-literal name) raises instead of returning a half-rendered
+  script, because rendering it would need the TypeScript evaluator.
 * `handler_matches_deployed_template` corroborates the extraction against the
   handler embedded in `deploy/cdk/templates/AshCodeCommitGate.template.json`,
   which is synthesized by the app and is itself gated byte-for-byte against a
@@ -81,6 +85,23 @@ _TS_ESCAPES = {
 }
 
 
+# `export const NAME = '...';` at the start of a line, with a quoted literal that
+# contains no escapes or quotes of its own. Anything fancier is not matched, so an
+# interpolation of it is reported rather than guessed at.
+_STRING_CONSTANT = re.compile(
+    r"""^export const ([A-Za-z_$][\w$]*) = (?:'([^'\\\n]*)'|"([^"\\\n]*)");$""",
+    re.MULTILINE,
+)
+
+
+def _string_constants(text: str) -> dict[str, str]:
+    """Top-level exported string constants of a TypeScript module, by name."""
+    return {
+        match.group(1): match.group(2) if match.group(2) is not None else match.group(3)
+        for match in _STRING_CONSTANT.finditer(text)
+    }
+
+
 def _closing_backtick(text: str, start: int) -> int:
     """Index of the backtick that ends the template literal opened before `start`.
 
@@ -113,15 +134,7 @@ def extract_handler_source(ts_path: Path | None = None) -> str:
     start = text.index(_HANDLER_MARKER) + len(_HANDLER_MARKER)
     raw = text[start : _closing_backtick(text, start)]
 
-    # An interpolation would mean the deployed script is not this string.
-    without_escaped = raw.replace("\\$", "")
-    if "${" in without_escaped:
-        raise AssertionError(
-            "CODECOMMIT_GATE_HANDLER now contains a ${...} interpolation, so "
-            "extracting the literal no longer yields the script the stack emits. "
-            "Render it through the app (npx ts-node, as "
-            "deploy/cdk/scripts/gen-s3-sync-diff-fixture.sh does) instead."
-        )
+    constants = _string_constants(text)
 
     out: list[str] = []
     index = 0
@@ -130,6 +143,21 @@ def extract_handler_source(ts_path: Path | None = None) -> str:
         if char == "\\" and index + 1 < len(raw) and raw[index + 1] in _TS_ESCAPES:
             out.append(_TS_ESCAPES[raw[index + 1]])
             index += 2
+            continue
+        if raw.startswith("${", index):
+            end = raw.find("}", index + 2)
+            name = raw[index + 2 : end] if end != -1 else raw[index + 2 :]
+            if end == -1 or name not in constants:
+                raise AssertionError(
+                    f"CODECOMMIT_GATE_HANDLER interpolates ${{{name}}}, which is not "
+                    f"a string constant declared in this file as "
+                    f"`export const {name} = '...';`, so extracting the literal "
+                    f"no longer yields the script the stack emits. Render it "
+                    f"through the app (npx ts-node, as "
+                    f"deploy/cdk/scripts/gen-s3-sync-diff-fixture.sh does) instead."
+                )
+            out.append(constants[name])
+            index = end + 1
             continue
         out.append(char)
         index += 1
@@ -174,6 +202,10 @@ def corroboration_lines(source: str | None = None) -> list[str]:
         elif stripped.startswith("def _verdict"):
             wanted.append(stripped)
         elif stripped.startswith(('return "passed"', 'return "failed"')):
+            wanted.append(stripped)
+        elif stripped.startswith("cli ="):
+            # argv[0], and the line the rendered ${ASH_CLI}/${ASH_CLI_V3} land
+            # on, so a wrong rendering of a constant shows up here.
             wanted.append(stripped)
         elif stripped.startswith("argv") and "--" in stripped:
             wanted.append(stripped)

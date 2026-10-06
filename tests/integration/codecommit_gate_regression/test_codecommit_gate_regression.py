@@ -297,6 +297,31 @@ def test_the_extraction_matches_the_synthesized_template():
     )
 
 
+def test_the_extraction_renders_only_same_file_string_constants(tmp_path):
+    """`${NAME}` of a literal constant renders; anything else refuses to.
+
+    The handler interpolates `${ASH_CLI}` and `${ASH_CLI_V3}` so the command name
+    lives in one constant. Rendering those from their `export const` literals is
+    lossless; rendering an expression would need the TypeScript evaluator, so the
+    extraction must raise rather than return a half-rendered script.
+    """
+    import gate_contract
+
+    head = (
+        "export const CLI = 'ashx';\n"
+        'export const CODECOMMIT_GATE_HANDLER = `run("${CLI}", "\\${KEEP}")`;\n'
+    )
+    rendered = tmp_path / "rendered.ts"
+    rendered.write_text(head, encoding="utf-8")
+    assert gate_contract.extract_handler_source(rendered) == 'run("ashx", "${KEEP}")'
+
+    for expression in ("CLI.toUpperCase()", "NOT_DECLARED"):
+        refused = tmp_path / "refused.ts"
+        refused.write_text(head.replace("${CLI}", "${" + expression + "}"), "utf-8")
+        with pytest.raises(AssertionError, match="interpolates"):
+            gate_contract.extract_handler_source(refused)
+
+
 def test_expected_json_no_longer_transcribes_the_contract():
     """Guard against the copies coming back.
 
