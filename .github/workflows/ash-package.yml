@@ -284,16 +284,18 @@ jobs:
           echo "installing ${wheel}"
           # A fresh venv, and --no-cache so a previously built wheel of the same
           # version cannot be substituted for the one just produced.
-          uv venv /tmp/ash-wheel-check
-          VIRTUAL_ENV=/tmp/ash-wheel-check uv pip install --no-cache "${wheel}"
+          # Under RUNNER_TEMP, which the runner empties after the job, not /tmp.
+          venv="${RUNNER_TEMP}/ash-wheel-check"
+          uv venv "${venv}"
+          VIRTUAL_ENV="${venv}" uv pip install --no-cache "${wheel}"
           # The console script, not `python -m`: the entry point is what the deb,
           # rpm, MSIX, Flatpak, Chocolatey and winget packages put on PATH, and it
           # is declared in wheel metadata that a plain import would not exercise.
-          /tmp/ash-wheel-check/bin/ashx --version
+          "${venv}/bin/ashx" --version
           # The wheel also declares the deprecated `ash` alias, which pip, pipx and
           # Homebrew installs still put on PATH: same exit code and --version output
           # as `ashx`, plus exactly one deprecation line on stderr.
-          PATH="/tmp/ash-wheel-check/bin:${PATH}" bash .github/actions/validate-install/assert-deprecated-alias.sh
+          PATH="${venv}/bin:${PATH}" bash .github/actions/validate-install/assert-deprecated-alias.sh
 
       - name: Upload wheel and sdist
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -405,8 +407,11 @@ jobs:
       # scripts/e2e/assert_outcome.py, shows those verdicts rejecting wrong outcomes,
       # uninstalls, then installs N-1 from a local remote and `flatpak update`s it to N.
       - name: Build the Flatpak, install it, run the e2e cases, upgrade and uninstall
-        run: sudo --preserve-env=REPO,DIST,PREV_DIST bash packaging/flatpak/verify-in-container.sh
+        run: sudo --preserve-env=REPO,DIST,PREV_DIST,TMPDIR bash packaging/flatpak/verify-in-container.sh
         env:
+          # The script's build output and logs go in a mktemp directory, so keep that
+          # under RUNNER_TEMP rather than the runner's /tmp.
+          TMPDIR: ${{ runner.temp }}
           REPO: ${{ github.workspace }}
           DIST: ${{ github.workspace }}/dist
           PREV_DIST: ${{ runner.temp }}/flatpak-wheels/dist-prev

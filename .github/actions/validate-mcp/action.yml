@@ -11,8 +11,9 @@ runs:
     - name: Create test fixture
       shell: bash
       run: |
-        mkdir -p /tmp/ash-selftest
-        echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
+        # RUNNER_TEMP, not /tmp: the runner empties it after every job.
+        mkdir -p "${RUNNER_TEMP}/ash-selftest"
+        echo 'print("hello")' > "${RUNNER_TEMP}/ash-selftest/test_sample.py"
 
     - name: "mcp: verify command"
       shell: bash
@@ -153,4 +154,4 @@ runs:
     # fetch and a registry blip read as a completeness failure.
     - name: "mcp: self-test scan"
       shell: bash
-      run: ashx scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: ashx scan --source-dir "${RUNNER_TEMP}/ash-selftest" --output-dir "${RUNNER_TEMP}/ash-selftest/output" --simple --phases scan --phases report --scanners detect-secrets

@@ -66,6 +66,7 @@ case "${LAYOUT_DIR}" in
 esac
 
 verify_err="$(mktemp)"
+trap 'rm -f "${verify_err}"' EXIT
 if ! manifest="$(python3 "${HELPER}" verify --dir "${LAYOUT_DIR}" --pin "${pin}" \
     --arch "${RUNNER_ARCH}" 2> "${verify_err}")"; then
   discard "verification failed ($(tr '\n' ' ' < "${verify_err}"))"

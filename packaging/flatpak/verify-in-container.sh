@@ -49,7 +49,11 @@ set -euo pipefail
 REPO="${REPO:-/src}"
 DIST="${DIST:-$REPO/dist}"
 PREV_DIST="${PREV_DIST:-$REPO/dist-prev}"
-OUT="${OUT:-/tmp/flatpakbuild}"
+# Scratch for build output and step logs: one mktemp directory, removed on exit, so a
+# run leaves nothing behind in the temp directory and two runs cannot share log names.
+# mktemp honors TMPDIR; CI points that at RUNNER_TEMP.
+WORK="$(mktemp -d -t ash-flatpak.XXXXXX)"
+OUT="${OUT:-$WORK/flatpakbuild}"
 APP_ID="io.github.awslabs.automated_security_helper"
 RUNTIME_VERSION="24.08"
 
@@ -63,7 +67,13 @@ RUNTIME_VERSION="24.08"
 # fixture in /tmp would therefore be invisible to the sandboxed scan, the scan would
 # report zero findings, and the obvious conclusion would be that the manifest's grant is
 # broken. /srv is an ordinary toplevel and is covered.
-FIX_UNREACHABLE=/tmp/ash-fixture-negative-control
+#
+# The negative control in step 7 is the one thing that must be under the literal /tmp,
+# since what it proves is that /tmp is hidden. mktemp gives it a unique name and the
+# EXIT trap below removes it; TMPDIR cannot be used for it because CI points TMPDIR at
+# a directory the sandbox can see.
+FIX_UNREACHABLE="$(mktemp -d /tmp/ash-negative-control.XXXXXX)"
+trap 'rm -rf "$WORK" "$FIX_UNREACHABLE"' EXIT
 # Everything the e2e cases write: the fixture copies, their output directories, the
 # launcher shim run_case.py is pointed at, and the local OSTree repo the upgrade leg
 # serves from. Under /srv for the reason above.
@@ -155,9 +165,9 @@ echo "   $(flatpak-builder --version)"
 # Fail here with a message about namespaces rather than 200 lines into a
 # flatpak-builder log. This is the check that distinguishes "the manifest is wrong" from
 # "this environment cannot build a Flatpak at all".
-if ! bwrap --dev-bind / / --unshare-user-try /bin/true 2>/tmp/bwrap.err; then
+if ! bwrap --dev-bind / / --unshare-user-try /bin/true 2>"$WORK/bwrap.err"; then
   echo "   FAIL: bwrap cannot create a sandbox here, so flatpak-builder cannot run." >&2
-  sed 's/^/         /' /tmp/bwrap.err >&2
+  sed 's/^/         /' "$WORK/bwrap.err" >&2
   echo "         Run this in a privileged container, or on a host that permits" >&2
   echo "         unprivileged user namespaces. See the header of this script." >&2
   exit 1
@@ -172,9 +182,9 @@ flatpak remote-add --if-not-exists --system \
 # Its exit code is not trusted alone: an already-installed runtime makes it report and
 # move on, and the `flatpak info` below is the check that the runtime is really there.
 if ! flatpak install -y --system --noninteractive \
-    flathub "org.freedesktop.Sdk//${RUNTIME_VERSION}" >/tmp/runtime-install.log 2>&1; then
+    flathub "org.freedesktop.Sdk//${RUNTIME_VERSION}" >"$WORK/runtime-install.log" 2>&1; then
   echo "   flatpak install of the runtime exited non-zero; its output:"
-  sed 's/^/     /' /tmp/runtime-install.log
+  sed 's/^/     /' "$WORK/runtime-install.log"
 fi
 flatpak info --system "org.freedesktop.Sdk//${RUNTIME_VERSION}" >/dev/null || {
   echo "   FAIL: org.freedesktop.Sdk//${RUNTIME_VERSION} is not installed" >&2
@@ -288,11 +298,11 @@ echo -n "   -V (the short form the CLI contract fixes as --version) -> "
 flatpak run "$APP_ID" -V
 for name in ashv3 automated-security-helper; do
   echo -n "   --command=$name --version -> "
-  flatpak run --command="$name" "$APP_ID" --version 2>/tmp/${name}.err || {
-    echo "   FAIL: $name is not usable" >&2; cat /tmp/${name}.err >&2; exit 1
+  flatpak run --command="$name" "$APP_ID" --version 2>"$WORK/${name}.err" || {
+    echo "   FAIL: $name is not usable" >&2; cat "$WORK/${name}.err" >&2; exit 1
   }
-  if [ -s "/tmp/${name}.err" ]; then
-    echo "     stderr: $(head -2 /tmp/${name}.err | tr '\n' ' ')"
+  if [ -s "$WORK/${name}.err" ]; then
+    echo "     stderr: $(head -2 "$WORK/${name}.err" | tr '\n' ' ')"
   fi
 done
 # Read from the installed app, so a bundle that gained /app/bin/ash after build.sh's
@@ -335,12 +345,11 @@ echo "== 7. negative control: a fixture the sandbox cannot reach must find nothi
 # the only difference between this scan and that case in step 8 is whether the sandbox
 # can reach the tree. It also keeps the planted key out of this script, which therefore
 # needs no secret-scanner entry of its own.
-rm -rf "$FIX_UNREACHABLE"; mkdir -p "$FIX_UNREACHABLE"
 cp "$REPO/tests/e2e/fixtures/findings/leak.py" "$FIX_UNREACHABLE/leak.py"
 set +e
 flatpak run "$APP_ID" scan --source-dir "$FIX_UNREACHABLE" \
   --output-dir "$FIX_UNREACHABLE/.ash/ash_output" \
-  --scanners detect-secrets --no-progress >/tmp/scan-negative.log 2>&1
+  --scanners detect-secrets --no-progress >"$WORK/scan-negative.log" 2>&1
 NEG_RC=$?
 set -e
 NEG_RESULTS="$(python3 - "$FIX_UNREACHABLE" <<'PY'
@@ -468,8 +477,8 @@ echo "== 11. a plain uninstall leaves the venv, and --delete-data removes it"
 # assert the venv is gone. Flatpak keeps ~/.var/app/$FLATPAK_ID across an uninstall by
 # design -- it is user data, not package content -- so the honest analogue of "removal
 # drops the venv" is `--delete-data`. Both halves are measured rather than one assumed.
-flatpak uninstall -y --system --noninteractive "$APP_ID" >/tmp/uninstall.log 2>&1 || {
-  echo "   FAIL: plain uninstall failed" >&2; cat /tmp/uninstall.log >&2; exit 1
+flatpak uninstall -y --system --noninteractive "$APP_ID" >"$WORK/uninstall.log" 2>&1 || {
+  echo "   FAIL: plain uninstall failed" >&2; cat "$WORK/uninstall.log" >&2; exit 1
 }
 if flatpak info --system "$APP_ID" >/dev/null 2>&1; then
   echo "   FAIL: $APP_ID is still installed after a plain uninstall" >&2
@@ -488,8 +497,8 @@ echo "   OK: plain uninstall kept $DATA_ROOT ($(du -sh "$DATA_ROOT" | cut -f1))"
 # against an app that has already been uninstalled exits 1 with "No installed refs found"
 # and leaves the data in place. That is why README.flatpak gives --delete-data as the
 # uninstall command rather than as a follow-up to one.
-flatpak install -y --system --noninteractive --bundle "$BUNDLE" >/tmp/reinstall.log 2>&1 || {
-  echo "   FAIL: reinstalling from the bundle failed" >&2; cat /tmp/reinstall.log >&2
+flatpak install -y --system --noninteractive --bundle "$BUNDLE" >"$WORK/reinstall.log" 2>&1 || {
+  echo "   FAIL: reinstalling from the bundle failed" >&2; cat "$WORK/reinstall.log" >&2
   exit 1
 }
 

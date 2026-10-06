@@ -20,8 +20,10 @@ runs:
     - name: Create test fixture
       shell: bash
       run: |
-        mkdir -p /tmp/ash-selftest
-        echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
+        # RUNNER_TEMP, not /tmp: the runner empties it after every job, so nothing
+        # here outlives the job on a self-hosted or reused host.
+        mkdir -p "${RUNNER_TEMP}/ash-selftest"
+        echo 'print("hello")' > "${RUNNER_TEMP}/ash-selftest/test_sample.py"
 
     # WHY A SCAN LEG EXISTS AT ALL
     #
@@ -30,7 +32,7 @@ runs:
     # can scan with the result, which is the only reason the image is built. So podman
     # and finch were the two runtimes in the matrix whose image nobody ever ran, while
     # the five methods that do scan (pip, pipx, uvx, mcp, nix) all exercise
-    # `ashx scan --source-dir /tmp/ash-selftest ... --phases scan --phases report`.
+    # `ashx scan --source-dir "${RUNNER_TEMP}/ash-selftest" ... --phases scan --phases report`.
     #
     # A runtime with a build leg and no scan leg is precisely that defect, so the
     # runtimes carrying one are named here rather than assumed. Adding a runtime to the
@@ -64,7 +66,7 @@ runs:
     # the build step now reports only the build.
     #
     # No coverage is lost. The scan below is the deliberate one: it targets
-    # /tmp/ash-selftest, a fixture that is a single print statement, precisely so that
+    # $RUNNER_TEMP/ash-selftest, a fixture that is a single print statement, precisely so that
     # only exit 0 is acceptable. A checkout scan cannot be held to that bar -- its
     # status depends on what happens to be committed -- so it was never the thing
     # proving the image can scan.
@@ -495,8 +497,8 @@ runs:
         ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
-          --source-dir /tmp/ash-selftest \
-          --output-dir /tmp/ash-selftest/output \
+          --source-dir "${RUNNER_TEMP}/ash-selftest" \
+          --output-dir "${RUNNER_TEMP}/ash-selftest/output" \
           --simple \
           --fail-on-incomplete-scanners \
           --phases scan \
@@ -543,10 +545,11 @@ runs:
       run: |
         python3 <<'PY'
         import json
+        import os
         import pathlib
         import sys
 
-        results = pathlib.Path("/tmp/ash-selftest/output/ash_aggregated_results.json")
+        results = pathlib.Path(os.environ["RUNNER_TEMP"], "ash-selftest", "output", "ash_aggregated_results.json")
         if not results.exists() or results.stat().st_size == 0:
             listing = sorted(p.name for p in results.parent.glob("*")) if results.parent.is_dir() else "(no output directory)"
             sys.exit(f"FAIL: no usable results at {results}; the container scan did not complete even though it exited 0. Output dir holds: {listing}")
@@ -659,7 +662,7 @@ runs:
     - name: "Create the detection fixture"
       shell: bash
       run: |
-        mkdir -p /tmp/ash-detect
+        mkdir -p "${RUNNER_TEMP}/ash-detect"
         # Two defects, from two independent scanners, at a path of its own so the
         # clean scan's report above is not overwritten. They are the same kinds of
         # plant validate-nix uses, for the same reason: they are unambiguous, they need
@@ -684,13 +687,14 @@ runs:
         python3 <<'PY'
         import base64
         import hashlib
+        import os
         import pathlib
 
         digest = hashlib.sha256(b"ash validate-container detection fixture").digest()
         key = base64.b64encode(digest[:30]).decode("ascii")
         assert len(key) == 40, key
 
-        pathlib.Path("/tmp/ash-detect/vulnerable_sample.py").write_text(
+        pathlib.Path(os.environ["RUNNER_TEMP"], "ash-detect", "vulnerable_sample.py").write_text(
             "import subprocess\n"
             "\n"
             f'AWS_SECRET_ACCESS_KEY = "{key}"\n'
@@ -701,7 +705,7 @@ runs:
         )
         PY
         echo "--- fixture ---"
-        cat /tmp/ash-detect/vulnerable_sample.py
+        cat "${RUNNER_TEMP}/ash-detect/vulnerable_sample.py"
 
     # WHY THE EXIT CODE IS CAPTURED AND THEN LARGELY IGNORED
     #
@@ -725,8 +729,8 @@ runs:
         ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
-          --source-dir /tmp/ash-detect \
-          --output-dir /tmp/ash-detect/output \
+          --source-dir "${RUNNER_TEMP}/ash-detect" \
+          --output-dir "${RUNNER_TEMP}/ash-detect/output" \
           --simple \
           --fail-on-incomplete-scanners \
           --phases scan \
@@ -767,4 +771,4 @@ runs:
         ASSERT_DETECTION: ${{ github.action_path }}/assert_detection.py
       run: |
         python3 "${ASSERT_DETECTION}" \
-          /tmp/ash-detect/output/ash_aggregated_results.json
+          "${RUNNER_TEMP}/ash-detect/output/ash_aggregated_results.json"
