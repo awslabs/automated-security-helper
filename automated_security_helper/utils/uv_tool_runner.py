@@ -209,6 +209,17 @@ class UVToolRunner:
             try:
                 command = [self.uv_executable, "tool", "run"]
 
+                # Offline means offline for the probe too. Without the flag this
+                # `uv tool run` resolved and downloaded the tool over the network
+                # under ASH_OFFLINE, and the scan's own `--offline` run then
+                # depended on what it had fetched before its timeout cut it off.
+                from automated_security_helper.core.constants import (
+                    is_offline_mode,
+                )
+
+                if is_offline_mode():
+                    command.append("--offline")
+
                 # Build command with --from parameter if extras specified
                 if package_name:
                     # Build the --from specification
@@ -1094,9 +1105,13 @@ def get_uv_tool_command(
         uv_path = find_uv_or_none()
         command: Optional[List[str]] = None
         if uv_path is not None:
+            from automated_security_helper.core.constants import is_offline_mode
+
+            # Offline, only a tool uv already has may count; see get_tool_version.
+            offline_flag = ["--offline"] if is_offline_mode() else []
             try:
                 probe = subprocess.run(  # nosec B603 — fixed list of trusted strings
-                    [uv_path, "tool", "run", tool_name, "--version"],
+                    [uv_path, "tool", "run", *offline_flag, tool_name, "--version"],
                     capture_output=True,
                     text=True,
                     check=False,
