@@ -20,6 +20,8 @@
 # ---
 # name: test_diff_scan_results[after_path_missing]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'error': 'after_path does not exist: <TMP>/allowed/absent.json',
       'success': False,
@@ -29,6 +31,8 @@
 # ---
 # name: test_diff_scan_results[before_path_missing]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'error': 'before_path does not exist: <TMP>/allowed/absent.json',
       'success': False,
@@ -38,6 +42,8 @@
 # ---
 # name: test_diff_scan_results[identical]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'new': list([
       ]),
@@ -51,6 +57,8 @@
 # ---
 # name: test_diff_scan_results[new_resolved_and_severity_changed]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'new': list([
         dict({
@@ -153,6 +161,8 @@
 # ---
 # name: test_diff_scan_results[unparseable]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'error': '''
         Failed to parse result file: 1 validation error for AshAggregatedResults
@@ -167,6 +177,8 @@
 # name: test_explain_finding[found_by_rule]
   dict({
     'B101': dict({
+      'client_messages': list([
+      ]),
       'result': dict({
         'finding': dict({
           'cve_id': None,
@@ -249,6 +261,8 @@
       'tool': 'explain_finding',
     }),
     'B602': dict({
+      'client_messages': list([
+      ]),
       'result': dict({
         'finding': dict({
           'cve_id': None,
@@ -325,6 +339,8 @@
       'tool': 'explain_finding',
     }),
     'SECRET-AWS-ACCESS-KEY': dict({
+      'client_messages': list([
+      ]),
       'result': dict({
         'finding': dict({
           'cve_id': None,
@@ -404,6 +420,8 @@
 # ---
 # name: test_explain_finding[no_results_file]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'error': 'Failed to load scan results: Results file not found: <TMP>/allowed/ash_aggregated_results.json',
       'operation': 'explain_finding',
@@ -414,6 +432,8 @@
 # ---
 # name: test_explain_finding[results_path_outside_roots]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'context': dict({
         'cwd': '<TMP>/cwd',
@@ -437,6 +457,8 @@
 # ---
 # name: test_explain_finding[unknown_finding_id]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'error': "Finding 'bandit-B999-00000000' not found in scan results",
       'operation': 'explain_finding',
@@ -447,6 +469,8 @@
 # ---
 # name: test_get_config[discovered_raw]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'fail_on_findings': False,
       'global_settings': dict({
@@ -459,6 +483,8 @@
 # ---
 # name: test_get_config[explicit_path_missing_returns_defaults]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'ash_plugin_modules': list([
       ]),
@@ -831,6 +857,8 @@
 # ---
 # name: test_get_config[explicit_path_resolved]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'ash_plugin_modules': list([
       ]),
@@ -1203,6 +1231,8 @@
 # ---
 # name: test_get_config[no_config_found_returns_defaults]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'ash_plugin_modules': list([
       ]),
@@ -1673,6 +1703,8 @@
 # ---
 # name: test_suggest_suppression[results_file_missing]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'error': 'Results file not found: <TMP>/allowed/project/nope.json',
       'success': False,
@@ -1682,6 +1714,8 @@
 # ---
 # name: test_suggest_suppression[results_file_unparseable]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'error': '''
         Failed to parse results file: 1 validation error for AshAggregatedResults
@@ -1695,6 +1729,8 @@
 # ---
 # name: test_suggest_suppression[unknown_finding_id]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'error': 'Finding not found: bandit-B999-00000000',
       'success': False,
@@ -1704,6 +1740,8 @@
 # ---
 # name: test_suggest_suppression[with_expiration_and_justification]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'json': dict({
         'expiration': '2031-01-31',
@@ -1732,6 +1770,8 @@
 # ---
 # name: test_validate_config[file_not_found][result]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'errors': list([
         dict({
@@ -1747,6 +1787,8 @@
 # ---
 # name: test_validate_config[file_valid][result]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'errors': list([
       ]),
@@ -1757,6 +1799,8 @@
 # ---
 # name: test_validate_config[no_input][result]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'errors': list([
         dict({
@@ -1772,6 +1816,8 @@
 # ---
 # name: test_validate_config[unknown_field][result]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'errors': list([
         dict({
@@ -1787,6 +1833,8 @@
 # ---
 # name: test_validate_config[valid][result]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'errors': list([
       ]),
@@ -1797,6 +1845,8 @@
 # ---
 # name: test_validate_config[wrong_type][result]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'errors': list([
       ]),
@@ -1807,6 +1857,8 @@
 # ---
 # name: test_validate_config[yaml_syntax_error][result]
   dict({
+    'client_messages': list([
+    ]),
     'result': dict({
       'errors': list([
         dict({

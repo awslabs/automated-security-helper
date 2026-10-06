@@ -31,8 +31,16 @@ from tests.snapshot.mcp.mcp_snapshot_support import (
 
 
 async def _call(tool: str, *args, **kwargs) -> Dict[str, Any]:
-    """Call a tool; a Context, if the tool takes one, is passed positionally."""
-    result = getattr(mcp_server, tool)(*args, **kwargs)
+    """Call a tool; a Context, if the tool takes one, is passed positionally.
+
+    A tool whose first parameter is ``ctx`` gets a stdio-shaped one (no session
+    header) when the test passes none, so its messages are recorded too.
+    """
+    fn = getattr(mcp_server, tool)
+    params = list(inspect.signature(fn).parameters)
+    if not args and params and params[0] == "ctx":
+        args = (make_ctx(),)
+    result = fn(*args, **kwargs)
     if inspect.isawaitable(result):
         result = await result
     ctx = args[0] if args else None
