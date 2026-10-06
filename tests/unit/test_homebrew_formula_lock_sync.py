@@ -43,7 +43,7 @@ FORMULA = REPO_ROOT / "Formula" / "ash.rb"
 _RESOURCE_BLOCK = re.compile(
     r'^  resource "(?P<name>[^"]+)" do\n'
     r'    url "(?P<url>[^"]+)"\n'
-    r'    sha256 "(?P<sha>[0-9a-f]{64})"\n'
+    r'    sha256 "(?P<sha>[0-9a-f]{64})" # pragma: allowlist secret\n'
     r"  end$",
     re.MULTILINE,
 )

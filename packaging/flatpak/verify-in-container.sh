@@ -330,11 +330,13 @@ echo "== 7. negative control: a fixture the sandbox cannot reach must find nothi
 #
 # /tmp is deliberately outside --filesystem=host, so the app sees its own empty tmpfs
 # there and the planted secret is not in it.
+#
+# The file is the findings case's own fixture, copied rather than written out here, so
+# the only difference between this scan and that case in step 8 is whether the sandbox
+# can reach the tree. It also keeps the planted key out of this script, which therefore
+# needs no secret-scanner entry of its own.
 rm -rf "$FIX_UNREACHABLE"; mkdir -p "$FIX_UNREACHABLE"
-cat > "$FIX_UNREACHABLE/leak.py" <<'PY'
-# Fixture for packaging verification. Not a real credential.
-AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-PY
+cp "$REPO/tests/e2e/fixtures/findings/leak.py" "$FIX_UNREACHABLE/leak.py"
 set +e
 flatpak run "$APP_ID" scan --source-dir "$FIX_UNREACHABLE" \
   --output-dir "$FIX_UNREACHABLE/.ash/ash_output" \

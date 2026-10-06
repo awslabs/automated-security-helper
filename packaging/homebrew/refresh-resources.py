@@ -401,6 +401,9 @@ def compute_closure(lock_path: Path, python_version: str) -> dict[str, LockPacka
     return merge_platform_closures(per_platform)
 
 
+DIGEST_ALLOWLIST_MARKER = "# pragma: allowlist secret"
+
+
 def render_block(closure: dict[str, LockPackage]) -> str:
     """The Ruby text between the two markers, markers included.
 
@@ -414,7 +417,10 @@ def render_block(closure: dict[str, LockPackage]) -> str:
         display, url, sha256 = sdist_of(name, closure[name])
         lines.append(f'  resource "{display}" do')
         lines.append(f'    url "{url}"')
-        lines.append(f'    sha256 "{sha256}"')
+        # A published sdist digest is 64 hex characters, which detect-secrets reads
+        # as a high-entropy secret. The marker allowlists this one line only, so a
+        # credential anywhere else in the formula is still reported.
+        lines.append(f'    sha256 "{sha256}" {DIGEST_ALLOWLIST_MARKER}')
         lines.append("  end")
         lines.append("")
     lines.append(END_MARKER)
