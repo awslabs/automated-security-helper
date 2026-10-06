@@ -181,9 +181,10 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
     def _suppression_to_dict(suppression: AshSuppression) -> Dict[str, Any]:
         """Convert a suppression to a dictionary for JSON serialization.
 
-        Package fields are included only when set, so the report for a
-        suppression without them is unchanged, and so the config linter can
-        rebuild the same id from the report that ``AshSuppression.id`` gives.
+        Package fields and ``symbol`` are included only when set, so the
+        report for a suppression without them is unchanged, and so the config
+        linter can rebuild the same id from the report that
+        ``AshSuppression.id`` gives.
         """
         data: Dict[str, Any] = {
             "path": suppression.path,
@@ -193,7 +194,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             "reason": suppression.reason,
             "expiration": suppression.expiration,
         }
-        for field in PACKAGE_SUPPRESSION_FIELDS:
+        for field in (*PACKAGE_SUPPRESSION_FIELDS, "symbol"):
             value = getattr(suppression, field)
             if value is not None:
                 data[field] = value
@@ -263,6 +264,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                     ("package_name", "Package"),
                     ("package_version", "Package version"),
                     ("package_path", "Package path"),
+                    ("symbol", "Symbol"),
                 ):
                     value = getattr(suppression, field)
                     if value is not None:

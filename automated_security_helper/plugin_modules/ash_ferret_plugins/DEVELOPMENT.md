@@ -149,10 +149,33 @@ The plugin validates ferret-scan version compatibility during dependency validat
 ```python
 # Version constants (update when ferret-scan releases breaking changes)
 MIN_SUPPORTED_VERSION = "2.4.5"
-MAX_SUPPORTED_VERSION = "2.5.0"
-DEFAULT_VERSION_CONSTRAINT = ">=2.4.5,<2.5.0"
-RECOMMENDED_VERSION = "2.4.5"
+MAX_SUPPORTED_VERSION = "2.6.0"
+DEFAULT_VERSION_CONSTRAINT = f">={MIN_SUPPORTED_VERSION},<{MAX_SUPPORTED_VERSION}"
+RECOMMENDED_VERSION = "2.5.2"
 ```
+
+`DEFAULT_VERSION_CONSTRAINT` is derived from the two bounds, so moving the window is
+a two-constant edit. CI (`.github/actions/run-scan-test/action.yml`) imports it rather
+than restating it.
+
+**What 2.5.x changed that the plugin had to absorb** (verified by running ASH against
+the same fixtures with the 2.4.5 and 2.5.2 binaries):
+- SARIF locations became base-relative (ferret-scan #720): `{"uri": "src/x.py",
+  "uriBaseId": "%SRCROOT%"}` plus `run.originalUriBaseIds`, where 2.4.x wrote absolute
+  `file://` URIs. ASH does not carry `originalUriBaseIds` into its aggregated SARIF, so
+  the plugin resolves these back to absolute URIs (`_resolve_sarif_uri_base_ids`)
+  before validation. Both lines then produce identical paths in every ASH report.
+- `--exclude` stopped matching raw substrings (see section 9). The same ASH ignore
+  paths now exclude what they say and nothing more.
+- Detector changes only narrowed results on the fixtures: 2.5.2 drops 9 PHONE false
+  positives on card numbers and IBANs and adds nothing. The flag surface ASH uses and
+  the `--help checks` list are unchanged; every `confidence_levels` value is accepted.
+
+Independently of version, ferret-scan enters pre-commit mode from environment
+variables alone (`PRE_COMMIT=1`, and before 2.5.2 also `PRE_COMMIT_HOME`), which makes a
+scan with findings exit 1 and narrows the profile. ASH runs under pre-commit through
+its own hook, so the plugin always passes `FERRET_PRECOMMIT=0`
+(`FERRET_SUBPROCESS_ENV_OVERRIDES`).
 
 **Behavior**:
 - Version check runs during `validate_plugin_dependencies()`
@@ -234,7 +257,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `max_live_bytes` | Memory cap on extracted content via `--max-live-bytes` (e.g. `256MB`) | `None` |
 | `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
 | `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
-| `tool_version` | Version constraint for installation | `">=2.4.5,<2.5.0"` |
+| `tool_version` | Version constraint for installation | `">=2.4.5,<2.6.0"` |
 | `skip_version_check` | Bypass version validation | `false` |
 
 Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose` flags. Use the `ferret_` prefixed versions instead.
@@ -496,7 +519,17 @@ The `validate_no_unsupported_options` validator runs in `mode="before"`, meaning
 
 The `_process_config_options()` method appends to `self.args.extra_args`. To prevent accumulation when called multiple times, the method clears `self.args.extra_args = []` at the start of each invocation. This was added to handle the case where `_resolve_arguments` calls `_process_config_options`, and the base class `model_post_init` also calls it.
 
-### 9. Exclude Patterns: Glob (no `**`) + Substring, Not "Simple Names"
+### 9. Exclude Patterns: Semantics Differ Between 2.4.x and 2.5.x
+
+**2.5.x** (ferret-scan #682 in 2.5.0, #736 in 2.5.2): matching is glob-only, against the
+whole path, the base name, and each path segment, and a relative pattern containing
+`/` is resolved against the scan root. There is no substring branch. Measured with
+ASH's own ignore list on a tree built for it: 2.4.5 skipped `.github/` because the
+`.git` pattern matched it as a substring, and did not apply `test-results/**` or
+`tests/pytest-temp/**`; 2.5.2 scans `.github/` and applies both. ferret-scan 2.5.x also
+prints one stderr note listing patterns that matched nothing, which is informational.
+
+The rest of this section describes 2.4.x, the minimum supported line.
 
 Correction (verified against ferret-scan v2.4.5, `isExcluded` in `cmd/main.go`): the
 earlier claim that `--exclude` uses "simple names, not globs" is wrong. Each pattern is

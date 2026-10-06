@@ -232,8 +232,8 @@ runs:
         # `pip install ferret-scan` resolves to whatever is newest, which is not
         # a version anyone chose. ferret-scan 2.3.3 was published at
         # 2026-08-20T21:14:59Z; jobs whose install step ran after that installed
-        # it, picked up a new API_KEY_OR_SECRET detector that matches
-        # `session: Optional[Session]` in generated Pydantic schemas, and failed
+        # it, picked up a new API_KEY_OR_SECRET detector that flags an optional
+        # field named for a login session in generated Pydantic schemas, and failed
         # on 2 findings. Runs from 40 minutes earlier passed on 2.3.2. Three
         # unrelated merge-queue branches broke in the same window with no source
         # change.

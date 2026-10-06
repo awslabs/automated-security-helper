@@ -65,11 +65,11 @@ The following ferret-scan CLI options are **NOT supported** and will raise an er
 
 This plugin is tested and compatible with specific ferret-scan versions. Using versions outside the supported range may result in unexpected behavior.
 
-**Supported Versions:** 2.4.5 to 2.5.0 (exclusive)
+**Supported Versions:** 2.4.5 to 2.6.0 (exclusive)
 
 | Plugin Version | ferret-scan Version | Notes |
 |---------------|---------------------|-------|
-| Current | 2.4.5 - 2.5.0 (exclusive) | Pinned conservatively to the tested current line |
+| Current | 2.4.5 - 2.6.0 (exclusive) | 2.4.5 and 2.5.2 verified end to end; 2.5.2 is the recommended version |
 
 ### Install Ferret Scan
 
@@ -85,7 +85,7 @@ the newest release, which may sit outside the range in the table above — that 
 how a release published partway through a CI run once failed every open pull
 request without a source change.
 ```bash
-pip install 'ferret-scan>=2.4.5,<2.5.0'
+pip install 'ferret-scan>=2.4.5,<2.6.0'
 ```
 
 **Build from Source**:
@@ -217,7 +217,7 @@ scanners:
 | `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`--max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
 | `ferret_debug` | bool | `false` | Enable ferret-scan's own debug logging (preprocessing/validation flow) |
 | `ferret_verbose` | bool | `false` | Enable ferret-scan's own verbose output (detailed finding info) |
-| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=2.4.5,<2.5.0`, `==2.4.5`) |
+| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=2.4.5,<2.6.0`, `==2.5.2`) |
 | `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
 
 ### Options NOT Supported (Will Raise Error)
@@ -250,7 +250,7 @@ The following options are **not supported** because they conflict with ASH conve
 ### Available Checks
 
 The authoritative list for your installed version is `ferret-scan --help checks` — do not
-hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5:
+hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5 through v2.5.2:
 
 - `BANK_ACCOUNT` - Bank account / IBAN / routing numbers
 - `CLOUD_RESOURCES` - Cloud resource identifiers (AWS ARNs, Azure/GCP/OCI/IBM/Alibaba IDs)
@@ -327,7 +327,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: "==2.4.5"  # Exact version
+      tool_version: "==2.5.2"  # Exact version
 ```
 
 Or use a version range:
@@ -337,7 +337,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: ">=2.4.5,<2.5.0"  # Compatible range
+      tool_version: ">=2.4.5,<2.6.0"  # Compatible range
 ```
 
 To bypass version checks (not recommended for production):

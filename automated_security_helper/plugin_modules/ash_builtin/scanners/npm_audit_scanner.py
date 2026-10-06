@@ -42,7 +42,9 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.package_identity import (
     NPM_LOCKFILE_NAMES,
+    PACKAGE_PATH_KEY,
     PACKAGE_VERSION_KEY,
+    ROOT_ADVISORIES_KEY,
     NpmLockIndex,
     identity_properties,
     install_path,
@@ -185,6 +187,60 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             install_path(lock_rel, str(node_path)),
         )
 
+    @staticmethod
+    def _advisory_id(pkg_name: str, via: Dict[str, Any]) -> str:
+        """Rule id of one advisory entry, the same for direct and root findings."""
+        return (
+            via.get("url", "").split("/")[-1] if via.get("url") else f"npm-{pkg_name}"
+        )
+
+    def _root_advisories(
+        self,
+        pkg_name: str,
+        vulnerabilities: Dict[str, Any],
+        lock_rel: str | None,
+        lock_index: NpmLockIndex | None,
+    ) -> List[Dict[str, str]]:
+        """The direct findings a transitive package's ``via`` chain leads to.
+
+        One entry per (advisory, installed copy of the advisory's package),
+        identified the way that copy's own result is: rule id, ``package_path``
+        when the lockfile gives one, and the result URI. Suppression uses these
+        to treat the transitive finding as suppressed only when every one of
+        those results is. npm audit does not say which copy of a root package a
+        dependent resolves to, so every copy is listed.
+        """
+        roots: Dict[tuple[str, str, str], Dict[str, str]] = {}
+        seen: set[str] = set()
+        pending = [pkg_name]
+        while pending:
+            name = pending.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            info = vulnerabilities.get(name) or {}
+            via_items = info.get("via", [])
+            if not isinstance(via_items, list):
+                via_items = [via_items]
+            for via in via_items:
+                if isinstance(via, str):
+                    pending.append(via)
+                    continue
+                if not isinstance(via, dict):
+                    continue
+                rule_id = self._advisory_id(name, via)
+                for node_path in info.get("nodes", []):
+                    identity = self._node_identity(
+                        name, node_path, lock_rel, lock_index
+                    )
+                    location = str(node_path).replace("node_modules/", "")
+                    ref = {"rule_id": rule_id}
+                    if identity.get(PACKAGE_PATH_KEY):
+                        ref["package_path"] = identity[PACKAGE_PATH_KEY]
+                    ref["uri"] = f"node_modules/{location}/package.json"
+                    roots[(rule_id, ref.get("package_path", ""), ref["uri"])] = ref
+        return [roots[key] for key in sorted(roots)]
+
     def _convert_per_lockfile(
         self,
         per_lock_results: List[tuple[Path, Dict[str, Any]]],
@@ -282,11 +338,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     has_dict_via = True
 
                     # Extract vulnerability details
-                    vuln_id = (
-                        via.get("url", "").split("/")[-1]
-                        if via.get("url")
-                        else f"npm-{pkg_name}"
-                    )
+                    vuln_id = self._advisory_id(pkg_name, via)
                     title = via.get("title", f"Vulnerability in {pkg_name}")
                     description = f"Vulnerability in {pkg_name}: {title}"
 
@@ -391,11 +443,24 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         )
                         rules_dict[vuln_id] = rule
 
+                    # Every direct finding this chain resolves to, so a
+                    # suppression on the advisory can reach this result too.
+                    root_advisories = self._root_advisories(
+                        pkg_name,
+                        npm_audit_results["vulnerabilities"],
+                        lock_rel,
+                        lock_index,
+                    )
                     for node_path in vuln_info.get("nodes", []):
                         pkg_location = str(node_path).replace("node_modules/", "")
                         identity = self._node_identity(
                             pkg_name, node_path, lock_rel, lock_index
                         )
+                        # Any-valued: root_advisories is a list of refs, unlike
+                        # the string identity fields it joins in the PropertyBag.
+                        identity_fields: Dict[str, Any] = dict(identity)
+                        if root_advisories:
+                            identity_fields[ROOT_ADVISORIES_KEY] = root_advisories
                         result = Result(
                             ruleId=vuln_id,
                             level=level,
@@ -413,7 +478,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 )
                             ],
                             properties=PropertyBag(
-                                **identity,
+                                **identity_fields,
                                 installed_version=identity.get(
                                     PACKAGE_VERSION_KEY, vuln_info.get("range", "*")
                                 ),
