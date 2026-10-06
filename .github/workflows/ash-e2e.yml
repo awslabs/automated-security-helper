@@ -97,7 +97,12 @@ jobs:
       run:
         shell: bash
     steps:
+      # Two commits, so HEAD's parent is here for the N-1 fallback to HEAD^ described below.
+      # A HEAD that is not v4-capabilities but has its tree takes that fallback too, and a
+      # one-commit checkout has no HEAD^. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
       # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two
       # commits, not one: on a push to v4-capabilities HEAD is that ref, and wheel.sh then
@@ -136,7 +141,12 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Two commits, so HEAD's parent is here for the N-1 fallback to HEAD^ described below.
+      # A HEAD that is not v4-capabilities but has its tree takes that fallback too, and a
+      # one-commit checkout has no HEAD^. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
       # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two
       # commits, not one: on a push to v4-capabilities HEAD is that ref, and
@@ -191,7 +201,12 @@ jobs:
     env:
       HOMEBREW_NO_ANALYTICS: "1"
     steps:
+      # Two commits, so HEAD's parent is here for the N-1 fallback to HEAD^ described below.
+      # A HEAD that is not v4-capabilities but has its tree takes that fallback too, and a
+      # one-commit checkout has no HEAD^. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
       # N-1 is built from v4-capabilities' tree, as in the wheel job, and for the same
       # reason two commits: on a push to v4-capabilities HEAD is that ref, and
