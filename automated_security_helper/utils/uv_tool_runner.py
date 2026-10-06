@@ -561,6 +561,7 @@ class UVToolRunner:
         """
         from automated_security_helper.utils.subprocess_utils import (
             TIMEOUT_RETURNCODE,
+            SpawnFailedProcess,
             TimedOutProcess,
             run_command_with_output_handling,
         )
@@ -639,9 +640,13 @@ class UVToolRunner:
                 # dict says timed_out and CompletedProcess has no field for it, so
                 # rebuilding a plain one made a killed scanner indistinguishable
                 # from one that exited 124 by itself.
-                result_type = (
+                # SpawnFailedProcess does the same for a uv that never started,
+                # so the mixin can tell it from a uv that ran and exited 127.
+                result_type: type[subprocess.CompletedProcess] = (
                     TimedOutProcess
                     if response.get("timed_out")
+                    else SpawnFailedProcess
+                    if response.get("spawn_failed")
                     else subprocess.CompletedProcess
                 )
                 result = result_type(

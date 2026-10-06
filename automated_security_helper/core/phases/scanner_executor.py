@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
@@ -124,6 +125,13 @@ def _timed_out_after(scanner_plugin: Any) -> float | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
     return None
+
+
+def _spawn_failure(scanner_plugin: Any) -> str | None:
+    """Why the plugin's tool could not be started, or None. Coerced like
+    ``_timed_out_after``: only a real string counts."""
+    value = getattr(scanner_plugin, "scan_spawn_failure", None)
+    return value if isinstance(value, str) and value else None
 
 
 def _target_count_attr(obj: Any, name: str) -> int | None:
@@ -333,6 +341,7 @@ class ScannerExecutor:
                         )
                         if isinstance(scanner_plugin, PluginBase):
                             scanner_plugin.clear_scan_timeout()
+                            scanner_plugin.clear_scan_spawn_failure()
                         heartbeat.start()
                         try:
                             raw_results = scanner_plugin.scan(
@@ -343,6 +352,16 @@ class ScannerExecutor:
                             )
                         finally:
                             heartbeat.stop()
+                        # A tool that never started found nothing, so the scan is an
+                        # error even when scan() returned normally. A scanner that
+                        # overrides scan() may have read the empty output as "no
+                        # findings", or accepted the exit code; neither may stand.
+                        spawn_failure = _spawn_failure(scanner_plugin)
+                        if spawn_failure is not None:
+                            raise ScannerError(
+                                f"{scanner_config_name} could not start its tool on "
+                                f"{target_type}: {spawn_failure}"
+                            )
                         self._assess_content_databases(scanner_plugin, raw_results)
                     else:
                         ASH_LOGGER.warning(f"{scanner_config_name} is not enabled!")
@@ -357,10 +376,18 @@ class ScannerExecutor:
                     # -- typically "No such file or directory" -- and only
                     # _run_subprocess saw that the tool was killed.
                     timed_out_after = _timed_out_after(scanner_plugin)
+                    spawn_failure = _spawn_failure(scanner_plugin)
                     if timed_out_after is not None and "timed out" not in str(e):
                         err_str = (
                             f"{scanner_config_name} timed out after "
                             f"{timed_out_after}s on {target_type} and was killed: {e}"
+                        )
+                    elif spawn_failure is not None and "could not start" not in str(e):
+                        # Same for a tool that never started: the exception is
+                        # usually the results file it did not write.
+                        err_str = (
+                            f"{scanner_config_name} could not start its tool on "
+                            f"{target_type} ({spawn_failure}): {e}"
                         )
                     ASH_LOGGER.error(err_str)
                     raw_results = {

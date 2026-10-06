@@ -1,12 +1,14 @@
 """Centralized subprocess execution utilities for ASH."""
 
+import errno
 import logging
 import os
 import platform
 import shutil
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
+import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any, Literal
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union, Any, Literal
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -33,6 +35,63 @@ class TimedOutProcess(subprocess.CompletedProcess):
     """
 
     timed_out = True
+
+
+# Exit code reported for a command that never started: the OS refused to spawn it
+# (missing or non-executable binary, a bad cwd, EFAULT/ETXTBSY from exec). Shells
+# use 127 for "command not found or not runnable" and no scanner accepts it, so a
+# spawn failure is never read as a tool that ran and signalled findings.
+#
+# It used to be 1, the generic failure code. bandit and semgrep both accept 1, so
+# a uv binary that failed to exec with [Errno 14] Bad address let the scan carry
+# on, and the only error anyone saw was the SARIF file the tool never wrote.
+SPAWN_FAILURE_RETURNCODE = 127
+
+# errnos from exec that a second attempt can clear: ETXTBSY while another process
+# still holds the binary open for writing, EFAULT seen intermittently from exec
+# under emulation. Retried once; anything else fails on the first attempt.
+_SPAWN_RETRY_ERRNOS = frozenset({errno.EFAULT, errno.ETXTBSY})
+_SPAWN_RETRY_DELAY_SECONDS = 0.2
+
+_T = TypeVar("_T")
+
+
+class SpawnFailedProcess(subprocess.CompletedProcess):
+    """A CompletedProcess for a command the OS could not start.
+
+    The counterpart of ``TimedOutProcess``: ``run_command_with_output_handling``
+    reports the fact as ``spawn_failed: True`` in its dict, and this type keeps it
+    when a caller (``UVToolRunner.run_tool``) converts that dict back.
+    """
+
+    spawn_failed = True
+
+
+def spawn_failure_message(cmd_str: str, exc: OSError) -> str:
+    """The stderr text for a command that never ran."""
+    return (
+        f"Could not start {cmd_str}: {exc}. The command never ran "
+        f"(exit code {SPAWN_FAILURE_RETURNCODE})."
+    )
+
+
+def _retry_transient_spawn_failure(spawn: Callable[[], _T], cmd_str: str) -> _T:
+    """Call ``spawn``; if exec failed with a transient errno, call it once more.
+
+    ``spawn`` wraps ``subprocess.run`` or ``subprocess.Popen``. Both raise OSError
+    only when the child could not be started (exec failures are passed back from
+    the child before it runs anything), so retrying cannot run the tool twice.
+    """
+    try:
+        return spawn()
+    except OSError as e:
+        if e.errno not in _SPAWN_RETRY_ERRNOS:
+            raise
+        ASH_LOGGER.warning(
+            f"Could not start {cmd_str} ({e}); retrying once", extra=NO_MARKUP
+        )
+        time.sleep(_SPAWN_RETRY_DELAY_SECONDS)
+        return spawn()
 
 
 def clear_find_executable_cache() -> None:
@@ -207,17 +266,20 @@ def run_command(
         encoding = "utf-8"
 
     try:
-        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-            args,
-            cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
-            capture_output=capture_output,
-            text=text,
-            check=check,
-            shell=shell,
-            timeout=timeout,
-            encoding=encoding,
-            errors=errors,
+        result = _retry_transient_spawn_failure(
+            lambda: subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+                args,
+                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+                env=env,
+                capture_output=capture_output,
+                text=text,
+                check=check,
+                shell=shell,
+                timeout=timeout,
+                encoding=encoding,
+                errors=errors,
+            ),
+            cmd_str,
         )
 
         # Log command result
@@ -258,6 +320,19 @@ def run_command(
             stdout=e.stdout or "",
             stderr=e.stderr or f"Command timed out after {e.timeout}s",
         )
+    except OSError as e:
+        # Ahead of the generic branch, whose returncode 1 reads as "ran and
+        # failed" and is an accepted exit code for most scanners.
+        error_msg = spawn_failure_message(cmd_str, e)
+        ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
+        if check:
+            raise
+        return SpawnFailedProcess(
+            args=args,
+            returncode=SPAWN_FAILURE_RETURNCODE,
+            stdout="",
+            stderr=error_msg,
+        )
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}", extra=NO_MARKUP)
         if check:
@@ -293,6 +368,35 @@ def _write_stream_log(
         log_file.write(text)
 
 
+def _spawn_failure_response(
+    cmd_str: str,
+    exc: OSError,
+    results_dir: Optional[Union[str, Path]],
+    class_name: Optional[str],
+    stderr_preference: str,
+) -> Dict[str, Any]:
+    """The ``run_command_with_output_handling`` result for a command that never ran.
+
+    There is no tool output, so the reason is the whole stderr. It is written to
+    the stderr log as a completed run's would be, because scanners default to
+    "write" and read that file to explain a failure.
+    """
+    error_msg = spawn_failure_message(cmd_str, exc)
+    ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
+    try:
+        _write_stream_log(
+            results_dir, class_name, "stderr", stderr_preference, error_msg
+        )
+    except OSError as log_error:
+        ASH_LOGGER.debug(f"Could not write the stderr log: {log_error}")
+    return {
+        "error": str(exc),
+        "returncode": SPAWN_FAILURE_RETURNCODE,
+        "spawn_failed": True,
+        "stderr": error_msg,
+    }
+
+
 def run_command_with_output_handling(
     command: List[str],
     results_dir: Optional[Union[str, Path]] = None,
@@ -325,6 +429,8 @@ def run_command_with_output_handling(
         Dictionary with stdout, stderr, and returncode if requested. A timed-out
         command returns returncode 124 (matching coreutils ``timeout(1)``) and
         ``timed_out: True``, so callers can tell it from the generic failure path.
+        A command the OS could not start returns returncode 127 and
+        ``spawn_failed: True``, with the reason as its stderr.
     """
     # Resolve the full path to the executable if possible
     if command and not shell:
@@ -341,18 +447,28 @@ def run_command_with_output_handling(
         encoding = "utf-8"
 
     try:
-        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-            command,
-            capture_output=True,
-            text=True,
-            shell=shell,
-            check=False,
-            cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
-            encoding=encoding,
-            errors=errors,
-            timeout=timeout,
-        )
+        try:
+            result = _retry_transient_spawn_failure(
+                lambda: subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+                    command,
+                    capture_output=True,
+                    text=True,
+                    shell=shell,
+                    check=False,
+                    cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+                    env=env,
+                    encoding=encoding,
+                    errors=errors,
+                    timeout=timeout,
+                ),
+                cmd_str,
+            )
+        except OSError as e:
+            # Caught here, around the spawn alone, so an OSError from writing the
+            # stream logs below is not reported as a command that never ran.
+            return _spawn_failure_response(
+                cmd_str, e, results_dir, class_name, stderr_preference
+            )
 
         # Use the actual returncode from the result
         returncode = result.returncode
@@ -484,16 +600,19 @@ def run_command_stream_output(
         encoding = "utf-8"
 
     try:
-        process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-            args,
-            cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            shell=shell,
-            encoding=encoding,
-            errors=errors,
+        process = _retry_transient_spawn_failure(
+            lambda: subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+                args,
+                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                shell=shell,
+                encoding=encoding,
+                errors=errors,
+            ),
+            cmd_str,
         )
 
         try:
@@ -512,6 +631,9 @@ def run_command_stream_output(
                 process.kill()
                 process.wait()
 
+    except OSError as e:
+        ASH_LOGGER.error(spawn_failure_message(cmd_str, e), extra=NO_MARKUP)
+        return SPAWN_FAILURE_RETURNCODE
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
         return 1

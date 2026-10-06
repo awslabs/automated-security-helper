@@ -405,7 +405,10 @@ class TestScannerPlugin:
         )
         final_args = scanner._resolve_arguments(test_source_dir)
         scanner._run_subprocess(final_args)
-        assert scanner.exit_code == 1
+        # 127, not 1: a command that cannot start never ran, and 1 is an accepted
+        # exit code for most scanners.
+        assert scanner.exit_code == 127
+        assert scanner.scan_spawn_failure
         assert len(scanner.errors) > 0
 
     def test_run_subprocess_with_stdout_stderr(
@@ -460,7 +463,8 @@ class TestScannerPlugin:
             command="nonexistent-binary",
         )
         scanner._run_subprocess(["nonexistent-binary"])
-        assert scanner.exit_code == 1
+        assert scanner.exit_code == 127
+        assert scanner.scan_spawn_failure
         assert len(scanner.errors) > 0
 
     def test_abstract_methods_not_implemented(self):

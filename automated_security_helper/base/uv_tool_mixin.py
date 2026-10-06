@@ -208,6 +208,10 @@ class UVToolMixin:
             # uv-run scanner report a timeout as its missing results file.
             if getattr(result, "timed_out", False) is True:
                 response["timed_out"] = True
+            # Same for a uv that could not be started: _run_subprocess records it
+            # so the scan reports ERROR whatever the scanner accepts as exit codes.
+            if getattr(result, "spawn_failed", False) is True:
+                response["spawn_failed"] = True
 
             self._process_command_response(response)
             self._explain_offline_resolve_failure(response, results_dir)
