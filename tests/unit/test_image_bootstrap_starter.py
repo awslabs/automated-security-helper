@@ -14,6 +14,7 @@ name from ``ResourceProperties`` and never touches the environment.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 import types
@@ -65,13 +66,21 @@ class _RecordingCodeBuild:
         return {"build": {"id": "recorded"}}
 
 
-def _load_handler(code: str, codebuild: _RecordingCodeBuild, monkeypatch):
+def _load_handler(
+    code: str, codebuild: _RecordingCodeBuild, monkeypatch, tmp_path: Path
+) -> dict:
+    """Import the shipped handler as Lambda would, with boto3 replaced."""
     fake_boto3 = types.ModuleType("boto3")
     fake_boto3.client = lambda service: codebuild  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "boto3", fake_boto3)
-    namespace: dict = {}
-    exec(compile(code, "index.py", "exec"), namespace)  # noqa: S102 - code under test
-    return namespace
+    source = tmp_path / "index.py"
+    source.write_text(code)
+    spec = importlib.util.spec_from_file_location("bootstrap_starter_index", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # The module's own globals, so replacing `send` here is what `handler` calls.
+    return vars(module)
 
 
 @pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: p.name)
@@ -83,7 +92,7 @@ def test_the_starter_has_no_environment(path: Path):
 
 @pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: p.name)
 def test_the_shipped_handler_starts_the_project_named_in_resource_properties(
-    path: Path, monkeypatch
+    path: Path, monkeypatch, tmp_path: Path
 ):
     bootstrap, starter = _starter(path)
     assert "ProjectName" in bootstrap["Properties"]
@@ -92,7 +101,7 @@ def test_the_shipped_handler_starts_the_project_named_in_resource_properties(
 
     codebuild = _RecordingCodeBuild()
     namespace = _load_handler(
-        starter["Properties"]["Code"]["ZipFile"], codebuild, monkeypatch
+        starter["Properties"]["Code"]["ZipFile"], codebuild, monkeypatch, tmp_path
     )
     sent: list[tuple] = []
     namespace["send"] = lambda event, status, reason: sent.append((status, reason))
@@ -114,7 +123,7 @@ def test_the_shipped_handler_starts_the_project_named_in_resource_properties(
 
 @pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: p.name)
 def test_a_missing_project_name_fails_the_resource_instead_of_hanging(
-    path: Path, monkeypatch
+    path: Path, monkeypatch, tmp_path: Path
 ):
     # If the property were ever dropped, the handler must still answer: a
     # KeyError escaping before `send` would leave CloudFormation waiting for an
@@ -122,7 +131,7 @@ def test_a_missing_project_name_fails_the_resource_instead_of_hanging(
     _, starter = _starter(path)
     codebuild = _RecordingCodeBuild()
     namespace = _load_handler(
-        starter["Properties"]["Code"]["ZipFile"], codebuild, monkeypatch
+        starter["Properties"]["Code"]["ZipFile"], codebuild, monkeypatch, tmp_path
     )
     sent: list[tuple] = []
     namespace["send"] = lambda event, status, reason: sent.append((status, reason))
