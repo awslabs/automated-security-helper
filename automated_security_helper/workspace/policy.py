@@ -35,8 +35,9 @@ file whose author expected project scope.
 Two mechanisms keep that from happening, and the second exists because the first
 is not sufficient:
 
-* ``WORKSPACE_POLICY_FILE_NAMES`` is disjoint from ``ASH_CONFIG_FILE_NAMES``, so
-  *discovery* can never land on a project config. A test asserts the
+* ``WORKSPACE_POLICY_FILE_NAMES`` is disjoint from ``ASH_CONFIG_FILE_NAMES``,
+  ``ASH_RC_FILE_NAMES`` and ``pyproject.toml``, so *discovery* can never land on
+  a project config. A test asserts the
   disjointness rather than trusting it to stay true.
 * ``--workspace-config`` can name any path, so discovery's guarantee does not
   cover it. An explicit file is checked by RESOLVED IDENTITY against each
@@ -392,7 +393,11 @@ def _refuse_project_config_as_policy(
     Compared by resolved path rather than by name, so a symlink to a project's
     config, or a differently-spelled path to it, is caught as well.
     """
-    from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+    from automated_security_helper.core.constants import (
+        ASH_CONFIG_FILE_NAMES,
+        ASH_PYPROJECT_FILE_NAME,
+        ASH_RC_FILE_NAMES,
+    )
 
     for project_config in project_config_paths:
         try:
@@ -411,8 +416,16 @@ def _refuse_project_config_as_policy(
 
     # Also refuse by name. This catches the workspace root's own config even when
     # the caller passed no project list -- the common CLI shape, since the root
-    # project's config path is not known to argument parsing.
-    if policy_path.name in ASH_CONFIG_FILE_NAMES:
+    # project's config path is not known to argument parsing. The ashrc names
+    # and pyproject.toml are project config sources too, discovered after
+    # ASH_CONFIG_FILE_NAMES, so a root project configured by one of them is
+    # caught the same way.
+    project_config_names = {
+        *ASH_CONFIG_FILE_NAMES,
+        *ASH_RC_FILE_NAMES,
+        ASH_PYPROJECT_FILE_NAME,
+    }
+    if policy_path.name in project_config_names:
         raise _refuse(
             f"'{policy_path.as_posix()}' is named like an ASH project config "
             f"('{policy_path.name}'), so it cannot be the workspace policy file. "
