@@ -630,6 +630,15 @@
   run, the scan ended in an uncaught `RuntimeError`. It now prints the same message
   on stderr and exits 1, like the other refused invocations.
 
+- **A container-mode refusal is no longer followed by "Results file not found".**
+  When `ash scan --mode container` refused before any container ran (no OCI
+  runner, a non-numeric `--container-uid` or `--container-gid`, an unsafe
+  `--ash-revision-to-install`, a missing Dockerfile, a failed image build), it went
+  on to log "Container execution failed" and then looked for a results file that
+  nothing could have written, ending in `Results file not found at
+  .../ash_aggregated_results.json`. It now stops after the refusal's own message,
+  with its exit code: 1, or the runner's status for a failed build.
+
 ### Reporting changes
 
 - **Reports now carry the age of every content database a scan used.** Additive:
