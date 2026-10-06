@@ -27,6 +27,7 @@ class TestSecretMasking:
 
     def test_mask_secret_value_long(self):
         """Test masking of long secrets."""
+        # pragma: allowlist nextline secret
         long_secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # nosec B105 — test fixture with dummy AWS key
         masked = _mask_secret_value(long_secret)
         assert masked.startswith("wJ")
@@ -36,6 +37,7 @@ class TestSecretMasking:
 
     def test_mask_bandit_b105_single_quote(self):
         """Test masking of B105 findings with single quotes."""
+        # pragma: allowlist nextline secret
         text = "Possible hardcoded password: 'super_secret_password_123'"
         result = _mask_bandit_b105_secret(text)
         assert "super_secret_password_123" not in result
@@ -44,8 +46,10 @@ class TestSecretMasking:
 
     def test_mask_bandit_b105_double_quote(self):
         """Test masking of B105 findings with double quotes."""
+        # pragma: allowlist nextline secret
         text = 'Possible hardcoded password: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"'
         result = _mask_bandit_b105_secret(text)
+        # pragma: allowlist nextline secret
         assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in result
         assert result.startswith('Possible hardcoded password: "wJ')
         assert result.endswith('Y"')
@@ -58,6 +62,7 @@ class TestSecretMasking:
 
     def test_mask_secret_in_text_b105(self):
         """Test the main masking function with B105 rule."""
+        # pragma: allowlist nextline secret
         text = "Possible hardcoded password: 'test_secret'"
         result = mask_secret_in_text(text, "B105")
         assert "test_secret" not in result
@@ -71,6 +76,7 @@ class TestSecretMasking:
 
     def test_mask_secret_in_text_no_rule(self):
         """Test that text without rule ID is not modified."""
+        # pragma: allowlist nextline secret
         text = "Possible hardcoded password: 'secret'"
         result = mask_secret_in_text(text, None)
         assert result == text
@@ -89,15 +95,18 @@ class TestSecretMasking:
         """Test with real-world examples from the issue description."""
         # Example 1: AWS Secret Key
         text1 = (
+            # pragma: allowlist nextline secret
             "Possible hardcoded password: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'"
         )
         result1 = mask_secret_in_text(text1, "B105")
+        # pragma: allowlist nextline secret
         assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in result1
         assert "Possible hardcoded password:" in result1
         assert result1.startswith("Possible hardcoded password: 'wJ")
         assert result1.endswith("Y'")
 
         # Example 2: Database Password
+        # pragma: allowlist nextline secret
         text2 = "Possible hardcoded password: 'super_secret_password_123'"
         result2 = mask_secret_in_text(text2, "B105")
         assert "super_secret_password_123" not in result2

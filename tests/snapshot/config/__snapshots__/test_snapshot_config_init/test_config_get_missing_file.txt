@@ -1,0 +1,3 @@
+$ ash config get does-not-exist.yaml
+Config file does not exist at does-not-exist.yaml
+[exit code: 1]

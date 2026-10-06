@@ -1,0 +1,21 @@
+$ ash config validate --config invalid.yaml
+Validating configuration file: invalid.yaml
+
+❌ Configuration validation failed with 9 error(s):
+  1. Missing required top-level field: 'project_name'
+  2. Invalid top-level field 'build' - this is an internal field and should not be in user configs
+  3. Unknown top-level field 'legacy_option' - may cause parsing issues
+  4. Duplicate top-level field 'fail_on_findings' found at multiple locations
+  5. Scanner 'bandit' contains internal-only field 'name' - this should not be in user configs
+  6. Scanner 'bandit' contains internal-only field 'tool_version' - this should not be in user configs
+  7. Reporter 'html' contains internal-only field 'extension' - this should not be in user configs
+  8. Converter 'archive' contains internal-only field 'install_timeout' - this should not be in user configs
+  9. Path 'vendor' points to a directory but lacks a '**' glob suffix — it will not match files inside the directory. Use 'vendor/**' to ignore all files recursively.
+
+💡 Common fixes:
+  - Remove internal-only fields like 'name', 'extension', 'tool_version' from scanner/reporter configs
+  - Remove invalid top-level sections like 'build' or 'mcp-resource-management'
+  - Check for duplicate field definitions in your YAML file
+
+📖 See the ASH configuration documentation for the correct format.
+[exit code: 1]

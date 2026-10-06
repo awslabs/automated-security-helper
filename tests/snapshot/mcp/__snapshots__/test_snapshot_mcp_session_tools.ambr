@@ -1,0 +1,1156 @@
+# serializer version: 1
+# name: test_profiles[list_profiles]
+  dict({
+    'result': dict({
+      'count': 1,
+      'profiles': list([
+        dict({
+          'name': 'strict',
+          'path_sha256': '<PROFILE_PATH_SHA256>',
+        }),
+      ]),
+    }),
+    'tool': 'list_profiles',
+  })
+# ---
+# name: test_profiles[list_profiles_none_registered]
+  dict({
+    'result': dict({
+      'count': 0,
+      'profiles': list([
+      ]),
+    }),
+    'tool': 'list_profiles',
+  })
+# ---
+# name: test_profiles[select_profile_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_profiles[select_profile_none_registered]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "unknown profile 'strict' (none registered)",
+      ]),
+    ]),
+    'result': dict({
+      'error': "unknown profile 'strict' (none registered)",
+      'session_id': '__default__',
+      'success': False,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_profiles[select_profile_override]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        "Profile 'strict' bound to session __default__ (override)",
+      ]),
+    ]),
+    'result': dict({
+      'config_path': '<TMP>/workspaces/__default__/config/ash.yaml',
+      'mode': 'override',
+      'profile_name': 'strict',
+      'session_id': '__default__',
+      'success': True,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_profiles[select_profile_override_unknown_field]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        'override_yaml validation error: unknown top-level field(s): not_a_setting',
+      ]),
+    ]),
+    'result': dict({
+      'error': 'override_yaml validation error: unknown top-level field(s): not_a_setting',
+      'session_id': '__default__',
+      'success': False,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_profiles[select_profile_override_unparseable]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        '''
+          override_yaml parse error: while parsing a flow sequence
+            in "<unicode string>", line 1, column 6:
+              key: [unclosed
+                   ^
+          expected ',' or ']', but got '<stream end>'
+            in "<unicode string>", line 2, column 1:
+          
+              ^
+        ''',
+      ]),
+    ]),
+    'result': dict({
+      'error': '''
+        override_yaml parse error: while parsing a flow sequence
+          in "<unicode string>", line 1, column 6:
+            key: [unclosed
+                 ^
+        expected ',' or ']', but got '<stream end>'
+          in "<unicode string>", line 2, column 1:
+        
+            ^
+      ''',
+      'session_id': '__default__',
+      'success': False,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_profiles[select_profile_patch_and_override_together]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        'patch_ops and override_yaml are mutually exclusive',
+      ]),
+    ]),
+    'result': dict({
+      'error': 'patch_ops and override_yaml are mutually exclusive',
+      'session_id': '__default__',
+      'success': False,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_profiles[select_profile_patch_denied]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        'patch denied: Patch op None denied by rule: runtime overrides disabled (allowlist.enabled is False)',
+      ]),
+    ]),
+    'result': dict({
+      'error': 'patch denied: Patch op None denied by rule: runtime overrides disabled (allowlist.enabled is False)',
+      'session_id': '__default__',
+      'success': False,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_profiles[select_profile_static]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        "Profile 'strict' bound to session __default__ (static)",
+      ]),
+    ]),
+    'result': dict({
+      'config_path': '<TMP>/workspaces/__default__/config/ash.yaml',
+      'mode': 'static',
+      'profile_name': 'strict',
+      'session_id': '__default__',
+      'success': True,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_profiles[select_profile_unknown_profile]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "unknown profile 'lenient'; known: strict",
+      ]),
+    ]),
+    'result': dict({
+      'error': "unknown profile 'lenient'; known: strict",
+      'session_id': '__default__',
+      'success': False,
+    }),
+    'tool': 'select_profile',
+  })
+# ---
+# name: test_set_source_git[clone_failed]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "git clone failed (exit 128): fatal: repository 'https://example.com/org/missing.git/' not found",
+      ]),
+    ]),
+    'result': dict({
+      'error': "git clone failed (exit 128): fatal: repository 'https://example.com/org/missing.git/' not found",
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_git',
+  })
+# ---
+# name: test_set_source_git[cloned]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Source cloned for session session-a',
+      ]),
+    ]),
+    'result': dict({
+      'session_id': 'session-a',
+      'source_dir': '<TMP>/workspaces/session-a/source',
+      'success': True,
+    }),
+    'tool': 'set_source_git',
+  })
+# ---
+# name: test_set_source_git[cloned_at_ref]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Source cloned for session session-a',
+      ]),
+    ]),
+    'result': dict({
+      'session_id': 'session-a',
+      'source_dir': '<TMP>/workspaces/session-a/source',
+      'success': True,
+    }),
+    'tool': 'set_source_git',
+  })
+# ---
+# name: test_set_source_git[ext_transport_url]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "refusing url with 'ext::' transport: it instructs git to execute an arbitrary command",
+      ]),
+    ]),
+    'result': dict({
+      'error': "refusing url with 'ext::' transport: it instructs git to execute an arbitrary command",
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_git',
+  })
+# ---
+# name: test_set_source_git[git_argv]
+  list([
+    list([
+      'git',
+      'clone',
+      '--depth',
+      '1',
+      '--',
+      'https://example.com/org/repo.git',
+      '<TMP>/workspaces/session-a/source',
+    ]),
+    list([
+      'git',
+      'clone',
+      '--depth',
+      '1',
+      '--',
+      'https://example.com/org/repo.git',
+      '<TMP>/workspaces/session-a/source',
+    ]),
+    list([
+      'git',
+      '-C',
+      '<TMP>/workspaces/session-a/source',
+      'fetch',
+      '--depth',
+      '1',
+      'origin',
+      'v1.2.3',
+    ]),
+    list([
+      'git',
+      '-C',
+      '<TMP>/workspaces/session-a/source',
+      'checkout',
+      '--detach',
+      'v1.2.3',
+    ]),
+  ])
+# ---
+# name: test_set_source_git[invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'set_source_git',
+  })
+# ---
+# name: test_set_source_git[option_like_ref]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "ref must not begin with '-': git would parse '--output=owned' as an option rather than a value",
+      ]),
+    ]),
+    'result': dict({
+      'error': "ref must not begin with '-': git would parse '--output=owned' as an option rather than a value",
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_git',
+  })
+# ---
+# name: test_set_source_git[option_like_url]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "url must not begin with '-': git would parse '--upload-pack=touch owned' as an option rather than a value",
+      ]),
+    ]),
+    'result': dict({
+      'error': "url must not begin with '-': git would parse '--upload-pack=touch owned' as an option rather than a value",
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_git',
+  })
+# ---
+# name: test_workspace_tools[resolve]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Resolving ASH workspace: <TMP>/allowed/work/dev.code-workspace',
+      ]),
+    ]),
+    'result': dict({
+      'allow_missing_projects': False,
+      'exit_code': 0,
+      'exit_code_meaning': 'success',
+      'message': 'Resolution and validation only. Nothing was scanned; call run_ash_workspace_scan to scan this plan.',
+      'plan': '''
+        Workspace execution plan
+              file:       <TMP>/allowed/work/dev.code-workspace
+              root:       <TMP>/allowed/work
+              projects:   3 to scan, 0 skipped
+              missing ok: no
+        
+          1. api
+              label:      api
+              path:       <TMP>/allowed/work/api
+              relative:   api
+              config:     ASH default config
+              threshold:  MEDIUM
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              pins:       bandit >=1.7.0,<2.0.0
+        
+          2. web
+              label:      web
+              path:       <TMP>/allowed/work/web
+              relative:   web
+              config:     <TMP>/allowed/work/web/.ash/.ash.yaml
+              threshold:  HIGH
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              pins:       bandit >=1.7.0,<2.0.0
+        
+          3. gone
+              label:      gone
+              path:       <TMP>/allowed/work/gone
+              relative:   gone
+              config:     ASH default config
+              threshold:  MEDIUM
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              pins:       bandit >=1.7.0,<2.0.0
+        
+        Nothing has been scanned. This is a resolution and validation pass only.
+      ''',
+      'projects': list([
+        dict({
+          'config_source': None,
+          'display_label': 'api',
+          'effective_severity_threshold': 'MEDIUM',
+          'path': '<TMP>/allowed/work/api',
+          'policy_scanners': list([
+          ]),
+          'project': 'api',
+          'relative_path': 'api',
+          'scanners': list([
+            'bandit',
+            'cdk-nag',
+            'cfn-nag',
+            'checkov',
+            'detect-secrets',
+            'grype',
+            'npm-audit',
+            'opengrep',
+            'semgrep',
+            'syft',
+          ]),
+          'severity_threshold': 'MEDIUM',
+          'skip_detail': None,
+          'skip_reason': None,
+          'skipped': False,
+          'threshold_tightened_by_policy': False,
+        }),
+        dict({
+          'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
+          'display_label': 'web',
+          'effective_severity_threshold': 'HIGH',
+          'path': '<TMP>/allowed/work/web',
+          'policy_scanners': list([
+          ]),
+          'project': 'web',
+          'relative_path': 'web',
+          'scanners': list([
+            'bandit',
+            'cdk-nag',
+            'cfn-nag',
+            'checkov',
+            'detect-secrets',
+            'grype',
+            'npm-audit',
+            'opengrep',
+            'semgrep',
+            'syft',
+          ]),
+          'severity_threshold': 'HIGH',
+          'skip_detail': None,
+          'skip_reason': None,
+          'skipped': False,
+          'threshold_tightened_by_policy': False,
+        }),
+        dict({
+          'config_source': None,
+          'display_label': 'gone',
+          'effective_severity_threshold': 'MEDIUM',
+          'path': '<TMP>/allowed/work/gone',
+          'policy_scanners': list([
+          ]),
+          'project': 'gone',
+          'relative_path': 'gone',
+          'scanners': list([
+            'bandit',
+            'cdk-nag',
+            'cfn-nag',
+            'checkov',
+            'detect-secrets',
+            'grype',
+            'npm-audit',
+            'opengrep',
+            'semgrep',
+            'syft',
+          ]),
+          'severity_threshold': 'MEDIUM',
+          'skip_detail': None,
+          'skip_reason': None,
+          'skipped': False,
+          'threshold_tightened_by_policy': False,
+        }),
+      ]),
+      'scanned': False,
+      'session_config_path': None,
+      'session_id': '__default__',
+      'skipped_projects': list([
+      ]),
+      'success': True,
+      'workspace_config_source': None,
+      'workspace_file': '<TMP>/allowed/work/dev.code-workspace',
+      'workspace_root': '<TMP>/allowed/work',
+    }),
+    'tool': 'resolve_ash_workspace',
+  })
+# ---
+# name: test_workspace_tools[resolve_allow_missing_projects]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Resolving ASH workspace: <TMP>/allowed/work/dev.code-workspace',
+      ]),
+    ]),
+    'result': dict({
+      'allow_missing_projects': True,
+      'exit_code': 0,
+      'exit_code_meaning': 'success',
+      'message': 'Resolution and validation only. Nothing was scanned; call run_ash_workspace_scan to scan this plan.',
+      'plan': '''
+        Workspace execution plan
+              file:       <TMP>/allowed/work/dev.code-workspace
+              root:       <TMP>/allowed/work
+              projects:   2 to scan, 1 skipped
+              missing ok: yes
+        
+          1. api
+              label:      api
+              path:       <TMP>/allowed/work/api
+              relative:   api
+              config:     ASH default config
+              threshold:  MEDIUM
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              pins:       bandit >=1.7.0,<2.0.0
+        
+          2. web
+              label:      web
+              path:       <TMP>/allowed/work/web
+              relative:   web
+              config:     <TMP>/allowed/work/web/.ash/.ash.yaml
+              threshold:  HIGH
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              pins:       bandit >=1.7.0,<2.0.0
+        
+          3. gone  [skipped: error]
+              label:      gone
+              path:       <TMP>/allowed/work/gone
+              relative:   gone
+              reason:     'gone' does not exist as a directory at '<TMP>/allowed/work/gone'
+        
+        Nothing has been scanned. This is a resolution and validation pass only.
+      ''',
+      'projects': list([
+        dict({
+          'config_source': None,
+          'display_label': 'api',
+          'effective_severity_threshold': 'MEDIUM',
+          'path': '<TMP>/allowed/work/api',
+          'policy_scanners': list([
+          ]),
+          'project': 'api',
+          'relative_path': 'api',
+          'scanners': list([
+            'bandit',
+            'cdk-nag',
+            'cfn-nag',
+            'checkov',
+            'detect-secrets',
+            'grype',
+            'npm-audit',
+            'opengrep',
+            'semgrep',
+            'syft',
+          ]),
+          'severity_threshold': 'MEDIUM',
+          'skip_detail': None,
+          'skip_reason': None,
+          'skipped': False,
+          'threshold_tightened_by_policy': False,
+        }),
+        dict({
+          'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
+          'display_label': 'web',
+          'effective_severity_threshold': 'HIGH',
+          'path': '<TMP>/allowed/work/web',
+          'policy_scanners': list([
+          ]),
+          'project': 'web',
+          'relative_path': 'web',
+          'scanners': list([
+            'bandit',
+            'cdk-nag',
+            'cfn-nag',
+            'checkov',
+            'detect-secrets',
+            'grype',
+            'npm-audit',
+            'opengrep',
+            'semgrep',
+            'syft',
+          ]),
+          'severity_threshold': 'HIGH',
+          'skip_detail': None,
+          'skip_reason': None,
+          'skipped': False,
+          'threshold_tightened_by_policy': False,
+        }),
+        dict({
+          'config_source': None,
+          'display_label': 'gone',
+          'effective_severity_threshold': None,
+          'path': '<TMP>/allowed/work/gone',
+          'policy_scanners': list([
+          ]),
+          'project': 'gone',
+          'relative_path': 'gone',
+          'scanners': list([
+          ]),
+          'severity_threshold': None,
+          'skip_detail': "'gone' does not exist as a directory at '<TMP>/allowed/work/gone'",
+          'skip_reason': 'error',
+          'skipped': True,
+          'threshold_tightened_by_policy': False,
+        }),
+      ]),
+      'scanned': False,
+      'session_config_path': None,
+      'session_id': '__default__',
+      'skipped_projects': list([
+        dict({
+          'detail': "'gone' does not exist as a directory at '<TMP>/allowed/work/gone'",
+          'project': 'gone',
+          'reason': 'error',
+        }),
+      ]),
+      'success': True,
+      'workspace_config_source': None,
+      'workspace_file': '<TMP>/allowed/work/dev.code-workspace',
+      'workspace_root': '<TMP>/allowed/work',
+    }),
+    'tool': 'resolve_ash_workspace',
+  })
+# ---
+# name: test_workspace_tools[resolve_ash_workspace_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'resolve_ash_workspace',
+  })
+# ---
+# name: test_workspace_tools[resolve_missing_project]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Resolving ASH workspace: <TMP>/allowed/work/dev.code-workspace',
+      ]),
+      list([
+        'error',
+        '''
+          Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:
+            - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'
+        ''',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+      }),
+      'error': '''
+        Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:
+          - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'
+      ''',
+      'error_category': 'unexpected_error',
+      'error_type': 'WorkspaceDefinitionError',
+      'exit_code': 4,
+      'exit_code_meaning': 'workspace definition or policy error',
+      'operation': 'resolve_workspace',
+      'success': False,
+      'suggestions': list([
+        'Check logs for additional information',
+        'Verify system stability and resource availability',
+        'Report the issue if it persists',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'resolve_ash_workspace',
+  })
+# ---
+# name: test_workspace_tools[resolve_unknown_profile]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Resolving ASH workspace: <TMP>/allowed/work/dev.code-workspace',
+      ]),
+      list([
+        'error',
+        "unknown profile 'nope'; known: none registered",
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+      }),
+      'error': "unknown profile 'nope'; known: none registered",
+      'error_category': 'unexpected_error',
+      'error_type': 'ProfileNotRegisteredError',
+      'exit_code': 3,
+      'exit_code_meaning': 'invalid config',
+      'operation': 'resolve_workspace',
+      'success': False,
+      'suggestions': list([
+        'Check logs for additional information',
+        'Verify system stability and resource availability',
+        'Report the issue if it persists',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'resolve_ash_workspace',
+  })
+# ---
+# name: test_workspace_tools[resolve_workspace_file_missing]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Resolving ASH workspace: <TMP>/allowed/work/absent.code-workspace',
+      ]),
+      list([
+        'error',
+        "workspace file '<TMP>/allowed/work/absent.code-workspace' does not exist",
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+      }),
+      'error': "workspace file '<TMP>/allowed/work/absent.code-workspace' does not exist",
+      'error_category': 'unexpected_error',
+      'error_type': 'WorkspaceDefinitionError',
+      'exit_code': 4,
+      'exit_code_meaning': 'workspace definition or policy error',
+      'operation': 'resolve_workspace',
+      'success': False,
+      'suggestions': list([
+        'Check logs for additional information',
+        'Verify system stability and resource availability',
+        'Report the issue if it persists',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'resolve_ash_workspace',
+  })
+# ---
+# name: test_workspace_tools[run_ash_workspace_scan_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'run_ash_workspace_scan',
+  })
+# ---
+# name: test_workspace_tools[scan]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Starting ASH workspace scan: <TMP>/allowed/work/dev.code-workspace',
+      ]),
+      list([
+        'report_progress',
+        "message='Workspace scan started: 0/2 projects complete'",
+        'progress=0.0',
+        'total=2.0',
+      ]),
+      list([
+        'report_progress',
+        "message='api complete (1/2 projects)'",
+        'progress=1.0',
+        'total=2.0',
+      ]),
+      list([
+        'report_progress',
+        "message='web complete (2/2 projects)'",
+        'progress=2.0',
+        'total=2.0',
+      ]),
+      list([
+        'info',
+        'Workspace scan finished with exit code 0 across 2 project(s)',
+      ]),
+    ]),
+    'result': dict({
+      'ceiling_unreachable_findings': dict({
+      }),
+      'exit_code': 0,
+      'exit_code_meaning': 'success',
+      'output_dir': '<TMP>/allowed/work/.ash/ash_output',
+      'projects': list([
+        dict({
+          'actionable_finding_count': 0,
+          'ceiling_unreachable_findings': dict({
+          }),
+          'display_label': 'api',
+          'duration_seconds': 0.0,
+          'error': None,
+          'exceeds_threshold': False,
+          'finding_count': 0,
+          'incomplete_scanners': list([
+          ]),
+          'invalid_config': False,
+          'no_scanner_ran': False,
+          'output_path': 'projects/api',
+          'policy_origin_finding_count': 0,
+          'project': 'api',
+          'relative_path': 'api',
+          'sarif_run_index': None,
+          'scan_id': '<PROJECT_SCAN_ID>',
+          'scan_incomplete': False,
+          'scanners': dict({
+          }),
+          'severity_threshold': 'MEDIUM',
+          'skip_detail': None,
+          'skip_reason': None,
+          'status': 'completed',
+        }),
+        dict({
+          'actionable_finding_count': 0,
+          'ceiling_unreachable_findings': dict({
+          }),
+          'display_label': 'web',
+          'duration_seconds': 0.0,
+          'error': None,
+          'exceeds_threshold': False,
+          'finding_count': 0,
+          'incomplete_scanners': list([
+          ]),
+          'invalid_config': False,
+          'no_scanner_ran': False,
+          'output_path': 'projects/web',
+          'policy_origin_finding_count': 0,
+          'project': 'web',
+          'relative_path': 'web',
+          'sarif_run_index': None,
+          'scan_id': '<PROJECT_SCAN_ID>',
+          'scan_incomplete': False,
+          'scanners': dict({
+          }),
+          'severity_threshold': 'HIGH',
+          'skip_detail': None,
+          'skip_reason': None,
+          'status': 'completed',
+        }),
+        dict({
+          'actionable_finding_count': 0,
+          'ceiling_unreachable_findings': dict({
+          }),
+          'display_label': 'gone',
+          'duration_seconds': 0.0,
+          'error': None,
+          'exceeds_threshold': False,
+          'finding_count': 0,
+          'incomplete_scanners': list([
+          ]),
+          'invalid_config': False,
+          'no_scanner_ran': False,
+          'output_path': 'projects/gone',
+          'policy_origin_finding_count': 0,
+          'project': 'gone',
+          'relative_path': 'gone',
+          'sarif_run_index': None,
+          'scan_id': None,
+          'scan_incomplete': False,
+          'scanners': dict({
+          }),
+          'severity_threshold': None,
+          'skip_detail': None,
+          'skip_reason': None,
+          'status': 'completed',
+        }),
+      ]),
+      'results_path': '<TMP>/allowed/work/.ash/ash_output/ash_workspace_results.json',
+      'scan_ids': dict({
+        'api': '<PROJECT_SCAN_ID>',
+        'web': '<PROJECT_SCAN_ID>',
+      }),
+      'scan_incomplete': False,
+      'session_config_path': None,
+      'session_id': '__default__',
+      'skipped_projects': list([
+        dict({
+          'detail': "'gone' does not exist as a directory at '<TMP>/allowed/work/gone'",
+          'project': 'gone',
+          'reason': 'error',
+        }),
+      ]),
+      'success': True,
+      'workspace_config_source': None,
+      'workspace_file': '<TMP>/allowed/work/dev.code-workspace',
+      'workspace_root': '<TMP>/allowed/work',
+    }),
+    'tool': 'run_ash_workspace_scan',
+  })
+# ---
+# name: test_workspace_tools[scan_project_outside_roots]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Starting ASH workspace scan: <TMP>/allowed/escaping/dev.code-workspace',
+      ]),
+      list([
+        'error',
+        '''
+          Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:
+            - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)
+        ''',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+      }),
+      'error': '''
+        Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:
+          - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)
+      ''',
+      'error_category': 'unexpected_error',
+      'error_type': 'WorkspaceDefinitionError',
+      'exit_code': 4,
+      'exit_code_meaning': 'workspace definition or policy error',
+      'operation': 'scan_workspace',
+      'success': False,
+      'suggestions': list([
+        'Check logs for additional information',
+        'Verify system stability and resource availability',
+        'Report the issue if it persists',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'run_ash_workspace_scan',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[chunk_0]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'last': False,
+      'next_sequence': 1,
+      'received': 117,
+      'session_id': 'session-a',
+      'success': True,
+    }),
+    'tool': 'set_source_zip_chunk',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[chunk_1_last]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'last': True,
+      'next_sequence': 2,
+      'received': 234,
+      'session_id': 'session-a',
+      'success': True,
+    }),
+    'tool': 'set_source_zip_chunk',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[chunk_invalid_base64]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': 'invalid base64 payload: Incorrect padding',
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_zip_chunk',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[chunk_out_of_order]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': 'out-of-order chunk: expected sequence 1, got 5',
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_zip_chunk',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[clear_source]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Source cleared for session session-a',
+      ]),
+    ]),
+    'result': dict({
+      'session_id': 'session-a',
+      'success': True,
+    }),
+    'tool': 'clear_source',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[clear_source_idempotent]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Source cleared for session session-a',
+      ]),
+    ]),
+    'result': dict({
+      'session_id': 'session-a',
+      'success': True,
+    }),
+    'tool': 'clear_source',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[clear_source_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'clear_source',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[finalize]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Source extracted for session session-a',
+      ]),
+    ]),
+    'result': dict({
+      'session_id': 'session-a',
+      'source_dir': '<TMP>/workspaces/session-a/source',
+      'success': True,
+    }),
+    'tool': 'set_source_zip_finalize',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[finalize_after_mismatch]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "no finalized zip for upload_id='upload-3' (did the last chunk arrive with last=True?)",
+      ]),
+    ]),
+    'result': dict({
+      'error': "no finalized zip for upload_id='upload-3' (did the last chunk arrive with last=True?)",
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_zip_finalize',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[finalize_extracted_files]
+  list([
+    'README.md',
+    'src/app.py',
+  ])
+# ---
+# name: test_zip_upload_finalize_and_clear[finalize_sha256_mismatch]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        'sha256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, got 70e5c676cfee2ec9d172ab6ea9318458b71cd685fe1bd62b87c7547f12a8b79b',
+      ]),
+    ]),
+    'result': dict({
+      'error': 'sha256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, got 70e5c676cfee2ec9d172ab6ea9318458b71cd685fe1bd62b87c7547f12a8b79b',
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_zip_finalize',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[finalize_unknown_upload]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "no finalized zip for upload_id='never-uploaded' (did the last chunk arrive with last=True?)",
+      ]),
+    ]),
+    'result': dict({
+      'error': "no finalized zip for upload_id='never-uploaded' (did the last chunk arrive with last=True?)",
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'set_source_zip_finalize',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[run_ash_scan_after_clear]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
+      ]),
+    ]),
+    'result': dict({
+      'error': "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
+      'error_type': 'no_source_delivered',
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[set_source_zip_chunk_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'set_source_zip_chunk',
+  })
+# ---
+# name: test_zip_upload_finalize_and_clear[set_source_zip_finalize_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'set_source_zip_finalize',
+  })
+# ---
