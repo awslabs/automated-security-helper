@@ -508,10 +508,12 @@ export class AshImageBuild extends Construct {
       description:
         'Starts the ASH image build during stack creation and hands CloudFormation’s ' +
         'response URL to the build, which answers once the image exists.',
-      environment: { PROJECT_NAME: this.project.projectName },
-      // Encrypts PROJECT_NAME at rest with the adopter's key when one was
-      // supplied, and disappears when it was not. See `AshCustomerKey`.
-      environmentEncryption: props.customerKey.key,
+      // No `environment`. The project name arrives as the custom resource's
+      // `ProjectName` property instead (see below). checkov's CKV_AWS_45 fired on
+      // an environment that held only a `Ref` to the project, on some CI runs and
+      // not others, and a function with no environment gives it nothing to read.
+      // With no variables there is nothing for `environmentEncryption` to encrypt
+      // either, so the function takes no key.
       /*
        * ONE, because one is the most CloudFormation will ever ask for.
        *
@@ -545,7 +547,12 @@ export class AshImageBuild extends Construct {
       serviceToken: starter.functionArn,
       resourceType: 'Custom::AshImageBootstrap',
       properties: {
-        // These are read by nobody. They exist so that changing the ASH version
+        // The one property the handler reads: the project to start. Passing it
+        // here rather than in the Lambda's environment keeps the function free of
+        // environment variables. The starter's role may StartBuild on this project
+        // and no other.
+        ProjectName: this.project.projectName,
+        // The rest are read by nobody. They exist so that changing the ASH version
         // or the offline flag changes the custom resource's properties, which is
         // what makes CloudFormation re-invoke it on a stack update. Without them
         // a version bump would leave the old image in place and the workload
@@ -846,7 +853,6 @@ fi`;
  * `ZipFile`, which CloudFormation caps at 4096 characters.
  */
 const BOOTSTRAP_STARTER_CODE = `import json
-import os
 import urllib.request
 
 import boto3
@@ -874,7 +880,7 @@ def handler(event, context):
         return
     try:
         boto3.client("codebuild").start_build(
-            projectName=os.environ["PROJECT_NAME"],
+            projectName=event["ResourceProperties"]["ProjectName"],
             environmentVariablesOverride=[
                 {"name": "CFN_RESPONSE_URL", "value": event["ResponseURL"], "type": "PLAINTEXT"},
                 {"name": "CFN_STACK_ID", "value": event["StackId"], "type": "PLAINTEXT"},

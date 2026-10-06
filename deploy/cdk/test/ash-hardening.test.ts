@@ -174,6 +174,74 @@ describe('the image-build bootstrap starter is concurrency-bounded', () => {
   );
 });
 
+/**
+ * The bootstrap starter takes the project name from the custom resource, not from
+ * a Lambda environment variable.
+ *
+ * checkov's CKV_AWS_45 ("no hard-coded secrets in Lambda environment") fired on
+ * this function in CI on some runs and not others, although its only variable was
+ * a `Ref` to the CodeBuild project. With no `Environment` block there is nothing
+ * for that check, or any other environment-variable check, to evaluate, so the
+ * template needs no entry for it. The custom resource's `ProjectName` property
+ * carries the name instead, and CloudFormation hands it to the handler as
+ * `ResourceProperties`. tests/unit/test_image_bootstrap_starter.py runs the
+ * inline handler against each committed template to prove it reads it from there.
+ */
+describe('the image-build bootstrap starter has no environment', () => {
+  const functions = everyResource('AWS::Lambda::Function').filter(([name]) =>
+    name.includes('BootstrapStarter'),
+  );
+
+  test('there are bootstrap starters to check', () => {
+    expect(functions.length).toBe(3);
+  });
+
+  test.each(functions.map(([name, props]) => [name, props] as const))(
+    '%s declares no environment variables and no environment key',
+    (_name, props) => {
+      expect(props.Environment).toBeUndefined();
+      // KmsKeyArn only encrypts environment variables. With none, a key there
+      // would be configuration that does nothing.
+      expect(props.KmsKeyArn).toBeUndefined();
+    },
+  );
+
+  const withBootstrap = CASES.filter(
+    ([, t]) => Object.keys(t.findResources('Custom::AshImageBootstrap')).length > 0,
+  );
+
+  test('there are bootstrap custom resources to check', () => {
+    expect(withBootstrap.map(([stack]) => stack)).toEqual([
+      'AshAgentCore',
+      'AshFargate',
+      'AshCodeCommitGate',
+    ]);
+  });
+
+  test.each(withBootstrap)(
+    '%s passes the project the starter may start as ProjectName',
+    (_stack, template) => {
+      const [bootstrap] = Object.values<any>(template.findResources('Custom::AshImageBootstrap'));
+      const starterId: string = bootstrap.Properties.ServiceToken['Fn::GetAtt'][0];
+      const projectRef = bootstrap.Properties.ProjectName;
+      expect(projectRef).toEqual({ Ref: expect.any(String) });
+      expect(template.findResources('AWS::CodeBuild::Project')[projectRef.Ref]).toBeDefined();
+
+      // The one project the starter's role may StartBuild is the one named here, so
+      // the handler cannot be pointed at a project its role cannot start.
+      const starter = template.findResources('AWS::Lambda::Function')[starterId];
+      const roleId: string = starter.Properties.Role['Fn::GetAtt'][0];
+      const startBuild = Object.values<any>(template.findResources('AWS::IAM::Policy'))
+        .filter((p) => (p.Properties.Roles ?? []).some((r: any) => r.Ref === roleId))
+        .flatMap((p) => p.Properties.PolicyDocument.Statement)
+        .filter((s: any) => [].concat(s.Action).includes('codebuild:StartBuild' as never));
+      expect(startBuild.map((s: any) => s.Resource)).toEqual([
+        { 'Fn::GetAtt': [projectRef.Ref, 'Arn'] },
+      ]);
+    },
+  );
+});
+
 describe('the Fargate VPC does not auto-assign public IPv4 addresses', () => {
   const template = TEMPLATES.AshFargate;
   const subnets = Object.entries<any>(template.findResources('AWS::EC2::Subnet'));
