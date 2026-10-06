@@ -949,6 +949,19 @@ global_settings:
         immediately above that block, which is the more likely thing the rule's
         heuristic is reacting to, though that was not confirmed against checkov's
         implementation.
+    - rule_id: CKV_AWS_45
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Same image-build bootstrap starter as the AshAgentCore entry above, and the
+        same environment: PROJECT_NAME is a Ref to this stack's CodeBuild project, so
+        nothing in it is hard-coded. The Lambda resource is byte-identical to the one
+        in the tree where no CKV_AWS_45 fired at all; only the CodeBuild project it
+        references changed (its buildspec now runs ashx). Measured in local mode with
+        checkov 3.3.23 across five trees, the rule fired on no template, on
+        AshAgentCore only, or on AshFargate only, while each template's Lambda stayed
+        the same, so which sibling template it lands on is not a property of that
+        template's Lambda. checkov run on the templates directory alone does not raise
+        it for any of them.
     # === checkov's own secret detector, same two lines as detect-secrets ===
     #
     # CKV_SECRET_6 fires on the identical two `"SecretString": "ash-mcp-auth-
