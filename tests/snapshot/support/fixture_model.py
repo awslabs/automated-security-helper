@@ -14,7 +14,7 @@ Why the model is built through ASH's own code and not by hand
 A hand-assembled ``AshAggregatedResults`` snapshots what the test author believed the
 pipeline produces. Building it through the pipeline snapshots what it does produce, so
 a change to aggregation, suppression or metrics shows up in every reporter snapshot
-that depends on it. The steps mirror a real ``ash scan``:
+that depends on it. The steps mirror a real ``ashx scan``:
 
 1. Each scanner in ``scanner_outputs/scanners.yaml`` becomes the
    ``ScanResultsContainer`` the executor would build for it

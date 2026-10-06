@@ -1,4 +1,4 @@
-$ ash report --format text --log-level ERROR
+$ ashx report --format text --log-level ERROR
 [exit 0]
 ASH SECURITY SCAN REPORT
 =======================

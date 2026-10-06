@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash config update`: what it prints, and the file it leaves behind.
+"""`ashx config update`: what it prints, and the file it leaves behind.
 
 `update` prints the whole updated config rather than a diff, so the snapshot is the
 printed config plus the file as written. The printed config includes every default,

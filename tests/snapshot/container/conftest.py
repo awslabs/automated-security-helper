@@ -77,7 +77,7 @@ def fixture_repo(in_tmp: Path) -> Path:
 
 @pytest.fixture
 def run_cli(in_tmp: Path) -> Callable[..., dict[str, Any]]:
-    """Invoke ``ash`` in-process; return the exit code and each stream separately."""
+    """Invoke ``ashx`` in-process; return the exit code and each stream separately."""
     from automated_security_helper.cli.main import app
 
     def _run(args: Sequence[str]) -> dict[str, Any]:

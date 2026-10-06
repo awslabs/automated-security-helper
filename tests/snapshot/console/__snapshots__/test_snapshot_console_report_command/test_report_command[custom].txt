@@ -1,4 +1,4 @@
-$ ash report --format custom --log-level ERROR
+$ ashx report --format custom --log-level ERROR
 [exit 1]
 Error: Reporter plugin 'custom' not found.
 Available reporter formats:

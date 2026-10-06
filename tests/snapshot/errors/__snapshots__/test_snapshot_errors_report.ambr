@@ -12,7 +12,7 @@
       AshConfig
       fail_on_findings
         Input should be a valid boolean
-          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ashx config
       lint' to identify and fix issues.
   
     ''',

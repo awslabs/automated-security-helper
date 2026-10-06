@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash report --format <f>`` for every ``ExportFormat`` value, through the real CLI.
+"""``ashx report --format <f>`` for every ``ExportFormat`` value, through the real CLI.
 
 ``report_command`` prints a reporter's output three different ways depending on the format:
 ``rich.print_json`` (re-indented, for the JSON-shaped formats), ``rich.Markdown`` (rendered,
@@ -85,7 +85,7 @@ def test_report_command(
     )
 
     document = (
-        f"$ ash report --format {report_format} --log-level ERROR\n"
+        f"$ ashx report --format {report_format} --log-level ERROR\n"
         f"[exit {result.exit_code}]\n"
         f"{result.stdout}"
     )

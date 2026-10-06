@@ -34,7 +34,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Config file not found. Use 'ash config init' to create one.
+      Config file not found. Use 'ashx config init' to create one.
   
     ''',
   })
@@ -159,7 +159,7 @@
       Invalid configuration: Configuration validation failed for 'ash.yaml': 1 validation error for AshConfig
       fail_on_findings
         Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
-          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ashx config lint' to identify and fix issues.
   
     ''',
   })
@@ -206,7 +206,7 @@
       Config file '<TMP>/ash.yaml' is not valid: Configuration validation failed for 'ash.yaml': 1 validation error for AshConfig
       fail_on_findings
         Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
-          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ashx config lint' to identify and fix issues.
   
     ''',
   })
@@ -236,7 +236,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Config file not found. Use 'ash config init' to create one.
+      Config file not found. Use 'ashx config init' to create one.
   
     ''',
   })

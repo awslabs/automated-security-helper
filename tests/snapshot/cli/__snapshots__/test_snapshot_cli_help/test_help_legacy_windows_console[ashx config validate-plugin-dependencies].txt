@@ -1,0 +1,25 @@
+
+ Usage: ashx config validate-plugin-dependencies [OPTIONS] [config_path]
+
+┌─ Arguments ─────────────────────────────────────────────────────────────────────────────────────┐
+│   config_path      <str>  The name of the config file to create. By default, ASH looks for the  │
+│                           following config file names in the source directory of a scan:        │
+│                           ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml',         │
+│                           'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml',   │
+│                           '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml',             │
+│                           'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the        │
+│                           tool.ash table of pyproject.toml at the root; the first found is      │
+│                           used. If  a different filename is specified, it must be provided when │
+│                           running ASH via the `--config` option or by setting the `ASH_CONFIG`  │
+│                           environment variable.                                                 │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --config-overrides                        <str>  Configuration overrides specified as key-value │
+│                                                  pairs (e.g.,                                   │
+│                                                  'global_settings.severity_threshold=LOW')      │
+│ --verbose               --no-verbose             Enable verbose logging [default: no-verbose]   │
+│ --debug                 --no-debug               Enable debug logging [default: no-debug]       │
+│ --color                 --no-color    -C         Enable/disable colorized output                │
+│                                                  [default: color]                               │
+│ --help              -h                           Show this message and exit.                    │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

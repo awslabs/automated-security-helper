@@ -31,8 +31,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash merge [OPTIONS]
-      Try 'ash merge --help' for help.
+      Usage: ashx merge [OPTIONS]
+      Try 'ashx merge -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ Invalid value: 'pdf' is not a valid format. Valid formats are: aggregated, text, flat-json,      │
       │ yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom            │
@@ -46,8 +46,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash merge [OPTIONS]
-      Try 'ash merge --help' for help.
+      Usage: ashx merge [OPTIONS]
+      Try 'ashx merge -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ Missing option '--results'.                                                                      │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

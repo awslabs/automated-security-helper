@@ -1,0 +1,19 @@
+
+ Usage: ashx config [OPTIONS] COMMAND [ARGS]...
+
+ ASH configuration management
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help  -h        Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init                                                                                             │
+│ get                                                                                              │
+│ update                        Update an existing configuration file with the specified           │
+│                               modifications.                                                     │
+│ validate-plugin-dependencies                                                                     │
+│ lint                          Lint an ASH configuration file for issues and optionally auto-fix  │
+│                               them.                                                              │
+│ wizard                        Interactive configuration wizard.                                  │
+│ validate                      Validate an ASH configuration file for common issues.              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

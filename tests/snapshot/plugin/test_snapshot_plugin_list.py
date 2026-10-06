@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash plugin list`: the scanner, converter and reporter tables.
+"""`ashx plugin list`: the scanner, converter and reporter tables.
 
 The plugin set is the real built-in one. What is faked is the environment probe
 behind ``--show-versions``: ``list_scanner_inventory`` instantiates every scanner and

@@ -202,7 +202,7 @@ def pytest_runtest_teardown(item: pytest.Item) -> Iterator[None]:
             )
 
 
-#: Where ASH's own plugins live. A fresh ``ash`` process registers these and nothing
+#: Where ASH's own plugins live. A fresh ``ashx`` process registers these and nothing
 #: else unless its config names more (no snapshot test's config does).
 _BUILTIN_PLUGIN_PACKAGE = "automated_security_helper.plugin_modules.ash_builtin"
 
@@ -228,7 +228,7 @@ def _builtin_plugins_only(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 @contextlib.contextmanager
 def builtin_plugin_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Give every snapshot the plugin registry of a freshly started ``ash`` process.
+    """Give every snapshot the plugin registry of a freshly started ``ashx`` process.
 
     Plugins register into one module-level ``ash_plugin_manager`` when their module is
     first imported, and ``plugin_modules()`` memoises what it resolved. So once any
@@ -262,7 +262,7 @@ def builtin_plugin_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # ``pinned_clock`` imports these to patch them, and two are AWS reporters: their
     # package registers its plugins on first import. Imported inside the test, those
     # registrations would land in the test's copy and the first test in a worker to
-    # pin the clock would list the AWS reporters (measured: `ash report --format
+    # pin the clock would list the AWS reporters (measured: `ashx report --format
     # dict` did, under xdist only). Importing them first puts them in the real
     # registry, where the filter below leaves them out of every test alike.
     for module_name in CLOCK_PINNED_MODULES:
@@ -371,7 +371,7 @@ def _no_real_aws(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 @pytest.fixture(autouse=True)
 def _fresh_ash_loggers() -> Iterator[None]:
-    """Give every snapshot the logging state of a freshly started ``ash`` process.
+    """Give every snapshot the logging state of a freshly started ``ashx`` process.
 
     ``get_logger`` attaches a handler to the ``ash`` logger (and to named children
     such as ``ash.cli.config.lint``) that lives for the rest of the process, at the
@@ -410,7 +410,7 @@ def _fresh_ash_loggers() -> Iterator[None]:
 
 @pytest.hookimpl(wrapper=True, trylast=True)
 def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
-    """Run the test body with no logging handler that a real ``ash`` would not have.
+    """Run the test body with no logging handler that a real ``ashx`` would not have.
 
     pytest's logging plugin attaches its capture handlers to the root logger, and to
     the non-propagating ``ash`` logger, when the call phase starts -- after every

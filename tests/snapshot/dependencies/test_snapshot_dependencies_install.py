@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash dependencies install`: panels, per-command lines and the results table.
+"""`ashx dependencies install`: panels, per-command lines and the results table.
 
 The plugins, and the install commands they declare, are the real built-in ones. What
 is replaced is everything that touches the machine:

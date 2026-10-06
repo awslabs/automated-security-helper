@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash config wizard`, driven through every prompt with scripted answers.
+"""`ashx config wizard`, driven through every prompt with scripted answers.
 
 The wizard asks one yes/no question per built-in scanner and reporter, in field
 order. The answers are built from that same field list (via the wizard's own

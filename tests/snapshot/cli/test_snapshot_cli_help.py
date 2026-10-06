@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Snapshots of every ``--help`` page, ``ash --version`` and ``--generate-cli-skeleton``.
+"""Snapshots of every ``--help`` page, ``ashx --version`` and ``--generate-cli-skeleton``.
 
 The command list is walked from the real Typer app, so a command added without a
 snapshot fails here instead of shipping unreviewed help text, and
@@ -21,7 +21,7 @@ How the help is made identical on every OS
   real user-visible output, so both variants are rendered on every OS by pinning the
   detection: ``test_help`` is a VT terminal (Linux, macOS, Windows Terminal) and
   ``test_help_legacy_windows_console`` is the legacy console.
-- ``prog_name="ash"`` keeps the usage line from depending on how pytest was started.
+- ``prog_name=CANONICAL_CLI_NAME`` (``ashx``) keeps the usage line from depending on how pytest was started.
 - The one machine-dependent help default, ``dependencies install --bin-path``
   (``~/.ash/bin``), is masked as ``<HOME>`` by the shared normalizer, which also
   keeps the panel border where rich drew it.
@@ -37,6 +37,7 @@ import typer.main
 import typer.rich_utils
 from typer.testing import CliRunner
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.cli.json_input import CliJsonInputCommand
 from automated_security_helper.cli.main import app
 from tests.snapshot.support.normalize import pinned_terminal_env
@@ -60,7 +61,7 @@ SKELETON_COMMANDS = [
 
 
 def _command_id(path: tuple[str, ...]) -> str:
-    return " ".join(("ash", *path))
+    return " ".join((CANONICAL_CLI_NAME, *path))
 
 
 @pytest.fixture(autouse=True)
@@ -73,7 +74,7 @@ def _pinned_rich_help(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _invoke(args: list[str]) -> str:
-    result = CliRunner().invoke(app, args, prog_name="ash")
+    result = CliRunner().invoke(app, args, prog_name=CANONICAL_CLI_NAME)
     assert result.exit_code == 0, (result.output, result.exception)
     return result.output
 
@@ -134,14 +135,14 @@ def test_the_walk_reaches_the_documented_tree():
     # above would still pass over a shorter list.
     walked = {_command_id(path) for path, _ in COMMANDS}
     assert {
-        "ash",
-        "ash scan",
-        "ash config validate-plugin-dependencies",
-        "ash dependencies install",
-        "ash inspect sarif-fields",
-        "ash plugin list",
+        "ashx",
+        "ashx scan",
+        "ashx config validate-plugin-dependencies",
+        "ashx dependencies install",
+        "ashx inspect sarif-fields",
+        "ashx plugin list",
     } <= walked
     assert {_command_id(path) for path, _ in SKELETON_COMMANDS} >= {
-        "ash scan",
-        "ash report",
+        "ashx scan",
+        "ashx report",
     }

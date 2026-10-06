@@ -55,7 +55,7 @@ def in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def run_cli(in_tmp: Path) -> Callable[..., dict[str, Any]]:
-    """Invoke ``ash`` in-process and return what the user saw."""
+    """Invoke ``ashx`` in-process and return what the user saw."""
 
     def _run(args: Sequence[str], **kwargs: Any) -> dict[str, Any]:
         result = CliRunner().invoke(app, list(args), **kwargs)

@@ -1,0 +1,23 @@
+
+ Usage: ashx get-genai-guide [OPTIONS]
+
+ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
+
+ This guide provides comprehensive instructions for GenAI tools on how to properly
+ interact with ASH scan results, including:
+ - Correct file formats to use (JSON vs HTML)
+ - How to handle severity discrepancies
+ - Creating suppressions properly
+ - Working with CycloneDX SBOM for dependencies
+ - Configuration file schema
+ - Common pitfalls and solutions
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --output       -o      <str>  Output path for the GenAI integration guide                       │
+│                               [default: ash-genai-guide.md]                                     │
+│ --from-github                 Fetch from GitHub instead of local installation                   │
+│ --branch       -b      <str>  GitHub branch to fetch from when using --from-github (default:    │
+│                               main)                                                             │
+│                               [default: main]                                                   │
+│ --help         -h             Show this message and exit.                                       │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

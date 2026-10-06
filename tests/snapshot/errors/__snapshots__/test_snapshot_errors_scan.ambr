@@ -3,8 +3,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ Invalid value: 'pdf' is not a valid format. Valid formats are: aggregated, text, flat-json,      │
       │ yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom            │
@@ -16,16 +16,16 @@
 # ---
 # name: TestArgumentRefusals.test_misspelled_option
   dict({
-    'exit_code': 1,
-    'stderr': '',
-    'stdout': '''
-      [<LOG_TIME>] ERROR    probe: the scan reached the orchestrator with source_dir '.' (relative to the working directory), which exists=True
-                            <TRACEBACK>
-                            RuntimeError: probe: the scan reached the orchestrator with source_dir '.' (relative to the working directory), which exists=True
-      ERROR (1) Exiting due to exception during ASH scan: probe: the scan reached the orchestrator with
-      source_dir '.' (relative to the working directory), which exists=True
+    'exit_code': 2,
+    'stderr': '''
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
+      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
+      │ No such option: --sourc-dir (Possible options: --oci, --output-dir, --source-dir)                │
+      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   
     ''',
+    'stdout': '',
   })
 # ---
 # name: TestArgumentRefusals.test_nonexistent_source_dir
@@ -42,8 +42,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash [OPTIONS] COMMAND [ARGS]...
-      Try 'ash --help' for help.
+      Usage: ashx [OPTIONS] COMMAND [ARGS]...
+      Try 'ashx -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ No such command 'scna'. Did you mean 'scan'?                                                     │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -66,8 +66,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: params.json is not valid JSON: key 'output_dir' appears more than once         │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -80,8 +80,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: params.json is not valid JSON: Expecting ',' delimiter: line 1 column 22 (char │
       │ 21)                                                                                              │
@@ -95,8 +95,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: cannot read nowhere.json: [Errno 2] No such file or directory: 'nowhere.json'  │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -109,8 +109,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: invalid value for key 'min_severity' in params.json: a JSON boolean is only    │
       │ accepted for a true/false parameter                                                              │
@@ -124,8 +124,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: params.json must contain a JSON object whose keys are parameter names, not a   │
       │ list                                                                                             │
@@ -139,8 +139,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: invalid value for key 'shard_index' in params.json: Invalid value for          │
       │ '--shard-index' (env var: 'ASH_SHARD_INDEX'): 'first' is not a valid int.                        │
@@ -154,8 +154,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: invalid value for key 'scanners' in params.json: expected a JSON array,        │
       │ because this parameter takes a list                                                              │
@@ -169,8 +169,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: invalid value for key 'source_dir' in params.json: expected a string, number   │
       │ or boolean                                                                                       │
@@ -184,8 +184,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: keys 'output_dir' and '--output-dir' in params.json both set the parameter     │
       │ 'output_dir'.                                                                                    │
@@ -199,8 +199,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: invalid value for key 'output_dir' in params.json: expected a single value,    │
       │ not a JSON array                                                                                 │
@@ -214,8 +214,8 @@
   dict({
     'exit_code': 2,
     'stderr': '''
-      Usage: ash scan [OPTIONS]
-      Try 'ash scan --help' for help.
+      Usage: ashx scan [OPTIONS]
+      Try 'ashx scan -h' for help.
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: unknown key 'output_dirr' in params.json. Valid keys are the parameter names   │
       │ source_dir, output_dir, scanners, exclude_scanners, ash_plugin_modules, config_overrides,        │
@@ -350,7 +350,7 @@
       for AshConfig
       fail_on_findings
         Input should be a valid boolean
-          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ashx config
       lint' to identify and fix issues.
   
     ''',
@@ -425,7 +425,7 @@
   dict({
     'exit_code': 1,
     'stderr': '''
-      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ash merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via --source-dir and shard that.
+      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ashx merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via --source-dir and shard that.
   
     ''',
     'stdout': '',
@@ -482,7 +482,7 @@
       Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash/.ash.yaml': 1 validation error for AshConfig
       fail_on_findings
         Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
-          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ashx config lint' to identify and fix issues.
   
     ''',
     'stdout': '',

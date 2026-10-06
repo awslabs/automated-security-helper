@@ -138,6 +138,33 @@ class TestMasked:
         )
         assert out == "ASH <ASH_VERSION> on <HOSTNAME> run <UUID>"
 
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("ASH v4.0.0", "ASH v<ASH_VERSION>"),
+            ("version: 4.0.0\n", "version: <ASH_VERSION>\n"),
+            (
+                "automated-security-helper==4.0.0",
+                "automated-security-helper==<ASH_VERSION>",
+            ),
+            ("'4.0.0'", "'<ASH_VERSION>'"),
+            # A dependency constraint that names the same number is not ASH's version.
+            ("checkov>=3.2.0,<4.0.0", "checkov>=3.2.0,<4.0.0"),
+            ("cdk-nag<4.0.0,>=3.0", "cdk-nag<4.0.0,>=3.0"),
+            ("x>=4.0.0", "x>=4.0.0"),
+            ("x~=4.0.0", "x~=4.0.0"),
+            ("x!=4.0.0", "x!=4.0.0"),
+            # Nor is a longer version that contains it.
+            ("14.0.0", "14.0.0"),
+            ("4.0.0.1", "4.0.0.1"),
+            ("4.0.01", "4.0.01"),
+        ],
+    )
+    def test_ash_version_is_masked_only_as_a_version(self, text, expected):
+        n = SnapshotNormalizer()
+        n.add_version("4.0.0", "ASH_VERSION")
+        assert n.text(text) == expected
+
     def test_volatile_keys_in_data(self, timed):
         data = {"duration": 1.5, "start_time": "x", "count": 3, "nested": [{"time": 2}]}
         assert timed.data(data) == {

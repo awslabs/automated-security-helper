@@ -1,4 +1,4 @@
-$ ash report --format csv --log-level ERROR
+$ ashx report --format csv --log-level ERROR
 [exit 0]
 id,title,description,severity,scanner,scanner_type,rule_id,file_path,line_start,line_end,cve_id,cwe_
 id,fix_available,is_suppressed,suppression_kind,suppression_justification,detected_at,code_snippet,t

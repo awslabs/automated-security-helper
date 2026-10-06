@@ -1,4 +1,4 @@
-$ ash report --format yaml --log-level ERROR
+$ ashx report --format yaml --log-level ERROR
 [exit 0]
 additional_reports:
   bandit:

@@ -82,14 +82,14 @@ def nix_shell(monkeypatch) -> FakeNixShell:
 
 @pytest.fixture
 def scan(run_cli, monkeypatch):
-    """Run ``ash <args>`` with ``sys.argv`` set as a real ``ash`` process would have it.
+    """Run ``ashx <args>`` with ``sys.argv`` set as a real ``ashx`` process would have it.
 
     Nix mode forwards the caller's argv into the shell verbatim, so in-process it
     would otherwise forward pytest's.
     """
 
     def _scan(args):
-        monkeypatch.setattr(sys, "argv", ["ash", *args])
+        monkeypatch.setattr(sys, "argv", ["ashx", *args])
         return run_cli(args)
 
     return _scan

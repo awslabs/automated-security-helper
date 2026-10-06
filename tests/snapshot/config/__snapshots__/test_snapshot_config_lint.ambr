@@ -151,7 +151,7 @@
         'category': 'legacy-name-conflict',
         'fix_description': '',
         'fixable': False,
-        'message': "scanners has BOTH the legacy form 'npm_audit' and the canonical form 'npm-audit' defined. This is ambiguous and would lose data on auto-fix. Remove or merge one of the entries by hand before running `ash config lint --fix`.",
+        'message': "scanners has BOTH the legacy form 'npm_audit' and the canonical form 'npm-audit' defined. This is ambiguous and would lose data on auto-fix. Remove or merge one of the entries by hand before running `ashx config lint --fix`.",
         'path': 'scanners.npm_audit',
         'severity': 'error',
       }),

@@ -1,4 +1,4 @@
-$ ash report --format dict --log-level ERROR
+$ ashx report --format dict --log-level ERROR
 [exit 1]
 Error: Reporter plugin 'dict' not found.
 Available reporter formats:

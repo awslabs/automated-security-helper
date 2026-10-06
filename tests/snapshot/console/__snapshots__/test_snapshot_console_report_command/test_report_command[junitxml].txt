@@ -1,4 +1,4 @@
-$ ash report --format junitxml --log-level ERROR
+$ ashx report --format junitxml --log-level ERROR
 [exit 0]
 <testsuites name="ASH Scan Report"><testsuite name="bandit" tests="5" errors="3" failures="0"
 skipped="2" time="0"><testcase name="subprocess call with shell=True [B602]" classname="B602"><error

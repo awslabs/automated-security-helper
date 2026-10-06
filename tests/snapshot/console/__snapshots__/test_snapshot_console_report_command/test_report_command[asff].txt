@@ -1,4 +1,4 @@
-$ ash report --format asff --log-level ERROR
+$ ashx report --format asff --log-level ERROR
 [exit 1]
 Error: Reporter plugin 'asff' not found.
 Available reporter formats:

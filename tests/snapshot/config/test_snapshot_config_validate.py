@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash config validate` and `ash config validate-plugin-dependencies`."""
+"""`ashx config validate` and `ashx config validate-plugin-dependencies`."""
 
 from __future__ import annotations
 

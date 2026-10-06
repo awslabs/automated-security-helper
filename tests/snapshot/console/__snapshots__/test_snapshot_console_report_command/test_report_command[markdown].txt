@@ -1,4 +1,4 @@
-$ ash report --format markdown --log-level ERROR
+$ ashx report --format markdown --log-level ERROR
 [exit 0]
                                       ASH Security Scan Report
 

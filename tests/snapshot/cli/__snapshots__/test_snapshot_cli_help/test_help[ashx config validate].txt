@@ -1,0 +1,32 @@
+
+ Usage: ashx config validate [OPTIONS]
+
+ Validate an ASH configuration file for common issues.
+
+ This command checks for:
+ - Invalid or internal-only fields in scanners/reporters/converters
+ - Duplicate top-level field definitions
+ - Missing required fields
+ - Invalid top-level sections
+ - YAML/JSON syntax errors
+
+ Examples:
+     # Validate default config
+     ashx config validate
+
+     # Validate specific config file
+     ashx config validate --config path/to/config.yaml
+
+     # Validate with verbose output
+     ashx config validate --verbose
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --config   -c      <str>  The path to the configuration file to validate. By default, ASH        │
+│                           validates the config a scan of the current directory would use (see    │
+│                           the configuration guide for the discovery order), falling back to      │
+│                           .ash/.ash.yaml.                                                        │
+│                           [env var: ASH_CONFIG]                                                  │
+│ --verbose  -v             Enable verbose logging                                                 │
+│ --debug    -d             Enable debug logging                                                   │
+│ --help     -h             Show this message and exit.                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

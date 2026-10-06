@@ -21,7 +21,7 @@ What is masked, and why each is safe to mask
 - The Windows spelling of a registered relative path (``add_relative_path``), which is
   written in its POSIX form and is otherwise left alone: ``.ash\\.ash.yaml`` becomes
   ``.ash/.ash.yaml``. ASH prints ``Path(".ash/.ash.yaml")``, the default ``--config``
-  of the ``ash config`` commands, with the native separator, so on Windows every
+  of the ``ashx config`` commands, with the native separator, so on Windows every
   lint message named the file with a backslash. Only registered paths are rewritten,
   because a backslash in arbitrary text is not known to be a separator.
 - The time column of ASH's console log (rich's ``RichHandler``). This one is not
@@ -40,7 +40,11 @@ What is masked, and why each is safe to mask
   masks the stamp only, so such output would still fail on its indentation, loudly).
   A bare or bracketed date in a message survives.
 - Instants and durations, but only for a test that opts in; see "Time" below.
-- UUIDs, the ASH version, the Python version and the hostname.
+- UUIDs, the ASH version, the Python version and the hostname. The ASH version is
+  masked only where it stands as a version of its own: not inside a longer version
+  (``14.0.0``, ``4.0.0.1``) and not after a comparison operator (``<4.0.0``,
+  ``>=4.0.0``), which is a dependency's constraint that happens to name the same
+  number. ``checkov>=3.2.0,<4.0.0`` stays readable under ASH 4.0.0.
 - The pydantic minor version in its ``errors.pydantic.dev/<version>/`` help links, which
   a dependency bump changes in every config-error message.
 - The frames of a traceback, rich's panel or CPython's plain one, as ``<TRACEBACK>``.
@@ -311,6 +315,8 @@ class SnapshotNormalizer:
 
     roots: list[tuple[PurePath, str]] = field(default_factory=list)
     extra_literals: dict[str, str] = field(default_factory=dict)
+    #: Versions masked only where they stand alone; see ``add_version``.
+    version_literals: dict[str, str] = field(default_factory=dict)
     #: Relative paths, POSIX-spelled, whose Windows spelling is rewritten to POSIX.
     relative_paths: list[str] = field(default_factory=list)
     # Off by default: a test opts in only for wall-clock time it cannot pin. See "Time"
@@ -332,6 +338,16 @@ class SnapshotNormalizer:
         """Mask one exact string, such as a scan id a test cannot choose."""
         if value:
             self.extra_literals[value] = f"<{token}>"
+
+    def add_version(self, value: str, token: str) -> None:
+        """Mask a version string where it is a version of its own.
+
+        Not inside a longer version, and not after ``<``, ``>``, ``~``, ``!`` or one of
+        them followed by ``=``: there it is a dependency's constraint (``<4.0.0``) that
+        names the same number, and masking it would hide what the user reads.
+        """
+        if value:
+            self.version_literals[value] = f"<{token}>"
 
     def add_relative_path(self, path: str) -> None:
         """Write the Windows spelling of relative ``path`` (POSIX-spelled) as POSIX."""
@@ -385,6 +401,14 @@ class SnapshotNormalizer:
                 )
             else:
                 out = out.replace(spelling, token)
+        for version, token in sorted(
+            self.version_literals.items(), key=lambda item: len(item[0]), reverse=True
+        ):
+            out = re.sub(
+                r"(?<![<>~!\d.])(?<![<>~!]=)" + re.escape(version) + r"(?!\.?\d)",
+                lambda _m, token=token: token,
+                out,
+            )
         out = self._posix_relative_paths(out)
         out = _PYDANTIC_ERROR_URL.sub(r"\1<PYDANTIC_VERSION>/", out)
         tokens = sorted({token for _, token in self.roots}, key=len, reverse=True)
@@ -462,7 +486,7 @@ def _host_names() -> frozenset[str]:
     return frozenset({socket.gethostname(), socket.getfqdn()})
 
 
-#: The default ``--config`` of the ``ash config`` commands, which they print relative.
+#: The default ``--config`` of the ``ashx config`` commands, which they print relative.
 ASH_DEFAULT_CONFIG = ".ash/.ash.yaml"
 
 
@@ -498,7 +522,7 @@ def default_normalizer(
     normalizer.add_relative_path(ASH_DEFAULT_CONFIG)
     version = get_ash_version()
     if version:
-        normalizer.add_literal(str(version), "ASH_VERSION")
+        normalizer.add_version(str(version), "ASH_VERSION")
     normalizer.add_literal(platform.python_version(), "PYTHON_VERSION")
     for name in _host_names():
         # Short names ("localhost", a one-letter container id) would mask ordinary words.

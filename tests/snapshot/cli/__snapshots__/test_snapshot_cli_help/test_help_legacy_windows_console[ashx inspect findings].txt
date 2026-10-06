@@ -1,0 +1,22 @@
+
+ Usage: ashx inspect findings [OPTIONS]
+
+ The `inspect findings` command provides an interactive TUI to explore the findings and identify
+ actions to quickly take.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --output-dir           <path>  Path to the output directory containing an ASH Aggregated        │
+│                                Results JSON report file to analyze.                             │
+│ --report-file          <str>   Name of the report file to analyze. Defaults to                  │
+│                                'ash_aggregated_results.json'.                                   │
+│                                [default: ash_aggregated_results.json]                           │
+│ --config       -c      <path>  Path to the configuration file where suppressions should be      │
+│                                saved. By default, ASH searches for ['.ash.yml', '.ash.yaml',    │
+│                                '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the     │
+│                                root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml',        │
+│                                '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml',         │
+│                                'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table  │
+│                                of pyproject.toml at the root; the first found is used.          │
+│                                [env var: ASH_CONFIG]                                            │
+│ --help         -h              Show this message and exit.                                      │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What ``ash scan`` prints after the table: next steps, the exit-code legend, the ERROR line.
+"""What ``ashx scan`` prints after the table: next steps, the exit-code legend, the ERROR line.
 
 Two layers. The printing helpers in run_ash_scan -- ``_print_summary``,
 ``_print_workspace_summary`` and ``print_incompleteness_message`` -- are rendered directly, one

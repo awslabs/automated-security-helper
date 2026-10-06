@@ -1,4 +1,4 @@
-$ ash report --format aggregated --log-level ERROR
+$ ashx report --format aggregated --log-level ERROR
 [exit 1]
 Error: Reporter plugin 'aggregated' not found.
 Available reporter formats:

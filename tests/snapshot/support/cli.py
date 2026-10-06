@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Driving the ``ash`` CLI for snapshot tests, and pretending to be another host.
+"""Driving the ``ashx`` CLI for snapshot tests, and pretending to be another host.
 
 Nothing here normalizes output; the ``snapshot`` and ``text_snapshot`` fixtures still
 do all of that. What lives here pins the *inputs* that would otherwise differ between

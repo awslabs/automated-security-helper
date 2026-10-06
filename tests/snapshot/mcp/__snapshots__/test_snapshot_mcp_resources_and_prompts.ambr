@@ -236,7 +236,7 @@
           'text': '''
             Please run an ASH security scan of the following directory: <TMP>/cwd
             
-            The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
+            The scan should be done using the `run_ash_scan` MCP tool from the ASH MCP server.
             
             Once the scan has started, an ID will be returned. Using that scan ID, call the
             `get_scan_progress` MCP tool with the scan ID to monitor until completion.
@@ -293,7 +293,7 @@
           'text': '''
             Please run an ASH security scan of the following directory: /work/project
             
-            The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
+            The scan should be done using the `run_ash_scan` MCP tool from the ASH MCP server.
             
             Once the scan has started, an ID will be returned. Using that scan ID, call the
             `get_scan_progress` MCP tool with the scan ID to monitor until completion.

@@ -1,0 +1,16 @@
+
+ Usage: ashx inspect [OPTIONS] COMMAND [ARGS]...
+
+ Inspect and analyze ASH outputs and reports
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --help  -h        Show this message and exit.                                                   │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Commands ──────────────────────────────────────────────────────────────────────────────────────┐
+│ sarif-fields  The `inspect sarif-fields` command analyzes SARIF reports to understand field     │
+│               usage                                                                             │
+│               across different scanners and ensure fields are preserved during aggregation.     │
+│ findings      The `inspect findings` command provides an interactive TUI to explore the         │
+│               findings                                                                          │
+│               and identify actions to quickly take.                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

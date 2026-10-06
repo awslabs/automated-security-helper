@@ -1,4 +1,4 @@
-$ ash report --format html --log-level ERROR
+$ ashx report --format html --log-level ERROR
 [exit 0]
 
 <!DOCTYPE html>

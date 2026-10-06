@@ -17,7 +17,7 @@ Found 16 issue(s):
   ❌ Suppression has invalid expiration date format: '31/01/2099' (expected YYYY-MM-DD) at 'global_settings.suppressions[3]'
   ⚠️  Path 'vendor' points to a directory but lacks a '**' glob suffix. This pattern will not match files inside the directory. Use 'vendor/**' to ignore all files recursively. at 'global_settings.ignore_paths[0].path'
   ⚠️  scanners.'cdk_nag' uses the legacy snake/kebab variant; canonical form is 'cdk-nag'. ASH reads it as 'cdk-nag', but only the canonical form is documented. at 'scanners.cdk_nag' [auto-fixable]
-  ❌ scanners has BOTH the legacy form 'npm_audit' and the canonical form 'npm-audit' defined. This is ambiguous and would lose data on auto-fix. Remove or merge one of the entries by hand before running `ash config lint --fix`. at 'scanners.npm_audit'
+  ❌ scanners has BOTH the legacy form 'npm_audit' and the canonical form 'npm-audit' defined. This is ambiguous and would lose data on auto-fix. Remove or merge one of the entries by hand before running `ashx config lint --fix`. at 'scanners.npm_audit'
 
   Errors: 10
   Warnings: 6

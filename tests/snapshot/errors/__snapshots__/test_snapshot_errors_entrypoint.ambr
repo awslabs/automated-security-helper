@@ -2,7 +2,7 @@
 # name: test_excepthook_fails
   dict({
     'stderr': '''
-      ash: fatal error: ImportError: cannot import name 'Model' from 'x'
+      ashx: fatal error: ImportError: cannot import name 'Model' from 'x'
       ImportError: cannot import name 'Model' from 'x'
   
     ''',
@@ -23,7 +23,7 @@
 # name: test_no_stream_object_left
   dict({
     'stderr': '''
-      ash: fatal error: ImportError: cannot import name 'Model' from 'x'
+      ashx: fatal error: ImportError: cannot import name 'Model' from 'x'
       ImportError: cannot import name 'Model' from 'x'
   
     ''',
@@ -42,7 +42,7 @@
 # name: test_started_without_either_stream
   dict({
     'stderr': '''
-      ash: fatal error: started with no usable stdout/stderr; ASH reattached them to report the failure below.
+      ashx: fatal error: started with no usable stdout/stderr; ASH reattached them to report the failure below.
       ImportError: cannot import name 'Model' from 'x'
   
     ''',
@@ -52,7 +52,7 @@
 # name: test_started_without_stderr
   dict({
     'stderr': '''
-      ash: fatal error: started with no usable stderr; ASH reattached it to report the failure below.
+      ashx: fatal error: started with no usable stderr; ASH reattached it to report the failure below.
       ImportError: cannot import name 'Model' from 'x'
   
     ''',

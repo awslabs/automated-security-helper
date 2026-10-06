@@ -1,4 +1,4 @@
-$ ash report --format cyclonedx --log-level ERROR
+$ ashx report --format cyclonedx --log-level ERROR
 [exit 0]
 {
   "bomFormat": "CycloneDX",
