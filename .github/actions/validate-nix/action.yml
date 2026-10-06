@@ -183,6 +183,9 @@ runs:
     # but its output was lost.
     - name: "nix: zizmor (opt-in) runs and reports"
       shell: bash
+      env:
+        # The flake under review, for the reason given on the scan step above.
+        ASH_NIX_FLAKE_REF: "path:${{ github.workspace }}"
       run: |
         mkdir -p /tmp/ash-zizmor-selftest/.github/workflows
         # The expression is assembled from two halves so this action file never
