@@ -19,6 +19,7 @@ Scanner configuration
 │ opengrep       │        yes        │
 │ semgrep        │        yes        │
 │ syft           │        yes        │
+│ trivy          │        no         │
 └────────────────┴───────────────────┘
   Enable bandit? [y/N]:
   Enable cdk-nag? [Y/n]:
@@ -30,6 +31,7 @@ Scanner configuration
   Enable opengrep? [Y/n]:
   Enable semgrep? [Y/n]:
   Enable syft? [Y/n]:
+  Enable trivy? [y/N]:
 
 Output format configuration
               Output Formats

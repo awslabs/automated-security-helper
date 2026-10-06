@@ -1660,6 +1660,13 @@
         'offline_strategy': 'cache_flags',
         'version': None,
       }),
+      'trivy': dict({
+        'dependencies_satisfied': True,
+        'enabled': False,
+        'name': 'trivy',
+        'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
       'trivy_repo': dict({
         'dependencies_satisfied': True,
         'enabled': True,
