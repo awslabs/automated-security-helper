@@ -380,6 +380,77 @@ ASH scan output, last line",
 }
 `;
 
+exports[`the scan outcomes a user can see findings at every SARIF level, a pass and a suppressed result 1`] = `
+{
+  "exitCode": 2,
+  "notifications": [
+    {
+      "message": "ASH: 5 finding(s) in 1 file(s). See the Problems panel.",
+      "severity": "info",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "AWS Labs - Automated Security Helper: 5 finding(s) across 1 file(s); 1 suppressed by ASH, 1 not failures, 0 with no file location, 0 naming no local file",
+  ],
+  "problems": {
+    "<workspace>/planted_secret.py": [
+      {
+        "code": "LEVEL-ERROR",
+        "message": "LEVEL-ERROR on line 1",
+        "range": "0:0-0:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "LEVEL-WARNING",
+        "message": "LEVEL-WARNING on line 2",
+        "range": "1:0-1:EOL",
+        "severity": "Warning",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "LEVEL-NOTE",
+        "message": "LEVEL-NOTE on line 3",
+        "range": "2:0-2:EOL",
+        "severity": "Information",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "LEVEL-NONE",
+        "message": "LEVEL-NONE on line 4",
+        "range": "3:0-3:EOL",
+        "severity": "Hint",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "LEVEL-ABSENT",
+        "message": "LEVEL-ABSENT on line 5",
+        "range": "4:0-4:EOL",
+        "severity": "Warning",
+        "source": "ASH (detect-secrets)",
+      },
+    ],
+  },
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "ok",
+  "summary": {
+    "diagnostics": 5,
+    "files": 1,
+    "notFailures": 1,
+    "suppressed": 1,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
 exports[`the scan outcomes a user can see findings that cannot be placed in the editor 1`] = `
 {
   "exitCode": 2,

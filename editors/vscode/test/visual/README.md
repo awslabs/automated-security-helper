@@ -54,13 +54,15 @@ jest snapshots of the text and structure of every surface the extension has:
   descriptions and defaults) and the untrusted-workspace capability text;
 - what activation registers: the commands, the diagnostic collection's name, the
   output channel's name, and the Clear command's output;
-- for each of 27 scan outcomes: the diagnostics (file, range, severity, message,
+- for each of 28 scan outcomes: the diagnostics (file, range, severity, message,
   source, code), every notification in the order raised with its severity, the
   progress notification's title and Cancel button, and the output channel's text.
   The outcomes include exit 0, exit 2, exit 1 with partial results (the
   incomplete-scan warning), exit 1 with no report, every refused setting, every
-  executable lookup failure, and the `ashx` to `ash` fallback notice shown and
-  already shown.
+  executable lookup failure, the `ashx` to `ash` fallback notice shown and
+  already shown, and one report with a result at each SARIF level (error,
+  warning, note, none and no level), a `kind: "pass"` result and a suppressed
+  one, so the severity each level maps to is in the snapshot too.
 
 The extension has no tree view, CodeLens, hover provider, status bar item, quick
 pick, input box, webview, custom editor, code action, terminal or task. A test in
