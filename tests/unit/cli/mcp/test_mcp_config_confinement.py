@@ -43,7 +43,7 @@ from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core import exceptions as _exceptions
 
 _SESSION = "client-one"
-_SECRET = "OUTSIDE-THE-GRANT-MARKER"
+_OUTSIDE_MARKER = "OUTSIDE-THE-GRANT-MARKER"
 _CONFIG_REFUSED = "config_input_not_permitted"
 
 #: Looked up rather than imported so that, against a tree without the class, each
@@ -87,13 +87,13 @@ class _Layout:
         # Beside the granted .ash/ directory: inside #712's default confinement
         # root (the parent of .ash/), outside the grant.
         self.sibling = self.policies / "outside.yaml"
-        self.sibling.write_text(f"project_name: {_SECRET}\n", encoding="utf-8")
+        self.sibling.write_text(f"project_name: {_OUTSIDE_MARKER}\n", encoding="utf-8")
 
         # Outside every root, and outside #712's root too.
         self.elsewhere = tmp_path / "elsewhere"
         self.elsewhere.mkdir()
         self.far = self.elsewhere / "far.yaml"
-        self.far.write_text(f"project_name: {_SECRET}\n", encoding="utf-8")
+        self.far.write_text(f"project_name: {_OUTSIDE_MARKER}\n", encoding="utf-8")
 
         self.config = self.grant / ".ash.yaml"
         self.in_grant_base = self.grant / "base.yaml"
@@ -131,7 +131,7 @@ def _run(coro):
 
 
 def _assert_carries_nothing_from(result: Any) -> None:
-    assert _SECRET not in json.dumps(result, default=str)
+    assert _OUTSIDE_MARKER not in json.dumps(result, default=str)
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ class TestExtendsChainUnderAnMcpGrant:
                 source_dir=layout.scan,
                 permit_base=sandbox.config_base_gate(_SESSION),
             )
-        assert _SECRET not in str(excinfo.value)
+        assert _OUTSIDE_MARKER not in str(excinfo.value)
 
     def test_a_base_reached_through_a_symlink_is_refused(self, layout):
         link = layout.grant / "linked.yaml"
@@ -218,7 +218,7 @@ class TestExtendsChainUnderAnMcpGrant:
         cfg = layout.write_config("../outside.yaml")
 
         config = resolve_config(config_path=cfg, source_dir=layout.scan)
-        assert config.project_name == _SECRET
+        assert config.project_name == _OUTSIDE_MARKER
 
     def test_the_cli_root_still_applies_under_the_gate(self, layout, monkeypatch):
         # A grant wider than #712's root does not widen the chain: both rules apply.
@@ -447,7 +447,7 @@ class TestGetConfigIsConfined:
         from automated_security_helper.cli import mcp_server
 
         (layout.elsewhere / ".ash.yaml").write_text(
-            f"project_name: {_SECRET}\n", encoding="utf-8"
+            f"project_name: {_OUTSIDE_MARKER}\n", encoding="utf-8"
         )
         monkeypatch.chdir(layout.elsewhere)
         result = _run(mcp_server.get_config(_ctx(), raw=True))
@@ -464,7 +464,7 @@ class TestGetConfigIsConfined:
         monkeypatch.chdir(layout.elsewhere)
         absent = _run(mcp_server.get_config(_ctx(), raw=True))
         (layout.elsewhere / ".ash.yaml").write_text(
-            f"project_name: {_SECRET}\n", encoding="utf-8"
+            f"project_name: {_OUTSIDE_MARKER}\n", encoding="utf-8"
         )
         present = _run(mcp_server.get_config(_ctx(), raw=True))
 
