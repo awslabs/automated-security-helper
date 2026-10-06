@@ -95,6 +95,36 @@ class MyScannerConfig(ScannerPluginConfigBase):
         include_tests: bool = Field(default=False, description="Include test files")
 ```
 
+### Opt-in scanners
+
+A scanner that should not run unless the user asks for it sets `OPT_IN` on the
+plugin class and defaults its config to disabled:
+
+```python
+from typing import ClassVar, Literal
+
+
+class MyScannerConfig(ScannerPluginConfigBase):
+    name: Literal["my-scanner"] = "my-scanner"
+    enabled: bool = False
+
+
+@ash_scanner_plugin
+class MyScanner(ScannerPluginBase[MyScannerConfig]):
+    OPT_IN: ClassVar[bool] = True
+```
+
+Without `OPT_IN`, a scanner whose config says `enabled: false` is still listed in
+every scan as SKIPPED. With it, the scanner is left out of the run entirely (no
+result row, no summary count, no report entry, no SARIF run, no shard
+assignment) until the user enables it with `enabled: true` in config or by
+naming it in `--scanners`. Once enabled it runs like any other scanner, and a
+missing tool is reported as MISSING.
+
+Use this for any built-in scanner added after a release, so that existing users'
+default output does not change. The rule is implemented in
+`automated_security_helper/core/scanner_opt_in.py`.
+
 ## Scanner Plugin Example
 
 Here's a complete example of a custom scanner plugin:

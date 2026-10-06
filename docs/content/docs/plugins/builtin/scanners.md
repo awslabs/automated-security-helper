@@ -19,6 +19,47 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[Semgrep](#semgrep)**               | Static analysis scanner         | 30+ languages                   | Community and custom rules                 |
 | **[Syft](#syft)**                     | SBOM generator                  | Container images, filesystems   | Software inventory generation              |
 
+## Opt-in scanners
+
+Some built-in scanners are opt-in. An opt-in scanner does not run, and does not
+appear anywhere in the results, until you enable it. It has no row in the
+summary tables, no SKIPPED count, no SARIF run, and it does not affect the exit
+code. This is how ASH adds scanners without changing the output of an existing
+scan.
+
+Enable an opt-in scanner in either of two ways:
+
+```yaml
+# .ash/.ash.yaml
+scanners:
+  <scanner-name>:
+    enabled: true
+```
+
+```bash
+# For one run. --scanners also narrows the run to the scanners it names.
+ash --scanners bandit,<scanner-name>
+```
+
+The MCP `scanners` argument and the `scanners` argument of the Python
+`run_ash_scan` API work the same way as `--scanners`. A workspace policy's
+`additional_scanners` enables it the same way as the config file.
+
+Once enabled, an opt-in scanner behaves like any other built-in scanner. If its
+tool is not installed it is reported as MISSING, and the scan exits 1 while
+`fail_on_incomplete_scanners` is on.
+
+Naming an opt-in scanner in `--scanners` runs it even if the config says
+`enabled: false`, because `false` is its default and ASH cannot tell that
+default from a value you wrote. For the other built-in scanners `--scanners`
+only narrows the run, and a scanner disabled in config stays SKIPPED. To keep an
+opt-in scanner off, leave it out of `--scanners`. `--exclude-scanners` takes
+precedence over both.
+
+`ash dependencies install` installs the tools for opt-in scanners as well, and
+labels them as opt-in, so an image or CI runner provisioned with it can run them
+once they are enabled.
+
 ## Scanner Details
 
 ### Bandit

@@ -435,6 +435,21 @@
   the scanner. Reverting to the previous behavior means accepting a report that
   states coverage it does not have.
 
+### Features
+
+- **Opt-in builtin scanners.** A scanner plugin can set `OPT_IN = True`
+  (`ScannerPluginBase.OPT_IN`, default `False`). An opt-in scanner is left out of
+  a scan entirely until it is enabled with `enabled: true` in its config or by
+  naming it in `--scanners` (or the MCP / `run_ash_scan` `scanners` argument). It
+  has no result row, summary count, report entry, SARIF run or shard
+  assignment, and is not on the expected-scanner roster. Once enabled it behaves
+  like any builtin, so a missing tool is `MISSING` and the scan exits 1. This
+  lets new builtin scanners ship without changing existing scans: a scanner
+  that is only `enabled: false` still appears as a `SKIPPED` row in every scan.
+  Naming an opt-in scanner in `--scanners` runs it even if its config says
+  `enabled: false`; for other scanners `--scanners` only narrows the run. No
+  scanner shipped today is opt-in, so default scan output is unchanged.
+
 ### Fixes
 
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
