@@ -502,9 +502,10 @@ class TestWorkingDirectoryRoot:
         # Not inside the repo checkout, and not a parent of it.
         # Neither inside the repo nor a temp dir: the shared normalizer takes a fake
         # cwd so the case is reachable on any host.
-        outside = PurePosixPath("/srv/elsewhere/work")
-        monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: Path(outside)))
-        out = default_normalizer().text(f"{outside}/a.txt")
+        # Built from the filesystem anchor so it is absolute on Windows (C:\...) too.
+        outside = Path(Path.home().anchor) / "srv-elsewhere" / "work"
+        monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: outside))
+        out = default_normalizer().text(str(outside / "a.txt"))
         assert out == "<CWD>/a.txt"
 
     def test_a_cwd_inside_tmp_path_masks_as_tmp(self, monkeypatch, tmp_path):
