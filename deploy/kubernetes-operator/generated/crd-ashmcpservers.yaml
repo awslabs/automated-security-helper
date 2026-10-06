@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: 4a13960f5b420f76
+    ash.awslabs.github.io/ash-config-schema-sha256: d1c26e7c9e2206e8
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -1859,6 +1859,21 @@ spec:
                           that project is recorded as failed and the remaining projects still complete.
                         nullable: true
                     type: object
+                  extends:
+                    x-kubernetes-preserve-unknown-fields: true
+                    description: 'Base config file(s) this config extends: a path, or a list of paths
+                      applied in order, relative to this file. Mappings merge key by key; lists and scalars
+                      from this file replace the base''s. Paths must stay inside the repository being
+                      scanned; URLs are refused.'
+                  patch:
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    type: array
+                    description: RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after
+                      this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-'
+                      to append to a base's list.
+                    nullable: true
                 type: object
           status:
             type: object

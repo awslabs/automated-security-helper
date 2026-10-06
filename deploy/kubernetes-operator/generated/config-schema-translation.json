@@ -1,16 +1,16 @@
 {
   "additionalPropertiesDroppedAlongsideProperties": 74,
-  "collapsedOptionals": 68,
+  "collapsedOptionals": 69,
   "constRewrittenToEnum": 27,
   "droppedKeywords": {
-    "default": 310,
-    "title": 343
+    "default": 311,
+    "title": 344
   },
   "exclusiveBoundsRewritten": 1,
   "referenceCycles": [
     "AshConfig"
   ],
-  "sourceSchemaSha256": "4a13960f5b420f76",
+  "sourceSchemaSha256": "d1c26e7c9e2206e8",
   "unexpressible": [
     {
       "path": "/properties/build/anyOf/0/properties/custom_scanners/items/properties/context/anyOf/0/properties/config",
@@ -287,6 +287,10 @@
     {
       "path": "/properties/reporters/properties/yaml/properties/options",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
+    },
+    {
+      "path": "/properties/extends",
+      "reason": "a union of 2 branches with types ['array', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     }
   ]
 }
