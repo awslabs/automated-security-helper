@@ -301,7 +301,14 @@ def install(tool: str, bin_dir: Path, package_root: Path) -> Path:
         print(f"Verified SHA256 {asset.sha256.lower()}", flush=True)
 
         staged = staging / asset.install_as
-        extract_member(archive, asset.member_name, staged)
+        if asset.archived:
+            extract_member(archive, asset.member_name, staged)
+        else:
+            # hadolint publishes the executable itself, so the verified download IS
+            # the binary and there is no member to look for. Renamed within the
+            # staging directory so the move below is the same one either branch
+            # takes.
+            archive.replace(staged)
         staged.chmod(0o755)
         # Replaced via the staging path so an interrupted run cannot leave a
         # half-written executable at the destination for the next layer to run.
@@ -315,7 +322,7 @@ def main(argv: "list[str] | None" = None) -> int:
     parser = argparse.ArgumentParser(
         description="Install a pinned ASH scanner binary, verified against its digest.",
     )
-    parser.add_argument("tool", help="grype, syft or trivy")
+    parser.add_argument("tool", help="grype, hadolint, syft or trivy")
     parser.add_argument(
         "-b",
         "--bin-dir",

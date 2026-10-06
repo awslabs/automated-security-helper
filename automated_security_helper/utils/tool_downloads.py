@@ -39,8 +39,9 @@ Known limitations
 -----------------
 * Not every tool publishes an asset for every platform ASH runs on.
   ``get_tool_asset`` raises :class:`ToolNotProvisionableError` for those pairs
-  rather than guessing at a nearby architecture. The absences are real: grype and
-  trivy publish no windows/arm64 asset, and trivy publishes no 32-bit macOS one.
+  rather than guessing at a nearby architecture. The absences are real: grype,
+  hadolint and trivy publish no windows/arm64 asset, and trivy publishes no 32-bit
+  macOS one.
 * cfn-nag is not here. It is a Ruby gem with a dependency closure, not a single
   release binary, so it is provisioned through the committed
   ``assets/Gemfile.lock`` instead -- see ``cfn_nag_scanner``.
@@ -71,6 +72,14 @@ class ToolAsset:
     binary from the archive root into a subdirectory keeps working while an
     archive containing two same-named entries is rejected instead of resolved
     arbitrarily.
+
+    ``archived`` is False for a vendor that publishes the executable itself rather
+    than an archive holding it (hadolint). There is then nothing to extract: the
+    downloaded bytes are the executable, ``sha256`` covers them directly, and
+    ``member_name`` is unused. It is a field rather than something inferred from
+    the filename's extension because hadolint's Linux and macOS assets have no
+    extension at all, and guessing "no suffix means bare" would also send a vendor
+    who drops an archive's extension down the wrong path.
     """
 
     tool: str
@@ -79,6 +88,7 @@ class ToolAsset:
     sha256: str
     member_name: str
     install_as: str
+    archived: bool = True
 
 
 # Versions are deliberately the same pins the container image already builds with
@@ -86,6 +96,7 @@ class ToolAsset:
 # from a bare `ash dependencies install` all execute the same tool versions.
 TOOL_VERSIONS: dict[str, str] = {
     "grype": "v0.111.0",
+    "hadolint": "v2.15.1",
     "syft": "v1.42.4",
     "trivy": "v0.69.3",
 }
@@ -106,6 +117,18 @@ _GRYPE_ASSETS: dict[PlatformArch, str] = {
     ("darwin", "amd64"): "grype_0.111.0_darwin_amd64.tar.gz",
     ("darwin", "arm64"): "grype_0.111.0_darwin_arm64.tar.gz",
     ("windows", "amd64"): "grype_0.111.0_windows_amd64.zip",
+    # windows/arm64: upstream publishes no such asset for this release.
+}
+
+# hadolint publishes bare executables, not archives, and its filenames carry no
+# version -- the version is only in the release tag in the URL. See
+# ToolAsset.archived and _BARE_BINARY_TOOLS.
+_HADOLINT_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "hadolint-linux-x86_64",
+    ("linux", "arm64"): "hadolint-linux-arm64",
+    ("darwin", "amd64"): "hadolint-macos-x86_64",
+    ("darwin", "arm64"): "hadolint-macos-arm64",
+    ("windows", "amd64"): "hadolint-windows-x86_64.exe",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
@@ -134,13 +157,14 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # Transcribed verbatim from the checksums file published with each release, so a
 # reviewer can diff this block against the upstream file line for line:
 #   https://github.com/anchore/grype/releases/download/v0.111.0/grype_0.111.0_checksums.txt
+#   https://github.com/hadolint/hadolint/releases/download/v2.15.1/checksums.sha256
 #   https://github.com/anchore/syft/releases/download/v1.42.4/syft_1.42.4_checksums.txt
 #   https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_checksums.txt
 #
 # Every line carries `# pragma: allowlist secret`, which is detect-secrets' own
 # inline marker. It is needed and it is honest: a 64-character hex string is exactly
 # what a high-entropy-string detector is built to find, and ASH scanning itself
-# reported all 16 as CRITICAL secrets -- correctly, by its own heuristic. A published
+# reported the first 16 as CRITICAL secrets -- correctly, by its own heuristic. A published
 # release checksum is public by construction and is the opposite of a credential:
 # it exists so that everyone can compare against it.
 #
@@ -155,6 +179,12 @@ _DIGESTS: dict[str, str] = {
     "grype_0.111.0_darwin_amd64.tar.gz": "8fefd00f6ddd6407275be31b228089820e91c7a8cd2d046e877601773ac5062f",  # pragma: allowlist secret
     "grype_0.111.0_darwin_arm64.tar.gz": "62d005a1e36ac7ec0b7be801ebc8eab0053fd831a227e1dc8ea9c356d38fa361",  # pragma: allowlist secret
     "grype_0.111.0_windows_amd64.zip": "17f3bfb758b3c18426a89060344d9569f4344b0a606d42b60bd89792f996e3bd",  # pragma: allowlist secret
+    # hadolint v2.15.1
+    "hadolint-linux-x86_64": "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507",  # pragma: allowlist secret
+    "hadolint-linux-arm64": "f6198ef8090f404dbb771abfee086eb8c48ac177f30da7fd3510aca35b344b5d",  # pragma: allowlist secret
+    "hadolint-macos-x86_64": "ffe9bb18b23d5ed1eae50237aecdbb523d016e96da0bd4e7aa432040acfc3fde",  # pragma: allowlist secret
+    "hadolint-macos-arm64": "5c09f3213f8e40406abe048233d985eebef336d4a6a20021be47fadb6cf480a2",  # pragma: allowlist secret
+    "hadolint-windows-x86_64.exe": "01d927294962b5387f9ead4f18679158452be4f17c765ad0bdffe5264b9c7b0a",  # pragma: allowlist secret
     # syft v1.42.4
     "syft_1.42.4_linux_amd64.tar.gz": "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f",  # pragma: allowlist secret
     "syft_1.42.4_linux_arm64.tar.gz": "5029bad1ed372649527b1e443cbceef7f5d6ae1cfe52c16e721559f94267128b",  # pragma: allowlist secret
@@ -173,15 +203,20 @@ _DIGESTS: dict[str, str] = {
 
 _RELEASE_BASE_URLS: dict[str, str] = {
     "grype": "https://github.com/anchore/grype/releases/download",
+    "hadolint": "https://github.com/hadolint/hadolint/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
 }
 
 _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "grype": _GRYPE_ASSETS,
+    "hadolint": _HADOLINT_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
 }
+
+# Tools whose release assets are the executable itself rather than an archive.
+_BARE_BINARY_TOOLS: frozenset[str] = frozenset({"hadolint"})
 
 
 def downloadable_tools() -> list[str]:
@@ -246,4 +281,5 @@ def get_tool_asset(tool: str, target_platform: str, arch: str) -> ToolAsset:
         sha256=digest,
         member_name=f"{tool}{suffix}",
         install_as=f"{tool}{suffix}",
+        archived=tool not in _BARE_BINARY_TOOLS,
     )

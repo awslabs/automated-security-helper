@@ -975,15 +975,28 @@ def install_pinned_tool(
         )
         return target
 
-    with tempfile.TemporaryDirectory(prefix="ash-tool-download-") as staging:
-        staging_dir = Path(staging)
-        archive = download_file(
-            asset.url,
-            staging_dir,
-            rename_to=asset.url.split("/")[-1],
-            expected_sha256=asset.sha256,
+    if not asset.archived:
+        # The asset is the executable (hadolint), so the pinned digest covers the
+        # very bytes that will run and there is nothing to extract. Downloaded
+        # straight to the target through the same verify-then-atomic-replace path
+        # an archive's extracted member takes: _download_verified checks the pin in
+        # TMPDIR, and _replace_atomically checks it again on the bytes that landed,
+        # so the digest returned here is the verified one and never a re-hash.
+        _, installed_digest = _download_verified(
+            asset.url, bin_dir, asset.install_as, expected_sha256=asset.sha256
         )
-        installed_digest = _extract_single_member(archive, asset.member_name, target)
+    else:
+        with tempfile.TemporaryDirectory(prefix="ash-tool-download-") as staging:
+            staging_dir = Path(staging)
+            archive = download_file(
+                asset.url,
+                staging_dir,
+                rename_to=asset.url.split("/")[-1],
+                expected_sha256=asset.sha256,
+            )
+            installed_digest = _extract_single_member(
+                archive, asset.member_name, target
+            )
 
     # _extract_single_member already set the mode on the staged file before renaming
     # it into place; this covers the Windows branch, where it does not.

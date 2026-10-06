@@ -136,12 +136,12 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 151
-      line_end: 171
+      line_start: 175
+      line_end: 201
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum, transcribed from the vendor's own *_checksums.txt. A 64-character
-        hex string is what an entropy detector is built to find, so all 16 are
+        hex string is what an entropy detector is built to find, so every one is
         reported at 95% confidence, but a release checksum is public by construction
         and is the opposite of a credential: it exists so anyone can compare against
         it. detect-secrets is handled by an inline `# pragma: allowlist secret` on
