@@ -64,7 +64,9 @@ uv venv --quiet --python "$(command -v python3)" "$WORK/venv"
 uv pip install --quiet --no-cache --python "$WORK/venv/bin/python" "$WHEEL"
 for name in "$ASH_CLI_NAME" "$FALLBACK_NAME"; do
   [ -x "$WORK/venv/bin/$name" ] || fail "the wheel installed no $name console script"
-  line="$("$WORK/venv/bin/$name" --version)"
+  # Without the vendored PYTHONPATH, as AshScanRealCliTest's wrapper runs the CLI: the
+  # installed wheel has to work from its own venv alone.
+  line="$(env -u PYTHONPATH -u PYTHONHOME "$WORK/venv/bin/$name" --version)"
   case "$line" in
     *"v$VERSION"*) printf '   %s --version: %s\n' "$name" "$line" ;;
     *) fail "$name --version printed '$line', expected v$VERSION" ;;

@@ -109,8 +109,9 @@ class AshScanRealCliTest : BasePlatformTestCase() {
     private fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
     /**
-     * Writes [wrapperName] into the PATH directory: the case's environment, then the real CLI
-     * with the case's scanners and arguments appended to `scan`. Everything else passes through
+     * Writes [wrapperName] into the PATH directory: no inherited PYTHONPATH or PYTHONHOME, the
+     * case's environment, then the real CLI with the case's scanners and arguments appended to
+     * `scan`. Everything else passes through
      * unchanged, so the plugin's `--version` probe answers with the real CLI's version line.
      */
     private fun wrapper(wrapperName: String, real: Path, case: JsonObject): Path {
@@ -119,6 +120,12 @@ class AshScanRealCliTest : BasePlatformTestCase() {
         val script = bin.resolve(wrapperName)
         val body = buildString {
             appendLine("#!/bin/sh")
+            // e2e-real-cli.sh puts a vendored defusedxml on PYTHONPATH for the Gradle census,
+            // and the JVM, the plugin's process and this wrapper all inherit it. ASH itself
+            // depends on defusedxml, so the inherited path would let a wheel that forgot that
+            // requirement pass here and crash on a real fresh install. The CLI gets only what
+            // its own venv holds.
+            appendLine("unset PYTHONPATH PYTHONHOME")
             for ((key, value) in case.getAsJsonObject("env").entrySet()) {
                 appendLine("export $key=${quote(value.asString)}")
             }
