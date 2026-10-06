@@ -660,7 +660,14 @@ def test_the_raw_output_and_sarif_are_kept_in_the_results_dir(
     scanner.scan(target=repo, target_type="source")
 
     results = Path(scanner.results_dir) / "source"
-    assert (results / "actionlint.json").read_text() == stdout
+    kept = json.loads((results / "actionlint.json").read_text())
+    original = json.loads(stdout)
+    assert len(kept["errors"]) == len(original["errors"])
+    assert "hunter2" in stdout and "hunter2" not in json.dumps(kept)
+    # Only the credentials snippet is dropped.
+    assert [e for e in kept["errors"] if e["kind"] != "credentials"] == [
+        e for e in original["errors"] if e["kind"] != "credentials"
+    ]
     _assert_matches_default(
         json.loads((results / "actionlint.sarif").read_text(encoding="utf-8"))
     )
@@ -822,3 +829,22 @@ def test_the_pinned_version_is_not_warned_about(repo, monkeypatch, on_path, capl
         scanner.scan(target=repo, target_type="source")
 
     assert not any("not the pinned" in r.getMessage() for r in caplog.records)
+
+
+def test_a_scan_set_path_outside_the_target_is_not_passed(
+    repo, tmp_path, monkeypatch, on_path
+):
+    outside = tmp_path / "elsewhere" / ".github" / "workflows" / "ci.yml"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("on: push\n")
+    inside = repo / ".github" / "workflows" / "clean.yml"
+    monkeypatch.setattr(
+        module, "scan_set", lambda **kwargs: [str(outside), str(inside)]
+    )
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == [".github/workflows/clean.yml"]

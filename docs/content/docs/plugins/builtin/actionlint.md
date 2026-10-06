@@ -106,7 +106,7 @@ actionlint makes no network calls (its action metadata is compiled in), so it wo
 
 ## Errors
 
-actionlint exits 0 when clean, 1 when it found problems, 2 for a bad command line and 3 for a fatal error such as an unreadable file or an invalid config. ASH treats 0 and 1 as success and everything else as `ERROR`, as it does output that is not the expected JSON and an exit code that contradicts the findings. The raw output is kept at `scanners/actionlint/<target>/actionlint.json` and the SARIF ASH built from it at `actionlint.sarif`.
+actionlint exits 0 when clean, 1 when it found problems, 2 for a bad command line and 3 for a fatal error such as an unreadable file or an invalid config. ASH treats 0 and 1 as success and everything else as `ERROR`, as it does output that is not the expected JSON and an exit code that contradicts the findings. The raw output is kept at `scanners/actionlint/<target>/actionlint.json` (with `credentials` snippets removed) and the SARIF ASH built from it at `actionlint.sarif`.
 
 ## Relation to zizmor
 

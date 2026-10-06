@@ -251,6 +251,22 @@ def config_ignore_patterns(config_path: Path) -> List[str]:
     return sorted(found)
 
 
+def redact_credentials(payload: Any) -> Any:
+    """A copy of *payload* with the snippet of every ``credentials`` finding removed.
+
+    That snippet is the hard-coded password, and the payload is written into the
+    output directory.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("errors"), list):
+        return payload
+    errors = []
+    for error in payload["errors"]:
+        if isinstance(error, dict) and error.get("kind") == "credentials":
+            error = {k: v for k, v in error.items() if k != "snippet"}
+        errors.append(error)
+    return {**payload, "errors": errors}
+
+
 def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
     """Convert actionlint's ``ACTIONLINT_FORMAT`` output into a SARIF 2.1.0 dict.
 
@@ -677,14 +693,19 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
             stdout = (response or {}).get("stdout") or ""
             raw_output = results_dir / "actionlint.json"
-            raw_output.write_text(stdout, encoding="utf-8")
             try:
                 payload = json.loads(stdout)
             except json.JSONDecodeError as exc:
+                # Kept verbatim for diagnosis: output that does not parse cannot
+                # be redacted, and is not findings.
+                raw_output.write_text(stdout, encoding="utf-8")
                 raise ScannerError(
                     f"actionlint output is not JSON ({exc}); raw output kept at "
                     f"{raw_output.as_posix()}"
                 ) from exc
+            raw_output.write_text(
+                json.dumps(redact_credentials(payload), indent=2), encoding="utf-8"
+            )
 
             sarif_dict = build_sarif(payload, self.exit_code)
             self.tool_version = sarif_dict["runs"][0]["tool"]["driver"]["version"]
