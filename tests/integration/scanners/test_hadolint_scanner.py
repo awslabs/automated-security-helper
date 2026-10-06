@@ -48,7 +48,9 @@ def _hadolint() -> str:
     pytest.skip("hadolint is not installed on this machine")
 
 
-def _ash_scan(source: Path, output: Path, *extra: str) -> subprocess.CompletedProcess:
+def _ash_scan(
+    source: Path, output: Path, *extra: str, env: dict | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(  # nosec B603 - fixed argv, no shell
         [
             sys.executable,
@@ -67,6 +69,7 @@ def _ash_scan(source: Path, output: Path, *extra: str) -> subprocess.CompletedPr
         text=True,
         timeout=600,
         check=False,
+        env=env,
     )
 
 
@@ -227,3 +230,40 @@ def test_an_ash_line_suppression_suppresses_exactly_that_finding(
     counts = _results(output)["scanner_results"]["hadolint"]["severity_counts"]
     assert counts["suppressed"] == 1
     assert counts["medium"] == 5
+
+
+def test_offline_mode_runs_it_unchanged(fixture_copy, tmp_path):
+    """hadolint needs no network, so --offline changes nothing about its result."""
+    _hadolint()
+    source = fixture_copy("positive")
+    output = tmp_path / "out"
+    proc = _ash_scan(source, output, "--scanners", "hadolint", "--offline")
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert _results(output)["scanner_results"]["hadolint"]["finding_count"] == 13
+
+
+def test_enabled_but_not_installed_is_missing_and_fails_the_scan(
+    fixture_copy, tmp_path
+):
+    """The #640 contract: an enabled scanner without its tool is MISSING, exit 1.
+
+    PATH is reduced to the interpreter's own directory and ASH_BIN_PATH points at
+    an empty directory, so no hadolint is reachable. The integration job installs
+    hadolint into its own directory, which this PATH leaves out.
+    """
+    hadolint = Path(_hadolint()).resolve()
+    interpreter_dir = Path(sys.executable).parent
+    if hadolint.parent == interpreter_dir.resolve():
+        pytest.skip("hadolint shares the interpreter's directory here")
+    empty_bin = tmp_path / "empty-bin"
+    empty_bin.mkdir()
+    env = {
+        **os.environ,
+        "PATH": str(interpreter_dir),
+        "ASH_BIN_PATH": str(empty_bin),
+    }
+    source = fixture_copy("negative")
+    output = tmp_path / "out"
+    proc = _ash_scan(source, output, "--scanners", "hadolint", env=env)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert _results(output)["scanner_results"]["hadolint"]["status"] == "MISSING"

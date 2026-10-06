@@ -229,20 +229,19 @@ class FakeHadolint:
     def __call__(self, scanner):
         def run(command, results_dir=None, env=None, timeout=None, **_):
             self.calls.append({"argv": list(command), "env": env, "timeout": timeout})
+            assert "--output" not in command, "nixpkgs' hadolint has no --output"
             fmt = command[command.index("--format") + 1]
-            out = Path(command[command.index("--output") + 1])
             if self.timed_out:
                 scanner.exit_code = -9
                 return {"timed_out": True}
-            if fmt == "sarif":
-                scanner.exit_code = self.exit_code
-                if self.sarif and self.exit_code == 0:
-                    out.write_text((CAPTURED / self.sarif).read_text())
-            else:
-                scanner.exit_code = self.json_exit_code
-                if self.json_name and self.json_exit_code == 0:
-                    out.write_text((CAPTURED / self.json_name).read_text())
-            return {"returncode": scanner.exit_code, "stderr": self.stderr}
+            name, code = (
+                (self.sarif, self.exit_code)
+                if fmt == "sarif"
+                else (self.json_name, self.json_exit_code)
+            )
+            scanner.exit_code = code
+            stdout = (CAPTURED / name).read_text() if name and code == 0 else ""
+            return {"returncode": code, "stdout": stdout, "stderr": self.stderr}
 
         return run
 

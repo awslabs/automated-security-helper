@@ -498,12 +498,14 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
 
             # "--" ends option parsing, so a Dockerfile whose name starts with a
             # dash is read as a file rather than as a flag.
+            #
+            # The report is read from stdout rather than written with --output,
+            # because --output is newer than the hadolint some installs carry:
+            # nixpkgs' 2.14.0 rejects it with "Invalid option `--output'".
             final_args = [
                 *self._base_args(config_file),
                 "--format",
                 "sarif",
-                "--output",
-                results_file.as_posix(),
                 "--",
                 *argv_paths,
             ]
@@ -511,7 +513,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=results_dir,
-                stdout_preference="write",
+                stdout_preference="return",
                 stderr_preference="both",
                 env=self._subprocess_env(),
                 timeout=timeout,
@@ -540,10 +542,14 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                     f"hadolint exited {self.exit_code}, which with --no-fail means "
                     "it did not complete"
                 )
+            stdout = (
+                (response.get("stdout") or "") if isinstance(response, dict) else ""
+            )
+            results_file.write_text(stdout, encoding="utf-8")
 
             raw = self._read_results_file(results_file)
             if raw is None:
-                raise ScannerError("hadolint exited 0 but wrote an empty results file")
+                raise ScannerError("hadolint exited 0 but wrote no report")
             sarif_report = SarifReport.model_validate(raw)
             if not sarif_report.runs:
                 raise ScannerError("hadolint wrote a SARIF report with no runs")
@@ -579,14 +585,10 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         ``note`` at LOW. A code that appears at two levels is left out of the
         table, with the same effect for that code.
         """
-        json_file = results_dir.joinpath("hadolint.json")
-        json_file.unlink(missing_ok=True)
         argv = [
             *self._base_args(config_file),
             "--format",
             "json",
-            "--output",
-            json_file.as_posix(),
             "--",
             *argv_paths,
         ]
@@ -596,8 +598,8 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         try:
             response = self._run_subprocess(
                 command=argv,
-                results_dir=results_dir.joinpath("levels"),
-                stdout_preference="none",
+                results_dir=results_dir,
+                stdout_preference="return",
                 stderr_preference="return",
                 env=self._subprocess_env(),
                 timeout=timeout,
@@ -613,9 +615,12 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         elif exit_code != 0:
             reason = f"the JSON pass exited {exit_code}"
         else:
+            stdout = (
+                (response.get("stdout") or "") if isinstance(response, dict) else ""
+            )
             try:
-                entries = json.loads(json_file.read_text(encoding="utf-8") or "[]")
-            except (OSError, ValueError) as e:
+                entries = json.loads(stdout or "[]")
+            except ValueError as e:
                 reason = f"its output could not be read ({e})"
         if entries is None or not isinstance(entries, list):
             self._plugin_log(
