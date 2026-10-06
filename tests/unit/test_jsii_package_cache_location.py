@@ -45,16 +45,37 @@ def _under(path: Path, parent: Path) -> bool:
     return True
 
 
-def _temp_roots() -> list[Path]:
-    roots = [Path(tempfile.gettempdir())]
-    if os.name != "nt":
-        roots.append(Path("/tmp"))
+def _os_default_temp_dir() -> Path:
+    """The temp directory the platform picks when no variable names one.
+
+    Asked of tempfile itself, with TMPDIR/TEMP/TMP removed and its cached choice
+    cleared, so the answer is the interpreter's own platform default (/tmp on
+    Linux, the user's AppData temp directory on Windows) rather than a path
+    spelled out here. Both are restored on exit.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        for var in ("TMPDIR", "TEMP", "TMP"):
+            mp.delenv(var, raising=False)
+        mp.setattr(tempfile, "tempdir", None)
+        return Path(tempfile.gettempdir())
+
+
+def _temp_roots(ash_conftest) -> list[Path]:
+    """Every temp directory this run could have placed the cache in.
+
+    The session's own (what tempfile answers now), the ones TMPDIR/TEMP/TMP named
+    before the session pointed them at it, and the platform default that applies
+    when none is set.
+    """
+    roots = [Path(tempfile.gettempdir()).resolve()]
+    roots += [Path(v).resolve() for v in ash_conftest._pre_session_temp_env().values()]
+    roots.append(_os_default_temp_dir().resolve())
     # A checkout that itself lives in a temp directory cannot avoid one; only a
     # cache placed there by conftest, outside the checkout, is the defect.
-    return [r for r in roots if not _under(REPO_ROOT, r)]
+    return [r for r in dict.fromkeys(roots) if not _under(REPO_ROOT, r)]
 
 
-def test_live_cache_root_is_repo_local_and_not_in_a_temp_dir():
+def test_live_cache_root_is_repo_local_and_not_in_a_temp_dir(ash_conftest):
     """The root this very process was configured with, as jsii will read it."""
     configured = os.environ.get("JSII_RUNTIME_PACKAGE_CACHE_ROOT")
     assert configured, "conftest did not pin JSII_RUNTIME_PACKAGE_CACHE_ROOT"
@@ -65,7 +86,7 @@ def test_live_cache_root_is_repo_local_and_not_in_a_temp_dir():
         assert root == Path(override).expanduser().resolve() / "jsii-package-cache"
     else:
         assert root == DEFAULT_ROOT
-        for temp_root in _temp_roots():
+        for temp_root in _temp_roots(ash_conftest):
             assert not _under(root, temp_root), (
                 f"jsii package cache resolved under {temp_root}: {root}"
             )
@@ -249,7 +270,13 @@ def test_live_session_runs_in_its_own_temp_directory():
 
 
 def _isolate_session_state(monkeypatch, ash_conftest, tmp_path):
-    for var in ("ASH_TEST_SESSION_TMPDIR", "TMPDIR", "TEMP", "TMP"):
+    for var in (
+        "ASH_TEST_SESSION_TMPDIR",
+        "ASH_TEST_PRE_SESSION_TEMP_ENV",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+    ):
         monkeypatch.setenv(var, os.environ.get(var, ""))
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     monkeypatch.setattr(ash_conftest, "_created_session_tmpdir", None)
@@ -260,9 +287,17 @@ def test_session_tmpdir_is_created_owned_and_removed(
 ):
     _isolate_session_state(monkeypatch, ash_conftest, tmp_path)
     monkeypatch.delenv("ASH_TEST_SESSION_TMPDIR")
+    monkeypatch.delenv("ASH_TEST_PRE_SESSION_TEMP_ENV")
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "from-tmpdir"))
+    monkeypatch.delenv("TEMP")
+    monkeypatch.setenv("TMP", "")
 
     path = ash_conftest._enter_session_tmpdir()
 
+    # The originals survive the override, for workers too: set ones only.
+    assert ash_conftest._pre_session_temp_env() == {
+        "TMPDIR": str(tmp_path / "from-tmpdir")
+    }
     assert path.parent == tmp_path and path.is_dir()
     assert os.environ["ASH_TEST_SESSION_TMPDIR"] == str(path)
     assert tempfile.gettempdir() == str(path)

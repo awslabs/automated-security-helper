@@ -5,6 +5,7 @@ import errno
 import functools
 import importlib.abc
 import importlib.machinery
+import json
 import logging
 import os
 import shutil
@@ -275,7 +276,20 @@ def _prune_jsii_package_cache(root: Path, keep: int = _JSII_CACHE_KEEP) -> List[
 
 _SESSION_TMP_ENV = "ASH_TEST_SESSION_TMPDIR"
 _TEMP_VARS = ("TMPDIR", "TEMP", "TMP")
+# The temp variables as the session found them, before it pointed them at its own
+# directory: a JSON object of the ones that were set. Exported so xdist workers,
+# which inherit the overridden values, can still read the originals. Tests use it
+# to name every temp directory the run could otherwise have written to.
+_PRE_SESSION_TEMP_ENV = "ASH_TEST_PRE_SESSION_TEMP_ENV"
 _created_session_tmpdir: Optional[Path] = None
+
+
+def _pre_session_temp_env() -> dict:
+    """TMPDIR/TEMP/TMP as they were before the session override; unset ones absent."""
+    recorded = os.environ.get(_PRE_SESSION_TEMP_ENV)
+    if recorded:
+        return json.loads(recorded)
+    return {var: os.environ[var] for var in _TEMP_VARS if os.environ.get(var)}
 
 
 def _enter_session_tmpdir() -> Path:
@@ -290,6 +304,7 @@ def _enter_session_tmpdir() -> Path:
         # at session end. PYTEST_DEBUG_TEMPROOT is pytest's documented knob for that
         # root; an explicit --basetemp overrides both.
         os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", tempfile.gettempdir())
+        os.environ[_PRE_SESSION_TEMP_ENV] = json.dumps(_pre_session_temp_env())
         path = Path(tempfile.mkdtemp(prefix="ash-pytest-"))
         os.environ[_SESSION_TMP_ENV] = str(path)
         _created_session_tmpdir = path
