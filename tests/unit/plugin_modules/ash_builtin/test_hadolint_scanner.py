@@ -191,6 +191,45 @@ class TestSeverityMapping:
         by_rule = {f[0]: f for f in _findings(report)}
         assert by_rule["DL3015"][1:3] == ("note", "LOW")
 
+    def test_a_code_at_two_levels_is_not_refined(self, monkeypatch, tmp_path):
+        """Ambiguous JSON levels for one code leave that code's notes at LOW."""
+        scanner = _scanner(tmp_path, tmp_path)
+        responses = iter(
+            [
+                {
+                    "stdout": json.dumps(
+                        [
+                            {"code": "SC2006", "level": "style"},
+                            {"code": "SC2006", "level": "info"},
+                            {"code": "DL3015", "level": "info"},
+                        ]
+                    )
+                }
+            ]
+        )
+
+        def run(command, **_):
+            scanner.exit_code = 0
+            return next(responses)
+
+        monkeypatch.setattr(scanner, "_run_subprocess", run)
+        table = scanner._hadolint_levels(["hadolint"], [["Dockerfile"]], tmp_path, None)
+        assert table == {"DL3015": "info"}
+
+    def test_a_result_without_a_level_is_high(self):
+        """ASH's SARIF model defaults Result.level to error, so this is HIGH."""
+        raw = copy.deepcopy(_load("positive.sarif"))
+        del raw["runs"][0]["results"][0]["level"]
+        report = SarifReport.model_validate(raw)
+        HadolintScanner.apply_severity_mapping(report, None)
+        assert _findings(report)[0][1:3] == ("error", "HIGH")
+
+    def test_an_unknown_level_is_high(self):
+        report = SarifReport.model_validate(_load("positive.sarif"))
+        report.runs[0].results[0].level = "bogus"
+        HadolintScanner.apply_severity_mapping(report, None)
+        assert _findings(report)[0][1:3] == ("error", "HIGH")
+
     def test_user_config_ignores_and_overrides_are_honored(self):
         """configured/.hadolint.yaml ignores DL3007 and makes DL3008 style."""
         report = SarifReport.model_validate(_load("configured.sarif"))
@@ -456,7 +495,7 @@ class TestScan:
         fake = FakeHadolint(timed_out=True)
         with pytest.raises(ScannerError, match="timed out after 5"):
             _run(scanner, fake, monkeypatch)
-        assert fake.calls[0]["timeout"] == 5
+        assert 0 < fake.calls[0]["timeout"] <= 5
 
     def test_missing_binary_is_reported_as_unsatisfied_dependencies(
         self, tree, tmp_path, monkeypatch
@@ -467,6 +506,80 @@ class TestScan:
         assert _run(scanner, fake, monkeypatch) is False
         assert scanner.dependencies_satisfied is False
         assert fake.calls == []
+
+
+class TestLargeTreesAndBudgets:
+    def test_a_long_file_list_is_split_and_the_results_merged(
+        self, tmp_path, on_path, monkeypatch
+    ):
+        src = tmp_path / "src"
+        names = []
+        for i in range(400):
+            d = src / ("d" * 60 + f"{i:03d}")
+            d.mkdir(parents=True)
+            (d / "Dockerfile").write_text("FROM x\n")
+            names.append(f"{d.name}/Dockerfile")
+        scanner = _scanner(src, tmp_path)
+        fake = FakeHadolint(sarif="positive.sarif", json_name="positive.json")
+        report = _run(scanner, fake, monkeypatch)
+
+        sarif_calls = [c for c in fake.calls if "sarif" in c["argv"]]
+        assert len(sarif_calls) > 1
+        passed = [
+            a for c in sarif_calls for a in c["argv"][c["argv"].index("--") + 1 :]
+        ]
+        assert sorted(passed) == sorted(names)
+        for call in fake.calls:
+            assert len(" ".join(call["argv"])) <= hs._MAX_COMMAND_LINE_CHARS
+        assert len(_findings(report)) == len(POSITIVE_EXPECTED) * len(sarif_calls)
+        assert scanner.targets_attempted == 400
+
+    def test_every_run_shares_one_deadline(self, tree, tmp_path, on_path, monkeypatch):
+        """The JSON pass gets what the SARIF pass left, not a fresh budget."""
+        clock = iter([100.0, 100.0, 103.0])
+        monkeypatch.setattr(hs, "_now", lambda: next(clock))
+        scanner = _scanner(tree, tmp_path, scan_timeout=5)
+        fake = FakeHadolint()
+        _run(scanner, fake, monkeypatch)
+        sarif_call, json_call = fake.calls
+        assert sarif_call["timeout"] == pytest.approx(5)
+        assert json_call["timeout"] == pytest.approx(2)
+
+    def test_an_exhausted_budget_skips_the_json_pass_and_reports_low(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        clock = iter([100.0, 100.0, 106.0])
+        monkeypatch.setattr(hs, "_now", lambda: next(clock))
+        scanner = _scanner(tree, tmp_path, scan_timeout=5)
+        fake = FakeHadolint()
+        report = _run(scanner, fake, monkeypatch)
+        assert len(fake.calls) == 1
+        assert ("SC2006", "note", "LOW", "Dockerfile", 5) in _findings(report)
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+    def test_a_discovered_config_symlinked_outside_the_tree_is_not_used(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        outside = tmp_path / "outside.yaml"
+        outside.write_text("ignored: [DL3007]\n")
+        (tree / ".hadolint.yaml").symlink_to(outside)
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeHadolint()
+        _run(scanner, fake, monkeypatch)
+        assert "--config" not in fake.calls[0]["argv"]
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+    def test_an_explicitly_configured_config_outside_the_tree_is_used(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        outside = tmp_path / "shared" / "hadolint.yaml"
+        outside.parent.mkdir()
+        outside.write_text("ignored: [DL3007]\n")
+        scanner = _scanner(tree, tmp_path, config_file=str(outside))
+        fake = FakeHadolint()
+        _run(scanner, fake, monkeypatch)
+        argv = fake.calls[0]["argv"]
+        assert argv[argv.index("--config") + 1] == outside.resolve().as_posix()
 
 
 class TestInstall:

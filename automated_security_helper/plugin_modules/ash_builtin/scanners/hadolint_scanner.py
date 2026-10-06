@@ -85,7 +85,9 @@ Offline
 -------
 hadolint reads only the files it is given and never uses the network, so it
 behaves identically offline. A missing binary is reported MISSING by the scan
-phase like any other builtin, and the run is bounded by ``scan_timeout``.
+phase like any other builtin. ``scan_timeout`` bounds the whole scan: every
+hadolint process this scanner starts, SARIF and JSON passes together, shares
+one deadline.
 
 Environment
 -----------
@@ -110,6 +112,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
@@ -316,8 +319,19 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             return candidate.resolve()
         for name in DEFAULT_CONFIG_CANDIDATES:
             candidate = source_dir / name
-            if candidate.is_file():
-                return candidate.resolve()
+            if not candidate.is_file():
+                continue
+            resolved = candidate.resolve()
+            # Discovered in the scanned tree, so held to it, as Dockerfiles are.
+            # A config the operator names explicitly (above) may live anywhere.
+            if not resolved.is_relative_to(source_dir.resolve()):
+                self._plugin_log(
+                    f"Ignoring {candidate.as_posix()}: it resolves to "
+                    f"{resolved.as_posix()}, outside the scanned tree.",
+                    level=logging.WARNING,
+                )
+                continue
+            return resolved
         return None
 
     def _dockerfiles(
@@ -465,7 +479,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         *args: Any,
         **kwargs: Any,
     ) -> SarifReport | bool:
-        """Lint every Dockerfile under *target* with one hadolint invocation."""
+        """Lint every Dockerfile under *target* (one hadolint run per argv chunk)."""
         if global_ignore_paths is None:
             global_ignore_paths = []
 
@@ -511,6 +525,8 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
 
             self.targets_attempted = len(dockerfiles)
             argv_paths = [self._argv_path(p) for p in dockerfiles]
+            base_args = self._base_args(config_file)
+            chunks = _argv_chunks(base_args, argv_paths)
 
             results_dir = Path(self.results_dir or self._ctx.output_dir).joinpath(
                 target_type
@@ -519,63 +535,31 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             results_file = results_dir.joinpath("hadolint.sarif")
             results_file.unlink(missing_ok=True)
 
-            # "--" ends option parsing, so a Dockerfile whose name starts with a
-            # dash is read as a file rather than as a flag.
-            #
-            # The report is read from stdout rather than written with --output,
-            # because --output is newer than the hadolint some installs carry:
-            # nixpkgs' 2.14.0 rejects it with "Invalid option `--output'".
-            final_args = [
-                *self._base_args(config_file),
-                "--format",
-                "sarif",
-                "--",
-                *argv_paths,
-            ]
+            # One budget for every invocation of this scan, SARIF and JSON passes
+            # alike, so scan_timeout bounds the scanner and not each process.
             timeout = self._effective_scan_timeout()
-            response = self._run_subprocess(
-                command=final_args,
-                results_dir=results_dir,
-                stdout_preference="return",
-                stderr_preference="both",
-                env=self._subprocess_env(),
-                timeout=timeout,
-            )
+            deadline = None if timeout is None else _now() + timeout
+
+            reports: List[SarifReport] = []
+            final_args: List[str] = []
+            for chunk in chunks:
+                final_args = self._format_args(base_args, "sarif", chunk)
+                response = self._run_until(final_args, results_dir, deadline)
+                self._check_sarif_response(response, timeout, config_file)
+                reports.append(self._parse_sarif(response))
             self._post_scan(target=target, target_type=target_type)
 
-            if isinstance(response, dict) and response.get("timed_out"):
-                raise ScannerError(
-                    f"hadolint timed out after {timeout}s and was killed, so it "
-                    "produced no results file. Raise "
-                    "scanners.hadolint.options.scan_timeout if these Dockerfiles "
-                    "legitimately need longer."
-                )
-            stderr = (
-                (response.get("stderr") or "") if isinstance(response, dict) else ""
+            sarif_report = reports[0]
+            for extra in reports[1:]:
+                merged = sarif_report.runs[0].results or []
+                merged.extend(extra.runs[0].results or [])
+                sarif_report.runs[0].results = merged
+            results_file.write_text(
+                sarif_report.model_dump_json(
+                    exclude_none=True, exclude_unset=True, by_alias=True
+                ),
+                encoding="utf-8",
             )
-            if _CONFIG_PARSE_ERROR_MARKER in stderr:
-                raise ScannerError(
-                    "hadolint could not parse its configuration file "
-                    f"({config_file.as_posix() if config_file else 'auto-discovered'}) "
-                    "and would have run with its defaults instead, ignoring any rules "
-                    f"and severity overrides it sets. hadolint said: {stderr.strip()}"
-                )
-            if self.exit_code not in self.success_exit_codes:
-                raise ScannerError(
-                    f"hadolint exited {self.exit_code}, which with --no-fail means "
-                    "it did not complete"
-                )
-            stdout = (
-                (response.get("stdout") or "") if isinstance(response, dict) else ""
-            )
-            results_file.write_text(stdout, encoding="utf-8")
-
-            raw = self._read_results_file(results_file)
-            if raw is None:
-                raise ScannerError("hadolint exited 0 but wrote no report")
-            sarif_report = SarifReport.model_validate(raw)
-            if not sarif_report.runs:
-                raise ScannerError("hadolint wrote a SARIF report with no runs")
 
             driver = sarif_report.runs[0].tool.driver
             if driver.version:
@@ -585,9 +569,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             if any(
                 _level_name(r.level) == "note" for r in sarif_report.get_all_results()
             ):
-                levels = self._hadolint_levels(
-                    config_file, argv_paths, results_dir, timeout
-                )
+                levels = self._hadolint_levels(base_args, chunks, results_dir, deadline)
             self.apply_severity_mapping(sarif_report, levels)
 
             self._inject_invocation(sarif_report, final_args, target)
@@ -595,72 +577,127 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         except Exception as e:
             raise ScannerError(self._describe_scan_failure(e, results_file))
 
+    @staticmethod
+    def _format_args(base_args: List[str], fmt: str, chunk: List[str]) -> List[str]:
+        """``hadolint ... --format <fmt> -- <files>``.
+
+        "--" ends option parsing, so a Dockerfile whose name starts with a dash
+        is read as a file rather than as a flag. The report is read from stdout
+        rather than written with --output, because --output is newer than the
+        hadolint some installs carry: nixpkgs' 2.14.0 rejects it with "Invalid
+        option `--output'".
+        """
+        return [*base_args, "--format", fmt, "--", *chunk]
+
+    def _run_until(
+        self, argv: List[str], results_dir: Path, deadline: Optional[float]
+    ) -> Dict[str, Any]:
+        """Run *argv* with whatever is left of the scan's time budget."""
+        if deadline is None:
+            remaining = None
+        else:
+            remaining = deadline - _now()
+            if remaining <= 0:
+                return {"timed_out": True}
+        response = self._run_subprocess(
+            command=argv,
+            results_dir=results_dir,
+            stdout_preference="return",
+            stderr_preference="both",
+            env=self._subprocess_env(),
+            timeout=remaining,
+        )
+        return response if isinstance(response, dict) else {}
+
+    def _check_sarif_response(
+        self,
+        response: Dict[str, Any],
+        timeout: Optional[float],
+        config_file: Optional[Path],
+    ) -> None:
+        if response.get("timed_out"):
+            raise ScannerError(
+                f"hadolint timed out after {timeout}s and was killed, so it "
+                "produced no report. Raise scanners.hadolint.options.scan_timeout "
+                "if these Dockerfiles legitimately need longer."
+            )
+        stderr = response.get("stderr") or ""
+        if _CONFIG_PARSE_ERROR_MARKER in stderr:
+            raise ScannerError(
+                "hadolint could not parse its configuration file "
+                f"({config_file.as_posix() if config_file else 'auto-discovered'}) "
+                "and would have run with its defaults instead, ignoring any rules "
+                f"and severity overrides it sets. hadolint said: {stderr.strip()}"
+            )
+        if self.exit_code not in self.success_exit_codes:
+            raise ScannerError(
+                f"hadolint exited {self.exit_code}, which with --no-fail means "
+                "it did not complete"
+            )
+
+    @staticmethod
+    def _parse_sarif(response: Dict[str, Any]) -> SarifReport:
+        stdout = response.get("stdout") or ""
+        if not stdout.strip():
+            raise ScannerError("hadolint exited 0 but wrote no report")
+        report = SarifReport.model_validate(json.loads(stdout))
+        if not report.runs:
+            raise ScannerError("hadolint wrote a SARIF report with no runs")
+        return report
+
     def _hadolint_levels(
         self,
-        config_file: Optional[Path],
-        argv_paths: List[str],
+        base_args: List[str],
+        chunks: List[List[str]],
         results_dir: Path,
-        timeout: Optional[float],
+        deadline: Optional[float],
     ) -> Optional[Dict[str, str]]:
-        """``rule code -> hadolint level`` from a JSON-format run, or None.
+        """``rule code -> hadolint level`` from JSON-format runs, or None.
 
-        None when the run fails or its output cannot be read, which leaves every
+        None when any run fails or its output cannot be read, which leaves every
         ``note`` at LOW. A code that appears at two levels is left out of the
         table, with the same effect for that code.
         """
-        argv = [
-            *self._base_args(config_file),
-            "--format",
-            "json",
-            "--",
-            *argv_paths,
-        ]
-        # The SARIF run's exit code and errors are the scanner's verdict; this
-        # pass must not overwrite them.
+        seen: Dict[str, Set[str]] = {}
+        # The SARIF runs' exit code and errors are the scanner's verdict; these
+        # passes must not overwrite them.
         saved_exit, saved_errors = self.exit_code, list(self.errors)
+        reason = None
         try:
-            response = self._run_subprocess(
-                command=argv,
-                results_dir=results_dir,
-                stdout_preference="return",
-                stderr_preference="return",
-                env=self._subprocess_env(),
-                timeout=timeout,
-            )
-            exit_code = self.exit_code
+            for chunk in chunks:
+                response = self._run_until(
+                    self._format_args(base_args, "json", chunk), results_dir, deadline
+                )
+                if response.get("timed_out"):
+                    reason = "the JSON pass ran out of the scan's time budget"
+                    break
+                if self.exit_code != 0:
+                    reason = f"the JSON pass exited {self.exit_code}"
+                    break
+                try:
+                    entries = json.loads(response.get("stdout") or "[]")
+                except ValueError as e:
+                    reason = f"its output could not be read ({e})"
+                    break
+                if not isinstance(entries, list):
+                    reason = "its output was not a list"
+                    break
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    code, level = entry.get("code"), entry.get("level")
+                    if isinstance(code, str) and isinstance(level, str):
+                        seen.setdefault(code, set()).add(level)
         finally:
             self.exit_code, self.errors = saved_exit, saved_errors
 
-        reason = None
-        entries = None
-        if isinstance(response, dict) and response.get("timed_out"):
-            reason = "the JSON pass timed out"
-        elif exit_code != 0:
-            reason = f"the JSON pass exited {exit_code}"
-        else:
-            stdout = (
-                (response.get("stdout") or "") if isinstance(response, dict) else ""
-            )
-            try:
-                entries = json.loads(stdout or "[]")
-            except ValueError as e:
-                reason = f"its output could not be read ({e})"
-        if entries is None or not isinstance(entries, list):
+        if reason is not None:
             self._plugin_log(
                 "Could not tell hadolint's info findings from its style findings "
-                f"because {reason or 'its output was not a list'}; every SARIF "
-                "'note' is reported as LOW.",
+                f"because {reason}; every SARIF 'note' is reported as LOW.",
                 level=logging.WARNING,
             )
             return None
-
-        seen: Dict[str, Set[str]] = {}
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            code, level = entry.get("code"), entry.get("level")
-            if isinstance(code, str) and isinstance(level, str):
-                seen.setdefault(code, set()).add(level)
         return {code: next(iter(lv)) for code, lv in seen.items() if len(lv) == 1}
 
     @staticmethod
@@ -675,8 +712,10 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         have written as ``note`` (info or style) is accepted from it.
         """
         for result in sarif_report.get_all_results():
-            sarif_level = _level_name(result.level) or "warning"
-            hadolint_level = _SARIF_LEVEL_TO_HADOLINT.get(sarif_level, "warning")
+            # A missing or unknown level is read as error, the default ASH's SARIF
+            # model gives Result.level, so nothing is under-reported.
+            sarif_level = _level_name(result.level) or "error"
+            hadolint_level = _SARIF_LEVEL_TO_HADOLINT.get(sarif_level, "error")
             if sarif_level == "note" and levels:
                 refined = levels.get(result.ruleId or "")
                 if refined in ("info", "style"):
@@ -699,6 +738,38 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 "`ash dependencies install --tool hadolint`."
             )
         return found is not None
+
+
+#: The clock the scan's time budget is measured on; a seam for tests.
+_now = time.monotonic
+
+#: Upper bound on one hadolint command line, in characters. Windows caps a
+#: command line at 32,767 characters (CreateProcess); the margin leaves room for
+#: quoting. A tree with more Dockerfiles than fit is linted in several runs whose
+#: results are merged.
+_MAX_COMMAND_LINE_CHARS = 24_000
+
+
+def _argv_chunks(base_args: List[str], paths: List[str]) -> List[List[str]]:
+    """Split *paths* so each ``hadolint`` command line stays under the cap.
+
+    Every chunk has at least one path, so a single path longer than the cap is
+    still attempted (and fails loudly) rather than dropped.
+    """
+    fixed = sum(len(a) + 3 for a in base_args) + len(" --format sarif --")
+    chunks: List[List[str]] = []
+    current: List[str] = []
+    size = fixed
+    for path in paths:
+        cost = len(path) + 3
+        if current and size + cost > _MAX_COMMAND_LINE_CHARS:
+            chunks.append(current)
+            current, size = [], fixed
+        current.append(path)
+        size += cost
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _level_name(level: Any) -> Optional[str]:

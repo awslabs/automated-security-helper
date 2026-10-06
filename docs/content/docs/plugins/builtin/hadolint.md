@@ -51,14 +51,16 @@ binary is not installed the scanner is reported `MISSING` and, because
 ## Which files are scanned
 
 Files named `Dockerfile`, `Containerfile`, `*.Dockerfile` or `Dockerfile.*`
-anywhere under the source directory, matched case-sensitively. BuildKit ignore
-files (`Dockerfile.dockerignore`, `*.Dockerfile.dockerignore`) are not linted.
+anywhere under the source directory, matched case-sensitively: a lowercase
+`app.dockerfile` or `dockerfile` is not linted. BuildKit ignore files
+(`Dockerfile.dockerignore`, `*.Dockerfile.dockerignore`) are not linted either.
 
 ASH's ignore files (`.gitignore`, `.ashignore`) and `global_settings.ignore_paths`
 apply before hadolint sees anything. ASH's own output directory is never scanned,
 and a symlinked Dockerfile that points outside the source directory is skipped
 with a warning. If there are no Dockerfiles, hadolint is not run and the scanner
-reports `SKIPPED`.
+reports `SKIPPED`. A tree with more Dockerfiles than fit on one command line is
+linted in several hadolint runs whose results are merged.
 
 A Dockerfile hadolint cannot parse (a template such as `Dockerfile.j2`, for
 example) is reported as rule `DL1000` at HIGH severity. Add it to
@@ -76,7 +78,8 @@ scanners:
       # and .ash/hadolint.yaml that exists. A path that is set but missing fails
       # the scan instead of silently running with hadolint's defaults.
       config_file: null
-      # Seconds before hadolint is killed (default 1800; null for no limit).
+      # Seconds for the whole hadolint scan (default 1800; null for no limit).
+      # Every hadolint process the scan starts shares this one budget.
       scan_timeout: 1800
       # Scanner-level severity threshold override.
       severity_threshold: null
