@@ -1,0 +1,7 @@
+
+=== ASH Scan Completed in 42.5s: Next Steps ===
+View detailed findings...
+  - SARIF: '.ash/ash_output/reports/ash.sarif'
+  - JUnit: '.ash/ash_output/reports/ash.junit.xml'
+  - ASH aggregated results JSON available at: '.ash/ash_output/ash_aggregated_results.json'
+ERROR (1) Exiting due to exception during ASH scan

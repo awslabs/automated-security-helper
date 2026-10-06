@@ -1,0 +1,30 @@
+ ⭘                                    ASH Security Findings                                03:04:05
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ ID  Rule ID                                     Severity  Scanner  File          Line  Message   │
+│ 1   B105                                        high      bandit   src/app.py    12    Possible h│
+│ 2   javascript.lang.security.audit.unsafe-eval  low       semgrep  web/index.js  N/A   Avoid eval│
+│ 3   GHSA-0000-fixture                           info      unknown  N/A           N/A   Package le│
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                        ▉                         │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+Total: 4 | Showing: 3 | Hiding suppressed | s=search | f=filters | h=toggle suppressed
+
+
+
+
+
+ q Quit  f Toggle Filters  j Next Finding  k Previous Finding  v View Selected  s Search▏^p palette

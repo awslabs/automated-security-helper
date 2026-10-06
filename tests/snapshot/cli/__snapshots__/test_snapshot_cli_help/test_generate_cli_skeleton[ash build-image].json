@@ -1,0 +1,22 @@
+{
+  "no_build": false,
+  "no_run": false,
+  "force": false,
+  "oci_runner": null,
+  "container_network": "bridge",
+  "build_target": "non-root",
+  "offline_semgrep_rulesets": "p/ci",
+  "container_uid": null,
+  "container_gid": null,
+  "ash_revision_to_install": null,
+  "custom_containerfile": null,
+  "custom_build_arg": null,
+  "config_overrides": null,
+  "offline": false,
+  "quiet": false,
+  "log_level": "INFO",
+  "config": null,
+  "verbose": false,
+  "debug": false,
+  "color": true
+}

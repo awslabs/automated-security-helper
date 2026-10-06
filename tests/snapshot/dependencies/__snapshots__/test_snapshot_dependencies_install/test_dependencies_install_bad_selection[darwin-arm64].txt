@@ -1,0 +1,16 @@
+$ ash dependencies install --bin-path bin --tool grype --tool gryp
+╭───────── ASH Dependency Installer ─────────╮
+│ Installing ASH dependencies                │
+│ Target bin path: bin                       │
+│ Plugin types: converter, scanner, reporter │
+╰────────────────────────────────────────────╯
+Getting platform and architecture
+Installing dependencies for platform: darwin, architecture: arm64
+[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
+│ Unknown tool(s): gryp                                                                            │
+│ Available: ArchiveConverter, bandit, cdk-nag, cfn-nag, checkov, csv, cyclonedx, detect-secrets,  │
+│ flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, grype, html, junitxml, jupyter, markdown, │
+│ npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, text, unused-suppressions, yaml           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+[exit code: 2]

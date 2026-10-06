@@ -1,0 +1,3 @@
+$ ash config update ash.yaml
+No modifications specified. Use --set to specify changes.
+[exit code: 0]

@@ -1,0 +1,78 @@
+$ ash dependencies install --bin-path bin
+╭───────── ASH Dependency Installer ─────────╮
+│ Installing ASH dependencies                │
+│ Target bin path: bin                       │
+│ Plugin types: converter, scanner, reporter │
+╰────────────────────────────────────────────╯
+Getting platform and architecture
+Installing dependencies for platform: windows, architecture: arm64
+[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+             WARNING  cfn-nag cannot be installed here: no Ruby DevKit (RI_DEVKIT is unset), and
+                      cfn-nag's `psych` dependency publishes no precompiled gem for this Ruby ABI,
+                      so it has to build from source. It will be reported as having no install path
+                      on this machine rather than failing the install of every other scanner.
+Installing dependencies for converter plugin: ArchiveConverter
+Installing dependencies for converter plugin: jupyter
+Running command: uv tool install nbconvert>=7.16.0,<8.0.0
+Command succeeded with exit code: 0
+Installing dependencies for scanner plugin: bandit
+Running command: uv tool install bandit[sarif,toml]>=1.7.0,<2.0.0
+Command succeeded with exit code: 0
+Installing dependencies for scanner plugin: cdk-nag
+Running command: python3 -m pip install aws-cdk-lib<3.0.0,>=2.269.0 cdk-nag<4.0.0,>=3.0
+constructs<11.0.0,>=10.8
+Command succeeded with exit code: 0
+Installing dependencies for scanner plugin: cfn-nag
+Installing dependencies for scanner plugin: checkov
+Running command: uv tool install checkov>=3.2.0,<4.0.0
+Command succeeded with exit code: 0
+Installing dependencies for scanner plugin: detect-secrets
+Installing dependencies for scanner plugin: grype
+Installing dependencies for scanner plugin: npm-audit
+Installing dependencies for scanner plugin: opengrep
+Installing dependencies for scanner plugin: semgrep
+Running command: uv tool install semgrep>=1.125.0,<2.0.0
+Command succeeded with exit code: 0
+Installing dependencies for scanner plugin: syft
+Running command: python3 -c import sys; from pathlib import Path; from
+automated_security_helper.utils.download_utils import install_pinned_tool;
+install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])) syft windows arm64 bin
+Command succeeded with exit code: 0
+Installing dependencies for reporter plugin: csv
+Installing dependencies for reporter plugin: cyclonedx
+Installing dependencies for reporter plugin: github-ghas
+Installing dependencies for reporter plugin: gitlab-cyclonedx
+Installing dependencies for reporter plugin: gitlab-sast
+Installing dependencies for reporter plugin: html
+Installing dependencies for reporter plugin: flat-json
+Installing dependencies for reporter plugin: junitxml
+Installing dependencies for reporter plugin: markdown
+Installing dependencies for reporter plugin: ocsf
+Installing dependencies for reporter plugin: sarif
+Installing dependencies for reporter plugin: spdx
+Installing dependencies for reporter plugin: text
+Installing dependencies for reporter plugin: unused-suppressions
+Installing dependencies for reporter plugin: yaml
+                                  Dependency installation results
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Plugin         ┃ Type      ┃ Tool            ┃ Cmds ┃ Failed ┃ Status          ┃ Resolved to     ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ jupyter        │ converter │ jupyter-nbconv… │    1 │      0 │ INSTALLED       │ bin/jupyter-nb… │
+│ bandit         │ scanner   │ bandit          │    1 │      0 │ INSTALLED       │ bin/bandit      │
+│ cdk-nag        │ scanner   │ python          │    1 │      0 │ INSTALLED       │ bin/python      │
+│ cfn-nag        │ scanner   │ cfn_nag_scan    │    0 │      0 │ ALREADY PRESENT │ bin/cfn_nag_sc… │
+│ checkov        │ scanner   │ checkov         │    1 │      0 │ INSTALLED       │ bin/checkov     │
+│ detect-secrets │ scanner   │ detect-secrets  │    0 │      0 │ ALREADY PRESENT │ bin/detect-sec… │
+│ grype          │ scanner   │ grype           │    0 │      0 │ ALREADY PRESENT │ bin/grype       │
+│ npm-audit      │ scanner   │ npm             │    0 │      0 │ ALREADY PRESENT │ bin/npm         │
+│ opengrep       │ scanner   │ opengrep        │    0 │      0 │ ALREADY PRESENT │ bin/opengrep    │
+│ semgrep        │ scanner   │ semgrep         │    1 │      0 │ INSTALLED       │ bin/semgrep     │
+│ syft           │ scanner   │ syft            │    1 │      0 │ INSTALLED       │ bin/syft        │
+└────────────────┴───────────┴─────────────────┴──────┴────────┴─────────────────┴─────────────────┘
+╭───────────────────────────────────── Installation Complete ──────────────────────────────────────╮
+│ Commands run: 6 (0 failed)                                                                       │
+│ Tools verified on PATH: 11 -- bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, jupyter, │
+│ npm-audit, opengrep, semgrep, syft                                                               │
+│ No install path on this platform: cfn-nag, detect-secrets, grype, npm-audit, opengrep            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+[exit code: 0]

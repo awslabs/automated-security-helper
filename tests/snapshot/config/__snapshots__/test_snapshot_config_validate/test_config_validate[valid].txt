@@ -1,0 +1,6 @@
+$ ash config validate --config valid.yaml
+Validating configuration file: valid.yaml
+✅ Configuration is valid!
+
+The configuration file passed all validation checks.
+[exit code: 0]
