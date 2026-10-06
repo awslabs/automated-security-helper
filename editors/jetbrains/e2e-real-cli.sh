@@ -83,7 +83,9 @@ if ASH_JB_REAL_CLI_BIN="$WORK/empty-bin" ./gradlew --no-daemon --console=plain r
   fail "realCliTest passed with no CLI installed; the suite cannot fail on a missing CLI"
 fi
 # Matched without the quotes around the name, which the JUnit XML may write as &apos;.
-if ! cat build/test-results/realCliTest/TEST-*.xml | grep -q "holds no executable"; then
+# grep reads the files itself: piped from cat, `grep -q` exits at the first match, cat can
+# take SIGPIPE, and pipefail then turns a found match into this failure.
+if ! grep -q "holds no executable" build/test-results/realCliTest/TEST-*.xml; then
   tail -n 30 "$WORK/negative.log"
   fail "realCliTest failed, but not because the CLI was missing; see the log above"
 fi
