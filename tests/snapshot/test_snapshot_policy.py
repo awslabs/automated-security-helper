@@ -165,6 +165,57 @@ def test_self_test_passes(trailers, tmp_path: Path, monkeypatch) -> None:
     assert trailers.self_test() == 0
 
 
+# A frozen copy of PRE_RULE_EXEMPTIONS' keys and the cutoff. The table may only shrink:
+# a commit made after #717 takes a trailer, not an entry. Removing an entry here and in
+# the script is fine; adding one, or moving the cutoff, fails below.
+_FROZEN_RULE_COMMIT = "2a09ec3ad071e40718183630ff9899360b74fe3d"
+_FROZEN_CUTOFF = 1791309669  # committer date of the #717 merge on main
+_FROZEN_EXEMPTIONS = frozenset(
+    {
+        "7e54dba560cee37bb267f8cb8f78dc3e185ce4e3",
+        "19cfbc5aa0a81447b2d960b5dc1294f346aba633",
+        "19fd417e028f973b65e4f520ad7f71492e49b260",
+        "b9a782f5c694f2a788909f49ab1a60fd22c7a055",
+    }
+)
+
+
+def test_pre_rule_exemptions_only_shrink(trailers) -> None:
+    added = set(trailers.PRE_RULE_EXEMPTIONS) - _FROZEN_EXEMPTIONS
+    assert not added, f"PRE_RULE_EXEMPTIONS is shrink-only; new entries: {added}"
+    assert trailers.TRAILER_RULE_COMMIT == _FROZEN_RULE_COMMIT
+    assert trailers.TRAILER_RULE_COMMITTED_AT == _FROZEN_CUTOFF
+    for sha, reason in trailers.PRE_RULE_EXEMPTIONS.items():
+        assert reason.strip(), f"{sha} has no reason"
+
+
+def test_listed_commit_after_the_rule_still_fails(trailers, repo, capsys) -> None:
+    # NEGATIVE CONTROL through run_check: a golden change committed after the rule, with
+    # its SHA in the table, is judged like any other commit.
+    path = "tests/snapshot/__snapshots__/test_cli.ambr"
+    repo.write(path, "new\n")
+    sha = repo.commit(
+        "feat: change", committed_at=trailers.TRAILER_RULE_COMMITTED_AT + 60
+    )
+    table = {sha: "should not be honored"}
+    commits = trailers.commits_in_range(repo.path, repo.base, "HEAD")
+    assert [
+        v.path for v in trailers.find_violations(repo.path, commits, "HEAD", table)
+    ] == [path]
+    early = trailers._Repo(repo.path.parent / "early")
+    early.write(path, "new\n")
+    early_sha = early.commit(
+        "feat: change", committed_at=trailers.TRAILER_RULE_COMMITTED_AT - 60
+    )
+    early_commits = trailers.commits_in_range(early.path, early.base, "HEAD")
+    assert (
+        trailers.find_violations(
+            early.path, early_commits, "HEAD", {early_sha: "pre-rule"}
+        )
+        == []
+    )
+
+
 def test_golden_change_without_trailer_fails(trailers, repo, capsys) -> None:
     # NEGATIVE CONTROL: the check exists to produce this failure.
     path = "tests/snapshot/__snapshots__/test_cli/summary.md"

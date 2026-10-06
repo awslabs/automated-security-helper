@@ -214,6 +214,47 @@ PER_COMMIT_ROOTS: tuple[str, ...] = ("editors",)
 # count. Empty, the default, means the whole GOLDEN list.
 GOLDEN_ROOTS: list[str] = []
 
+# ---------------------------------------------------------------------------
+# PRE-RULE EXCEPTIONS
+#
+# The trailer rule landed on main in #717
+# (https://github.com/awslabs/automated-security-helper/pull/717), merge commit
+# TRAILER_RULE_COMMIT below. Four commits that reach v4 branches changed a golden file
+# before that, so nobody could have known to trailer them, and none can be amended now:
+# three are main's own squash commits, and b9a782f5 is already in the history that v4
+# branches build on. Without this table every push of such a branch fails on them.
+#
+# A listed commit counts as carrying its reason here, and only when BOTH hold:
+# * its committer date is before TRAILER_RULE_COMMITTED_AT, the committer date of the
+#   #717 merge (pinned as a number so the check needs neither main nor a network fetch);
+# * it is an ancestor of the head being checked.
+# Otherwise the entry is ignored and the commit is judged like any other.
+#
+# SHRINK-ONLY. tests/snapshot/test_snapshot_policy.py holds a frozen copy of this table
+# and the cutoff and fails if an entry is added or the cutoff moves. A commit made after
+# the rule takes a trailer, never an entry here.
+# ---------------------------------------------------------------------------
+TRAILER_RULE_COMMIT = "2a09ec3ad071e40718183630ff9899360b74fe3d"
+TRAILER_RULE_COMMITTED_AT = 1791309669  # 2026-10-06T11:01:09-07:00
+PRE_RULE_EXEMPTIONS: dict[str, str] = {
+    "7e54dba560cee37bb267f8cb8f78dc3e185ce4e3": (
+        "pre-rule squash of #707 on main: the config and results schemas gained the "
+        "suppression's symbol field"
+    ),
+    "19cfbc5aa0a81447b2d960b5dc1294f346aba633": (
+        "pre-rule squash of #711 on main: the config and results schemas gained "
+        "skip_ash_output_dir"
+    ),
+    "19fd417e028f973b65e4f520ad7f71492e49b260": (
+        "pre-rule squash of #712 on main: the config and results schemas gained "
+        "extends and patch"
+    ),
+    "b9a782f5c694f2a788909f49ab1a60fd22c7a055": (
+        "pre-rule v4 commit: the VS Code untrusted-workspace reason names .ashrc and "
+        "[tool.ash] as config sources"
+    ),
+}
+
 # What passes an editor snapshot suite's update flag, matched against the logical lines
 # of workflow files (see ``logical_lines``). editors/vscode/test/snapshot-policy.test.ts
 # holds the same list for every file under .github/; a form added here goes there too.
@@ -343,7 +384,13 @@ class GitError(RuntimeError):
     pass
 
 
-def git(repo: Path, *args: str, stdin: str | None = None, check: bool = True) -> str:
+def git(
+    repo: Path,
+    *args: str,
+    stdin: str | None = None,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> str:
     # core.quotepath=off as well as -z where paths are read: no git output this
     # script parses, or prints, spells a path in git's quoted octal form.
     proc = subprocess.run(
@@ -353,6 +400,7 @@ def git(repo: Path, *args: str, stdin: str | None = None, check: bool = True) ->
         text=True,
         encoding="utf-8",
         errors="replace",
+        env={**os.environ, **env} if env else None,
     )
     if check and proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
@@ -506,12 +554,40 @@ class Violation:
     commits: list[Commit]
 
 
-def find_violations(repo: Path, commits: list[Commit]) -> list[Violation]:
+def exemption_reason(
+    repo: Path, sha: str, head: str, exemptions: dict[str, str] | None = None
+) -> str | None:
+    """The pre-rule exception reason for ``sha``, or None when the entry is not honored.
+
+    ``exemptions`` defaults to ``PRE_RULE_EXEMPTIONS``; the self-test passes its own. An
+    entry is honored only for a commit committed before the #717 merge that is an
+    ancestor of ``head``; see "PRE-RULE EXCEPTIONS" above the table.
+    """
+    table = PRE_RULE_EXEMPTIONS if exemptions is None else exemptions
+    reason = table.get(sha)
+    if not reason:
+        return None
+    committed_at = int(git(repo, "log", "-1", "--format=%ct", sha).strip())
+    if committed_at >= TRAILER_RULE_COMMITTED_AT:
+        return None
+    if not is_ancestor(repo, sha, head):
+        return None
+    return reason
+
+
+def find_violations(
+    repo: Path,
+    commits: list[Commit],
+    head: str | None = None,
+    exemptions: dict[str, str] | None = None,
+) -> list[Violation]:
     """Each golden path, with the commits that changed it and carry no reason.
 
     Under ``PER_COMMIT_ROOTS`` every commit that touches the path needs its own
     trailer. Elsewhere a path is accepted once ANY commit in the range that touched
-    it has one; see "TWO RULES" in the module docstring for why.
+    it has one; see "TWO RULES" in the module docstring for why. With ``head``, a
+    commit with an honored pre-rule exception (``exemption_reason``) counts as having
+    a reason; without it, none is honored.
     """
     touched: dict[str, list[Commit]] = {}
     for commit in commits:
@@ -519,6 +595,14 @@ def find_violations(repo: Path, commits: list[Commit]) -> list[Violation]:
             if golden_reason(path):
                 touched.setdefault(path, []).append(commit)
     reasons = {c.sha: snapshot_reasons(repo, c.message) for c in commits}
+    if head is not None:
+        for c in commits:
+            if reasons[c.sha] or not any(golden_reason(p) for p in c.files):
+                continue
+            exempt = exemption_reason(repo, c.sha, head, exemptions)
+            if exempt:
+                print(f"pre-rule exception honored for {c.sha[:10]}: {exempt}")
+                reasons[c.sha] = [exempt]
     violations = []
     for path, touching in sorted(touched.items()):
         unexplained = [c for c in touching if not reasons[c.sha]]
@@ -725,7 +809,7 @@ def run_check(repo: Path, rng: Range) -> int:
             print(f"::error::{sha} is not in the clone; check out with fetch-depth: 0")
             return 1
     commits = commits_in_range(repo, rng.base, rng.head)
-    violations = find_violations(repo, commits)
+    violations = find_violations(repo, commits, head=rng.head)
     head_sha = git(repo, "rev-parse", f"{rng.head}^{{commit}}").strip()
     report(violations, rng.base, head_sha)
     golden = sorted({p for c in commits for p in c.files if golden_reason(p)})
@@ -902,7 +986,7 @@ class _Repo:
         self.write("README.md", "x\n")
         self.base = self.commit("chore: initial")
 
-    def _git(self, *args: str) -> str:
+    def _git(self, *args: str, env: dict[str, str] | None = None) -> str:
         # Isolated from the caller's config: no signing prompt, no hooks, a fixed identity.
         return git(
             self.path,
@@ -915,6 +999,7 @@ class _Repo:
             "-c",
             "core.hooksPath=/dev/null",
             *args,
+            env=env,
         )
 
     def write(self, rel: str, text: str) -> None:
@@ -922,10 +1007,21 @@ class _Repo:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
 
-    def commit(self, message: str, *, allow_empty: bool = False) -> str:
+    def commit(
+        self,
+        message: str,
+        *,
+        allow_empty: bool = False,
+        committed_at: int | None = None,
+    ) -> str:
         self._git("add", "-A")
         extra = ["--allow-empty"] if allow_empty else []
-        self._git("commit", "-q", *extra, "-m", message)
+        env = (
+            {"GIT_COMMITTER_DATE": f"@{committed_at} +0000"}
+            if committed_at is not None
+            else None
+        )
+        self._git("commit", "-q", *extra, "-m", message, env=env)
         return self._git("rev-parse", "HEAD").strip()
 
     def violations(self) -> list[str]:
@@ -1241,6 +1337,65 @@ _CASES = {
 }
 
 
+def _self_test_exemptions(tmp: Path) -> list[str]:
+    """Pre-rule exceptions: honored only before the cutoff and only for an ancestor."""
+    failures = []
+    before = TRAILER_RULE_COMMITTED_AT - 3600
+    after = TRAILER_RULE_COMMITTED_AT + 3600
+    for name, path in (("core", CORE_SNAP), ("editor", _VSCODE.snap)):
+        r = _Repo(tmp / f"exempt-{name}")
+        r.write(path, "pre-rule\n")
+        listed = r.commit("test: pre-rule change", committed_at=before)
+        table = {listed: "pre-rule fixture"}
+        commits = commits_in_range(r.path, r.base, "HEAD")
+
+        def got(
+            head: str, tbl: dict[str, str] = table, cs: list[Commit] = commits
+        ) -> list[str]:
+            return [v.path for v in find_violations(r.path, cs, head, tbl)]
+
+        if got("HEAD") != []:
+            failures.append(f"{name}: a listed pre-rule ancestor was not honored")
+        if got("HEAD", {}) != [path]:
+            failures.append(f"{name}: an unlisted pre-rule commit passed")
+        if [v.path for v in find_violations(r.path, commits, None, table)] != [path]:
+            failures.append(f"{name}: an exception was honored with no head to check")
+
+        # NEGATIVE CONTROL: listed, pre-rule, but not an ancestor of the head checked.
+        r._git("checkout", "-q", "-b", "elsewhere", r.base)
+        r.write("other.txt", "x\n")
+        r.commit("chore: unrelated", committed_at=before)
+        if got("elsewhere") != [path]:
+            failures.append(f"{name}: a listed SHA that is not an ancestor was honored")
+        r._git("checkout", "-q", "main")
+
+        # NEGATIVE CONTROL: listed, an ancestor, but committed after the rule.
+        r.write(path, "post-rule\n")
+        late = r.commit("test: post-rule change", committed_at=after)
+        late_commits = commits_in_range(r.path, listed, "HEAD")
+        if got("HEAD", {late: "post-rule"}, late_commits) != [path]:
+            failures.append(f"{name}: a listed commit made after the rule was honored")
+
+        # NEGATIVE CONTROL: an honored exception does not cover a later, untrailered
+        # change made after the rule; under the editors' per-commit rule it still fails.
+        both = commits_in_range(r.path, r.base, "HEAD")
+        want = [path] if per_commit(path) else []
+        if got("HEAD", table, both) != want:
+            failures.append(
+                f"{name}: honored exception plus a post-rule change gave the wrong result"
+            )
+        r.write(path, "post-rule, unlisted\n")
+        r.commit("test: post-rule change, unlisted", committed_at=after)
+        if got("HEAD", {}, commits_in_range(r.path, listed, "HEAD")) != [path]:
+            failures.append(f"{name}: an untrailered post-rule snapshot commit passed")
+    if PRE_RULE_EXEMPTIONS and any(
+        len(sha) != 40 or not reason.strip()
+        for sha, reason in PRE_RULE_EXEMPTIONS.items()
+    ):
+        failures.append("a PRE_RULE_EXEMPTIONS entry is not a full SHA with a reason")
+    return failures
+
+
 def _self_test_ranges(tmp: Path) -> list[str]:
     failures = []
     r = _Repo(tmp / "ranges")
@@ -1547,6 +1702,7 @@ def self_test() -> int:
                     f"core: {name}: expected violations {expected}, got {got}"
                 )
         failures += _self_test_ranges(tmp)
+        failures += _self_test_exemptions(tmp)
         failures += _self_test_core_orphans(tmp)
         failures += _self_test_orphans(tmp)
         failures += _self_test_policy(tmp)
@@ -1555,8 +1711,8 @@ def self_test() -> int:
         print(f"::error::self-test: {f}")
     print(
         f"self-test: {len(_CASES)} trailer cases for each of {len(_FIXTURES)} editors, "
-        f"{len(_CORE_CASES)} core cases, plus range, orphan, policy and root cases, "
-        f"{len(failures)} failure(s)"
+        f"{len(_CORE_CASES)} core cases, plus range, exception, orphan, policy and root "
+        f"cases, {len(failures)} failure(s)"
     )
     return 1 if failures else 0
 
