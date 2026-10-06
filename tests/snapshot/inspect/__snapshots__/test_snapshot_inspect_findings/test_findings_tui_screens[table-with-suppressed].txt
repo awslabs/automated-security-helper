@@ -4,7 +4,7 @@
 │ 1   B105                                        high      bandit   src/app.py         12    Possi│
 │ 2   CKV_AWS_18                                  medium    checkov  infra/bucket.yaml  3     Ensur│
 │ 3   javascript.lang.security.audit.unsafe-eval  low       semgrep  web/index.js       N/A   Avoid│
-│                                                                                                  │
+│ 4   GHSA-0000-fixture                           info      unknown  N/A                N/A   Packa│
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
@@ -21,7 +21,7 @@
 │                                                                                                  │
 │                                                                    ▏                             │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-Total: 3 | Showing: 3 | Showing suppressed | s=search | f=filters | h=toggle suppressed
+Total: 4 | Showing: 4 | Showing suppressed | s=search | f=filters | h=toggle suppressed
 
 
 

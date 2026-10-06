@@ -109,18 +109,6 @@ class TestMasked:
             "                    INFO     Applied modification: c=d"
         )
 
-    def test_hash_derived_jq_element_ids(self, normalizer):
-        out = normalizer.text(
-            "<code id='jq-2741195'>jq '.runs'</code>"
-            "<button id='btn-jq-2741195' "
-            "onclick=\"copyToClipboard('jq-2741195')\">Copy</button>"
-        )
-        assert out == (
-            "<code id='jq-<HASH_ID>'>jq '.runs'</code>"
-            "<button id='btn-jq-<HASH_ID>' "
-            "onclick=\"copyToClipboard('jq-<HASH_ID>')\">Copy</button>"
-        )
-
     def test_a_root_at_a_path_boundary(self):
         n = SnapshotNormalizer()
         n.add_root(PurePosixPath("/tmp"), "SYSTEM_TMP")
@@ -259,10 +247,6 @@ class TestSurvives:
 
     def test_slash_dates_outside_the_log_time_column(self, normalizer):
         text = "released 10/05/26, ratio [10/05/26], level [INFO]"
-        assert normalizer.text(text) == text
-
-    def test_jq_text_that_is_not_an_element_id(self, normalizer):
-        text = ".jq-query { color: #666; } jq '. | select(.x)' jq-1.7 'jq-1.7' jqx-123"
         assert normalizer.text(text) == text
 
     def test_box_drawing_and_emoji(self, normalizer):

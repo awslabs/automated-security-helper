@@ -58,8 +58,14 @@
     <h2>Field Analysis by Scanner</h2>
     <div class='scanner'>
       <div class='scanner-header'>
+        <h3>ash</h3>
+        <div>Match Rate: 7/7 (100.00%)</div>
+      </div>
+    </div>
+    <div class='scanner'>
+      <div class='scanner-header'>
         <h3>bandit</h3>
-        <div>Match Rate: 0/9 (0.00%)</div>
+        <div>Match Rate: 7/9 (77.78%)</div>
       </div>
     </div>
   </div>
@@ -68,7 +74,7 @@
       <h2>Validation Summary</h2>
       <div class='stats'>
         <div class='stat'>Total Findings: 10</div>
-        <div class='stat'>Matched Findings: 0 (0.00%)</div>
+        <div class='stat'>Matched Findings: 7 (70.00%)</div>
       </div>
       <div class='stats'>
         <div class='stat critical'>Critical Missing Fields: 0</div>
@@ -87,9 +93,17 @@
         <th>Informational Missing</th>
       </tr>
       <tr>
+        <td>ash</td>
+        <td>7/7</td>
+        <td>100.00%</td>
+        <td class='critical'>0</td>
+        <td class='important'>0</td>
+        <td class='informational'>0</td>
+      </tr>
+      <tr>
         <td>bandit</td>
-        <td>0/9</td>
-        <td>0.00%</td>
+        <td>7/9</td>
+        <td>77.78%</td>
         <td class='critical'>0</td>
         <td class='important'>0</td>
         <td class='informational'>0</td>
@@ -165,15 +179,15 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-1'>jq '. | select(has("runs[]")) | select(.runs[].results[].level != null)' .ash/ash_output/scanners/bandit/**/*.sarif</code>
+                    <code id='jq-1'>jq '. | select(has("runs[]")) | select(.runs[].results[].level != null)' .ash/ash_output/scanners/ash/**/*.sarif</code>
                     <button id='btn-jq-1' class='copy-btn' onclick="copyToClipboard('jq-1')">Copy</button>
                 </div>
             </div>
         </td>
 
-        <td>bandit</td>
+        <td>ash, bandit</td>
         <td>unknown</td>
-        <td class='missing'>No</td>
+        <td class='present'>Yes</td>
         <td class='field-path'>Findings[].Severity.Label</td>
         <td class='field-path'>Severity</td>
         <td class='field-path'>severity</td>
@@ -190,15 +204,15 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-2'>jq '. | select(.runs[] | select(.results[] | select(.locations[] | select(.physicalLocation.artifactLocation.uri != null))))' .ash/ash_output/scanners/bandit/**/*.sarif</code>
+                    <code id='jq-2'>jq '. | select(.runs[] | select(.results[] | select(.locations[] | select(.physicalLocation.artifactLocation.uri != null))))' .ash/ash_output/scanners/ash/**/*.sarif</code>
                     <button id='btn-jq-2' class='copy-btn' onclick="copyToClipboard('jq-2')">Copy</button>
                 </div>
             </div>
         </td>
 
-        <td>bandit</td>
+        <td>ash, bandit</td>
         <td>unknown</td>
-        <td class='missing'>No</td>
+        <td class='present'>Yes</td>
         <td class='field-path'>Findings[].Resources[].Details.AwsEc2Instance.Path</td>
         <td class='field-path'>File Path</td>
         <td class='field-path'>file_path</td>
@@ -215,15 +229,15 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-3'>jq '. | select(has("runs[]")) | select(.runs[].results[].locations[].physicalLocation.region.endLine != null)' .ash/ash_output/scanners/bandit/**/*.sarif</code>
+                    <code id='jq-3'>jq '. | select(has("runs[]")) | select(.runs[].results[].locations[].physicalLocation.region.endLine != null)' .ash/ash_output/scanners/ash/**/*.sarif</code>
                     <button id='btn-jq-3' class='copy-btn' onclick="copyToClipboard('jq-3')">Copy</button>
                 </div>
             </div>
         </td>
 
-        <td>bandit</td>
+        <td>ash, bandit</td>
         <td>unknown</td>
-        <td class='missing'>No</td>
+        <td class='present'>Yes</td>
         <td class='field-path'></td>
         <td class='field-path'>Line End</td>
         <td class='field-path'>line_end</td>
@@ -265,15 +279,15 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-5'>jq '. | select(has("runs[]")) | select(.runs[].results[].locations[].physicalLocation.region.startLine != null)' .ash/ash_output/scanners/bandit/**/*.sarif</code>
+                    <code id='jq-5'>jq '. | select(has("runs[]")) | select(.runs[].results[].locations[].physicalLocation.region.startLine != null)' .ash/ash_output/scanners/ash/**/*.sarif</code>
                     <button id='btn-jq-5' class='copy-btn' onclick="copyToClipboard('jq-5')">Copy</button>
                 </div>
             </div>
         </td>
 
-        <td>bandit</td>
+        <td>ash, bandit</td>
         <td>unknown</td>
-        <td class='missing'>No</td>
+        <td class='present'>Yes</td>
         <td class='field-path'></td>
         <td class='field-path'>Line Start</td>
         <td class='field-path'>line_start</td>
@@ -290,15 +304,15 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-6'>jq '. | select(has("runs[]")) | select(.runs[].results[].message.text != null)' .ash/ash_output/scanners/bandit/**/*.sarif</code>
+                    <code id='jq-6'>jq '. | select(has("runs[]")) | select(.runs[].results[].message.text != null)' .ash/ash_output/scanners/ash/**/*.sarif</code>
                     <button id='btn-jq-6' class='copy-btn' onclick="copyToClipboard('jq-6')">Copy</button>
                 </div>
             </div>
         </td>
 
-        <td>bandit</td>
+        <td>ash, bandit</td>
         <td>unknown</td>
-        <td class='missing'>No</td>
+        <td class='present'>Yes</td>
         <td class='field-path'>Findings[].Description</td>
         <td class='field-path'>Description</td>
         <td class='field-path'>description</td>
@@ -315,15 +329,15 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-7'>jq '. | select(has("runs[]")) | select(.runs[].results[].properties != null)' .ash/ash_output/scanners/bandit/**/*.sarif</code>
+                    <code id='jq-7'>jq '. | select(has("runs[]")) | select(.runs[].results[].properties != null)' .ash/ash_output/scanners/ash/**/*.sarif</code>
                     <button id='btn-jq-7' class='copy-btn' onclick="copyToClipboard('jq-7')">Copy</button>
                 </div>
             </div>
         </td>
 
-        <td>bandit</td>
+        <td>ash, bandit</td>
         <td>unknown</td>
-        <td class='missing'>No</td>
+        <td class='present'>Yes</td>
         <td class='field-path'></td>
         <td class='field-path'></td>
         <td class='field-path'></td>
@@ -340,15 +354,15 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-8'>jq '. | select(.runs[] | select(.results[] | select(.ruleId != null)))' .ash/ash_output/scanners/bandit/**/*.sarif</code>
+                    <code id='jq-8'>jq '. | select(.runs[] | select(.results[] | select(.ruleId != null)))' .ash/ash_output/scanners/ash/**/*.sarif</code>
                     <button id='btn-jq-8' class='copy-btn' onclick="copyToClipboard('jq-8')">Copy</button>
                 </div>
             </div>
         </td>
 
-        <td>bandit</td>
+        <td>ash, bandit</td>
         <td>unknown</td>
-        <td class='missing'>No</td>
+        <td class='present'>Yes</td>
         <td class='field-path'>Findings[].Types[]</td>
         <td class='field-path'>Rule ID</td>
         <td class='field-path'>rule_id</td>

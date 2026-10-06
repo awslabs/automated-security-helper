@@ -4,16 +4,11 @@
 """`ash inspect sarif-fields`: the console tables and every file it writes.
 
 The input is tests/test_data/snapshot/sarif_fields: one aggregated report and one
-scanner report. Two orderings in the command are not deterministic, and the fixture
-is shaped around both rather than masking them:
-
-- Input files come from ``glob.glob``, in directory-listing order, and that order
-  decides the key order of the JSON it writes. One file per directory keeps it the
-  same on every filesystem.
-- The HTML report lists scanners in the iteration order of a ``set`` of scanner
-  names, which follows Python's per-process string hash. With two scanners (the
-  aggregate counts as one) the sections swap between runs, so the HTML is
-  snapshotted from a single-scanner run, where there is only one order.
+scanner report. The command sorts its input files and lists scanners by name, and the
+HTML report's JQ element ids are row indexes, so every file it writes is the same on
+every filesystem and under every PYTHONHASHSEED. The HTML is snapshotted both from
+the two-scanner run (the aggregate counts as one), where the scanner order is
+visible, and from the single-scanner run.
 """
 
 from __future__ import annotations
@@ -75,7 +70,7 @@ def test_sarif_fields_reports_missing_field(project_dir, text_snapshot):
     assert "unexpectedly missing" in run.output
     assert (project_dir / OUTPUT_DIR / HTML_REPORT).is_file()
     assert text_snapshot("txt")(name="console") == run.document
-    for filename, ext in WRITTEN_DATA.items():
+    for filename, ext in {**WRITTEN_DATA, HTML_REPORT: "html"}.items():
         assert text_snapshot(ext)(name=filename) == _written(project_dir, filename)
 
 

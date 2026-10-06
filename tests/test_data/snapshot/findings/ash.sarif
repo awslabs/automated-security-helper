@@ -42,6 +42,7 @@
         },
         {
           "ruleId": "CKV_AWS_18",
+          "ruleIndex": 0,
           "level": "warning",
           "message": {
             "text": "Ensure the S3 bucket has access logging enabled"

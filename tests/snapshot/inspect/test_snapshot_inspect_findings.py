@@ -114,6 +114,15 @@ async def _screens(findings, config_path) -> dict[str, str]:
         await pilot.press("v")  # open the selected (first) finding
         await _settle(pilot, app)
         frames["detail"] = _frame(app)
+        await pilot.press("escape")  # back to the table
+        await _settle(pilot, app)
+        # Rows are sorted by severity, so the info-level advisory, the one finding
+        # with no location, is the last of the four.
+        await pilot.press("j", "j", "j")
+        await _settle(pilot, app)
+        await pilot.press("v")
+        await _settle(pilot, app)
+        frames["detail-no-location"] = _frame(app)
     return frames
 
 
@@ -122,16 +131,17 @@ def test_findings_tui_screens(model, tmp_path, monkeypatch, text_snapshot):
 
     # The header clock is the one wall-clock value on screen.
     monkeypatch.setattr(header, "datetime", _FixedClock)
-    # Only findings with a location: the table reads finding["file"] unguarded, and
-    # extract_findings sets that key only when the SARIF result has a location, so
-    # the fixture's location-less advisory raises KeyError in _populate_table.
-    findings = [f for f in extract_findings(model) if "file" in f]
-    assert len(findings) == 3
+    # Every fixture finding, including the advisory with no location: extract_findings
+    # sets no "file" or "line" key for it, and the table and detail screen draw it.
+    findings = extract_findings(model)
+    assert len(findings) == 4
 
     frames = asyncio.run(_screens(findings, tmp_path / ".ash.yaml"))
 
     assert "B105" in frames["table"]
+    assert "GHSA-0000-fixture" in frames["table"]
     assert "CKV_AWS_18" not in frames["table"], "suppressed rows are hidden by default"
     assert "CKV_AWS_18" in frames["table-with-suppressed"]
+    assert "GHSA-0000-fixture" in frames["detail-no-location"]
     for name, frame in frames.items():
         assert text_snapshot("txt")(name=name) == frame

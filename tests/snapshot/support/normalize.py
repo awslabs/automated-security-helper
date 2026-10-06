@@ -48,8 +48,6 @@ What is masked, and why each is safe to mask
   passed through, so they move with unrelated edits. The fact that a traceback was
   shown, and the ``ExcType: message`` line after it, are kept: a message that turns
   into a traceback, or back, still shows up as a diff.
-- ``jq-<digits>`` element ids in the ``inspect sarif-fields`` HTML report, which are
-  derived from Python's per-process salted ``hash()``.
 - Trailing whitespace on each line, which rich pads tables with.
 - The padding in front of a rich panel's right border, on a line where a mask
   changed the text's length. rich pads ``│ [default: /home/me/.ash/bin]   │`` to the
@@ -139,11 +137,6 @@ _REPORT_ID = re.compile(r"\bASH-\d{8}(?:\d{6})?\b")
 # Masked before durations, which would otherwise take the HH:MM:SS half alone.
 _LOG_TIME = re.compile(r"\[\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\]")
 
-# Element ids in the `inspect sarif-fields` HTML report, built as
-# f"jq-{abs(hash(path)) % 10000000}" (utils/meta_analysis/reporting.py). str hashes are
-# salted per process (PYTHONHASHSEED), so the number changes on every run. Only a
-# quoted value (an attribute, or the JS string argument that refers to it) is masked.
-_JQ_ELEMENT_ID = re.compile(r"(?<=['\"])((?:btn-)?jq-)\d+(?=['\"])")
 # The MCP get_scan_results scan_id: "scan-" + the local date-time it was read at
 # (core/resource_management/scan_tracking.py mints it on every call).
 _MCP_RESULTS_SCAN_ID = re.compile(r"\bscan-\d{14}\b")
@@ -409,7 +402,6 @@ class SnapshotNormalizer:
         # The log-time backstop runs whatever the switches say: the column is pinned
         # by conftest.py, so a stamp here is drawn some other way (see the docstring).
         out = _LOG_TIME.sub("[<LOG_TIME>]", out)
-        out = _JQ_ELEMENT_ID.sub(r"\1<HASH_ID>", out)
         if self.mask_instants:
             out = _ISO_INSTANT.sub("<TIMESTAMP>", out)
             out = _REPORT_ID.sub("ASH-<REPORT_ID>", out)
