@@ -88,8 +88,9 @@ DEPLOY_VERBS: dict[str, frozenset[str]] = {
 DEPLOY_ACTIONS = ("aws-actions/aws-cloudformation-github-deploy",)
 
 # `&&` and `||` before their single-character forms; a lone `&` backgrounds a job,
-# which still runs it, so it ends a command the same way `;` does.
-SEPARATORS = re.compile(r"&&|\|\||;|\||&")
+# which still runs it, so it ends a command the same way `;` does. An `&` inside a
+# redirection (`2>&1`, `>&2`, `&>file`) is not a separator, so the command goes on.
+SEPARATORS = re.compile(r"&&|\|\||;|\||(?<![<>])&(?!>)")
 
 # Other names the same tool runs under, after normalize_tool().
 TOOL_ALIASES = {
@@ -206,6 +207,10 @@ PLANTED_DEPLOYS = (
     # A background job is its own command, as `;` is.
     "run: cdk deploy&",
     "run: cdk deploy & wait",
+    # A redirection's `&` is not a separator; the command keeps going.
+    "run: cdk 2>&1 deploy",
+    "run: terraform 2>&1 apply -auto-approve",
+    "run: cdk >&2 deploy",
     # OpenTofu is a drop-in for terraform.
     "run: tofu apply",
     "run: tofu -chdir=deploy/terraform destroy -auto-approve",

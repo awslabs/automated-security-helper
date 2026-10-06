@@ -100,3 +100,16 @@ def test_normalize_tool(guard: ModuleType, token: str, tool: str) -> None:
 def test_a_background_job_ends_a_command(guard: ModuleType) -> None:
     assert guard.scan_text("x.yml", "run: cdk deploy&") != []
     assert guard.scan_text("x.yml", "run: npx cdk synth & echo deploy") == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "run: cdk 2>&1 deploy",
+        "run: terraform 2>&1 apply -auto-approve",
+        "run: cdk >&2 deploy",
+        "run: cdk &>out.log deploy",
+    ],
+)
+def test_a_redirection_does_not_end_a_command(guard: ModuleType, line: str) -> None:
+    assert guard.scan_text("x.yml", line) != []
