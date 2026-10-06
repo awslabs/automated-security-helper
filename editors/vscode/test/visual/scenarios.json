@@ -1,5 +1,5 @@
 {
-  "//": "The pixel snapshots the visual suite takes, one PNG baseline each in __snapshots__/. Read by test/visual/scenarios.ts for the suite, and by .github/scripts/check-editor-snapshot-trailers.py --orphans, which fails a PNG named here by no scenario, or a scenario with no PNG.",
+  "//": "The pixel snapshots the visual suite takes, one PNG baseline each in __snapshots__/. Read by test/visual/scenarios.ts for the suite, and by .github/scripts/check-snapshot-trailers.py --orphans, which fails a PNG named here by no scenario, or a scenario with no PNG.",
   "scenarios": [
     {
       "name": "fallback-notice",

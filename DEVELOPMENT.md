@@ -118,6 +118,9 @@ output fails CI until someone has looked at it and said why it changed.
   `__snapshots__/<test_module>/<test_name>.<ext>` for whole rendered documents.
 - `.github/actions/validate-mcp/tool_surface.golden.json`: the MCP tool surface a client
   sees, compared against the live server by the `validate-mcp` action.
+- `editors/**/__snapshots__/`: the IDE plugins' structural snapshots and PNG baselines
+  (`editors/vscode/test/visual/README.md`, `editors/jetbrains/README.jetbrains`). Each
+  editor's workflow runs the same trailer check on its own tree.
 
 The Snapshot-Update rule below also covers the other committed files that a generator
 writes in full and CI regenerates and compares: the JSON schemas in
@@ -203,8 +206,9 @@ timezone.
    ```
 
 The `snapshot-trailers` CI job fails if a golden file changed in a commit that has no
-non-empty `Snapshot-Update:` trailer. The trailer has to be on a commit that touched the
-file, so a separate follow-up commit that only adds it does not count. To fix:
+non-empty `Snapshot-Update:` trailer. Every commit that touches a golden file needs its
+own trailer: a separate follow-up commit that only adds one does not count, and neither
+does the trailer of an earlier commit that changed the same file. To fix:
 
 - if the change is in your latest commit, run
   `git commit --amend --no-edit --trailer "Snapshot-Update: <why>"`;
@@ -228,9 +232,10 @@ test module that still exists. If you delete or rename a test module, syrupy nev
 its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
 `test_snapshot_policy.py`) checks that every file under a `tests/**/__snapshots__/`
 directory belongs to a `<test_module>.py` next to that directory, and that no
-`__snapshots__` directory is empty. When you rename a module, move its snapshots with it;
-when you delete one, delete its snapshots. Either change needs a `Snapshot-Update:`
-trailer like any other.
+`__snapshots__` directory is empty. It checks the VS Code extension's `.snap` files and
+PNG baselines against their test files and `scenarios.json` the same way. When you
+rename a module, move its snapshots with it; when you delete one, delete its snapshots.
+Either change needs a `Snapshot-Update:` trailer like any other.
 
 ### Output that differs by operating system
 

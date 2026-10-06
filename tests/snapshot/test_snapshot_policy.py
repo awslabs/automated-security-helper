@@ -98,11 +98,19 @@ def test_banned_flag_scanner_detects_an_invocation() -> None:
     assert not banned_flags("run: uv run pytest tests/snapshot")
 
 
-def test_no_ci_file_passes_snapshot_update_or_warn_unused() -> None:
+def test_no_ci_file_passes_snapshot_update_or_warn_unused(trailers) -> None:
     files = _ci_files()
     assert any(p.name == "ash-unified-ci.yml" for p in files), "scanned the wrong tree"
+    # The trailer script's --policy names every editor update flag, syrupy's among them,
+    # in order to look for them in workflows: in its patterns and its self-test
+    # fixtures. It passes none, so it is the one file exempt here, by exact path, and
+    # only while it is still that checker and still looks for syrupy's flag.
+    # editors/vscode/test/snapshot-policy.test.ts exempts it the same way.
+    assert trailers.UPDATE_FLAGS.search("pytest --snapshot-update")
     offenders = {}
     for path in files:
+        if path == SCRIPT:
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:

@@ -18,7 +18,7 @@
  *   - The pixel suite's container is pinned: base image by digest, VS Code by
  *     version and SHA-256, and the version is the one the integration job uses.
  *
- * Orphans and trailers are checked by .github/scripts/check-editor-snapshot-trailers.py,
+ * Orphans and trailers are checked by .github/scripts/check-snapshot-trailers.py,
  * which has its own self-test.
  */
 
@@ -35,7 +35,7 @@ const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
 // explaining the rule must not trip it, and nothing a comment says is executed.
 const COMMENT = /(?:^|\s)#.*$/;
 
-// The same forms as UPDATE_FLAGS in .github/scripts/check-editor-snapshot-trailers.py,
+// The same forms as UPDATE_FLAGS in .github/scripts/check-snapshot-trailers.py,
 // which checks the workflows without node; a form added here goes there too.
 const BANNED: readonly RegExp[] = [
   // Prefix match, as core's policy test does, so --snapshot-update-anything is caught.
@@ -159,7 +159,7 @@ function runTestScriptOverNewSnapshot(extra: readonly string[]): { status: numbe
 // for them: in its pattern, its docstring and its self-test fixtures. It passes none,
 // so it is the one file under .github/ exempt here, by exact path, and only while it
 // is still that checker (the test below requires its policy function).
-const POLICY_CHECKER = '.github/scripts/check-editor-snapshot-trailers.py';
+const POLICY_CHECKER = '.github/scripts/check-snapshot-trailers.py';
 
 function filesUnder(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

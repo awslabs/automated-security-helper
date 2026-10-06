@@ -360,7 +360,7 @@ To change a snapshot on purpose:
   4. Commit with a trailer saying why the output changed:
      `git commit --trailer "Snapshot-Update: <why the output changed>"`.
 
-.github/scripts/check-editor-snapshot-trailers.py fails a push or pull request in which a file
+.github/scripts/check-snapshot-trailers.py fails a push or pull request in which a file
 under a __snapshots__ directory changed in a commit with no Snapshot-Update trailer. A snapshot
 no test compares fails too (assert-snapshots-used.py), including one left behind by a deleted
 test class. The same rules, flag name and trailer as core ASH's syrupy suite.

@@ -186,7 +186,7 @@ jacoco {
 // snapshot fails (see src/test/kotlin/.../snapshot/Snapshots.kt). It is refused here, at
 // configuration, when CI or GITHUB_ACTIONS is "true", so a workflow that passed it would fail
 // before any test ran; the helper refuses it again in the test JVM for a run that bypasses this
-// file. No workflow passes it, and check-editor-snapshot-trailers.py --policy fails one that does.
+// file. No workflow passes it, and check-snapshot-trailers.py --policy fails one that does.
 //
 // The `__snapshots__` directory component is what core ASH's golden-file check keys on, so the
 // trailer rule applies to these files under either script.

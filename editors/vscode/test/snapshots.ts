@@ -14,7 +14,7 @@
  * update-policy.ts), and test/snapshot-policy.test.ts fails if any workflow passes
  * it. After an update, read `git diff`, then commit with
  * `--trailer "Snapshot-Update: <why the output changed>"`; the editor-snapshots job
- * runs .github/scripts/check-editor-snapshot-trailers.py and fails a changed
+ * runs .github/scripts/check-snapshot-trailers.py and fails a changed
  * snapshot or PNG whose commit carries no such trailer.
  *
  * The visual suite builds test/visual/Dockerfile and runs test/visual/run.ts in it.

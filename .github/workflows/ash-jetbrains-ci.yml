@@ -79,7 +79,7 @@ on:
       - "tests/e2e/**"
       - "scripts/e2e/**"
       - "packaging/cli-name.sh"
-      - ".github/scripts/check-editor-snapshot-trailers.py"
+      - ".github/scripts/check-snapshot-trailers.py"
   pull_request:
     branches:
       - "**"
@@ -321,8 +321,8 @@ jobs:
   # editors/jetbrains (the structural suite's text and the visual suite's PNGs) must be changed
   # by a commit carrying a 'Snapshot-Update: <reason>' trailer, over the event's own range:
   # base..head of the pull request or the merge-queue entry, before..after of a push. The script
-  # is core ASH's check-snapshot-trailers.py rule for the editor trees; its header says how that
-  # script absorbs it.
+  # is the one core ASH's snapshot-trailers job runs, scoped here to this tree with
+  # --golden-root.
   #
   # On the runner itself, as the runner's unprivileged user: the check reads git history with
   # the standard library and builds nothing, so there is no image to pin and no root to drop.
@@ -346,9 +346,9 @@ jobs:
       - name: Assert every editor snapshot change carries a Snapshot-Update trailer
         run: |
           set -euo pipefail
-          python3 .github/scripts/check-editor-snapshot-trailers.py --self-test
-          python3 .github/scripts/check-editor-snapshot-trailers.py --policy
-          python3 .github/scripts/check-editor-snapshot-trailers.py --golden-root editors/jetbrains
+          python3 .github/scripts/check-snapshot-trailers.py --self-test
+          python3 .github/scripts/check-snapshot-trailers.py --policy
+          python3 .github/scripts/check-snapshot-trailers.py --golden-root editors/jetbrains
 
   # The visual snapshots: a real IDE on an Xvfb display, driven by Remote-Robot, every scene
   # compared pixel for pixel with the committed PNGs under

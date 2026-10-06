@@ -6,7 +6,7 @@
  * file.
  *
  * JSON rather than a TypeScript literal so the orphan check in
- * .github/scripts/check-editor-snapshot-trailers.py, which runs without node, reads
+ * .github/scripts/check-snapshot-trailers.py, which runs without node, reads
  * the same list the suite does: a baseline under test/visual/__snapshots__/ that no
  * scenario names fails there, and the suite itself fails at the end of a run when a
  * baseline was not compared.

@@ -16,7 +16,7 @@ import javax.imageio.ImageIO
  * the rest of the message, so a change to what the user reads lands without anyone deciding it.
  * A snapshot holds the whole rendered text, and a change to it fails until someone rewrites the
  * snapshot on purpose and commits it with a `Snapshot-Update: <reason>` trailer, which
- * .github/scripts/check-editor-snapshot-trailers.py enforces.
+ * .github/scripts/check-snapshot-trailers.py enforces.
  *
  * WHY IT IS WRITTEN HERE. JUnit 4 has no snapshot support, and the libraries that add it either
  * bring a second test framework (the JUnit 5 extensions) or a dependency tree larger than this

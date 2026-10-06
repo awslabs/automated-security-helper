@@ -54,7 +54,7 @@ on:
       - ".nvmrc"
       - ".github/workflows/ash-vscode-extension.yml"
       # The editor-snapshots job runs this, and its self-test is the only test of it.
-      - ".github/scripts/check-editor-snapshot-trailers.py"
+      - ".github/scripts/check-snapshot-trailers.py"
       # The coverage-parity job below runs ASH's own coverage rule over the
       # extension's fixtures, so a change to that rule must run it. These are the
       # modules `assess_coverage` reads its verdict through.
@@ -83,7 +83,7 @@ on:
       - "editors/vscode/**"
       - ".nvmrc"
       - ".github/workflows/ash-vscode-extension.yml"
-      - ".github/scripts/check-editor-snapshot-trailers.py"
+      - ".github/scripts/check-snapshot-trailers.py"
       - "tests/unit/test_vscode_coverage_parity.py"
       - "automated_security_helper/interactions/run_ash_scan.py"
       - "automated_security_helper/core/resource_management/scan_tracking.py"
@@ -410,11 +410,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 .github/scripts/check-editor-snapshot-trailers.py --self-test
-          python3 .github/scripts/check-editor-snapshot-trailers.py
+          python3 .github/scripts/check-snapshot-trailers.py --self-test
+          python3 .github/scripts/check-snapshot-trailers.py --golden-root editors
 
       - name: Assert every editor snapshot and PNG baseline belongs to a test
-        run: python3 .github/scripts/check-editor-snapshot-trailers.py --orphans
+        run: python3 .github/scripts/check-snapshot-trailers.py --orphans
 
       - name: Install dependencies
         working-directory: editors/vscode

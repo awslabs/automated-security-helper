@@ -38,7 +38,7 @@ JetBrains plugin's `-Psnapshot-update` in any spelling, or sets
 policy test runs it over a new snapshot to prove that. (`"ci": true` in the jest
 configuration would not: jest's command-line default for `--ci` overrides it.)
 
-The `editor-snapshots` job runs `.github/scripts/check-editor-snapshot-trailers.py`
+The `editor-snapshots` job runs `.github/scripts/check-snapshot-trailers.py`
 over the commits of the push (`before..after`, or from the merge base with the
 default branch for a new branch or a force-push) or the pull request (fork point to
 head). It fails when a file under an `editors/**/__snapshots__/` directory changed
