@@ -10,6 +10,19 @@ class ASHConfigValidationError(ASHValidationError):
     """Exception raised when an AshConfig is invalid."""
 
 
+class ASHConfigSourceError(ASHConfigValidationError):
+    """A config source could not be read or its ``extends`` chain resolved.
+
+    Covers a missing or unreadable base, a cycle, a chain past its bounds, a base
+    path outside the confinement root, a malformed ``patch``, and a
+    ``pyproject.toml`` whose ``[tool.ash]`` table cannot be read. A subclass of
+    ``ASHConfigValidationError`` so that ``resolve_config`` re-raises it rather
+    than falling back to the default config: a config whose bases did not load is
+    not the config the operator wrote, and scanning with the defaults instead
+    would drop its suppressions and settings without failing.
+    """
+
+
 class WorkspacePatternError(ASHValidationError):
     """Exception raised when a glob pattern cannot be rebased between the
     project and workspace path spaces.

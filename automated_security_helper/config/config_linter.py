@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+from automated_security_helper.config.config_sources import read_config_file
 from automated_security_helper.config.config_validator import ConfigValidator
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ class LintCategory(str, Enum):
     LEGACY_NAME_VARIANT = "legacy-name-variant"
     LEGACY_NAME_CONFLICT = "legacy-name-conflict"
     SYNTAX_ERROR = "syntax-error"
+    EXTENDS_ERROR = "extends-error"
 
 
 @dataclass
@@ -153,7 +155,7 @@ class ConfigLinter:
             return result
 
         # Run validation checks (same as `ash config validate`)
-        cls._check_validation_issues(config_path, config_data, result)
+        cls._check_validation_issues(config_path, config_data, result, source_dir)
 
         # Run suppression-specific lint checks
         cls._check_suppression_issues(config_data, result)
@@ -184,6 +186,7 @@ class ConfigLinter:
         Returns:
             Tuple of (fixed_content, list_of_fixed_issues)
         """
+        cls._refuse_to_rewrite_toml(config_path)
         config_data = cls._load_config(config_path)
         raw_content = config_path.read_text(encoding="utf-8")
 
@@ -264,6 +267,7 @@ class ConfigLinter:
         Returns:
             Tuple of (fixed_content, list_of_commented_suppressions, report_timestamp)
         """
+        cls._refuse_to_rewrite_toml(config_path)
         config_data = cls._load_config(config_path)
         raw_content = config_path.read_text(encoding="utf-8")
 
@@ -451,7 +455,14 @@ class ConfigLinter:
 
     @classmethod
     def _load_config(cls, config_path: Path) -> Dict[str, Any]:
-        """Load and parse a config file."""
+        """Load and parse a config file.
+
+        A TOML file goes through the config loader's reader, so a
+        pyproject.toml yields its [tool.ash] table. Its own ``extends`` is not
+        followed: lint reports on the file it would fix.
+        """
+        if str(config_path).endswith(".toml"):
+            return read_config_file(config_path) or {}
         with open(config_path, "r", encoding="utf-8") as f:
             if str(config_path).endswith(".json"):
                 return json.load(f)
@@ -459,8 +470,22 @@ class ConfigLinter:
                 return yaml.safe_load(f) or {}
 
     @classmethod
+    def _refuse_to_rewrite_toml(cls, config_path: Path) -> None:
+        # The fixers regenerate the file as YAML text. Applied to a TOML file
+        # that would replace pyproject.toml's every other table with ASH's.
+        if str(config_path).endswith(".toml"):
+            raise ValueError(
+                f"Auto-fix rewrites YAML and JSON config files only; edit "
+                f"{config_path} by hand"
+            )
+
+    @classmethod
     def _check_validation_issues(
-        cls, config_path: Path, config_data: Dict[str, Any], result: LintResult
+        cls,
+        config_path: Path,
+        config_data: Dict[str, Any],
+        result: LintResult,
+        source_dir: Optional[Path] = None,
     ) -> None:
         """Delegate shared structural checks to ConfigValidator, then enrich to LintIssues."""
         if not isinstance(config_data, dict):
@@ -473,7 +498,12 @@ class ConfigLinter:
             )
             return
 
-        _, errors = ConfigValidator.validate_config_file(config_path)
+        # source_dir is passed only when given, so the call keeps the
+        # single-argument shape for callers that never had one.
+        if source_dir is None:
+            _, errors = ConfigValidator.validate_config_file(config_path)
+        else:
+            _, errors = ConfigValidator.validate_config_file(config_path, source_dir)
         for error in errors:
             result.issues.append(cls._validator_error_to_lint_issue(error, config_data))
 
@@ -482,6 +512,14 @@ class ConfigLinter:
         cls, error: str, config_data: Dict[str, Any]
     ) -> LintIssue:
         """Convert a ConfigValidator error string to a LintIssue with enriched metadata."""
+        if error.startswith(ConfigValidator.EXTENDS_ERROR_PREFIX):
+            return LintIssue(
+                severity=LintSeverity.ERROR,
+                category=LintCategory.EXTENDS_ERROR,
+                message=error,
+                path="extends",
+            )
+
         # Missing required top-level field: 'field_name'
         if error.startswith("Missing required top-level field: '"):
             field_name = error.split("'")[1]
