@@ -156,3 +156,22 @@ def test_real_guarddog_verify_reads_a_requirements_file(tmp_path):
     assert rows, "six 1.16.0 calls exec(); GuardDog reports it as a capability"
     assert all(uri == "requirements.txt" and line == 1 for _, _, uri, line in rows)
     assert {r.properties.package_name for r in report.runs[0].results} == {"six"}
+
+
+def test_real_guarddog_takes_an_ecosystem_specific_exclusion(tmp_path):
+    """typosquatting exists for pypi but not github_action, which rejects it."""
+    repo = tmp_path / "src"
+    shutil.copytree(FIXTURE_REPO / "pypi_suspicious", repo / "pypi_suspicious")
+    shutil.copytree(FIXTURE_REPO / "action_suspicious", repo / "action_suspicious")
+    scanner = _scanner(
+        tmp_path,
+        repo,
+        ecosystems=["pypi", "github_action"],
+        exclude_rules=["typosquatting"],
+    )
+    report = scanner.scan(target=repo, target_type="source")
+    assert scanner.targets_attempted == 2 and scanner.targets_failed == 0
+    assert {uri.split("/")[0] for _, _, uri, _ in _rows(report)} == {
+        "pypi_suspicious",
+        "action_suspicious",
+    }

@@ -435,12 +435,34 @@ def _fixture_files() -> Dict[str, frozenset]:
     return {pkg.name: _tree(pkg) for pkg in FIXTURE_REPO.iterdir()}
 
 
+#: Rule sets the fake ``list-rules`` reports. Like GuardDog 3.2.0, the metadata
+#: rule typosquatting exists for pypi and npm and not for the other ecosystems.
+BASE_RULES = [
+    "capability-process-spawn",
+    "threat-runtime-obfuscation-base64exec",
+    "threat-process-download-exec",
+]
+RULES_BY_ECOSYSTEM = {
+    "pypi": BASE_RULES + ["typosquatting"],
+    "npm": BASE_RULES + ["typosquatting"],
+}
+
+
+def _rules_table(names: List[str]) -> str:
+    rows = "\n".join(f"| Source code | {n:<40} | description |" for n in names)
+    return (
+        "+---+---+---+\n| Rule type   | Rule name | Description |\n+---+---+---+\n"
+        f"{rows}\n+---+---+---+\n"
+    )
+
+
 class FakeGuardDog:
     """Stands in for ``_run_subprocess``: answers with the captured JSON."""
 
     def __init__(self):
         self.calls: List[List[str]] = []
         self.staged: List[frozenset] = []
+        self.staged_dirs: List[Path] = []
         self.overrides: Dict[tuple, Dict[str, Any]] = {}
         self.default_response: Dict[str, Any] | None = None
         self.files = _fixture_files()
@@ -467,12 +489,21 @@ class FakeGuardDog:
         timeout=None,
     ):
         self.calls.append(list(command))
-        ecosystem, mode, path = command[1], command[2], Path(command[3])
-        if mode == "scan":
-            key = (ecosystem, self.package_for(path))
+        ecosystem, mode = command[1], command[2]
+        if mode == "list-rules":
+            key = (ecosystem, "list-rules")
+            spec = self.overrides.get(key) or {
+                "returncode": 0,
+                "stdout": _rules_table(RULES_BY_ECOSYSTEM.get(ecosystem, BASE_RULES)),
+            }
         else:
-            key = (ecosystem, "verify")
-        spec = self.overrides.get(key) or self.default_response
+            path = Path(command[3])
+            if mode == "scan":
+                self.staged_dirs.append(path)
+                key = (ecosystem, self.package_for(path))
+            else:
+                key = (ecosystem, "verify")
+            spec = self.overrides.get(key) or self.default_response
         if spec is None:
             stdout = (CAPTURED / CAPTURE_FOR[key]).read_text(encoding="utf-8")
             spec = {"returncode": 0, "stdout": stdout, "stderr": ""}
@@ -773,7 +804,7 @@ def test_rules_reach_argv_as_separate_values(tmp_path, fake):
         exclude_rules=["threat-runtime-obfuscation-base64exec"],
     )
     scanner.scan(target=repo, target_type="source")
-    call = fake.calls[0]
+    call = next(c for c in fake.calls if c[2] == "scan")
     index = call.index("--exclude-rules")
     assert call[index + 1] == "threat-runtime-obfuscation-base64exec"
 
@@ -1191,3 +1222,215 @@ def test_package_suppression_applies_to_verify_findings(tmp_path):
         )
         == []
     )
+
+
+# --------------------------------------------------------------------------- #
+# Review round 1: rule names per ecosystem, and gaps the mutants found
+# --------------------------------------------------------------------------- #
+
+
+def test_an_exclusion_is_passed_only_to_ecosystems_that_know_it(tmp_path, fake):
+    """GuardDog exits 2 on an --exclude-rules name its ecosystem does not have."""
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, exclude_rules=["typosquatting"])
+    scanner.scan(target=repo, target_type="source")
+    scans = [c for c in fake.calls if c[2] == "scan"]
+    assert scans
+    for call in scans:
+        has = "--exclude-rules" in call
+        assert has == (call[1] in ("pypi", "npm")), call
+
+
+def test_a_rules_selection_no_ecosystem_rule_matches_skips_that_ecosystem(
+    tmp_path, fake
+):
+    repo = _repo(tmp_path)
+    scanner = _scanner(
+        repo, tmp_path, ecosystems=["pypi", "go"], rules=["typosquatting"]
+    )
+    scanner.scan(target=repo, target_type="source")
+    scans = [c for c in fake.calls if c[2] == "scan"]
+    assert {c[1] for c in scans} == {"pypi"}
+    assert all(c[c.index("--rules") + 1] == "typosquatting" for c in scans)
+    # go was not run, and not counted as attempted.
+    assert scanner.targets_attempted == 2
+
+
+def test_a_rule_name_no_ecosystem_knows_is_an_error(tmp_path, fake):
+    repo = _repo(tmp_path)
+    scanner = _scanner(
+        repo, tmp_path, ecosystems=["go"], exclude_rules=["no-such-rule"]
+    )
+    with pytest.raises(ScannerError, match="no-such-rule"):
+        scanner.scan(target=repo, target_type="source")
+
+
+def test_list_rules_failing_fails_that_ecosystems_targets(tmp_path, fake):
+    repo = _repo(tmp_path)
+    fake.overrides[("go", "list-rules")] = {"returncode": 1, "stderr": "boom\n"}
+    scanner = _scanner(
+        repo, tmp_path, ecosystems=["go", "npm"], exclude_rules=["typosquatting"]
+    )
+    with pytest.raises(
+        ScannerError, match="go scan of go_suspicious: could not list its rules"
+    ):
+        scanner.scan(target=repo, target_type="source")
+    assert {c[1] for c in fake.calls if c[2] == "scan"} == {"npm"}
+
+
+def test_no_rule_options_means_no_list_rules_call(tmp_path, fake):
+    repo = _repo(tmp_path)
+    _scanner(repo, tmp_path).scan(target=repo, target_type="source")
+    assert not [c for c in fake.calls if c[2] == "list-rules"]
+
+
+def test_verify_passes_the_rule_options(tmp_path, fake):
+    repo = _repo(tmp_path)
+    (repo / "requirements.txt").write_text("six==1.16.0\n")
+    fake.overrides[("pypi", "verify")] = {
+        "returncode": 0,
+        "stdout": (CAPTURED / "verify_pypi_requirements.json").read_text(),
+    }
+    scanner = _scanner(
+        repo,
+        tmp_path,
+        verify=True,
+        ecosystems=["pypi"],
+        exclude_rules=["typosquatting"],
+    )
+    scanner.scan(target=repo, target_type="source")
+    (verify,) = [c for c in fake.calls if c[2] == "verify"]
+    assert verify[verify.index("--exclude-rules") + 1] == "typosquatting"
+
+
+def test_a_dependency_guarddog_could_not_check_is_a_failed_target(tmp_path, fake):
+    repo = _repo(tmp_path)
+    (repo / "requirements.txt").write_text("six==1.16.0\n")
+    entries = _capture("verify_pypi_requirements.json")
+    entries[0]["result"]["errors"] = {"download-package": "404 Not Found"}
+    fake.overrides[("pypi", "verify")] = {
+        "returncode": 0,
+        "stdout": json.dumps(entries),
+    }
+    scanner = _scanner(repo, tmp_path, verify=True, ecosystems=["pypi"])
+    with pytest.raises(ScannerError, match="six: download-package: 404 Not Found"):
+        scanner.scan(target=repo, target_type="source")
+
+
+@pytest.mark.parametrize(
+    "rel,expected",
+    [
+        (".github/workflows/ci.yml", True),
+        (".github/workflows/ci.yaml", True),
+        ("sub/.github/workflows/ci.yml", True),
+        ("ci.yml", False),
+        (".github/ci.yml", False),
+        ("docs/workflows/ci.yml", False),
+        (".github/workflows/notes.txt", False),
+    ],
+)
+def test_github_action_verify_reads_only_workflow_files(rel, expected):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.guarddog_scanner import (
+        _is_verify_manifest,
+    )
+
+    assert _is_verify_manifest("github_action", rel) is expected
+
+
+def test_the_output_dir_inside_the_source_is_not_staged(tmp_path, fake):
+    repo = _repo(tmp_path)
+    output = repo / "ash-out"
+    (output / "copy").mkdir(parents=True)
+    shutil.copytree(FIXTURE_REPO / "npm_suspicious", output / "copy" / "npm_suspicious")
+    context = PluginContext(
+        source_dir=repo,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(),
+    )
+    scanner = GuardDogScanner(
+        context=context,
+        config=GuardDogScannerConfig(
+            enabled=True, options=GuardDogScannerConfigOptions(ecosystems=["npm"])
+        ),
+    )
+    report = scanner.scan(target=repo, target_type="source")
+    assert len(fake.staged) == 2  # npm_clean and npm_suspicious, not the copy
+    assert not [r for r in _rows(report) if r[2].startswith("ash-out/")]
+
+
+def test_staging_is_removed_after_the_scan_even_when_it_fails(tmp_path, fake):
+    repo = _repo(tmp_path)
+    fake.overrides[("go", "go_suspicious")] = {"returncode": 1, "stderr": "boom"}
+    scanner = _scanner(repo, tmp_path, ecosystems=["go", "npm"])
+    with pytest.raises(ScannerError):
+        scanner.scan(target=repo, target_type="source")
+    assert fake.staged_dirs
+    assert not any(d.exists() for d in fake.staged_dirs)
+    assert not fake.staged_dirs[0].parent.exists()
+
+
+def test_dedup_keeps_the_higher_severity(tmp_path, fake):
+    """The same match, correlated in one scan (HIGH) and not in another (LOW)."""
+    repo = _repo(tmp_path)
+    (repo / "pypi_suspicious" / "package.json").write_text('{"name": "x"}\n')
+    fake.files["both"] = _tree(repo / "pypi_suspicious")
+    correlated = _capture("scan_pypi_pypi_suspicious.json")
+    uncorrelated = copy.deepcopy(correlated)
+    uncorrelated["risks"] = []
+    # The uncorrelated (LOW) copy is served to the scan that runs first (npm).
+    fake.overrides[("npm", "both")] = {
+        "returncode": 0,
+        "stdout": json.dumps(uncorrelated),
+    }
+    fake.overrides[("pypi", "both")] = {
+        "returncode": 0,
+        "stdout": json.dumps(correlated),
+    }
+    scanner = _scanner(repo, tmp_path, ecosystems=["pypi", "npm"])
+    report = scanner.scan(target=repo, target_type="source")
+    setup = [r for r in _rows(report) if r[2] == "pypi_suspicious/setup.py"]
+    assert (
+        "threat-runtime-obfuscation-base64exec",
+        "HIGH",
+        "pypi_suspicious/setup.py",
+        15,
+    ) in setup
+    assert (
+        "threat-runtime-obfuscation-base64exec",
+        "LOW",
+        "pypi_suspicious/setup.py",
+        15,
+    ) not in setup
+
+
+def test_the_same_finding_in_two_dependencies_is_kept_twice():
+    entries = _capture("verify_pypi_requirements.json")
+    result = entries[0]["result"]
+    one = convert_guarddog_scan_result(
+        result,
+        uri_prefix="",
+        ecosystem="pypi",
+        include_capabilities=True,
+        dependency=("six", "1.16.0"),
+        manifest_uri="requirements.txt",
+        manifest_line=1,
+    )
+    two = convert_guarddog_scan_result(
+        result,
+        uri_prefix="",
+        ecosystem="pypi",
+        include_capabilities=True,
+        dependency=("six", "1.17.0"),
+        manifest_uri="requirements.txt",
+        manifest_line=1,
+    )
+    assert one.keys and two.keys and one.keys[0] != two.keys[0]
+
+
+def test_the_matched_code_is_the_region_snippet():
+    converted = convert_guarddog_scan_result(
+        _capture("scan_npm_npm_suspicious.json"), uri_prefix="", ecosystem="npm"
+    )
+    region = converted.results[0].locations[0].physicalLocation.root.region
+    assert "eval(Buffer.from(" in region.snippet.text

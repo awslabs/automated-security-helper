@@ -107,7 +107,11 @@ apply:
   which are findings in a dependency.
 
 To stop GuardDog evaluating a rule at all, use `options.exclude_rules`, or
-`options.rules` to run only some rules. The two cannot be combined.
+`options.rules` to run only some rules. The two cannot be combined. Each ecosystem has
+its own rule set (`guarddog <ecosystem> list-rules`), so ASH passes each ecosystem only
+the configured names it knows: an exclusion it does not know is ignored for it, and an
+ecosystem that knows none of the `rules` names is not scanned. A name no scanned
+ecosystem knows is reported as an error, since it is most likely a typo.
 
 ## Offline and air-gapped use
 
@@ -141,8 +145,8 @@ Seatbelt on macOS) that blocks network access and limits reads to the scanned
 directory. `options.sandbox` controls it:
 
 - `auto` (default): use it where the platform supports it, otherwise scan without it
-  and log a warning once per scan. Container runtimes and older kernels commonly do
-  not allow it.
+  and log a warning once per scan. It is available in the ASH image under Docker;
+  some container runtimes, seccomp profiles and older kernels do not allow it.
 - `required`: report `ERROR` where it is unavailable.
 - `disabled`: never use it.
 
@@ -191,6 +195,11 @@ scanners:
 - GuardDog's `extension` ecosystem (editor extensions) is not offered: its manifest is an
   ordinary `package.json` and cannot be told apart from an npm package.
 - A file reached only through a symlink is not scanned.
+- The staging copy is made of hard links when the temporary directory (`TMPDIR`) is on
+  the same filesystem as the source, and of copies otherwise. In the container, where
+  the source is a bind mount, that means a copy of each package root's files; for a
+  repository with a root `pyproject.toml` or `package.json` that is most of the
+  repository.
 - `verify` findings are located on the first manifest line naming the dependency, because
   GuardDog's JSON does not record where a dependency is declared.
 - When any invocation fails, the scanner's findings appear in its own SARIF file but not

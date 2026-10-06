@@ -653,7 +653,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
 
     @property
     def _opts(self) -> GuardDogScannerConfigOptions:
-        """The options, typed. config is set in model_post_init."""
+        """The options, typed. ``config`` is set in ``model_post_init``."""
         return cast(GuardDogScannerConfig, self.config).options
 
     @property
@@ -685,6 +685,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         self.targets_attempted = 0
         self.targets_failed = 0
         self._sandbox_unavailable = False
+        self._rule_args_for: Dict[str, List[str]] = {}
+        self._skip_ecosystems: set[str] = set()
+        self._rules_error: Dict[str, str] = {}
         super().model_post_init(context)
 
     # ------------------------------------------------------------------
@@ -896,13 +899,86 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     # Running GuardDog
     # ------------------------------------------------------------------
 
-    def _rule_args(self) -> List[str]:
-        args: List[str] = []
-        for rule in self._opts.rules:
-            args.extend(["--rules", rule])
-        for rule in self._opts.exclude_rules:
-            args.extend(["--exclude-rules", rule])
-        return args
+    def _rule_args(self, ecosystem: str) -> List[str]:
+        """--rules/--exclude-rules for one ecosystem, from _prepare_rules."""
+        return list(self._rule_args_for.get(ecosystem, []))
+
+    def _list_rules(
+        self, ecosystem: str, invocation_dir: Path
+    ) -> Tuple[set[str], str | None]:
+        """The rule names GuardDog accepts for one ecosystem; (names, failure reason)."""
+        response, stdout, stderr = self._invoke(
+            [_COMMAND, ecosystem, "list-rules"],
+            invocation_dir,
+            float(self._opts.install_timeout),
+        )
+        reason = self._failure(response, stdout, stderr, self._opts.install_timeout)
+        if reason is not None:
+            return set(), f"could not list its rules: {reason}"
+        names: set[str] = set()
+        for line in stdout.splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) >= 2 and _RULE_NAME.match(cells[1]):
+                names.add(cells[1])
+        if not names:
+            return set(), "could not list its rules: list-rules printed no rule names"
+        return names, None
+
+    def _prepare_rules(self, ecosystems: Iterable[str], results_dir: Path) -> List[str]:
+        """Resolve options.rules/exclude_rules per ecosystem; return config errors.
+
+        GuardDog validates each name against the rules of the ecosystem being
+        scanned, and the sets differ: a metadata rule such as ``typosquatting``
+        exists for pypi and npm but not for github_action, which then exits 2 on
+        ``--exclude-rules typosquatting``. So each ecosystem gets the configured
+        names it knows. An exclusion it does not know is irrelevant to it; a
+        rules selection none of whose names it knows leaves nothing to run, so
+        that ecosystem is not scanned at all (running it without --rules would
+        run every rule). A name no scanned ecosystem knows is a configuration
+        error, reported as a failed run, since it is most likely a typo.
+
+        Costs one list-rules call per ecosystem, and only when either option
+        is set.
+        """
+        self._rule_args_for = {}
+        self._skip_ecosystems = set()
+        self._rules_error = {}
+        configured = list(self._opts.rules) + list(self._opts.exclude_rules)
+        if not configured:
+            return []
+        known_anywhere: set[str] = set()
+        wanted = sorted(set(ecosystems))
+        for ecosystem in wanted:
+            names, reason = self._list_rules(
+                ecosystem, results_dir / "invocations" / f"list-rules-{ecosystem}"
+            )
+            if reason is not None:
+                self._rules_error[ecosystem] = reason
+                continue
+            known_anywhere |= names
+            args: List[str] = []
+            if self._opts.rules:
+                selected = [r for r in self._opts.rules if r in names]
+                if not selected:
+                    self._skip_ecosystems.add(ecosystem)
+                    continue
+                for rule in selected:
+                    args.extend(["--rules", rule])
+            for rule in self._opts.exclude_rules:
+                if rule in names:
+                    args.extend(["--exclude-rules", rule])
+            self._rule_args_for[ecosystem] = args
+        # Only judged when at least one ecosystem's rule list was read.
+        if len(self._rules_error) == len(wanted):
+            return []
+        unknown = sorted(set(configured) - known_anywhere)
+        if not unknown:
+            return []
+        message = (
+            "options.rules/exclude_rules name(s) no scanned ecosystem has: "
+            f"{', '.join(unknown)}. See `guarddog <ecosystem> list-rules`."
+        )
+        return [message]
 
     def _invoke(
         self,
@@ -969,11 +1045,11 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         mode = self._opts.sandbox
         timeout = self._effective_scan_timeout()
         if mode == "disabled" or (mode == "auto" and self._sandbox_unavailable):
-            argv = base + ["--no-sandbox"] + self._rule_args()
+            argv = base + ["--no-sandbox"] + self._rule_args(target.ecosystem)
         elif mode == "required":
-            argv = base + ["--sandbox"] + self._rule_args()
+            argv = base + ["--sandbox"] + self._rule_args(target.ecosystem)
         else:
-            argv = base + self._rule_args()
+            argv = base + self._rule_args(target.ecosystem)
 
         response, stdout, stderr = self._invoke(argv, invocation_dir, timeout)
         if (
@@ -990,7 +1066,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 "as an error instead.",
                 level=logging.WARNING,
             )
-            argv = base + ["--no-sandbox"] + self._rule_args()
+            argv = base + ["--no-sandbox"] + self._rule_args(target.ecosystem)
             response, stdout, stderr = self._invoke(argv, invocation_dir, timeout)
 
         reason = self._failure(response, stdout, stderr, timeout)
@@ -1024,7 +1100,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             target.path.as_posix(),
             "--output-format",
             "json",
-        ] + self._rule_args()
+        ] + self._rule_args(target.ecosystem)
         env = {
             **os.environ,
             "GUARDDOG_PARALLELISM": str(self._opts.verify_parallelism),
@@ -1160,12 +1236,38 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 level=logging.INFO,
             )
 
+        failures.extend(
+            self._prepare_rules(
+                {eco for eco, _ in owned} | {t.ecosystem for t in verify_targets},
+                results_dir,
+            )
+        )
+
+        def not_run(ecosystem: str, what: str) -> bool:
+            """True when a target of this ecosystem must not be run, recording why."""
+            if ecosystem in self._rules_error:
+                self.targets_attempted += 1
+                self.targets_failed += 1
+                failures.append(f"{ecosystem} {what}: {self._rules_error[ecosystem]}")
+                return True
+            if ecosystem in self._skip_ecosystems:
+                self._plugin_log(
+                    f"Not running GuardDog on {ecosystem} {what}: none of options.rules "
+                    "exists for that ecosystem.",
+                    target_type=target_type,
+                    level=logging.INFO,
+                )
+                return True
+            return False
+
         staging_parent = Path(tempfile.mkdtemp(prefix="ash-guarddog-"))
         try:
             for index, ((ecosystem, root), root_files) in enumerate(
                 sorted(owned.items(), key=lambda kv: (kv[0][0], kv[0][1].as_posix()))
             ):
                 label = self._label(root)
+                if not_run(ecosystem, f"scan of {label or '.'}"):
+                    continue
                 self.targets_attempted += 1
                 staging = staging_parent / f"{index:04d}"
                 staging.mkdir()
@@ -1192,6 +1294,8 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
 
         offline = self._is_offline_mode()
         for index, vtarget in enumerate(verify_targets):
+            if not_run(vtarget.ecosystem, f"verify of {vtarget.label}"):
+                continue
             self.targets_attempted += 1
             if offline:
                 self.targets_failed += 1
