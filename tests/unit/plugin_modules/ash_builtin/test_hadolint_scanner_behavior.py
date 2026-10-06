@@ -638,17 +638,30 @@ class TestLargeTreesAndBudgets:
         assert stub != outside
 
     @pytest.mark.skipif(os.name == "nt", reason="no /dev/zero or FIFOs on Windows")
-    @pytest.mark.parametrize("kind", ["device", "fifo", "directory"])
+    @pytest.mark.parametrize("kind", ["device", "fifo", "directory", "loop"])
     def test_a_discovered_config_that_is_not_a_regular_file_is_not_read(
         self, tree, tmp_path, on_path, monkeypatch, kind
     ):
         """hadolint would open it itself; /dev/zero exhausts its memory."""
+        if kind == "loop":
+            real_resolve = Path.resolve
+
+            def resolve(self, *a, **k):
+                if self.name == ".hadolint.yaml" and self.is_symlink():
+                    raise RuntimeError(f"Symlink loop from {self!r}")
+                return real_resolve(self, *a, **k)
+
+            # Reproduce the <3.13 behavior on every interpreter.
+            monkeypatch.setattr(Path, "resolve", resolve)
         if kind == "device":
             (tree / ".hadolint.yaml").symlink_to("/dev/zero")
         elif kind == "fifo":
             fifo = tmp_path / "fifo"
             os.mkfifo(fifo)
             (tree / ".hadolint.yml").symlink_to(fifo)
+        elif kind == "loop":
+            # resolve() raises RuntimeError on this before Python 3.13.
+            (tree / ".hadolint.yaml").symlink_to(".hadolint.yaml")
         else:
             (tree / ".hadolint.yaml").mkdir()
         scanner = _scanner(tree, tmp_path)

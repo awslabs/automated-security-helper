@@ -322,7 +322,12 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             candidate = source_dir / name
             if not os.path.lexists(candidate):
                 continue
-            resolved = candidate.resolve()
+            try:
+                resolved = candidate.resolve()
+            except (OSError, RuntimeError):
+                # A symlink loop: RuntimeError before Python 3.13. is_file() is
+                # False for it, so it is rejected below rather than fatal.
+                resolved = candidate
             # Discovered in the scanned tree, so held to it, as Dockerfiles are:
             # a regular file inside the tree, or nothing. Anything else -- a link
             # out of the tree, or to a device or FIFO, which hadolint would read
@@ -400,7 +405,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 if not path.is_file():
                     continue
                 resolved = path.resolve()
-            except OSError:
+            except (OSError, RuntimeError):
                 continue
             if not resolved.is_relative_to(root):
                 self._plugin_log(
