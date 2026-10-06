@@ -1,0 +1,165 @@
+$ ash report --format csv --log-level ERROR
+[exit 0]
+id,title,description,severity,scanner,scanner_type,rule_id,file_path,line_start,line_end,cve_id,cwe_
+id,fix_available,is_suppressed,suppression_kind,suppression_justification,detected_at,code_snippet,t
+ags,properties,references,raw_data,package_name,package_version,package_path
+bandit-B602-e7207a83,B602,subprocess call with
+shell=True,HIGH,bandit,UNKNOWN,B602,src/app.py,12,12,,,,False,,,2026-01-15T12:30:00+00:00,,,"{""tags
+"": [], ""scanner_name"": ""bandit"", ""issue_severity"":
+""HIGH""}",,"{""ruleId"":""B602"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message""
+:{""text"":""subprocess call with
+shell=True"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":
+{""uri"":""src/app.py"",""index"":-1},""region"":{""startLine"":12,""endLine"":12,""charOffset"":-1,
+""byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],
+""codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attach
+ments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""bandit"",""issue_
+severity"":""HIGH""}}",,,
+bandit-B105-29fb4f6e,B105,Possible hardcoded
+password,MEDIUM,bandit,UNKNOWN,B105,src/config.py,3,3,,,,False,,,2026-01-15T12:30:00+00:00,,,"{""tag
+s"": [], ""scanner_name"": ""bandit"", ""issue_severity"":
+""MEDIUM""}",,"{""ruleId"":""B105"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message
+"":{""text"":""Possible hardcoded
+password"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{"
+"uri"":""src/config.py"",""index"":-1},""region"":{""startLine"":3,""endLine"":3,""charOffset"":-1,"
+"byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],"
+"codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachm
+ents"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""bandit"",""issue_s
+everity"":""MEDIUM""}}",,,
+bandit-B108-dc820a43,B108,Probable insecure usage of temp
+file,MEDIUM,bandit,UNKNOWN,B108,src/app.py,40,40,,,,False,,,2026-01-15T12:30:00+00:00,,,"{""tags"":
+[], ""scanner_name"": ""bandit"", ""issue_severity"":
+""MEDIUM""}",,"{""ruleId"":""B108"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message
+"":{""text"":""Probable insecure usage of temp
+file"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{""uri
+"":""src/app.py"",""index"":-1},""region"":{""startLine"":40,""endLine"":40,""charOffset"":-1,""byte
+Offset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""code
+Flows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachments"
+":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""bandit"",""issue_severi
+ty"":""MEDIUM""}}",,,
+bandit-B101-b5dd5202,B101,Use of assert
+detected,LOW,bandit,UNKNOWN,B101,tests/test_app.py,8,8,,,,False,,,2026-01-15T12:30:00+00:00,,,"{""ta
+gs"": [], ""scanner_name"": ""bandit"", ""issue_severity"":
+""LOW""}",,"{""ruleId"":""B101"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message"":
+{""text"":""Use of assert
+detected"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{"
+"uri"":""tests/test_app.py"",""index"":-1},""region"":{""startLine"":8,""endLine"":8,""charOffset"":
+-1,""byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":
+[],""codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""att
+achments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""bandit"",""iss
+ue_severity"":""LOW""}}",,,
+bandit-B311-4e7b184b,B311,Standard pseudo-random
+generator,LOW,bandit,UNKNOWN,B311,src/util.py,5,5,,,,True,external,Accepted risk: test
+fixture,2026-01-15T12:30:00+00:00,,,"{""tags"": [], ""scanner_name"": ""bandit"",
+""issue_severity"":
+""LOW""}",,"{""ruleId"":""B311"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message"":
+{""text"":""Standard pseudo-random
+generator"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{
+""uri"":""src/util.py"",""index"":-1},""region"":{""startLine"":5,""endLine"":5,""charOffset"":-1,""
+byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""
+codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""suppressions"":[{""kin
+d"":""external"",""justification"":""Accepted risk: test
+fixture""}],""rank"":-1.0,""attachments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""
+scanner_name"":""bandit"",""issue_severity"":""LOW""}}",,,
+semgrep-python.lang.security.eval-fccd4cc9,python.lang.security.eval,Detected use of
+eval(),CRITICAL,semgrep,UNKNOWN,python.lang.security.eval,src/app.py,77,77,,,,False,,,2026-01-15T12:
+30:00+00:00,,,"{""tags"": [], ""scanner_name"": ""semgrep"", ""issue_severity"":
+""CRITICAL""}",,"{""ruleId"":""python.lang.security.eval"",""ruleIndex"":-1,""kind"":""fail"",""leve
+l"":""error"",""message"":{""text"":""Detected use of
+eval()"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{""u
+ri"":""src/app.py"",""index"":-1},""region"":{""startLine"":77,""endLine"":77,""charOffset"":-1,""by
+teOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""co
+deFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachment
+s"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""semgrep"",""issue_sev
+erity"":""CRITICAL""}}",,,
+semgrep-generic.secrets.gitleaks-bbf70ebd,generic.secrets.gitleaks,Example key in
+docs,INFO,semgrep,UNKNOWN,generic.secrets.gitleaks,README.md,1,1,,,,False,,,2026-01-15T12:30:00+00:0
+0,,,"{""tags"": [], ""scanner_name"": ""semgrep"", ""issue_severity"":
+""INFO""}",,"{""ruleId"":""generic.secrets.gitleaks"",""ruleIndex"":-1,""kind"":""fail"",""level"":"
+"error"",""message"":{""text"":""Example key in
+docs"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{""uri
+"":""README.md"",""index"":-1},""region"":{""startLine"":1,""endLine"":1,""charOffset"":-1,""byteOff
+set"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""codeFlo
+ws"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachments"":[
+],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""semgrep"",""issue_severity
+"":""INFO""}}",,,
+semgrep-python.lang.best-practice.open-b79f7651,python.lang.best-practice.open,open() without
+encoding,INFO,semgrep,UNKNOWN,python.lang.best-practice.open,src/util.py,9,9,,,,False,,,2026-01-15T1
+2:30:00+00:00,,,"{""tags"": [], ""scanner_name"": ""semgrep"", ""issue_severity"":
+""INFO""}",,"{""ruleId"":""python.lang.best-practice.open"",""ruleIndex"":-1,""kind"":""fail"",""lev
+el"":""error"",""message"":{""text"":""open() without
+encoding"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{"
+"uri"":""src/util.py"",""index"":-1},""region"":{""startLine"":9,""endLine"":9,""charOffset"":-1,""b
+yteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""c
+odeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachmen
+ts"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""semgrep"",""issue_se
+verity"":""INFO""}}",,,
+semgrep-python.flask.debug-be9d4a9e,python.flask.debug,Flask debug
+mode,HIGH,semgrep,UNKNOWN,python.flask.debug,src/web.py,4,4,,,,True,external,Accepted risk: test
+fixture,2026-01-15T12:30:00+00:00,,,"{""tags"": [], ""scanner_name"": ""semgrep"",
+""issue_severity"":
+""HIGH""}",,"{""ruleId"":""python.flask.debug"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error
+"",""message"":{""text"":""Flask debug
+mode"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{""uri
+"":""src/web.py"",""index"":-1},""region"":{""startLine"":4,""endLine"":4,""charOffset"":-1,""byteOf
+fset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""codeFl
+ows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""suppressions"":[{""kind"":""
+external"",""justification"":""Accepted risk: test
+fixture""}],""rank"":-1.0,""attachments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""
+scanner_name"":""semgrep"",""issue_severity"":""HIGH""}}",,,
+semgrep-python.requests.no-timeout-9f83bd69,python.requests.no-timeout,Request without
+timeout,MEDIUM,semgrep,UNKNOWN,python.requests.no-timeout,src/web.py,20,20,,,,True,external,Accepted
+risk: test fixture,2026-01-15T12:30:00+00:00,,,"{""tags"": [], ""scanner_name"": ""semgrep"",
+""issue_severity"":
+""MEDIUM""}",,"{""ruleId"":""python.requests.no-timeout"",""ruleIndex"":-1,""kind"":""fail"",""level
+"":""error"",""message"":{""text"":""Request without
+timeout"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{""
+uri"":""src/web.py"",""index"":-1},""region"":{""startLine"":20,""endLine"":20,""charOffset"":-1,""b
+yteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""c
+odeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""suppressions"":[{""kind
+"":""external"",""justification"":""Accepted risk: test
+fixture""}],""rank"":-1.0,""attachments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""
+scanner_name"":""semgrep"",""issue_severity"":""MEDIUM""}}",,,
+checkov-CKV_AWS_18-440a870e,CKV_AWS_18,S3 access logging
+disabled,LOW,checkov,UNKNOWN,CKV_AWS_18,infra/bucket.yaml,6,6,,,,False,,,2026-01-15T12:30:00+00:00,,
+,"{""tags"": [], ""scanner_name"": ""checkov"", ""issue_severity"":
+""LOW""}",,"{""ruleId"":""CKV_AWS_18"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""mess
+age"":{""text"":""S3 access logging
+disabled"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{"
+"uri"":""infra/bucket.yaml"",""index"":-1},""region"":{""startLine"":6,""endLine"":6,""charOffset"":
+-1,""byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":
+[],""codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""att
+achments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""checkov"",""is
+sue_severity"":""LOW""}}",,,
+checkov-CKV_AWS_21-dd5d6906,CKV_AWS_21,S3 versioning
+disabled,LOW,checkov,UNKNOWN,CKV_AWS_21,infra/bucket.yaml,6,6,,,,False,,,2026-01-15T12:30:00+00:00,,
+,"{""tags"": [], ""scanner_name"": ""checkov"", ""issue_severity"":
+""LOW""}",,"{""ruleId"":""CKV_AWS_21"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""mess
+age"":{""text"":""S3 versioning
+disabled"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{"
+"uri"":""infra/bucket.yaml"",""index"":-1},""region"":{""startLine"":6,""endLine"":6,""charOffset"":
+-1,""byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":
+[],""codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""att
+achments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""checkov"",""is
+sue_severity"":""LOW""}}",,,
+checkov-CKV_AWS_144-6c3d87b2,CKV_AWS_144,Cross-region replication
+off,INFO,checkov,UNKNOWN,CKV_AWS_144,infra/bucket.yaml,6,6,,,,False,,,2026-01-15T12:30:00+00:00,,,"{
+""tags"": [], ""scanner_name"": ""checkov"", ""issue_severity"":
+""INFO""}",,"{""ruleId"":""CKV_AWS_144"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""me
+ssage"":{""text"":""Cross-region replication
+off"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{""uri"
+":""infra/bucket.yaml"",""index"":-1},""region"":{""startLine"":6,""endLine"":6,""charOffset"":-1,""
+byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""
+codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachme
+nts"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""checkov"",""issue_s
+everity"":""INFO""}}",,,
+opengrep-javascript.express.xss-ef8684f2,javascript.express.xss,Unescaped user
+input,HIGH,opengrep,UNKNOWN,javascript.express.xss,web/server.js,31,31,,,,False,,,2026-01-15T12:30:0
+0+00:00,,,"{""tags"": [], ""scanner_name"": ""opengrep"", ""issue_severity"":
+""HIGH""}",,"{""ruleId"":""javascript.express.xss"",""ruleIndex"":-1,""kind"":""fail"",""level"":""e
+rror"",""message"":{""text"":""Unescaped user
+input"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{""ur
+i"":""web/server.js"",""index"":-1},""region"":{""startLine"":31,""endLine"":31,""charOffset"":-1,""
+byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""stacks"":[],""
+codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachme
+nts"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""opengrep"",""issue_
+severity"":""HIGH""}}",,,

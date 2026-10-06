@@ -1,0 +1,125 @@
+{
+  "description": "Represents a finding suppression rule.",
+  "properties": {
+    "path": {
+      "description": "Path or pattern to exclude",
+      "title": "Path",
+      "type": "string"
+    },
+    "reason": {
+      "description": "Reason for exclusion",
+      "title": "Reason",
+      "type": "string"
+    },
+    "expiration": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Expiration date (YYYY-MM-DD)",
+      "title": "Expiration"
+    },
+    "rule_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Rule ID to suppress",
+      "title": "Rule Id"
+    },
+    "line_start": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Starting line number",
+      "title": "Line Start"
+    },
+    "line_end": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Ending line number",
+      "title": "Line End"
+    },
+    "package_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Only suppress findings about this package (glob, case-insensitive). Findings that do not report a package name never match.",
+      "title": "Package Name"
+    },
+    "package_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Only suppress findings about this installed package version (glob, case-insensitive). Findings that do not report an installed version never match.",
+      "title": "Package Version"
+    },
+    "package_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Only suppress findings about the package copy installed at this path, relative to the scan root (glob, supports **), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. Separates two copies with the same name and version. Findings that do not report an install path never match.",
+      "title": "Package Path"
+    },
+    "symbol": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches.",
+      "title": "Symbol"
+    }
+  },
+  "required": [
+    "path",
+    "reason"
+  ],
+  "title": "AshSuppression",
+  "type": "object"
+}

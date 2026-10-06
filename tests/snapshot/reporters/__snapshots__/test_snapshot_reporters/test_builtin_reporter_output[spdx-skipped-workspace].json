@@ -1,0 +1,35 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "workspace ASH SBOM",
+  "documentNamespace": "https://github.com/awslabs/automated-security-helper/spdx/workspace-<UUID>",
+  "creationInfo": {
+    "created": "2026-01-15T12:00:42Z",
+    "creators": [
+      "Tool: automated-security-helper-<ASH_VERSION>"
+    ]
+  },
+  "documentDescribes": [
+    "SPDXRef-RootPackage"
+  ],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-RootPackage",
+      "name": "workspace",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "SOURCE"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-RootPackage"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+$ ash config lint -c missing.yaml
+❌ Config file not found: missing.yaml
+[exit code: 1]

@@ -1,0 +1,47 @@
+<testsuites name="ASH Scan Report"><testsuite name="bandit" tests="2" errors="1" failures="0" skipped="1" time="0"><testcase name="subprocess call with shell=True identified, security issue. [B602]" classname="B602"><error message="subprocess call with shell=True identified, security issue." type="error" /><system-out>tags: ['bandit']
+issue_severity: HIGH
+issue_confidence: HIGH
+scanner_name: bandit
+scanner_version: 1.8.6
+scanner_details: {'tool_name': 'bandit', 'tool_version': '1.8.6', 'tool_invocation': {'exit_code': 0, 'duration': 1.25, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:01.250000+00:00'}}</system-out></testcase><testcase name="Possible hardcoded password: 'hunter2-not-a-real-secret' [B105]" classname="B105"><skipped message="Finding is below configured severity threshold" type="threshold" /><system-out>tags: ['bandit']
+issue_severity: LOW
+issue_confidence: MEDIUM
+scanner_name: bandit
+scanner_version: 1.8.6
+scanner_details: {'tool_name': 'bandit', 'tool_version': '1.8.6', 'tool_invocation': {'exit_code': 0, 'duration': 1.25, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:01.250000+00:00'}}</system-out></testcase></testsuite><testsuite name="checkov" tests="4" errors="3" failures="0" skipped="1" time="0"><testcase name="S3 Bucket has an ACL defined which allows public READ access. [CKV_AWS_20]" classname="CKV_AWS_20"><error message="S3 Bucket has an ACL defined which allows public READ access." type="error" /><system-out>tags: ['checkov']
+issue_severity: HIGH
+scanner_name: checkov
+scanner_version: 3.2.469
+scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 7.5, 'start_time': '2026-01-15T12:00:01.250000+00:00', 'end_time': '2026-01-15T12:00:08.750000+00:00'}}</system-out></testcase><testcase name="Ensure the S3 bucket has access logging enabled [CKV_AWS_18]" classname="CKV_AWS_18"><error message="Ensure the S3 bucket has access logging enabled" type="error" /><system-out>tags: ['checkov']
+issue_severity: MEDIUM
+scanner_name: checkov
+scanner_version: 3.2.469
+scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 7.5, 'start_time': '2026-01-15T12:00:01.250000+00:00', 'end_time': '2026-01-15T12:00:08.750000+00:00'}}</system-out></testcase><testcase name="Ensure the last USER is not root [CKV_DOCKER_8]" classname="CKV_DOCKER_8"><error message="Ensure the last USER is not root" type="error" /><system-out>tags: ['checkov']
+issue_severity: MEDIUM
+scanner_name: checkov
+scanner_version: 3.2.469
+scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 7.5, 'start_time': '2026-01-15T12:00:01.250000+00:00', 'end_time': '2026-01-15T12:00:08.750000+00:00'}}</system-out></testcase><testcase name="Ensure that HEALTHCHECK instructions have been added to container images [CKV_DOCKER_2]" classname="CKV_DOCKER_2"><skipped message="Finding is below configured severity threshold" type="threshold" /><system-out>tags: ['checkov']
+issue_severity: LOW
+scanner_name: checkov
+scanner_version: 3.2.469
+scanner_details: {'tool_name': 'checkov', 'tool_version': '3.2.469', 'tool_invocation': {'exit_code': 0, 'duration': 7.5, 'start_time': '2026-01-15T12:00:01.250000+00:00', 'end_time': '2026-01-15T12:00:08.750000+00:00'}}</system-out></testcase></testsuite><testsuite name="semgrep" tests="2" errors="0" failures="0" skipped="2" time="0"><testcase name="The last user in the container is 'root'. Switch back to an unprivileged user. [dockerfile.security.last-user-is-root.last-user-is-root]" classname="dockerfile.security.last-user-is-root.last-user-is-root"><skipped message="Finding is below configured severity threshold" type="threshold" /><system-out>tags: ['semgrep']
+issue_severity: LOW
+scanner_name: semgrep
+scanner_version: 1.140.0
+scanner_details: {'tool_name': 'semgrep', 'tool_version': '1.140.0', 'tool_invocation': {'exit_code': 0, 'duration': 4.0, 'start_time': '2026-01-15T12:00:08.750000+00:00', 'end_time': '2026-01-15T12:00:12.750000+00:00'}}</system-out></testcase><testcase name="Command string built with an f-string; prefer an argument list. [python.lang.best-practice.unpinned-shell-command]" classname="python.lang.best-practice.unpinned-shell-command"><skipped message="Finding is below configured severity threshold" type="threshold" /><system-out>tags: ['semgrep']
+issue_severity: INFO
+scanner_name: semgrep
+scanner_version: 1.140.0
+scanner_details: {'tool_name': 'semgrep', 'tool_version': '1.140.0', 'tool_invocation': {'exit_code': 0, 'duration': 4.0, 'start_time': '2026-01-15T12:00:08.750000+00:00', 'end_time': '2026-01-15T12:00:12.750000+00:00'}}</system-out></testcase></testsuite><testsuite name="detect-secrets" tests="1" errors="0" failures="0" skipped="1" time="0"><testcase name="Secret of type Secret Keyword detected in file app/app.py at line 5 [SECRET-SECRET-KEYWORD]" classname="SECRET-SECRET-KEYWORD"><skipped message="(ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret" type="suppression" /><system-out>tags: ['detect-secrets']
+issue_severity: HIGH
+scanner_name: detect-secrets
+scanner_version: 1.5.0
+scanner_details: {'tool_name': 'detect-secrets', 'tool_version': '1.5.0', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:12.750000+00:00', 'end_time': '2026-01-15T12:00:13.250000+00:00'}}</system-out></testcase></testsuite><testsuite name="grype" tests="2" errors="2" failures="0" skipped="0" time="0"><testcase name="A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt [CVE-2018-18074-requests]" classname="CVE-2018-18074-requests"><error message="A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt" type="error" /><system-out>tags: ['grype']
+issue_severity: CRITICAL
+scanner_name: grype
+scanner_version: 0.100.0
+scanner_details: {'tool_name': 'grype', 'tool_version': '0.100.0', 'tool_invocation': {'exit_code': 0, 'duration': 3.0, 'start_time': '2026-01-15T12:00:13.250000+00:00', 'end_time': '2026-01-15T12:00:16.250000+00:00'}}</system-out></testcase><testcase name="A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt [CVE-2023-32681-requests]" classname="CVE-2023-32681-requests"><error message="A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt" type="error" /><system-out>tags: ['grype']
+issue_severity: MEDIUM
+scanner_name: grype
+scanner_version: 0.100.0
+scanner_details: {'tool_name': 'grype', 'tool_version': '0.100.0', 'tool_invocation': {'exit_code': 0, 'duration': 3.0, 'start_time': '2026-01-15T12:00:13.250000+00:00', 'end_time': '2026-01-15T12:00:16.250000+00:00'}}</system-out></testcase></testsuite></testsuites>

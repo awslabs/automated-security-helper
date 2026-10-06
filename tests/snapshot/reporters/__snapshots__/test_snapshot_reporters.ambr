@@ -1,0 +1,75 @@
+# serializer version: 1
+# name: test_workspace_project_rows[skipped-workspace]
+  dict({
+    'project_rows': list([
+      dict({
+        'actionable': 1,
+        'detail': 'did not complete: npm-audit',
+        'findings': 1,
+        'key': 'api',
+        'project': 'snapshot-api (api)',
+        'result': 'FAILED',
+        'status': 'COMPLETED',
+        'threshold': 'MEDIUM',
+      }),
+      dict({
+        'actionable': 1,
+        'detail': '',
+        'findings': 2,
+        'key': 'web',
+        'project': 'snapshot-web (web)',
+        'result': 'FAILED',
+        'status': 'COMPLETED',
+        'threshold': 'HIGH',
+      }),
+      dict({
+        'actionable': 0,
+        'detail': "'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'",
+        'findings': 0,
+        'key': 'docs',
+        'project': 'docs',
+        'result': 'SKIPPED (error)',
+        'status': 'SKIPPED',
+        'threshold': 'n/a',
+      }),
+    ]),
+    'skipped_projects': list([
+      dict({
+        'detail': "Project 'docs' was not scanned (error): 'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'",
+        'entry': dict({
+          'detail': "'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'",
+          'project': 'docs',
+          'reason': 'error',
+        }),
+      }),
+    ]),
+  })
+# ---
+# name: test_workspace_project_rows[workspace]
+  dict({
+    'project_rows': list([
+      dict({
+        'actionable': 1,
+        'detail': 'did not complete: npm-audit',
+        'findings': 1,
+        'key': 'api',
+        'project': 'snapshot-api (api)',
+        'result': 'FAILED',
+        'status': 'COMPLETED',
+        'threshold': 'MEDIUM',
+      }),
+      dict({
+        'actionable': 1,
+        'detail': '',
+        'findings': 2,
+        'key': 'web',
+        'project': 'snapshot-web (web)',
+        'result': 'FAILED',
+        'status': 'COMPLETED',
+        'threshold': 'HIGH',
+      }),
+    ]),
+    'skipped_projects': list([
+    ]),
+  })
+# ---

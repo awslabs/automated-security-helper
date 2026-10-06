@@ -1,0 +1,3 @@
+$ ash inspect sarif-fields --sarif-dir <SARIF_INPUT> --output-dir <INSPECT_OUT>
+No SARIF files found in <SARIF_INPUT>
+[exit code: 1]

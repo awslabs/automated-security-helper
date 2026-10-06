@@ -5,98 +5,95 @@
 
 import fnmatch
 import re
-from typing import Optional
+from functools import lru_cache
+from typing import List, Optional
+
+_DOUBLE_STAR = "**"
+
+
+def _pattern_components(pattern: str) -> List[str]:
+    """Split *pattern* into path components, normalizing the ``**`` forms.
+
+    * ``**`` alone in a component means zero or more whole path components.
+    * ``**`` inside a longer component (``foo**``, ``**.py``) is an ordinary
+      ``*``, the rule gitignore uses. The matcher this replaced split the
+      pattern on every ``**``, so ``src/**.py`` matched only a file literally
+      named ``.py``.
+    * Repeated ``**`` components collapse to one: ``a/**/**/b`` is ``a/**/b``.
+    * A slash next to a leading or trailing ``**`` is absorbed, so ``/**/x``
+      is ``**/x`` and ``tests/**/`` is ``tests/**``. That is what the previous
+      splitter did with its ``/?\\*\\*/?`` separator, kept so that no existing
+      ignore path or suppression changes meaning.
+    """
+    components: List[str] = []
+    for component in pattern.split("/"):
+        if _DOUBLE_STAR in component and component != _DOUBLE_STAR:
+            component = re.sub(r"\*{2,}", "*", component)
+        if component == _DOUBLE_STAR and components and components[-1] == _DOUBLE_STAR:
+            continue
+        components.append(component)
+    if len(components) >= 2 and components[0] == "" and components[1] == _DOUBLE_STAR:
+        components.pop(0)
+    while (
+        len(components) >= 2 and components[-1] == "" and components[-2] == _DOUBLE_STAR
+    ):
+        components.pop()
+    return components
 
 
 def _recursive_glob_match(path: str, pattern: str) -> bool:
     """Match *path* against *pattern* treating ``**`` as zero-or-more directories.
 
-    The algorithm splits the pattern on ``**`` separators, then verifies that
-    each resulting segment appears in the correct order inside *path* using
-    ``fnmatch`` for each segment.
+    Both sides are split into ``/``-separated components. A ``**`` component
+    matches any run of path components, including none; every other pattern
+    component must match exactly one path component, with ``fnmatch`` deciding
+    the match. So the whole path is consumed, anchored at both ends, and a
+    ``**`` can sit anywhere: first, last, or between other components, any
+    number of times.
+
+    Why a component matcher rather than the segment splitter it replaced
+    --------------------------------------------------------------------
+    The old algorithm split the pattern on ``**`` and then special-cased the
+    single-segment shapes. With two or more segments it ignored a ``**`` at
+    either end: the last segment was always anchored to the end of the path and
+    the first to the start. So ``a/**/b/**`` did not match ``a/x/b/c``,
+    ``tests/**/__snapshots__/**`` matched nothing under a snapshot directory,
+    and ``**/x/**/y`` did not match ``p/x/q/y``. Ignore paths and suppressions
+    written that way were silently inert, which for a suppression means the
+    findings it was written for stay reported, and for an ignore path means
+    the directory stays scanned.
+
+    Matching a whole pattern component against a whole path component gives
+    the same answer the old code gave for every shape it handled correctly:
+    it compared a pattern segment of N components against N path components
+    joined with ``/``, and with the slash counts equal a ``*`` in the segment
+    could not span a slash and still leave enough literal slashes to match.
+
+    Callers lower-case both sides first (see ``_match_form`` and
+    ``suppression_matcher.file_path_matches``), so ``fnmatch.fnmatch``'s
+    platform case folding has nothing left to change. Backslashes are treated
+    as separators on both sides.
     """
-    path = path.replace("\\", "/")
-    pattern = pattern.replace("\\", "/")
+    path_parts = tuple(path.replace("\\", "/").split("/"))
+    pattern_parts = tuple(_pattern_components(pattern.replace("\\", "/")))
 
-    segments = re.split(r"/?\*\*/?", pattern)
-    has_trailing_star = pattern.rstrip("/").endswith("**")
-    has_leading_star = pattern.lstrip("/").startswith("**")
-    segments = [s for s in segments if s]
-
-    if not segments:
-        return True
-
-    if len(segments) == 1 and has_leading_star and has_trailing_star:
-        middle = segments[0]
-        parts = path.split("/")
-        seg_parts = middle.split("/")
-        seg_len = len(seg_parts)
-        for j in range(len(parts) - seg_len + 1):
-            candidate = "/".join(parts[j : j + seg_len])
-            if fnmatch.fnmatch(candidate, middle):
-                return True
-        return False
-
-    if len(segments) == 1 and has_trailing_star and not has_leading_star:
-        prefix = segments[0]
-        parts = path.split("/")
-        seg_parts = prefix.split("/")
-        seg_len = len(seg_parts)
-        if len(parts) < seg_len:
+    @lru_cache(maxsize=None)
+    def match(pattern_index: int, path_index: int) -> bool:
+        if pattern_index == len(pattern_parts):
+            return path_index == len(path_parts)
+        component = pattern_parts[pattern_index]
+        if component == _DOUBLE_STAR:
+            return any(
+                match(pattern_index + 1, next_path_index)
+                for next_path_index in range(path_index, len(path_parts) + 1)
+            )
+        if path_index == len(path_parts):
             return False
-        candidate = "/".join(parts[:seg_len])
-        return fnmatch.fnmatch(candidate, prefix)
+        return fnmatch.fnmatch(path_parts[path_index], component) and match(
+            pattern_index + 1, path_index + 1
+        )
 
-    if len(segments) == 1 and has_leading_star and not has_trailing_star:
-        suffix = segments[0]
-        parts = path.split("/")
-        seg_parts = suffix.split("/")
-        seg_len = len(seg_parts)
-        if len(parts) < seg_len:
-            return fnmatch.fnmatch(path, suffix)
-        candidate = "/".join(parts[-seg_len:])
-        return fnmatch.fnmatch(candidate, suffix)
-
-    remaining = path
-    for i, segment in enumerate(segments):
-        if not segment:
-            continue
-
-        is_first = i == 0
-        is_last = i == len(segments) - 1
-
-        if is_first and is_last:
-            return fnmatch.fnmatch(remaining, segment)
-
-        if is_first:
-            parts = remaining.split("/")
-            seg_parts = segment.split("/")
-            seg_len = len(seg_parts)
-            prefix = "/".join(parts[:seg_len])
-            if not fnmatch.fnmatch(prefix, segment):
-                return False
-            remaining = "/".join(parts[seg_len:])
-        elif is_last:
-            parts = remaining.split("/")
-            seg_parts = segment.split("/")
-            seg_len = len(seg_parts)
-            suffix = "/".join(parts[-seg_len:]) if seg_len <= len(parts) else remaining
-            return fnmatch.fnmatch(suffix, segment)
-        else:
-            parts = remaining.split("/")
-            seg_parts = segment.split("/")
-            seg_len = len(seg_parts)
-            found = False
-            for j in range(len(parts) - seg_len + 1):
-                candidate = "/".join(parts[j : j + seg_len])
-                if fnmatch.fnmatch(candidate, segment):
-                    remaining = "/".join(parts[j + seg_len :])
-                    found = True
-                    break
-            if not found:
-                return False
-
-    return True
+    return match(0, 0)
 
 
 def _match_form(value: str) -> str:
