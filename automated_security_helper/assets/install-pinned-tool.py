@@ -301,7 +301,14 @@ def install(tool: str, bin_dir: Path, package_root: Path) -> Path:
         print(f"Verified SHA256 {asset.sha256.lower()}", flush=True)
 
         staged = staging / asset.install_as
-        extract_member(archive, asset.member_name, staged)
+        # getattr, not attribute access: an image built from an older table whose
+        # ToolAsset has no `archive` field is all archives.
+        if getattr(asset, "archive", True):
+            extract_member(archive, asset.member_name, staged)
+        else:
+            # The asset is the executable itself (opengrep), so the digest just
+            # verified covers the exact bytes being installed.
+            archive.rename(staged)
         staged.chmod(0o755)
         # Replaced via the staging path so an interrupted run cannot leave a
         # half-written executable at the destination for the next layer to run.
@@ -315,7 +322,7 @@ def main(argv: "list[str] | None" = None) -> int:
     parser = argparse.ArgumentParser(
         description="Install a pinned ASH scanner binary, verified against its digest.",
     )
-    parser.add_argument("tool", help="grype, syft or trivy")
+    parser.add_argument("tool", help="grype, opengrep, syft, trivy or uv")
     parser.add_argument(
         "-b",
         "--bin-dir",

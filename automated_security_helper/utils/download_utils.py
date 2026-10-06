@@ -274,9 +274,9 @@ def _download_verified(
     # follows a link at the destination. The source is a NamedTemporaryFile in
     # TMPDIR and the destination is ASH_BIN_PATH, so a relocated TMPDIR or a
     # `--tmpfs /tmp` container puts that fallback on the normal path rather than an
-    # exotic one. This matters most for opengrep, which reaches here through
-    # create_url_download_command, passes no digest, and therefore re-downloads on
-    # every single install.
+    # exotic one. It matters most for an unpinned download -- an opengrep version the
+    # user configured away from the pin, through create_url_download_command -- which
+    # passes no digest and therefore re-downloads on every single install.
     #
     # The pin goes with it. The bytes verified above and the bytes copied below are two
     # separate reads of a file in TMPDIR, so the copy has to be checked against the pin
@@ -663,8 +663,8 @@ def _already_installed(
        not an install.
     2. There is a pinned digest at all. An unpinned download has nothing to be
        idempotent against, so ``sha256: null`` in a receipt would match every later
-       unpinned install and cache a substituted binary forever. opengrep is in that
-       state until it gets a pin, so it re-downloads.
+       unpinned install and cache a substituted binary forever. An opengrep version
+       configured away from the pin is in that state, so it re-downloads.
     3. A receipt exists. A file with no receipt came from somewhere else -- a
        package manager, a nix profile, an ASH that predates receipts -- and must not
        be assumed to be the pinned version.
@@ -1108,16 +1108,28 @@ def install_pinned_tool(
     with tempfile.TemporaryDirectory(prefix="ash-tool-download-") as staging:
         staging_dir = Path(staging)
         asset_name = asset.url.split("/")[-1]
-        archive = _restore_cached_asset(asset_name, asset.sha256, staging_dir)
-        if archive is None:
-            archive = download_file(
+        # A verified cached copy, or a fresh verified download that is then cached.
+        # Both are hashed against the pin in this private directory before use.
+        downloaded = _restore_cached_asset(asset_name, asset.sha256, staging_dir)
+        if downloaded is None:
+            downloaded = download_file(
                 asset.url,
                 staging_dir,
                 rename_to=asset_name,
                 expected_sha256=asset.sha256,
             )
-            _store_cached_asset(archive, asset_name)
-        installed_digest = _extract_single_member(archive, asset.member_name, target)
+            _store_cached_asset(downloaded, asset_name)
+        if not asset.archive:
+            # The asset is the executable (opengrep). It goes to its final name through
+            # the same staged, symlink-safe, pin-checked rename the unarchived URL path
+            # uses; _replace_atomically refuses anything but the pinned digest.
+            installed_digest = _replace_atomically(
+                downloaded, target, expected_sha256=asset.sha256
+            )
+        else:
+            installed_digest = _extract_single_member(
+                downloaded, asset.member_name, target
+            )
 
     # _extract_single_member already set the mode on the staged file before renaming
     # it into place; this covers the Windows branch, where it does not.
@@ -1169,9 +1181,9 @@ def create_pinned_tool_install_command(
 ) -> CustomCommand:
     """Build the CustomCommand that installs a pinned tool in a subprocess.
 
-    Mirrors ``create_url_download_command``, which is how opengrep is provisioned,
-    so the installer keeps one execution model for every tool: plugins declare
-    commands, the CLI runs them and counts them.
+    Mirrors ``create_url_download_command``, which is how an unpinned opengrep
+    version is still provisioned, so the installer keeps one execution model for
+    every tool: plugins declare commands, the CLI runs them and counts them.
     """
     if destination is None:
         destination = str(current_bin_path()).replace("\\", "/")

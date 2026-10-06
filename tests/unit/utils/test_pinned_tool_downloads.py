@@ -1119,9 +1119,9 @@ class TestReceiptDirectoryPermissions:
 
 class TestAssetResolution:
     def test_downloadable_tools(self):
-        assert downloadable_tools() == ["grype", "syft", "trivy"]
+        assert downloadable_tools() == ["grype", "opengrep", "syft", "trivy", "uv"]
 
-    @pytest.mark.parametrize("tool", ["grype", "syft", "trivy"])
+    @pytest.mark.parametrize("tool", ["grype", "opengrep", "syft", "trivy"])
     def test_linux_and_darwin_are_provisionable_on_both_arches(self, tool):
         pairs = supported_platforms(tool)
         for target in [
@@ -1132,9 +1132,9 @@ class TestAssetResolution:
         ]:
             assert target in pairs, f"{tool} should be provisionable on {target}"
 
-    @pytest.mark.parametrize("tool", ["grype", "trivy"])
+    @pytest.mark.parametrize("tool", ["grype", "opengrep", "trivy"])
     def test_windows_arm64_is_refused_not_approximated(self, tool):
-        """Upstream publishes no windows/arm64 build for these two.
+        """Upstream publishes no windows/arm64 build for these three.
 
         Refusing is the point: falling back to the amd64 asset would install a
         binary that fails at exec time, and that shows up in a scan report as an
@@ -1183,13 +1183,40 @@ class TestAssetResolution:
         assert sorted(set(_DIGESTS) - referenced) == []
 
     def test_pinned_versions_appear_in_their_asset_filenames(self):
+        """A version bump has to move every digest lookup with it.
+
+        For a tool whose asset names carry the version, the filename is that
+        guarantee. opengrep and uv name their assets the same in every release, so
+        for those the guarantee is _DIGESTS_TAKEN_AT, which must name the pinned
+        version -- checked here rather than exempted, so neither tool is a hole.
+        """
         for tool, version in TOOL_VERSIONS.items():
+            if tool in tool_downloads._DIGESTS_TAKEN_AT:
+                assert tool_downloads._DIGESTS_TAKEN_AT[tool] == version, (
+                    f"{tool} is pinned to {version} but its digests were taken at "
+                    f"{tool_downloads._DIGESTS_TAKEN_AT[tool]}"
+                )
+                continue
             bare = version.lstrip("v")
             for filename in _ASSET_TABLES[tool].values():
                 assert bare in filename, (
                     f"{tool} is pinned to {version} but asset {filename} does not "
                     "carry that version"
                 )
+
+    def test_the_unversioned_exemption_covers_only_unversioned_names(self):
+        """_DIGESTS_TAKEN_AT must not become a way to skip the filename check.
+
+        A tool listed there whose asset names DO carry its version has no reason to
+        be listed, and listing it would only weaken the check above for that tool.
+        """
+        for tool in tool_downloads._DIGESTS_TAKEN_AT:
+            bare = TOOL_VERSIONS[tool].lstrip("v")
+            versioned = [f for f in _ASSET_TABLES[tool].values() if bare in f]
+            assert versioned == [], (
+                f"{tool} assets {versioned} carry the version; take {tool} out of "
+                "_DIGESTS_TAKEN_AT so the filename check applies to it"
+            )
 
     def test_the_ferret_suppression_range_still_bounds_the_digest_table(self):
         """The community config suppresses API_KEY_OR_SECRET over a line range.

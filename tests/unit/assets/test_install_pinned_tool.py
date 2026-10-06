@@ -65,6 +65,19 @@ def _load_script():
 
 installer = _load_script()
 
+# Pinned tools the image does NOT install with install-pinned-tool, and why.
+#
+# opengrep reaches the image through `RUN ash dependencies install`, which resolves it
+# from the same table through OpengrepScanner's pinned install commands -- the path it
+# always took, now verified. Installing it a second time with install-pinned-tool
+# would add a ~42 MB copy to /usr/local/bin for no gain. Named here, rather than
+# filtered out of downloadable_tools() inline, so the exemption is one reviewed line,
+# and TestOpengrepReachesTheImageThroughThePin checks the path it takes instead.
+_PROVISIONED_BY_ASH_DEPENDENCIES_INSTALL = frozenset({"opengrep"})
+_INSTALLED_BY_THE_SCRIPT = sorted(
+    set(TOOL_VERSIONS) - _PROVISIONED_BY_ASH_DEPENDENCIES_INSTALL
+)
+
 
 def _pins_dir(tmp_path: Path, digest_overrides: dict | None = None) -> Path:
     """A standalone copy of the pinned table, optionally with digests rewritten.
@@ -88,10 +101,19 @@ def _pins_dir(tmp_path: Path, digest_overrides: dict | None = None) -> Path:
     return root
 
 
+def _dockerfile_instructions() -> str:
+    """The Dockerfile without its comment lines, which name the removed installers."""
+    return "\n".join(
+        line
+        for line in DOCKERFILE.read_text().splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
 class TestTheDockerfileAndTheTableAgree:
     """The ARG lines and TOOL_VERSIONS are the same fact written twice."""
 
-    @pytest.mark.parametrize("tool", sorted(TOOL_VERSIONS))
+    @pytest.mark.parametrize("tool", _INSTALLED_BY_THE_SCRIPT)
     def test_the_arg_version_matches_the_pinned_version(self, tool):
         arg = f"{tool.upper()}_VERSION"
         match = re.search(
@@ -133,10 +155,49 @@ class TestTheDockerfileAndTheTableAgree:
         own parametrized case with it. This pins the other direction.
         """
         text = DOCKERFILE.read_text()
-        for tool in downloadable_tools():
+        for tool in _INSTALLED_BY_THE_SCRIPT:
             assert f"install-pinned-tool {tool}" in text, (
                 f"{tool} has no `install-pinned-tool {tool}` line in the Dockerfile"
             )
+
+    def test_every_stage_that_needs_uv_installs_the_pinned_one(self):
+        """uv is installed in two stages; both must take the pinned path.
+
+        The piped installer was there twice, and replacing one of them would have
+        satisfied the per-tool scan above while the other kept running astral.sh's
+        script.
+        """
+        text = _dockerfile_instructions()
+        assert text.count("install-pinned-tool uv ") == 2
+        assert "astral.sh/uv/install.sh" not in text
+
+    def test_no_remote_script_is_executed_unverified_by_pip(self):
+        """get-pip.py was fetched and run unpinned to install a pip already present."""
+        assert "get-pip.py" not in _dockerfile_instructions()
+
+
+class TestOpengrepReachesTheImageThroughThePin:
+    """The exempted tool still has to be provisioned, and provisioned verified."""
+
+    def test_the_exemption_names_only_tools_whose_plugin_installs_the_pin(
+        self, test_plugin_context
+    ):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+            OpengrepScanner,
+            OpengrepScannerConfig,
+        )
+
+        assert _PROVISIONED_BY_ASH_DEPENDENCIES_INSTALL == {"opengrep"}
+        scanner = OpengrepScanner(
+            context=test_plugin_context, config=OpengrepScannerConfig()
+        )
+        argv = scanner.custom_install_commands["linux"]["amd64"][0].args
+        assert "install_pinned_tool" in argv[2]
+
+    def test_the_image_runs_ash_dependencies_install(self):
+        assert 'RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"' in (
+            DOCKERFILE.read_text()
+        )
 
 
 class TestArchResolution:
@@ -325,6 +386,59 @@ class TestTheDigestCheckCanFail:
             "the installed file must be executable, or the next Dockerfile layer's "
             "`RUN syft --version` fails with a permission error"
         )
+
+
+class TestABareExecutableAsset:
+    """opengrep publishes the executable itself; there is no archive to open."""
+
+    def test_a_bare_asset_is_installed_as_is_after_verification(
+        self, tmp_path, monkeypatch
+    ):
+        import hashlib
+
+        payload = b"\x7fELF-opengrep"
+
+        def download(url: str, target: Path) -> str:
+            target.write_bytes(payload)
+            return hashlib.sha256(payload).hexdigest()
+
+        pins = _pins_dir(
+            tmp_path,
+            {
+                "c4f6aab1edc8130c7a46e8f5e5215763420740fb94198fc9301215135a372900": hashlib.sha256(  # pragma: allowlist secret
+                    payload
+                ).hexdigest()
+            },
+        )
+        monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
+        monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(installer, "download", download)
+
+        installed = installer.install("opengrep", tmp_path / "bin", pins)
+        assert installed == tmp_path / "bin" / "opengrep"
+        assert installed.read_bytes() == payload
+        assert os.access(installed, os.X_OK)
+
+    def test_a_bare_asset_that_does_not_match_installs_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """Unpatched table: the committed opengrep digest is what refuses."""
+
+        def download(url: str, target: Path) -> str:
+            import hashlib
+
+            target.write_bytes(b"not the release")
+            return hashlib.sha256(b"not the release").hexdigest()
+
+        monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
+        monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(installer, "download", download)
+
+        bin_dir = tmp_path / "bin"
+        with pytest.raises(SystemExit) as raised:
+            installer.install("opengrep", bin_dir, _pins_dir(tmp_path))
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not bin_dir.exists() or list(bin_dir.iterdir()) == []
 
 
 class TestLoadPinsLeavesSysModulesAlone:

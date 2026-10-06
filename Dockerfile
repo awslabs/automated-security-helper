@@ -64,10 +64,24 @@ ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
 
 # Install UV
+#
+# From its pinned release asset, verified against the SHA256 in
+# automated_security_helper/utils/tool_downloads.py, the same way the core stage
+# installs syft, grype and trivy. This was `curl -LsSf https://astral.sh/uv/install.sh
+# | sh`: a remote script piped into a shell, which pinned no version and no bytes and
+# gave astral.sh code execution in the stage that builds the wheel the image ships.
+# The installer and the two files it reads are copied here as well as in the core
+# stage because a stage starts from the base image and sees nothing the other copied.
 COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
 RUN chmod +x /usr/local/bin/with-retry
-RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/install-pinned-tool
+COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
+COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
+RUN chmod +x /usr/local/bin/install-pinned-tool
+ARG UV_VERSION="0.12.23"
+RUN ASH_PINS_DIR=/ash-pins with-retry 'install-pinned-tool uv -b /root/.local/bin'
 ENV PATH="/root/.local/bin:$PATH"
+RUN uv --version
 
 WORKDIR /src
 RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
@@ -191,15 +205,17 @@ RUN set -uex; \
     apt-get -qy update; \
     apt-get -qy install --no-install-recommends nodejs;
 #
-# Install UV in the core stage
+# uv is installed in the core stage below, after the pinned-tool installer is copied
+# in, from the same verified release asset as the uv-reqs stage.
 #
-RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ENV PATH="/root/.local/bin:$PATH"
 
 #
 # Python (no-op other than updating pip --- Python deps managed via Poetry @ pyproject.toml)
 #
-RUN with-retry 'curl -sSf https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py'
+# No get-pip.py. It was fetched from bootstrap.pypa.io and executed, unpinned and
+# unverified, to install a pip the python base image already ships -- the upgrade on
+# the next line is all this step ever needed.
 RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 
 # #
@@ -291,6 +307,10 @@ COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_down
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
 ENV ASH_PINS_DIR="/ash-pins"
+
+ARG UV_VERSION="0.12.23"
+RUN with-retry 'install-pinned-tool uv -b /root/.local/bin'
+RUN uv --version
 
 ARG SYFT_VERSION="v1.42.4"
 RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'

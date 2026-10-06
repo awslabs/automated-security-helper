@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pinned release assets for the scanner tools ASH provisions itself.
+"""Pinned release assets for the tools ASH provisions itself.
 
 Why this module exists
 ----------------------
@@ -11,10 +11,11 @@ download. grype, syft and trivy had no install path inside ASH at all, so a
 machine without them scanned with those scanners absent. That state was invisible
 from the outside: the scan reported them as not having run and still exited 0.
 
-Every asset here is identified by an exact version and an exact SHA256. Both are
-transcribed from the ``*_checksums.txt`` published alongside the upstream GitHub
-release, which is the same file the vendors' own install scripts consult. The
-digest is not decoration -- ``verified_download`` refuses to install an asset
+Every asset here is identified by an exact version and an exact SHA256. For
+grype, syft and trivy both are transcribed from the ``*_checksums.txt`` published
+alongside the upstream GitHub release, which is the same file the vendors' own
+install scripts consult. opengrep and uv publish no such file; where their digests
+came from is recorded above the digest table. The digest is not decoration -- ``verified_download`` refuses to install an asset
 whose bytes do not hash to the pinned value, so a compromised or truncated
 release download fails the install instead of silently becoming the binary a
 security scan then trusts.
@@ -49,7 +50,24 @@ Known limitations
   ``npm_audit_scanner.install_prerequisite_message``.
 * Bumping a version means replacing every digest for that tool. A version bumped
   without its digests will fail every install with an integrity error, which is
-  the intended direction to fail in.
+  the intended direction to fail in. opengrep and uv name their assets without a
+  version, so for those two a bump would not even change a filename; see
+  ``_DIGESTS_TAKEN_AT`` for what catches it instead.
+* opengrep is pinned for manylinux only. The scanner has always installed the
+  manylinux build (``opengrep_scanner`` hardcodes it, with a TODO to detect musl),
+  and pinning musllinux too would be two digests for a path nothing takes.
+* opengrep's version is a user-facing scanner option. A configuration naming a
+  version other than the one pinned here has no digest to be checked against, so
+  ``opengrep_scanner`` installs that version through the old unverified download,
+  which logs that integrity was not verified. Refusing it outright would break
+  every configuration that pins opengrep today.
+* opengrep also publishes a cosign signature and certificate beside each asset.
+  They are not checked: that needs cosign at install time, and the digest pin
+  already fixes the exact bytes, which is a stronger statement than "signed by
+  whoever holds the release identity".
+* uv is here for the container image only, which installs it before ASH exists
+  (see ``assets/install-pinned-tool.py``). It is pinned for linux, the only
+  platform the image is built for, and no scanner plugin installs it.
 """
 
 from dataclasses import dataclass
@@ -71,6 +89,11 @@ class ToolAsset:
     binary from the archive root into a subdirectory keeps working while an
     archive containing two same-named entries is rejected instead of resolved
     arbitrarily.
+
+    ``archive`` is False when the release asset *is* the executable, which is how
+    opengrep publishes. There is nothing to extract, ``member_name`` is unused, and
+    the pinned digest then covers the very bytes that will be executed -- which is
+    what lets a cached copy be checked against the pin directly.
     """
 
     tool: str
@@ -79,15 +102,25 @@ class ToolAsset:
     sha256: str
     member_name: str
     install_as: str
+    archive: bool = True
 
 
 # Versions are deliberately the same pins the container image already builds with
 # (see the ARG lines in Dockerfile), so a scan run from a container, from nix and
 # from a bare `ash dependencies install` all execute the same tool versions.
+#
+# opengrep is not in the Dockerfile's ARG lines: the image installs it through
+# `ash dependencies install`, which resolves it from this table. Its version is the
+# default of OpengrepScannerConfigOptions.version, which is also what nix/opengrep.nix
+# pins -- NOT the v1.1.5 default in get_opengrep_url's signature, which no caller
+# reaches because the scanner always passes its configured version.
 TOOL_VERSIONS: dict[str, str] = {
     "grype": "v0.111.0",
+    "opengrep": "v1.15.1",
     "syft": "v1.42.4",
     "trivy": "v0.69.3",
+    # Tagged without a leading "v" upstream, so the release URL has none either.
+    "uv": "0.12.23",
 }
 
 # The gem version cfn-nag installs at, kept beside the binary pins so there is one
@@ -118,6 +151,22 @@ _SYFT_ASSETS: dict[PlatformArch, str] = {
     ("windows", "arm64"): "syft_1.42.4_windows_arm64.zip",
 }
 
+# Bare executables, not archives. The names carry no version; see _DIGESTS_TAKEN_AT.
+_OPENGREP_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "opengrep_manylinux_x86",
+    ("linux", "arm64"): "opengrep_manylinux_aarch64",
+    ("darwin", "amd64"): "opengrep_osx_x86",
+    ("darwin", "arm64"): "opengrep_osx_arm64",
+    ("windows", "amd64"): "opengrep_windows_x86.exe",
+    # windows/arm64: upstream publishes no such asset for this release.
+}
+
+# linux only: uv is pinned for the container image, which is built for linux alone.
+_UV_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "uv-x86_64-unknown-linux-gnu.tar.gz",
+    ("linux", "arm64"): "uv-aarch64-unknown-linux-gnu.tar.gz",
+}
+
 _TRIVY_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "trivy_0.69.3_Linux-64bit.tar.gz",
     ("linux", "arm64"): "trivy_0.69.3_Linux-ARM64.tar.gz",
@@ -137,10 +186,23 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #   https://github.com/anchore/syft/releases/download/v1.42.4/syft_1.42.4_checksums.txt
 #   https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_checksums.txt
 #
+# opengrep publishes no checksums file. Its five digests were obtained three ways on
+# 2026-10-06 and all three agreed byte for byte: the `digest` field GitHub reports for
+# each asset of the v1.15.1 release (`gh api repos/opengrep/opengrep/releases/tags/
+# v1.15.1`), sha256sum over each asset downloaded once, and -- for the four non-Windows
+# assets -- the SRI hashes nix/opengrep.nix already pinned, decoded from base64. The
+# third is an independent witness: nix verified those hashes on its own fetch, earlier,
+# from a different machine. tests/unit/utils/test_pinned_tool_downloads.py keeps the
+# nix copy and this one equal.
+#
+# uv publishes a `<asset>.sha256` beside each asset. Those two files were downloaded
+# with the assets, and each agreed with sha256sum over its asset and with the `digest`
+# field GitHub reports for it.
+#
 # Every line carries `# pragma: allowlist secret`, which is detect-secrets' own
 # inline marker. It is needed and it is honest: a 64-character hex string is exactly
 # what a high-entropy-string detector is built to find, and ASH scanning itself
-# reported all 16 as CRITICAL secrets -- correctly, by its own heuristic. A published
+# reported the first 16 as CRITICAL secrets -- correctly, by its own heuristic. A published
 # release checksum is public by construction and is the opposite of a credential:
 # it exists so that everyone can compare against it.
 #
@@ -168,19 +230,50 @@ _DIGESTS: dict[str, str] = {
     "trivy_0.69.3_macOS-64bit.tar.gz": "fec4a9f7569b624dd9d044fca019e5da69e032700edbb1d7318972c448ec2f4e",  # pragma: allowlist secret
     "trivy_0.69.3_macOS-ARM64.tar.gz": "a2f2179afd4f8bb265ca3c7aefb56a666bc4a9a411663bc0f22c3549fbc643a5",  # pragma: allowlist secret
     "trivy_0.69.3_windows-64bit.zip": "74362dc711383255308230ecbeb587eb1e4e83a8d332be5b0259afac6e0c2224",  # pragma: allowlist secret
+    # opengrep v1.15.1
+    "opengrep_manylinux_x86": "c4f6aab1edc8130c7a46e8f5e5215763420740fb94198fc9301215135a372900",  # pragma: allowlist secret
+    "opengrep_manylinux_aarch64": "08932db32f4cbfd6e3af6bda82adac41754275d18a91c0fe065181e6a5291be7",  # pragma: allowlist secret
+    "opengrep_osx_x86": "afb2d508a501e3a7eb73d919af102f6764353955631ee5856efb214fee5e3432",  # pragma: allowlist secret
+    "opengrep_osx_arm64": "a833323d87cfe87f292498d0ccdc037adfa07905f11f2eb2dca7fbcc8b803cc5",  # pragma: allowlist secret
+    "opengrep_windows_x86.exe": "307ca6bd6852b38c8fa52d65f5066f780e61545c0e777ca5849a5cd517d688da",  # pragma: allowlist secret
+    # uv 0.12.23
+    "uv-x86_64-unknown-linux-gnu.tar.gz": "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6",  # pragma: allowlist secret
+    "uv-aarch64-unknown-linux-gnu.tar.gz": "6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f",  # pragma: allowlist secret
 }
+
+# The version each unversioned tool's digests above were taken from.
+#
+# grype, syft and trivy put the version in every asset name, so bumping
+# TOOL_VERSIONS without the table changes every URL to a filename the digest table
+# has no entry for, and get_tool_asset refuses it by name. opengrep and uv do not:
+# `opengrep_manylinux_x86` is the name of that asset in every release. Bumping the
+# version alone would therefore resolve the new URL to the OLD release's digest. That
+# still fails closed -- the download would not match -- but as a SHA256 mismatch, the
+# message that means "possible supply-chain substitution", for what is a half-applied
+# edit. Recording the version here turns it into the same refusal by name instead.
+_DIGESTS_TAKEN_AT: dict[str, str] = {
+    "opengrep": "v1.15.1",
+    "uv": "0.12.23",
+}
+
+# Tools whose release asset is the executable itself rather than an archive.
+_BARE_EXECUTABLE_TOOLS = frozenset({"opengrep"})
 
 
 _RELEASE_BASE_URLS: dict[str, str] = {
     "grype": "https://github.com/anchore/grype/releases/download",
+    "opengrep": "https://github.com/opengrep/opengrep/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
+    "uv": "https://github.com/astral-sh/uv/releases/download",
 }
 
 _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "grype": _GRYPE_ASSETS,
+    "opengrep": _OPENGREP_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
+    "uv": _UV_ASSETS,
 }
 
 
@@ -228,6 +321,15 @@ def get_tool_asset(tool: str, target_platform: str, arch: str) -> ToolAsset:
             f"{target_platform}/{arch}. Available: {available}"
         )
 
+    taken_at = _DIGESTS_TAKEN_AT.get(tool)
+    if taken_at is not None and taken_at != TOOL_VERSIONS[tool]:
+        raise ToolNotProvisionableError(
+            f"{tool} is pinned to {TOOL_VERSIONS[tool]} but its digests in "
+            f"tool_downloads.py were taken from {taken_at}. Its asset names carry no "
+            f"version, so the old digests would be checked against the new release; "
+            f"a version bump is half-applied."
+        )
+
     digest = _DIGESTS.get(filename)
     if digest is None:
         # Reachable only if the asset table and the digest table disagree, which
@@ -246,4 +348,5 @@ def get_tool_asset(tool: str, target_platform: str, arch: str) -> ToolAsset:
         sha256=digest,
         member_name=f"{tool}{suffix}",
         install_as=f"{tool}{suffix}",
+        archive=tool not in _BARE_EXECUTABLE_TOOLS,
     )

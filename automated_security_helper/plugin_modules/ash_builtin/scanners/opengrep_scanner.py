@@ -29,7 +29,9 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.download_utils import (
     create_url_download_command,
     get_opengrep_url,
+    pinned_tool_install_commands,
 )
+from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -82,10 +84,12 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         Field(description="Patterns to search for with OpenGrep."),
     ] = []
 
+    # The pinned version, read from the table rather than restated, so the default
+    # and the digests it is verified against cannot name different releases.
     version: Annotated[
         str,
         Field(description="Version of OpenGrep to use."),
-    ] = "v1.15.1"
+    ] = TOOL_VERSIONS["opengrep"]
 
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
@@ -117,8 +121,26 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "OpengrepScanner":
-        """Set up custom installation commands for opengrep."""
+        """Set up custom installation commands for opengrep.
+
+        The default version is installed from the pinned table in
+        ``utils/tool_downloads.py``, verified against its SHA256 before it is put
+        on disk, exactly as grype, syft and trivy are. Before this, every install
+        fetched the release asset by URL with no digest at all, so the binary a
+        SAST scan then trusted was whatever that URL served.
+
+        A version configured away from the pin has no digest to check, so it keeps
+        the previous URL download, which logs a warning that integrity was not
+        verified. Refusing it would break every configuration that names a version
+        today; the warning is what makes the choice visible.
+        """
         version = self.config.options.version
+        if version == TOOL_VERSIONS["opengrep"]:
+            self.custom_install_commands.update(
+                pinned_tool_install_commands("opengrep")
+            )
+            return self
+
         # TODO: detect manylinux vs musllinux
         linux_type = "manylinux"
 
