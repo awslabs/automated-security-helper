@@ -1,5 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+#checkov:skip=CKV_DOCKER_2:Nothing reads a Docker HEALTHCHECK here. The jetbrains-ci visual job runs this image once with docker run --rm and reads the exit status of ui-test-in-container.sh; there is no orchestrator and no long-running service to probe.
+#checkov:skip=CKV_DOCKER_3:Starting as root is what lets the suite run as the checkout's owner, whose uid is the runner's and not known when the image is built. ui-test-in-container.sh re-executes through run-unprivileged.sh as that owner before Gradle or the IDE starts, the way verify-in-container.sh does; a fixed USER here would run the suite as a uid that cannot write the mounted checkout.
 #
 # The image the JetBrains plugin's visual snapshots are rendered in.
 #

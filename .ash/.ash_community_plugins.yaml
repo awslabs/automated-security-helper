@@ -1110,6 +1110,29 @@ global_settings:
         Lambda manages this execution environment's lifecycle through the Runtime
         API and never reads a Docker HEALTHCHECK, so the instruction would have no
         effect. Same reasoning as this file's inline CKV_DOCKER_2 skip.
+    # The editors' visual-snapshot images follow the same one-to-one mapping. Each is
+    # built and run once per visual job with `docker run --rm`, so DS-0026 has no
+    # reader on either. The VS Code image sets USER node, which clears DS-0002 there;
+    # the JetBrains image cannot, and its inline CKV_DOCKER_3 skip says why.
+    - rule_id: DS-0002
+      path: editors/jetbrains/ui-test/Dockerfile
+      reason: >-
+        No USER on purpose: the container starts as root so ui-test-in-container.sh
+        can re-execute through run-unprivileged.sh as the owner of the mounted
+        checkout, whose uid is the runner's and unknown at build time. Same
+        reasoning as this file's inline CKV_DOCKER_3 skip.
+    - rule_id: DS-0026
+      path: editors/jetbrains/ui-test/Dockerfile
+      reason: >-
+        A one-shot test runner: the visual job runs it once and reads its exit
+        status, and nothing reads a HEALTHCHECK. Same reasoning as this file's
+        inline CKV_DOCKER_2 skip.
+    - rule_id: DS-0026
+      path: editors/vscode/test/visual/Dockerfile
+      reason: >-
+        A one-shot test runner: test/snapshots.ts runs it once and reads its exit
+        status, and nothing reads a HEALTHCHECK. Same reasoning as this file's
+        inline CKV_DOCKER_2 skip.
     # === trivy license scanner: two expressions the approved list does not match ===
     #
     # The approved-license entries above are keyed on rule ids of the form

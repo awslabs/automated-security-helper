@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+#checkov:skip=CKV_DOCKER_2:Nothing reads a Docker HEALTHCHECK here. test/snapshots.ts runs this image once per visual run with docker run --rm, waits for it to exit and reads its exit status; there is no orchestrator and no long-running service to probe.
 
 # The environment the VS Code pixel snapshots are rendered in. See README.md beside
 # this file for why each pin is here; in short, a pixel baseline is a picture of this
@@ -51,3 +52,9 @@ RUN curl -fsSL --retry 5 -o /tmp/vscode.tar.gz \
 ENV ASH_VISUAL_VSCODE=/opt/vscode/code \
     LANG=C.UTF-8 \
     TZ=UTC
+
+# The base image's unprivileged user, so the image never defaults to root.
+# test/snapshots.ts passes --user with the invoking uid and gid wherever the platform
+# has them, which overrides this, so files written into the mounted tree belong to
+# whoever ran the suite; this line decides only the fallback.
+USER node
