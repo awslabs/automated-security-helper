@@ -1,0 +1,901 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`the scan outcomes a user can see a configuration error, exit 3 1`] = `
+{
+  "exitCode": 3,
+  "notifications": [
+    {
+      "message": "ASH: the scan did not complete (exit 3). See the ASH output channel.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "the scan did not complete (exit 3)
+ASH scan output, last line",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "scan-failed",
+}
+`;
+
+exports[`the scan outcomes a user can see a configured executable that does not exist 1`] = `
+{
+  "notifications": [
+    {
+      "message": "ASH: Could not run "/opt/ash/bin/ashx": it is not on PATH. Install ASH, or set ash.executablePath to its full path.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Could not run "/opt/ash/bin/ashx": it is not on PATH. Install ASH, or set ash.executablePath to its full path.",
+  ],
+  "problems": {},
+  "progress": [],
+  "status": "wrong-executable",
+}
+`;
+
+exports[`the scan outcomes a user can see a stale report the extension could not delete 1`] = `
+{
+  "exitCode": 2,
+  "notifications": [
+    {
+      "message": "ASH: the SARIF report at <workspace>/.ash/ash_output/reports/ash.sarif was not rewritten by this run (exit 2); it is from a previous scan, and showing it would present old findings as this run's result.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "could not remove the previous <workspace>/.ash/ash_output/reports/ash.sarif; comparing modification times to tell this run's output from the last one",
+    "could not remove the previous <workspace>/.ash/ash_output/ash_aggregated_results.json; comparing modification times to tell this run's output from the last one",
+    "the SARIF report at <workspace>/.ash/ash_output/reports/ash.sarif was not rewritten by this run (exit 2); it is from a previous scan, and showing it would present old findings as this run's result.",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "stale-report",
+}
+`;
+
+exports[`the scan outcomes a user can see an unreadable report 1`] = `
+{
+  "exitCode": 2,
+  "notifications": [
+    {
+      "message": "ASH: <workspace>/.ash/ash_output/reports/ash.sarif: the SARIF report is not valid JSON: Expected property name or '}' in JSON at position 2 (line 1 column 3)",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "<workspace>/.ash/ash_output/reports/ash.sarif: the SARIF report is not valid JSON: Expected property name or '}' in JSON at position 2 (line 1 column 3)",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "unreadable-report",
+}
+`;
+
+exports[`the scan outcomes a user can see ash.extraArguments sets --output-dir 1`] = `
+{
+  "notifications": [
+    {
+      "message": "ASH: ash.extraArguments contains --output-dir, which this extension sets itself. Remove it; use ash.outputDirectory to choose where the scan writes.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "ash.extraArguments contains --output-dir, which this extension sets itself. Remove it; use ash.outputDirectory to choose where the scan writes.",
+  ],
+  "problems": {},
+  "progress": [],
+  "status": "bad-setting",
+}
+`;
+
+exports[`the scan outcomes a user can see ash.outputDirectory escapes the workspace 1`] = `
+{
+  "notifications": [
+    {
+      "message": "ASH: ash.outputDirectory (../out) resolves to /out, which is not inside the workspace folder. ASH clears directories under its output directory before scanning, so it must be a folder inside the workspace. Clear it to use the default (.ash/ash_output).",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "ash.outputDirectory (../out) resolves to /out, which is not inside the workspace folder. ASH clears directories under its output directory before scanning, so it must be a folder inside the workspace. Clear it to use the default (.ash/ash_output).",
+  ],
+  "problems": {},
+  "progress": [],
+  "status": "bad-setting",
+}
+`;
+
+exports[`the scan outcomes a user can see ash.outputDirectory holds a NUL 1`] = `
+{
+  "notifications": [
+    {
+      "message": "ASH: ash.outputDirectory contains a NUL character, which no path can hold. Change it, or clear it to use the default (.ash/ash_output).",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "ash.outputDirectory contains a NUL character, which no path can hold. Change it, or clear it to use the default (.ash/ash_output).",
+  ],
+  "problems": {},
+  "progress": [],
+  "status": "bad-setting",
+}
+`;
+
+exports[`the scan outcomes a user can see ash.outputDirectory is absolute 1`] = `
+{
+  "notifications": [
+    {
+      "message": "ASH: ash.outputDirectory is "/elsewhere", an absolute path. It must be relative to the workspace folder and stay inside it. Change it, or clear it to use the default (.ash/ash_output).",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "ash.outputDirectory is "/elsewhere", an absolute path. It must be relative to the workspace folder and stay inside it. Change it, or clear it to use the default (.ash/ash_output).",
+  ],
+  "problems": {},
+  "progress": [],
+  "status": "bad-setting",
+}
+`;
+
+exports[`the scan outcomes a user can see ash.outputDirectory is the workspace itself 1`] = `
+{
+  "notifications": [
+    {
+      "message": "ASH: ash.outputDirectory (.) resolves to <workspace>, which is not inside the workspace folder. ASH clears directories under its output directory before scanning, so it must be a folder inside the workspace. Clear it to use the default (.ash/ash_output).",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "ash.outputDirectory (.) resolves to <workspace>, which is not inside the workspace folder. ASH clears directories under its output directory before scanning, so it must be a folder inside the workspace. Clear it to use the default (.ash/ash_output).",
+  ],
+  "problems": {},
+  "progress": [],
+  "status": "bad-setting",
+}
+`;
+
+exports[`the scan outcomes a user can see ashx answers and is not ASH 1`] = `
+{
+  "notifications": [
+    {
+      "message": "ASH: "ashx" answered, but it is not ASH: \`ashx --version\` printed "BusyBox v1.36.1 (ash)" instead of a string naming automated-security-helper. Another program with that name is ahead of ASH on PATH, most often the Almquist shell that BusyBox installs as "ash". Set ash.executablePath to "automated-security-helper", which ASH installs for this case, or to ASH's full path. Refusing to scan: a shell writes no report, and an empty report would look exactly like a clean scan.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    ""ashx" answered, but it is not ASH: \`ashx --version\` printed "BusyBox v1.36.1 (ash)" instead of a string naming automated-security-helper. Another program with that name is ahead of ASH on PATH, most often the Almquist shell that BusyBox installs as "ash". Set ash.executablePath to "automated-security-helper", which ASH installs for this case, or to ASH's full path. Refusing to scan: a shell writes no report, and an empty report would look exactly like a clean scan.",
+  ],
+  "problems": {},
+  "progress": [],
+  "status": "wrong-executable",
+}
+`;
+
+exports[`the scan outcomes a user can see ashx missing, ash present: the fallback notice already shown 1`] = `
+{
+  "exitCode": 0,
+  "fallbackNotice": "already-shown",
+  "notifications": [
+    {
+      "message": "ASH: scan completed with no findings at or above the configured severity threshold.",
+      "severity": "info",
+    },
+  ],
+  "output": [
+    "Using ash: awslabs/automated-security-helper v3.7.0",
+    ""ashx" is not on PATH; fell back to "ash"",
+    "AWS Labs - Automated Security Helper: 0 finding(s) across 0 file(s); 0 suppressed by ASH, 0 not failures, 0 with no file location, 0 naming no local file",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "ok",
+  "summary": {
+    "diagnostics": 0,
+    "files": 0,
+    "notFailures": 0,
+    "suppressed": 0,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see ashx missing, ash present: the fallback notice, first time 1`] = `
+{
+  "exitCode": 0,
+  "fallbackNotice": "shown",
+  "notifications": [
+    {
+      "message": "ASH: "ashx" is not on PATH, so this extension is running "ash" instead. That works, and this notice is shown once. Install a version of ASH that provides "ashx", or set ash.executablePath to pin an executable and stop the lookup.",
+      "severity": "info",
+    },
+    {
+      "message": "ASH: scan completed with no findings at or above the configured severity threshold.",
+      "severity": "info",
+    },
+  ],
+  "output": [
+    "Using ash: awslabs/automated-security-helper v3.7.0",
+    ""ashx" is not on PATH; fell back to "ash"",
+    "AWS Labs - Automated Security Helper: 0 finding(s) across 0 file(s); 0 suppressed by ASH, 0 not failures, 0 with no file location, 0 naming no local file",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "ok",
+  "summary": {
+    "diagnostics": 0,
+    "files": 0,
+    "notFailures": 0,
+    "suppressed": 0,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see cancelled 1`] = `
+{
+  "exitCode": null,
+  "notifications": [
+    {
+      "message": "ASH: the scan was cancelled, and its process tree was stopped.",
+      "severity": "info",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "the scan was cancelled, and its process tree was stopped.",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "cancelled",
+}
+`;
+
+exports[`the scan outcomes a user can see clean, exit 0 1`] = `
+{
+  "exitCode": 0,
+  "notifications": [
+    {
+      "message": "ASH: scan completed with no findings at or above the configured severity threshold.",
+      "severity": "info",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "AWS Labs - Automated Security Helper: 0 finding(s) across 0 file(s); 0 suppressed by ASH, 0 not failures, 0 with no file location, 0 naming no local file",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "ok",
+  "summary": {
+    "diagnostics": 0,
+    "files": 0,
+    "notFailures": 0,
+    "suppressed": 0,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see exit 0 with no report 1`] = `
+{
+  "exitCode": 0,
+  "notifications": [
+    {
+      "message": "ASH: the scan exited 0 but wrote no SARIF report at <workspace>/.ash/ash_output/reports/ash.sarif, so there are no findings to show and no evidence the tree is clean.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "the scan exited 0 but wrote no SARIF report at <workspace>/.ash/ash_output/reports/ash.sarif, so there are no findings to show and no evidence the tree is clean.",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "no-report",
+}
+`;
+
+exports[`the scan outcomes a user can see exit 1 with no report: a crash 1`] = `
+{
+  "exitCode": 1,
+  "notifications": [
+    {
+      "message": "ASH: the scan exited 1 and wrote no SARIF report at <workspace>/.ash/ash_output/reports/ash.sarif, so it failed before producing results. See the ASH output channel.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "the scan exited 1 and wrote no SARIF report at <workspace>/.ash/ash_output/reports/ash.sarif, so it failed before producing results.
+ASH scan output, last line",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "scan-failed",
+}
+`;
+
+exports[`the scan outcomes a user can see findings that cannot be placed in the editor 1`] = `
+{
+  "exitCode": 2,
+  "notifications": [
+    {
+      "message": "ASH: 1 finding(s) named no file and 1 finding(s) named a file with no path on this machine and cannot be placed in the editor. See the ASH output channel.",
+      "severity": "error",
+    },
+    {
+      "message": "ASH: 2 finding(s) in 1 file(s). See the Problems panel.",
+      "severity": "info",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "AWS Labs - Automated Security Helper: 2 finding(s) across 1 file(s); 1 suppressed by ASH, 0 not failures, 1 with no file location, 1 naming no local file",
+  ],
+  "problems": {
+    "<workspace>/planted_secret.py": [
+      {
+        "code": "SECRET-AWS-ACCESS-KEY",
+        "message": "Secret of type 'AWS Access Key' detected in file 'planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "SECRET-BASE64-HIGH-ENTROPY-STRING",
+        "message": "Secret of type 'Base64 High Entropy String' detected in file 'planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+    ],
+  },
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "ok",
+  "summary": {
+    "diagnostics": 2,
+    "files": 1,
+    "notFailures": 0,
+    "suppressed": 1,
+    "unlocated": 1,
+    "unresolved": 1,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see findings, exit 2 1`] = `
+{
+  "exitCode": 2,
+  "notifications": [
+    {
+      "message": "ASH: 2 finding(s) in 1 file(s). See the Problems panel.",
+      "severity": "info",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "AWS Labs - Automated Security Helper: 2 finding(s) across 1 file(s); 1 suppressed by ASH, 0 not failures, 0 with no file location, 0 naming no local file",
+  ],
+  "problems": {
+    "<workspace>/planted_secret.py": [
+      {
+        "code": "SECRET-AWS-ACCESS-KEY",
+        "message": "Secret of type 'AWS Access Key' detected in file 'planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "SECRET-BASE64-HIGH-ENTROPY-STRING",
+        "message": "Secret of type 'Base64 High Entropy String' detected in file 'planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+    ],
+  },
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "ok",
+  "summary": {
+    "diagnostics": 2,
+    "files": 1,
+    "notFailures": 0,
+    "suppressed": 1,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see incomplete by coverage, exit 2 1`] = `
+{
+  "exitCode": 2,
+  "notifications": [
+    {
+      "message": "ASH: the scan is incomplete (exit 2): scanner semgrep: ERROR. The 3 finding(s) shown are real but may not be all of them.",
+      "severity": "warning",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "AWS Labs - Automated Security Helper: 3 finding(s) across 1 file(s); 0 suppressed by ASH, 0 not failures, 0 with no file location, 0 naming no local file",
+    "the scan is incomplete (exit 2): scanner semgrep: ERROR. The 3 finding(s) shown are real but may not be all of them.",
+  ],
+  "problems": {
+    "<workspace>/planted_secret.py": [
+      {
+        "code": "SECRET-BASE64-HIGH-ENTROPY-STRING",
+        "message": "Secret of type 'Base64 High Entropy String' detected in file '<workspace>/planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "SECRET-AWS-ACCESS-KEY",
+        "message": "Secret of type 'AWS Access Key' detected in file '<workspace>/planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "SECRET-SECRET-KEYWORD",
+        "message": "Secret of type 'Secret Keyword' detected in file '<workspace>/planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+    ],
+  },
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "incomplete",
+  "summary": {
+    "diagnostics": 3,
+    "files": 1,
+    "notFailures": 0,
+    "suppressed": 0,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see incomplete, exit 1, a scanner errored 1`] = `
+{
+  "exitCode": 1,
+  "notifications": [
+    {
+      "message": "ASH: the scan is incomplete (exit 1): scanner semgrep: ERROR. The 3 finding(s) shown are real but may not be all of them.",
+      "severity": "warning",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "AWS Labs - Automated Security Helper: 3 finding(s) across 1 file(s); 0 suppressed by ASH, 0 not failures, 0 with no file location, 0 naming no local file",
+    "the scan is incomplete (exit 1): scanner semgrep: ERROR. The 3 finding(s) shown are real but may not be all of them.",
+  ],
+  "problems": {
+    "<workspace>/planted_secret.py": [
+      {
+        "code": "SECRET-BASE64-HIGH-ENTROPY-STRING",
+        "message": "Secret of type 'Base64 High Entropy String' detected in file '<workspace>/planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "SECRET-AWS-ACCESS-KEY",
+        "message": "Secret of type 'AWS Access Key' detected in file '<workspace>/planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "SECRET-SECRET-KEYWORD",
+        "message": "Secret of type 'Secret Keyword' detected in file '<workspace>/planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+    ],
+  },
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "incomplete",
+  "summary": {
+    "diagnostics": 3,
+    "files": 1,
+    "notFailures": 0,
+    "suppressed": 0,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see incomplete, exit 1, a scanner is missing 1`] = `
+{
+  "exitCode": 1,
+  "notifications": [
+    {
+      "message": "ASH: the scan is incomplete (exit 1): scanner cfn-nag: MISSING. The Problems panel is empty, but that is not the same as clean.",
+      "severity": "warning",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "AWS Labs - Automated Security Helper: 0 finding(s) across 0 file(s); 0 suppressed by ASH, 0 not failures, 0 with no file location, 0 naming no local file",
+    "the scan is incomplete (exit 1): scanner cfn-nag: MISSING. The Problems panel is empty, but that is not the same as clean.",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "incomplete",
+  "summary": {
+    "diagnostics": 0,
+    "files": 0,
+    "notFailures": 0,
+    "suppressed": 0,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see killed by a signal 1`] = `
+{
+  "exitCode": null,
+  "notifications": [
+    {
+      "message": "ASH: the scan did not complete (exit null). See the ASH output channel.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "the scan did not complete (exit null)
+ASH scan output, last line",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "scan-failed",
+}
+`;
+
+exports[`the scan outcomes a user can see neither ashx nor ash is on PATH 1`] = `
+{
+  "notifications": [
+    {
+      "message": "ASH: Neither "ashx" nor "ash" is on PATH. Install ASH, or set ash.executablePath to its full path.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Neither "ashx" nor "ash" is on PATH. Install ASH, or set ash.executablePath to its full path.",
+  ],
+  "problems": {},
+  "progress": [],
+  "status": "wrong-executable",
+}
+`;
+
+exports[`the scan outcomes a user can see no aggregated results beside the report 1`] = `
+{
+  "exitCode": 2,
+  "notifications": [
+    {
+      "message": "ASH: could not confirm that every selected scanner ran: this run wrote no readable ash_aggregated_results.json beside the report. The findings shown are real.",
+      "severity": "warning",
+    },
+    {
+      "message": "ASH: 2 finding(s) in 1 file(s). See the Problems panel.",
+      "severity": "info",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "no ash_aggregated_results.json at <workspace>/.ash/ash_output/ash_aggregated_results.json",
+    "AWS Labs - Automated Security Helper: 2 finding(s) across 1 file(s); 1 suppressed by ASH, 0 not failures, 0 with no file location, 0 naming no local file",
+  ],
+  "problems": {
+    "<workspace>/planted_secret.py": [
+      {
+        "code": "SECRET-AWS-ACCESS-KEY",
+        "message": "Secret of type 'AWS Access Key' detected in file 'planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+      {
+        "code": "SECRET-BASE64-HIGH-ENTROPY-STRING",
+        "message": "Secret of type 'Base64 High Entropy String' detected in file 'planted_secret.py' at line 25",
+        "range": "24:0-24:EOL",
+        "severity": "Error",
+        "source": "ASH (detect-secrets)",
+      },
+    ],
+  },
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "ok",
+  "summary": {
+    "diagnostics": 2,
+    "files": 1,
+    "notFailures": 0,
+    "suppressed": 1,
+    "unlocated": 0,
+    "unresolved": 0,
+  },
+}
+`;
+
+exports[`the scan outcomes a user can see no workspace folder 1`] = `
+{
+  "exitCode": 2,
+  "notifications": [
+    {
+      "message": "ASH: the scan exited 2 but wrote no SARIF report at <workspace>/.ash/ash_output/reports/ash.sarif, so there are no findings to show and no evidence the tree is clean.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "the scan exited 2 but wrote no SARIF report at <workspace>/.ash/ash_output/reports/ash.sarif, so there are no findings to show and no evidence the tree is clean.",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "no-report",
+}
+`;
+
+exports[`the scan outcomes a user can see the scan could not start 1`] = `
+{
+  "exitCode": null,
+  "notifications": [
+    {
+      "message": "ASH: the scan did not complete (exit null): spawn EACCES. See the ASH output channel.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "the scan did not complete (exit null): spawn EACCES
+ASH scan output, last line",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "scan-failed",
+}
+`;
+
+exports[`the scan outcomes a user can see timed out 1`] = `
+{
+  "exitCode": null,
+  "notifications": [
+    {
+      "message": "ASH: the scan did not finish within 1800s and was stopped, along with every process it started. Raise ash.scanTimeoutSeconds if large scans legitimately take longer, or set it to 0 to wait indefinitely.",
+      "severity": "error",
+    },
+  ],
+  "output": [
+    "Using ashx: awslabs/automated-security-helper v3.7.0",
+    "the scan did not finish within 1800s and was stopped, along with every process it started. Raise ash.scanTimeoutSeconds if large scans legitimately take longer, or set it to 0 to wait indefinitely.
+ASH scan output, last line",
+  ],
+  "problems": {},
+  "progress": [
+    {
+      "cancellable": true,
+      "location": 15,
+      "title": "ASH: scanning workspace",
+    },
+  ],
+  "status": "scan-failed",
+}
+`;
+
+exports[`what the manifest and activation present activation registers the commands, the Problems source and the output channel 1`] = `
+{
+  "commands": [
+    "ash.clearFindings",
+    "ash.scanWorkspace",
+  ],
+  "diagnosticCollections": [
+    "ash",
+  ],
+  "notifications": [],
+  "outputChannels": [
+    {
+      "lines": [
+        "Cleared ASH findings.",
+      ],
+      "name": "ASH",
+    },
+  ],
+}
+`;
+
+exports[`what the manifest and activation present package.json contributions and the text around them 1`] = `
+{
+  "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "description": "A scan runs ASH over the workspace, and ASH reads the workspace's own .ash/.ash.yaml, which can load Python plugin modules and so run code the repository supplies. Trust the workspace to scan it.",
+      "supported": false,
+    },
+  },
+  "categories": [
+    "Linters",
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "category": "ASH",
+        "command": "ash.scanWorkspace",
+        "title": "ASH: Scan workspace",
+      },
+      {
+        "category": "ASH",
+        "command": "ash.clearFindings",
+        "title": "ASH: Clear findings",
+      },
+    ],
+    "configuration": {
+      "properties": {
+        "ash.executablePath": {
+          "default": "",
+          "markdownDescription": "The ASH executable to run. Empty (the default) runs \`ashx\` from PATH, and runs \`ash\` instead when \`ashx\` is not installed, with a one-time notice. Any other value is run exactly as given, with no fallback. On Windows with MSYS2 or Git Bash on PATH, a bare \`ash\` can resolve to the Almquist shell instead of ASH; set this to \`automated-security-helper\`, which ASH installs as a permanent alias for exactly that case.
+
+Machine-scoped: this names a program that gets executed, so a cloned repository cannot set it from its own \`.vscode/settings.json\`.",
+          "scope": "machine",
+          "type": "string",
+        },
+        "ash.extraArguments": {
+          "default": [],
+          "items": {
+            "type": "string",
+          },
+          "markdownDescription": "Extra arguments appended to \`ashx scan\`, for example \`--scanners detect-secrets\` or \`--offline\`. \`--output-dir\` and \`--source-dir\` are refused, in either form: the extension sets both, and \`ash.outputDirectory\` chooses where the scan writes.",
+          "type": "array",
+        },
+        "ash.outputDirectory": {
+          "default": ".ash/ash_output",
+          "markdownDescription": "Directory the scan writes to, relative to the workspace folder. ASH writes its SARIF report to \`reports/ash.sarif\` underneath it.
+
+It must resolve, symlinks included, to a folder inside the workspace folder. ASH clears directories under it before each scan, so an absolute path, a \`..\` escape or a link out of the workspace is refused and nothing runs.",
+          "type": "string",
+        },
+        "ash.scanTimeoutSeconds": {
+          "default": 1800,
+          "markdownDescription": "Seconds to wait for a scan before stopping it and every process it started. \`0\` waits indefinitely. A scan can also be stopped from its progress notification.",
+          "minimum": 0,
+          "type": "number",
+        },
+      },
+      "title": "Automated Security Helper",
+    },
+  },
+  "description": "Runs the ASH CLI over the open workspace and reports its SARIF findings as editor diagnostics. Ships no scanners and no copy of ASH.",
+  "displayName": "Automated Security Helper",
+  "engines": {
+    "node": ">=22",
+    "vscode": "^1.85.0",
+  },
+  "publisher": "awslabs",
+}
+`;

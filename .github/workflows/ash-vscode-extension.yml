@@ -53,6 +53,8 @@ on:
       # toolchain this job builds on.
       - ".nvmrc"
       - ".github/workflows/ash-vscode-extension.yml"
+      # The editor-snapshots job runs this, and its self-test is the only test of it.
+      - ".github/scripts/check-editor-snapshot-trailers.py"
       # The coverage-parity job below runs ASH's own coverage rule over the
       # extension's fixtures, so a change to that rule must run it. These are the
       # modules `assess_coverage` reads its verdict through.
@@ -81,6 +83,7 @@ on:
       - "editors/vscode/**"
       - ".nvmrc"
       - ".github/workflows/ash-vscode-extension.yml"
+      - ".github/scripts/check-editor-snapshot-trailers.py"
       - "tests/unit/test_vscode_coverage_parity.py"
       - "automated_security_helper/interactions/run_ash_scan.py"
       - "automated_security_helper/core/resource_management/scan_tracking.py"
@@ -371,3 +374,92 @@ jobs:
 
       - name: Run the parity test
         run: uv run --group dev pytest tests/unit/test_vscode_coverage_parity.py -q --no-cov -p no:cacheprovider
+
+  # Structural snapshots of what the extension shows a user, and the rules that make
+  # changing one a decision: a changed or new snapshot fails (jest runs with `ci: true`
+  # and --ci), an obsolete one fails (jest --ci exits 1 on an unchecked snapshot or an
+  # obsolete .snap file, measured), a snapshot or PNG no test owns fails (--orphans),
+  # and a commit in this push or pull request that changed one without a
+  # `Snapshot-Update: <reason>` trailer fails. Nothing here passes an update flag;
+  # test/snapshot-policy.test.ts fails if anything under .github/ does. See
+  # editors/vscode/test/visual/README.md.
+  #
+  # The trailer range is the event's: before..after on a push, fork point..head on a
+  # pull request. fetch-depth: 0 because both ends have to be in the clone.
+  editor-snapshots:
+    name: "snapshots: structural, Snapshot-Update trailers, orphans"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Cache off for the same reason as the integration job's setup-node.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # --self-test first: a checker that has degenerated into finding nothing exits
+      # 0 and reads as a clean range. `set -e` so a failing self-test stops the step.
+      - name: Assert every editor snapshot change carries a Snapshot-Update trailer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-editor-snapshot-trailers.py --self-test
+          python3 .github/scripts/check-editor-snapshot-trailers.py
+
+      - name: Assert every editor snapshot and PNG baseline belongs to a test
+        run: python3 .github/scripts/check-editor-snapshot-trailers.py --orphans
+
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      # The whole jest suite and not only the snapshot files: jest reports an obsolete
+      # .snap file only on a run that could have collected its test.
+      - name: Structural snapshots
+        working-directory: editors/vscode
+        run: npm run snapshots -- structural
+
+  # Pixel snapshots of the extension's UI in a real VS Code: the Problems panel with
+  # ASH diagnostics, the hover over a finding, the incomplete-scan (exit 1) warning and
+  # the ashx -> ash fallback notice, each compared with its PNG baseline in
+  # test/visual/__snapshots__/ at zero differing pixels. Rendered inside the image
+  # test/visual/Dockerfile builds, which pins the base image by digest, Debian packages
+  # (Xvfb, fonts, FreeType) to one snapshot.debian.org instant, and VS Code 1.140.0 by
+  # SHA-256; test/visual/run.ts pins the screen, DPI, scale factor, theme, font and
+  # settings. The image is built here and never pushed. On a mismatch the captures
+  # and a diff image per scenario are uploaded.
+  visual-snapshots:
+    name: "snapshots: pixels in a pinned VS Code"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Cache off for the same reason as the integration job's setup-node.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Pixel snapshots
+        working-directory: editors/vscode
+        run: npm run snapshots -- visual --artifacts "$RUNNER_TEMP/visual-snapshots"
+
+      - name: Upload the captures and diffs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vscode-visual-snapshots-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/visual-snapshots/
+          retention-days: 7
+          if-no-files-found: warn

@@ -302,6 +302,24 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=vscode-visual-snapshots-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=${{ runner.temp }}/visual-snapshots/"
+        ),
+        reason=(
+            "Failure evidence only (if: failure()): PNG screen captures of a VS Code "
+            "window showing the extension's UI over the committed test fixture, and a "
+            "diff image per mismatched scenario. The same pictures as the baselines "
+            "committed under editors/vscode/test/visual/__snapshots__/, so nothing in "
+            "them is not already in the repository. No built code. 7-day retention; "
+            "if-no-files-found: warn because a failure before the first capture (the "
+            "image build) leaves nothing to upload, and the job is already red."
+        ),
+    ),
+    Entry(
         file=".github/workflows/ash-jetbrains-ci.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,

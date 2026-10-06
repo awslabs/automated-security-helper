@@ -301,6 +301,16 @@ your login shell's environment and puts its PATH ahead of the suite's, so an
 installed scanner or a real `ash` on the development machine answers instead of
 the one under test.
 
+## Snapshot tests
+
+What the extension shows a user is pinned twice: jest snapshots of every
+notification, diagnostic, log line and contribution (`test/ui-snapshots.test.ts`),
+and PNG baselines of the Problems panel, a hover and two notifications rendered by
+VS Code 1.140.0 in a pinned container (`test/visual/`). A change to either fails
+until it is rewritten with `npm run snapshots -- --snapshot-update <structural|visual>`
+and committed with a `Snapshot-Update: <reason>` trailer, which CI checks. See
+[test/visual/README.md](test/visual/README.md).
+
 ## Why this is not in the agentic-coding transpiler
 
 `ash-agent-plugins/agentic-coding/transpiler/transpiler/packagers.py` names a

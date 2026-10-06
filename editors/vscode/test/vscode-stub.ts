@@ -190,6 +190,12 @@ export const state = {
   errors: [] as string[],
   warnings: [] as string[],
   infos: [] as string[],
+  /**
+   * Every notification in the order it was raised, across all three severities.
+   * The per-severity lists above lose the interleaving, and the order is part of
+   * what a user sees: test/ui-snapshots.test.ts snapshots this list.
+   */
+  notifications: [] as { severity: 'error' | 'warning' | 'info'; message: string }[],
   channels: [] as OutputChannel[],
   collections: [] as DiagnosticCollection[],
   commands: new Map<string, (...args: unknown[]) => unknown>(),
@@ -201,6 +207,7 @@ export function resetState(): void {
   state.errors = [];
   state.warnings = [];
   state.infos = [];
+  state.notifications = [];
   state.channels = [];
   state.collections = [];
   state.commands = new Map();
@@ -256,14 +263,17 @@ export const window = {
   },
   showErrorMessage(message: string): Promise<undefined> {
     state.errors.push(message);
+    state.notifications.push({ severity: 'error', message });
     return Promise.resolve(undefined);
   },
   showWarningMessage(message: string): Promise<undefined> {
     state.warnings.push(message);
+    state.notifications.push({ severity: 'warning', message });
     return Promise.resolve(undefined);
   },
   showInformationMessage(message: string): Promise<undefined> {
     state.infos.push(message);
+    state.notifications.push({ severity: 'info', message });
     return Promise.resolve(undefined);
   },
 };

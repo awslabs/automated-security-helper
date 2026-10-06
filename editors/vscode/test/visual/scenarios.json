@@ -1,0 +1,21 @@
+{
+  "//": "The pixel snapshots the visual suite takes, one PNG baseline each in __snapshots__/. Read by test/visual/scenarios.ts for the suite, and by .github/scripts/check-editor-snapshot-trailers.py --orphans, which fails a PNG named here by no scenario, or a scenario with no PNG.",
+  "scenarios": [
+    {
+      "name": "fallback-notice",
+      "shows": "the one-time notice shown when ashx is not on PATH and ash runs instead"
+    },
+    {
+      "name": "problems-panel",
+      "shows": "the Problems panel after a scan with findings, with planted_secret.py open"
+    },
+    {
+      "name": "diagnostic-hover",
+      "shows": "the hover over the line a finding is on: message, source and rule code"
+    },
+    {
+      "name": "incomplete-scan-notification",
+      "shows": "the warning a scan that exits 1 with partial results raises (ScanIncompleteExit)"
+    }
+  ]
+}

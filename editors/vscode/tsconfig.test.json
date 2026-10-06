@@ -7,5 +7,5 @@
     "types": ["node", "vscode", "jest"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["node_modules", "out", "out-integration", "test/integration"]
+  "exclude": ["node_modules", "out", "out-integration", "test/integration", "test/visual/run.ts", "test/visual/suite", "test/snapshots.ts"]
 }
