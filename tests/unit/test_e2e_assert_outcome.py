@@ -57,7 +57,9 @@ def test_cli_findings_case_accepts_a_matching_output(tmp_path):
 
 def test_cli_rejects_the_wrong_exit_code(tmp_path):
     out = _write(
-        tmp_path, [ao._sarif_result("detect-secrets")] * 3, {"detect-secrets": "FAILED"}
+        tmp_path,
+        [ao._sarif_result("detect-secrets")] * 3,
+        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
     )
     assert ao.main(["--case", "findings", "--output-dir", str(out), "--rc", "0"]) == 1
 
@@ -66,13 +68,13 @@ def test_cli_incomplete_case_requires_the_named_scanner(tmp_path):
     out = _write(
         tmp_path,
         [ao._sarif_result("detect-secrets")] * 3,
-        {"detect-secrets": "FAILED", "opengrep": "PASSED"},
+        {"detect-secrets": "FAILED", "opengrep": "PASSED"},  # pragma: allowlist secret
     )
     assert ao.main(["--case", "incomplete", "--output-dir", str(out), "--rc", "1"]) == 1
 
 
 def test_cli_refuses_exit_one_without_a_named_scanner(tmp_path):
-    out = _write(tmp_path, [], {"detect-secrets": "PASSED"})
+    out = _write(tmp_path, [], {"detect-secrets": "PASSED"})  # pragma: allowlist secret
     rc = ao.main(
         [
             "--output-dir",
@@ -92,7 +94,9 @@ def test_cli_refuses_exit_one_without_a_named_scanner(tmp_path):
 
 def test_flags_override_the_case(tmp_path):
     out = _write(
-        tmp_path, [ao._sarif_result("detect-secrets")] * 2, {"detect-secrets": "FAILED"}
+        tmp_path,
+        [ao._sarif_result("detect-secrets")] * 2,
+        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
     )
     assert (
         ao.main(
@@ -115,7 +119,7 @@ def test_no_sarif_fallback(tmp_path):
     out = ao._write_output(
         tmp_path,
         [ao._sarif_result("detect-secrets")] * 3,
-        {"detect-secrets": "FAILED"},
+        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
         sarif_at=Path("ash.sarif"),
     )
     problems = ao.check_outcome(

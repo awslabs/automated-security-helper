@@ -395,7 +395,10 @@ def self_test() -> int:
         "detect-secrets": "FAILED",  # pragma: allowlist secret
         "bandit": "SKIPPED",
     }
-    ok_incomplete = {"detect-secrets": "FAILED", "opengrep": "MISSING"}
+    ok_incomplete = {
+        "detect-secrets": "FAILED",  # pragma: allowlist secret
+        "opengrep": "MISSING",
+    }
 
     # (name, results, statuses, rc, expectation, extra writer kwargs, problem substring or None)
     plans: List[Tuple[Any, ...]] = [
@@ -413,7 +416,10 @@ def self_test() -> int:
         (
             "ERROR also counts as incomplete",
             three,
-            {"detect-secrets": "FAILED", "opengrep": "ERROR"},
+            {
+                "detect-secrets": "FAILED",  # pragma: allowlist secret
+                "opengrep": "ERROR",
+            },
             1,
             incomplete,
             {},
@@ -459,7 +465,7 @@ def self_test() -> int:
         (
             "SARIF has no runs",
             [],
-            {"detect-secrets": "PASSED"},
+            {"detect-secrets": "PASSED"},  # pragma: allowlist secret
             0,
             clean,
             {"no_runs": True},
@@ -504,7 +510,10 @@ def self_test() -> int:
         (
             "selected scanner was SKIPPED",
             three,
-            {"detect-secrets": "FAILED", "opengrep": "SKIPPED"},
+            {
+                "detect-secrets": "FAILED",  # pragma: allowlist secret
+                "opengrep": "SKIPPED",
+            },
             1,
             incomplete,
             {},
@@ -513,7 +522,10 @@ def self_test() -> int:
         (
             "trigger scanner ran instead",
             three,
-            {"detect-secrets": "FAILED", "opengrep": "PASSED"},
+            {
+                "detect-secrets": "FAILED",  # pragma: allowlist secret
+                "opengrep": "PASSED",
+            },
             1,
             incomplete,
             {},
@@ -531,7 +543,7 @@ def self_test() -> int:
         (
             "clean scan with an incomplete scanner",
             [],
-            {"detect-secrets": "PASSED", "bandit": "ERROR"},
+            {"detect-secrets": "PASSED", "bandit": "ERROR"},  # pragma: allowlist secret
             0,
             clean,
             {},
@@ -540,7 +552,7 @@ def self_test() -> int:
         (
             "unknown status",
             [],
-            {"detect-secrets": "PASSED", "x": "RUNNING"},
+            {"detect-secrets": "PASSED", "x": "RUNNING"},  # pragma: allowlist secret
             0,
             clean,
             {},
