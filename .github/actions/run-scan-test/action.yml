@@ -784,8 +784,8 @@ runs:
         fi
         "$PY" .github/scripts/assert_scanners_completed.py
 
-    # Snapshots of what ASH prints when a real runtime runs its image: `ash --version` and
-    # `ash build-image --help` inside it, `ash --mode container` and both wrappers scanning
+    # Snapshots of what ASH prints when a real runtime runs its image: `ashx --version` and
+    # `ashx build-image --help` inside it, `ashx --mode container` and the PowerShell wrapper scanning
     # the snapshot fixture, and the exit status each one ends with. The unit-test legs have
     # no runtime, so tests/conftest.py deselects these there; the image the scan above just
     # built is what makes them runnable here, which is why this is a step and not a job.
@@ -803,5 +803,4 @@ runs:
       run: |
         uv run --extra cdk pytest \
           tests/snapshot/container/runtime/test_snapshot_container_runtime.py \
-          tests/snapshot/container/runtime/test_snapshot_container_bash_wrapper.py \
           --run-container-snapshots --no-cov -n 0

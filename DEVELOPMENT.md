@@ -246,7 +246,7 @@ snapshot looks unused to the runs that skip it.
 What container mode and Nix mode print before and after the runtime is snapshotted
 in-process, with only the runner process or the `nix develop` call replaced, under
 `tests/snapshot/container/`. What only a real runtime can produce (output from inside
-the image, a real container or Nix scan, the `./ash` and `ash_helpers.ps1` wrappers) is
+the image, a real container or Nix scan, the `ash_helpers.ps1` wrapper) is
 in `tests/snapshot/container/runtime/`, marked `container_runtime` or `nix_runtime`.
 `tests/conftest.py` deselects those unless `--run-container-snapshots` or
 `--run-nix-snapshots` is passed, which the scan-validation container legs and the Nix

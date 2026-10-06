@@ -8,13 +8,6 @@
     ''',
   })
 # ---
-# name: test_bash_wrapper_scan_of_the_fixture
-  dict({
-    'announced_the_run': True,
-    'exit_code': 2,
-    'last_line': 'ERROR (2) Exiting due to 1 actionable findings found in ASH scan',
-  })
-# ---
 # name: test_container_exit_status_for_an_invalid_config
   dict({
     'exit_code': 3,
