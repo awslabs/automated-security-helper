@@ -497,6 +497,32 @@ describe('spawnAsyncRunner', () => {
     expect(result.stdout).toBe(process.cwd());
   });
 
+  // ASH reads ASH_DEBUG and ASH_VERBOSE as its log level when no flag is given.
+  // The extension passes no `env`, so the child inherits the extension host's
+  // environment; an `env` option that dropped them would make a user's
+  // ASH_DEBUG=true silently do nothing for scans started from the editor.
+  it('passes ASH_DEBUG and ASH_VERBOSE from the host environment to the child', async () => {
+    const saved = { debug: process.env.ASH_DEBUG, verbose: process.env.ASH_VERBOSE };
+    process.env.ASH_DEBUG = 'true';
+    process.env.ASH_VERBOSE = '1';
+    try {
+      const result = await spawnAsyncRunner(process.execPath, [
+        '-e',
+        'process.stdout.write(JSON.stringify([process.env.ASH_DEBUG, process.env.ASH_VERBOSE]))',
+      ]);
+
+      expect(JSON.parse(result.stdout)).toEqual(['true', '1']);
+    } finally {
+      for (const [name, value] of [['ASH_DEBUG', saved.debug], ['ASH_VERBOSE', saved.verbose]] as const) {
+        if (value === undefined) {
+          delete process.env[name];
+        } else {
+          process.env[name] = value;
+        }
+      }
+    }
+  });
+
   it('resolves with ENOENT rather than rejecting when the executable does not exist', async () => {
     const result = await spawnAsyncRunner('ash-that-is-not-installed-anywhere', ['--version']);
 
