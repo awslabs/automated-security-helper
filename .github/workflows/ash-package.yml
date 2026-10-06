@@ -378,9 +378,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # Longer than the 25 minutes the .deb and .rpm jobs get: this one downloads a 633 MB
-    # runtime before it can build, and then its first `ashx` invocation resolves ASH's 27
-    # runtime dependencies from a Python index, which the other two do at install time.
-    timeout-minutes: 40
+    # runtime before it can build, builds two bundles (N and N-1), and each first `ashx`
+    # run after an install or update resolves ASH's runtime dependencies from a Python
+    # index, which the other two do at install time.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -390,10 +391,25 @@ jobs:
           name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: dist
 
-      - name: Build the Flatpak, install it, and run a real scan
-        run: sudo --preserve-env=REPO bash packaging/flatpak/verify-in-container.sh
+      # The upgrade leg's N-1 wheel: this tree with its version lowered (3.7.0 -> 3.6.0),
+      # built and gated by the same script the deb and rpm legs use. Built here and never
+      # uploaded, because a workflow artifact on a public repository is downloadable by
+      # anyone and this wheel is this tree's code under a version it is not. Only its
+      # dist-prev/ half is used; N stays the wheel the build job gated. `sudo` because the
+      # script installs its harness tools with apt-get.
+      - name: Build and gate the N-1 wheel for the upgrade leg
+        run: sudo REPO="$GITHUB_WORKSPACE" bash packaging/build-test-wheels.sh "$RUNNER_TEMP/flatpak-wheels"
+
+      # Builds N and N-1 bundles, installs N fresh, runs the findings, clean and
+      # incomplete cases from tests/e2e/fixtures/cases.json with every verdict from
+      # scripts/e2e/assert_outcome.py, shows those verdicts rejecting wrong outcomes,
+      # uninstalls, then installs N-1 from a local remote and `flatpak update`s it to N.
+      - name: Build the Flatpak, install it, run the e2e cases, upgrade and uninstall
+        run: sudo --preserve-env=REPO,DIST,PREV_DIST bash packaging/flatpak/verify-in-container.sh
         env:
           REPO: ${{ github.workspace }}
+          DIST: ${{ github.workspace }}/dist
+          PREV_DIST: ${{ runner.temp }}/flatpak-wheels/dist-prev
 
   # The MSIX. Unlike the two jobs above there is no container: a hosted Windows runner is
   # both the build host and the test host, and that is a real weakness of this job rather

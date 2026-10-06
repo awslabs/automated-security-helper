@@ -356,4 +356,10 @@ bwrap before it checks anything else, so an environment that cannot build a Flat
 so in its first few lines.
 
   docker run --rm --privileged -v "$PWD:/src" -v ash-flatpak-store:/var/lib/flatpak \
-    fedora:41 bash /src/packaging/flatpak/verify-in-container.sh
+    ubuntu:24.04 bash -c 'REPO=/src bash /src/packaging/build-test-wheels.sh /work &&
+      DIST=/work/dist PREV_DIST=/work/dist-prev bash /src/packaging/flatpak/verify-in-container.sh'
+
+builds the head wheel and an N-1 wheel (the same tree with a lower version), then builds
+both bundles, installs the head one fresh, runs the findings, clean and incomplete cases
+from tests/e2e/fixtures/cases.json, uninstalls, and upgrades N-1 to N through a local
+remote with `flatpak update`. Every scan is judged by scripts/e2e/assert_outcome.py.

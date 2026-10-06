@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
 #
-# Builds the Flatpak bundle, installs it, and runs a real scan -- the plan's
-# requirement that a package be exercised rather than syntax-checked.
+# The Flatpak channel end to end: builds the bundle from this tree's wheel, installs it
+# fresh, runs the three e2e cases from tests/e2e/fixtures/cases.json through the
+# installed app, upgrades from an N-1 bundle through a local remote, uninstalls, and
+# shows each gate failing on a planted wrong outcome.
 #
-# The scan must report a finding. A scan that exits 0 having found nothing is
-# indistinguishable from a scan that never ran, which is the failure this whole
-# branch's exit-code work exists to remove -- so asserting exit 0 alone would repeat the
-# bug in the test. For a Flatpak that is not a hypothetical: a sandbox that cannot see
-# the source tree produces exactly a clean, zero-finding, exit-0 scan. Step 7 below
-# turns that into a positive control instead of a trap.
+#   DIST       directory holding the head wheel (default: $REPO/dist)
+#   PREV_DIST  directory holding the N-1 wheel, the same tree with a lower version, as
+#              packaging/build-test-wheels.sh writes it (default: $REPO/dist-prev)
+#
+# Every scan is judged by scripts/e2e/assert_outcome.py, the verdict every e2e channel
+# shares: findings exits exactly 2 with 3 detect-secrets findings, clean exits exactly 0,
+# and incomplete exits exactly 1 with opengrep MISSING, each with reports/ash.sarif and
+# ash_aggregated_results.json at their exact paths. An earlier revision of this script
+# captured the findings scan's exit code into SCAN_RC, printed it, and compared it to
+# nothing, and it accepted any *.sarif under the output directory. Both are gone.
+#
+# The scan that has to find something matters more for a Flatpak than for the other
+# channels: a sandbox that cannot see the source tree produces exactly a clean,
+# zero-finding, exit-0 scan. Step 7 turns that into a positive control instead of a trap.
 #
 # WHERE THIS CAN RUN, WHICH IS NOT THE SAME AS THE .deb AND .rpm SCRIPTS
 #
@@ -26,16 +36,26 @@
 # ubuntu-latest runner for that reason. Locally:
 #
 #   docker run --rm --privileged -v "$PWD:/src" -v ash-flatpak-store:/var/lib/flatpak \
-#     fedora:41 bash /src/packaging/flatpak/verify-in-container.sh
+#     ubuntu:24.04 bash -c 'REPO=/src bash /src/packaging/build-test-wheels.sh /work &&
+#       DIST=/work/dist PREV_DIST=/work/dist-prev bash /src/packaging/flatpak/verify-in-container.sh'
+#
+# ubuntu:24.04 because the CI job runs on ubuntu-latest, so the flatpak and
+# flatpak-builder versions match. The dnf branch below still works on Fedora.
 #
 # The named volume is worth using: the two runtimes are about 2.4 GB and reinstalling
 # them on every run dwarfs the rest of the script.
 set -euo pipefail
 
 REPO="${REPO:-/src}"
+DIST="${DIST:-$REPO/dist}"
+PREV_DIST="${PREV_DIST:-$REPO/dist-prev}"
 OUT="${OUT:-/tmp/flatpakbuild}"
 APP_ID="io.github.awslabs.automated_security_helper"
 RUNTIME_VERSION="24.08"
+
+# shellcheck source=packaging/cli-name.sh
+. "$REPO/packaging/cli-name.sh"
+: "${ASH_CLI_NAME:?packaging/cli-name.sh did not set ASH_CLI_NAME}"
 
 # The fixture does NOT go in /tmp, and that is not a style choice. --filesystem=host
 # grants every toplevel path under / except a reserved set, and /tmp, /var, /root, /boot,
@@ -43,17 +63,88 @@ RUNTIME_VERSION="24.08"
 # fixture in /tmp would therefore be invisible to the sandboxed scan, the scan would
 # report zero findings, and the obvious conclusion would be that the manifest's grant is
 # broken. /srv is an ordinary toplevel and is covered.
-FIX=/srv/ash-fixture
 FIX_UNREACHABLE=/tmp/ash-fixture-negative-control
+# Everything the e2e cases write: the fixture copies, their output directories, the
+# launcher shim run_case.py is pointed at, and the local OSTree repo the upgrade leg
+# serves from. Under /srv for the reason above.
+E2E=/srv/ash-e2e
+E2E_REMOTE=ash-e2e-local
+
+# The harness. Both scripts are standard library only and run under the host's python3;
+# neither is installed into, or depends on, the app under test.
+run_case() { python3 "$REPO/scripts/e2e/run_case.py" "$@"; }
+assert_outcome() { python3 "$REPO/scripts/e2e/assert_outcome.py" "$@"; }
+
+# The version a bundle carries, read from its wheel's filename as build.sh does.
+wheel_version() {
+  basename "$1" | sed -n 's/^automated_security_helper-\([^-]*\)-py3-none-any\.whl$/\1/p'
+}
+
+# Exactly one wheel in a directory, or fail naming the directory.
+one_wheel() {
+  local dir="$1" found=() w
+  for w in "$dir"/*.whl; do
+    [ -f "$w" ] && found+=("$w")
+  done
+  if [ "${#found[@]}" -ne 1 ]; then
+    echo "   FAIL: expected exactly 1 wheel in $dir, found ${#found[@]}" >&2
+    exit 1
+  fi
+  printf '%s\n' "${found[0]}"
+}
+
+# Uninstalls the app with --delete-data and requires both effects: the ref is gone and
+# its data directory is gone.
+#
+# The exit code is deliberately NOT the assertion here, and the reason is measured rather
+# than assumed: in a headless environment --delete-data removes the data and then exits 1
+# with "Cannot autolaunch D-Bus without X11 $DISPLAY", because it also tries to revoke the
+# app's portal permissions over the session bus. Asserting rc=0 would fail this step on
+# every container while the thing it is checking worked, and asserting nothing would let a
+# real failure through. So the assertion is on the observable effects, with the exit code
+# reported.
+uninstall_delete_data() {
+  local log="$E2E/delete-data-$1.log" rc
+  set +e
+  flatpak uninstall -y --system --noninteractive --delete-data "$APP_ID" >"$log" 2>&1
+  rc=$?
+  set -e
+  if [ -d "$DATA_ROOT" ]; then
+    echo "   FAIL: $DATA_ROOT survived --delete-data (rc=$rc)" >&2
+    cat "$log" >&2
+    exit 1
+  fi
+  if flatpak info --system "$APP_ID" >/dev/null 2>&1; then
+    echo "   FAIL: $APP_ID is still installed after uninstall --delete-data (rc=$rc)" >&2
+    cat "$log" >&2
+    exit 1
+  fi
+  echo "   OK: --delete-data removed the app and the venvs its runs created (rc=$rc)"
+  if [ "$rc" -ne 0 ]; then
+    echo "      non-zero exit, and the app and data are gone. Reported rather than hidden:"
+    sed 's/^/        /' "$log"
+  fi
+}
 
 echo "== 1. install build prerequisites"
 if command -v dnf >/dev/null; then
-  dnf -q -y install flatpak flatpak-builder findutils python3 >/dev/null 2>&1
+  dnf -q -y install flatpak flatpak-builder findutils python3 ostree >/dev/null 2>&1
 elif command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get -qq update >/dev/null
   apt-get -qq install -y --no-install-recommends \
-    flatpak flatpak-builder ca-certificates python3 >/dev/null
+    flatpak flatpak-builder ca-certificates python3 dbus ostree >/dev/null
+  # Ubuntu 24.04's flatpak 1.14 refuses `flatpak run` with no system bus. Measured in
+  # a privileged ubuntu:24.04 container, which has none:
+  #   flatpak run --command=python3 org.freedesktop.Sdk//24.08 -V
+  #     -> error: Could not connect: No such file or directory          (exit 1)
+  # and the same command prints the runtime's python once a system dbus-daemon is
+  # running. A runner host already has one, so this only starts a bus where none exists.
+  if [ ! -S /run/dbus/system_bus_socket ]; then
+    mkdir -p /run/dbus
+    dbus-daemon --system --fork
+    echo "   started a system D-Bus (none was running)"
+  fi
 else
   echo "   FAIL: no dnf and no apt-get; cannot install flatpak-builder" >&2
   exit 1
@@ -78,8 +169,13 @@ flatpak remote-add --if-not-exists --system \
 # Sdk is both the runtime and the sdk for this app; see the manifest for why Platform is
 # not used. Installing it explicitly rather than letting flatpak-builder do it with
 # --install-deps-from keeps the download in a step that says what it is doing.
-flatpak install -y --system --noninteractive \
-  flathub "org.freedesktop.Sdk//${RUNTIME_VERSION}" >/dev/null 2>&1 || true
+# Its exit code is not trusted alone: an already-installed runtime makes it report and
+# move on, and the `flatpak info` below is the check that the runtime is really there.
+if ! flatpak install -y --system --noninteractive \
+    flathub "org.freedesktop.Sdk//${RUNTIME_VERSION}" >/tmp/runtime-install.log 2>&1; then
+  echo "   flatpak install of the runtime exited non-zero; its output:"
+  sed 's/^/     /' /tmp/runtime-install.log
+fi
 flatpak info --system "org.freedesktop.Sdk//${RUNTIME_VERSION}" >/dev/null || {
   echo "   FAIL: org.freedesktop.Sdk//${RUNTIME_VERSION} is not installed" >&2
   exit 1
@@ -88,14 +184,48 @@ echo "   runtime: org.freedesktop.Sdk//${RUNTIME_VERSION}"
 echo -n "   runtime python: "
 flatpak run --command=python3 "org.freedesktop.Sdk//${RUNTIME_VERSION}" -V
 
-echo "== 2. build the package"
-WHEEL="$(find "$REPO/dist" -maxdepth 1 -name '*.whl' -print -quit)"
-[ -n "$WHEEL" ] || { echo "   FAIL: no wheel in $REPO/dist" >&2; exit 1; }
-echo "   wheel: $(basename "$WHEEL")"
+echo "== 2. build the N and N-1 bundles"
+WHEEL="$(one_wheel "$DIST")"
+PREV_WHEEL="$(one_wheel "$PREV_DIST")"
+VERSION="$(wheel_version "$WHEEL")"
+PREV_VERSION="$(wheel_version "$PREV_WHEEL")"
+[ -n "$VERSION" ] && [ -n "$PREV_VERSION" ] || {
+  echo "   FAIL: cannot read a version from $(basename "$WHEEL") or $(basename "$PREV_WHEEL")" >&2
+  exit 1
+}
+# The upgrade in step 12 must cross a real version change, or `flatpak update` and the
+# launcher's per-wheel venv path would both be exercised on a no-op.
+[ "$VERSION" != "$PREV_VERSION" ] || {
+  echo "   FAIL: the N and N-1 wheels are both $VERSION" >&2
+  exit 1
+}
+[ "$(printf '%s\n%s\n' "$PREV_VERSION" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ] || {
+  echo "   FAIL: N-1 ($PREV_VERSION) does not sort below N ($VERSION)" >&2
+  exit 1
+}
+echo "   wheel N:   $(basename "$WHEEL")"
+echo "   wheel N-1: $(basename "$PREV_WHEEL")"
+# N-1 first. `flatpak update` refuses a commit whose timestamp is older than the
+# installed one, measured: with N built first, step 12's update failed with "Update is
+# older than current version". Building in release order keeps the timestamps in the
+# order a real release would produce them.
+PREV_BUNDLE="$("$REPO/packaging/flatpak/build.sh" "$PREV_WHEEL" "$OUT/prev")"
+echo "   built N-1: $PREV_BUNDLE ($(du -h "$PREV_BUNDLE" | cut -f1))"
 BUNDLE="$("$REPO/packaging/flatpak/build.sh" "$WHEEL" "$OUT")"
-echo "   built: $BUNDLE ($(du -h "$BUNDLE" | cut -f1))"
+echo "   built N:   $BUNDLE ($(du -h "$BUNDLE" | cut -f1))"
 
-echo "== 3. install it"
+echo "== 3. install it, fresh"
+# Fresh means nothing of this app is on the host before the install: no installed ref
+# and no data directory left by an earlier run.
+if flatpak info --system "$APP_ID" >/dev/null 2>&1; then
+  echo "   FAIL: $APP_ID is already installed, so this would not be a fresh install" >&2
+  exit 1
+fi
+DATA_ROOT="$HOME/.var/app/$APP_ID/data"
+if [ -e "$HOME/.var/app/$APP_ID" ]; then
+  echo "   FAIL: $HOME/.var/app/$APP_ID exists from an earlier run" >&2
+  exit 1
+fi
 flatpak install -y --system --noninteractive --bundle "$BUNDLE" >/dev/null 2>&1
 flatpak info --system "$APP_ID" | sed -n '1,8p;/Runtime:/p'
 
@@ -230,57 +360,86 @@ echo "   /tmp fixture: rc=$NEG_RC, findings=$NEG_RESULTS"
 echo "   OK: an unreachable tree yields a clean, zero-finding, exit-0 scan --"
 echo "       which is precisely the failure this package must not ship silently"
 
-echo "== 8. scan a reachable fixture with a KNOWN finding"
-# detect-secrets is a runtime dependency of ASH and drives in process, so it is the one
-# default scanner present after installing ASH alone. Everything else is correctly
-# reported SKIPPED rather than MISSING.
-rm -rf "$FIX"; mkdir -p "$FIX"
-cat > "$FIX/leak.py" <<'PY'
-# Fixture for packaging verification. Not a real credential.
-AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-PY
-# --output-dir is NOT passed. ASH defaults it to <source-dir>/.ash/ash_output
-# (cli/scan.py:636-640), which is inside the tree being scanned and therefore on the
-# host. Letting it default is the part of the sandbox trade that a passed --output-dir
-# would hide.
+echo "== 8. the three e2e cases, through the installed app"
+# run_case.py takes an executable, so the app is reached through a two-line shim named
+# after the CLI. The shim adds nothing: it is `flatpak run $APP_ID "$@"`, which is the
+# command README.flatpak gives users.
+rm -rf "$E2E"; mkdir -p "$E2E/bin"
+SHIM="$E2E/bin/$ASH_CLI_NAME"
+printf '#!/bin/sh\nexec flatpak run %s "$@"\n' "$APP_ID" > "$SHIM"
+chmod 0755 "$SHIM"
+
+# The incomplete case depends on two environment variables reaching ASH inside the
+# sandbox, one of them set to an EMPTY string. flatpak run passes the caller's
+# environment through apart from a fixed set it resets, so this is checked rather than
+# assumed: if either were dropped, opengrep could still end MISSING for a different
+# reason and the case would pass without testing its trigger.
+SEEN="$(ASH_OFFLINE=YES OPENGREP_RULES_CACHE_DIR='' flatpak run --command=sh "$APP_ID" -c \
+  'printf "%s|%s" "${ASH_OFFLINE-unset}" "${OPENGREP_RULES_CACHE_DIR-unset}"')"
+echo "   case env inside the sandbox: ASH_OFFLINE|OPENGREP_RULES_CACHE_DIR = $SEEN"
+[ "$SEEN" = "YES|" ] || {
+  echo "   FAIL: the incomplete case's environment does not reach the sandbox as set" >&2
+  exit 1
+}
+
+for case_name in findings clean incomplete; do
+  run_case --cli "$SHIM" --case "$case_name" --work "$E2E/scans"
+done
+
+echo "== 9. the default output directory lands inside the scanned tree, on the host"
+# --output-dir is NOT passed here, unlike in the cases above. ASH defaults it to
+# <source-dir>/.ash/ash_output, which is inside the tree being scanned and therefore on
+# the host. Letting it default is the part of the sandbox trade that a passed
+# --output-dir would hide. The outcome is judged as the findings case.
+FIX="$E2E/default-output"
+mkdir -p "$FIX"
+cp -R "$REPO/tests/e2e/fixtures/findings/." "$FIX/"
 cd "$FIX"
-echo -n "   CWD as the sandbox sees it: "
-flatpak run --command=pwd "$APP_ID" || echo "(pwd not preserved)"
 set +e
 flatpak run "$APP_ID" scan --source-dir "$FIX" \
-  --scanners detect-secrets --no-progress 2>&1 | tail -25
-SCAN_RC=${PIPESTATUS[0]}
+  --scanners detect-secrets --no-progress >"$E2E/default-output.log" 2>&1
+DEFAULT_RC=$?
 set -e
-echo "   ashx scan rc=$SCAN_RC"
+cd /
+echo "   scan rc=$DEFAULT_RC"
+assert_outcome --case findings --output-dir "$FIX/.ash/ash_output" --rc "$DEFAULT_RC" || {
+  tail -25 "$E2E/default-output.log" >&2
+  exit 1
+}
 
-echo "== 9. assert a finding was actually reported"
-python3 - "$FIX" <<'PY'
-import json, sys, pathlib
-out = pathlib.Path(sys.argv[1]) / ".ash" / "ash_output"
-if not out.exists():
-    print(f"   FAIL: {out} was never created, so the default output directory --")
-    print("   which lands inside the scanned tree -- was not writable from the sandbox.")
-    raise SystemExit(1)
-sarif = out / "reports" / "ash.sarif"
-if not sarif.exists():
-    cands = sorted(out.rglob("*.sarif"))
-    if not cands:
-        print("   FAIL: no SARIF produced, so nothing can be asserted about findings")
-        raise SystemExit(1)
-    sarif = cands[0]
-doc = json.loads(sarif.read_text(encoding="utf-8"))
-results = [r for run in doc.get("runs", []) for r in run.get("results", [])]
-print(f"   SARIF: {sarif.name}, {len(results)} result(s)")
-if not results:
-    print("   FAIL: scan produced 0 findings on a fixture planted with a secret.")
-    print("   A green scan that found nothing is the silent pass this branch removes.")
-    raise SystemExit(1)
-for r in results[:3]:
-    loc = (r.get("locations") or [{}])[0]
-    uri = loc.get("physicalLocation", {}).get("artifactLocation", {}).get("uri", "?")
-    print(f"     - {r.get('ruleId','?')} at {uri}")
-print("   OK: the installed package ran a scan and reported findings")
-PY
+echo "== 9b. negative controls: each gate must reject a wrong outcome"
+# Without these, a green step 8 could mean the verdict cannot fail. Each must be SEEN
+# failing, on a real output from this run.
+#
+# (a) The real clean output judged as a findings outcome: wrong exit code, no findings.
+set +e
+assert_outcome --case findings --output-dir "$E2E/scans/clean/out" --rc 0 >"$E2E/neg-a.log" 2>&1
+NEG_A=$?
+set -e
+sed 's/^/     /' "$E2E/neg-a.log"
+[ "$NEG_A" -eq 1 ] || {
+  echo "   FAIL: the clean output passed as a findings outcome (rc=$NEG_A)" >&2
+  exit 1
+}
+echo "   OK: the clean output is rejected as a findings outcome"
+# (b) The findings case scanned with --no-fail-on-findings. The scan finds the same
+# secret and exits 0, so the exit-code check must fail it. A channel wrapper that
+# swallowed the exit code would look exactly like this.
+set +e
+run_case --cli "$SHIM" --case findings --work "$E2E/scans" --label neg-no-fail -- \
+  --no-fail-on-findings >"$E2E/neg-b.log" 2>&1
+NEG_B=$?
+set -e
+sed 's/^/     /' "$E2E/neg-b.log"
+[ "$NEG_B" -eq 1 ] || {
+  echo "   FAIL: a findings scan that exited 0 was accepted (run_case rc=$NEG_B)" >&2
+  exit 1
+}
+grep -Eq '^::error::\[neg-no-fail\] exit code 0 ' "$E2E/neg-b.log" || {
+  echo "   FAIL: the --no-fail-on-findings run failed, but not on its exit code" >&2
+  exit 1
+}
+echo "   OK: a findings scan that exits 0 is rejected on its exit code"
 
 echo "== 10. the container runner is NOT reachable from inside the sandbox"
 # Asserted rather than assumed, because README.flatpak tells users this and a document
@@ -310,6 +469,11 @@ echo "== 11. a plain uninstall leaves the venv, and --delete-data removes it"
 flatpak uninstall -y --system --noninteractive "$APP_ID" >/tmp/uninstall.log 2>&1 || {
   echo "   FAIL: plain uninstall failed" >&2; cat /tmp/uninstall.log >&2; exit 1
 }
+if flatpak info --system "$APP_ID" >/dev/null 2>&1; then
+  echo "   FAIL: $APP_ID is still installed after a plain uninstall" >&2
+  exit 1
+fi
+echo "   OK: $APP_ID is no longer installed"
 if [ ! -d "$DATA_ROOT" ]; then
   echo "   FAIL: a plain uninstall deleted $DATA_ROOT. That contradicts what" >&2
   echo "   README.flatpak tells users about reclaiming the space, so the doc is now" >&2
@@ -327,27 +491,93 @@ flatpak install -y --system --noninteractive --bundle "$BUNDLE" >/tmp/reinstall.
   exit 1
 }
 
-# The exit code is deliberately NOT the assertion here, and the reason is measured rather
-# than assumed: in a headless environment --delete-data removes the data and then exits 1
-# with "Cannot autolaunch D-Bus without X11 $DISPLAY", because it also tries to revoke the
-# app's portal permissions over the session bus. Asserting rc=0 would fail this step on
-# every container while the thing it is checking worked, and asserting nothing would let a
-# real failure through. So the assertion is on the observable effect, with the exit code
-# reported.
-set +e
-flatpak uninstall -y --system --noninteractive --delete-data "$APP_ID" >/tmp/delete-data.log 2>&1
-DELETE_RC=$?
-set -e
-if [ -d "$DATA_ROOT" ]; then
-  echo "   FAIL: $DATA_ROOT survived --delete-data (rc=$DELETE_RC)" >&2
-  cat /tmp/delete-data.log >&2
+uninstall_delete_data plain-and-delete
+
+echo "== 12. upgrade: install N-1 from a local remote, then flatpak update to N"
+# A user who installed from a remote upgrades with `flatpak update`, so that is the
+# path tested, not a bundle reinstall. Both bundles are imported into one local OSTree
+# repo served as a system remote. Unsigned, which is why the remote is added with
+# --no-gpg-verify: it is a directory on this machine that nothing else can reach, and it
+# is deleted at the end of this step.
+#
+# What the upgrade has to show:
+#   - the installed commit changed, and `ashx --version` moved from N-1 to N;
+#   - the launcher built a NEW venv for the N wheel instead of serving the N-1 one. The
+#     venv path carries the wheel name (see ash-launcher.sh), so an upgrade that kept
+#     using the old venv would still report N-1 here;
+#   - a findings scan through the upgraded app still exits 2 with its 3 findings.
+LREPO="$E2E/repo"
+rm -rf "$LREPO"
+# build-import-bundle needs an existing repo: measured, on a missing path it fails with
+# "'<path>' is not a valid repository". ostree is installed in step 1 for this line.
+ostree init --repo="$LREPO" --mode=archive-z2
+# build-import-bundle prints GLib-CRITICAL lines about a NULL remote name on flatpak
+# 1.14 and exits 0: a bundle built without --repo-url names no origin. Its output is
+# kept in a log and shown only if it fails.
+import_bundle() {
+  flatpak build-import-bundle "$LREPO" "$1" >"$E2E/import-$2.log" 2>&1 || {
+    echo "   FAIL: build-import-bundle of $1 failed" >&2
+    cat "$E2E/import-$2.log" >&2
+    exit 1
+  }
+  flatpak build-update-repo "$LREPO" >/dev/null
+}
+import_bundle "$PREV_BUNDLE" prev
+if flatpak remotes --system --columns=name | grep -qx "$E2E_REMOTE"; then
+  echo "   FAIL: a remote named $E2E_REMOTE already exists; this host is not fresh" >&2
   exit 1
 fi
-echo "   OK: --delete-data removed the venv the first run created (rc=$DELETE_RC)"
-if [ "$DELETE_RC" -ne 0 ]; then
-  echo "      non-zero exit, and the data is gone. Reported rather than hidden:"
-  sed 's/^/        /' /tmp/delete-data.log
-fi
+flatpak remote-add --system --no-gpg-verify "$E2E_REMOTE" "file://$LREPO"
+flatpak install -y --system --noninteractive "$E2E_REMOTE" "$APP_ID" >"$E2E/install-prev.log" 2>&1 || {
+  echo "   FAIL: installing N-1 from the local remote failed" >&2
+  cat "$E2E/install-prev.log" >&2
+  exit 1
+}
+PREV_COMMIT="$(flatpak info --system --show-commit "$APP_ID")"
+PREV_REPORTED="$(flatpak run "$APP_ID" --version 2>&1)"
+echo "   N-1 installed: commit ${PREV_COMMIT:0:12}, reports: $PREV_REPORTED"
+case "$PREV_REPORTED" in
+  *"$PREV_VERSION"*) ;;
+  *) echo "   FAIL: N-1 does not report $PREV_VERSION" >&2; exit 1 ;;
+esac
+run_case --cli "$SHIM" --case findings --work "$E2E/scans" --label upgrade-from-n-1
+PREV_VENV="$DATA_ROOT/$(basename "$PREV_WHEEL" .whl)-"
+ls -d "$PREV_VENV"py3.* >/dev/null 2>&1 || {
+  echo "   FAIL: N-1's first run built no venv at ${PREV_VENV}py3.*" >&2
+  exit 1
+}
+
+import_bundle "$BUNDLE" head
+flatpak update -y --system --noninteractive "$APP_ID" >"$E2E/update.log" 2>&1 || {
+  echo "   FAIL: flatpak update to N failed" >&2
+  cat "$E2E/update.log" >&2
+  exit 1
+}
+NEW_COMMIT="$(flatpak info --system --show-commit "$APP_ID")"
+[ "$NEW_COMMIT" != "$PREV_COMMIT" ] || {
+  echo "   FAIL: flatpak update left the installed commit at ${PREV_COMMIT:0:12}" >&2
+  cat "$E2E/update.log" >&2
+  exit 1
+}
+NEW_REPORTED="$(flatpak run "$APP_ID" --version 2>&1)"
+echo "   updated to N: commit ${NEW_COMMIT:0:12}, reports: $NEW_REPORTED"
+case "$NEW_REPORTED" in
+  *"$VERSION"*) ;;
+  *) echo "   FAIL: after the update the app does not report $VERSION" >&2; exit 1 ;;
+esac
+NEW_VENV="$DATA_ROOT/$(basename "$WHEEL" .whl)-"
+ls -d "$NEW_VENV"py3.* >/dev/null 2>&1 || {
+  echo "   FAIL: the first run after the update built no venv for the N wheel" >&2
+  ls -la "$DATA_ROOT" >&2
+  exit 1
+}
+echo "   venvs after the update (the N-1 one lingers by design; README.flatpak):"
+ls -d "$DATA_ROOT"/automated_security_helper-* | sed 's/^/     /'
+run_case --cli "$SHIM" --case findings --work "$E2E/scans" --label upgrade-to-n
+
+uninstall_delete_data upgrade
+flatpak remote-delete --system "$E2E_REMOTE"
+echo "   removed the local remote $E2E_REMOTE"
 
 echo
 echo "FLATPAK VERIFICATION PASSED"
