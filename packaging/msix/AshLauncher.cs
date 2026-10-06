@@ -75,6 +75,9 @@ internal static class AshLauncher
     // CreateVenv explains why completeness is a file of its own rather than the presence of a
     // console script.
     private const string CompletionMarker = ".ash-bootstrap-complete";
+    // The marker's first line, followed by the file name of the wheel the venv was built from.
+    // packaging/msix/verify-on-windows.ps1 reads the same line to check an upgrade rebuilt it.
+    private const string MarkerWheelPrefix = "wheel: ";
 
     // The probe below must print this exact token. An interpreter that is too old prints the
     // other one, and the Microsoft Store's python.exe placeholder (which opens the Store
@@ -111,9 +114,12 @@ internal static class AshLauncher
             string venvDirectory = ResolveVenvDirectory();
             string target = Path.Combine(venvDirectory, "Scripts", scriptName + ".exe");
 
-            if (!IsBootstrapped(venvDirectory, target))
+            // Found on every run, not only on a first run, because which wheel the package
+            // carries is part of whether the venv is current. IsBootstrapped has the reason.
+            string wheel = FindTheWheel(packageRoot);
+            if (!IsBootstrapped(venvDirectory, target, Path.GetFileName(wheel)))
             {
-                CreateVenv(venvDirectory, packageRoot, scriptName);
+                CreateVenv(venvDirectory, wheel, scriptName);
             }
 
             return Run(target);
@@ -220,14 +226,48 @@ internal static class AshLauncher
         return Path.Combine(localAppData, "Packages", family, "LocalCache", "ash-venv");
     }
 
-    // Whether the venv at the real path is finished. Deliberately not "does the console script
-    // exist": pip writes the Scripts\*.exe shims before the last of site-packages, so a
-    // bootstrap killed near the end leaves a console script that runs and then dies on a
-    // missing import. The marker is written after pip returns 0 AND after the console script is
-    // confirmed, so its presence is the only honest answer to this question.
-    private static bool IsBootstrapped(string venvDirectory, string target)
+    // Whether the venv at the real path is finished AND was built from the wheel this package
+    // carries. Deliberately not "does the console script exist": pip writes the Scripts\*.exe
+    // shims before the last of site-packages, so a bootstrap killed near the end leaves a
+    // console script that runs and then dies on a missing import. The marker is written after
+    // pip returns 0 AND after the console script is confirmed, so its presence is the only
+    // honest answer to whether a bootstrap finished.
+    //
+    // The wheel's file name is recorded in the marker and compared here because the venv
+    // outlives the package version that built it. Windows keeps LocalCache across a package
+    // update, which is the point of putting the venv there, so after an update from N-1 to N the
+    // N-1 venv and its marker are still present. A marker check alone would keep running N-1's
+    // ASH from N's launcher indefinitely, and `ashx --version` would report the old version
+    // after a successful upgrade. The wheel name carries the version, so a different name means
+    // a different ASH, and the venv is rebuilt from the wheel that shipped. A marker written by
+    // an older launcher has no wheel line, reads as a mismatch, and is rebuilt the same way.
+    private static bool IsBootstrapped(string venvDirectory, string target, string wheelName)
     {
-        return File.Exists(Path.Combine(venvDirectory, CompletionMarker)) && File.Exists(target);
+        if (!File.Exists(target))
+        {
+            return false;
+        }
+        string built = WheelRecordedIn(venvDirectory);
+        return built != null && string.Equals(built, wheelName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The wheel file name a finished bootstrap recorded, or null when there is no marker or the
+    // marker names no wheel.
+    private static string WheelRecordedIn(string venvDirectory)
+    {
+        string marker = Path.Combine(venvDirectory, CompletionMarker);
+        if (!File.Exists(marker))
+        {
+            return null;
+        }
+        foreach (string line in File.ReadAllLines(marker))
+        {
+            if (line.StartsWith(MarkerWheelPrefix, StringComparison.Ordinal))
+            {
+                return line.Substring(MarkerWheelPrefix.Length).Trim();
+            }
+        }
+        return null;
     }
 
     // Creates the venv AT ITS FINAL PATH, under a cross-process lock, and marks it complete
@@ -277,9 +317,9 @@ internal static class AshLauncher
     // Two shells can run ashx for the first time at the same moment. Staging let both build a
     // full copy and threw one away, which cost a duplicate download of every dependency. The
     // lock makes the second wait for the first and then find the work already done.
-    private static void CreateVenv(string venvDirectory, string packageRoot, string scriptName)
+    private static void CreateVenv(string venvDirectory, string wheel, string scriptName)
     {
-        string wheel = FindTheWheel(packageRoot);
+        string wheelName = Path.GetFileName(wheel);
         string target = Path.Combine(venvDirectory, "Scripts", scriptName + ".exe");
 
         // The parent has to exist before a lock file can be created beside the venv.
@@ -289,18 +329,36 @@ internal static class AshLauncher
         {
             // Re-checked under the lock, because the wait may have been a wait for another
             // process to do exactly this work.
-            if (IsBootstrapped(venvDirectory, target))
+            if (IsBootstrapped(venvDirectory, target, wheelName))
             {
                 return;
             }
 
-            // Either a previous bootstrap died partway or this is a first run. Both are handled
-            // the same way, because anything without the marker is by definition unfinished and
-            // there is nothing in it worth keeping.
+            // A previous bootstrap died partway, the venv was built from a different wheel (the
+            // package was updated), or this is a first run. The first two are handled the same
+            // way, because a venv without a marker naming this wheel has nothing in it worth
+            // keeping; they differ only in what the user is told.
             if (Directory.Exists(venvDirectory))
             {
-                Console.Error.WriteLine(
-                    "ashx: removing an unfinished virtualenv at " + venvDirectory + " and starting over.");
+                string built = WheelRecordedIn(venvDirectory);
+                if (built != null)
+                {
+                    Console.Error.WriteLine(
+                        "ashx: the virtualenv at " + venvDirectory + " was built from " + built +
+                        " and this package carries " + wheelName + "; rebuilding it.");
+                }
+                else if (File.Exists(Path.Combine(venvDirectory, CompletionMarker)))
+                {
+                    Console.Error.WriteLine(
+                        "ashx: the virtualenv at " + venvDirectory + " does not record which wheel " +
+                        "it was built from, so it predates this launcher; rebuilding it from " +
+                        wheelName + ".");
+                }
+                else
+                {
+                    Console.Error.WriteLine(
+                        "ashx: removing an unfinished virtualenv at " + venvDirectory + " and starting over.");
+                }
                 Directory.Delete(venvDirectory, true);
             }
 
@@ -351,11 +409,14 @@ internal static class AshLauncher
 
                 File.WriteAllText(
                     Path.Combine(venvDirectory, CompletionMarker),
+                    MarkerWheelPrefix + wheelName + Environment.NewLine +
                     "Written by ASH's MSIX launcher once pip finished installing ASH's wheel." +
                     Environment.NewLine +
                     "The presence of THIS file, not of any console script, is what marks this" +
                     Environment.NewLine +
-                    "virtualenv usable. Deleting it forces the next ashx run to rebuild." +
+                    "virtualenv usable, and only for the wheel named on the first line. Deleting" +
+                    Environment.NewLine +
+                    "it, or updating the package to a different wheel, forces a rebuild." +
                     Environment.NewLine);
                 finished = true;
             }

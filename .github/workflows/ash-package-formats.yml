@@ -50,6 +50,21 @@ on:
       - "tests/unit/test_package_contents_gate.py"
       - "tests/unit/test_package_formats_workflow.py"
       - "tests/unit/test_homebrew_formula_*.py"
+      - "tests/unit/test_msix_e2e_script.py"
+      # Every input to the wheel the packages wrap, the same set ash-native-packages.yml
+      # names and packaging/assert-paths-filter.py measures there. Without these a push
+      # that changes only ASH's code rebuilds no package, so an MSIX, Flatpak or
+      # Chocolatey regression in that code goes unseen until a pull request.
+      - "automated_security_helper/**"
+      - "hatch_build.py"
+      - "Dockerfile"
+      - "README.md"
+      - "LICENSE"
+      - "NOTICE"
+      - ".gitignore"
+      # The shared e2e contract the msix job's scans are judged by.
+      - "scripts/e2e/**"
+      - "tests/e2e/**"
   workflow_dispatch: {}
 
 permissions:
@@ -102,3 +117,4 @@ jobs:
           tests/unit/test_homebrew_formula_lock_sync.py
           tests/unit/test_homebrew_formula_resources.py
           tests/unit/test_homebrew_formula_version.py
+          tests/unit/test_msix_e2e_script.py

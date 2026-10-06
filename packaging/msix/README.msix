@@ -110,8 +110,13 @@ Two other files appear alongside it, and both are the launcher's.
 The launcher decides whether to bootstrap by looking for the marker, not by looking for
 a console script, because pip writes the console scripts before the last of
 site-packages and a bootstrap interrupted near the end would otherwise leave something
-that looks finished. Deleting the marker is the supported way to force a rebuild on the
-next `ashx`; the run will remove what is there and install again. The lock is what stops
+that looks finished. The marker's first line names the wheel the venv was built from,
+and the launcher rebuilds when that is not the wheel the installed package carries.
+Windows keeps LocalCache when a package is updated, so without that check an update
+would leave the new launcher running the old version's ASH. A same-version reinstall
+carries the same wheel and keeps the venv. Deleting the marker is the supported way to
+force a rebuild on the next `ashx`; the run will remove what is there and install
+again. The lock is what stops
 two shells running `ashx` for the first time at the same moment from installing over each
 other -- the second waits for the first and then finds the work done. If a run is killed
 hard the lock file is left behind, which is harmless: it holds no lock once the process
@@ -295,7 +300,9 @@ Building it yourself
   # from a checkout, with a wheel already built by `uv build --out-dir dist`
   pwsh -File packaging/msix/build.ps1 -Wheel dist\automated_security_helper-<version>-py3-none-any.whl
 
-  # or the whole thing, including installing it and running a real scan
+  # or the whole thing: build N and an N-1 package, install N-1, upgrade to N, run the
+  # three e2e scans, and uninstall. It changes the installed packages and trusts the
+  # throwaway signing certificate in LocalMachine\TrustedPeople, so run it on a VM.
   pwsh -File packaging/msix/verify-on-windows.ps1
 
 build.ps1 needs makeappx.exe and signtool.exe, which ship with the Windows SDK and are not
