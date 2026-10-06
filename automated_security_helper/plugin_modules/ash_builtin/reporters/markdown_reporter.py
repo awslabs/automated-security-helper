@@ -148,9 +148,11 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 md_parts.append(
                     "  - **Info (I)**: Informational findings with minimal risk"
                 )
-                md_parts.append(
-                    "- **Duration (Time)**: Time taken by the scanner to complete its execution"
-                )
+                # No Duration entry here: the table below has no Duration column.
+                # Its ten-column shape is parsed positionally (see the shortfall
+                # note after the table), so the legend follows the table rather
+                # than the table growing a column. Durations are in the text and
+                # html reports.
                 md_parts.append(
                     "- **Actionable**: Number of findings at or above the threshold severity level that require attention"
                 )

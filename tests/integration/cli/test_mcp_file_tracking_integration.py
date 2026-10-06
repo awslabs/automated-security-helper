@@ -62,7 +62,7 @@ async def test_file_based_tracking_workflow(test_directory, mock_scan_process):
 
     # Create a simple file to scan
     test_file = source_dir / "test.py"
-    test_file.write_text('password = "hardcoded_password"')
+    test_file.write_text('password = "hardcoded_password"')  # pragma: allowlist secret
 
     # Start a scan
     with patch(

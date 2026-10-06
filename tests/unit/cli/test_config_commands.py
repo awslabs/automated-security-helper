@@ -1,5 +1,7 @@
 """Tests for cli/config.py — covers init, get, update, validate commands."""
 
+from pathlib import Path
+
 import yaml
 from unittest.mock import patch
 from typer.testing import CliRunner
@@ -93,6 +95,60 @@ class TestConfigGet:
                 ["get", str(config_path)],
             )
             assert result.exit_code == 0
+
+
+class TestConfigGetRefusesUnparseableFiles:
+    """``ash config get`` on a file that does not parse.
+
+    resolve_config logs a file it cannot parse and returns the default
+    configuration, which is right for a scan and wrong for this command: it
+    exited 0 and printed the defaults as though they were the file's contents.
+    It now exits 3, the CLI's documented code for an invalid configuration and
+    the code this command already used for a file that parses but does not
+    validate.
+    """
+
+    INVALID_YAML = "project_name: test\nreporters: [unclosed\n"
+
+    def _assert_refused(self, result, path):
+        assert result.exit_code == 3, result.output
+        assert "Invalid configuration: could not parse" in result.output
+        assert str(path) in result.output
+        # The defaults were not printed in its place.
+        assert "global_settings" not in result.output
+
+    def test_a_named_file_with_a_yaml_syntax_error(self, tmp_path):
+        config_path = tmp_path / ".ash.yaml"
+        config_path.write_text(self.INVALID_YAML, encoding="utf-8")
+        result = runner.invoke(config_app, ["get", str(config_path)])
+        self._assert_refused(result, config_path)
+
+    def test_a_discovered_file_with_a_yaml_syntax_error(self, tmp_path, monkeypatch):
+        (tmp_path / ".ash").mkdir()
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.write_text(self.INVALID_YAML, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(config_app, ["get"])
+        self._assert_refused(result, Path(".ash") / ".ash.yaml")
+
+    def test_a_json_file_that_does_not_parse(self, tmp_path):
+        config_path = tmp_path / "ash.json"
+        config_path.write_text('{"project_name": ', encoding="utf-8")
+        result = runner.invoke(config_app, ["get", str(config_path)])
+        self._assert_refused(result, config_path)
+
+    def test_a_valid_file_still_prints(self, tmp_path):
+        config_path = tmp_path / ".ash.yaml"
+        config_path.write_text("project_name: printed-project\n", encoding="utf-8")
+        result = runner.invoke(config_app, ["get", str(config_path)])
+        assert result.exit_code == 0, result.output
+        assert "printed-project" in result.output
+
+    def test_no_config_file_still_prints_the_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(config_app, ["get"])
+        assert result.exit_code == 0, result.output
+        assert "global_settings" in result.output
 
 
 class TestConfigUpdate:

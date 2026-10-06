@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "AWS Labs - Automated Security Helper",
+          "version": "0.0.0-fixture"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "B105",
+          "level": "error",
+          "message": {
+            "text": "Possible hardcoded password: 'hunter2'"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/app.py"
+                },
+                "region": {
+                  "startLine": 12,
+                  "endLine": 12
+                }
+              }
+            }
+          ],
+          "properties": {
+            "scanner_name": "bandit",
+            "tags": [
+              "security"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+$ ash dependencies install --bin-path bin -t scanner --tool grype --tool semgrep
+╭─ ASH Dependency Installer ──╮
+│ Installing ASH dependencies │
+│ Target bin path: bin        │
+│ Plugin types: scanner       │
+╰─────────────────────────────╯
+Getting platform and architecture
+Installing dependencies for platform: unknown, architecture: unknown
+[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+Installing dependencies for scanner plugin: grype
+Installing dependencies for scanner plugin: semgrep
+Running command: uv tool install semgrep>=1.125.0,<2.0.0
+Command succeeded with exit code: 0
+                        Dependency installation results
+┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ Plugin  ┃ Type    ┃ Tool    ┃ Cmds ┃ Failed ┃ Status          ┃ Resolved to ┃
+┡━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ grype   │ scanner │ grype   │    0 │      0 │ ALREADY PRESENT │ bin/grype   │
+│ semgrep │ scanner │ semgrep │    1 │      0 │ INSTALLED       │ bin/semgrep │
+└─────────┴─────────┴─────────┴──────┴────────┴─────────────────┴─────────────┘
+╭─────────── Installation Complete ───────────╮
+│ Commands run: 1 (0 failed)                  │
+│ Tools verified on PATH: 2 -- grype, semgrep │
+│ No install path on this platform: grype     │
+╰─────────────────────────────────────────────╯
+[exit code: 0]

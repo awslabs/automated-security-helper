@@ -1,0 +1,497 @@
+$ ash report --format html --log-level ERROR
+[exit 0]
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ASH Security Scan Results</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1, h2, h3 {
+            color: #333;
+            margin-top: 20px;
+        }
+        .summary-box {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .severity-error { color: #dc3545; }
+        .severity-warning { color: #fd7e14; }
+        .severity-note { color: #ffc107; }
+        .severity-none { color: #28a745; }
+        .status-passed { color: #28a745; font-weight: bold; }
+        .status-failed { color: #dc3545; font-weight: bold; }
+        .status-error { color: #dc3545; font-weight: bold; }
+        .status-skipped { color: #6c757d; font-weight: bold; }
+        .status-missing { color: #fd7e14; font-weight: bold; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #dee2e6;
+        }
+        th {
+            background: #f8f9fa;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        .metadata-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .help-text {
+            background: #e9f5ff;
+            border: 1px solid #b8daff;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            font-size: 0.9em;
+        }
+        .help-text h4 {
+            margin-top: 0;
+            color: #0056b3;
+        }
+        .help-text ul {
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ASH Security Scan Results</h1>
+
+        <div class="metadata-section">
+            <p><strong>Project:</strong> ASH</p>
+            <p><strong>Scan executed:</strong> 2026-01-15T12:00:00+00:00</p>
+            <p><strong>Report generated:</strong> 2026-01-15T12:30:00+00:00</p>
+            <p><strong>ASH version:</strong> <ASH_VERSION></p>
+        </div>
+
+
+
+        <h2>Scanner Results</h2>
+        <div class="help-text">
+            <h4>How to read scanner results</h4>
+            <ul>
+                <li><strong>Severity levels:</strong>
+                    <ul>
+                        <li><strong>Suppressed (S):</strong> Findings that have been explicitly
+suppressed and don't affect scanner status</li>
+                        <li><strong>Critical (C):</strong> Highest severity findings that require
+immediate attention</li>
+                        <li><strong>High (H):</strong> Serious findings that should be addressed
+soon</li>
+                        <li><strong>Medium (M):</strong> Moderate risk findings</li>
+                        <li><strong>Low (L):</strong> Lower risk findings</li>
+                        <li><strong>Info (I):</strong> Informational findings with minimal risk</li>
+                    </ul>
+                </li>
+                <li><strong>Duration:</strong> Time taken by the scanner to complete its
+execution</li>
+                <li><strong>Actionable:</strong> Number of findings at or above the threshold
+severity level that require attention</li>
+                <li><strong>Result:</strong>
+                    <ul>
+                        <li class="status-passed">PASSED = No findings at or above threshold</li>
+                        <li class="status-failed">FAILED = Findings at or above threshold</li>
+                        <li class="status-missing">MISSING = Required dependencies not
+available</li>
+                        <li class="status-skipped">SKIPPED = Scanner explicitly disabled</li>
+                        <li class="status-error">ERROR = Scanner execution error</li>
+                    </ul>
+                </li>
+                <li><strong>Threshold:</strong> The minimum severity level that will cause a scanner
+to fail</li>
+                <li><strong>Statistics calculation:</strong>
+                    <ul>
+                        <li>All statistics are calculated from the final aggregated SARIF
+report</li>
+                        <li>Suppressed findings are counted separately and do not contribute to
+actionable findings</li>
+                        <li>Scanner status is determined by comparing actionable findings to the
+threshold</li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+
+        <table>
+            <tr>
+                <th>Scanner</th>
+                <th>S</th>
+                <th>C</th>
+                <th>H</th>
+                <th>M</th>
+                <th>L</th>
+                <th>I</th>
+                <th>Duration</th>
+                <th>Actionable</th>
+                <th>Result</th>
+                <th>Threshold</th>
+            </tr>
+
+            <tr>
+                <td>bandit</td>
+                <td>1</td>
+                <td>0</td>
+                <td>1</td>
+                <td>2</td>
+                <td>1</td>
+                <td>0</td>
+                <td>12.5s</td>
+                <td class="status-failed">3</td>
+                <td class="status-failed">FAILED</td>
+                <td>MEDIUM (global)</td>
+            </tr>
+
+            <tr>
+                <td>cdk-nag</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>7s</td>
+                <td class="status-passed">0</td>
+                <td class="status-passed">PASSED</td>
+                <td>MEDIUM (global)</td>
+            </tr>
+
+            <tr>
+                <td>checkov</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>2</td>
+                <td>1</td>
+                <td>500ms</td>
+                <td class="status-passed">0</td>
+                <td class="status-passed">PASSED</td>
+                <td>MEDIUM (global)</td>
+            </tr>
+
+            <tr>
+                <td>detect-secrets</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>250ms</td>
+                <td class="status-passed">0</td>
+                <td class="status-skipped">SKIPPED</td>
+                <td>MEDIUM (global)</td>
+            </tr>
+
+            <tr>
+                <td>grype</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td><1ms</td>
+                <td class="status-passed">0</td>
+                <td class="status-missing">MISSING</td>
+                <td>MEDIUM (global)</td>
+            </tr>
+
+            <tr>
+                <td>npm-audit</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>1s</td>
+                <td class="status-passed">0</td>
+                <td class="status-error">ERROR</td>
+                <td>MEDIUM (global)</td>
+            </tr>
+
+            <tr>
+                <td>opengrep</td>
+                <td>0</td>
+                <td>0</td>
+                <td>1</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>1m 35s</td>
+                <td class="status-passed">0</td>
+                <td class="status-passed">PASSED</td>
+                <td>CRITICAL (config)</td>
+            </tr>
+
+            <tr>
+                <td>semgrep</td>
+                <td>2</td>
+                <td>1</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>2</td>
+                <td>48s</td>
+                <td class="status-failed">1</td>
+                <td class="status-failed">FAILED</td>
+                <td>MEDIUM (global)</td>
+            </tr>
+
+            <tr>
+                <td>syft</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td><1ms</td>
+                <td class="status-passed">0</td>
+                <td class="status-skipped">SKIPPED</td>
+                <td>MEDIUM (global)</td>
+            </tr>
+            </table>
+
+        <h2>Summary</h2>
+        <div class="summary-box">
+            <h3>Findings by Severity</h3><p>Statistics are calculated from the final aggregated
+SARIF report:</p><ul><li class="severity-error"><strong>ERROR</strong>: 11 finding(s)</li><li
+style="color:#6c757d"><strong>SUPPRESSED</strong>: 3 finding(s)</li></ul>
+            <h3>Findings by Type</h3><ul><li>B602: 1 finding(s)</li><li>B105: 1
+finding(s)</li><li>B108: 1 finding(s)</li><li>B101: 1 finding(s)</li><li>B311: 1
+finding(s)</li><li>python.lang.security.eval: 1 finding(s)</li><li>generic.secrets.gitleaks: 1
+finding(s)</li><li>python.lang.best-practice.open: 1 finding(s)</li><li>python.flask.debug: 1
+finding(s)</li><li>python.requests.no-timeout: 1 finding(s)</li><li>CKV_AWS_18: 1
+finding(s)</li><li>CKV_AWS_21: 1 finding(s)</li><li>CKV_AWS_144: 1
+finding(s)</li><li>javascript.express.xss: 1 finding(s)</li></ul>
+            <h3>Top 2 Hotspots</h3><p>Files with the highest number of security findings:</p>
+        <table>
+            <tr>
+                <th>Finding Count</th>
+                <th>File Location</th>
+            </tr>
+
+            <tr>
+                <td>3</td>
+                <td>src/app.py</td>
+            </tr>
+
+            <tr>
+                <td>1</td>
+                <td>src/config.py</td>
+            </tr>
+            </table>
+        </div>
+
+        <h2>Detailed Findings</h2>
+
+        <table>
+            <tr>
+                <th>Severity</th>
+                <th>Rule</th>
+                <th>Message</th>
+                <th>Location</th>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>B602</td>
+                <td>subprocess call with shell=True</td>
+                <td>src/app.py:12</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>B105</td>
+                <td>Possible hardcoded password</td>
+                <td>src/config.py:3</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>B108</td>
+                <td>Probable insecure usage of temp file</td>
+                <td>src/app.py:40</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>B101</td>
+                <td>Use of assert detected</td>
+                <td>tests/test_app.py:8</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>python.lang.security.eval</td>
+                <td>Detected use of eval()</td>
+                <td>src/app.py:77</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>generic.secrets.gitleaks</td>
+                <td>Example key in docs</td>
+                <td>README.md:1</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>python.lang.best-practice.open</td>
+                <td>open() without encoding</td>
+                <td>src/util.py:9</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>CKV_AWS_18</td>
+                <td>S3 access logging disabled</td>
+                <td>infra/bucket.yaml:6</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>CKV_AWS_21</td>
+                <td>S3 versioning disabled</td>
+                <td>infra/bucket.yaml:6</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>CKV_AWS_144</td>
+                <td>Cross-region replication off</td>
+                <td>infra/bucket.yaml:6</td>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>javascript.express.xss</td>
+                <td>Unescaped user input</td>
+                <td>web/server.js:31</td>
+            </tr>
+            </table>
+            <h3>Suppressed Findings (3)</h3>
+            <p>These findings have been explicitly suppressed and do not affect the scanner
+result.</p>
+            <table>
+                <tr>
+                    <th>Severity</th>
+                    <th>Rule</th>
+                    <th>Message</th>
+                    <th>Location</th>
+                    <th>Status</th>
+                    <th>Reason</th>
+                </tr>
+
+                <tr>
+                    <td class="severity-error">ERROR</td>
+                    <td>B311</td>
+                    <td>Standard pseudo-random generator</td>
+                    <td>src/util.py:5</td>
+                    <td style="color:#6c757d">Suppressed</td>
+                    <td>Accepted risk: test fixture</td>
+                </tr>
+
+                <tr>
+                    <td class="severity-error">ERROR</td>
+                    <td>python.flask.debug</td>
+                    <td>Flask debug mode</td>
+                    <td>src/web.py:4</td>
+                    <td style="color:#6c757d">Suppressed</td>
+                    <td>Accepted risk: test fixture</td>
+                </tr>
+
+                <tr>
+                    <td class="severity-error">ERROR</td>
+                    <td>python.requests.no-timeout</td>
+                    <td>Request without timeout</td>
+                    <td>src/web.py:20</td>
+                    <td style="color:#6c757d">Suppressed</td>
+                    <td>Accepted risk: test fixture</td>
+                </tr>
+                </table>
+
+        <h2>Scan Metadata</h2>
+        <div class='metadata-section'>
+            <div class="metadata-item">
+                <strong>report_id:</strong> ASH-20260115
+            </div>
+
+            <div class="metadata-item">
+                <strong>generated_at:</strong> 2026-01-15T12:00:00+00:00
+            </div>
+
+            <div class="metadata-item">
+                <strong>project_name:</strong> ASH
+            </div>
+
+            <div class="metadata-item">
+                <strong>tool_version:</strong> <ASH_VERSION>
+            </div>
+
+            <div class="metadata-item">
+                <strong>description:</strong> Automated Security Helper Aggregated Report
+Post-processor
+            </div>
+
+            <div class="metadata-item">
+                <strong>summary_stats:</strong> {&#x27;severity_counts&#x27;:
+{&#x27;suppressed&#x27;: 6, &#x27;critical&#x27;: 1, &#x27;high&#x27;: 2, &#x27;medium&#x27;: 2,
+&#x27;low&#x27;: 3, &#x27;info&#x27;: 3}, &#x27;start&#x27;: None, &#x27;end&#x27;: None,
+&#x27;duration&#x27;: 0.0, &#x27;total&#x27;: 11, &#x27;actionable&#x27;: 4, &#x27;passed&#x27;: 3,
+&#x27;failed&#x27;: 2, &#x27;missing&#x27;: 1, &#x27;skipped&#x27;: 2, &#x27;error&#x27;: 1}
+            </div>
+
+            <div class="metadata-item">
+                <strong>validation_summary:</strong> {}
+            </div>
+
+            <div class="metadata-item">
+                <strong>execution_discrepancy_report:</strong> {}
+            </div>
+
+            <div class="metadata-item">
+                <strong>shard:</strong> None
+            </div>
+
+            <div class="metadata-item">
+                <strong>expected_scanners:</strong> []
+            </div>
+
+            <div class="metadata-item">
+                <strong>plugin_load_errors:</strong> {}
+            </div>
+            </div>
+    </div>
+</body>
+</html>

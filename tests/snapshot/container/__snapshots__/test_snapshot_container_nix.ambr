@@ -1,0 +1,233 @@
+# serializer version: 1
+# name: test_already_inside_a_nix_shell
+  dict({
+    'ASH_IN_NIX': list([
+    ]),
+    'ASH_OFFLINE': list([
+    ]),
+    'exit_code': 1,
+    'nix_commands': list([
+    ]),
+    'stderr': '''
+      ASH is already running inside a Nix shell but was asked to enter one again. The inner invocation should carry --mode local; this is a bug, not a configuration problem.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: test_equals_form_of_mode_is_rewritten
+  dict({
+    'ASH_IN_NIX': list([
+      '1',
+    ]),
+    'ASH_OFFLINE': list([
+      'YES',
+    ]),
+    'exit_code': 1,
+    'nix_commands': list([
+      list([
+        '/nix/var/nix/profiles/default/bin/nix',
+        '--extra-experimental-features',
+        'nix-command flakes',
+        'develop',
+        'path:<REPO>',
+        '--command',
+        'ash',
+        'scan',
+        '--mode=local',
+        '--no-progress',
+        '--source-dir',
+        'src',
+        '--output-dir',
+        'out',
+      ]),
+    ]),
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
+                   WARNING  Nix shell exited with code 1
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 1.
+  
+    ''',
+  })
+# ---
+# name: test_nix_not_installed
+  dict({
+    'exit_code': 1,
+    'stderr': '''
+      --mode nix requires Nix, which was not found on PATH. Install it from https://nixos.org/download/ (Linux and macOS; on Windows use WSL2), or choose a different --mode. ASH will not fall back to --mode local here, because that would scan with whatever tools happen to be installed and report the absent ones as MISSING.
+  
+    ''',
+    'stdout': '',
+  })
+# ---
+# name: test_shell_exit_with_results
+  dict({
+    'ASH_IN_NIX': list([
+      '1',
+    ]),
+    'ASH_OFFLINE': list([
+      'YES',
+    ]),
+    'exit_code': 2,
+    'nix_commands': list([
+      list([
+        '/nix/var/nix/profiles/default/bin/nix',
+        '--extra-experimental-features',
+        'nix-command flakes',
+        'develop',
+        'path:<REPO>',
+        '--command',
+        'ash',
+        'scan',
+        '--mode',
+        'local',
+        '--no-progress',
+        '--source-dir',
+        'src',
+        '--output-dir',
+        'out',
+        '--no-fail-on-incomplete-scanners',
+      ]),
+    ]),
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
+                   WARNING  Nix shell exited with code 2
+      
+      === ASH Scan Completed in <DURATION>: Next Steps ===
+      View detailed findings...
+        - SARIF: '<TMP>/out/reports/ash.sarif'
+        - JUnit: '<TMP>/out/reports/ash.junit.xml'
+        - ASH aggregated results JSON available at: '<TMP>/out/ash_aggregated_results.json'
+      
+      === Actionable findings detected! ===
+      To investigate...
+        1. Open one of the summary reports for a user-friendly table of the findings:
+          - HTML report of all findings: '<TMP>/out/reports/ash.html'
+          - Markdown summary: '<TMP>/out/reports/ash.summary.md'
+          - Text summary: '<TMP>/out/reports/ash.summary.txt'
+        2. Use ash report to view a short text summary of the scan in your terminal
+        3. Use ash inspect findings to explore the findings interactively
+        4. Review scanner-specific reports and outputs in the '<TMP>/out/scanners' directory
+      
+      === ASH Exit Codes ===
+        0: Success - No actionable findings or not configured to fail on findings
+        1: Error during execution
+        2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
+      ERROR (2) Exiting due to 6 actionable findings found in ASH scan
+  
+    ''',
+  })
+# ---
+# name: test_shell_left_no_results[0]
+  dict({
+    'ASH_IN_NIX': list([
+      '1',
+    ]),
+    'ASH_OFFLINE': list([
+      'YES',
+    ]),
+    'exit_code': 1,
+    'nix_commands': list([
+      list([
+        '/nix/var/nix/profiles/default/bin/nix',
+        '--extra-experimental-features',
+        'nix-command flakes',
+        'develop',
+        'path:<REPO>',
+        '--command',
+        'ash',
+        'scan',
+        '--mode',
+        'local',
+        '--no-progress',
+        '--source-dir',
+        'src',
+        '--output-dir',
+        'out',
+      ]),
+    ]),
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 0.
+  
+    ''',
+  })
+# ---
+# name: test_shell_left_no_results[1]
+  dict({
+    'ASH_IN_NIX': list([
+      '1',
+    ]),
+    'ASH_OFFLINE': list([
+      'YES',
+    ]),
+    'exit_code': 1,
+    'nix_commands': list([
+      list([
+        '/nix/var/nix/profiles/default/bin/nix',
+        '--extra-experimental-features',
+        'nix-command flakes',
+        'develop',
+        'path:<REPO>',
+        '--command',
+        'ash',
+        'scan',
+        '--mode',
+        'local',
+        '--no-progress',
+        '--source-dir',
+        'src',
+        '--output-dir',
+        'out',
+      ]),
+    ]),
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
+                   WARNING  Nix shell exited with code 1
+                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 1.
+  
+    ''',
+  })
+# ---
+# name: test_unparseable_results
+  dict({
+    'ASH_IN_NIX': list([
+      '1',
+    ]),
+    'ASH_OFFLINE': list([
+      'YES',
+    ]),
+    'exit_code': 1,
+    'nix_commands': list([
+      list([
+        '/nix/var/nix/profiles/default/bin/nix',
+        '--extra-experimental-features',
+        'nix-command flakes',
+        'develop',
+        'path:<REPO>',
+        '--command',
+        'ash',
+        'scan',
+        '--mode',
+        'local',
+        '--no-progress',
+        '--source-dir',
+        'src',
+        '--output-dir',
+        'out',
+      ]),
+    ]),
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
+                   ERROR    Failed to parse results file: 1 validation error for AshAggregatedResults
+                              Invalid JSON: key must be a string at line 1 column 2
+                                For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
+  
+    ''',
+  })
+# ---

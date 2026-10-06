@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../../../automated_security_helper/schemas/AshConfig.json
+# Config for the snapshot fixture repository. See tests/test_data/snapshot_fixture/README.md.
+project_name: snapshot-fixture
+fail_on_findings: true
+global_settings:
+  severity_threshold: MEDIUM
+  suppressions:
+    # Applied: matches the detect-secrets finding on app/app.py line 5, so the
+    # reports show one suppressed finding and the suppression in used_suppressions.
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "app/app.py"
+      line_start: 5
+      line_end: 5
+      reason: "Fixture placeholder credential, not a real secret"
+    # Never applied: no finding has this rule id, so unused-suppressions lists it.
+    - rule_id: "CKV_AWS_999"
+      path: "infra/main.tf"
+      reason: "Stale suppression for a check that no longer exists"
+      expiration: "2099-12-31"

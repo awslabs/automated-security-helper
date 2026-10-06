@@ -56,10 +56,50 @@ jobs:
             exit 0
           fi
 
+          # The release body leads with this version's CHANGELOG.md entry, and
+          # GitHub's generated notes follow it. gh prepends --notes to
+          # --generate-notes output. The entry is what commitizen rendered from
+          # .github/changelog/CHANGELOG.md.j2, which includes
+          # .github/release-notes/<tag>.md when that file exists, so the curated
+          # notes reach the release page from the same file as the changelog.
+          # v3.8.0 needs this: it ships breaking changes as a minor, and the
+          # release page is where users pinned to <4 look.
+          #
+          # Covered by tests/unit/test_release_notes_workflow.py.
+          NOTES_FILE="${RUNNER_TEMP:-/tmp}/release-notes-${TAG}.md"
+          CURATED=".github/release-notes/${TAG}.md"
+          awk -v tag="$TAG" '
+            /^## / { if (found) exit; if ($2 == tag) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+
+          if [[ -f "$CURATED" ]]; then
+            # The tag does not exist yet, so failing here costs a rerun after the
+            # changelog is fixed, while publishing would lose the curated notes.
+            if ! python3 - "$CURATED" "$NOTES_FILE" <<'PY'
+          import sys
+          curated = open(sys.argv[1], encoding="utf-8").read().strip()
+          notes = open(sys.argv[2], encoding="utf-8").read()
+          sys.exit(0 if curated and curated in notes else 1)
+          PY
+            then
+              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen (the template includes the file), then rerun this job."
+              exit 1
+            fi
+          fi
+
+          NOTES_ARGS=()
+          if grep -q '[^[:space:]]' "$NOTES_FILE"; then
+            NOTES_ARGS=(--notes "$(cat "$NOTES_FILE")")
+          else
+            echo "::warning::CHANGELOG.md has no entry for ${TAG}, so the release body is GitHub's generated notes only."
+          fi
+
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --target main \
             --generate-notes \
+            "${NOTES_ARGS[@]}" \
             --title "$TAG"
 
           echo "Created release $TAG"

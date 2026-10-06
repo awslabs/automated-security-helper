@@ -1,0 +1,9 @@
+$ ash config lint -c clean.yaml --fix-unused --non-interactive
+Linting configuration file: clean.yaml
+
+Found 1 issue(s):
+  ℹ️  No unused suppressions report found. Run a scan first to generate the report.
+
+  Info: 1
+⚠️  No unused suppressions report found. Run a scan first to generate the report.
+[exit code: 0]

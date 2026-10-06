@@ -105,6 +105,157 @@ uv run pytest tests/integration/ -v
 uv run pytest tests/integration/scanners/ -v
 ```
 
+## Snapshot tests
+
+What ASH prints and writes is pinned by snapshot tests, so a change to user-visible
+output fails CI until someone has looked at it and said why it changed.
+
+### What is snapshotted
+
+- `tests/snapshot/`: syrupy snapshot tests of CLI output, reports and other rendered
+  output. Snapshots live next to their test module, in
+  `tests/snapshot/**/__snapshots__/<test_module>.ambr` for structured data and
+  `__snapshots__/<test_module>/<test_name>.<ext>` for whole rendered documents.
+- `.github/actions/validate-mcp/tool_surface.golden.json`: the MCP tool surface a client
+  sees, compared against the live server by the `validate-mcp` action.
+
+The Snapshot-Update rule below also covers the other committed files that a generator
+writes in full and CI regenerates and compares: the JSON schemas in
+`automated_security_helper/schemas/*.json`, `docs/content/docs/cli-reference-generated.md`,
+and the MCP tool reference in
+`ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md`. The full
+list, and why each candidate is in or out, is the `GOLDEN` table in
+`.github/scripts/check-snapshot-trailers.py`.
+
+### Normalization
+
+Snapshots must be identical on every machine, so values that change from run to run
+(temp paths, the repository root, the home directory, ids, versions) are masked by one
+normalizer, `SnapshotNormalizer` in `tests/snapshot/support/normalize.py`. The `snapshot`
+and `text_snapshot` fixtures in `tests/snapshot/conftest.py` apply it, and they also pin
+the terminal (width, no color, no TTY) and unset the CI variables that change ASH's
+output. Do not normalize inside a test. If a test produces a value that varies, register
+it with the normalizer (`add_root`, `add_literal`) or extend the normalizer, together with
+a test in `tests/snapshot/test_snapshot_normalizer.py` showing what it masks and what it
+leaves alone.
+
+Time is not masked by default. A wrong timestamp or duration is a defect a user reads,
+so a new test sees every instant and duration it renders. When output contains the
+wall clock, pin the clock rather than masking it: the `pinned_clock` fixture in
+`tests/snapshot/conftest.py` (built on `pin_clock` in
+`tests/snapshot/support/fixture_model.py`) replaces `datetime.now()` and `uuid4` in the
+modules that stamp them into output, and `pin_clock(monkeypatch, extra_modules=(...))`
+covers a module outside that list. Only when the time cannot be pinned cheaply, and
+only after the test has been shown to differ between runs or between time zones (run it
+several times, and under `TZ=Pacific/Kiritimati` and `TZ=America/Adak`), opt in to
+masking for that test or module:
+
+```python
+pytestmark = pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True)
+```
+
+The switches, all `False` unless a marker turns them on:
+
+- `mask_instants`: ISO-8601 instants, `ASH-YYYYMMDD...` report ids, the
+  `scan-YYYYMMDDHHMMSS` id from MCP `get_scan_results`, today's date, and values under
+  instant keys such as `time`, `logged_time`, `generated_at`, `start_time`, `end_time`
+  and `timestamp`.
+- `mask_durations`: a number followed by a time unit in text (`1.2s`, `350ms`,
+  `0:00:01`).
+- `mask_duration_keys`: numbers under keys such as `duration` and `duration_seconds`.
+
+No snapshot test opts in at the moment: every one that renders the time runs under a
+pinned clock.
+
+The console log's time column is not a normalizer rule: the fixtures draw it as the
+constant `[<LOG_TIME>]`, so the column has one width under any clock, locale or
+timezone.
+
+### When a snapshot test fails
+
+1. Run the tests and read the diff syrupy prints:
+
+   ```bash
+   uv run pytest tests/snapshot
+   ```
+
+2. Decide whether the new output is what you intended. If it is not, fix the code.
+3. If it is, rewrite the snapshots for the tests you changed:
+
+   ```bash
+   uv run pytest tests/snapshot/<area>/test_snapshot_<area>_<topic>.py -n 0 --snapshot-update
+   ```
+
+   Pass `-n 0`. Under xdist several workers rewrite the same `.ambr` file at once, and
+   the last writer drops the others' snapshots without an error.
+
+4. Review what changed, file by file:
+
+   ```bash
+   git diff -- '**/__snapshots__/**'
+   ```
+
+5. Commit the code change and its snapshots together, with a trailer saying why the
+   output changed:
+
+   ```bash
+   git commit --trailer "Snapshot-Update: the summary table now shows suppressed findings"
+   ```
+
+The `snapshot-trailers` CI job fails if a golden file changed in a commit that has no
+non-empty `Snapshot-Update:` trailer. The trailer has to be on a commit that touched the
+file, so a separate follow-up commit that only adds it does not count. To fix:
+
+- if the change is in your latest commit, run
+  `git commit --amend --no-edit --trailer "Snapshot-Update: <why>"`;
+- if it is in an earlier commit, run the `git rebase ... --exec ...` command printed in the
+  CI error, which amends only the commits that touched that file.
+
+Then run `git push --force-with-lease`. Pull requests are squash-merged with every commit
+message kept, and the check reads trailers from each commit's section of the squash
+message, so the trailer survives the merge.
+
+CI never passes `--snapshot-update`, and `tests/snapshot/conftest.py` refuses it when the
+`CI` or `GITHUB_ACTIONS` environment variable equals `true` (exactly that string, so
+`CI=1` does not trigger the refusal). `tests/snapshot/test_snapshot_policy.py` fails if
+any workflow, action, script or pytest configuration passes `--snapshot-update` or
+`--snapshot-warn-unused`. A missing snapshot fails.
+
+### Orphaned snapshots
+
+A snapshot that no test asserts any more fails CI. syrupy reports an unused snapshot in a
+test module that still exists. If you delete or rename a test module, syrupy never opens
+its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
+`test_snapshot_policy.py`) checks that every file under a `tests/**/__snapshots__/`
+directory belongs to a `<test_module>.py` next to that directory, and that no
+`__snapshots__` directory is empty. When you rename a module, move its snapshots with it;
+when you delete one, delete its snapshots. Either change needs a `Snapshot-Update:`
+trailer like any other.
+
+### Output that differs by operating system
+
+When output really differs by platform (path separators, line endings, a Windows-only
+message), render every variant on every OS: call the code with the platform as an input
+and snapshot each variant under its own name, for example
+`text_snapshot("md")(name="windows")`. Do not skip a snapshot test on some platforms, and
+do not keep a separate snapshot per runner. A skipped variant is never compared, and its
+snapshot looks unused to the runs that skip it.
+
+### Output that needs a container runtime or Nix
+
+What container mode and Nix mode print before and after the runtime is snapshotted
+in-process, with only the runner process or the `nix develop` call replaced, under
+`tests/snapshot/container/`. What only a real runtime can produce (output from inside
+the image, a real container or Nix scan, the `./ash` and `ash_helpers.ps1` wrappers) is
+in `tests/snapshot/container/runtime/`, marked `container_runtime` or `nix_runtime`.
+`tests/conftest.py` deselects those unless `--run-container-snapshots` or
+`--run-nix-snapshots` is passed, which the scan-validation container legs and the Nix
+legs do after their scans. Keep such modules in `runtime/`: syrupy reads every file in a
+`__snapshots__` directory once one test beside it runs, so a deselected module's
+snapshots next to collected ones would fail the default run as unused. To update them,
+build the image (or have Nix) and run the module with its flag, `-n 0` and
+`--snapshot-update`; see the module docstrings for the environment they read.
+
 ## Development Commands
 
 - Format and lint code:
@@ -213,15 +364,33 @@ A pre-commit hook (`commitizen`) also validates local commit messages.
 
 Releases are cut by maintainers via **Actions > ASH - Create Release > Run workflow**. The workflow:
 
-1. Determines the bump type from commit history (patch/minor/major based on conventional commits)
+1. Determines the bump type from commit history (patch/minor/major based on conventional commits), subject to the release line described below
 2. Bumps the version in `pyproject.toml`, updates `CHANGELOG.md`
 3. Regenerates version references in documentation
 4. Creates a release PR
 
 After merging the release PR, a second workflow automatically:
 - Creates the git tag (`v{version}`)
-- Publishes a GitHub Release with auto-generated notes
+- Publishes a GitHub Release whose body is the version's `CHANGELOG.md` entry followed by GitHub's auto-generated notes
 - Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
+
+#### Release App setup
+
+The release PR's required checks (`ash / SAST, SCA, and IaC Scan`, `Validate PR title`, `required-checks`) run on `pull_request`. When the PR is opened with the workflow's `GITHUB_TOKEN`, GitHub creates those runs in an approval-required state, and nothing starts until a maintainer with write access selects **Approve workflows to run** in the PR's merge box. The release PR says so in its description when that happens. To have the checks start on their own, the workflow opens the PR with a GitHub App token instead, which needs this one-time setup by a repository admin:
+
+1. Create a GitHub App owned by the organization. It needs no webhook and no callback URL.
+2. Repository permissions: **Pull requests: Read and write**. Metadata read is implicit; GitHub adds it automatically. No Contents permission, not even read, and nothing else. The branch push stays on `GITHUB_TOKEN`, so the App only opens the PR. The workflow requests exactly `pull-requests: write` when it mints the token, so the mint step fails if the App lacks it, and it would also fail if the workflow asked for a permission the App was not granted.
+3. Install the App on this repository only.
+4. Generate a private key for the App, and copy the App's **Client ID** from its settings page (the Client ID, not the numeric App ID).
+5. Add two repository secrets under **Settings > Secrets and variables > Actions**:
+   - `RELEASE_APP_CLIENT_ID`: the Client ID
+   - `RELEASE_APP_PRIVATE_KEY`: the full contents of the `.pem` file
+
+No repository variables are needed.
+
+The workflow only uses the App when both secrets are set. With neither or only one, it falls back to `GITHUB_TOKEN`, logs a warning, and the PR waits for approval as described above. Once both are set, a misconfigured App (not installed, wrong permissions, bad key) fails the release job at the token step, before any version bump or push, rather than silently falling back.
+
+To confirm the setup, run the release workflow and check that the **Mint a GitHub App token** step ran, that the PR author is the App rather than `github-actions`, and that the PR's checks start without an approval banner.
 
 ### Manual Version Bumping
 
@@ -234,6 +403,26 @@ uv run cz bump --changelog
 
 # Dry run to preview
 uv run cz bump --changelog --dry-run
+```
+
+### Release line
+
+`main` carries breaking (`feat!`) commits that ship in 3.x by maintainer decision, because 4.0.0 is reserved for the v4 packaging work. The `RELEASE_LINE` value committed at the top of `ash-create-release.yml` controls this. It is not a dispatch input, so the line a release lands on is decided in reviewed history:
+
+- `3.x` (the default): if commitizen detects a major increment, the workflow runs `cz bump --increment MINOR` instead, logs a warning that names every breaking commit it overrode, and lists them in the run summary. A patch or minor increment is left alone. The commits are not rewritten, so their `BREAKING CHANGE` notes still render in `CHANGELOG.md`. The job fails if the current version is not 3.x, or if the bump still produced a version outside 3.x.
+- `auto`: commitizen's own semver, so a breaking change produces a major.
+
+A release whose version understates it can carry hand-written notes in `.github/release-notes/<tag>.md`. The changelog template (`.github/changelog/CHANGELOG.md.j2`) renders that file under the version heading, and the tag workflow publishes that version's `CHANGELOG.md` entry, curated notes included, at the top of the GitHub Release body, ahead of GitHub's generated notes. `v3.8.0.md` lists the behavior changes that 3.8.0 ships in a minor release, with their opt-outs.
+
+Hand-written notes go under `## Unreleased` in `CHANGELOG.md`. commitizen would replace that section with the generated entry, so before bumping, the workflow moves its body into `.github/release-notes/<next tag>.md`, below any curated notes already there, and removes the section. The new entry then carries the curated notes, the hand-written notes, and the generated sections, and so does the GitHub Release. The step fails before bumping if that text contains a Jinja delimiter (`{{`, `{%`, `{#`) or if the next tag cannot be determined. An empty or absent section is left alone.
+
+To cut 4.0.0 once v4 is on `main`: set `RELEASE_LINE` to `auto` in the change that lands v4, then run the workflow. Once the version is 4.x, `3.x` refuses to run, so a setting left at `3.x` fails loudly rather than capping 4.x.
+
+Preview either line locally:
+
+```bash
+uv run cz bump --dry-run --changelog --increment MINOR   # what RELEASE_LINE 3.x produces when a major is detected
+uv run cz bump --dry-run --changelog                     # what RELEASE_LINE auto produces
 ```
 
 ## Scanner Plugin Development

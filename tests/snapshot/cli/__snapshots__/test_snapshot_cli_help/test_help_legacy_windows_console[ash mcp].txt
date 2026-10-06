@@ -1,0 +1,43 @@
+
+ Usage: ash mcp [OPTIONS]
+
+ Start the ASH MCP server (Model Context Protocol)
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --log-level                                   <str>  Log level [default: INFO]                  │
+│ --verbose              --no-verbose                  Verbose output [default: no-verbose]       │
+│ --debug                --no-debug                    Debug output [default: no-debug]           │
+│ --color                --no-color                    Enable color output [default: color]       │
+│ --quiet                --no-quiet                    Quiet output [default: no-quiet]           │
+│ --transport                                   <str>  Transport: 'stdio' (default),              │
+│                                                      'streamable-http', or 'sse'.               │
+│                                                      [default: stdio]                           │
+│ --host                                        <str>  Host to bind for HTTP transports.          │
+│                                                      [default: 127.0.0.1]                       │
+│ --port                                        <int>  Port to bind for HTTP transports.          │
+│                                                      [default: 8000]                            │
+│ --mount-path                                  <str>  HTTP path the transport listens on         │
+│                                                      (default: /mcp for streamable-http, /sse   │
+│                                                      for sse).                                  │
+│                                                      [default: /mcp]                            │
+│ --auth-header-name                            <str>  Required HTTP header name for              │
+│                                                      single-tenant auth (HTTP transports only). │
+│ --auth-header-value                           <str>  Expected value of --auth-header-name.      │
+│ --stateless-http       --no-stateless-http           Handle each streamable-HTTP request        │
+│                                                      independently instead of binding it to a   │
+│                                                      server-held session. Required behind a     │
+│                                                      load balancer that may route consecutive   │
+│                                                      requests to different replicas, and by     │
+│                                                      managed runtimes that inject their own     │
+│                                                      Mcp-Session-Id. Only valid with            │
+│                                                      --transport streamable-http.               │
+│                                                      [default: no-stateless-http]               │
+│ --allowed-host                                <str>  Host header value to accept, repeatable.   │
+│                                                      Keeps DNS-rebinding protection enabled     │
+│                                                      while allowing a known proxy or load       │
+│                                                      balancer hostname. Without this,           │
+│                                                      protection is enabled only when --host is  │
+│                                                      loopback, matching the MCP SDK's own       │
+│                                                      default.                                   │
+│ --help                                               Show this message and exit.                │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
