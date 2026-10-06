@@ -1,0 +1,209 @@
+name: ASH - End to end
+# Every v4 install channel, built from this commit, installed fresh, and made to run a
+# real `ashx scan` over the fixtures in tests/e2e/fixtures: exit 2 with 3 findings, exit
+# 0 clean, and exit 1 with opengrep MISSING. Each channel also upgrades from N-1,
+# uninstalls, and shows a negative control failing. scripts/e2e/assert_outcome.py is the
+# one verdict every channel uses; tests/e2e/README.md records how the exit-1 trigger was
+# measured.
+#
+# Channels with their own workflow (deb/rpm in ash-native-packages.yml, Flatpak, MSIX,
+# Chocolatey and winget in ash-package.yml, the IDEs, the Kubernetes operator) are not
+# repeated here. This file holds the channels that had no e2e home: the wheel, the
+# container image, Homebrew from head, and the MCPB bundle.
+#
+# WHY THERE IS NO paths FILTER
+#
+# The e2e legs test the product, and the product is mostly automated_security_helper/**.
+# A paths filter that left it out is how the packaging-format jobs came to skip code
+# changes entirely, and merge_group accepts no filter at all. So every push and pull
+# request runs it.
+#
+# PENDING CHANNELS
+#
+# A channel whose job is still a placeholder is listed in E2E_PENDING below and its job
+# carries `if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'`. No such repository variable is
+# set, so the job is skipped. (A literal `if: false` would do the same, but actionlint
+# rejects a constant condition, and job-level `if:` cannot read `env`.) The gate requires
+# a pending channel to be skipped and every other channel to succeed. A pending channel
+# that runs, whether because it was implemented or because someone set the variable,
+# fails the gate until it is removed from the list, so the placeholder cannot outlive its
+# reason unnoticed.
+
+on:
+  push:
+    branches:
+      - v4-capabilities
+      - "v4/**"
+  pull_request:
+  merge_group:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Pushes are keyed by commit so two pushes never cancel each other's verdicts; pull
+  # requests by ref, so a new push to a PR supersedes the old run.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Channels whose job below is a placeholder. See PENDING CHANNELS above.
+  E2E_PENDING: container homebrew mcpb
+
+jobs:
+  contract:
+    name: "e2e: shared contract (fixtures, assert_outcome, cli name)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
+      # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
+      # has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      # The planted-output self-test first: the verdict every channel relies on has to
+      # be seen rejecting each wrong outcome before any channel's green means anything.
+      - name: Prove assert_outcome can fail
+        run: uv run --no-project python scripts/e2e/assert_outcome.py --self-test
+
+      - name: Unit tests for the e2e contract
+        run: >-
+          uv run --group dev pytest tests/unit/test_e2e_assert_outcome.py
+          -p no:cacheprovider -o addopts="" -v
+
+  wheel:
+    name: "e2e: wheel (${{ matrix.os }}, python ${{ matrix.python }})"
+    needs: contract
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.14"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two
+      # commits, not one: on a push to v4-capabilities HEAD is that ref, and wheel.sh then
+      # builds N-1 from HEAD's first parent instead.
+      - name: Fetch the N-1 ref
+        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+
+      # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
+      # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
+      # has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Build, install, scan, upgrade, uninstall
+        env:
+          E2E_PYTHON: ${{ matrix.python }}
+          E2E_PREV_REF: origin/v4-capabilities
+        run: |
+          work="$RUNNER_TEMP/e2e-wheel"
+          if command -v cygpath >/dev/null 2>&1; then work="$(cygpath -u "$work")"; fi
+          bash scripts/e2e/wheel.sh "$work"
+
+  # Placeholder for WP2: build the image from head (never pushed), scan the three cases
+  # with --mode container, rebuild over N-1, `docker rmi`, negative control.
+  container:
+    name: "e2e: container image"
+    needs: contract
+    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: echo "placeholder; see E2E_PENDING"
+
+  # Placeholder for WP4: Homebrew from a local tap whose formula points at this commit.
+  homebrew:
+    name: "e2e: Homebrew from head"
+    needs: contract
+    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: echo "placeholder; see E2E_PENDING"
+
+  # Placeholder for WP9: the MCPB bundle launched through the MCP inspector.
+  mcpb:
+    name: "e2e: MCPB via the MCP inspector"
+    needs: contract
+    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: echo "placeholder; see E2E_PENDING"
+
+  e2e-gate:
+    name: "e2e: gate"
+    needs: [contract, wheel, container, homebrew, mcpb]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # Checked out for the census: the gate reads this file's own jobs so a channel job
+      # added without being added to `needs` fails here instead of going ungated.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require every channel to have passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          GATE_JOB: ${{ github.job }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util, json, os, sys
+          spec = importlib.util.spec_from_file_location("census", ".github/scripts/assert-required-checks-census.py")
+          census = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(census)
+          with open(".github/workflows/ash-e2e.yml", encoding="utf-8") as handle:
+              jobs = set(census.workflow_job_names(handle.read())) - {os.environ["GATE_JOB"]}
+          results = {name: entry["result"] for name, entry in json.loads(os.environ["RESULTS"]).items()}
+          pending = set(os.environ.get("E2E_PENDING", "").split())
+          problems = []
+          if not jobs:
+              problems.append("the job census of ash-e2e.yml is empty; the parser or the path is broken")
+          for name in sorted(jobs - set(results)):
+              problems.append(f"job {name} is not in the gate's needs, so the gate would pass without it")
+          for name in sorted(pending - set(results)):
+              problems.append(f"{name} is listed in E2E_PENDING but is not a job the gate needs")
+          for name, result in sorted(results.items()):
+              if name in pending:
+                  if result == "success":
+                      problems.append(f"{name} succeeded but is still listed in E2E_PENDING; remove it")
+                  elif result != "skipped":
+                      problems.append(f"{name} is pending and should be skipped, but is {result}")
+                  else:
+                      print(f"PENDING {name}: not implemented yet")
+              elif result != "success":
+                  problems.append(f"{name} is {result}")
+              else:
+                  print(f"OK      {name}")
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PY

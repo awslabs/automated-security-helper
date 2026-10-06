@@ -114,8 +114,12 @@ jobs:
     # StubProcesses.assertAllExited fails five tests on a process that is already dead.
     # Measured by running these steps in this image the way Actions does: the zombies were
     # all children of tail. docker-init (tini) is what --init runs, and it reaps them.
+    #
+    # Pinned by digest, like every other job image here (.github/scripts/assert-images-pinned.py
+    # enforces it). The digest is the multi-arch index gradle:jdk21 resolved to on 2026-10-05
+    # (Gradle 9.8.0, JDK 21.0.12); move both together.
     container:
-      image: gradle:jdk21
+      image: gradle:jdk21@sha256:4debe478645a3ad9208f3403ac021859fdf4d1a819d59970d75309b098f28f76
       options: --init
 
     steps:
@@ -200,7 +204,8 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-    container: gradle:jdk21
+    # Pinned by digest; the same image as the plugin job above.
+    container: gradle:jdk21@sha256:4debe478645a3ad9208f3403ac021859fdf4d1a819d59970d75309b098f28f76
     defaults:
       run:
         shell: bash

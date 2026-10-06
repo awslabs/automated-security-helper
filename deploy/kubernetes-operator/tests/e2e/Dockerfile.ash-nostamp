@@ -24,6 +24,7 @@
 # conftest.py builds first, and naming it here keeps the base reference tagged
 # rather than an opaque argument that could resolve to an untagged :latest.
 ARG BASE_TAG=local
+# assert-images-pinned: built-locally conftest.py builds ash-e2e from Dockerfile.ash, which is digest-pinned, immediately before this
 FROM ash-e2e:${BASE_TAG}
 
 # Inherits NONE from the e2e image; restated so this file says it on its own.

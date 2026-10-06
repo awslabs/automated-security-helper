@@ -7,7 +7,9 @@
 #
 # The one thing that does need ASH is the CRD generator, and that runs in CI and on
 # a developer's machine, not here.
-FROM python:3.12-slim
+# Pinned by digest (.github/scripts/assert-images-pinned.py enforces it): the multi-arch
+# index python:3.12-slim resolved to on 2026-10-05 (Python 3.12.15).
+FROM python:3.12-slim@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d
 
 # Non-root from the start. The numeric uid matches manifests/operator.yaml so
 # readOnlyRootFilesystem and runAsUser agree. --user-group is explicit because a
