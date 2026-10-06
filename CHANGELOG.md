@@ -645,6 +645,13 @@
   found` although nothing was going to be built. The lookup now happens only for a
   build, and `--no-build` runs the image that is already present.
 
+- **The PowerShell `Invoke-ASH` finds an OCI runner when you do not name one.**
+  Without `-OCIRunner` and with `ASH_OCI_RUNNER` unset, PowerShell bound the
+  parameter to an empty string rather than `$null`, so `Invoke-ASH` tried to run a
+  runner named `""` and always failed. It now falls back to the first of `docker`,
+  `finch`, `nerdctl` and `podman` on PATH, as `./ash` falls back when `OCI_RUNNER`
+  is empty.
+
 ### Reporting changes
 
 - **Reports now carry the age of every content database a scan used.** Additive:
