@@ -17,7 +17,7 @@ what came back.
 
 Those existing jobs cannot catch the bugs below, for two compounding reasons:
 
-* Their fixture is ``echo 'print("hello")' > /tmp/ash-selftest/test_sample.py`` -- a
+* Their fixture is ``echo 'print("hello")' > "${RUNNER_TEMP}/ash-selftest/test_sample.py"`` -- a
   clean file that yields zero findings even when every scanner works perfectly.
   There is nothing there to notice the absence of.
 * Their only assertion is the step's exit status, and a scanner at ERROR cannot

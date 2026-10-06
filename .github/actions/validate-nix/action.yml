@@ -47,7 +47,8 @@ runs:
     - name: "nix: create test fixture"
       shell: bash
       run: |
-        mkdir -p /tmp/ash-nix-selftest
+        # RUNNER_TEMP, not /tmp: the runner empties it after every job.
+        mkdir -p "${RUNNER_TEMP}/ash-nix-selftest"
         # Deliberately flawed inputs so scanners have something to report. A fixture that
         # triggers nothing would let this job pass while every scanner sat idle -- which is
         # the exact failure mode Nix mode exists to prevent, so it must not be the shape of
@@ -55,13 +56,13 @@ runs:
         #
         # These are scanner FIXTURES, never executed: the shell=True call and the
         # hardcoded credential are the patterns bandit and detect-secrets should flag.
-        cat > /tmp/ash-nix-selftest/app.py <<'PY'
+        cat > "${RUNNER_TEMP}/ash-nix-selftest/app.py" <<'PY'
         import subprocess
         PASSWORD = "hunter2"
         def run(cmd):
             subprocess.call(cmd, shell=True)
         PY
-        cat > /tmp/ash-nix-selftest/template.yaml <<'YAML'
+        cat > "${RUNNER_TEMP}/ash-nix-selftest/template.yaml" <<'YAML'
         Resources:
           Bucket:
             Type: AWS::S3::Bucket
@@ -69,7 +70,7 @@ runs:
               BucketName: ash-nix-selftest-bucket
         YAML
         printf '{ "name": "ash-nix-selftest", "version": "1.0.0", "dependencies": {} }\n' \
-          > /tmp/ash-nix-selftest/package.json
+          > "${RUNNER_TEMP}/ash-nix-selftest/package.json"
 
     - name: "nix: scan"
       shell: bash
@@ -94,8 +95,8 @@ runs:
         set +e
         ashx scan \
           --mode nix \
-          --source-dir /tmp/ash-nix-selftest \
-          --output-dir /tmp/ash-nix-selftest/output \
+          --source-dir "${RUNNER_TEMP}/ash-nix-selftest" \
+          --output-dir "${RUNNER_TEMP}/ash-nix-selftest/output" \
           --simple
         rc=$?
         set -e
@@ -110,10 +111,11 @@ runs:
       run: |
         python3 <<'PY'
         import json
+        import os
         import pathlib
         import sys
 
-        results = pathlib.Path("/tmp/ash-nix-selftest/output/ash_aggregated_results.json")
+        results = pathlib.Path(os.environ["RUNNER_TEMP"], "ash-nix-selftest", "output", "ash_aggregated_results.json")
         if not results.exists():
             sys.exit(f"FAIL: no results at {results}; the scan did not complete")
 

@@ -12,8 +12,9 @@ runs:
     - name: Create test fixture
       shell: bash
       run: |
-        mkdir -p /tmp/ash-selftest
-        echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
+        # RUNNER_TEMP, not /tmp: the runner empties it after every job.
+        mkdir -p "${RUNNER_TEMP}/ash-selftest"
+        echo 'print("hello")' > "${RUNNER_TEMP}/ash-selftest/test_sample.py"
 
     # Every self-test scan below passes `--scanners detect-secrets`, and that is a
     # statement about what these jobs test rather than a way to quieten them.
@@ -70,7 +71,7 @@ runs:
     - name: "pip: self-test scan"
       if: inputs.method == 'pip'
       shell: bash
-      run: ashx scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: ashx scan --source-dir "${RUNNER_TEMP}/ash-selftest" --output-dir "${RUNNER_TEMP}/ash-selftest/output" --simple --phases scan --phases report --scanners detect-secrets
 
     # === pipx ===
     - name: "pipx: install pipx"
@@ -91,7 +92,7 @@ runs:
     - name: "pipx: self-test scan"
       if: inputs.method == 'pipx'
       shell: bash
-      run: ashx scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: ashx scan --source-dir "${RUNNER_TEMP}/ash-selftest" --output-dir "${RUNNER_TEMP}/ash-selftest/output" --simple --phases scan --phases report --scanners detect-secrets
 
     # === uvx ===
     - name: "uvx: install uv (Unix)"
@@ -109,7 +110,7 @@ runs:
     - name: "uvx: self-test scan"
       if: inputs.method == 'uvx'
       shell: bash
-      run: uvx --from . ashx scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: uvx --from . ashx scan --source-dir "${RUNNER_TEMP}/ash-selftest" --output-dir "${RUNNER_TEMP}/ash-selftest/output" --simple --phases scan --phases report --scanners detect-secrets
 
     # === homebrew ===
     - name: "homebrew: validate formula"

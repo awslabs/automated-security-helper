@@ -548,6 +548,11 @@ runs:
       run: |
         set -uo pipefail
 
+        # Every scratch file this step makes goes in here, and the trap removes it, so a
+        # self-hosted or reused runner does not collect one log per pull.
+        scratch="$(mktemp -d)"
+        trap 'rm -rf "${scratch}"' EXIT
+
         runtime="${RUNTIME:-docker}"
 
         # EVERY EXPANSION OF `wrapper` IS GUARDED, BECAUSE IT IS USUALLY EMPTY
@@ -621,7 +626,7 @@ runs:
         # all about why -- the reason was one line on stderr, discarded. A refusal has to carry
         # it, and it has to carry the argv too, because the step now asks more than one
         # question and "which one failed" is half the diagnosis.
-        inspect_log="$(mktemp)"
+        inspect_log="$(mktemp "${scratch}/inspect.XXXXXX")"
 
         # Answers with an empty string rather than a non-zero exit on some runtimes, so every
         # caller has to reject emptiness explicitly. Two empty ids compare equal, and "the
@@ -762,7 +767,7 @@ runs:
         pull_ref() {
           local ref="$1" kind="$2"
           local log n sleep_for
-          log="$(mktemp)"
+          log="$(mktemp "${scratch}/pull.XXXXXX")"
           for n in $(seq 1 "${ATTEMPTS}"); do
             pulls=$(( pulls + 1 ))
             echo "=== pull ${ref} (attempt ${n} of ${ATTEMPTS}) ==="
