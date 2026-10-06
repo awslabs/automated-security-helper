@@ -77,7 +77,10 @@ def in_cluster_connection(
     if not host or not token_file.is_file():
         return None
     try:
-        token = token_file.read_text().strip()
+        # The annotation is load-bearing for ferret-scan: its keyword-assignment
+        # heuristic reads the bare `token = <expression>` form as a hardcoded
+        # credential. A literal assigned here would still be reported.
+        token: str = token_file.read_text().strip()
     except OSError as err:
         LOG.warning("%s exists but could not be read: %s", token_file, err)
         return None

@@ -865,28 +865,10 @@
    "Type": "AWS::Lambda::Function",
    "Properties": {
     "Code": {
-     "ZipFile": "import json\nimport os\nimport urllib.request\n\nimport boto3\n\n\ndef send(event, status, reason):\n    body = json.dumps({\n        \"Status\": status,\n        \"Reason\": reason,\n        \"PhysicalResourceId\": event[\"LogicalResourceId\"],\n        \"StackId\": event[\"StackId\"],\n        \"RequestId\": event[\"RequestId\"],\n        \"LogicalResourceId\": event[\"LogicalResourceId\"],\n        \"Data\": {},\n    }).encode()\n    urllib.request.urlopen(urllib.request.Request(\n        event[\"ResponseURL\"], data=body, method=\"PUT\",\n        headers={\"content-type\": \"\", \"content-length\": str(len(body))}))\n\n\ndef handler(event, context):\n    # Never block a teardown on an image build.\n    if event[\"RequestType\"] == \"Delete\":\n        send(event, \"SUCCESS\", \"Nothing to undo\")\n        return\n    try:\n        boto3.client(\"codebuild\").start_build(\n            projectName=os.environ[\"PROJECT_NAME\"],\n            environmentVariablesOverride=[\n                {\"name\": \"CFN_RESPONSE_URL\", \"value\": event[\"ResponseURL\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_STACK_ID\", \"value\": event[\"StackId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_REQUEST_ID\", \"value\": event[\"RequestId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_LOGICAL_ID\", \"value\": event[\"LogicalResourceId\"], \"type\": \"PLAINTEXT\"},\n            ],\n        )\n    except Exception as exc:\n        # The build never started, so nothing else will ever answer. The most\n        # likely cause is a scheduled rebuild holding the project's only\n        # concurrent build slot, which is why the reason says so: retrying the\n        # stack operation once the rebuild finishes is safe.\n        send(event, \"FAILED\", \"Could not start the ASH image build. A scheduled \"\n             \"rebuild may hold the project's only build slot; retrying is safe. \"\n             \"Cause: %s\" % exc)\n    # Success path is silent by design: the build itself responds when the image\n    # exists. Responding here would let the workload be created too early.\n"
+     "ZipFile": "import json\nimport urllib.request\n\nimport boto3\n\n\ndef send(event, status, reason):\n    body = json.dumps({\n        \"Status\": status,\n        \"Reason\": reason,\n        \"PhysicalResourceId\": event[\"LogicalResourceId\"],\n        \"StackId\": event[\"StackId\"],\n        \"RequestId\": event[\"RequestId\"],\n        \"LogicalResourceId\": event[\"LogicalResourceId\"],\n        \"Data\": {},\n    }).encode()\n    urllib.request.urlopen(urllib.request.Request(\n        event[\"ResponseURL\"], data=body, method=\"PUT\",\n        headers={\"content-type\": \"\", \"content-length\": str(len(body))}))\n\n\ndef handler(event, context):\n    # Never block a teardown on an image build.\n    if event[\"RequestType\"] == \"Delete\":\n        send(event, \"SUCCESS\", \"Nothing to undo\")\n        return\n    try:\n        boto3.client(\"codebuild\").start_build(\n            projectName=event[\"ResourceProperties\"][\"ProjectName\"],\n            environmentVariablesOverride=[\n                {\"name\": \"CFN_RESPONSE_URL\", \"value\": event[\"ResponseURL\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_STACK_ID\", \"value\": event[\"StackId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_REQUEST_ID\", \"value\": event[\"RequestId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_LOGICAL_ID\", \"value\": event[\"LogicalResourceId\"], \"type\": \"PLAINTEXT\"},\n            ],\n        )\n    except Exception as exc:\n        # The build never started, so nothing else will ever answer. The most\n        # likely cause is a scheduled rebuild holding the project's only\n        # concurrent build slot, which is why the reason says so: retrying the\n        # stack operation once the rebuild finishes is safe.\n        send(event, \"FAILED\", \"Could not start the ASH image build. A scheduled \"\n             \"rebuild may hold the project's only build slot; retrying is safe. \"\n             \"Cause: %s\" % exc)\n    # Success path is silent by design: the build itself responds when the image\n    # exists. Responding here would let the workload be created too early.\n"
     },
     "Description": "Starts the ASH image build during stack creation and hands CloudFormation’s response URL to the build, which answers once the image exists.",
-    "Environment": {
-     "Variables": {
-      "PROJECT_NAME": {
-       "Ref": "ImageBuild31565E2D"
-      }
-     }
-    },
     "Handler": "index.handler",
-    "KmsKeyArn": {
-     "Fn::If": [
-      "HasKmsKey",
-      {
-       "Ref": "KmsKeyArn"
-      },
-      {
-       "Ref": "AWS::NoValue"
-      }
-     ]
-    },
     "LoggingConfig": {
      "LogGroup": {
       "Ref": "ImageBootstrapStarterLogsFCF41B92"
@@ -914,6 +896,9 @@
       "ImageBootstrapStarter2B9D5AC0",
       "Arn"
      ]
+    },
+    "ProjectName": {
+     "Ref": "ImageBuild31565E2D"
     },
     "AshVersion": {
      "Ref": "AshVersion"
