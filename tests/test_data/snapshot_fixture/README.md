@@ -35,6 +35,15 @@ snapshot suite passes with or without it. Exempting the advisory in the
 dependency-review configuration was the alternative, and it was rejected because that
 exemption would cover the whole repository, not this directory.
 
+### Why `repo/Dockerfile` pins its base image by digest
+
+`.github/scripts/assert-images-pinned.py` checks every Dockerfile in the repository and
+does not know that this one is scan input that is never built. Its `FROM` carries the
+same `python:3.12-slim` digest as `deploy/kubernetes-operator/Dockerfile`. The file has
+no comment explaining this because the canned checkov and semgrep outputs point at its
+line numbers (`USER root` on line 5, the whole file as lines 1 to 6), and a comment
+would move them.
+
 ## The single-directory scan (`repo/`, `scanner_outputs/scanners.yaml`)
 
 | Scanner | Outcome | Findings |
