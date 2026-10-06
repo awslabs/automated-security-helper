@@ -9,7 +9,7 @@ mcp_get_scan_results into smaller, purpose-specific views.
 """
 
 import copy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
@@ -35,15 +35,24 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
         "scan_duration_seconds": metadata.get("summary_stats", {}).get("duration"),
     }
 
-    summary_stats = results.get("summary_stats", {})
+    summary_stats = results.get("summary_stats") or {}
+    # SummaryStats serializes its per-severity tallies under "severity_counts"
+    # (a ScannerSeverityCount), not at the top level. Reading the top level only
+    # made every severity count zero for every real scan. The flat keys are
+    # still honored as a fallback for a caller that hands in a flattened dict.
+    severity_counts = summary_stats.get("severity_counts") or {}
+
+    def _severity(name: str) -> int:
+        return severity_counts.get(name, summary_stats.get(name, 0))
+
     summary["findings_summary"] = {
         "by_severity": {
-            "critical": summary_stats.get("critical", 0),
-            "high": summary_stats.get("high", 0),
-            "medium": summary_stats.get("medium", 0),
-            "low": summary_stats.get("low", 0),
-            "info": summary_stats.get("info", 0),
-            "suppressed": summary_stats.get("suppressed", 0),
+            "critical": _severity("critical"),
+            "high": _severity("high"),
+            "medium": _severity("medium"),
+            "low": _severity("low"),
+            "info": _severity("info"),
+            "suppressed": _severity("suppressed"),
             "total": summary_stats.get("total", 0),
             "actionable": summary_stats.get("actionable", 0),
         },
@@ -128,6 +137,9 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     if "summary_stats" in filtered_results:
         summary_stats = filtered_results["summary_stats"]
         summary_stats["suppressed"] = 0
+        # The real count lives under severity_counts; see filter_summary.
+        if isinstance(summary_stats.get("severity_counts"), dict):
+            summary_stats["severity_counts"]["suppressed"] = 0
         summary_stats["total"] = summary_stats.get("actionable", 0)
 
     if (
@@ -227,15 +239,24 @@ def apply_content_filters(
         }
 
     _severity_keys = {"critical", "high", "medium", "low", "info", "suppressed"}
-    if severity_list and "summary_stats" in filtered_results:
-        filtered_results["summary_stats"] = {
-            key: (
-                value
-                if key not in _severity_keys or key.lower() in severity_list
-                else 0
-            )
-            for key, value in filtered_results["summary_stats"].items()
+
+    def _zero_unselected(counts: Dict[str, Any], selected: List[str]) -> Dict[str, Any]:
+        return {
+            key: (value if key not in _severity_keys or key.lower() in selected else 0)
+            for key, value in counts.items()
         }
+
+    if severity_list and "summary_stats" in filtered_results:
+        summary_stats = _zero_unselected(
+            filtered_results["summary_stats"], severity_list
+        )
+        # The real per-severity counts are nested; see filter_summary. Filtering
+        # only the top level left every count in place.
+        if isinstance(summary_stats.get("severity_counts"), dict):
+            summary_stats["severity_counts"] = _zero_unselected(
+                summary_stats["severity_counts"], severity_list
+            )
+        filtered_results["summary_stats"] = summary_stats
 
     filter_metadata: Dict[str, Any] = {}
     if scanner_list:
