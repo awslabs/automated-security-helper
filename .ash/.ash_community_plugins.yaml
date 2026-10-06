@@ -1167,6 +1167,10 @@ global_settings:
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
+    - path: ".cache/**"
+      reason: >-
+        Gitignored local cache. The test suite extracts the jsii package cache here
+        (aws-cdk-lib alone is about 7,500 files of third-party JavaScript).
     - path: "test-results/**"
       reason: CI-generated coverage reports contain rendered source that triggers false positives
     - path: "tests/test_data/**"

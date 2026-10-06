@@ -1,12 +1,18 @@
 """Pytest configuration file for ASH tests."""
 
+import contextlib
+import functools
+import importlib.abc
+import importlib.machinery
 import logging
 import os
+import shutil
 import sys
-import tempfile
 import pytest
+from importlib.machinery import ModuleSpec
 from pathlib import Path
-from typing import List, Literal
+from types import ModuleType
+from typing import Any, Iterator, List, Literal, Optional, Sequence
 
 from tests.utils.helpers import get_ash_temp_path
 
@@ -14,122 +20,235 @@ from tests.utils.helpers import get_ash_temp_path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-def _isolate_jsii_package_cache_per_worker() -> str | None:
-    """Give each xdist worker its own jsii package cache, and say which one.
+# The jsii package cache: where it lives, how workers share it, and how big it gets.
+#
+# HISTORY. jsii extracts each assembly it loads (aws-cdk-lib is about 7,500 files and
+# 160 MB) into a package cache, taking a lockfile while it extracts. Its waiter gives
+# up after 12 randomized retries, about 13 s expected and 26 s worst case. On Windows
+# CI, creating 7,500 files is slow enough that a second worker booting a kernel
+# against the same cold entry exhausted that budget and died with
+#
+#     EEXIST: file already exists, open '...\package-cache\aws-cdk-lib\<v>\<sha>.lock'
+#
+# (zero occurrences in 1,772 Windows legs with one booting test, 12 in 583 with two).
+# The first fix gave every xdist worker its own root under
+# tempfile.gettempdir()/ash-jsii-package-cache/<worker>. That removed the race but
+# wrote one full extraction per booting worker into the host's temp directory and
+# never removed any of them. On a many-core host that directory reached about 665,000
+# inodes, filled a 1,048,576-inode /tmp, and broke every process on the machine.
+#
+# NOW. One root, shared by every worker:
+#   - ASH_JSII_CACHE_DIR when set, otherwise <repo>/.cache/jsii-package-cache, which
+#     is gitignored and in the ASH self-scan ignore_paths. Never the temp directory.
+#   - Kernel.load is wrapped in an exclusive file lock (_JsiiKernelLoadLockHook). The
+#     first worker to load an assembly extracts it while holding our lock, which has
+#     no retry budget; the rest block on it and then get a cache hit, and jsii only
+#     takes its own lock on a miss. So jsii's lock is never contended.
+#   - At session end the controller keeps the newest _JSII_CACHE_KEEP entries per
+#     package and removes the rest, so a checkout that has moved through several
+#     aws-cdk-lib versions holds a bounded number of extractions, not all of them.
+#     jsii's own 30-day TTL prune still runs on top of that.
+#
+# A pre-existing JSII_RUNTIME_PACKAGE_CACHE_ROOT is overwritten for the test session
+# on purpose: ASH_JSII_CACHE_DIR is the one supported override, so the location
+# test can assert where the cache is.
 
-    THE RACE THIS REMOVES. jsii caches an extracted assembly under a per-user
-    directory and takes a lockfile while extracting. ``Entry.retrieve`` only locks
-    on a cache *miss*, and holds the lock for the whole extraction --
-    ``aws-cdk-lib`` is 7,457 files and about 133 MB. Its waiter, ``lockSyncWithWait``,
-    retries 12 times with randomized backoff and then rethrows, so roughly 13 s
-    expected and 26 s worst case. Two workers that each boot a kernel can therefore
-    collide on one cache entry and the loser dies with
+_JSII_CACHE_ENV = "ASH_JSII_CACHE_DIR"
+_JSII_CACHE_KEEP = 2
+_JSII_LOAD_LOCK_NAME = ".ash-load.lock"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
-        EEXIST: file already exists, open
-        '...\\AWS\\jsii\\package-cache\\aws-cdk-lib\\<version>\\<sha>.lock'
 
-    Measured across the 600 most recent CI runs: zero occurrences in 1,772 decided
-    Windows unit-test legs while exactly one test booted a kernel, then 12 across 583
-    once a second one did. Separate roots mean there is no shared lockfile to
-    contend for, so the failure is unreachable rather than merely unlikely.
+def _jsii_package_cache_root() -> Path:
+    """The single jsii package cache root for this test session."""
+    override = (os.environ.get(_JSII_CACHE_ENV) or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return _REPO_ROOT / ".cache" / "jsii-package-cache"
 
-    WHAT WAS NOT SHOWN. The race does not reproduce on Linux. With the guard removed,
-    a cold cache and up to three booting tests sharing one root under -n 4, no EEXIST
-    ever appeared: extraction finishes in about three seconds here, far inside the
-    retry budget, so the loser waits and then gets its hit. The guard is therefore
-    justified structurally -- distinct roots mean there is no shared lockfile to
-    contend for -- and by the CI rates above, not by reproducing a failure locally and
-    then preventing it. Anyone re-testing this on Linux should expect green either
-    way and not read that as the guard being unnecessary.
 
-    WHY IT IS NOT PLATFORM-GATED. Only Windows has been observed failing, but jsii's
-    lock path carries no platform branch -- the sole ``process.platform`` checks in
-    that module write ``.nobackup``/``.noindex`` on darwin and sweep ``.DS_Store``.
-    The bounded retry budget is identical everywhere; Windows loses because creating
-    7,457 files there is slow enough to exhaust it. Gating this to Windows would
-    leave the same defect reachable on macOS and Linux to save nothing, because:
+@contextlib.contextmanager
+def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
+    """Block until this process holds an exclusive lock on ``lock_path``.
 
-    WHAT IT COSTS, MEASURED. Extraction happens only when a kernel actually boots, so
-    the bill is (workers that boot) x extraction, not (workers) x extraction. Measured
-    on Linux with a cold cache under -n 4, one extraction being 163,654,045 bytes:
-
-        booters   guard    bytes written   per-worker roots created
-        0         on                   0   none
-        1         on         163,654,045   1
-        2         on         327,308,090   2
-        1 or 2    off        163,654,045   n/a, one shared root
-
-    So with no eager import anywhere the guard writes nothing and creates no
-    directory -- measured across the whole unit suite, 7,734 tests, zero bytes. With
-    one booter it costs the same single extraction as no guard at all. Only two or
-    more booting workers pay a multiple, and that is precisely the case which is
-    otherwise an intermittent failure. Note the multiplier counts booting *workers*,
-    not booting tests: three booters produced two roots in one run because two landed
-    on the same worker.
-
-    WHERE IT ACTUALLY COSTS SOMETHING: the integration invocation. CI runs
-    tests/integration/scanners/test_cdk_nag_real_pack.py as a second, separate pytest
-    step, and all 11 of its tests boot a real kernel, because you cannot double the
-    thing you are integration-testing. That step inherits ``-n auto`` -- it passes no
-    ``-n`` of its own -- so on windows-latest its 11 tests spread over 4 workers and
-    every one of them extracts. Measured at ``-n 4``:
-
-        guard   wall clock   bytes written   extracting roots   result
-        on            7.7s     748,018,196   4                  11 passed
-        off           7.5s     187,004,549   1                  11 passed
-
-    Four times the bytes and, within noise, the same wall clock -- because the four
-    extractions run concurrently on separate roots, where today one extracts and three
-    wait out the same duration and sometimes exhaust the budget instead. This is the
-    step whose Windows legs fail, and neither removing nor doubling booters can help
-    it, so it is the case this guard exists for.
-
-    A caution on scale, since the cost tracks worker count and ``-n auto`` ties that to
-    core count: on a 192-core host the same file produced 192 worker roots and 2.2 GB.
-    If this ever runs on a large self-hosted runner, cap the workers for that step.
-
-    Returns the root it set, or ``None`` when it deliberately set nothing.
+    The lock belongs to the open file, so it is released if the holder dies, and two
+    separate opens in one process exclude each other just as two processes do.
     """
-    # xdist sets this in each worker before pytest_configure runs; the controller
-    # has neither it nor config.workerinput, and runs no tests. A plain pytest run,
-    # -n 0, or -p no:xdist likewise has no worker id -- and needs none, because one
-    # process cannot race itself. Leave jsii's own default alone in that case rather
-    # than inventing a root named after an empty string.
-    worker = (os.environ.get("PYTEST_XDIST_WORKER") or "").strip()
-    if not worker:
-        return None
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+b") as handle:
+        if sys.platform == "win32":
+            import msvcrt
 
-    # Honor an explicitly chosen location by isolating *within* it, so this does not
-    # silently relocate a cache someone pointed somewhere deliberately.
-    configured = (os.environ.get("JSII_RUNTIME_PACKAGE_CACHE_ROOT") or "").strip()
-    if configured:
-        base = Path(configured)
-    else:
-        # tempfile.gettempdir() rather than a per-platform user cache path: it needs
-        # no platform branching to rot, it is per-user on Windows, it sits outside
-        # the checkout so neither the repo nor ASH's own self-scan grows by 133 MB a
-        # worker, and jsii itself falls back to a tmpdir root, so this is a shape it
-        # already supports. The trade is that a /tmp sweep makes the cache cold.
-        # That costs nothing in CI, where the runner is fresh and this cache is not
-        # restored between runs anyway, and only costs a local re-extraction.
-        base = Path(tempfile.gettempdir()) / "ash-jsii-package-cache"
+            while True:
+                handle.seek(0)
+                try:
+                    # LK_LOCK retries for about 10 s and then raises; keep waiting.
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    continue
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
 
-    # Deliberately not created here. jsii's DiskCache.inDirectory already does a
-    # recursive mkdir, and only on the extraction path, so leaving creation to it
-    # keeps the no-booter case at literally zero directories and zero bytes rather
-    # than four empty directories per run.
-    root = base / worker
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _wrap_kernel_load(kernel_cls: Any, lock_path: Path) -> None:
+    """Make ``kernel_cls.load`` hold the cache lock for the whole load request."""
+    original = kernel_cls.load
+    if getattr(original, "__ash_jsii_cache_lock__", None):
+        return
+
+    @functools.wraps(original)
+    def load(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with _exclusive_file_lock(lock_path):
+            return original(self, *args, **kwargs)
+
+    load.__ash_jsii_cache_lock__ = lock_path  # type: ignore[attr-defined]
+    kernel_cls.load = load
+
+
+class _PatchingLoader(importlib.abc.Loader):
+    """Run the real loader, then wrap ``Kernel.load`` in the new module."""
+
+    def __init__(self, inner: importlib.abc.Loader, lock_path: Path) -> None:
+        self._inner = inner
+        self._lock_path = lock_path
+
+    def create_module(self, spec: ModuleSpec) -> Optional[ModuleType]:
+        return self._inner.create_module(spec)
+
+    def exec_module(self, module: ModuleType) -> None:
+        self._inner.exec_module(module)
+        _wrap_kernel_load(module.Kernel, self._lock_path)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _JsiiKernelLoadLockHook(importlib.abc.MetaPathFinder):
+    """Patch ``jsii._kernel.Kernel.load`` when, and only when, jsii is imported.
+
+    Not imported eagerly: most workers never touch jsii, and importing it early would
+    also run its import-time environment reads before cdk_nag_wrapper has set the
+    variables it relies on.
+    """
+
+    def __init__(self, lock_path: Path, module_name: str = "jsii._kernel") -> None:
+        self._lock_path = lock_path
+        self._module_name = module_name
+
+    def find_spec(
+        self,
+        fullname: str,
+        path: Optional[Sequence[str]],
+        target: Optional[ModuleType] = None,
+    ) -> Optional[ModuleSpec]:
+        if fullname != self._module_name:
+            return None
+        if self in sys.meta_path:
+            sys.meta_path.remove(self)
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        if spec is not None and spec.loader is not None:
+            spec.loader = _PatchingLoader(spec.loader, self._lock_path)
+        return spec
+
+
+def _configure_jsii_package_cache() -> Path:
+    """Point jsii at the shared root and install the load lock. Returns the root.
+
+    Must run before anything imports a jsii-backed package; jsii reads the variable
+    in the Node runtime it spawns, so it only has to be set before the first kernel
+    starts. The root itself is left for jsii to create, so a run that boots no
+    kernel creates nothing.
+    """
+    root = _jsii_package_cache_root()
     os.environ["JSII_RUNTIME_PACKAGE_CACHE_ROOT"] = str(root)
-    return str(root)
+    lock_path = root / _JSII_LOAD_LOCK_NAME
+    kernel_module = sys.modules.get("jsii._kernel")
+    if kernel_module is not None:
+        _wrap_kernel_load(kernel_module.Kernel, lock_path)
+    elif not any(isinstance(f, _JsiiKernelLoadLockHook) for f in sys.meta_path):
+        sys.meta_path.insert(0, _JsiiKernelLoadLockHook(lock_path))
+    return root
+
+
+def _jsii_entry_last_used(entry: Path) -> float:
+    """When jsii last used a cache entry.
+
+    jsii touches the ``.jsii-runtime-package-cache`` marker inside an entry on every
+    hit, not only on extraction, so its mtime is the last-use time. Falls back to the
+    entry directory's own mtime for an entry without one.
+    """
+    marker = entry / ".jsii-runtime-package-cache"
+    try:
+        return marker.stat().st_mtime
+    except OSError:
+        return entry.stat().st_mtime
+
+
+def _prune_jsii_package_cache(root: Path, keep: int = _JSII_CACHE_KEEP) -> List[Path]:
+    """Keep the ``keep`` most recently used ``<package>/<version>/<digest>`` entries.
+
+    Counted per package. Packages may be scoped (``@aws-cdk/asset-awscli-v1``), so a
+    package directory is any directory whose children are version directories
+    holding digest entries. Returns the entries removed.
+    """
+    if not root.is_dir():
+        return []
+    removed: List[Path] = []
+    package_dirs: List[Path] = []
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        if child.name.startswith("@"):
+            package_dirs.extend(p for p in child.iterdir() if p.is_dir())
+        else:
+            package_dirs.append(child)
+    for package_dir in package_dirs:
+        entries = [
+            entry
+            for version_dir in package_dir.iterdir()
+            if version_dir.is_dir()
+            for entry in version_dir.iterdir()
+            if entry.is_dir()
+        ]
+        entries.sort(key=_jsii_entry_last_used, reverse=True)
+        for stale in entries[keep:]:
+            shutil.rmtree(stale, ignore_errors=True)
+            removed.append(stale)
+            version_dir = stale.parent
+            if not any(version_dir.iterdir()):
+                version_dir.rmdir()
+    return removed
+
+
+def pytest_unconfigure(config):
+    """Bound the shared jsii cache once, from the process that owns the session."""
+    if hasattr(config, "workerinput"):
+        return
+    root = _jsii_package_cache_root()
+    if not root.is_dir():
+        return
+    with _exclusive_file_lock(root / _JSII_LOAD_LOCK_NAME):
+        _prune_jsii_package_cache(root)
 
 
 def pytest_configure(config):
     """Configure pytest for ASH tests."""
     # Must happen before anything imports a jsii-backed package. pytest_configure is
     # the earliest per-worker hook, and collection -- which imports test modules --
-    # runs after it. jsii reads this variable in the Node runtime it spawns, so it
-    # only has to be set before the first kernel starts.
-    _isolate_jsii_package_cache_per_worker()
+    # runs after it.
+    _configure_jsii_package_cache()
 
     # Register custom markers
     config.addinivalue_line(
