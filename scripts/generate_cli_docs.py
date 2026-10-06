@@ -258,9 +258,50 @@ def _render_flag_decl(decl: str) -> str:
     return decl.strip()
 
 
+def extract_command_class_options(command_name: str) -> list[dict]:
+    """Options a command gets from its command class rather than its function.
+
+    ``--cli-json-input`` and ``--generate-cli-skeleton`` are added by
+    ``CliJsonInputCommand`` and never appear in the function signature that
+    ``extract_typer_params`` reads. They are taken here from the click command
+    Typer actually builds, so a command that gains or loses the class gains or
+    loses the rows with it.
+    """
+    import typer.main
+
+    from automated_security_helper.cli.json_input import (
+        CLI_JSON_INPUT_FLAG,
+        GENERATE_CLI_SKELETON_FLAG,
+    )
+    from automated_security_helper.cli.main import app
+
+    command = typer.main.get_command(app)
+    for part in command_name.split():
+        command = command.commands[part]  # type: ignore[attr-defined]
+
+    rows = []
+    for param in command.params:
+        if param.expose_value or not param.opts:
+            continue
+        if param.opts[0] not in (CLI_JSON_INPUT_FLAG, GENERATE_CLI_SKELETON_FLAG):
+            continue
+        rows.append(
+            {
+                "param_name": param.name,
+                "flags": list(param.opts),
+                "type": "bool" if param.is_flag else "str",
+                "default": "",
+                "envvar": "",
+                "help": param.help or "",
+                "is_argument": False,
+            }
+        )
+    return rows
+
+
 def render_command_section(command_name: str, func, description: str = "") -> str:
     """Render a markdown section for a single CLI command."""
-    params = extract_typer_params(func)
+    params = extract_typer_params(func) + extract_command_class_options(command_name)
     if not params:
         return ""
 

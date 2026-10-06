@@ -3,6 +3,7 @@
 
 package io.github.awslabs.ash.jetbrains
 
+import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -120,6 +121,16 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
           ]
         }
     """.trimIndent()
+
+    fun testTheScanInheritsTheIdeEnvironmentSoAshDebugReachesIt() {
+        val commandLine = AshScanRunner.commandLine("ash", "scan")
+
+        assertEquals(GeneralCommandLine.ParentEnvironmentType.CONSOLE, commandLine.parentEnvironmentType)
+        assertEquals(emptyMap<String, String>(), commandLine.environment)
+        // Whatever ASH_* the IDE itself was started with is what the child sees.
+        val inherited = System.getenv().filterKeys { it.startsWith("ASH_") }
+        assertEquals(inherited, commandLine.effectiveEnvironment.filterKeys { it.startsWith("ASH_") })
+    }
 
     fun testLocatorFindsAStubOnARealPath() {
         val script = stubAsh(null)

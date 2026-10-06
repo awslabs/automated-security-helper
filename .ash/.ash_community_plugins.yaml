@@ -88,7 +88,7 @@ global_settings:
     # validator, so an ordinary identifier whose NAME is a secret keyword (session,
     # token, secret, ...) sitting next to an assignment now reads as API_KEY_OR_SECRET
     # at HIGH confidence. Bumping the plugin's supported binary to v2.4.5 surfaced the
-    # six high-confidence hits below. The type CANNOT be turned off in config:
+    # high-confidence hits below. The type CANNOT be turned off in config:
     # ferret-scan honours validators.<name> disabled_types ONLY for intellectual_
     # property, never for secrets (verified against v2.4.5). Per the plugin design
     # decision (ash_ferret_plugins/DEVELOPMENT.md → "API_KEY_OR_SECRET policy"), the
@@ -458,7 +458,9 @@ global_settings:
     # of this file). With those suppressions applied it reaches status PASSED rather
     # than MISSING or SKIPPED. Note this corrects an earlier claim that ferret-scan
     # "contributes nothing" — that held for the pre-2.x binary but not for v2.4.5,
-    # which is why the API_KEY_OR_SECRET suppressions now exist.
+    # which is why the API_KEY_OR_SECRET suppressions now exist. v2.5.2 reports the
+    # same set; it also scans `.github/`, which 2.4.x skipped because its --exclude
+    # matched `.git` as a substring.
     #
     # PATHS ARE NAMED FILE BY FILE. A trailing `**` is a whole-subtree match, so a
     # sixth template or a new terraform module would inherit a suppression nobody

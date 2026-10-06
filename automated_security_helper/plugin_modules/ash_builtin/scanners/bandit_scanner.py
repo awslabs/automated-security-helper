@@ -211,19 +211,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             installation_info = self._get_tool_installation_info()
 
             if installation_info.get("available"):
-                # Tool is available either via UV or pre-installed
-                source = installation_info.get("preferred_source", "unknown")
-                if source == "uv":
-                    self._plugin_log(
-                        "Bandit already installed via UV tool", level=logging.INFO
-                    )
-                elif source == "pre_installed":
-                    self._plugin_log(
-                        f"Using pre-installed bandit at {installation_info.get('pre_installed_path')}",
-                        level=logging.INFO,
-                    )
-                self.dependencies_satisfied = True
-                return True
+                # Runs a verified binary on PATH directly instead of re-resolving
+                # through uv, and fails offline with the missing extras named (#520).
+                return self._select_tool_execution(installation_info)
 
             # Tool not available, attempt installation
             self._plugin_log(

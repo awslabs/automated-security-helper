@@ -78,6 +78,18 @@ class TestScanArgv:
         )
         assert argv[-1] == "--offline"
 
+    @pytest.mark.parametrize("flag", ["--debug", "--verbose"])
+    def test_a_log_level_flag_reaches_the_shard_argv(self, flag):
+        """extraScanArguments is how a Scan asks for debug or verbose output.
+
+        ASH also reads ASH_DEBUG/ASH_VERBOSE, but the shard pod's environment is
+        built from a fixed list in manifests.build_shard_job and the CRD has no env
+        field, so the flag is the one route. Reserving either flag would leave a
+        Scan no way to get the log a hung scanner needs.
+        """
+        argv = contract.build_scan_argv(source_dir="/s", output_dir="/o", extra_arguments=[flag])
+        assert argv[-1] == flag
+
     @pytest.mark.parametrize(
         "bad", ["/s; rm -rf /", "/s$(id)", "/s`id`", "/s\nrm", "/s|cat", "/s&", "/s*"]
     )

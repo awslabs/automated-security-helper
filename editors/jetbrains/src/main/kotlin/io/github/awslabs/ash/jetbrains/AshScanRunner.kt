@@ -261,8 +261,13 @@ object AshScanRunner {
      * written or closed, that child would never exit and never write anything, and the scan
      * would wait on a process that is waiting on it. The probe's deadline bounds anything that
      * ignores EOF as well.
+     *
+     * The child inherits the IDE's environment unchanged: no parent-environment override and no
+     * variables of its own. ASH reads ASH_DEBUG and ASH_VERBOSE as its log level when no flag is
+     * given, so a user who sets either before starting the IDE gets that level for scans run from
+     * it. Internal rather than private so AshScanRunnerIdeTest can pin that.
      */
-    private fun commandLine(vararg args: String): GeneralCommandLine =
+    internal fun commandLine(vararg args: String): GeneralCommandLine =
         GeneralCommandLine(*args).withInput(File(if (SystemInfo.isWindows) "NUL" else "/dev/null"))
 
     /**

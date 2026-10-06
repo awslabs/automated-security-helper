@@ -128,5 +128,10 @@
     "moduleNameMapper": {
       "^vscode$": "<rootDir>/test/vscode-stub.ts"
     }
+  },
+  "overrides": {
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.1.1"
+    }
   }
 }

@@ -17,7 +17,7 @@
  * would sit.
  */
 
-import { ChildProcess } from 'child_process';
+import { ChildProcess, SpawnOptions } from 'child_process';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import {
@@ -618,6 +618,31 @@ function fakeSpawner(child: FakeChild): Spawner {
 }
 
 const NO_KILL: TreeKiller = { platform: 'linux', kill: () => undefined, spawnTaskkill: () => undefined };
+
+describe('spawnAsyncRunner environment', () => {
+  // ASH reads ASH_DEBUG and ASH_VERBOSE as its log level when no flag is given.
+  // With no `env` in the spawn options, Node hands the child the extension
+  // host's own environment, so a user's ASH_DEBUG=true applies to scans started
+  // from the editor. An `env` option would replace that environment wholesale.
+  // Checked at the spawner seam because jest gives each test file its own copy
+  // of process.env, which a real child would never see.
+  it('passes no env option, so the child inherits ASH_DEBUG and ASH_VERBOSE', async () => {
+    const child = new FakeChild();
+    let seen: SpawnOptions | undefined;
+    const spawner: Spawner = (_command, _args, options) => {
+      seen = options;
+      return child as unknown as ChildProcess;
+    };
+
+    const pending = spawnAsyncRunner('ash', ['scan'], {}, NO_KILL, spawner, 10);
+    child.emit('exit', 0, null);
+    child.emit('close', 0, null);
+    await pending;
+
+    expect(seen).toBeDefined();
+    expect(seen).not.toHaveProperty('env');
+  });
+});
 
 describe('spawnAsyncRunner when the pipes outlive the child', () => {
   it('settles after a short drain when the child exits and never closes', async () => {
