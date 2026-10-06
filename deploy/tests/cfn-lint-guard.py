@@ -400,6 +400,38 @@ def wildcard_in_role_inline_policy(t: Template) -> None:
     ]
 
 
+def drop_resources_of_type(*resource_types: str) -> Callable[[Template], None]:
+    def mutate(t: Template) -> None:
+        doomed = {
+            name
+            for name, resource in t["Resources"].items()
+            if resource.get("Type") in resource_types
+        }
+        if not doomed:
+            raise GateError(f"no {' or '.join(resource_types)} in the template to drop")
+        for name in doomed:
+            del t["Resources"][name]
+        # Keep the template well-formed for the resources that remain.
+        for resource in t["Resources"].values():
+            depends = resource.get("DependsOn")
+            if isinstance(depends, list):
+                resource["DependsOn"] = [d for d in depends if d not in doomed]
+                if not resource["DependsOn"]:
+                    del resource["DependsOn"]
+            elif depends in doomed:
+                del resource["DependsOn"]
+
+    return mutate
+
+
+def chain(*mutations: Callable[[Template], None]) -> Callable[[Template], None]:
+    def mutate(t: Template) -> None:
+        for mutation in mutations:
+            mutation(t)
+
+    return mutate
+
+
 def open_sg_rule_v6(t: Template) -> None:
     props = resource_of_type(t, "AWS::EC2::SecurityGroupIngress")["Properties"]
     props.pop("CidrIp", None)
@@ -531,6 +563,17 @@ def guard_mutants() -> list[GuardMutant]:
             wildcard_in_role_inline_policy,
             "IAM_NO_WILDCARD_OR_NEGATED_ALLOW",
         ),
+        # The inline-policy check must not depend on the template also having a
+        # standalone policy resource for the rule to run at all.
+        m(
+            'Action "*" in a role\'s inline policy, no policy resources',
+            "AshDistributedPipeline.template.json",
+            chain(
+                drop_resources_of_type("AWS::IAM::Policy", "AWS::IAM::ManagedPolicy"),
+                wildcard_in_role_inline_policy,
+            ),
+            "IAM_NO_WILDCARD_OR_NEGATED_ALLOW",
+        ),
         m(
             "ingress rule open to 0.0.0.0/0",
             fargate,
@@ -547,6 +590,15 @@ def guard_mutants() -> list[GuardMutant]:
             "inline ingress open to 0.0.0.0/0",
             fargate,
             open_inline_sg,
+            "SECURITY_GROUP_INGRESS_NOT_OPEN_TO_THE_INTERNET",
+        ),
+        m(
+            "inline ingress open to 0.0.0.0/0, no ingress resources",
+            fargate,
+            chain(
+                drop_resources_of_type("AWS::EC2::SecurityGroupIngress"),
+                open_inline_sg,
+            ),
             "SECURITY_GROUP_INGRESS_NOT_OPEN_TO_THE_INTERNET",
         ),
         m(

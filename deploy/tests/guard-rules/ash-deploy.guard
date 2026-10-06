@@ -72,12 +72,18 @@ let role_inline_statements = Resources.*[
     Properties.Policies exists
 ].Properties.Policies[*].PolicyDocument.Statement[*]
 
-rule IAM_NO_WILDCARD_OR_NEGATED_ALLOW when %identity_statements !empty {
-    %identity_statements[ Effect == 'Allow' ] {
-        NotAction !exists
-        NotResource !exists
-        Action[*] != '*'
-        Action[*] != /:\*$/
+# The rule runs when EITHER source has statements, and each source sits under its
+# own `when`. Nesting the inline check under the first source's guard let a
+# template with role inline policies and no AWS::IAM::Policy or ManagedPolicy pass
+# an Action "*" unchecked; the self-test has a mutant of exactly that shape.
+rule IAM_NO_WILDCARD_OR_NEGATED_ALLOW when %identity_statements !empty or %role_inline_statements !empty {
+    when %identity_statements !empty {
+        %identity_statements[ Effect == 'Allow' ] {
+            NotAction !exists
+            NotResource !exists
+            Action[*] != '*'
+            Action[*] != /:\*$/
+        }
     }
     when %role_inline_statements !empty {
         %role_inline_statements[ Effect == 'Allow' ] {
@@ -99,10 +105,14 @@ let sg_inline_ingress = Resources.*[
     Properties.SecurityGroupIngress exists
 ].Properties.SecurityGroupIngress[*]
 
-rule SECURITY_GROUP_INGRESS_NOT_OPEN_TO_THE_INTERNET when %sg_ingress_rules !empty {
-    %sg_ingress_rules {
-        CidrIp !exists or CidrIp is_struct or CidrIp != '0.0.0.0/0'
-        CidrIpv6 !exists or CidrIpv6 is_struct or CidrIpv6 != '::/0'
+# Same structure as the IAM rule, for the same reason: inline ingress on a
+# security group must be checked in a template with no SecurityGroupIngress.
+rule SECURITY_GROUP_INGRESS_NOT_OPEN_TO_THE_INTERNET when %sg_ingress_rules !empty or %sg_inline_ingress !empty {
+    when %sg_ingress_rules !empty {
+        %sg_ingress_rules {
+            CidrIp !exists or CidrIp is_struct or CidrIp != '0.0.0.0/0'
+            CidrIpv6 !exists or CidrIpv6 is_struct or CidrIpv6 != '::/0'
+        }
     }
     when %sg_inline_ingress !empty {
         %sg_inline_ingress {
