@@ -1,5 +1,6 @@
 """UV tool runner utility for managing UV-based tool execution and installation."""
 
+import os
 import random
 import subprocess  # nosec B404 — uv_tool_runner is the subprocess orchestrator for tool execution
 import threading
@@ -219,6 +220,26 @@ class UVToolRunner:
                 if python_request:
                     command.extend(["--python", python_request])
 
+                # Offline, the probe must be offline too, exactly as run_tool is.
+                # It used to be the one uv call that ignored ASH_OFFLINE: under
+                # `ash scan --mode nix` it resolved the newest semgrep on PyPI,
+                # downloaded it, and was killed at the 15s timeout whenever the
+                # download was slow. A killed probe leaves uv's cache holding the
+                # index entry but not the wheel, so the scan's own
+                # `uv tool run --offline` then failed with "the requested data
+                # wasn't found in the cache" (nix arm64 CI, 2026-10-06). A probe
+                # that finished was no better: the scan then ran that PyPI
+                # semgrep, not the one Nix pinned.
+                from automated_security_helper.core.constants import (
+                    is_offline_mode,
+                )
+
+                probe_env: Optional[Dict[str, str]] = None
+                if is_offline_mode():
+                    probe_env = os.environ.copy()
+                    probe_env["UV_OFFLINE"] = "1"
+                    command.append("--offline")
+
                 # Build command with --from parameter if extras specified
                 if package_name:
                     # Build the --from specification
@@ -234,6 +255,7 @@ class UVToolRunner:
                     command,
                     capture_output=True,
                     text=True,
+                    env=probe_env,
                     timeout=_UV_TOOL_VERSION_PROBE_TIMEOUT,
                     check=False,
                     encoding="utf-8",
@@ -1125,12 +1147,25 @@ def get_uv_tool_command(
         uv_path = find_uv_or_none()
         command: Optional[List[str]] = None
         if uv_path is not None:
+            # Offline, probe offline, for the reason given in
+            # UVToolRunner.get_tool_version: an online probe here resolved and
+            # downloaded the tool from PyPI under ASH_OFFLINE, and the 5s timeout
+            # could leave a half-written uv cache behind.
+            from automated_security_helper.core.constants import is_offline_mode
+
+            probe_command = [uv_path, "tool", "run", tool_name, "--version"]
+            probe_env: Optional[Dict[str, str]] = None
+            if is_offline_mode():
+                probe_command.insert(3, "--offline")
+                probe_env = os.environ.copy()
+                probe_env["UV_OFFLINE"] = "1"
             try:
                 probe = subprocess.run(  # nosec B603 — fixed list of trusted strings
-                    [uv_path, "tool", "run", tool_name, "--version"],
+                    probe_command,
                     capture_output=True,
                     text=True,
                     check=False,
+                    env=probe_env,
                     timeout=_UV_VERSION_PROBE_TIMEOUT,
                 )
                 if probe.returncode == 0:

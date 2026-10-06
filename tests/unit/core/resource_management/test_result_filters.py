@@ -278,3 +278,70 @@ class TestApplyContentFilters:
         result = apply_content_filters(full_results, severities="CRITICAL,HIGH")
         assert result["summary_stats"]["critical"] == 1
         assert result["summary_stats"]["medium"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The shape a real scan produces
+# ---------------------------------------------------------------------------
+#
+# Every fixture above hands the filters a FLAT summary_stats ({"critical": 1,
+# ...}). A real scan never produces that: SummaryStats nests its per-severity
+# tallies under "severity_counts", so filter_summary -- which backs the MCP
+# get_scan_summary tool -- read zero for every severity on every real scan, and
+# the flat fixture is exactly why no test noticed. These build the results dict
+# the way get_scan_results does, from a serialized AshAggregatedResults.
+
+
+def _real_scan_results(tmp_path):
+    from automated_security_helper.core.resource_management.scan_tracking import (
+        get_scan_results,
+    )
+    from automated_security_helper.models.asharp_model import (
+        AshAggregatedResults,
+        SummaryStats,
+    )
+
+    model = AshAggregatedResults()
+    model.metadata.summary_stats = SummaryStats(
+        critical=2, high=3, medium=5, low=7, info=11, suppressed=13, actionable=10
+    )
+    (tmp_path / "ash_aggregated_results.json").write_text(
+        model.model_dump_json(by_alias=True), encoding="utf-8"
+    )
+    results = get_scan_results(output_dir=tmp_path)
+    # The premise: the counts really are nested in what the filters receive.
+    assert "severity_counts" in results["summary_stats"]
+    assert "critical" not in results["summary_stats"]
+    return results
+
+
+class TestFiltersReadTheSerializedSummaryStats:
+    def test_filter_summary_reports_the_real_severity_counts(self, tmp_path):
+        by_sev = filter_summary(_real_scan_results(tmp_path))["findings_summary"][
+            "by_severity"
+        ]
+        assert by_sev["critical"] == 2
+        assert by_sev["high"] == 3
+        assert by_sev["medium"] == 5
+        assert by_sev["low"] == 7
+        assert by_sev["info"] == 11
+        assert by_sev["suppressed"] == 13
+        assert by_sev["actionable"] == 10
+
+    def test_actionable_only_zeros_the_nested_suppressed_count(self, tmp_path):
+        result = filter_actionable_only(_real_scan_results(tmp_path))
+        assert result["summary_stats"]["severity_counts"]["suppressed"] == 0
+        assert (
+            filter_summary(result)["findings_summary"]["by_severity"]["suppressed"] == 0
+        )
+
+    def test_severity_filter_zeros_the_nested_unselected_counts(self, tmp_path):
+        result = apply_content_filters(
+            _real_scan_results(tmp_path), severities="critical,high"
+        )
+        counts = result["summary_stats"]["severity_counts"]
+        assert counts["critical"] == 2
+        assert counts["high"] == 3
+        assert counts["medium"] == 0
+        assert counts["low"] == 0
+        assert counts["info"] == 0

@@ -1,0 +1,180 @@
+{
+  "workspace_file": "<REPO>/tests/test_data/snapshot_fixture/workspace/snapshot.code-workspace",
+  "workspace_root": "<REPO>/tests/test_data/snapshot_fixture/workspace",
+  "projects": [
+    "api",
+    "web"
+  ],
+  "reporters": {
+    "csv": {
+      "behaviour": "merged",
+      "considered": true,
+      "covers_projects": true,
+      "workspace_artifact": "reports/ash.csv",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "cyclonedx": {
+      "behaviour": "per-project",
+      "considered": true,
+      "covers_projects": false,
+      "workspace_artifact": null,
+      "per_project_artifacts": [
+        {
+          "project": "api",
+          "path": "projects/api/reports/ash.cdx.json"
+        },
+        {
+          "project": "web",
+          "path": "projects/web/reports/ash.cdx.json"
+        }
+      ],
+      "missing_per_project_artifacts": [
+        "api",
+        "web"
+      ]
+    },
+    "flat-json": {
+      "behaviour": "merged",
+      "considered": true,
+      "covers_projects": true,
+      "workspace_artifact": "reports/ash.flat.json",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "github-ghas": {
+      "behaviour": "per-project",
+      "considered": true,
+      "covers_projects": false,
+      "workspace_artifact": null,
+      "per_project_artifacts": [
+        {
+          "project": "api",
+          "path": "projects/api/reports/ash.ghas.sarif"
+        },
+        {
+          "project": "web",
+          "path": "projects/web/reports/ash.ghas.sarif"
+        }
+      ],
+      "missing_per_project_artifacts": [
+        "api",
+        "web"
+      ]
+    },
+    "gitlab-cyclonedx": {
+      "behaviour": "per-project",
+      "considered": true,
+      "covers_projects": false,
+      "workspace_artifact": null,
+      "per_project_artifacts": [
+        {
+          "project": "api",
+          "path": "projects/api/reports/ash.gl-dependency-scanning-report.cdx.json"
+        },
+        {
+          "project": "web",
+          "path": "projects/web/reports/ash.gl-dependency-scanning-report.cdx.json"
+        }
+      ],
+      "missing_per_project_artifacts": [
+        "api",
+        "web"
+      ]
+    },
+    "gitlab-sast": {
+      "behaviour": "per-project",
+      "considered": true,
+      "covers_projects": false,
+      "workspace_artifact": null,
+      "per_project_artifacts": [
+        {
+          "project": "api",
+          "path": "projects/api/reports/ash.gl-sast-report.json"
+        },
+        {
+          "project": "web",
+          "path": "projects/web/reports/ash.gl-sast-report.json"
+        }
+      ],
+      "missing_per_project_artifacts": [
+        "api",
+        "web"
+      ]
+    },
+    "html": {
+      "behaviour": "merged",
+      "considered": true,
+      "covers_projects": true,
+      "workspace_artifact": "reports/ash.html",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "junitxml": {
+      "behaviour": "merged",
+      "considered": true,
+      "covers_projects": true,
+      "workspace_artifact": "reports/ash.junit.xml",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "markdown": {
+      "behaviour": "merged",
+      "considered": true,
+      "covers_projects": true,
+      "workspace_artifact": "reports/ash.summary.md",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "ocsf": {
+      "behaviour": "merged",
+      "considered": true,
+      "covers_projects": true,
+      "workspace_artifact": "reports/ash.ocsf.json",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "sarif": {
+      "behaviour": "merged",
+      "considered": true,
+      "covers_projects": true,
+      "workspace_artifact": "reports/ash.sarif",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "spdx": {
+      "behaviour": "per-project",
+      "considered": false,
+      "covers_projects": false,
+      "workspace_artifact": null,
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": [],
+      "skipped": "disabled"
+    },
+    "text": {
+      "behaviour": "merged",
+      "considered": true,
+      "covers_projects": true,
+      "workspace_artifact": "reports/ash.summary.txt",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "unused-suppressions": {
+      "behaviour": "workspace-scoped",
+      "considered": true,
+      "covers_projects": false,
+      "workspace_artifact": "reports/ash.unused-suppressions.json",
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": []
+    },
+    "yaml": {
+      "behaviour": "merged",
+      "considered": false,
+      "covers_projects": false,
+      "workspace_artifact": null,
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": [],
+      "skipped": "disabled"
+    }
+  }
+}

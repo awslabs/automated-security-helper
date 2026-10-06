@@ -117,9 +117,14 @@ ASH_RC_FILE_NAMES = [
 ASH_PYPROJECT_FILE_NAME = "pyproject.toml"
 
 # The discovery order in one sentence, for CLI help text.
+#
+# Written "the tool.ash table", not "[tool.ash]": every --help is rendered as rich
+# markup, and rich reads "[tool.ash]" as a style tag and drops it, which printed
+# "then a  table in pyproject.toml". The file-name lists survive only because a
+# quoted, comma-separated list does not parse as a tag.
 ASH_CONFIG_SOURCES_DESCRIPTION = (
     f"{ASH_CONFIG_FILE_NAMES} (each at the root, then in .ash/), then "
-    f"{ASH_RC_FILE_NAMES} at the root, then a [tool.ash] table in "
+    f"{ASH_RC_FILE_NAMES} at the root, then the tool.ash table of "
     f"{ASH_PYPROJECT_FILE_NAME} at the root; the first found is used"
 )
 

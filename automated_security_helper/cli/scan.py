@@ -84,6 +84,19 @@ def _fail_shard_selection(message: str) -> NoReturn:
     raise typer.Exit(1)
 
 
+def _fail_usage(message: str) -> NoReturn:
+    """Report a refused invocation and exit 1, the way shard-selection errors do.
+
+    Exit 1 for the reason :func:`_fail_shard_selection` gives: 2 already means
+    "actionable findings were found", so a usage error must not exit 2 and be
+    read by a CI gate as a scan that found problems. Written with ``typer.echo``
+    to stderr because these messages quote operator-supplied paths, which Rich
+    would try to read as markup.
+    """
+    typer.echo(message, err=True)
+    raise typer.Exit(1)
+
+
 def _validate_shard_options(
     shard_index: int | None,
     shard_count: int | None,
@@ -672,6 +685,19 @@ def run_ash_scan_cli_command(
     # Resolve cwd-based defaults at call time (not import time).
     if source_dir is None:
         source_dir = Path.cwd().as_posix()
+    # Refused before anything else uses it. A missing --source-dir used to run a
+    # real scan of nothing -- every scanner finds no files -- and could exit 0,
+    # which reads exactly like a clean scan of the directory the operator named.
+    if not Path(source_dir).exists():
+        _fail_usage(
+            f"Source directory does not exist: {source_dir}. "
+            "Check --source-dir (or ASH_SOURCE_DIR)."
+        )
+    if not Path(source_dir).is_dir():
+        _fail_usage(
+            f"Source directory is not a directory: {source_dir}. "
+            "--source-dir must name the directory to scan."
+        )
     if output_dir is None:
         # Default output_dir is relative to source_dir, not CWD.
         # This ensures that when --source-dir points to a different project,
@@ -697,8 +723,11 @@ def run_ash_scan_cli_command(
         if poss_existing_results.exists():
             existing_results = poss_existing_results.as_posix()
         else:
-            raise ValueError(
-                f"{poss_existing_results.name} not found in output directory at {poss_existing_results.as_posix()}"
+            # A clean refusal, not the uncaught ValueError traceback this was.
+            _fail_usage(
+                f"--use-existing was given, but there are no existing results to "
+                f"use: {poss_existing_results.as_posix()} does not exist. Run a "
+                "scan first, or point --output-dir at the output of a previous one."
             )
 
     cli_final_show_progress = (

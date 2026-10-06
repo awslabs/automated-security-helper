@@ -1,0 +1,3 @@
+$ ash config validate --config missing.yaml
+❌ Config file not found: missing.yaml
+[exit code: 1]

@@ -1,5 +1,6 @@
 """Unit tests for the S3 reporter plugin."""
 
+import json
 from unittest.mock import MagicMock, patch, mock_open
 import os
 from pathlib import Path
@@ -240,7 +241,7 @@ def test_s3_reporter_report_json_format(mock_boto3, ash_temp_path):
 
     # Create mock model
     model = MagicMock()
-    model.metadata.summary_stats.start = "20250606-120000"
+    model.metadata.generated_at = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
     # Mock file operations
@@ -262,8 +263,8 @@ def test_s3_reporter_report_json_format(mock_boto3, ash_temp_path):
         mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
         mock_file.assert_called_once()
 
-        # Verify result is the S3 URL
-        assert result.startswith("s3://test-bucket/ash-reports/")
+        # Verify result is a JSON receipt naming the S3 URL
+        assert json.loads(result)["url"].startswith("s3://test-bucket/ash-reports/")
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
@@ -297,7 +298,7 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
 
     # Create mock model
     model = MagicMock()
-    model.metadata.summary_stats.start = "20250606-120000"
+    model.metadata.generated_at = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
     # Mock file operations
@@ -322,8 +323,8 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
         mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
         mock_file.assert_called_once()
 
-        # Verify result is the S3 URL
-        assert result.startswith("s3://test-bucket/ash-reports/")
+        # Verify result is a JSON receipt naming the S3 URL
+        assert json.loads(result)["url"].startswith("s3://test-bucket/ash-reports/")
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
@@ -361,7 +362,7 @@ def test_s3_reporter_report_error_handling(mock_boto3, ash_temp_path):
 
     # Create mock model
     model = MagicMock()
-    model.metadata.summary_stats.start = "20250606-120000"
+    model.metadata.generated_at = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
     # Mock Path operations
@@ -378,5 +379,5 @@ def test_s3_reporter_report_error_handling(mock_boto3, ash_temp_path):
         reporter._plugin_log.assert_called_once()
         assert "Error uploading to S3" in reporter._plugin_log.call_args[0][0]
 
-        # Verify result contains error message
-        assert "Error uploading to S3" in result
+        # A failed upload produces no report; the error is in the log above
+        assert result is None

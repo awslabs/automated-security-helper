@@ -1,0 +1,34 @@
+# serializer version: 1
+# name: test_nix_scan_of_the_fixture
+  dict({
+    'exit_code': 2,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
+                   WARNING  Nix shell exited with code 2
+      
+      === ASH Scan Completed in <DURATION>: Next Steps ===
+      View detailed findings...
+        - SARIF: '<TMP>/out/reports/ash.sarif'
+        - JUnit: '<TMP>/out/reports/ash.junit.xml'
+        - ASH aggregated results JSON available at: '<TMP>/out/ash_aggregated_results.json'
+      
+      === Actionable findings detected! ===
+      To investigate...
+        1. Open one of the summary reports for a user-friendly table of the findings:
+          - HTML report of all findings: '<TMP>/out/reports/ash.html'
+          - Markdown summary: '<TMP>/out/reports/ash.summary.md'
+          - Text summary: '<TMP>/out/reports/ash.summary.txt'
+        2. Use ash report to view a short text summary of the scan in your terminal
+        3. Use ash inspect findings to explore the findings interactively
+        4. Review scanner-specific reports and outputs in the '<TMP>/out/scanners' directory
+      
+      === ASH Exit Codes ===
+        0: Success - No actionable findings or not configured to fail on findings
+        1: Error during execution
+        2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
+      ERROR (2) Exiting due to 1 actionable findings found in ASH scan
+  
+    ''',
+  })
+# ---

@@ -86,14 +86,15 @@ runs:
       run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
 
     # === uvx ===
-    - name: "uvx: install uv (Unix)"
-      if: inputs.method == 'uvx' && runner.os != 'Windows'
-      shell: bash
-      run: curl -LsSf https://astral.sh/uv/install.sh | sh
-    - name: "uvx: install uv (Windows)"
-      if: inputs.method == 'uvx' && runner.os == 'Windows'
-      shell: pwsh
-      run: irm https://astral.sh/uv/install.ps1 | iex
+    # setup-uv, pinned like every other action here, rather than piping astral's
+    # install script into a shell. The script was fetched unpinned on every run, so
+    # whatever that URL served at the time executed with this job's token; the
+    # action is a reviewed commit. Both runner OSes are covered by the one step.
+    - name: "uvx: install uv"
+      if: inputs.method == 'uvx'
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        enable-cache: false
     - name: "uvx: verify"
       if: inputs.method == 'uvx'
       shell: bash

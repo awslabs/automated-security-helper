@@ -1,0 +1,20 @@
+{
+  "summary": {
+    "total_suppressions": 0,
+    "used_suppressions": 0,
+    "unused_suppressions": 0
+  },
+  "unused_suppressions": [],
+  "scope": "workspace",
+  "scope_detail": "Counts cover workspace-level suppressions only. Each project's own suppressions were matched during that project's scan, against that project's own config, and are reported under per_project_reports.",
+  "per_project_reports": [
+    {
+      "project": "api",
+      "path": "projects/api/reports/ash.unused-suppressions.json"
+    },
+    {
+      "project": "web",
+      "path": "projects/web/reports/ash.unused-suppressions.json"
+    }
+  ]
+}
