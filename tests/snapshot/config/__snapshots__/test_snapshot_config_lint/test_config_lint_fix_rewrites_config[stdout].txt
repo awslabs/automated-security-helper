@@ -30,7 +30,7 @@ Found 16 issue(s):
   • Narrow the suppression to line 10 alone by setting line_end = 10
   • Collapse the reason onto a single line
   • Remove expired suppression
-  •
+  • Rename scanners.'cdk_nag' to the canonical form 'cdk-nag'
 
 ✅ Fixed 8 issue(s) in .ash/.ash.yaml
 [exit code: 0]

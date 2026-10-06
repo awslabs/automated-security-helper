@@ -21,7 +21,7 @@ Wrote HTML report to <INSPECT_OUT>/sarif_validation_report.html
 ┃         ┃              ┃               ┃ Missing            ┃ Missing           ┃                ┃
 ┃ Scanner ┃ Total Fields ┃ Unique Fields ┃ (Unexpected)       ┃ (Intentional)     ┃ % in Aggregate ┃
 ┡━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
-│ bandit  │ 9            │ 9             │ 9                  │ 1                 │ -11.1%         │
+│ bandit  │ 9            │ 9             │ 9                  │ 1                 │ 0.0%           │
 └─────────┴──────────────┴───────────────┴────────────────────┴───────────────────┴────────────────┘
 WARNING: Some fields are unexpectedly missing from the aggregate report
 [exit code: 1]

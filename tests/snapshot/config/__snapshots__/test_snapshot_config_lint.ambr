@@ -131,7 +131,7 @@
       }),
       dict({
         'category': 'legacy-name-variant',
-        'fix_description': '',
+        'fix_description': "Rename scanners.'cdk_nag' to the canonical form 'cdk-nag'",
         'fixable': True,
         'message': "scanners.'cdk_nag' uses the legacy snake/kebab variant; canonical form is 'cdk-nag'. ASH reads it as 'cdk-nag', but only the canonical form is documented.",
         'path': 'scanners.cdk_nag',
