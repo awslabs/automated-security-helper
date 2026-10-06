@@ -380,6 +380,17 @@ ARG TRIVY_VERSION="v0.69.3"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
+# hadolint, the opt-in Dockerfile linter, from its pinned release asset like the three
+# above. Its asset is the executable itself rather than an archive; install-pinned-tool
+# handles that through ToolAsset.archived. hadolint is GPL-3.0 and this image
+# redistributes the binary, so its license text, its upstream third-party notices and
+# the exact source tag go in alongside it, at /usr/share/doc/hadolint. ASH runs it as
+# a separate process and never links to it.
+ARG HADOLINT_VERSION="v2.15.1"
+COPY automated_security_helper/assets/third_party/hadolint/ /usr/share/doc/hadolint/
+RUN with-retry 'install-pinned-tool hadolint -b /usr/local/bin'
+RUN hadolint --version
+
 #
 # Setting default WORKDIR to /src
 #

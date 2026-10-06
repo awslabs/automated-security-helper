@@ -46,6 +46,19 @@
 
 ## Unreleased
 
+### Features
+
+- **hadolint, an opt-in Dockerfile linter.** Enable it with
+  `scanners.hadolint.enabled: true` or `--scanners hadolint`; until then it does
+  not run and does not appear in any output. It lints `Dockerfile`,
+  `Containerfile`, `*.Dockerfile` and `Dockerfile.*` with hadolint's DL rules and
+  ShellCheck, reads a `.hadolint.yaml` in the source directory (or
+  `options.config_file`), and maps hadolint's error/warning/info/style to
+  HIGH/MEDIUM/LOW/INFO. The container image includes hadolint v2.15.1 with its
+  GPL-3.0 notices under `/usr/share/doc/hadolint/`; `ash dependencies install`
+  fetches the same pinned, digest-verified binary. See
+  [hadolint](docs/content/docs/plugins/builtin/hadolint.md).
+
 ### Behavior changes
 
 - **`fail_on_incomplete_scanners` now defaults to `true`.** A scan in which a

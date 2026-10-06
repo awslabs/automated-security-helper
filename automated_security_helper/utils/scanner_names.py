@@ -130,6 +130,7 @@ SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(
         "detect-secrets",
         "ferret-scan",
         "grype",
+        "hadolint",
         "npm-audit",
         "opengrep",
         "semgrep",

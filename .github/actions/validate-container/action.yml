@@ -612,3 +612,45 @@ runs:
 
         print(f"PASS: all {len(image_supplied)} image-supplied scanners participated")
         PY
+
+    # hadolint is opt-in, so the default scan above never runs it and cannot say
+    # whether the image's copy works. This scans a two-line Dockerfile with only
+    # hadolint selected. The fixture has a known finding (DL3007, an unpinned
+    # `latest` tag), so 2 is the expected exit and the assertion is that hadolint
+    # ran and reported it -- not merely that it was not MISSING.
+    - name: "Scan with the image's opt-in hadolint"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        mkdir -p /tmp/ash-selftest-hadolint
+        printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-selftest-hadolint/Dockerfile
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --source-dir /tmp/ash-selftest-hadolint \
+          --output-dir /tmp/ash-selftest-hadolint/output \
+          --scanners hadolint \
+          --simple \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        if [ "$rc" -ne 2 ]; then
+          echo "::error::expected exit 2 (the fixture's DL3007 finding); got $rc"
+          exit 1
+        fi
+        python3 - <<'PY'
+        import json, pathlib, sys
+        data = json.loads(pathlib.Path(
+            "/tmp/ash-selftest-hadolint/output/ash_aggregated_results.json").read_text())
+        row = (data.get("scanner_results") or {}).get("hadolint")
+        if not isinstance(row, dict):
+            sys.exit("FAIL: hadolint is absent from the report")
+        print(f"hadolint: {row.get('status')} with {row.get('finding_count')} finding(s)")
+        if str(row.get("status")).upper() in ("MISSING", "ERROR"):
+            sys.exit("FAIL: the image's hadolint did not run")
+        if not row.get("finding_count"):
+            sys.exit("FAIL: hadolint reported nothing for a Dockerfile with a known finding")
+        PY

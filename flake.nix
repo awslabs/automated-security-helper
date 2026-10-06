@@ -73,6 +73,7 @@
           pkgs.checkov
           pkgs.detect-secrets
           pkgs.grype
+          pkgs.hadolint # opt-in; runs only when enabled
           pkgs.nodejs # provides `npm audit`
           pkgs.semgrep
           pkgs.syft

@@ -545,6 +545,52 @@ runs:
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
+    # hadolint is opt-in, so the default scans above never run it. `ash dependencies
+    # install` in the python-local steps above did install it (installs include
+    # opt-in tools), so this runs that copy on the committed fixture with only
+    # hadolint selected, on every OS. The fixture has known findings at every
+    # hadolint level, so 2 is the expected exit; assert_opt_in_scanner_ran.py then
+    # checks hadolint ran and reported them rather than going MISSING.
+    - name: Validate opt-in hadolint (Python Local Unix)
+      if: inputs.method == 'python-local' && inputs.config-file == 'default' && runner.os != 'Windows'
+      shell: bash
+      run: |
+        out="${RUNNER_TEMP}/hadolint-out"
+        set +e
+        ash scan --mode local --no-progress --simple \
+          --source-dir tests/test_data/scanners/hadolint/positive \
+          --output-dir "$out" \
+          --scanners hadolint
+        rc=$?
+        set -e
+        PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
+        "$PY" "${{ github.action_path }}/assert_opt_in_scanner_ran.py" \
+          "$out/ash_aggregated_results.json" hadolint --exit-code "$rc" \
+          --expect-exit 2 --min-findings 13
+
+    # pwsh on Windows, for the reason the Windows scan step above gives: under Git
+    # Bash the name `ash` can resolve to an Almquist shell rather than to ASH.
+    - name: Validate opt-in hadolint (Python Local Windows)
+      if: inputs.method == 'python-local' && inputs.config-file == 'default' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $AshPath = (Get-Command ash -ErrorAction SilentlyContinue).Source
+        if ($AshPath -notmatch '\\Scripts\\ash\.exe$') {
+          Write-Host "::error::ash resolved to '$AshPath', not the ASH entry point"
+          exit 1
+        }
+        $Out = Join-Path $env:RUNNER_TEMP "hadolint-out"
+        & ash scan --mode local --no-progress --simple `
+          --source-dir tests/test_data/scanners/hadolint/positive `
+          --output-dir $Out `
+          --scanners hadolint
+        $Rc = $LASTEXITCODE
+        $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+        & $Python "${{ github.action_path }}/assert_opt_in_scanner_ran.py" `
+          (Join-Path $Out "ash_aggregated_results.json") hadolint `
+          --exit-code $Rc --expect-exit 2 --min-findings 13
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     # PowerShell scan
     - name: Validate ASH using PowerShell
       if: inputs.method == 'powershell'

@@ -96,14 +96,14 @@ def _cases(plugin_type):
     ]
 
 
-def _probe_config(plugin_type) -> AshConfig:
+def _probe_config(plugin_type, enabled: bool = False) -> AshConfig:
     segment_key, _ = SEGMENTS[plugin_type]
     return AshConfig.model_validate(
         {
             "project_name": "probe",
             segment_key: {
                 _documented_key(plugin_type, cls): {
-                    "enabled": False,
+                    "enabled": enabled,
                     "options": {"probe_marker": MARKER},
                 }
                 for cls in _shipped(plugin_type)
@@ -123,8 +123,8 @@ def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
     )
 
 
-def _assert_reached(instance):
-    assert instance.config.enabled is False, (
+def _assert_reached(instance, enabled: bool = False):
+    assert instance.config.enabled is enabled, (
         f"{type(instance).__name__} runs with enabled={instance.config.enabled}; "
         "its configuration never reached it"
     )
@@ -142,11 +142,9 @@ def test_every_shipped_plugin_type_is_represented():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.fixture(scope="module")
-def scan_phase_instances(tmp_path_factory):
+def _build_scan_phase_instances(context):
     from automated_security_helper.core.phases.scan_phase import ScanPhase
 
-    context = _context(tmp_path_factory.mktemp("scan"), _probe_config("scanner"))
     phase = ScanPhase(
         plugin_context=context,
         plugins=_shipped("scanner"),
@@ -175,10 +173,45 @@ def scan_phase_instances(tmp_path_factory):
     return captured
 
 
+@pytest.fixture(scope="module")
+def scan_phase_instances(tmp_path_factory):
+    return _build_scan_phase_instances(
+        _context(tmp_path_factory.mktemp("scan"), _probe_config("scanner"))
+    )
+
+
+@pytest.fixture(scope="module")
+def scan_phase_enabled_instances(tmp_path_factory):
+    """Every scanner configured enabled: true, for the opt-in ones.
+
+    An opt-in scanner whose config says enabled: false is not built at all
+    (core/scanner_opt_in.py), so the probe above cannot reach it; enabling it in
+    config is the documented way to turn it on, and that config must arrive.
+    """
+    return _build_scan_phase_instances(
+        _context(
+            tmp_path_factory.mktemp("scan-enabled"),
+            _probe_config("scanner", enabled=True),
+        )
+    )
+
+
 @pytest.mark.parametrize("plugin_class", _cases("scanner"))
 def test_scan_phase_builds_each_scanner_with_its_config(
-    scan_phase_instances, plugin_class
+    scan_phase_instances, scan_phase_enabled_instances, plugin_class
 ):
+    from automated_security_helper.core.scanner_opt_in import is_opt_in
+
+    if is_opt_in(plugin_class):
+        assert plugin_class not in scan_phase_instances, (
+            "an opt-in scanner configured enabled: false was built; it must be "
+            "left out of the run entirely"
+        )
+        assert plugin_class in scan_phase_enabled_instances, (
+            "the scan phase never built it when its config enabled it"
+        )
+        _assert_reached(scan_phase_enabled_instances[plugin_class], enabled=True)
+        return
     assert plugin_class in scan_phase_instances, "the scan phase never built it"
     _assert_reached(scan_phase_instances[plugin_class])
 

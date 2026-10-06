@@ -94,6 +94,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
     GrypeScannerConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.hadolint_scanner import (
+    HadolintScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScannerConfig,
 )
@@ -372,6 +375,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
     grype: Annotated[
         GrypeScannerConfig, Field(description="Configure the options for Grype")
     ] = GrypeScannerConfig()
+    hadolint: Annotated[
+        HadolintScannerConfig,
+        Field(description="Configure the options for hadolint (opt-in)"),
+    ] = HadolintScannerConfig()
     npm_audit: Annotated[
         NpmAuditScannerConfig,
         Field(description="Configure the options for NpmAudit", alias="npm-audit"),

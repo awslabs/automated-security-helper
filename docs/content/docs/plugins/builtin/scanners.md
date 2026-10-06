@@ -14,6 +14,7 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[Checkov](#checkov)**               | Infrastructure-as-Code scanner  | Terraform, CF, K8s, Docker      | Policy-as-code framework                   |
 | **[Detect-Secrets](#detect-secrets)** | Secret detection                | All text files                  | Entropy-based secret detection             |
 | **[Grype](#grype)**                   | Container vulnerability scanner | Container images, SBOMs         | CVE database matching                      |
+| **[hadolint](hadolint.md)** (opt-in)  | Dockerfile linter               | Dockerfile, Containerfile       | DL rules plus ShellCheck on `RUN`          |
 | **[NPM Audit](#npm-audit)**           | Node.js dependency scanner      | package.json, package-lock.json | NPM vulnerability database                 |
 | **[Opengrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
 | **[Semgrep](#semgrep)**               | Static analysis scanner         | 30+ languages                   | Community and custom rules                 |
@@ -182,6 +183,24 @@ scanners:
 - Container base image issues
 
 **Dependencies**: `grype` binary
+
+---
+
+### hadolint (opt-in)
+
+**Purpose**: Lints Dockerfiles with hadolint's DL rules and ShellCheck. Off unless
+enabled; see [hadolint](hadolint.md) for enabling, configuration and the severity
+mapping.
+
+```yaml
+scanners:
+  hadolint:
+    enabled: true
+    options:
+      config_file: null   # .hadolint.yaml in the source directory is used if present
+```
+
+**Dependencies**: `hadolint` binary (in the container image; `ash dependencies install` locally)
 
 ---
 

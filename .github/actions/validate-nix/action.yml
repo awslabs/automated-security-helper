@@ -70,6 +70,9 @@ runs:
         YAML
         printf '{ "name": "ash-nix-selftest", "version": "1.0.0", "dependencies": {} }\n' \
           > /tmp/ash-nix-selftest/package.json
+        # For hadolint, which is opt-in and enabled for this scan below. Unpinned base
+        # image tag, so DL3007 fires and the scanner has something to report.
+        printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-nix-selftest/Dockerfile
 
     - name: "nix: scan"
       shell: bash
@@ -96,6 +99,7 @@ runs:
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
+          --config-overrides 'scanners.hadolint.enabled=true' \
           --simple
         rc=$?
         set -e
@@ -148,6 +152,8 @@ runs:
             "checkov",
             "detect-secrets",
             "grype",
+            # Opt-in, so it is in the report only because the scan step enables it.
+            "hadolint",
             "npm-audit",
             "opengrep",
             "semgrep",
