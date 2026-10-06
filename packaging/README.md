@@ -69,7 +69,7 @@ lists of real builds.
 | `deb/` | Debian, Ubuntu | build + payload gate + install + real scan + upgrade from N-1 + purge in `debian:bookworm` and `ubuntu:24.04` (`ash-native-packages.yml`) |
 | `rpm/` | Amazon Linux, RHEL | build + payload gate + install + real scan + upgrade from N-1 + erase in `amazonlinux:2023` and `ubi9` (`ash-native-packages.yml`) |
 | `flatpak/` | any Linux with flatpak | build + install + real scan against `org.freedesktop.Sdk//24.08` |
-| `msix/` | Windows 10, Windows 11 | build + sign + install + real scan on `windows-latest` |
+| `msix/` | Windows 10, Windows 11 | build + sign + tampered-package refusal + install N-1 + upgrade to N + the three e2e scans (exit 2, 0, 1) + reinstall + uninstall on `windows-latest` |
 | `chocolatey/` | Windows, via Chocolatey | nuspec vs NuGet's XSD anywhere; build + install + real scan on `windows-latest` |
 | `winget/` | Windows, via winget | manifest set vs Microsoft's published JSON Schemas. Installs the MSIX, so it is schema-valid but not submission-ready; `README.winget` says why |
 | `homebrew/` | Homebrew tap, for `Formula/ash.rb` at the repository root | `brew install` + `brew test` + `brew audit --strict` on `macos-latest` |

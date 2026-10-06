@@ -429,9 +429,11 @@ jobs:
     needs: build
     runs-on: windows-latest
     # Longer than the 25 the deb and rpm jobs get. This one additionally downloads a managed
-    # CPython for uv, searches the SDK for two tools, compiles three launchers, and does a
-    # full pip install of ASH's 27 dependencies inside the first-run venv bootstrap.
-    timeout-minutes: 35
+    # CPython for uv, searches the SDK for two tools, compiles three launchers twice (N and
+    # the N-1 package the upgrade leg starts from), and does a full pip install of ASH's
+    # dependencies twice, once per venv bootstrap, before four scans. The bootstrap alone
+    # measured about 90 seconds on windows-latest.
+    timeout-minutes: 55
     steps:
       # No "install git first" step, unlike the deb and rpm jobs. Those run in distro images
       # with no git, where actions/checkout silently falls back to a REST tarball. The
@@ -491,7 +493,15 @@ jobs:
       # neither secret is configured, so every run generates its own certificate. The
       # supplied-certificate path is exercised the first time one is set, and the only
       # difference between them is where the .pfx bytes came from.
-      - name: Build the .msix, install it, and run a real scan
+      # What the script proves, in order: N and an N-1 package (this tree with a lowered
+      # version, built in RUNNER_TEMP and never uploaded) are built and signed; a copy of N
+      # with one changed byte is refused by Add-AppxPackage; N-1 installs fresh and reports
+      # its version; the upgrade to N moves the installed version and REBUILDS the venv
+      # Windows keeps across updates; the three e2e cases (tests/e2e/fixtures/cases.json)
+      # exit exactly 2, 0 and 1 with the counts and report paths scripts/e2e/assert_outcome.py
+      # requires; two negative controls on that verdict must fail; a same-version reinstall
+      # keeps the venv; and uninstall removes the package, the venv and the aliases.
+      - name: Build the .msix, upgrade from N-1, run the e2e scans, and uninstall
         shell: pwsh
         env:
           MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}

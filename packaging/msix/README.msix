@@ -300,7 +300,9 @@ Building it yourself
   # from a checkout, with a wheel already built by `uv build --out-dir dist`
   pwsh -File packaging/msix/build.ps1 -Wheel dist\automated_security_helper-<version>-py3-none-any.whl
 
-  # or the whole thing, including installing it and running a real scan
+  # or the whole thing: build N and an N-1 package, install N-1, upgrade to N, run the
+  # three e2e scans, and uninstall. It changes the installed packages and trusts the
+  # throwaway signing certificate in LocalMachine\TrustedPeople, so run it on a VM.
   pwsh -File packaging/msix/verify-on-windows.ps1
 
 build.ps1 needs makeappx.exe and signtool.exe, which ship with the Windows SDK and are not
