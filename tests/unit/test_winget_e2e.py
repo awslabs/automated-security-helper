@@ -622,3 +622,31 @@ def test_the_minimum_winget_version_is_the_first_with_the_manifest_schema() -> N
     # The client the script installs when none is usable must itself be new enough.
     pinned = _verify_ps1_family("WingetReleaseTag").removeprefix("v")
     assert tuple(map(int, pinned.split("."))) >= (1, 12, 210), pinned
+
+
+def test_the_ferret_suppression_covers_exactly_the_winget_digest_lines() -> None:
+    # ferret-scan reads each 64-hex digest as a secret and ignores the inline
+    # detect-secrets marker, so .ash/.ash_community_plugins.yaml suppresses it by line
+    # range. A range that drifts off the digests would suppress whatever moved in.
+    lines = VERIFY_PS1.read_text(encoding="utf-8").splitlines()
+    digests = [
+        number
+        for number, line in enumerate(lines, start=1)
+        if re.match(r"^\$Winget\w*Sha256 = '[0-9A-F]{64}'", line)
+    ]
+    assert len(digests) == 2, digests
+    config = yaml.safe_load(
+        (REPO / ".ash" / ".ash_community_plugins.yaml").read_text(encoding="utf-8")
+    )
+    entries = [
+        s
+        for s in config["global_settings"]["suppressions"]
+        if s.get("path") == "packaging/winget/verify-on-windows.ps1"
+    ]
+    assert len(entries) == 1, entries
+    assert entries[0]["rule_id"] == "API_KEY_OR_SECRET"
+    assert (entries[0]["line_start"], entries[0]["line_end"]) == (
+        digests[0],
+        digests[-1],
+    )
+    assert digests == list(range(digests[0], digests[-1] + 1)), digests

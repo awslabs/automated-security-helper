@@ -150,6 +150,19 @@ global_settings:
         purpose. A range that drifts after a version bump fails loudly -- the
         findings come back and the scan goes red -- whereas a whole-file suppression
         would silently swallow a real secret added here later.
+    - path: packaging/winget/verify-on-windows.ps1
+      rule_id: API_KEY_OR_SECRET
+      line_start: 93
+      line_end: 94
+      reason: >-
+        False positive, for the same reason as the entry above. The two lines are the
+        published SHA256 digests of the winget client bundle and its dependencies
+        archive that the winget e2e leg installs, copied from that release's own
+        digest file and recomputed from the downloads. They are public by construction.
+        detect-secrets is handled by an inline `# pragma: allowlist secret` on each
+        line; ferret-scan does not honor that marker, hence this entry. Scoped to
+        those two lines, and tests/unit/test_winget_e2e.py holds the range to them, so
+        a version bump that moves them fails a test instead of drifting.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
       line_start: 501
