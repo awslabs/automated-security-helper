@@ -864,7 +864,7 @@ workflows:
 
 ## Best Practices for CI Integration
 
-> **Tip**: The CI examples in this guide use pinned versions (`@v{{VERSION}}`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD pipelines.
+> **Tip**: The CI examples in this guide use pinned versions (`@v{{VERSION}}`) for reproducibility. You can also use the `v{{MAJOR_VERSION}}` floating tag (`@v{{MAJOR_VERSION}}`) to always get the latest stable v{{MAJOR_VERSION}}.x release, though pinned versions are recommended for CI/CD pipelines.
 
 1. **Fail builds on critical findings**:
    ```bash

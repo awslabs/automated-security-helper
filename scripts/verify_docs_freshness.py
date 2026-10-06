@@ -133,7 +133,7 @@ def collect_md_files() -> list[Path]:
     glob was not holding anything back, it was simply not looking.
 
     ``.md.template`` files are included alongside the ``.md`` files they render
-    to. Ten docs in this repository are generated from a sibling template, and
+    to. Eleven docs in this repository are generated from a sibling template, and
     the template is the file an edit has to land in -- a fix applied only to the
     rendered doc is discarded at the next release. Checking both means a stale
     list in a template is reported against the template's own path.

@@ -25,6 +25,10 @@ class VersionTemplateManager:
         self.project_root = project_root
         self.template_suffix = ".template"
         self.version_placeholder = "{{VERSION}}"
+        # The floating major tag (`v4` for 4.x). ash-tag-on-merge moves one tag per
+        # major and the older ones keep resolving, so a doc that writes the major as
+        # a literal keeps recommending the previous major's tag after a bump.
+        self.major_version_placeholder = "{{MAJOR_VERSION}}"
 
         # Files to process (relative to project root)
         self.target_files = [
@@ -35,6 +39,7 @@ class VersionTemplateManager:
             "docs/content/docs/quick-start-guide.md",
             "docs/content/docs/migration-guide.md",
             "docs/content/docs/advanced-usage.md",
+            "docs/content/docs/troubleshooting.md",
             "docs/content/tutorials/running-ash-in-ci.md",
             "docs/content/tutorials/running-ash-locally.md",
             "examples/streamlit_ui/README.md",
@@ -160,6 +165,13 @@ class VersionTemplateManager:
             print(f"Error converting {file_path} to template: {e}")
             return False
 
+    def render(self, content: str, version: str) -> str:
+        """Substitute the version placeholders in template content."""
+        major = version.split(".", 1)[0]
+        return content.replace(self.version_placeholder, version).replace(
+            self.major_version_placeholder, major
+        )
+
     def generate_from_template(self, template_path: Path) -> bool:
         """
         Generate final file from template by replacing placeholders with actual version.
@@ -178,9 +190,7 @@ class VersionTemplateManager:
             with open(template_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # Replace version placeholder with actual version
-            current_version = get_version()
-            content = content.replace(self.version_placeholder, current_version)
+            content = self.render(content, get_version())
 
             # Generate output file (remove .template suffix)
             output_path = template_path.with_suffix("")
