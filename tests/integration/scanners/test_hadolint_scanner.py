@@ -267,3 +267,20 @@ def test_enabled_but_not_installed_is_missing_and_fails_the_scan(
     proc = _ash_scan(source, output, "--scanners", "hadolint", env=env)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert _results(output)["scanner_results"]["hadolint"]["status"] == "MISSING"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_config_symlinked_out_of_the_tree_is_not_applied(fixture_copy, tmp_path):
+    """hadolint reads ./.hadolint.yaml itself; ASH must stop it following the link."""
+    _hadolint()
+    source = fixture_copy("negative")
+    (source / "Dockerfile").write_text("FROM ubuntu:latest\n")
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("ignored:\n  - DL3007\n")
+    (source / ".hadolint.yaml").symlink_to(outside)
+    output = tmp_path / "out"
+    proc = _ash_scan(source, output, "--scanners", "hadolint")
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    sarif = json.loads((output / "reports" / "ash.sarif").read_text())
+    rules = {r["ruleId"] for run in sarif["runs"] for r in run.get("results") or []}
+    assert "DL3007" in rules

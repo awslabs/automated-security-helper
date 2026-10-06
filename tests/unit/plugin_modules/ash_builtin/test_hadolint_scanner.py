@@ -259,10 +259,15 @@ class FakeHadolint:
         stderr: str = "",
         json_exit_code: int = 0,
         timed_out: bool = False,
+        sarif_call_overrides: Optional[Dict[int, dict]] = None,
+        stdout_even_on_failure: bool = False,
     ):
         self.sarif, self.json_name = sarif, json_name
         self.exit_code, self.stderr = exit_code, stderr
         self.json_exit_code, self.timed_out = json_exit_code, timed_out
+        # Index of a SARIF invocation (0 = first chunk) -> what it does instead.
+        self.sarif_call_overrides = sarif_call_overrides or {}
+        self.stdout_even_on_failure = stdout_even_on_failure
         self.calls: List[dict] = []
 
     def __call__(self, scanner):
@@ -270,17 +275,23 @@ class FakeHadolint:
             self.calls.append({"argv": list(command), "env": env, "timeout": timeout})
             assert "--output" not in command, "nixpkgs' hadolint has no --output"
             fmt = command[command.index("--format") + 1]
-            if self.timed_out:
+            override = {}
+            if fmt == "sarif":
+                index = sum(1 for c in self.calls if "sarif" in c["argv"]) - 1
+                override = self.sarif_call_overrides.get(index, {})
+            if self.timed_out or override.get("timed_out"):
                 scanner.exit_code = -9
                 return {"timed_out": True}
             name, code = (
-                (self.sarif, self.exit_code)
+                (self.sarif, override.get("exit_code", self.exit_code))
                 if fmt == "sarif"
                 else (self.json_name, self.json_exit_code)
             )
             scanner.exit_code = code
-            stdout = (CAPTURED / name).read_text() if name and code == 0 else ""
-            return {"returncode": code, "stdout": stdout, "stderr": self.stderr}
+            serve = name and (code == 0 or self.stdout_even_on_failure)
+            stdout = (CAPTURED / name).read_text() if serve else ""
+            stderr = override.get("stderr", self.stderr)
+            return {"returncode": code, "stdout": stdout, "stderr": stderr}
 
         return run
 
@@ -367,7 +378,9 @@ class TestScan:
         self, tree, tmp_path, on_path, monkeypatch
     ):
         scanner = _scanner(tree, tmp_path)
-        fake = FakeHadolint(json_exit_code=1)
+        # The failed pass still prints a usable table, so only the exit-code
+        # check can be what keeps the notes at LOW.
+        fake = FakeHadolint(json_exit_code=1, stdout_even_on_failure=True)
         report = _run(scanner, fake, monkeypatch)
         assert scanner.exit_code == 0
         assert ("SC2006", "note", "LOW", "Dockerfile", 5) in _findings(report)
@@ -534,6 +547,56 @@ class TestLargeTreesAndBudgets:
         assert len(_findings(report)) == len(POSITIVE_EXPECTED) * len(sarif_calls)
         assert scanner.targets_attempted == 400
 
+    @staticmethod
+    def _many(tmp_path: Path, count: int = 400) -> Path:
+        src = tmp_path / "src"
+        for i in range(count):
+            d = src / ("d" * 60 + f"{i:03d}")
+            d.mkdir(parents=True)
+            (d / "Dockerfile").write_text("FROM x\n")
+        return src
+
+    @pytest.mark.parametrize(
+        ("override", "message"),
+        [
+            ({"timed_out": True}, "timed out after"),
+            ({"exit_code": 1}, "did not complete"),
+            (
+                {"stderr": "Error parsing your config file in '.hadolint.yaml'"},
+                "could not parse its configuration",
+            ),
+        ],
+        ids=["timeout", "exit", "config-error"],
+    )
+    def test_a_failure_in_a_later_chunk_fails_the_scan(
+        self, tmp_path, on_path, monkeypatch, override, message
+    ):
+        scanner = _scanner(self._many(tmp_path), tmp_path, scan_timeout=60)
+        fake = FakeHadolint(sarif_call_overrides={1: override})
+        with pytest.raises(ScannerError, match=message):
+            _run(scanner, fake, monkeypatch)
+        assert scanner.end_time is not None, "_post_scan must run however it ends"
+
+    def test_the_json_pass_covers_every_chunk(self, tmp_path, on_path, monkeypatch):
+        scanner = _scanner(self._many(tmp_path), tmp_path)
+        fake = FakeHadolint()
+        _run(scanner, fake, monkeypatch)
+        sarif = [c["argv"] for c in fake.calls if "sarif" in c["argv"]]
+        json_ = [c["argv"] for c in fake.calls if "json" in c["argv"]]
+        assert [a[a.index("--") :] for a in sarif] == [
+            a[a.index("--") :] for a in json_
+        ]
+
+    def test_chunks_count_the_fixed_arguments_against_the_cap(self):
+        """A long --config path is part of every command line, so it is budgeted."""
+        base = ["hadolint", "--no-fail", "--no-color", "--config", "/" + "c" * 20_000]
+        paths = [f"dir{i:04d}/" + "p" * 80 + "/Dockerfile" for i in range(200)]
+        chunks = hs._argv_chunks(base, paths)
+        assert [p for chunk in chunks for p in chunk] == paths
+        for chunk in chunks:
+            line = " ".join(HadolintScanner._format_args(base, "sarif", chunk))
+            assert len(line) <= hs._MAX_COMMAND_LINE_CHARS
+
     def test_every_run_shares_one_deadline(self, tree, tmp_path, on_path, monkeypatch):
         """The JSON pass gets what the SARIF pass left, not a fresh budget."""
         clock = iter([100.0, 100.0, 103.0])
@@ -566,7 +629,13 @@ class TestLargeTreesAndBudgets:
         scanner = _scanner(tree, tmp_path)
         fake = FakeHadolint()
         _run(scanner, fake, monkeypatch)
-        assert "--config" not in fake.calls[0]["argv"]
+        # Leaving --config off is not enough: hadolint would read ./.hadolint.yaml
+        # from its working directory itself. An explicit empty config stops that.
+        argv = fake.calls[0]["argv"]
+        stub = Path(argv[argv.index("--config") + 1])
+        assert stub.read_text().strip() == "{}"
+        assert not stub.resolve().is_relative_to(tree.resolve())
+        assert stub != outside
 
     @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
     def test_an_explicitly_configured_config_outside_the_tree_is_used(

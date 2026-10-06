@@ -317,6 +317,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                     "Fix the path, or unset it to use hadolint's defaults."
                 )
             return candidate.resolve()
+        rejected = False
         for name in DEFAULT_CONFIG_CANDIDATES:
             candidate = source_dir / name
             if not candidate.is_file():
@@ -330,8 +331,22 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                     f"{resolved.as_posix()}, outside the scanned tree.",
                     level=logging.WARNING,
                 )
+                rejected = True
                 continue
             return resolved
+        if rejected:
+            # Passing no --config is not enough to ignore it: hadolint runs in the
+            # source directory and reads ./.hadolint.yaml there itself, following
+            # the symlink. An explicit config stops that lookup. "{}" and not an
+            # empty file, which hadolint reports as a parse error. Only in this
+            # case, because an explicit config also stops hadolint reading the
+            # user-level config under $XDG_CONFIG_HOME, which otherwise applies.
+            stub = Path(self.results_dir or self._ctx.output_dir).joinpath(
+                "hadolint-no-config.yaml"
+            )
+            stub.parent.mkdir(parents=True, exist_ok=True)
+            stub.write_text("{}\n", encoding="utf-8")
+            return stub.resolve()
         return None
 
     def _dockerfiles(
@@ -540,14 +555,24 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             timeout = self._effective_scan_timeout()
             deadline = None if timeout is None else _now() + timeout
 
-            reports: List[SarifReport] = []
+            responses: List[Dict[str, Any]] = []
+            exit_codes: List[int] = []
             final_args: List[str] = []
             for chunk in chunks:
                 final_args = self._format_args(base_args, "sarif", chunk)
-                response = self._run_until(final_args, results_dir, deadline)
+                responses.append(self._run_until(final_args, results_dir, deadline))
+                exit_codes.append(self.exit_code)
+                if responses[-1].get("timed_out") or self.exit_code != 0:
+                    break
+            # Before the checks below, so the scan's end time is recorded however
+            # it ends.
+            self._post_scan(target=target, target_type=target_type)
+
+            reports: List[SarifReport] = []
+            for response, exit_code in zip(responses, exit_codes):
+                self.exit_code = exit_code
                 self._check_sarif_response(response, timeout, config_file)
                 reports.append(self._parse_sarif(response))
-            self._post_scan(target=target, target_type=target_type)
 
             sarif_report = reports[0]
             for extra in reports[1:]:
