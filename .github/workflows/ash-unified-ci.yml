@@ -120,7 +120,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - id: setup-uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
           # Restore everywhere, save only from main. This setup-uv major defaults
@@ -133,6 +134,20 @@ jobs:
           # what every pull request already reads; the per-PR copies only served
           # a second push to the same pull request.
           save-cache: ${{ github.event_name == 'push' }}
+
+      - name: "Cache report: uv-lint"
+        if: ${{ !cancelled() && steps.setup-uv.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: uv-lint
+          CACHE_HIT: ${{ steps.setup-uv.outputs.cache-hit }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"

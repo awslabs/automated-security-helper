@@ -200,6 +200,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
+        id: setup-uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
@@ -208,6 +209,20 @@ jobs:
           # carries the measurement: one ~254 MB copy per open pull request,
           # readable by no other pull request, was 3.62 GB of a 10 GB quota.
           save-cache: ${{ github.event_name == 'push' }}
+
+      - name: "Cache report: uv"
+        if: ${{ !cancelled() && steps.setup-uv.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: uv
+          CACHE_HIT: ${{ steps.setup-uv.outputs.cache-hit }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -262,6 +277,21 @@ jobs:
           path: ~/.cache/grype/db
           key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
+      - name: "Cache report: grype-db"
+        if: ${{ !cancelled() && steps.grype-db-restore.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: grype-db
+          CACHE_HIT: ${{ steps.grype-db-restore.outputs.cache-hit }}
+          CACHE_MATCHED: ${{ steps.grype-db-restore.outputs.cache-matched-key }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Restore here, save after the install below from a push to the default branch
       # only -- the same split as the grype database. The combined actions/cache saved
       # from every ref, so each pull request kept a weekly copy no other pull request
@@ -274,6 +304,21 @@ jobs:
         with:
           path: ~/.opengrep/cli/latest
           key: opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}
+
+      - name: "Cache report: opengrep"
+        if: ${{ !cancelled() && steps.opengrep-cache.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: opengrep
+          CACHE_HIT: ${{ steps.opengrep-cache.outputs.cache-hit }}
+          CACHE_MATCHED: ${{ steps.opengrep-cache.outputs.cache-matched-key }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # `ash dependencies install`, not `curl https://get.anchore.io/... | sudo sh`.
       #

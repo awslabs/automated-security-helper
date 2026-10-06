@@ -196,6 +196,17 @@ _NPM_CACHE_REASON = (
     "this project builds. Restored everywhere and saved from a push to main only, "
     "so a pull request never writes an entry another run reads."
 )
+_PIP_HTTP_CACHE_REASON = (
+    "pip's HTTP download cache: responses fetched from PyPI, third-party packages "
+    "already published there. Only the http directories are cached, never pip's "
+    "wheels/ directory, which is where a locally built wheel -- ASH's own -- would "
+    "land. Restored everywhere, saved from a push to main only."
+)
+_MCP_INSPECTOR_NPM_REASON = (
+    "npm's download cache for the pinned @modelcontextprotocol/inspector install: "
+    "third-party tarballs from the npm registry, keyed on the pinned version. "
+    "Restored everywhere, saved from a push to main only."
+)
 _OPENGREP_CACHE_REASON = (
     "The OpenGrep release binary, downloaded from the upstream GitHub release. A "
     "third-party binary that is already publicly downloadable, not one this project "
@@ -219,6 +230,53 @@ _GRYPE_DB_CACHE_REASON = (
 )
 
 ALLOWLIST: tuple[Entry, ...] = (
+    # -- Third-party download caches added by the per-job cache pass ---------
+    Entry(
+        file=".github/actions/setup-ash/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ steps.pip-cache-dir.outputs.dir }}/http-v2|"
+            "${{ steps.pip-cache-dir.outputs.dir }}/http "
+            "key=pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-"
+            "${{ hashFiles('pyproject.toml') }}"
+        ),
+        reason=_PIP_HTTP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/setup-ash/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ steps.pip-cache-dir.outputs.dir }}/http-v2|"
+            "${{ steps.pip-cache-dir.outputs.dir }}/http "
+            "key=pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-"
+            "${{ hashFiles('pyproject.toml') }}"
+        ),
+        reason=_PIP_HTTP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/validate-mcp/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ steps.inspector.outputs.npm-cache }} "
+            "key=npm-mcp-inspector-${{ runner.os }}-${{ runner.arch }}-"
+            "${{ steps.inspector.outputs.version }}"
+        ),
+        reason=_MCP_INSPECTOR_NPM_REASON,
+    ),
+    Entry(
+        file=".github/actions/validate-mcp/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ steps.inspector.outputs.npm-cache }} "
+            "key=npm-mcp-inspector-${{ runner.os }}-${{ runner.arch }}-"
+            "${{ steps.inspector.outputs.version }}"
+        ),
+        reason=_MCP_INSPECTOR_NPM_REASON,
+    ),
     # -- Artifact uploads -----------------------------------------------------
     #
     # The wheel and the sdist are the only entries here that publish something
