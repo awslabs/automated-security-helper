@@ -248,7 +248,11 @@ class TestScanSourceDir:
 
     @pytest.mark.parametrize(
         "source",
-        [{"configMap": {"name": "tree"}}, {"secret": {"secretName": "tree"}}],
+        [
+            {"configMap": {"name": "tree"}},
+            # A volume source that names a Kubernetes Secret object; no credential.
+            {"secret": {"secretName": "tree"}},  # pragma: allowlist secret
+        ],
     )
     def test_an_atomic_writer_volume_is_scanned_at_its_data_link(self, source):
         assert self.source_dir(source) == f"{SOURCE_MOUNT}/..data"

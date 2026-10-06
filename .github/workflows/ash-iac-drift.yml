@@ -1672,7 +1672,10 @@ jobs:
     env:
       CFN_GUARD_VERSION: "3.2.1"
       CFN_GUARD_ASSET: cfn-guard-v3-x86_64-ubuntu-latest.tar.gz
-      CFN_GUARD_SHA256: 09c2b8cfd81d513374a8da89d4805dc55006a3da52bbf598e272022d4d198e94
+      # A published release digest, public by construction. detect-secrets reads any
+      # 64-character hex string as a high-entropy secret, so the line carries its
+      # inline marker, as the checksums in tool_downloads.py do.
+      CFN_GUARD_SHA256: 09c2b8cfd81d513374a8da89d4805dc55006a3da52bbf598e272022d4d198e94  # pragma: allowlist secret
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

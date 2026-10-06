@@ -86,10 +86,12 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $scriptDirectory)
 # The winget client this leg installs when the host has none. One stable release, and the
 # digests of the two files it needs, as published in that release's
 # Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.txt and recomputed from the downloads.
-# Raising the version means replacing all three values together.
+# Raising the version means replacing all three values together. The digests are public by
+# construction; each carries detect-secrets' inline marker because any 64-character hex
+# string reads to it as a high-entropy secret.
 $WingetReleaseTag = 'v1.29.380'
-$WingetBundleSha256 = '65DEA9C01CE08EE7B763366B27C0E651F97DB857C11CA9B9C301826C10092F2E'
-$WingetDependenciesSha256 = 'BA875AFE9D190F61218985AC0292A99D1DB710BF93E13C68944CA9D89F0D82D1'
+$WingetBundleSha256 = '65DEA9C01CE08EE7B763366B27C0E651F97DB857C11CA9B9C301826C10092F2E'  # pragma: allowlist secret
+$WingetDependenciesSha256 = 'BA875AFE9D190F61218985AC0292A99D1DB710BF93E13C68944CA9D89F0D82D1'  # pragma: allowlist secret
 $WingetReleaseBase = "https://github.com/microsoft/winget-cli/releases/download/$WingetReleaseTag"
 $AppInstallerFamily = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'
 

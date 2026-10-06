@@ -287,7 +287,13 @@ def test_the_pinned_winget_client_is_pinned_by_digest() -> None:
     )
     assert tag, "the winget-cli release is not pinned to one stable version"
     for name in ("WingetBundleSha256", "WingetDependenciesSha256"):
-        assert re.search(rf"^\${name} = '[0-9A-F]{{64}}'$", text, re.MULTILINE), name
+        # The marker keeps ASH's own scan of this repository from reading the public
+        # digest as a high-entropy secret.
+        assert re.search(
+            rf"^\${name} = '[0-9A-F]{{64}}'  # pragma: allowlist secret$",
+            text,
+            re.MULTILINE,
+        ), name
     # Both downloads are checked against their pins before anything is installed.
     assert text.count("Assert-Sha256 -Path $bundle -Expected $WingetBundleSha256") == 1
     assert (
