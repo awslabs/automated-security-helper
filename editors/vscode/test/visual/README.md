@@ -38,8 +38,8 @@ even a new one.
 The `editor-snapshots` job runs `.github/scripts/check-editor-snapshot-trailers.py`
 over the commits of the push (`before..after`) or the pull request (fork point to
 head). It fails when a file under an `editors/**/__snapshots__/` directory changed
-and no commit that touched it carries `Snapshot-Update: <reason>`. A separate commit
-that only adds the trailer does not count, and the placeholder
+in a commit that carries no `Snapshot-Update: <reason>`; every such commit needs its
+own. A separate commit that only adds the trailer does not count, and the placeholder
 `<why the output changed>` is not a reason. The error message prints the
 `git commit --amend` or `git rebase --exec` command that fixes it. The same job's
 `--orphans` step fails a `.snap` file whose test file is gone, a PNG that no

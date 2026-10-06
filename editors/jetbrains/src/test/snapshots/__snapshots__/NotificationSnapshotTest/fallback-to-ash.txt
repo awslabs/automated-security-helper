@@ -1,0 +1,28 @@
+first scan:
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ash scan
+
+notification group=ASH type=INFORMATION
+title: ASH: using 'ash'
+body:
+'ashx' was not found on PATH, so this scan ran 'ash' (<BIN>/ash). Install a version of ASH that provides 'ashx', or set the executable in Settings | Tools | ASH to choose one explicitly. This notice is shown once per IDE session.
+
+notification group=ASH type=INFORMATION
+title: ASH scan finished
+body:
+3 finding(s): 3 error.<br>
+10 scanner(s) completed.<br>
+awslabs/automated-security-helper v3.7.0, exit code 2. Report: <PROJECT>/.ash/ash_output/reports/ash.sarif
+
+second scan:
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ash scan
+
+notification group=ASH type=INFORMATION
+title: ASH scan finished
+body:
+3 finding(s): 3 error.<br>
+10 scanner(s) completed.<br>
+awslabs/automated-security-helper v3.7.0, exit code 2. Report: <PROJECT>/.ash/ash_output/reports/ash.sarif

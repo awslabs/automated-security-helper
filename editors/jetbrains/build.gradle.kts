@@ -74,6 +74,13 @@ repositories {
     intellijPlatform {
         defaultRepositories()
     }
+    // The Remote-Robot client the visual suite (src/uiTest) drives the IDE with. JetBrains
+    // publishes it only here, not to Maven Central. Restricted to that one group, so no other
+    // dependency can resolve from this repository by accident.
+    exclusiveContent {
+        forRepository { maven("https://packages.jetbrains.team/maven/p/ij/intellij-dependencies") }
+        filter { includeGroup("com.intellij.remoterobot") }
+    }
 }
 
 dependencies {
@@ -172,11 +179,51 @@ jacoco {
 // service, the scan action and the end-to-end scan be MEASURED instead of excluded with a line
 // budget. assert-coverage.py's floors make sure this keeps working: if JaCoCo goes back to
 // seeing nothing, the line denominator stays full and the ratio collapses to 0%, which fails.
+// SNAPSHOTS: THE UPDATE FLAG, AND WHERE THE FILES ARE
+//
+// `-Psnapshot-update` is the only way a snapshot is written: the same name as core ASH's
+// `pytest --snapshot-update`, so a contributor meets one flag. Without it a missing or changed
+// snapshot fails (see src/test/kotlin/.../snapshot/Snapshots.kt). It is refused here, at
+// configuration, when CI or GITHUB_ACTIONS is "true", so a workflow that passed it would fail
+// before any test ran; the helper refuses it again in the test JVM for a run that bypasses this
+// file. No workflow passes it, and check-editor-snapshot-trailers.py --policy fails one that does.
+//
+// The `__snapshots__` directory component is what core ASH's golden-file check keys on, so the
+// trailer rule applies to these files under either script.
+val snapshotUpdate = providers.gradleProperty("snapshot-update").isPresent
+if (snapshotUpdate) {
+    val ci = listOf("CI", "GITHUB_ACTIONS").filter { System.getenv(it).equals("true", ignoreCase = true) }
+    if (ci.isNotEmpty()) {
+        throw GradleException(
+            "-Psnapshot-update refused: ${ci.joinToString(" and ")} is true. Snapshots are updated " +
+                "on a developer's machine and committed with a Snapshot-Update trailer; CI only compares.",
+        )
+    }
+}
+val structuralSnapshots = layout.projectDirectory.dir("src/test/snapshots/__snapshots__")
+val structuralSnapshotUsage = layout.buildDirectory.file("snapshot-usage/test.txt")
+
 tasks.test {
     useJUnit()
 
     // The IntelliJ test fixtures expect headless AWT.
     systemProperty("java.awt.headless", "true")
+
+    // The snapshots are an input, so editing one reruns the suite instead of restoring a cached
+    // green result; the usage list is an output, so a cached run restores the list the orphan
+    // check reads along with the result it belongs to.
+    inputs.files(fileTree(structuralSnapshots)).withPropertyName("snapshots")
+    outputs.file(structuralSnapshotUsage).withPropertyName("snapshotUsage")
+    systemProperty("ash.snapshot.dir", structuralSnapshots.asFile.absolutePath)
+    systemProperty("ash.snapshot.update", snapshotUpdate.toString())
+    systemProperty("ash.snapshot.usage", structuralSnapshotUsage.get().asFile.absolutePath)
+    if (snapshotUpdate) {
+        // An update run writes into src/, which Gradle does not track as an output, so it must
+        // never be skipped or served from the cache.
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("-Psnapshot-update writes snapshots") { true }
+    }
+    doFirst { structuralSnapshotUsage.get().asFile.delete() }
 
     extensions.configure<JacocoTaskExtension> {
         isIncludeNoLocationClasses = true
@@ -302,10 +349,41 @@ val assertCoverage = tasks.register<Exec>("assertCoverage") {
     )
 }
 
+// The orphan check: a snapshot file no test asserted in this run fails, including every snapshot
+// of a test class that was deleted or renamed, which no per-class check can see. It reads the
+// usage list the snapshot helper appends to, so it is only meaningful after a full run of the
+// suite; assertTestsRan, which `check` also runs, is what guarantees the run was full. With
+// -Psnapshot-update it deletes the unused files instead, as syrupy's update does.
+val assertSnapshotsUsed = tasks.register<Exec>("assertSnapshotsUsed") {
+    group = "verification"
+    description = "Fails on a snapshot file that no test asserted."
+    dependsOn(tasks.test)
+    workingDir = layout.projectDirectory.asFile
+    // A filtered run asserts a subset, so every other snapshot would read as unused, and under
+    // -Psnapshot-update it would be DELETED. Refused rather than tolerated.
+    val testFilter = tasks.test.get().filter as org.gradle.api.internal.tasks.testing.filter.DefaultTestFilter
+    doFirst {
+        if (testFilter.includePatterns.isNotEmpty() || testFilter.commandLineIncludePatterns.isNotEmpty()) {
+            throw GradleException(
+                "assertSnapshotsUsed needs a full run of the test suite, and this one was filtered " +
+                    "(--tests). Run it without a filter.",
+            )
+        }
+    }
+    commandLine(
+        listOf(
+            "python3",
+            "assert-snapshots-used.py",
+            "--snapshot-dir", "src/test/snapshots/__snapshots__",
+            "--usage", "build/snapshot-usage/test.txt",
+        ) + (if (snapshotUpdate) listOf("--delete-unused") else emptyList()),
+    )
+}
+
 tasks.check {
     // assertTestsRan explicitly, because it is the only one of the three that can fail when
     // the test task is skipped as NO-SOURCE.
-    dependsOn(tasks.test, assertTestsRan, assertCoverage)
+    dependsOn(tasks.test, assertTestsRan, assertCoverage, assertSnapshotsUsed)
 
     // The platform's own two checks, which the IntelliJ Platform Gradle plugin provides and
     // does not wire into `check` itself. They are the only things that read META-INF/plugin.xml
@@ -417,5 +495,161 @@ tasks.register<Exec>("assertRealCliTestsRan") {
         "--results", "build/test-results/realCliTest",
         "--test-classes", "build/classes/kotlin/realCliTest",
         "--require-suite", "io.github.awslabs.ash.jetbrains.AshScanRealCliTest",
+    )
+}
+
+// THE VISUAL SUITE: SCREENSHOTS OF THE PLUGIN'S UI IN A REAL IDE, COMPARED PIXEL FOR PIXEL
+//
+// runIdeForUiTests starts the 2025.2.5 IDE this build compiles against, with this build's plugin
+// and JetBrains' Remote-Robot server plugin installed, on a fixed project. uiTest is a plain JVM
+// suite (src/uiTest) that drives that IDE over the robot's HTTP port, renders each scene, and
+// compares it with the committed PNG under src/uiTest/snapshots/__snapshots__. Both run inside
+// ui-test/Dockerfile's image, under the Xvfb display ui-test-in-container.sh starts, which is the
+// only supported way to run them: the baselines are pixels of THAT environment.
+//
+// Every input that reaches a pixel is pinned: the image (see its Dockerfile), the IDE build, the
+// Remote-Robot version, the theme, the UI and editor fonts and their sizes, antialiasing, the UI
+// scale, and the frame size. The settings files under src/uiTest/ide-config are copied into the
+// sandbox's config directory before each start, so the IDE never starts from whatever an
+// earlier run left there.
+val remoteRobotVersion = "0.11.23"
+val uiSnapshots = layout.projectDirectory.dir("src/uiTest/snapshots/__snapshots__")
+val uiSnapshotUsage = layout.buildDirectory.file("snapshot-usage/uiTest.txt")
+val uiRobotPort = "8082"
+
+sourceSets {
+    create("uiTest")
+}
+
+// The snapshot helper is compiled into both suites, so text and pixels follow one set of rules.
+kotlin {
+    sourceSets["test"].kotlin.srcDir("src/snapshotSupport/kotlin")
+    sourceSets["uiTest"].kotlin.srcDir("src/snapshotSupport/kotlin")
+}
+
+dependencies {
+    "uiTestImplementation"("com.intellij.remoterobot:remote-robot:$remoteRobotVersion")
+    "uiTestImplementation"("com.intellij.remoterobot:remote-fixtures:$remoteRobotVersion")
+    "uiTestImplementation"("junit:junit:4.13.2")
+    // RemoteRobot's constructor names OkHttpClient in its signature, and remote-robot declares the
+    // HTTP stack as runtime-only, so the compile classpath needs it. The version retrofit 2.11.0,
+    // remote-robot's own HTTP dependency, resolves to.
+    "uiTestImplementation"("com.squareup.okhttp3:okhttp:3.14.9")
+    // The suite runs in a plain JVM, not in the IDE, so it needs the Kotlin stdlib that
+    // gradle.properties keeps off the plugin's own classpath.
+    "uiTestImplementation"("org.jetbrains.kotlin:kotlin-stdlib:2.1.21")
+}
+
+val runIdeForUiTests by intellijPlatformTesting.runIde.registering {
+    task {
+        group = "verification"
+        description = "Starts the IDE with the plugin and the Remote-Robot server for the visual suite."
+        val project = providers.environmentVariable("ASH_UI_PROJECT")
+        val ideConfig = layout.projectDirectory.dir("src/uiTest/ide-config")
+        val configDir = sandboxConfigDirectory
+        val systemDir = sandboxSystemDirectory
+        val logDir = sandboxLogDirectory
+        doFirst {
+            // Every start from nothing but the pinned settings: the configuration, the caches
+            // and indexes, and the logs of an earlier start are removed, including the .lock and
+            // .port files an IDE that was killed leaves behind. Measured: a start after a killed
+            // one exited with DirectoryLock.CannotActivateException, because the stale lock
+            // named a PID that an unrelated process in the new container happened to hold.
+            listOf(configDir, systemDir, logDir).forEach { it.get().asFile.deleteRecursively() }
+            ideConfig.asFile.resolve("options").copyRecursively(configDir.get().asFile.resolve("options"))
+        }
+        argumentProviders += CommandLineArgumentProvider {
+            listOf(project.orNull ?: throw GradleException("ASH_UI_PROJECT names the project the visual suite opens"))
+        }
+        jvmArgumentProviders += CommandLineArgumentProvider {
+            listOf(
+                "-Drobot-server.port=$uiRobotPort",
+                "-Drobot-server.host.public=false",
+                // No first-run dialogs: privacy policy, data sharing, trust, tips, what's new.
+                "-Djb.privacy.policy.text=<!--999.999-->",
+                "-Djb.consents.confirmation.enabled=false",
+                "-Didea.trust.all.projects=true",
+                "-Dide.show.tips.on.startup.default.value=false",
+                "-Dide.newUsersOnboarding=false",
+                "-Didea.initially.ask.config=never",
+                "-Dide.experimental.ui=true",
+                // One logical pixel is one device pixel.
+                "-Dsun.java2d.uiScale.enabled=false",
+                "-Dide.ui.scale=1.0",
+                "-Dawt.useSystemAAFontSettings=gasp",
+                "-Dsun.java2d.xrender=false",
+                "-Duser.language=en",
+                "-Duser.country=US",
+                "-Duser.timezone=UTC",
+                "-Xmx2g",
+            )
+        }
+    }
+    plugins {
+        robotServerPlugin(remoteRobotVersion)
+    }
+}
+
+val uiTest = tasks.register<Test>("uiTest") {
+    group = "verification"
+    description = "Renders the plugin's UI in the running IDE and compares it with the committed PNGs."
+    val uiSources = sourceSets["uiTest"]
+    testClassesDirs = uiSources.output.classesDirs
+    classpath = uiSources.runtimeClasspath
+    useJUnit()
+    inputs.files(fileTree(uiSnapshots)).withPropertyName("uiSnapshots")
+    outputs.file(uiSnapshotUsage).withPropertyName("uiSnapshotUsage")
+    // The input that matters is the IDE it connects to, which Gradle cannot fingerprint.
+    outputs.upToDateWhen { false }
+    outputs.doNotCacheIf("the suite renders a running IDE that Gradle cannot fingerprint") { true }
+    // remote-robot's client deserializes the server's responses with Gson, which reflects into
+    // java.lang.Throwable for its error type; JDK 21 refuses that without this opening.
+    jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED")
+    systemProperty("ash.ui.robot", "http://127.0.0.1:$uiRobotPort")
+    systemProperty("ash.ui.project", providers.environmentVariable("ASH_UI_PROJECT").orElse("").get())
+    systemProperty("ash.snapshot.dir", uiSnapshots.asFile.absolutePath)
+    systemProperty("ash.snapshot.update", snapshotUpdate.toString())
+    systemProperty("ash.snapshot.usage", uiSnapshotUsage.get().asFile.absolutePath)
+    systemProperty("ash.snapshot.actual", layout.buildDirectory.dir("ui-snapshots").get().asFile.absolutePath)
+    doFirst { uiSnapshotUsage.get().asFile.delete() }
+    testLogging {
+        events("passed", "failed", "skipped")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+// The visual suite's census and orphan check, the same two gates `check` applies to `test`.
+tasks.register<Exec>("assertUiTestsRan") {
+    group = "verification"
+    description = "Fails unless the visual suite ran and reported, with none skipped."
+    dependsOn(uiTest)
+    workingDir = layout.projectDirectory.asFile
+    commandLine(
+        "python3",
+        "assert-tests-ran.py",
+        "--results", "build/test-results/uiTest",
+        "--test-classes", "build/classes/kotlin/uiTest",
+        "--require-suite", "io.github.awslabs.ash.jetbrains.ui.VisualSnapshotTest",
+    )
+}
+
+tasks.register<Exec>("assertUiSnapshotsUsed") {
+    group = "verification"
+    description = "Fails on a PNG baseline that no visual test compared."
+    dependsOn(uiTest)
+    workingDir = layout.projectDirectory.asFile
+    val uiFilter = uiTest.get().filter as org.gradle.api.internal.tasks.testing.filter.DefaultTestFilter
+    doFirst {
+        if (uiFilter.includePatterns.isNotEmpty() || uiFilter.commandLineIncludePatterns.isNotEmpty()) {
+            throw GradleException("assertUiSnapshotsUsed needs a full run of uiTest, and this one was filtered (--tests).")
+        }
+    }
+    commandLine(
+        listOf(
+            "python3",
+            "assert-snapshots-used.py",
+            "--snapshot-dir", "src/uiTest/snapshots/__snapshots__",
+            "--usage", "build/snapshot-usage/uiTest.txt",
+        ) + (if (snapshotUpdate) listOf("--delete-unused") else emptyList()),
     )
 }

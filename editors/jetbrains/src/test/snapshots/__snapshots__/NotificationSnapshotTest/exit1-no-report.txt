@@ -1,0 +1,10 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ashx scan
+
+notification group=ASH type=ERROR
+title: ASH scan failed
+body:
+ASH exited 1 and wrote no SARIF report at <PROJECT>/.ash/ash_output/reports/ash.sarif, so it stopped before producing results. No findings can be shown, and this is not the same as finding nothing.<br>
+<br>
+<pre></pre>

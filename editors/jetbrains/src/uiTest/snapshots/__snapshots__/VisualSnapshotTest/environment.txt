@@ -1,0 +1,14 @@
+ide: IC-252.28238.7 (IntelliJ IDEA 2025.2.5)
+jre: 21.0.9+10-b1038.76
+theme: ExperimentalLight (Light)
+new ui: true
+ui font: Inter 13
+ui font override: false Dialog 0
+editor font: JetBrains Mono 13, line spacing 1.2000000476837158
+editor scheme: _@user_Light
+antialiasing: ide Greyscale, editor Greyscale
+ui scale: 1, system scale 1
+screen: 1920x1080, device transform scale 1
+screen resolution: 96 dpi
+frame: 0,0 1600x1000
+locale: en_US, time zone UTC

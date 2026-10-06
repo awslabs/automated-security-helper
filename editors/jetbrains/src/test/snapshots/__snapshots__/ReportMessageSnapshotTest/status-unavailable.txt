@@ -1,0 +1,7 @@
+type=WARNING
+title: ASH scan incomplete
+body:
+ASH reported no findings, but the scan was NOT complete.<br>
+<br>
+Scanner completeness is unknown: no status file at x. An empty result list cannot be read as a clean scan.<br>
+awslabs/automated-security-helper v4.0.0, exit code 0. Report: /project/.ash/ash_output/reports/ash.sarif

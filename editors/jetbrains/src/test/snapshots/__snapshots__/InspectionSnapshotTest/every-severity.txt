@@ -1,0 +1,27 @@
+file: insecure.py
+highlights: 5
+
+1:1-1:10 ERROR
+  text: import os
+  description: ASH [bandit B999]: An enum-repr level is still an error.
+  tooltip: <html>ASH [bandit B999]: An enum-repr level is still an error. <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>
+
+2:1-2:25 ERROR
+  text: value = eval(user_input)
+  description: ASH [bandit B307]: Use of possibly insecure function - consider using safer ast.literal_eval.
+  tooltip: <html>ASH [bandit B307]: Use of possibly insecure function - consider using safer ast.literal_eval. <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>
+
+3:1-3:22 WARNING
+  text: os.system("rm -rf /")
+  description: ASH [bandit B605]: Starting a process with a shell.
+  tooltip: <html>ASH [bandit B605]: Starting a process with a shell. <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>
+
+4:1-4:12 ERROR
+  text: print("ok")
+  description: ASH [bandit INHERITS]: Level taken from the rule. (severity inherited from rule default)
+  tooltip: <html>ASH [bandit INHERITS]: Level taken from the rule. (severity inherited from rule default) <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>
+
+5:1-5:13 WEAK WARNING
+  text: assert value
+  description: ASH [bandit B101]: Use of assert detected.
+  tooltip: <html>ASH [bandit B101]: Use of assert detected. <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>

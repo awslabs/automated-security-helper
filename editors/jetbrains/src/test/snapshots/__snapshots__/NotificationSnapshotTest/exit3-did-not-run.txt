@@ -1,0 +1,10 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ashx scan
+
+notification group=ASH type=ERROR
+title: ASH scan failed
+body:
+ASH exited 3, which means the scan did not run: 3 is an invalid configuration and 4 a workspace or policy error, and any other code is not one this plugin knows. Nothing at <PROJECT>/.ash/ash_output/reports/ash.sarif is shown as a result.<br>
+<br>
+<pre></pre>

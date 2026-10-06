@@ -6,65 +6,78 @@
 
 WHY THIS EXISTS
 ---------------
-The editor snapshot suites (editors/vscode: jest ``.snap`` files and PNG baselines)
-fail when what the extension shows a user changes, and the update flag makes them
-pass again by rewriting the snapshot (see editors/vscode/test/visual/README.md). That rewrite is one command and produces
-a diff nobody has to read, so on its own a snapshot suite only proves that someone
-ran the command. What makes a changed snapshot a decision is a sentence, attached to
-the commit that changed it, saying why the output is now different. This script
-requires that sentence: every editor snapshot touched in the range must be touched
-by at least one commit that carries ``Snapshot-Update: <non-empty reason>`` as a git
-trailer.
+The editor plugins under editors/ have snapshot suites of their own: text snapshots of
+what a plugin shows a user and PNG baselines of how it looks. For the VS Code extension
+those are jest ``.snap`` files and the visual suite's PNGs (editors/vscode/test/visual/
+README.md); for the JetBrains plugin, the text snapshots under
+src/test/snapshots/__snapshots__ and the PNGs (plus the environment text the visual suite
+pins) under src/uiTest/snapshots/__snapshots__ (editors/jetbrains/README.jetbrains). Each
+suite fails when its output changes, and each has an update flag that rewrites the
+snapshots and makes it pass again. That rewrite is one command and produces a diff nobody
+has to read, so on its own a snapshot suite only proves that someone ran the command.
+What makes a changed snapshot a decision is a sentence, attached to the commit that
+changed it, saying why the output is now different. This script requires that sentence:
+every commit in the range that touches an editor snapshot must carry
+``Snapshot-Update: <non-empty reason>`` as a git trailer.
 
-The rule is per commit, not per pull request. A follow-up commit that only adds the
-trailer (an empty commit, or one touching some other file) does not satisfy it,
-because then the reason is not attached to the change it explains, and after a
-rebase or a cherry-pick the two travel separately. The error message prints the
-exact command that amends the right commits.
+The rule is per commit, not per pull request or per path. A follow-up commit that only
+adds the trailer (an empty commit, or one touching some other file) does not satisfy it,
+because then the reason is not attached to the change it explains, and after a rebase or
+a cherry-pick the two travel separately. A second, unexplained change to a snapshot an
+earlier commit explained fails too. The error message prints the exact command that
+amends the right commits.
+
+One script serves both editors. The VS Code and JetBrains branches each added a copy of
+this file; they were merged into this one, which keeps the VS Code copy's per-commit rule
+and ownership check and the JetBrains copy's ``--golden-root`` and ``--policy``.
 
 RELATION TO check-snapshot-trailers.py (core ASH's snapshot suite)
 ------------------------------------------------------------------
-Core ASH's snapshot pull request adds .github/scripts/check-snapshot-trailers.py
-for its own golden files. This script is that script's logic with two
-things swapped: ``GOLDEN`` (the editor snapshot trees instead of core's golden
-files) and the orphan check (``find_editor_orphans``, jest and PNG ownership, in
-place of core's ``find_orphans`` for syrupy). The trailer key, its placeholder rule,
-the ``git interpret-trailers --parse`` reading, the per-section parse of squash
-bodies, the event-to-range rules and the fix instructions are the same code, so a
-commit that satisfies one satisfies the other.
+Core ASH's snapshot pull request adds .github/scripts/check-snapshot-trailers.py for its
+own golden files. This script is that script's logic with two things swapped: which files
+are golden (the editor snapshot trees, see below) and the orphan check
+(``find_editor_orphans`` in place of core's ``find_orphans`` for syrupy). The trailer key,
+its placeholder rule, the ``git interpret-trailers --parse`` reading, the per-section
+parse of squash bodies, the event-to-range rules and the fix instructions are the same
+code, so a commit that satisfies this script satisfies that one.
 
-That is what lets the core script absorb this one. Core's ``GOLDEN`` already treats
-any path with a ``__snapshots__`` directory component as golden, and every editor
-snapshot, PNG baselines included, lives under one, so core's trailer check covers
-these paths as it stands. Absorbing then takes three edits there: call
-``find_editor_orphans`` from ``--orphans`` (or paste it in), take the per-commit
-rule below into ``find_violations``, and make sure the job that runs it triggers on
-``editors/vscode/**`` (or point this workflow's job at the core script). This file
-is then deleted.
-
-One rule is stricter here, on purpose: every commit that changes an editor snapshot
-needs its own trailer (``find_violations``). Core accepts a path once any commit in
-the range that touched it carries one, so a second, unexplained change to a snapshot
-an earlier commit explained passes there. When core absorbs this script it should
-take the stricter rule, or the editor paths lose it.
+That is what lets the core script absorb this one. Core's golden set already treats any
+path with a ``__snapshots__`` directory component as golden, and every editor snapshot,
+PNG baselines included, lives under one, so core's trailer check covers these paths as it
+stands. Absorbing then takes these edits there: call ``find_editor_orphans`` from
+``--orphans``, take ``find_update_flags`` for ``--policy``, take the per-commit rule in
+``find_violations``, and make sure the jobs that run it trigger on ``editors/**``. This
+file is then deleted. The per-commit rule is the stricter one: core accepts a path once
+any commit in the range that touched it carries a trailer. When core absorbs this script
+it should take the stricter rule, or the editor paths lose it.
 
 WHAT COUNTS AS GOLDEN
 ---------------------
-Any file under ``editors/`` with a ``__snapshots__`` directory component: jest
-writes ``test/__snapshots__/<file>.test.ts.snap`` and the visual suite keeps its
-PNG baselines in ``test/visual/__snapshots__/``. Both are written only by
-the update flag and never edited by hand, so a change to one is always a
-change in what the editor shows.
+Any file with a ``__snapshots__`` directory component under one of the ``--golden-root``
+directories (default: ``editors``, so both editors' trees). The roots are a parameter so
+each editor's CI job can scope the check to its own tree. Every such file is written only
+by an update flag and never edited by hand, so a change to one is always a change in what
+an editor shows.
 
 ORPHANED SNAPSHOTS
 ------------------
-``jest --ci`` fails a run that leaves a snapshot unchecked or a snapshot file
-obsolete (measured: exit 1 for both), but only for files under its ``roots``, and
-the visual suite fails a baseline it did not compare, but only when it runs.
-``--orphans`` checks ownership statically, without either: every ``X.snap`` must sit
-in a ``__snapshots__`` directory beside a test file ``X``, and every PNG must be
-named in the ``scenarios.json`` beside its ``__snapshots__`` directory, which must
-in turn have a PNG for each name.
+``--orphans`` checks the VS Code extension's snapshot ownership statically.
+``jest --ci`` fails a run that leaves a snapshot unchecked or a snapshot file obsolete
+(measured: exit 1 for both), but only for files under its ``roots``, and the visual suite
+fails a baseline it did not compare, but only when it runs. So: every ``X.snap`` must sit
+in a ``__snapshots__`` directory beside a test file ``X``, and every PNG must be named in
+the ``scenarios.json`` beside its ``__snapshots__`` directory, which must in turn have a
+PNG for each name. The JetBrains plugin's snapshots are named after test classes and
+cases rather than files, so its suite records every snapshot it compares and fails on a
+file nothing compared (editors/jetbrains/assert-snapshots-used.py) instead; it is not in
+``EDITOR_ROOTS``.
+
+POLICY
+------
+``--policy`` fails when a workflow under .github/workflows passes an editor's snapshot
+update flag (``-Psnapshot-update``, ``ASH_SNAPSHOT_UPDATE=1``, ``--snapshot-update`` or
+jest's ``--updateSnapshot``). The suites also refuse their flag when CI or GITHUB_ACTIONS
+is "true", so this is the second of two locks: CI only ever compares.
 
 HOW THE RANGE IS CHOSEN (one per event; see ``resolve_range``)
 -------------------------------------------------------------
@@ -98,7 +111,9 @@ USAGE
     python3 .github/scripts/check-editor-snapshot-trailers.py --self-test
     python3 .github/scripts/check-editor-snapshot-trailers.py              # range from the event
     python3 .github/scripts/check-editor-snapshot-trailers.py --base origin/main --head HEAD
+    python3 .github/scripts/check-editor-snapshot-trailers.py --golden-root editors/jetbrains
     python3 .github/scripts/check-editor-snapshot-trailers.py --orphans
+    python3 .github/scripts/check-editor-snapshot-trailers.py --policy
 
 Standard library only, like the other gate scripts, so the job installs nothing.
 """
@@ -115,6 +130,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 TRAILER_KEY = "Snapshot-Update"
 ZERO_SHA = "0" * 40
@@ -122,22 +138,30 @@ ZERO_SHA = "0" * 40
 # ---------------------------------------------------------------------------
 # THE GOLDEN SET
 #
-# (pattern, why), in the same shape as check-snapshot-trailers.py's. The one pattern
-# here matches a path whose first component is `editors` and which has a
-# `__snapshots__` directory component: the jest snapshots and the PNG baselines of
-# every editor plugin.
+# A file is golden when it sits under one of GOLDEN_ROOTS and has a `__snapshots__`
+# directory component. Every such file is written only by an editor suite's update flag, so a
+# change to one is always a change in what the plugin shows, never a hand edit. The roots are
+# a parameter so one script serves both editors and the caller can scope a job to one tree.
 # ---------------------------------------------------------------------------
-GOLDEN: tuple[tuple[str, str], ...] = (
-    ("editors/**/__snapshots__/**", "editor snapshot"),
+DEFAULT_GOLDEN_ROOTS: tuple[str, ...] = ("editors",)
+GOLDEN_ROOTS: list[str] = list(DEFAULT_GOLDEN_ROOTS)
+
+# What passes an editor snapshot suite's update flag. Matched in workflow files only.
+UPDATE_FLAGS = re.compile(
+    r"-Psnapshot-update|ASH_SNAPSHOT_UPDATE\s*[:=]\s*['\"]?1|--snapshot-update|--updateSnapshot"
 )
 
 
 def golden_reason(path: str) -> str | None:
     """Return why ``path`` is golden, or None when it is not."""
     posix = PurePosixPath(path)
-    for _pattern, why in GOLDEN:
-        if posix.parts[:1] == ("editors",) and "__snapshots__" in posix.parts[:-1]:
-            return why
+    if "__snapshots__" not in posix.parts[:-1]:
+        return None
+    for root in GOLDEN_ROOTS:
+        root_parts = PurePosixPath(root).parts
+        if posix.parts[: len(root_parts)] == root_parts:
+            kind = "image snapshot" if posix.suffix == ".png" else "text snapshot"
+            return f"editor {kind}"
     return None
 
 
@@ -317,7 +341,7 @@ def find_violations(repo: Path, commits: list[Commit]) -> list[Violation]:
     Every commit that touches the path needs its own trailer. Core's script accepts
     a path once ANY commit in the range that touched it has one, so a second,
     unexplained change to a snapshot an earlier commit explained passes there. This
-    is the one rule that differs, and the stricter one; see the module docstring.
+    is the stricter rule; see the module docstring.
     """
     touched: dict[str, list[Commit]] = {}
     for commit in commits:
@@ -445,7 +469,7 @@ def _base_branch_tip(repo: Path, ref: str | None) -> list[str]:
     return [remote] if commit_exists(repo, remote) else []
 
 
-def resolve_range(repo: Path, event_name: str, payload: dict) -> Range | None:
+def resolve_range(repo: Path, event_name: str, payload: dict[str, Any]) -> Range | None:
     """The commits an event introduces, or None when there are none to check."""
     if event_name in ("pull_request", "pull_request_target"):
         pr = payload["pull_request"]
@@ -512,8 +536,10 @@ def run_check(repo: Path, rng: Range) -> int:
 # ---------------------------------------------------------------------------
 
 
-# The editor package roots whose snapshot ownership is checked. A new editor plugin
-# with snapshots adds its root here, in whichever ownership shape it uses below.
+# The editor package roots whose snapshot ownership is checked here. A new editor plugin
+# with snapshots in this ownership shape adds its root. editors/jetbrains is not listed:
+# its snapshots are named after test classes, and its suite checks their use itself
+# (editors/jetbrains/assert-snapshots-used.py).
 EDITOR_ROOTS: tuple[str, ...] = ("editors/vscode",)
 
 
@@ -595,6 +621,26 @@ def find_editor_orphans(root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Policy: no workflow passes an update flag
+# ---------------------------------------------------------------------------
+
+
+def find_update_flags(root: Path) -> list[str]:
+    """Lines in .github/workflows that pass an editor snapshot update flag."""
+    hits = []
+    workflows = sorted((root / ".github/workflows").glob("*.y*ml"))
+    for wf in workflows:
+        for number, line in enumerate(wf.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if UPDATE_FLAGS.search(line):
+                hits.append(
+                    f"{wf.relative_to(root).as_posix()}:{number}: {line.strip()}"
+                )
+    return hits
+
+
+# ---------------------------------------------------------------------------
 # Self-test
 #
 # Runs first in CI for the same reason as assert-publish-surfaces.py's: a checker whose
@@ -644,69 +690,99 @@ class _Repo:
         return [v.path for v in find_violations(self.path, commits)]
 
 
-SNAP = "editors/vscode/test/__snapshots__/ui-snapshots.test.ts.snap"
-PNG = "editors/vscode/test/visual/__snapshots__/problems-panel.png"
+@dataclass(frozen=True)
+class _Fixture:
+    """One editor's paths for the trailer cases, which run once per editor."""
+
+    snap: str  # a text snapshot
+    png: str  # a PNG baseline
+    renamed: str  # where the rename cases move ``snap``
+    source: str  # a non-golden file in the same editor
+    other_png: str  # the other editor's PNG baseline
 
 
-def _case_trailer_present(r: _Repo) -> list[str]:
-    r.write(SNAP, "a\n")
+_VSCODE = _Fixture(
+    snap="editors/vscode/test/__snapshots__/ui-snapshots.test.ts.snap",
+    png="editors/vscode/test/visual/__snapshots__/problems-panel.png",
+    renamed="editors/vscode/test/__snapshots__/ui-renamed.test.ts.snap",
+    source="editors/vscode/test/visual/run.ts",
+    other_png="editors/jetbrains/src/uiTest/snapshots/__snapshots__/VisualSnapshotTest/settings-page.png",
+)
+_JETBRAINS = _Fixture(
+    snap="editors/jetbrains/src/test/snapshots/__snapshots__/NotificationSnapshotTest/clean.txt",
+    png="editors/jetbrains/src/uiTest/snapshots/__snapshots__/VisualSnapshotTest/settings-page.png",
+    renamed="editors/jetbrains/src/test/snapshots/__snapshots__/NotificationSnapshotTest/clean-renamed.txt",
+    source="editors/jetbrains/src/uiTest/kotlin/A.kt",
+    other_png="editors/vscode/test/visual/__snapshots__/problems-panel.png",
+)
+_FIXTURES = {"vscode": _VSCODE, "jetbrains": _JETBRAINS}
+
+
+def _case_trailer_present(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.snap, "a\n")
     r.commit(f"test: update\n\nbody\n\n{GOOD}")
     return []
 
 
-def _case_trailer_missing(r: _Repo) -> list[str]:
-    r.write(SNAP, "a\n")
+def _case_trailer_missing(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.snap, "a\n")
     r.commit("test: update\n\nno trailer here")
-    return [SNAP]
+    return [f.snap]
 
 
-def _case_empty_reason(r: _Repo) -> list[str]:
-    r.write(SNAP, "a\n")
+def _case_empty_reason(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.snap, "a\n")
     r.commit(f"test: update\n\n{TRAILER_KEY}:\nSigned-off-by: a <a@b.c>")
-    return [SNAP]
+    return [f.snap]
 
 
-def _case_placeholder_reason(r: _Repo) -> list[str]:
-    r.write(SNAP, "a\n")
+def _case_placeholder_reason(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.snap, "a\n")
     r.commit(f"test: update\n\n{TRAILER_KEY}: <why the output changed>")
-    return [SNAP]
+    return [f.snap]
 
 
-def _case_trailer_on_other_commit(r: _Repo) -> list[str]:
-    r.write(SNAP, "a\n")
+def _case_trailer_on_other_commit(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.snap, "a\n")
     r.commit("test: update")
     r.commit(f"chore: explain\n\n{GOOD}", allow_empty=True)
-    return [SNAP]
+    return [f.snap]
 
 
-def _case_second_change_untrailered(r: _Repo) -> list[str]:
+def _case_second_change_untrailered(r: _Repo, f: _Fixture) -> list[str]:
     # The first change is explained; the second, to the same file, is not.
-    r.write(SNAP, "a\n")
+    r.write(f.snap, "a\n")
     r.commit(f"test: update\n\n{GOOD}")
-    r.write(SNAP, "b\n")
+    r.write(f.snap, "b\n")
     r.commit("test: change it again")
-    return [SNAP]
+    return [f.snap]
 
 
-def _case_trailer_mid_prose(r: _Repo) -> list[str]:
+def _case_trailer_mid_prose(r: _Repo, f: _Fixture) -> list[str]:
     # Not the last paragraph, so not a trailer -- the reason a regex is not used.
-    r.write(SNAP, "a\n")
+    r.write(f.snap, "a\n")
     r.commit(f"test: update\n\n{GOOD}\n\nand then more prose.")
-    return [SNAP]
+    return [f.snap]
 
 
-def _case_non_golden(r: _Repo) -> list[str]:
+def _case_non_golden(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.source, "x\n")
     r.write("editors/vscode/src/extension.ts", "export {};\n")
     r.write("editors/vscode/test/ui-snapshots.test.ts", "test('x', () => {});\n")
-    # core's golden files are core's script's business, not this one's.
+    r.write("editors/jetbrains/src/main/kotlin/A.kt", "class A\n")
+    r.write(
+        "editors/jetbrains/src/test/snapshots/README.txt", "not under __snapshots__\n"
+    )
+    r.write("automated_security_helper/core.py", "x = 1\n")
+    # core ASH's own snapshots: golden for its script, not for this one.
     r.write("tests/snapshot/__snapshots__/test_cli.ambr", "x\n")
     r.commit("feat: no editor golden file")
     return []
 
 
-def _case_squash_message(r: _Repo) -> list[str]:
-    r.write(SNAP, "a\n")
-    r.write(PNG, "png\n")
+def _case_squash_message(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.snap, "a\n")
+    r.write(f.png, "png\n")
     r.commit(
         "feat(cli): new summary (#123)\n\n"
         "* feat(cli): add the column\n\n"
@@ -718,42 +794,49 @@ def _case_squash_message(r: _Repo) -> list[str]:
     return []
 
 
-def _case_squash_without_trailer(r: _Repo) -> list[str]:
-    r.write(SNAP, "a\n")
+def _case_squash_without_trailer(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.snap, "a\n")
     r.commit("feat: x (#1)\n\n* feat: x\n\nbody\n\n* fix: y\n\nmore")
-    return [SNAP]
+    return [f.snap]
 
 
-def _case_deleted_golden(r: _Repo) -> list[str]:
-    (r.path / SNAP).unlink()
+def _case_deleted_golden(r: _Repo, f: _Fixture) -> list[str]:
+    (r.path / f.snap).unlink()
     r.commit("test: drop snapshot")
-    return [SNAP]
+    return [f.snap]
 
 
-def _case_renamed_golden(r: _Repo) -> list[str]:
-    new = "editors/vscode/test/__snapshots__/ui-renamed.test.ts.snap"
-    r._git("mv", SNAP, new)
+def _case_renamed_golden(r: _Repo, f: _Fixture) -> list[str]:
+    r._git("mv", f.snap, f.renamed)
     r.commit("test: rename module")
-    return sorted([SNAP, new])
+    return sorted([f.snap, f.renamed])
 
 
-def _case_renamed_golden_with_trailer(r: _Repo) -> list[str]:
-    r._git("mv", SNAP, "editors/vscode/test/__snapshots__/x.test.ts.snap")
+def _case_renamed_golden_with_trailer(r: _Repo, f: _Fixture) -> list[str]:
+    r._git("mv", f.snap, f.renamed)
     r.commit(f"test: rename\n\n{GOOD}")
     return []
 
 
-def _case_png_baseline(r: _Repo) -> list[str]:
-    r.write(PNG, "png\n")
-    r.write("editors/vscode/test/visual/run.ts", "export {};\n")
-    r.commit("test(vscode): new picture")
-    return [PNG]
+def _case_png_baseline(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.png, "png\n")
+    r.write(f.source, "x\n")
+    r.commit("test: new picture")
+    return [f.png]
 
 
-def _case_png_with_trailer(r: _Repo) -> list[str]:
-    r.write(PNG, "png\n")
-    r.commit(f"test(vscode): new picture\n\n{GOOD}")
+def _case_png_with_trailer(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(f.png, "png\n")
+    r.commit(f"test: new picture\n\n{GOOD}")
     return []
+
+
+def _case_png_and_other_editor(r: _Repo, f: _Fixture) -> list[str]:
+    # The default roots cover both editors, so one commit is charged for both.
+    r.write(f.png, "png\n")
+    r.write(f.other_png, "png\n")
+    r.commit("test: new baselines")
+    return sorted([f.png, f.other_png])
 
 
 _CASES = {
@@ -775,6 +858,10 @@ _CASES = {
     "renamed golden with trailer -> pass": (_case_renamed_golden_with_trailer, True),
     "PNG baseline without trailer -> fail": (_case_png_baseline, False),
     "PNG baseline with trailer -> pass": (_case_png_with_trailer, False),
+    "png baseline and another editor's snapshot -> fail": (
+        _case_png_and_other_editor,
+        False,
+    ),
 }
 
 
@@ -820,7 +907,7 @@ def _self_test_stale_base(tmp: Path) -> list[str]:
     fork = r.base
     r.write("main.txt", "1\n")
     m1 = r.commit("chore: m1")
-    r.write(SNAP, "from main\n")
+    r.write(_VSCODE.snap, "from main\n")
     m2 = r.commit("test: main changed a snapshot")
     r._git("checkout", "-q", "-b", "feature", fork)
     r.write("feature.txt", "1\n")
@@ -905,32 +992,81 @@ def _self_test_orphans(tmp: Path) -> list[str]:
     return failures
 
 
+def _self_test_policy(tmp: Path) -> list[str]:
+    root = tmp / "policy"
+    wf = root / ".github/workflows"
+    wf.mkdir(parents=True)
+    (wf / "clean.yml").write_text(
+        "# -Psnapshot-update is never passed here\n"
+        "run: ./gradlew uiTest\n"
+        "run: npm run snapshots -- structural\n"
+    )
+    failures = [f"clean workflow reported: {h}" for h in find_update_flags(root)]
+    (wf / "bad.yml").write_text(
+        "run: ./gradlew test -Psnapshot-update\n"
+        "env:\n  ASH_SNAPSHOT_UPDATE: '1'\n"
+        "run: pytest --snapshot-update\n"
+        "run: npx jest --updateSnapshot\n"
+    )
+    hits = find_update_flags(root)
+    if len(hits) != 4:
+        failures.append(f"policy expected 4 hits, got {hits}")
+    return failures
+
+
+def _self_test_roots() -> list[str]:
+    failures = []
+    if not golden_reason(_VSCODE.png):
+        failures.append("a VS Code PNG baseline is not golden")
+    if not golden_reason(
+        "editors/jetbrains/src/uiTest/snapshots/__snapshots__/A/b.png"
+    ):
+        failures.append("a JetBrains PNG baseline is not golden")
+    if golden_reason("editors/jetbrains/src/test/snapshots/x.txt"):
+        failures.append("a file outside __snapshots__ is golden")
+    if golden_reason("editors/vscode/test/__snapshots__"):
+        failures.append("a bare __snapshots__ path (no file below it) read as golden")
+    if golden_reason("tests/snapshot/__snapshots__/test_cli.ambr"):
+        failures.append("core ASH's snapshot is golden for the editor check")
+    saved = list(GOLDEN_ROOTS)
+    GOLDEN_ROOTS[:] = ["editors/jetbrains"]
+    try:
+        if golden_reason("editors/vscode/__snapshots__/a.png"):
+            failures.append(
+                "--golden-root editors/jetbrains still covers editors/vscode"
+            )
+        if not golden_reason("editors/jetbrains/__snapshots__/a.txt"):
+            failures.append("--golden-root editors/jetbrains no longer covers itself")
+    finally:
+        GOLDEN_ROOTS[:] = saved
+    return failures
+
+
 def self_test() -> int:
     failures: list[str] = []
     with tempfile.TemporaryDirectory(prefix="editor-snapshot-trailers-") as tmpdir:
         tmp = Path(tmpdir)
-        for i, (name, (case, seed)) in enumerate(_CASES.items()):
-            r = _Repo(tmp / f"case{i}")
-            if seed:  # cases that delete or rename need the file to exist at base
-                r.write(SNAP, "seed\n")
-                r.base = r.commit(f"test: seed\n\n{GOOD}")
-            expected = case(r)
-            got = sorted(r.violations())
-            if got != expected:
-                failures.append(f"{name}: expected violations {expected}, got {got}")
+        for editor, fixture in _FIXTURES.items():
+            for i, (name, (case, seed)) in enumerate(_CASES.items()):
+                r = _Repo(tmp / f"{editor}-case{i}")
+                if seed:  # cases that delete or rename need the file to exist at base
+                    r.write(fixture.snap, "seed\n")
+                    r.base = r.commit(f"test: seed\n\n{GOOD}")
+                expected = case(r, fixture)
+                got = sorted(r.violations())
+                if got != expected:
+                    failures.append(
+                        f"{editor}: {name}: expected violations {expected}, got {got}"
+                    )
         failures += _self_test_ranges(tmp)
         failures += _self_test_orphans(tmp)
-    if not golden_reason(PNG):
-        failures.append("PNG baseline not golden")
-    if golden_reason("editors/vscode/test/__snapshots__"):
-        failures.append("a bare __snapshots__ path (no file below it) read as golden")
-    if golden_reason("tests/snapshot/__snapshots__/test_cli.ambr"):
-        failures.append("a core snapshot read as an editor snapshot")
+        failures += _self_test_policy(tmp)
+    failures += _self_test_roots()
     for f in failures:
         print(f"::error::self-test: {f}")
     print(
-        f"self-test: {len(_CASES)} trailer cases plus range and orphan cases, "
-        f"{len(failures)} failure(s)"
+        f"self-test: {len(_CASES)} trailer cases for each of {len(_FIXTURES)} editors "
+        f"plus range, orphan, policy and root cases, {len(failures)} failure(s)"
     )
     return 1 if failures else 0
 
@@ -939,15 +1075,27 @@ def self_test() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument(
         "--orphans", action="store_true", help="check snapshot ownership"
+    )
+    parser.add_argument(
+        "--policy",
+        action="store_true",
+        help="fail on a workflow that passes an editor snapshot update flag",
+    )
+    parser.add_argument(
+        "--golden-root",
+        action="append",
+        help="a directory whose __snapshots__ trees are golden (repeatable; default: editors)",
     )
     parser.add_argument("--base", help="check BASE..HEAD instead of the event's range")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     opts = parser.parse_args(argv)
+    if opts.golden_root:
+        GOLDEN_ROOTS[:] = [r.strip("/") for r in opts.golden_root]
 
     if opts.self_test:
         return self_test()
@@ -957,6 +1105,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"::error::orphaned snapshot: {p}")
         print(f"orphan check: {len(problems)} problem(s)")
         return 1 if problems else 0
+    if opts.policy:
+        hits = find_update_flags(opts.repo)
+        for hit in hits:
+            print(f"::error::a workflow passes a snapshot update flag: {hit}")
+        print(f"update-flag policy: {len(hits)} workflow line(s) pass an update flag")
+        return 1 if hits else 0
+    rng: Range | None
     try:
         if opts.base:
             rng = Range(opts.base, opts.head, f"{opts.base}..{opts.head}")
@@ -972,6 +1127,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"{event_name}: the event introduces no commits; nothing to check."
                 )
                 return 0
+        print(f"golden roots: {', '.join(GOLDEN_ROOTS)}")
         return run_check(opts.repo, rng)
     except GitError as exc:
         print(f"::error::{exc}")

@@ -79,6 +79,7 @@ on:
       - "tests/e2e/**"
       - "scripts/e2e/**"
       - "packaging/cli-name.sh"
+      - ".github/scripts/check-editor-snapshot-trailers.py"
   pull_request:
     branches:
       - "**"
@@ -315,3 +316,89 @@ jobs:
         env:
           E2E_PREV_REF: origin/v4-capabilities
         run: bash editors/jetbrains/e2e-ide-cycle.sh "$RUNNER_TEMP/jb-ide-cycle"
+
+  # A changed snapshot needs a reason. Every file under a __snapshots__ directory in
+  # editors/jetbrains (the structural suite's text and the visual suite's PNGs) must be changed
+  # by a commit carrying a 'Snapshot-Update: <reason>' trailer, over the event's own range:
+  # base..head of the pull request or the merge-queue entry, before..after of a push. The script
+  # is core ASH's check-snapshot-trailers.py rule for the editor trees; its header says how that
+  # script absorbs it.
+  #
+  # On the runner itself, as the runner's unprivileged user: the check reads git history with
+  # the standard library and builds nothing, so there is no image to pin and no root to drop.
+  # Full history, because the range can reach back past a shallow clone.
+  snapshot-trailers:
+    name: "editors: jetbrains snapshot trailers"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # --self-test first: a checker that has degenerated into finding nothing exits 0 and
+      # reads as a clean tree. --policy is the second lock on the update flag: the suites
+      # refuse it under CI, and this fails a workflow that passes it at all.
+      - name: Assert every editor snapshot change carries a Snapshot-Update trailer
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-editor-snapshot-trailers.py --self-test
+          python3 .github/scripts/check-editor-snapshot-trailers.py --policy
+          python3 .github/scripts/check-editor-snapshot-trailers.py --golden-root editors/jetbrains
+
+  # The visual snapshots: a real IDE on an Xvfb display, driven by Remote-Robot, every scene
+  # compared pixel for pixel with the committed PNGs under
+  # editors/jetbrains/src/uiTest/snapshots/__snapshots__, threshold zero.
+  #
+  # The image is built here from editors/jetbrains/ui-test/Dockerfile: the same digest-pinned
+  # gradle:jdk21 as the jobs above, plus Xvfb at pinned versions from a dated Ubuntu archive
+  # snapshot. It is built, used and discarded in this job and never pushed. It is run with
+  # --init for the reason the plugin job gives, and ui-test-in-container.sh drops from root to
+  # the checkout's owner (the runner's own user here) before anything runs.
+  #
+  # `2` runs the suite twice, each from a fresh IDE configuration, and fails unless both runs
+  # rendered identical pixels, so a scene that is not deterministic fails here rather than as
+  # an intermittent red somewhere else. CI and GITHUB_ACTIONS are passed in so the update flag
+  # is refused inside the container as it is outside.
+  visual-snapshots:
+    name: "editors: jetbrains visual snapshots (IntelliJ IDEA 2025.2.5, Xvfb)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the pinned visual-test image
+        run: docker build -t "ash-jetbrains-ui:${GITHUB_RUN_ID}" editors/jetbrains/ui-test
+
+      - name: Render every scene twice and compare it with the committed PNGs
+        run: |
+          set -euo pipefail
+          docker run --rm --init -e CI -e GITHUB_ACTIONS \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            "ash-jetbrains-ui:${GITHUB_RUN_ID}" \
+            bash editors/jetbrains/ui-test-in-container.sh 2
+
+      # Failure evidence only: for each scene that differs, the rendered PNG and a diff image,
+      # plus the IDE's log and the test report. A reviewer cannot see a pixel difference from
+      # the job log.
+      - name: Upload the rendered scenes and diffs when something failed
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jetbrains-visual-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            editors/jetbrains/build/ui-snapshots/
+            editors/jetbrains/build/ui-logs/
+            editors/jetbrains/build/reports/tests/uiTest/
+          if-no-files-found: warn
+          retention-days: 7
+

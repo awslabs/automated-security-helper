@@ -73,6 +73,11 @@ echo "== 3. provision the one Python dependency the two gates need"
 # provision-defusedxml.sh carries the reasons and the pinned digest.
 . "$HERE/provision-defusedxml.sh"
 
+echo "== 3b. the snapshot orphan check can fail"
+# Self-tested before `check` uses it, for the reason every gate here is: a checker that has
+# degenerated into finding nothing exits 0 and reads as a clean tree.
+python3 assert-snapshots-used.py --self-test
+
 echo "== 4. build, test, and gate coverage"
 # `check` pulls in test, assertTestsRan and assertCoverage; buildPlugin pulls in the
 # distribution and, via finalizedBy, assertDistributionContents. Every gate is a Gradle task

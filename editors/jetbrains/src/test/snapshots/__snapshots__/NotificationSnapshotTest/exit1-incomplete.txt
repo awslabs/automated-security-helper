@@ -1,0 +1,11 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ashx scan
+
+notification group=ASH type=WARNING
+title: ASH scan incomplete
+body:
+ASH reported this scan INCOMPLETE (exit 1): it did not cover everything it was asked to. Showing the 3 finding(s) it did produce: 3 error. Findings from the parts that did not run are absent.<br>
+<br>
+1 of 10 scanner(s) did not complete: cfn-nag (MISSING). Findings from those scanners are absent, so this is not a complete answer.<br>
+awslabs/automated-security-helper v3.7.0, exit code 1. Report: <PROJECT>/.ash/ash_output/reports/ash.sarif
