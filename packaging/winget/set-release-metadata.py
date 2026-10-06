@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["jsonschema>=4.26,<5", "PyYAML>=6,<7", "defusedxml>=0.7,<0.8"]
+# dependencies = ["jsonschema>=4.26,<5", "PyYAML>=6,<7", "defusedxml>=0.7,<0.8", "requests>=2.34,<3"]
 # ///
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -33,6 +33,13 @@ validating after the artifact changes, and reads as authoritative. Writing the f
 manifests back over the source would remove the assertion's subject. So the output goes
 somewhere else, and the last thing this script does is run validate-manifests.py
 --released against that output, which requires the opposite state.
+
+THE LOOPBACK SET
+
+--local-url-base http://127.0.0.1:<port> replaces the release asset URL with that
+server and the file's name, for the winget-client e2e job, which installs a commit that
+has no release. The output is validated with --released --local-installer, and that
+refuses any URL that is not loopback, so the two kinds of set cannot be confused.
 
 WHAT THIS DOES NOT FILL, AND WHY NOT
 
@@ -180,6 +187,16 @@ def main() -> int:
         help="release tag the asset is attached to (default: v<PackageVersion>)",
     )
     parser.add_argument(
+        "--local-url-base",
+        default=None,
+        help=(
+            "for the end-to-end install leg only: serve the .msix from this loopback "
+            "base (http://127.0.0.1:<port>) instead of the release asset path. The "
+            "output is validated with --released --local-installer, which refuses any "
+            "other host, so a set rendered this way cannot pass as a release set"
+        ),
+    )
+    parser.add_argument(
         "--skip-validate",
         action="store_true",
         help="do not run validate-manifests.py --released on the output",
@@ -219,8 +236,15 @@ def main() -> int:
             f"manifests behind."
         )
 
-    tag = args.tag or f"v{package_version}"
-    installer_url = f"{RELEASE_ASSET_BASE}/{tag}/{msix.name}"
+    if args.local_url_base is not None:
+        if args.tag is not None:
+            raise Failure(
+                "--tag names a release asset; it means nothing with --local-url-base"
+            )
+        installer_url = f"{args.local_url_base.rstrip('/')}/{msix.name}"
+    else:
+        tag = args.tag or f"v{package_version}"
+        installer_url = f"{RELEASE_ASSET_BASE}/{tag}/{msix.name}"
     digest = sha256_of(msix)
     print("== filling the installer manifest")
     print(f"   InstallerUrl: {installer_url}")
@@ -276,10 +300,10 @@ def main() -> int:
 
     print("\n== validating the filled set")
     validator = source_dir / "validate-manifests.py"
-    completed = subprocess.run(  # noqa: S603
-        [sys.executable, str(validator), str(out_dir), "--released"],
-        check=False,
-    )
+    validate_args = [sys.executable, str(validator), str(out_dir), "--released"]
+    if args.local_url_base is not None:
+        validate_args.append("--local-installer")
+    completed = subprocess.run(validate_args, check=False)  # noqa: S603
     if completed.returncode != 0:
         raise Failure(
             f"the filled manifest set at {out_dir} does not validate. See above."

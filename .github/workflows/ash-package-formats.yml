@@ -35,6 +35,12 @@ on:
       - "**"
     paths:
       - "packaging/**"
+      # The winget-client job in ash-package.yml installs and scans with this code, and
+      # judges the scans with the shared e2e contract, so a change to either has to
+      # rerun it.
+      - "automated_security_helper/**"
+      - "scripts/e2e/**"
+      - "tests/e2e/**"
       - "Formula/**"
       - "uv.lock"
       - "pyproject.toml"
@@ -44,6 +50,7 @@ on:
       - "tests/unit/test_package_contents_gate.py"
       - "tests/unit/test_package_formats_workflow.py"
       - "tests/unit/test_homebrew_formula_*.py"
+      - "tests/unit/test_winget_e2e.py"
   workflow_dispatch: {}
 
 permissions:
@@ -96,3 +103,4 @@ jobs:
           tests/unit/test_homebrew_formula_lock_sync.py
           tests/unit/test_homebrew_formula_resources.py
           tests/unit/test_homebrew_formula_version.py
+          tests/unit/test_winget_e2e.py
