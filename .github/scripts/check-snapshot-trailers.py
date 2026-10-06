@@ -224,11 +224,14 @@ GOLDEN_ROOTS: list[str] = []
 # three are main's own squash commits, and b9a782f5 is already in the history that v4
 # branches build on. Without this table every push of such a branch fails on them.
 #
-# A listed commit counts as carrying its reason here, and only when BOTH hold:
+# A listed commit is skipped, as if it had not touched any golden file, and only when
+# BOTH hold:
 # * its committer date is before TRAILER_RULE_COMMITTED_AT, the committer date of the
 #   #717 merge (pinned as a number so the check needs neither main nor a network fetch);
 # * it is an ancestor of the head being checked.
-# Otherwise the entry is ignored and the commit is judged like any other.
+# Otherwise the entry is ignored and the commit is judged like any other. A skipped
+# commit exempts only itself: it does not count as a trailer for any other commit, so
+# under the any-commit rule a later untrailered change to the same file still fails.
 #
 # SHRINK-ONLY. tests/snapshot/test_snapshot_policy.py holds a frozen copy of this table
 # and the cutoff and fails if an entry is added or the cutoff moves. A commit made after
@@ -586,8 +589,8 @@ def find_violations(
     Under ``PER_COMMIT_ROOTS`` every commit that touches the path needs its own
     trailer. Elsewhere a path is accepted once ANY commit in the range that touched
     it has one; see "TWO RULES" in the module docstring for why. With ``head``, a
-    commit with an honored pre-rule exception (``exemption_reason``) counts as having
-    a reason; without it, none is honored.
+    commit with an honored pre-rule exception (``exemption_reason``) is skipped: it
+    neither needs nor supplies a reason. Without ``head``, none is honored.
     """
     touched: dict[str, list[Commit]] = {}
     for commit in commits:
@@ -595,6 +598,7 @@ def find_violations(
             if golden_reason(path):
                 touched.setdefault(path, []).append(commit)
     reasons = {c.sha: snapshot_reasons(repo, c.message) for c in commits}
+    skipped: set[str] = set()
     if head is not None:
         for c in commits:
             if reasons[c.sha] or not any(golden_reason(p) for p in c.files):
@@ -602,9 +606,12 @@ def find_violations(
             exempt = exemption_reason(repo, c.sha, head, exemptions)
             if exempt:
                 print(f"pre-rule exception honored for {c.sha[:10]}: {exempt}")
-                reasons[c.sha] = [exempt]
+                skipped.add(c.sha)
     violations = []
-    for path, touching in sorted(touched.items()):
+    for path, all_touching in sorted(touched.items()):
+        # A skipped commit is out of the path's history entirely: it neither needs a
+        # reason nor supplies one, so it cannot explain another commit's change.
+        touching = [c for c in all_touching if c.sha not in skipped]
         unexplained = [c for c in touching if not reasons[c.sha]]
         if not unexplained:
             continue
@@ -1376,13 +1383,12 @@ def _self_test_exemptions(tmp: Path) -> list[str]:
         if got("HEAD", {late: "post-rule"}, late_commits) != [path]:
             failures.append(f"{name}: a listed commit made after the rule was honored")
 
-        # NEGATIVE CONTROL: an honored exception does not cover a later, untrailered
-        # change made after the rule; under the editors' per-commit rule it still fails.
+        # NEGATIVE CONTROL: a skipped commit is not a trailer for another one, so an
+        # untrailered post-rule change to the same file fails under both rules.
         both = commits_in_range(r.path, r.base, "HEAD")
-        want = [path] if per_commit(path) else []
-        if got("HEAD", table, both) != want:
+        if got("HEAD", table, both) != [path]:
             failures.append(
-                f"{name}: honored exception plus a post-rule change gave the wrong result"
+                f"{name}: an exempted commit explained a later untrailered change"
             )
         r.write(path, "post-rule, unlisted\n")
         r.commit("test: post-rule change, unlisted", committed_at=after)

@@ -216,6 +216,30 @@ def test_listed_commit_after_the_rule_still_fails(trailers, repo, capsys) -> Non
     )
 
 
+def test_exempted_commit_does_not_explain_a_later_schema_change(trailers, repo) -> None:
+    # NEGATIVE CONTROL: an exempted pre-rule commit is skipped, not counted as a
+    # trailer, so under the any-commit rule an untrailered post-rule change to the same
+    # schema file still fails.
+    path = "automated_security_helper/schemas/AshConfig.json"
+    cutoff = trailers.TRAILER_RULE_COMMITTED_AT
+    repo.write(path, "{}\n")
+    exempt = repo.commit("feat: pre-rule schema change", committed_at=cutoff - 60)
+    table = {exempt: "pre-rule"}
+    alone = trailers.commits_in_range(repo.path, repo.base, "HEAD")
+    assert trailers.find_violations(repo.path, alone, "HEAD", table) == []
+    repo.write(path, '{"a": 1}\n')
+    repo.commit("feat: post-rule schema change", committed_at=cutoff + 60)
+    commits = trailers.commits_in_range(repo.path, repo.base, "HEAD")
+    violations = trailers.find_violations(repo.path, commits, "HEAD", table)
+    assert [v.path for v in violations] == [path]
+    assert [c.sha for c in violations[0].commits] != [exempt]
+    # A trailered later change still explains the file, as the any-commit rule says.
+    repo.write(path, '{"a": 2}\n')
+    repo.commit("feat: explained\n\nSnapshot-Update: the schema gained a field")
+    commits = trailers.commits_in_range(repo.path, repo.base, "HEAD")
+    assert trailers.find_violations(repo.path, commits, "HEAD", table) == []
+
+
 def test_golden_change_without_trailer_fails(trailers, repo, capsys) -> None:
     # NEGATIVE CONTROL: the check exists to produce this failure.
     path = "tests/snapshot/__snapshots__/test_cli/summary.md"
