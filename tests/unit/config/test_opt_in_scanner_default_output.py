@@ -126,3 +126,37 @@ def test_the_loaded_count_leaves_out_opt_in_scanners(caplog):
         r.getMessage().startswith(f"Also loaded {opt_in} opt-in scanners")
         for r in caplog.records
     )
+
+
+def test_a_config_dump_does_not_freeze_the_scanner_registry(tmp_path):
+    """External scanners still load after a config dump and repr.
+
+    The omission once read opt-in from ``ash_plugin_manager.plugin_modules``,
+    which caches its first answer, so dumping a config before
+    ``ash_plugin_modules`` loaded dropped trivy-repo and ferret-scan from the
+    run with no error. Run in a fresh interpreter because that cache is
+    process-global.
+    """
+    import subprocess
+    import sys
+
+    script = (
+        "from automated_security_helper.config.ash_config import AshConfig\n"
+        "from automated_security_helper.plugins import ash_plugin_manager\n"
+        "from automated_security_helper.plugins.loader import load_plugins\n"
+        "c = AshConfig(); c.model_dump(by_alias=True); repr(c)\n"
+        "load_plugins_mods = ['automated_security_helper.plugin_modules.ash_trivy_plugins']\n"
+        "from automated_security_helper.plugins.loader import load_additional_plugin_modules\n"
+        "load_additional_plugin_modules(load_plugins_mods)\n"
+        "names = {cls.__name__ for cls in ash_plugin_manager.plugin_modules('scanner')}\n"
+        "print('TrivyRepoScanner' in names, 'GitleaksScanner' in names)\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=tmp_path,
+    )
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip().splitlines()[-1] == "True True", out.stdout

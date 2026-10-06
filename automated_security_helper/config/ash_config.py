@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 import re
 from pydantic import (
@@ -283,6 +284,35 @@ def field_name_spellings(segment_cls: type[BaseModel]) -> Dict[str, str]:
     }
 
 
+def _is_opt_in_scanner_config(config_class: type) -> bool:
+    """Whether *config_class* is the config class of an opt-in scanner.
+
+    Read from the module that defines the config class: a scanner and its config
+    class live in one module, so the scanner class is found there without the
+    plugin registry. Reading the registry instead is wrong in a way that does
+    not show: ``ash_plugin_manager.plugin_modules`` caches its first answer, so a
+    config dump taken before ``ash_plugin_modules`` loaded froze the scanner list
+    at the builtins and the external scanners (trivy-repo, ferret-scan) dropped
+    out of the run with no error.
+    """
+    if not isinstance(config_class, type) or not issubclass(
+        config_class, ScannerPluginConfigBase
+    ):
+        return False
+    from automated_security_helper.core.scanner_opt_in import (
+        _declared_config_class,
+        is_opt_in,
+    )
+
+    module = sys.modules.get(config_class.__module__)
+    return any(
+        isinstance(obj, type)
+        and is_opt_in(obj)
+        and _declared_config_class(obj) is config_class
+        for obj in vars(module or object()).values()
+    )
+
+
 class _PluginConfigSegment(BaseModel):
     """Base for the scanner, reporter and converter config segments.
 
@@ -358,40 +388,22 @@ class ScannerConfigSegment(_PluginConfigSegment):
         """Field names of opt-in scanners whose config here is still the default.
 
         An opt-in scanner (``ScannerPluginBase.OPT_IN``) declares a field on this
-        segment so the schema and ``ash config`` document it. Every dump or repr
-        of the segment would otherwise carry it, and ASH writes those into
+        segment so the JSON schema documents it. Every dump or repr of the
+        segment would otherwise carry it, and ASH writes those into
         ``ash_aggregated_results.json``, the YAML report and the AWS reporter
         payloads -- so shipping an opt-in scanner changed the default output of
         every user who never enabled it, which is what opt-in exists to avoid.
+        A consequence: ``ash config init`` and ``ash config get`` do not list an
+        opt-in scanner until it is configured.
 
         Only a value equal to the field's default is left out, so the omission is
         lossless: loading the dump back gives the same default. An enabled or
         option-carrying opt-in scanner is written like any other.
-
-        Opt-in is read from the scanner classes in the plugin registry. Importing
-        this module imports every builtin scanner module for its config class,
-        and the decorator registers the class on import, so the registry holds
-        them whenever this runs. If it cannot be read nothing is left out, which
-        is the behavior from before opt-in scanners existed.
         """
-        try:
-            from automated_security_helper.core.scanner_opt_in import (
-                _declared_config_class,
-                is_opt_in,
-            )
-            from automated_security_helper.plugins import ash_plugin_manager
-
-            opt_in_configs = {
-                _declared_config_class(cls)
-                for cls in ash_plugin_manager.plugin_modules("scanner")
-                if is_opt_in(cls)
-            }
-        except Exception:  # nosec B110 - fall back to dumping every field
-            return set()
         return {
             name
             for name, field in type(self).model_fields.items()
-            if type(field.default) in opt_in_configs
+            if _is_opt_in_scanner_config(type(field.default))
             and getattr(self, name, None) == field.default
         }
 
