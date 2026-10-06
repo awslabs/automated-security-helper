@@ -204,6 +204,15 @@ async function main(): Promise<void> {
         '--extensions-dir',
         path.join(SCRATCH, 'extensions'),
         '--disable-gpu',
+        // Chromium re-rasters only the damaged part of a tile by default, and its
+        // software rasterizer can round an anti-aliased edge pixel one level
+        // differently in a partial raster than in a full one. Which edges a frame
+        // re-rasters partially depends on what changed in it and when, so without
+        // this flag 4 of 10 runs drew one edge pixel (the Problems toolbar
+        // separator's top, a part's rounded corner) one level off. With it, every
+        // tile is rastered whole and 20 of 20 runs were identical. See README.md,
+        // "Threshold and determinism".
+        '--disable-partial-raster',
         '--no-sandbox',
         '--disable-dev-shm-usage',
         '--disable-workspace-trust',

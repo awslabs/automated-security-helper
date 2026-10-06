@@ -8,8 +8,10 @@
  * threshold of zero differing pixels.
  *
  * The tests run in order in one window, because the first depends on the PATH
- * run.ts set up (no `ashx`, so the fallback notice appears) and the second adds an
- * `ashx`.
+ * run.ts set up (no `ashx`, so the fallback notice appears) and every later one
+ * adds an `ashx`. Apart from that, each scene builds the state it shows, and a
+ * teardown resets the workbench after every test, so a failure in one scene
+ * cannot change what the next one captures.
  *
  * WHY "WAIT UNTIL IT STOPS CHANGING" AND NOT A FIXED DELAY
  *
@@ -128,12 +130,35 @@ async function expandLowestToast(name: string): Promise<void> {
   await vscode.commands.executeCommand('notification.expand');
 }
 
+/**
+ * Puts `ashx` on the PATH run.ts gave the extension host. Only the first scene runs
+ * without it, to show the ashx -> ash fallback notice; every other scene installs it
+ * itself, so none depends on the first one having got as far as installing it.
+ */
+function installAshx(): void {
+  fs.writeFileSync(path.join(ASHX_DIR, 'ashx'), ASHX_WRAPPER, { mode: 0o755 });
+}
+
+/** Closes everything a scene can open: hover, editors, panel and notifications. */
+async function resetWorkbench(): Promise<void> {
+  await vscode.commands.executeCommand('editor.action.hideHover');
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  await vscode.commands.executeCommand('workbench.action.closePanel');
+  await clearNotifications();
+}
+
 suite('ASH visual snapshots', () => {
   suiteSetup(async () => {
     for (const [name, value] of Object.entries({ DISPLAY, WORKSPACE, ASHX_DIR, BASELINES, ACTUAL })) {
       assert.ok(value !== '', `${name} was not passed to the extension host`);
     }
   });
+
+  // Every scene starts from the same empty workbench, whether the scene before it
+  // passed or failed. The cleanup used to be the last lines of each test, after its
+  // assertion, so one failed comparison left a hover and an open editor on screen
+  // and the next scene failed by a whole screen for a reason that was not its own.
+  teardown(resetWorkbench);
 
   test('fallback-notice', async () => {
     const report = await scan('clean');
@@ -143,12 +168,10 @@ suite('ASH visual snapshots', () => {
     // was raised first.
     await expandLowestToast('fallback-notice');
     await matchesBaseline('fallback-notice');
-    await clearNotifications();
-    // Every scan from here on resolves ashx.
-    fs.writeFileSync(path.join(ASHX_DIR, 'ashx'), ASHX_WRAPPER, { mode: 0o755 });
   });
 
   test('problems-panel', async () => {
+    installAshx();
     const report = await scan('findings');
     assert.strictEqual(report.status, 'ok', report.detail);
     assert.ok((report.summary?.diagnostics ?? 0) > 0, 'the findings scan published nothing');
@@ -160,10 +183,16 @@ suite('ASH visual snapshots', () => {
   });
 
   test('diagnostic-hover', async () => {
-    const editor = await vscode.window.showTextDocument(
-      vscode.Uri.file(path.join(WORKSPACE, 'planted_secret.py')),
-      { preview: false },
-    );
+    installAshx();
+    // The state the problems-panel scene leaves, rebuilt here rather than inherited,
+    // so this scene does not depend on that one having run or passed.
+    const report = await scan('findings');
+    assert.strictEqual(report.status, 'ok', report.detail);
+    const file = vscode.Uri.file(path.join(WORKSPACE, 'planted_secret.py'));
+    await vscode.window.showTextDocument(file, { preview: false });
+    await vscode.commands.executeCommand('workbench.actions.view.problems');
+    await clearNotifications();
+    const editor = await vscode.window.showTextDocument(file, { preview: false });
     const diagnostics = vscode.languages.getDiagnostics(editor.document.uri);
     assert.ok(diagnostics.length > 0, 'no diagnostics on planted_secret.py to hover over');
     const at = new vscode.Position(diagnostics[0].range.start.line, 4);
@@ -171,11 +200,13 @@ suite('ASH visual snapshots', () => {
     editor.revealRange(new vscode.Range(at, at), vscode.TextEditorRevealType.InCenter);
     await vscode.commands.executeCommand('editor.action.showHover');
     await matchesBaseline('diagnostic-hover');
-    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
 
   test('incomplete-scan-notification', async () => {
-    await clearNotifications();
+    installAshx();
+    // The Problems panel is in the picture because it shows the partial results the
+    // warning is about.
+    await vscode.commands.executeCommand('workbench.actions.view.problems');
     const report = await scan('incomplete');
     assert.strictEqual(report.status, 'incomplete', report.detail);
     assert.strictEqual(report.exitCode, 1);

@@ -112,11 +112,25 @@ The image is built from the Dockerfile on each run and is never pushed.
 ### Threshold and determinism
 
 The threshold is zero: `compare -metric AE` with no fuzz, so one changed pixel
-fails. That is justified by measurement, not assumed. The suite was run three
-times in a row in the container on the same commit, and every capture of every
-scenario was byte-identical across the three runs and to the baselines. With no
-variance measured there is nothing for a tolerance to absorb, and a tolerance
-would only be room for a styling change to pass.
+fails. That is justified by measurement, not assumed.
+
+The suite was not always deterministic. Before `--disable-partial-raster`, 4 of
+10 runs in the container failed by exactly one pixel: the top end of the
+Problems toolbar's separator at (1218,518), or a part's rounded corner, one
+level of gray off (#5E5E5E against #606060). By default Chromium re-rasters only
+the damaged part of a tile, and its software rasterizer can round an
+anti-aliased edge pixel differently in a partial raster than in a whole one.
+Which edges get a partial raster depends on what changed in which frame, so the
+same state could be drawn two ways. With partial raster off, every tile is
+rastered whole: 20 runs, then 12 consecutive runs, then 20 more five at a time,
+every capture of every scenario identical. The cause is removed, so there is
+still nothing for a tolerance to absorb.
+
+Each scene also starts from the same empty workbench: a mocha `teardown` hides
+the hover and closes the editors, the panel and the notifications after every
+test, pass or fail, and each scene builds the state it shows itself. A failed
+comparison used to leave its hover on screen, and the next scene then failed by
+a whole screen.
 
 Each state is captured repeatedly until four consecutive captures have the same
 pixel signature, rather than after a fixed delay. A fixed delay is a guess that a
@@ -125,7 +139,7 @@ changing fails with a timeout instead of producing a baseline that depends on wh
 it was taken.
 
 One limit is known. The renderer is Chromium's software rasterizer, which picks
-SIMD code paths from the CPU it runs on. The three identical runs were on one
+SIMD code paths from the CPU it runs on. The identical runs were on one
 machine, so they do not show that a runner with a different CPU draws the same
 pixels. CI is the first cross-host check; if it differs, the fix is to measure the
 difference across runners, not to raise the threshold.
