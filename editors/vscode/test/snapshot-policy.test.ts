@@ -45,6 +45,12 @@ function bannedIn(text: string): string[] {
   return BANNED.filter((pattern) => pattern.test(code)).map((pattern) => pattern.source);
 }
 
+// The --policy checker in the trailer script names every update flag in order to look
+// for them: in its pattern, its docstring and its self-test fixtures. It passes none,
+// so it is the one file under .github/ exempt here, by exact path, and only while it
+// is still that checker (the test below requires its policy function).
+const POLICY_CHECKER = '.github/scripts/check-editor-snapshot-trailers.py';
+
 function filesUnder(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
@@ -70,8 +76,13 @@ describe('no CI path updates a snapshot', () => {
   test('no file under .github/ and no npm script passes one', () => {
     const files = filesUnder(path.join(REPO_ROOT, '.github'));
     expect(files.some((file) => file.endsWith('ash-vscode-extension.yml'))).toBe(true);
+    const checker = fs.readFileSync(path.join(REPO_ROOT, POLICY_CHECKER), 'utf8');
+    expect(checker).toContain('def find_update_flags(');
     const offenders: Record<string, string[]> = {};
     for (const file of files) {
+      if (path.relative(REPO_ROOT, file).split(path.sep).join('/') === POLICY_CHECKER) {
+        continue;
+      }
       const found = bannedIn(fs.readFileSync(file, 'utf8'));
       if (found.length > 0) {
         offenders[path.relative(REPO_ROOT, file)] = found;
