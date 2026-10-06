@@ -1,6 +1,6 @@
 # Built-in Security Scanners
 
-ASH includes 10 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
+ASH includes 10 built-in security scanners that run by default, plus opt-in scanners that run only when you enable them (cfn-lint). Each scanner specializes in specific security domains and file types. An opt-in scanner that is not enabled does not appear in scan results at all; see its own page for how to enable it.
 
 > For detailed visual diagrams of the built-in scanner architecture and workflows, see [Built-in Scanner Diagrams](scanners-diagrams.md).
 
@@ -10,6 +10,7 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 |---------------------------------------|---------------------------------|---------------------------------|--------------------------------------------|
 | **[Bandit](#bandit)**                 | Python security linter          | Python                          | AST-based analysis, security-focused rules |
 | **[CDK-Nag](#cdk-nag)**               | AWS CDK security checker        | TypeScript, Python, Java        | CDK-specific security rules                |
+| **[cfn-lint](cfn-lint.md)** (opt-in)  | CloudFormation validation       | YAML, JSON                      | Resource schema and best-practice checks   |
 | **[CFN-Nag](#cfn-nag)**               | CloudFormation security         | YAML, JSON                      | AWS resource security validation           |
 | **[Checkov](#checkov)**               | Infrastructure-as-Code scanner  | Terraform, CF, K8s, Docker      | Policy-as-code framework                   |
 | **[Detect-Secrets](#detect-secrets)** | Secret detection                | All text files                  | Entropy-based secret detection             |

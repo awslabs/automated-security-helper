@@ -640,6 +640,16 @@
   config a scan of the current directory would use, instead of always
   `.ash/.ash.yaml`.
 
+### Features
+
+- **cfn-lint, an opt-in scanner.** Validates CloudFormation templates with cfn-lint
+  (`>=1.43.3,<2.0.0`, installed with uv). Rule classes map to ASH severities as
+  E to MEDIUM, W to LOW and I to INFO. Off unless `scanners.cfn-lint.enabled: true`
+  or `--scanners cfn-lint`; see docs/plugins/builtin/cfn-lint.md.
+- cfn-lint reads the same templates cfn-nag reads and needs no network access to
+  scan. cfn-nag is unchanged. A default scan's output and exit code do not change:
+  an opt-in scanner nobody enabled does not appear in it.
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat

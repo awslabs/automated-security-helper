@@ -125,6 +125,7 @@ SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(
     {
         "bandit",
         "cdk-nag",
+        "cfn-lint",
         "cfn-nag",
         "checkov",
         "detect-secrets",

@@ -69,6 +69,16 @@
         let pkgs = pkgsFor system;
         in [
           pkgs.bandit
+          # cfn-lint, an opt-in scanner, with its `sarif` extra: ASH runs
+          # `cfn-lint --format sarif`, and nixpkgs ships the extra as optional. As a
+          # Python application so its library closure stays out of the shared env.
+          # cfn-guard has no nixpkgs package; under Nix it reports MISSING with the
+          # `ash dependencies install --tool cfn-guard` remedy.
+          (pkgs.python3Packages.toPythonApplication
+            (pkgs.python3Packages.cfn-lint.overridePythonAttrs (old: {
+              dependencies = (old.dependencies or [ ])
+                ++ old.optional-dependencies.sarif;
+            })))
           pkgs.cfn-nag
           pkgs.checkov
           pkgs.detect-secrets

@@ -7,6 +7,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
     CdkNagScanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+    CfnLintScanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
     CfnNagScanner,
 )
@@ -36,6 +39,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
 __all__ = [
     "BanditScanner",
     "CdkNagScanner",
+    "CfnLintScanner",
     "CfnNagScanner",
     "CheckovScanner",
     "DetectSecretsScanner",

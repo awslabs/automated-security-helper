@@ -82,6 +82,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
     CdkNagScannerConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+    CfnLintScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
     CfnNagScannerConfig,
 )
@@ -355,6 +358,13 @@ class ScannerConfigSegment(_PluginConfigSegment):
         CdkNagScannerConfig,
         Field(description="Configure the options for CdkNag", alias="cdk-nag"),
     ] = CdkNagScannerConfig()
+    cfn_lint: Annotated[
+        CfnLintScannerConfig,
+        Field(
+            description="Configure the options for cfn-lint (opt-in)",
+            alias="cfn-lint",
+        ),
+    ] = CfnLintScannerConfig()
     cfn_nag: Annotated[
         CfnNagScannerConfig,
         Field(description="Configure the options for CfnNag", alias="cfn-nag"),

@@ -1,0 +1,27 @@
+{
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "cfn-lint",
+          "rules": [],
+          "version": "1.57.1",
+          "informationUri": "https://github.com/aws-cloudformation/cfn-lint",
+          "shortDescription": {
+            "text": "Validates AWS CloudFormation templates against the resource specification and additional checks."
+          }
+        }
+      },
+      "results": [],
+      "originalUriBaseIds": {
+        "EXECUTIONROOT": {
+          "description": {
+            "text": "The directory in which cfn-lint was run."
+          }
+        }
+      }
+    }
+  ],
+  "version": "2.1.0",
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/cos02/schemas/sarif-schema-2.1.0.json"
+}

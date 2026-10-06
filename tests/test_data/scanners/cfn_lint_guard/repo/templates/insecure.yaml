@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Known positives for cfn-lint and cfn-guard. Do not deploy.
+Parameters:
+  UnusedName:
+    Type: String
+Resources:
+  OpenBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketNam: misspelled-on-purpose
+  LegacyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python2.7
+      Handler: index.handler
+      Role: arn:aws:iam::123456789012:role/example
+      Code:
+        ZipFile: "def handler(event, context): return None"

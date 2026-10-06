@@ -1,0 +1,4 @@
+# Not a CloudFormation template: no Resources mapping. Both scanners must skip it.
+service:
+  name: example
+  retries: 3
