@@ -25,7 +25,7 @@ exact command that amends the right commits.
 RELATION TO check-snapshot-trailers.py (core ASH's snapshot suite)
 ------------------------------------------------------------------
 Core ASH's snapshot pull request adds .github/scripts/check-snapshot-trailers.py
-for its own golden files. This script is that script's logic, unchanged, with two
+for its own golden files. This script is that script's logic with two
 things swapped: ``GOLDEN`` (the editor snapshot trees instead of core's golden
 files) and the orphan check (``find_editor_orphans``, jest and PNG ownership, in
 place of core's ``find_orphans`` for syrupy). The trailer key, its placeholder rule,
@@ -36,10 +36,17 @@ commit that satisfies one satisfies the other.
 That is what lets the core script absorb this one. Core's ``GOLDEN`` already treats
 any path with a ``__snapshots__`` directory component as golden, and every editor
 snapshot, PNG baselines included, lives under one, so core's trailer check covers
-these paths as it stands. Absorbing then takes two edits there: call
-``find_editor_orphans`` from ``--orphans`` (or paste it in), and add
-``editors/vscode/**`` to the workflow that runs it, or keep this workflow's job
-calling the core script. This file and its job are then deleted.
+these paths as it stands. Absorbing then takes three edits there: call
+``find_editor_orphans`` from ``--orphans`` (or paste it in), take the per-commit
+rule below into ``find_violations``, and make sure the job that runs it triggers on
+``editors/vscode/**`` (or point this workflow's job at the core script). This file
+is then deleted.
+
+One rule is stricter here, on purpose: every commit that changes an editor snapshot
+needs its own trailer (``find_violations``). Core accepts a path once any commit in
+the range that touched it carries one, so a second, unexplained change to a snapshot
+an earlier commit explained passes there. When core absorbs this script it should
+take the stricter rule, or the editor paths lose it.
 
 WHAT COUNTS AS GOLDEN
 ---------------------
@@ -305,17 +312,25 @@ class Violation:
 
 
 def find_violations(repo: Path, commits: list[Commit]) -> list[Violation]:
+    """Each golden path, with the commits that changed it and carry no reason.
+
+    Every commit that touches the path needs its own trailer. Core's script accepts
+    a path once ANY commit in the range that touched it has one, so a second,
+    unexplained change to a snapshot an earlier commit explained passes there. This
+    is the one rule that differs, and the stricter one; see the module docstring.
+    """
     touched: dict[str, list[Commit]] = {}
     for commit in commits:
         for path in commit.files:
             if golden_reason(path):
                 touched.setdefault(path, []).append(commit)
     reasons = {c.sha: snapshot_reasons(repo, c.message) for c in commits}
-    return [
-        Violation(path, golden_reason(path) or "", touching)
-        for path, touching in sorted(touched.items())
-        if not any(reasons[c.sha] for c in touching)
-    ]
+    violations = []
+    for path, touching in sorted(touched.items()):
+        unexplained = [c for c in touching if not reasons[c.sha]]
+        if unexplained:
+            violations.append(Violation(path, golden_reason(path) or "", unexplained))
+    return violations
 
 
 def fix_instructions(violation: Violation, base: str | None, head_sha: str) -> str:
@@ -664,6 +679,15 @@ def _case_trailer_on_other_commit(r: _Repo) -> list[str]:
     return [SNAP]
 
 
+def _case_second_change_untrailered(r: _Repo) -> list[str]:
+    # The first change is explained; the second, to the same file, is not.
+    r.write(SNAP, "a\n")
+    r.commit(f"test: update\n\n{GOOD}")
+    r.write(SNAP, "b\n")
+    r.commit("test: change it again")
+    return [SNAP]
+
+
 def _case_trailer_mid_prose(r: _Repo) -> list[str]:
     # Not the last paragraph, so not a trailer -- the reason a regex is not used.
     r.write(SNAP, "a\n")
@@ -738,6 +762,10 @@ _CASES = {
     "empty reason -> fail": (_case_empty_reason, False),
     "placeholder reason -> fail": (_case_placeholder_reason, False),
     "trailer on a different commit -> fail": (_case_trailer_on_other_commit, False),
+    "second, untrailered change to an explained file -> fail": (
+        _case_second_change_untrailered,
+        False,
+    ),
     "trailer-looking line mid-prose -> fail": (_case_trailer_mid_prose, False),
     "non-golden change -> pass": (_case_non_golden, False),
     "squash-style message -> pass": (_case_squash_message, False),
