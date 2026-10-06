@@ -39,10 +39,26 @@ def gate() -> ModuleType:
 
 
 def fake_tool(path: Path, stdout: str, rc: int) -> str:
-    """An executable that prints `stdout` and exits `rc`, whatever its arguments."""
-    path.write_text(
-        f"#!{sys.executable}\nimport sys\nsys.stdout.write({stdout!r})\nsys.exit({rc})\n",
+    """An executable that prints `stdout` and exits `rc`, whatever its arguments.
+
+    The behavior is a Python script, so it is the same program on every platform; only
+    the launcher differs. On POSIX it is an executable file at `path` that execs this
+    interpreter. Windows cannot start a shebang script at all (CreateProcess refuses it
+    with WinError 193), so there the launcher is `path` + ".cmd", the shim form npm and
+    pip install, which `subprocess.run` with a list starts directly and whose exit
+    status is the last command's. Either way the gate's own `run` is what starts it.
+    """
+    script = path.with_name(f"_fake_{path.name}.py")
+    script.write_text(
+        f"import sys\nsys.stdout.write({stdout!r})\nsys.exit({rc})\n",
         encoding="utf-8",
+    )
+    if sys.platform == "win32":
+        launcher = path.with_name(f"{path.name}.cmd")
+        launcher.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+        return str(launcher)
+    path.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8"
     )
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return str(path)
@@ -118,6 +134,20 @@ def test_missing_tool_is_a_gate_error(gate: ModuleType, scratch: Path) -> None:
     with pytest.raises(gate.GateError, match="cannot run"):
         gate.cfn_lint_matches(
             gate.Tools(str(scratch / "absent"), "unused"), [scratch / "x.json"]
+        )
+
+
+def test_a_tool_the_os_cannot_start_is_a_gate_error(
+    gate: ModuleType, scratch: Path
+) -> None:
+    # A file that exists but cannot be executed: POSIX refuses it with PermissionError
+    # (no execute bit), Windows with WinError 193 (not a Win32 program). Both are
+    # OSErrors that are not FileNotFoundError, and both must read as "cannot run".
+    not_a_program = scratch / "not-a-program"
+    not_a_program.write_text("this is not a program\n", encoding="utf-8")
+    with pytest.raises(gate.GateError, match="cannot run"):
+        gate.cfn_lint_matches(
+            gate.Tools(str(not_a_program), "unused"), [scratch / "x.json"]
         )
 
 

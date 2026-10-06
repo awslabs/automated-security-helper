@@ -123,7 +123,10 @@ class Tools:
 def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
-    except FileNotFoundError as exc:
+    except OSError as exc:
+        # FileNotFoundError for a missing tool, but also PermissionError (POSIX, no
+        # execute bit) and WinError 193 (Windows, not a program): each means the tool
+        # never ran, which is a gate error and not a traceback.
         raise GateError(f"cannot run {cmd[0]}: {exc}") from exc
 
 
