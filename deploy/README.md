@@ -454,6 +454,21 @@ two representations hand an adopter a different default encryption posture. Whic
 default is right is an open decision — a customer-managed key carries a recurring
 per-key cost, which is the reason the Terraform side gives for not imposing one.
 
+## Upgrade notes
+
+- **Updating an existing AshAgentCore, AshFargate or AshCodeCommitGate stack runs one
+  extra image build.** The image-build bootstrap starter used to read the CodeBuild
+  project name from a Lambda environment variable. It now reads it from a new
+  `ProjectName` property on the `Custom::AshImageBootstrap` resource, so the function
+  has no environment at all. A changed custom resource property makes CloudFormation
+  re-invoke the starter on the first update to a template with this change, and the
+  starter starts one image build, the same thing an ASH version bump does. The update
+  does not complete until that build finishes and answers CloudFormation, so expect
+  it to take as long as a normal image build. If a scheduled rebuild holds the
+  project's only build slot at that moment, the update fails with a message saying
+  so, and retrying it once the rebuild finishes is safe. Logical ids are unchanged,
+  so nothing is replaced. Stacks created from scratch see no difference.
+
 ## Constraints and assumptions
 
 - **The stacks synthesize offline.** `cdk synth` runs in CI with `--no-lookups` and no
