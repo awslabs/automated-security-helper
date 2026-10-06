@@ -1618,6 +1618,13 @@
         'offline_strategy': 'bundled',
         'version': None,
       }),
+      'gitleaks': dict({
+        'dependencies_satisfied': True,
+        'enabled': False,
+        'name': 'gitleaks',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
       'grype': dict({
         'dependencies_satisfied': True,
         'enabled': True,

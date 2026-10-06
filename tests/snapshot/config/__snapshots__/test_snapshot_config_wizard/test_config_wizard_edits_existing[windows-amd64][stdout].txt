@@ -14,6 +14,7 @@ Scanner configuration
 │ cfn-nag        │        yes        │
 │ checkov        │        yes        │
 │ detect-secrets │        yes        │
+│ gitleaks       │        no         │
 │ grype          │        yes        │
 │ npm-audit      │        yes        │
 │ opengrep       │        no         │
@@ -25,6 +26,7 @@ Scanner configuration
   Enable cfn-nag? [Y/n]:
   Enable checkov? [Y/n]: n
   Enable detect-secrets? [Y/n]:
+  Enable gitleaks? [y/N]:
   Enable grype? [Y/n]: n
   Enable npm-audit? [Y/n]:
   Enable opengrep? [y/N]:

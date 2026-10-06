@@ -23,6 +23,8 @@ Installing dependencies for scanner plugin: checkov
 Running command: uv tool install checkov>=3.2.0,<4.0.0
 Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: detect-secrets
+Installing dependencies for scanner plugin: gitleaks (opt-in: runs only when enabled in config or
+named with --scanners)
 Installing dependencies for scanner plugin: grype
 Installing dependencies for scanner plugin: npm-audit
 Installing dependencies for scanner plugin: opengrep
@@ -55,6 +57,7 @@ Installing dependencies for reporter plugin: yaml
 │ cfn-nag        │ scanner   │ cfn_nag_scan    │    0 │      0 │ ALREADY PRESENT │ bin/cfn_nag_sc… │
 │ checkov        │ scanner   │ checkov         │    1 │      0 │ INSTALLED       │ bin/checkov     │
 │ detect-secrets │ scanner   │ detect-secrets  │    0 │      0 │ ALREADY PRESENT │ bin/detect-sec… │
+│ gitleaks       │ scanner   │ gitleaks        │    0 │      0 │ ALREADY PRESENT │ bin/gitleaks    │
 │ grype          │ scanner   │ grype           │    0 │      0 │ ALREADY PRESENT │ bin/grype       │
 │ npm-audit      │ scanner   │ npm             │    0 │      0 │ ALREADY PRESENT │ bin/npm         │
 │ opengrep       │ scanner   │ opengrep        │    0 │      0 │ ALREADY PRESENT │ bin/opengrep    │
@@ -63,8 +66,9 @@ Installing dependencies for reporter plugin: yaml
 └────────────────┴───────────┴─────────────────┴──────┴────────┴─────────────────┴─────────────────┘
 ╭───────────────────────────────────── Installation Complete ──────────────────────────────────────╮
 │ Commands run: 5 (0 failed)                                                                       │
-│ Tools verified on PATH: 11 -- bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, jupyter, │
-│ npm-audit, opengrep, semgrep, syft                                                               │
-│ No install path on this platform: cfn-nag, detect-secrets, grype, npm-audit, opengrep, syft      │
+│ Tools verified on PATH: 12 -- bandit, cdk-nag, cfn-nag, checkov, detect-secrets, gitleaks,       │
+│ grype, jupyter, npm-audit, opengrep, semgrep, syft                                               │
+│ No install path on this platform: cfn-nag, detect-secrets, gitleaks, grype, npm-audit, opengrep, │
+│ syft                                                                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 0]
