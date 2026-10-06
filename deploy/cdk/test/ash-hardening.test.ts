@@ -206,6 +206,41 @@ describe('the image-build bootstrap starter has no environment', () => {
     },
   );
 
+  // The same on the committed templates, which are what checkov scans. synth
+  // --check keeps them equal to the synthesized stacks above; this reads them
+  // directly so the property under test is checked on the scanned artifact too.
+  const templatesDir = path.join(__dirname, '..', 'templates');
+  const committedStarters = fs
+    .readdirSync(templatesDir)
+    .filter((file) => file.endsWith('.template.json'))
+    .sort()
+    .flatMap((file) => {
+      const resources = JSON.parse(fs.readFileSync(path.join(templatesDir, file), 'utf8'))
+        .Resources as Record<string, any>;
+      return Object.entries(resources)
+        .filter(
+          ([logicalId, r]) =>
+            r.Type === 'AWS::Lambda::Function' && logicalId.includes('BootstrapStarter'),
+        )
+        .map(([logicalId, r]) => [file, logicalId, r.Properties ?? {}] as const);
+    });
+
+  test('every committed template with a bootstrap starter is checked', () => {
+    expect(committedStarters.map(([file]) => file)).toEqual([
+      'AshAgentCore.template.json',
+      'AshCodeCommitGate.template.json',
+      'AshFargate.template.json',
+    ]);
+  });
+
+  test.each(committedStarters)(
+    '%s %s has no Environment property',
+    (_file, _logicalId, props) => {
+      expect(Object.keys(props)).not.toContain('Environment');
+      expect(Object.keys(props)).not.toContain('KmsKeyArn');
+    },
+  );
+
   const withBootstrap = CASES.filter(
     ([, t]) => Object.keys(t.findResources('Custom::AshImageBootstrap')).length > 0,
   );
