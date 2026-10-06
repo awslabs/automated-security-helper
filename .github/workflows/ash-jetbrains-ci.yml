@@ -90,11 +90,13 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per pull request; pushing again supersedes the previous run. Copied from
-  # ash-package.yml, including the reasoning: github.ref is refs/pull/<n>/merge on
-  # pull_request and the per-entry gh-readonly-queue branch on merge_group, so every queue
-  # entry lands in its own group and entries never serialize behind one another.
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # One in-flight run per pull request; pushing again supersedes the previous run. github.ref
+  # is refs/pull/<n>/merge on pull_request and the per-entry gh-readonly-queue branch on
+  # merge_group, so every queue entry lands in its own group and entries never serialize
+  # behind one another. Pushes are keyed by commit, as in ash-e2e.yml: grouped by ref, two
+  # quick pushes to v4-capabilities would put both runs in one group, GitHub would cancel the
+  # older one while it was still pending, and that commit would get no headless-real verdict.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   # Only pull_request runs may be cancelled. A merge_group run must finish or the queue loses
   # its verdict.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
