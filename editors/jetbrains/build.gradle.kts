@@ -547,11 +547,16 @@ val runIdeForUiTests by intellijPlatformTesting.runIde.registering {
         val project = providers.environmentVariable("ASH_UI_PROJECT")
         val ideConfig = layout.projectDirectory.dir("src/uiTest/ide-config")
         val configDir = sandboxConfigDirectory
+        val systemDir = sandboxSystemDirectory
+        val logDir = sandboxLogDirectory
         doFirst {
-            // A fresh, pinned configuration for every start.
-            val options = configDir.get().asFile.resolve("options")
-            options.deleteRecursively()
-            ideConfig.asFile.resolve("options").copyRecursively(options)
+            // Every start from nothing but the pinned settings: the configuration, the caches
+            // and indexes, and the logs of an earlier start are removed, including the .lock and
+            // .port files an IDE that was killed leaves behind. Measured: a start after a killed
+            // one exited with DirectoryLock.CannotActivateException, because the stale lock
+            // named a PID that an unrelated process in the new container happened to hold.
+            listOf(configDir, systemDir, logDir).forEach { it.get().asFile.deleteRecursively() }
+            ideConfig.asFile.resolve("options").copyRecursively(configDir.get().asFile.resolve("options"))
         }
         argumentProviders += CommandLineArgumentProvider {
             listOf(project.orNull ?: throw GradleException("ASH_UI_PROJECT names the project the visual suite opens"))

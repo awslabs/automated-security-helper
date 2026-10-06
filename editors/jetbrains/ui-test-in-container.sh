@@ -127,9 +127,8 @@ declare -a DIGESTS=()
 for run in $(seq 1 "$RUNS"); do
   say "run $run of $RUNS: fresh project, fresh IDE configuration, IDE start"
   fresh_project
-  # The sandbox's system directory holds caches and indexes from a previous start; removed so
-  # every run starts the same way.
-  rm -rf build/idea-sandbox/*/system_runIdeForUiTests build/idea-sandbox/*/log_runIdeForUiTests
+  # runIdeForUiTests removes the previous start's configuration, caches, indexes and logs
+  # before every start (see build.gradle.kts), so each run starts the same way.
   IDE_LOG="$LOGS/ide-run$run.log"
   setsid ./gradlew --no-daemon --console=plain runIdeForUiTests > "$IDE_LOG" 2>&1 &
   IDE_PID=$!
