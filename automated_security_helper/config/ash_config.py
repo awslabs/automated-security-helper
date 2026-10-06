@@ -395,6 +395,7 @@ class ScannerConfigSegment(_PluginConfigSegment):
             config_class = type(value)
             if (
                 getattr(config_class, "OPT_IN", False) is True
+                and getattr(value, "enabled", None) is not True
                 and value == config_class()
             ):
                 names.append(name)
