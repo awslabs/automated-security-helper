@@ -791,3 +791,23 @@ runs:
           PY=python
         fi
         "$PY" .github/scripts/assert_scanners_completed.py
+
+    # Snapshots of what ASH prints when a real runtime runs its image: `ash --version` and
+    # `ash build-image --help` inside it, `ash --mode container` and both wrappers scanning
+    # the snapshot fixture, and the exit status each one ends with. The unit-test legs have
+    # no runtime, so tests/conftest.py deselects these there; the image the scan above just
+    # built is what makes them runnable here, which is why this is a step and not a job.
+    #
+    # Every container leg compares against the same snapshots, so a runtime whose output or
+    # exit status differs from docker's fails here by name. `--no-cov`: coverage is the
+    # unit-test legs' gate. `-n 0`: four containers at once on a podman or finch runner buys
+    # nothing and costs memory. OCI_RUNNER and OCI_RUNNER_WRAPPER come from the job env.
+    # Last, so a snapshot diff never hides one of the scan's own diagnostics above.
+    - name: Snapshot the container-runtime output
+      if: inputs.method != 'python-local'
+      shell: bash
+      run: |
+        uv run --extra cdk pytest \
+          tests/snapshot/container/runtime/test_snapshot_container_runtime.py \
+          tests/snapshot/container/runtime/test_snapshot_container_bash_wrapper.py \
+          --run-container-snapshots --no-cov -n 0

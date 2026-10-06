@@ -1230,8 +1230,9 @@ jobs:
   # ash-install-methods.yml still shares are those last four. Its pip, pipx, uvx, pre-commit,
   # mcp and nix legs now have the namespace to themselves.
   # ash-install-methods.yml is path-filtered to pyproject.toml, hatch_build.py,
-  # automated_security_helper/**, .pre-commit-hooks.yaml, Formula/** and itself, so whether it
-  # runs is decided by whether the commit touches those paths. A CI-plumbing commit like the
+  # automated_security_helper/**, .pre-commit-hooks.yaml, Formula/**, itself, and the nix
+  # leg's action and snapshot module, so whether it runs is decided by whether the commit
+  # touches those paths. A CI-plumbing commit like the
   # one measured here triggers no run of it -- confirmed by querying that workflow for runs on
   # the branch and getting zero, rather than assuming the filter excluded it -- and sees 186
   # check runs over 185 names. A commit touching package code triggers both surfaces and sees
