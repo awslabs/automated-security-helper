@@ -14,6 +14,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import yaml
+
 from ash_operator import constants
 
 # Both overridable so concurrent runs on one host -- or a CI runner and a developer
@@ -151,3 +153,145 @@ def operator_logs(tail: int = 200) -> str:
         "-n", NAMESPACE, "logs", "deployment/ash-operator", f"--tail={tail}", check=False
     )
     return result.stdout + result.stderr
+
+
+# The default ``config`` of :func:`apply_scan`: a project name and a MEDIUM threshold.
+# A sentinel rather than a literal default, so ``config=None`` can mean "no config".
+PROJECT_CONFIG = object()
+
+
+def apply_fixture_configmap(name: str, fixture: str | Path) -> None:
+    """Load a fixture tree into a ConfigMap the scan mounts as its source.
+
+    A ``str`` names a directory under this harness's own ``fixtures/``; a ``Path`` is
+    used as given, which is how the shared tree in ``tests/e2e/fixtures`` at the
+    repository root gets in.
+    """
+    directory = fixture if isinstance(fixture, Path) else E2E_DIR / "fixtures" / fixture
+    assert directory.is_dir() and any(directory.iterdir()), (
+        f"fixture {directory} is missing or empty; a ConfigMap of nothing scans clean"
+    )
+    # `create --dry-run=client | apply` rather than `create`, so re-running the suite
+    # against a fresh cluster and against a warm one behave the same.
+    rendered = kubectl(
+        "-n",
+        NAMESPACE,
+        "create",
+        "configmap",
+        name,
+        f"--from-file={directory}",
+        "--dry-run=client",
+        "-o",
+        "yaml",
+    ).stdout
+    kubectl_apply_stdin(rendered)
+
+
+def apply_scan(
+    name: str,
+    *,
+    source_configmap: str,
+    shard_count: int = 3,
+    scanners: list[str] | None = None,
+    backoff_limit: int = 0,
+    min_severity: str | None = "MEDIUM",
+    config: dict | None | object = PROJECT_CONFIG,
+    extra_spec: dict | None = None,
+) -> None:
+    """Create or update an AshScan.
+
+    ``min_severity=None`` and ``config=None`` leave the field out, so the run uses
+    ASH's own defaults; the shared contract cases need that to be the same scan every
+    other channel runs.
+    """
+    spec = {
+        "image": ASH_IMAGE,
+        "imagePullPolicy": "Never",
+        "shardCount": shard_count,
+        "backoffLimit": backoff_limit,
+        "scanServiceAccountName": "ash-scan",
+        "source": {"configMap": {"name": source_configmap}},
+        "results": {"size": "1Gi", "accessModes": ["ReadWriteOnce"]},
+        # One shard at a time, so a ReadWriteOnce claim on a single-node kind
+        # cluster works. The partition is unaffected -- it is a function of the
+        # roster and the two integers, not of how many pods run at once.
+        "parallelism": 1,
+        "scanners": scanners or ["bandit", "detect-secrets"],
+    }
+    if min_severity is not None:
+        spec["minSeverity"] = min_severity
+    if config is PROJECT_CONFIG:
+        spec["config"] = {
+            "project_name": name,
+            "global_settings": {"severity_threshold": "MEDIUM"},
+        }
+    elif config is not None:
+        spec["config"] = config
+    if extra_spec:
+        spec.update(extra_spec)
+    body = {
+        "apiVersion": f"{GROUP}/v1alpha1",
+        "kind": "AshScan",
+        "metadata": {"name": name, "namespace": NAMESPACE},
+        "spec": spec,
+    }
+    kubectl_apply_stdin(yaml.safe_dump(body))
+
+
+def scan_status(name: str) -> dict:
+    obj = kubectl_json("-n", NAMESPACE, "get", "ashscan", name)
+    return obj.get("status") or {}
+
+
+def wait_terminal(name: str, timeout: int = 900) -> dict:
+    # The last observed phase is tracked explicitly rather than left to wait_for's
+    # "last saw" reporting. wait_for prints the predicate's return value, which is
+    # None for "not yet" -- so a timeout read "last saw None", which looks like an
+    # empty .status and sends the reader after the wrong thing. It happened: under
+    # nektos/act this timed out and the message implied the operator had written no
+    # status at all, when in fact the phase was Scanning and the scan was simply
+    # slower than the budget.
+    seen: list[str | None] = [None]
+
+    def check():
+        status = scan_status(name)
+        seen[0] = status.get("phase")
+        if seen[0] in TERMINAL:
+            return status
+        return None
+
+    try:
+        status = wait_for(check, timeout=timeout, what=f"AshScan/{name} to reach a terminal phase")
+    except AssertionError:
+        print(f"=== AshScan/{name} last observed phase: {seen[0]!r} ===")
+        print(f"=== raw status: {json.dumps(scan_status(name))[:1500]} ===")
+        print("=== operator logs ===")
+        print(operator_logs(300))
+        print("=== jobs ===")
+        kubectl("-n", NAMESPACE, "get", "jobs", check=False)
+        kubectl("-n", NAMESPACE, "get", "pods", check=False)
+        raise
+    # The verdict fields, printed on success too, so a CI log shows what each run
+    # actually ended as rather than only that the assertions held.
+    summary = {
+        key: status.get(key)
+        for key in ("phase", "exitCode", "coverageComplete", "coverageGaps", "findings")
+    }
+    print(f"=== AshScan/{name} terminal: {json.dumps(summary, sort_keys=True)} ===")
+    return status
+
+
+def shard_pods(scan_uid: str) -> list[dict]:
+    listing = kubectl_json(
+        "-n",
+        NAMESPACE,
+        "get",
+        "pods",
+        "-l",
+        f"{GROUP}/scan-uid={scan_uid},{GROUP}/role=shard",
+    )
+    return listing["items"]
+
+
+def scan_uid(name: str) -> str:
+    return kubectl_json("-n", NAMESPACE, "get", "ashscan", name)["metadata"]["uid"]

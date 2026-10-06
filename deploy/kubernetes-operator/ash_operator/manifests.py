@@ -36,6 +36,8 @@ from typing import Any
 
 from ash_operator import contract
 from ash_operator.constants import (
+    ATOMIC_WRITER_DATA_DIR,
+    ATOMIC_WRITER_SOURCES,
     COLLECT_ENTRYPOINT_FILENAME,
     CONFIG_FILENAME,
     CONFIG_MOUNT,
@@ -227,6 +229,17 @@ def _mounts(*, source_read_only: bool = True) -> list[dict[str, Any]]:
     ]
 
 
+def scan_source_dir(source: dict[str, Any]) -> str:
+    """The directory a shard scans inside the source mount.
+
+    The mount root, except for a volume the kubelet writes with its atomic writer,
+    where the root holds every file twice; see ``ATOMIC_WRITER_DATA_DIR``.
+    """
+    if set(source) & ATOMIC_WRITER_SOURCES:
+        return f"{SOURCE_MOUNT}/{ATOMIC_WRITER_DATA_DIR}"
+    return SOURCE_MOUNT
+
+
 def build_shard_job(
     *,
     scan: dict[str, Any],
@@ -266,7 +279,7 @@ def build_shard_job(
     # where it wants an integer. The shell sees the real environment and has
     # neither problem.
     scan_argv = contract.build_scan_argv(
-        source_dir=SOURCE_MOUNT,
+        source_dir=scan_source_dir(spec["source"]),
         output_dir=OUTPUT_MOUNT,
         shard_index=None,
         shard_count=None,

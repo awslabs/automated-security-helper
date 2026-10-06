@@ -232,6 +232,46 @@ class TestShardJob:
         assert "blockOwnerDeletion" not in owner
 
 
+class TestScanSourceDir:
+    """Which directory inside the source mount a shard scans.
+
+    configMap and secret volumes come from the kubelet's atomic writer, where the
+    mount root holds every file twice: a symlink per name, and the real file in a
+    timestamped directory that ``..data`` points to. Scanning the root reported every
+    finding twice on kind. The other sources hold one copy at the root.
+    """
+
+    @staticmethod
+    def source_dir(source):
+        args = shard_job({"source": source})["spec"]["template"]["spec"]["containers"][0]["args"]
+        return args[args.index("--source-dir") + 1]
+
+    @pytest.mark.parametrize(
+        "source",
+        [{"configMap": {"name": "tree"}}, {"secret": {"secretName": "tree"}}],
+    )
+    def test_an_atomic_writer_volume_is_scanned_at_its_data_link(self, source):
+        assert self.source_dir(source) == f"{SOURCE_MOUNT}/..data"
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            {"persistentVolumeClaim": {"claimName": "src", "readOnly": True}},
+            {"csi": {"driver": "example.csi.k8s.io"}},
+        ],
+    )
+    def test_any_other_volume_is_scanned_at_the_mount_root(self, source):
+        assert self.source_dir(source) == SOURCE_MOUNT
+
+    def test_the_mount_itself_does_not_move(self):
+        # Only the scan's starting point changes; the volume is still mounted at the
+        # path every layout check is written against.
+        job = shard_job({"source": {"configMap": {"name": "tree"}}})
+        mounts = job["spec"]["template"]["spec"]["containers"][0]["volumeMounts"]
+        source = next(m for m in mounts if m["name"] == "ash-source")
+        assert source["mountPath"] == SOURCE_MOUNT
+
+
 class TestCollectJob:
     def test_it_is_not_indexed(self):
         spec = collect_job()["spec"]

@@ -23,14 +23,12 @@ from tests.e2e.helpers import (
     ASH_IMAGE_NOSTAMP,
     CLUSTER_NAME,
     IMAGE_TAG,
-    NAMESPACE,
     OPERATOR_DIR,
     OPERATOR_IMAGE,
-    kubectl,
-    kubectl_apply_stdin,
     run,
     stage_ash_source,
 )
+from tests.e2e.lifecycle import install_operator
 
 E2E_ENABLED = os.environ.get("ASH_OPERATOR_E2E") == "1"
 E2E_DIR = Path(__file__).resolve().parent
@@ -154,43 +152,22 @@ def cluster(require_tooling, ash_image, ash_image_nostamp, operator_image):
 
 @pytest.fixture(scope="session")
 def installed(cluster):
-    """CRDs, RBAC and the operator, in that order."""
+    """CRDs, RBAC and the operator, as README.md installs them."""
     generated = OPERATOR_DIR / "generated"
-    crds = sorted(generated.glob("crd-*.yaml"))
-    assert crds, (
+    assert sorted(generated.glob("crd-*.yaml")), (
         f"no generated CRDs under {generated}. Run "
         f"`python -m ash_operator.generate_manifests` first -- installing nothing and "
         f"then passing would prove nothing."
     )
-    for crd in crds:
-        kubectl("apply", "-f", str(crd))
-    for crd in crds:
-        plural = crd.stem.removeprefix("crd-")
-        kubectl(
-            "wait",
-            "--for=condition=Established",
-            f"crd/{plural}.ash.awslabs.github.io",
-            "--timeout=90s",
-        )
-    # The namespace lives in operator.yaml, and rbac.yaml's objects are in it, so the
-    # namespace has to exist first -- but the Deployment must not, or its ReplicaSet
-    # fails to create a pod with "serviceaccount ash-operator not found" and spends a
-    # restart backoff before the SA arrives.
-    shipped = (OPERATOR_DIR / "manifests" / "operator.yaml").read_text()
-    # The shipped manifest names `ash-operator:local`. A run with its own image tag
-    # substitutes it here, and asserts that it did: an apply that silently kept the
-    # shipped name would run whatever image last carried that tag on the node.
-    shipped_image = "image: ash-operator:local"
-    assert shipped.count(shipped_image) == 1, "operator.yaml no longer names one image"
-    kubectl_apply_stdin(shipped.replace(shipped_image, f"image: {OPERATOR_IMAGE}"))
-    kubectl("apply", "-f", str(OPERATOR_DIR / "manifests" / "rbac.yaml"))
-    kubectl("-n", NAMESPACE, "rollout", "restart", "deployment/ash-operator", check=False)
-    kubectl(
-        "-n",
-        NAMESPACE,
-        "wait",
-        "--for=condition=Available",
-        "deployment/ash-operator",
-        "--timeout=300s",
-    )
+    install_operator(OPERATOR_DIR, OPERATOR_IMAGE)
     yield
+
+
+# The lifecycle module uninstalls the operator and reinstalls it from N-1, so it has
+# to run after every module that relies on the session's fresh install. Ordered here
+# rather than by file name, which a rename would silently change.
+LIFECYCLE_MODULE = "test_e2e_lifecycle.py"
+
+
+def pytest_collection_modifyitems(session, config, items):
+    items.sort(key=lambda item: item.path.name == LIFECYCLE_MODULE)

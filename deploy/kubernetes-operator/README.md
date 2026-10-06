@@ -14,6 +14,24 @@ Name the CRD files rather than the directory: `generated/` also holds
 `config-schema-translation.json`, a report for reviewers with no `kind`, and
 `kubectl apply -f generated/` stops on it.
 
+To upgrade, run the same two commands from the newer tree, with the newer operator
+image. A finished `AshScan` keeps its status and is not re-run, and a scan in flight
+is merged by the new operator. To uninstall, delete in the reverse order:
+
+```
+kubectl delete -f generated/crd-ashscans.yaml -f generated/crd-ashmcpservers.yaml  # every AshScan and AshMcpServer, and what they own
+kubectl delete -f manifests/         # namespace, RBAC, operator Deployment
+```
+
+The operator puts no finalizer on either kind, so the first command does not wait
+for the operator, and the garbage collector removes each scan's Jobs, pods,
+ConfigMap and results claim, and each MCP server's Deployment and Service. The
+results claim goes with its scan, so copy any report you want to keep first, and
+delete any pod of your own that mounted the claim to do it: pvc-protection keeps a
+claim in Terminating while a pod object names it, even a finished one.
+`tests/e2e/test_e2e_lifecycle.py` runs both procedures on kind, upgrading from the
+operator as it was before its most recent code change.
+
 You must build the operator image yourself (`Dockerfile`), and you must supply an
 ASH image in `spec.image`. Nothing in this directory or its workflow pushes either
 one: the end-to-end test loads both into a kind cluster with
@@ -127,6 +145,12 @@ Four siblings. None is an ancestor of another, and `ash_operator/volumes.py` ass
 that on every Job it builds — a guard that is currently impossible to trip, which is
 the point: it is what stands between a future patch making the paths configurable
 and a silently clean scan.
+
+A `configMap` or `secret` source is scanned at `/workspace/src/..data`, not at the
+mount root. The kubelet writes those volumes with its atomic writer: the files sit in
+a timestamped directory that `..data` links to, and each top-level name is a symlink
+through it, so the root holds every file twice. Scanned at the root, the shared e2e
+fixture's three detect-secrets findings came back as six on kind.
 
 ## The CRD is generated from ASH's own models
 

@@ -72,6 +72,14 @@ SOURCE_MOUNT = f"{WORKSPACE_ROOT}/src"
 OUTPUT_MOUNT = f"{WORKSPACE_ROOT}/out"
 CONFIG_MOUNT = f"{WORKSPACE_ROOT}/config"
 RESULTS_MOUNT = f"{WORKSPACE_ROOT}/results"
+# The kubelet writes configMap and secret volumes with its atomic writer: the files
+# live in a timestamped directory, `..data` is a symlink to it, and each top-level name
+# is a symlink through `..data`. Scanning the mount root therefore reads every file
+# twice, once through its symlink and once inside the timestamped directory, and every
+# finding comes back twice (measured on kind: six detect-secrets results for a fixture
+# that has three). `..data` holds exactly one copy, so those sources are scanned there.
+ATOMIC_WRITER_DATA_DIR = "..data"
+ATOMIC_WRITER_SOURCES = frozenset({"configMap", "secret"})
 # A mount path inside a container, not a path this process writes to. The pod backs
 # it with an emptyDir, so it is private to one pod and gone when the pod is; the
 # symlink attacks S108 is about need a shared /tmp on a host.
