@@ -639,6 +639,12 @@
   .../ash_aggregated_results.json`. It now stops after the refusal's own message,
   with its exit code: 1, or the runner's status for a failed build.
 
+- **`ash scan --mode container --no-build` no longer needs a Dockerfile.** The
+  Dockerfile was looked up before ASH decided whether to build, so outside an ASH
+  checkout, with ASH installed from one, `--no-build` refused with `Dockerfile not
+  found` although nothing was going to be built. The lookup now happens only for a
+  build, and `--no-build` runs the image that is already present.
+
 ### Reporting changes
 
 - **Reports now carry the age of every content database a scan used.** Additive:
