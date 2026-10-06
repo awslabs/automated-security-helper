@@ -77,6 +77,9 @@
     "typescript": "~5.9.3"
   },
   "overrides": {
-    "stream-json": "^3.5.0"
+    "stream-json": "^3.5.0",
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.3.2"
+    }
   }
 }
