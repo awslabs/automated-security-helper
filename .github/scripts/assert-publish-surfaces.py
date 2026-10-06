@@ -316,6 +316,22 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-jetbrains-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=jetbrains-visual-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/jetbrains/build/ui-snapshots/|editors/jetbrains/build/ui-logs/|"
+            "editors/jetbrains/build/reports/tests/uiTest/"
+        ),
+        reason=(
+            "Failure evidence only (if: failure()): the visual suite's rendered "
+            "scenes and diff images, the IDE log and the test report, for a pixel "
+            "difference a job log cannot show. Screenshots of a fixture project "
+            "and named build directories, not build/libs or build/distributions."
+        ),
+    ),
+    Entry(
         file=".github/actions/run-scan-test/action.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
