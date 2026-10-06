@@ -30,6 +30,9 @@ What it asserts, for every console link in DOC:
 With ``--lint-cmd`` it then runs that command once per distinct template the links
 name, as ``<cmd> <template> --regions <launch regions>``, and fails if any run exits
 non-zero. The caller chooses the linter and its strictness; see scripts/e2e/quick_create.sh.
+CMD is split with POSIX shell rules (``shlex.split``) on every platform, so a caller
+builds it with ``shlex.join``; an unquoted Windows path would lose its backslashes. A
+linter that cannot be started is a usage error.
 
 Exit status: 0 when every assertion holds, 1 when one does not, 2 for a usage error.
 """
@@ -252,7 +255,10 @@ def lint(
     for stack in sorted(regions):
         path = templates / f"{stack}{TEMPLATE_SUFFIX}"
         argv = [*lint_cmd, str(path), "--regions", *regions[stack]]
-        result = subprocess.run(argv, check=False)
+        try:
+            result = subprocess.run(argv, check=False)
+        except OSError as exc:
+            raise UsageError(f"cannot run the linter {lint_cmd[0]!r}: {exc}") from exc
         print(f"lint {stack} in {' '.join(regions[stack])}: exit {result.returncode}")
         if result.returncode != 0:
             problems.append(
@@ -271,7 +277,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--lint-cmd",
         default="",
-        help="linter command line, run once per template the links name",
+        help=(
+            "linter command line, run once per template the links name; quoted the "
+            "way a POSIX shell quotes on every platform (shlex), so a Windows path "
+            "with backslashes must be quoted"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -290,7 +300,11 @@ def main(argv: list[str] | None = None) -> int:
         f"over {len(regions)} template(s), {params} param_ value(s) checked"
     )
     if args.lint_cmd and not problems:
-        problems.extend(lint(shlex.split(args.lint_cmd), args.templates, regions))
+        try:
+            problems.extend(lint(shlex.split(args.lint_cmd), args.templates, regions))
+        except UsageError as exc:
+            print(f"USAGE: {exc}", file=sys.stderr)
+            return 2
 
     if problems:
         print("quick-create e2e assertion FAILED:", file=sys.stderr)
