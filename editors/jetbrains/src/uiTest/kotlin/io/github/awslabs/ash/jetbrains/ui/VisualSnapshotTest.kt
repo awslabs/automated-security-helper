@@ -345,17 +345,29 @@ class VisualSnapshotTest {
                 """,
             ) == "true"
         }
-        // The view selects its first row on its own, at a moment that depends on when the tree's
-        // model finished loading, and a selected row also changes which toolbar buttons are
-        // enabled. Measured: run 1 rendered the first finding selected and run 2 did not. The
-        // selection is therefore cleared, so the scene is the list of findings and nothing else.
+        // The view selects a row on its own, at a moment that depends on when the tree's model
+        // finished loading, and a selected row also changes which toolbar buttons are enabled.
+        // Measured: one run rendered the first finding selected and the next did not, and
+        // clearing the selection did not hold because the view selected the row again
+        // afterwards. So the first finding is selected here, which is the state the view
+        // converges on either way, and the scene is rendered once that selection has held.
         js(
             """
             var tw = com.intellij.openapi.wm.ToolWindowManager.getInstance(ash.project()).getToolWindow("Problems View");
-            ash.find(tw.getComponent(), function (c) { return c instanceof javax.swing.JTree; }).clearSelection();
+            ash.find(tw.getComponent(), function (c) { return c instanceof javax.swing.JTree; }).setSelectionRow(1);
             "ok";
             """,
         )
+        waitFor("the first finding to stay selected") {
+            js(
+                """
+                var tw = com.intellij.openapi.wm.ToolWindowManager.getInstance(ash.project()).getToolWindow("Problems View");
+                var tree = ash.find(tw.getComponent(), function (c) { return c instanceof javax.swing.JTree; });
+                var rows = tree.getSelectionRows();
+                String(rows != null && rows.length == 1 && rows[0] == 1 && !tree.hasFocus());
+                """,
+            ) == "true"
+        }
         assertScene(
             "problems-tool-window",
             render("com.intellij.openapi.wm.ToolWindowManager.getInstance(ash.project()).getToolWindow('Problems View').getComponent()"),
