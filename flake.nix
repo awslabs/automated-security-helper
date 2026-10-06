@@ -77,6 +77,7 @@
           pkgs.semgrep
           pkgs.syft
           pkgs.trivy # community-mode scanner set
+          pkgs.zizmor # opt-in; runs only when enabled or named with --scanners
           (opengrepFor system)
         ];
     in

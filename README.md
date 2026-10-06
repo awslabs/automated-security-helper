@@ -78,6 +78,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 | [npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit) | SCA       | JavaScript/Node.js                                                                           | Install Node.js/npm                                                     |
 | [Grype](https://github.com/anchore/grype)                     | SCA       | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Grype Installation](https://github.com/anchore/grype#installation) |
 | [Syft](https://github.com/anchore/syft)                       | SBOM      | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Syft Installation](https://github.com/anchore/syft#installation)   |
+| [zizmor](https://github.com/zizmorcore/zizmor) (opt-in)     | SAST      | GitHub Actions workflows and composite actions                                               | Managed via UV tool isolation (auto-installed: `zizmor>=1.29.0,<2.0.0`) |
 
 ## Prerequisites
 

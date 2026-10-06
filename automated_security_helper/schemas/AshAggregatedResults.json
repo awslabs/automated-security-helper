@@ -1708,6 +1708,19 @@
                 "scan_timeout": 1800,
                 "severity_threshold": null
               }
+            },
+            "zizmor": {
+              "enabled": false,
+              "name": "zizmor",
+              "options": {
+                "config_file": null,
+                "install_timeout": 300,
+                "online_audits": false,
+                "persona": "regular",
+                "scan_timeout": 1800,
+                "severity_threshold": null,
+                "tool_version": ">=1.29.0,<2.0.0"
+              }
             }
           },
           "description": "Scanner configurations by name."
@@ -16241,6 +16254,23 @@
             }
           },
           "description": "Configure the options for Syft"
+        },
+        "zizmor": {
+          "$ref": "#/$defs/ZizmorScannerConfig",
+          "default": {
+            "enabled": false,
+            "name": "zizmor",
+            "options": {
+              "config_file": null,
+              "install_timeout": 300,
+              "online_audits": false,
+              "persona": "regular",
+              "scan_timeout": 1800,
+              "severity_threshold": null,
+              "tool_version": ">=1.29.0,<2.0.0"
+            }
+          },
+          "description": "Configure the options for zizmor"
         }
       },
       "title": "ScannerConfigSegment",
@@ -21861,6 +21891,131 @@
       "additionalProperties": true,
       "properties": {},
       "title": "YAMLReporterConfigOptions",
+      "type": "object"
+    },
+    "ZizmorScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "zizmor",
+          "default": "zizmor",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ZizmorScannerConfigOptions",
+          "default": {
+            "config_file": null,
+            "install_timeout": 300,
+            "online_audits": false,
+            "persona": "regular",
+            "scan_timeout": 1800,
+            "severity_threshold": null,
+            "tool_version": ">=1.29.0,<2.0.0"
+          },
+          "description": "Configure zizmor scanner"
+        }
+      },
+      "title": "ZizmorScannerConfig",
+      "type": "object"
+    },
+    "ZizmorScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a zizmor configuration file, relative to the source directory, passed as `--config`. When unset, zizmor discovers `zizmor.yml` or `.github/zizmor.yml` in the repository itself.",
+          "title": "Config File"
+        },
+        "install_timeout": {
+          "default": 300,
+          "description": "Timeout in seconds for tool installation",
+          "title": "Install Timeout",
+          "type": "integer"
+        },
+        "online_audits": {
+          "default": false,
+          "description": "Allow zizmor's online audits. Off by default: zizmor runs with `--offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, `--offline` is not passed, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Ignored, with a warning, when ASH runs in offline mode.",
+          "title": "Online Audits",
+          "type": "boolean"
+        },
+        "persona": {
+          "default": "regular",
+          "description": "zizmor persona. `regular` reports the fewest false positives; `pedantic` adds code-smell findings; `auditor` reports everything, false positives included.",
+          "enum": [
+            "regular",
+            "pedantic",
+            "auditor"
+          ],
+          "title": "Persona",
+          "type": "string"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": ">=1.29.0,<2.0.0",
+          "description": "Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces.",
+          "title": "Tool Version"
+        }
+      },
+      "title": "ZizmorScannerConfigOptions",
       "type": "object"
     },
     "automated_security_helper__schemas__cyclonedx_bom_1_6_schema__Attachment": {

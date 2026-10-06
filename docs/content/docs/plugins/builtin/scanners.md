@@ -18,6 +18,7 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[Opengrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
 | **[Semgrep](#semgrep)**               | Static analysis scanner         | 30+ languages                   | Community and custom rules                 |
 | **[Syft](#syft)**                     | SBOM generator                  | Container images, filesystems   | Software inventory generation              |
+| **[zizmor](#zizmor)** (opt-in)        | GitHub Actions analyzer         | Workflows, composite actions    | Template injection, trigger and pin audits |
 
 ## Scanner Details
 
@@ -284,6 +285,28 @@ scanners:
 - License identification
 
 **Dependencies**: `syft` binary
+
+---
+
+### zizmor
+
+**Purpose**: Finds security problems in GitHub Actions workflows and composite actions.
+Opt-in: it runs only when enabled in config or named with `--scanners zizmor`.
+
+**Configuration**:
+```yaml
+scanners:
+  zizmor:
+    enabled: true
+    options:
+      persona: regular        # regular, pedantic, auditor
+      online_audits: false    # true lets zizmor use a GitHub token from the environment
+```
+
+See [zizmor](zizmor.md) for what is scanned, the severity mapping, tokens and
+suppressions.
+
+**Dependencies**: `zizmor` (installed with `uv tool install`; shipped in the container image)
 
 ## Best Practices
 

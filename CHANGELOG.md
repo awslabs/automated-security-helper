@@ -640,6 +640,20 @@
   config a scan of the current directory would use, instead of always
   `.ash/.ash.yaml`.
 
+### Features
+
+- **zizmor scanner for GitHub Actions (opt-in).** `zizmor` audits workflows in
+  `.github/workflows` and composite actions (`action.yml`/`action.yaml`) for
+  template injection, dangerous triggers, unpinned actions, credential
+  persistence and excessive permissions. It is opt-in: a default scan does not
+  run or list it; enable it with `scanners.zizmor.enabled: true` or
+  `--scanners zizmor`. It runs with `--offline`, and GitHub tokens in the
+  environment are withheld from it unless `options.online_audits` is true.
+  zizmor's severity and confidence are combined into one ASH severity (a
+  low-confidence finding is reported one band lower). Installed by
+  `ash dependencies install` and in the container image; the nix flake supplies
+  it too. See `docs/content/docs/plugins/builtin/zizmor.md`.
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat

@@ -420,6 +420,10 @@ ENV _ASH_EXEC_MODE="local"
 RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
+# zizmor (opt-in scanner) is installed by the line above through `uv tool install`
+# within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.
+RUN zizmor --version
+
 #
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
 #

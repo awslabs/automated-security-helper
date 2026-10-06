@@ -1,0 +1,140 @@
+# zizmor (GitHub Actions)
+
+[zizmor](https://docs.zizmor.sh) is a static analyzer for GitHub Actions. ASH runs it
+over a repository's workflows and composite actions and reports template
+injection, dangerous triggers, credential persistence, unpinned actions,
+excessive permissions and the rest of zizmor's
+[audits](https://docs.zizmor.sh/audits/).
+
+zizmor is **opt-in**. A default `ash scan` does not run it, list it in the summary,
+or count it anywhere. Turn it on in one of two ways:
+
+```bash
+# For one run
+ash scan --scanners zizmor
+
+# Alongside the default scanners, for one run
+ash scan --config-overrides 'scanners.zizmor.enabled=true'
+```
+
+```yaml
+# Or permanently, in .ash/.ash.yaml
+scanners:
+  zizmor:
+    enabled: true
+```
+
+Once enabled it behaves like any built-in scanner: if zizmor cannot be found or
+installed the scanner reports `MISSING` and, with `fail_on_incomplete_scanners`
+on (the default), the scan exits 1.
+
+## What gets scanned
+
+ASH passes zizmor two kinds of file, taken from its scan set so `.gitignore`,
+`.ashignore` and `global_settings.ignore_paths` apply:
+
+- workflows: `*.yml` and `*.yaml` directly inside a `.github/workflows` directory
+  (the only place GitHub runs a workflow from; subdirectories are not scanned);
+- composite actions: every `action.yml` and `action.yaml`.
+
+Files under `node_modules/` and virtual environments are skipped. A repository
+with neither kind of file does not start zizmor; the scanner reports `SKIPPED`
+with zero findings, the same as cfn-nag on a repository with no templates.
+
+A file named `action.yml` that is not a GitHub Actions definition is not counted.
+A workflow or action that zizmor cannot load (a YAML syntax error, or a file in
+`.github/workflows` that is not a valid workflow) is counted as a target that
+failed, which `--fail-on-incomplete-scanners` reports.
+
+## Configuration
+
+```yaml
+scanners:
+  zizmor:
+    enabled: true
+    options:
+      persona: regular        # regular, pedantic or auditor
+      config_file: null       # path to a zizmor config, relative to the source dir
+      online_audits: false    # see "Network access and tokens"
+      tool_version: ">=1.29.0,<2.0.0"
+      install_timeout: 300
+      scan_timeout: 1800
+      severity_threshold: null
+```
+
+- `persona`: zizmor's [persona](https://docs.zizmor.sh/usage/#using-personas).
+  `regular` has the fewest false positives, `pedantic` adds code-smell findings,
+  and `auditor` reports everything.
+- `config_file`: passed as `--config`. Without it, zizmor reads a `zizmor.yml` or
+  `.github/zizmor.yml` it finds in the repository, as it does when run by hand.
+  A configured file that does not exist fails the scan rather than being ignored.
+- `tool_version`: the pip-style constraint for installing zizmor.
+
+## Network access and tokens
+
+zizmor always runs with `--offline` unless `online_audits: true`. Offline is the
+default because zizmor reads a GitHub token from `GH_TOKEN`, `GITHUB_TOKEN` or
+`ZIZMOR_GITHUB_TOKEN` by itself, and a token that happens to be in a CI job's
+environment is not permission to use it. While offline, ASH removes those three
+variables from zizmor's environment.
+
+`online_audits: true` disables `--offline` and lets those variables reach zizmor
+unchanged, which enables the audits that query the GitHub API (for example
+known-vulnerable actions and impostor commits). ASH never reads, copies or logs
+the token and never puts it on zizmor's command line. ASH's own offline mode
+(`ASH_OFFLINE=true` or `ash scan --offline`) overrides `online_audits`.
+
+`ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and `ZIZMOR_NO_ONLINE_AUDITS` are always
+removed from zizmor's environment, so a scan's result depends on the repository
+and the ASH config rather than on the shell it ran in. Use `config_file` instead
+of `ZIZMOR_CONFIG`.
+
+## Severity mapping
+
+zizmor rates each finding with a severity and a confidence. ASH combines them:
+
+| zizmor severity | confidence Medium or High | confidence Low |
+|-----------------|---------------------------|----------------|
+| High            | HIGH                      | MEDIUM         |
+| Medium          | MEDIUM                    | LOW            |
+| Low             | LOW                       | INFO           |
+| Informational   | INFO                      | INFO           |
+
+zizmor's scale stops at High, so no zizmor finding is CRITICAL. A low-confidence
+finding is one zizmor expects to be wrong some of the time, so it is reported one
+band lower. The SARIF `level` is set to match (HIGH `error`, MEDIUM `warning`, LOW
+`note`, INFO `none`), and zizmor's own values stay on the result as
+`properties["zizmor/severity"]` and `properties["zizmor/confidence"]`. A finding
+missing either value keeps zizmor's own level.
+
+With the default `MEDIUM` threshold, the low-confidence `artipacked` finding
+(Medium, Low) is reported LOW and does not fail the scan on its own.
+
+## Suppressions
+
+Rule IDs are zizmor's audit names with a `zizmor/` prefix, for example
+`zizmor/template-injection`. ASH suppressions by rule, path and line all apply:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: zizmor/dangerous-triggers
+      path: .github/workflows/release.yml
+      line_start: 3
+      reason: "Runs only on tags pushed by maintainers"
+```
+
+zizmor's own [ignore comments](https://docs.zizmor.sh/usage/#ignoring-results)
+(`# zizmor: ignore[template-injection]`) and `zizmor.yml` rules are honored as
+well. Package-scoped and symbol-scoped suppressions do not apply: zizmor reports
+no packages, and a workflow has no functions or classes.
+
+## Installation
+
+`ash dependencies install` installs zizmor with `uv tool install`, and the ASH
+container image ships it. ASH also uses any `zizmor` already on `PATH` whose
+`zizmor --version` satisfies `tool_version`, which covers the nix flake (nixpkgs
+supplies zizmor), Homebrew, and `cargo install`. Offline, ASH does not try to
+install zizmor; install it first.
+
+zizmor is MIT licensed.
