@@ -455,13 +455,6 @@ global_settings:
     #
     # False positives, each read on its line before being listed.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: .github/workflows/ash-kubernetes-operator.yml
-      reason: >-
-        KIND_SHA256 and KUBECTL_SHA256 are the vendors' published SHA-256 digests for
-        the pinned kind and kubectl binaries, from the release pages the comments
-        beside them name. The workflow verifies each download against its digest, so
-        they are public by construction and are what makes the install verifiable.
-    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: deploy/kubernetes-operator/generated/config-schema-translation.json
       reason: >-
         sourceSchemaSha256 is a truncated SHA-256 of ASH's own published config

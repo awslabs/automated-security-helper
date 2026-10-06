@@ -51,11 +51,13 @@ env:
   OPERATOR_DIR: deploy/kubernetes-operator
   KIND_VERSION: v0.30.0
   # The vendor's published digest for kind-linux-amd64 at KIND_VERSION, from
-  # kind-linux-amd64.sha256sum on the release page.
-  KIND_SHA256: 517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889
+  # kind-linux-amd64.sha256sum on the release page. detect-secrets reads any
+  # 64-character hex string as a high-entropy secret, so this line and the
+  # KUBECTL_SHA256 line carry the inline marker, as ash-iac-drift.yml does.
+  KIND_SHA256: 517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889  # pragma: allowlist secret
   KUBECTL_VERSION: v1.37.1
   # The vendor's published digest, from dl.k8s.io/release/<version>/bin/linux/amd64/kubectl.sha256.
-  KUBECTL_SHA256: 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
+  KUBECTL_SHA256: 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8  # pragma: allowlist secret
 
 jobs:
   lint-and-unit:
