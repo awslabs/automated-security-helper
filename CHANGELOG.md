@@ -484,6 +484,12 @@
 
 ### Fixes
 
+- **A scanner whose constructor raises is recorded under its scanner name.** The
+  ERROR row for a scanner that could not be constructed was keyed by its class
+  name (`banditscanner`) because the configured name was read off a dict with
+  `getattr`. It is now keyed by the scanner name (`bandit`), which is the name
+  the expected-scanner roster, the shard partition and `--exclude-scanners` use.
+
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan

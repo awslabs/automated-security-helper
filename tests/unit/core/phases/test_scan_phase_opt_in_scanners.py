@@ -613,6 +613,18 @@ def test_an_enabled_opt_in_scanner_that_cannot_be_built_is_an_error_under_its_na
     assert _compute_exit_code(results, opts, config_fail_on_findings=False) == 1
 
 
+def test_with_no_config_entry_a_failed_build_still_uses_the_declared_name(tmp_path):
+    """A third-party scanner has no config entry; its config class names it."""
+    context = _context(tmp_path)
+    results = _scan(
+        context,
+        [DummyControlScanner, RaisingOptInScanner],
+        enabled_scanners=[OPT_IN_NAME, CONTROL_NAME],
+    )
+    assert results.scanner_results[OPT_IN_NAME].status.value == "ERROR"
+    assert "raisingoptinscanner" not in results.scanner_results
+
+
 def test_the_constructor_already_sees_enabled_when_the_selection_names_it(tmp_path):
     """A scanner that reads config.enabled while it is built must see True.
 
