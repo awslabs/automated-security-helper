@@ -448,6 +448,25 @@
   pre-commit hook, ferret-scan detected pre-commit mode from `PRE_COMMIT=1`, exited 1
   on findings (reported as a scanner failure) and narrowed its results.
 
+- **SARIF upload can hold `security-events: write`.** `run-ash-security-scan.yml`
+  declares only contents, checks and pull-requests, and a called workflow can only
+  narrow its caller's token, so its "Upload ASH SARIF file" step never had
+  `security-events: write` even when the caller granted it. Same-repo pull requests
+  uploaded anyway; `workflow_dispatch` failed with "Resource not accessible by
+  integration".
+
+  The new reusable workflow `upload-ash-sarif.yml` declares the permission and
+  uploads the report from the `ash_output` artifact. To use it, set
+  `collect-sarif-report: false` on the scan and call it from a second job that
+  `needs` the scan job, granting `security-events: write` to that job only.
+  `run-ash-security-scan.yml` is unchanged for existing callers.
+
+  The permission was not added to the scan workflow, not even on a job gated by
+  `collect-sarif-report`. GitHub validates every permission a called workflow
+  declares when the run starts, including on a job whose `if:` is false, and fails
+  a caller that does not grant it before any job runs. That would have broken
+  every caller that never granted `security-events`.
+
 - **cdk-nag now evaluates CDK-synthesized CloudFormation templates.** A template
   produced by `cdk synth` carries a `BootstrapVersion` parameter and a
   `CheckBootstrapVersion` rule of its own. ASH re-includes a template under
