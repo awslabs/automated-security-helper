@@ -73,7 +73,7 @@ ALLOWLIST: dict[tuple[str, str | None, str], str] = {}
 # The baseline sizes when the guard was added. Lower them as entries are
 # removed; never raise them.
 FROZEN_SIZES = {
-    "main": {".ash/.ash.yaml": 211, ".ash/.ash_community_plugins.yaml": 135},
+    "main": {".ash/.ash.yaml": 207, ".ash/.ash_community_plugins.yaml": 123},
     "pre_guard": {".ash/.ash.yaml": 27, ".ash/.ash_community_plugins.yaml": 8},
 }
 

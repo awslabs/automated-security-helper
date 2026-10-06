@@ -5,7 +5,11 @@ add to these lists: a new entry that cannot carry a line range belongs in
 ``ALLOWLIST`` in the guard, with a reason. Removing an entry from a config means
 removing it here too; the guard fails on a stale key, so these lists only shrink.
 
-MAIN_BASELINE holds the entries inherited from ``main``. PRE_GUARD_BASELINE holds the
+MAIN_BASELINE holds the entries inherited from ``main``, and only ones that are still
+unpinned entries in ``origin/main``'s configs (the guard's subset test). A merge of main
+can therefore only shrink it or swap in a key main itself added, within the cap: the
+merge of a513530b dropped the directory globs #724 removed (17 keys) and took
+#717's B108 entry for tests/snapshot/test_snapshot_normalizer.py. PRE_GUARD_BASELINE holds the
 ones that were already on this branch, from other branches, when the guard was
 added. Each is tagged with the branch that landed it.
 """
@@ -15,9 +19,7 @@ from __future__ import annotations
 # (rule_id, path). A rule_id of None matches every rule on the path.
 MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
     ".ash/.ash.yaml": (
-        ("yaml.github-actions.security.*", ".github/**/*.yml"),
         ("CKV_DOCKER_2", "Dockerfile"),
-        ("yaml.github-actions.security.*", "ash-agent-plugins/**/.github/**/*.yml"),
         (
             "B404",
             "ash-agent-plugins/agentic-coding/transpiler/tools/generate_models.py",
@@ -551,15 +553,13 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("B108", "deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py"),
         ("B404", "deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py"),
         ("B603", "deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py"),
-        ("SECRET-SECRET-KEYWORD", "docs/**"),
         ("SECRET-BASE64-HIGH-ENTROPY-STRING", "nix/opengrep.nix"),
         ("SECRET-BASE64-HIGH-ENTROPY-STRING", "pyproject.toml"),
-        ("SECRET-*", "scripts/**"),
         ("B404", "scripts/verify_moto_server_suite.py"),
         ("B603", "scripts/verify_moto_server_suite.py"),
-        ("SECRET-*", "tests/**"),
         ("B404", "tests/integration/cli/test_mcp_stdio_server.py"),
         ("B603", "tests/integration/cli/test_mcp_stdio_server.py"),
+        ("B108", "tests/snapshot/test_snapshot_normalizer.py"),
         ("B404", "tests/unit/assets/test_install_pinned_tool.py"),
         ("B404", "tests/unit/assets/test_with_retry.py"),
         ("B104", "tests/unit/cli/test_mcp_sse_host_binding.py"),
@@ -603,17 +603,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("*:Python Software Foundation License", "**"),
         ("*:Unlicense", "**"),
         ("bash.lang.security.ifs-tampering.ifs-tampering", "**/*.sh"),
-        ("SECRET-HEX-HIGH-ENTROPY-STRING", ".ash/ash_output*/*.*"),
-        ("SECRET-HEX-HIGH-ENTROPY-STRING", ".ash/ash_output*/reports/*.json"),
-        ("SECRET-HEX-HIGH-ENTROPY-STRING", ".ash/ash_output*/scanners/*.json"),
-        (
-            "yaml.github-actions.security.run-shell-injection.run-shell-injection",
-            ".github/**/*.yml",
-        ),
-        (
-            "yaml.github-actions.security.run-shell-injection.run-shell-injection",
-            ".github/actions/run-scan-test/action.yml",
-        ),
         (
             "B404",
             "ash-agent-plugins/agentic-coding/transpiler/tools/generate_models.py",
@@ -748,19 +737,13 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("AWS-0017", "deploy/terraform/modules/fargate/main.tf"),
         ("AWS-0054", "deploy/terraform/modules/fargate/main.tf"),
         ("AWS-0104", "deploy/terraform/modules/fargate/main.tf"),
-        ("SECRET-SECRET-KEYWORD", "docs/**"),
         ("SECRET-SECRET-KEYWORD", "docs/content/docs/plugins/aws/index.md"),
         ("SECRET-SECRET-KEYWORD", "docs/content/docs/plugins/development-guide.md"),
-        (None, "docs/content/docs/testing/examples/*"),
         ("B110", "hatch_build.py"),
         ("API_KEY_OR_SECRET", "pyproject.toml"),
         ("SECRET-BASE64-HIGH-ENTROPY-STRING", "pyproject.toml"),
-        ("SECRET-*", "scripts/**"),
         ("B404", "scripts/*.py"),
         ("B603", "scripts/*.py"),
-        ("SECRET-BASE64-HIGH-ENTROPY-STRING", "tests/**"),
-        ("SECRET-HEX-HIGH-ENTROPY-STRING", "tests/**"),
-        ("SECRET-SECRET-KEYWORD", "tests/**"),
         ("B101", "tests/**/*.py"),
         ("B105", "tests/**/*.py"),
         ("B108", "tests/**/*.py"),
@@ -779,7 +762,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
             "SECRET-SECRET-KEYWORD",
             "tests/integration/cli/test_mcp_integration_simple.py",
         ),
-        ("*", "tests/test_data/**"),
         ("JWT_TOKEN", "tests/unit/cli/mcp/test_session_id_single_component.py"),
         ("API_KEY_OR_SECRET", "tests/unit/cli/mcp/test_sessions.py"),
         ("B104", "tests/unit/cli/test_mcp_sse_host_binding.py"),
