@@ -1,0 +1,7 @@
+$ ash report --format cyclonedx --log-level ERROR
+[exit 0]
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1
+}

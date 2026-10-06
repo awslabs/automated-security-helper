@@ -20,6 +20,17 @@ def cli_runner():
     return CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _source_dir_exists(tmp_path, monkeypatch):
+    """The scan refuses a --source-dir that does not exist.
+
+    These tests pass the relative ``./source``, so run them from a directory
+    where it exists.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "source").mkdir()
+
+
 @patch("automated_security_helper.cli.scan.run_ash_scan")
 def test_run_ash_scan_cli_command_with_all_options(mock_run_ash_scan):
     """Test run_ash_scan_cli_command with all options."""

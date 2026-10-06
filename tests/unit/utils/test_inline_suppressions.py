@@ -51,7 +51,7 @@ class TestFindInlineSuppressions:
             tmp_path,
             """\
             # ash-ignore-next-line: SEC-002 known safe
-            password = "hunter2"
+            password = get_password()
         """,
         )
         result = find_inline_suppressions(src)

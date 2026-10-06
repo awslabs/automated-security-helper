@@ -1,0 +1,770 @@
+additional_reports: {}
+ash_config: null
+converter_results: {}
+cyclonedx:
+  $schema: null
+  annotations: null
+  bomFormat: CycloneDX
+  components: null
+  compositions: null
+  declarations: null
+  definitions: null
+  dependencies: null
+  externalReferences: null
+  formulation: null
+  metadata: null
+  properties: null
+  serialNumber: null
+  services: null
+  signature: null
+  specVersion: '1.6'
+  version: 1
+  vulnerabilities: null
+description: Automated Security Helper - aggregated workspace report. One SARIF run
+  per project; see the 'workspace' block for attribution and per-project verdicts.
+metadata:
+  description: Automated Security Helper workspace-mode aggregated report
+  execution_discrepancy_report: {}
+  expected_scanners: []
+  generated_at: '2026-01-15T12:00:42+00:00'
+  plugin_load_errors: {}
+  project_name: workspace
+  report_id: ASH-WORKSPACE-snapshot-with-skipped
+  shard: null
+  summary_stats:
+    actionable: 0
+    duration: 0.0
+    end: null
+    error: 0
+    failed: 0
+    missing: 0
+    passed: 0
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    skipped: 0
+    start: null
+    total: 0
+  tool_version: <ASH_VERSION>
+  validation_summary: {}
+name: 'ASH Workspace Scan: workspace'
+sarif:
+  $schema: https://json.schemastore.org/sarif-2.1.0.json
+  inlineExternalProperties: []
+  properties:
+    tags: []
+  runs:
+  - addresses: []
+    artifacts: null
+    automationDetails: null
+    baselineGuid: null
+    columnKind: null
+    conversion: null
+    defaultEncoding: null
+    defaultSourceLanguage: null
+    externalPropertyFileReferences: null
+    graphs: []
+    invocations: []
+    language: en-US
+    logicalLocations: []
+    newlineSequences:
+    - "\r\n"
+    - '
+
+      '
+    originalUriBaseIds:
+      PROJECTROOT:
+        description: null
+        index: -1
+        properties: null
+        uri: <REPO>/tests/test_data/snapshot_fixture/workspace/api/
+        uriBaseId: null
+    policies: []
+    properties:
+      tags: []
+      workspace_project: api
+      workspace_project_label: snapshot-api
+      workspace_project_path: api
+    redactionTokens: []
+    results:
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: app.py
+            uriBaseId: PROJECTROOT
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 7
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 7
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: subprocess call with shell=True identified, security issue.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_confidence: HIGH
+        issue_severity: HIGH
+        scanner_details:
+          tool_invocation:
+            duration: 1.0
+            end_time: '2026-01-15T12:00:01+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: bandit
+          tool_version: 1.8.6
+        scanner_name: bandit
+        scanner_version: 1.8.6
+        tags:
+        - bandit
+        workspace_project: api
+        workspace_uri: api/app.py
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: B602
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    runAggregates: []
+    specialLocations: null
+    taxonomies: []
+    threadFlowLocations: []
+    tool:
+      driver:
+        associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: https://github.com/awslabs/automated-security-helper
+        fullDescription: null
+        fullName: awslabs/automated-security-helper
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://awslabs.github.io/automated-security-helper
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: AWS Labs - Automated Security Helper
+        notifications: []
+        organization: Amazon Web Services
+        product: null
+        productSuite: null
+        properties: null
+        releaseDateUtc: null
+        rules: []
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: <ASH_VERSION>
+      extensions:
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: null
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: bandit
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 1.0
+              end_time: '2026-01-15T12:00:01+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:00+00:00'
+            tool_name: bandit
+            tool_version: 1.8.6
+          tags:
+          - bandit
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: null
+          id: B602
+          messageStrings: null
+          name: subprocess_popen_with_shell_equals_true
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: subprocess call with shell=True identified, security issue.
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 1.8.6
+      properties: null
+    translations: []
+    versionControlProvenance: []
+    webRequests: []
+    webResponses: []
+  - addresses: []
+    artifacts: null
+    automationDetails: null
+    baselineGuid: null
+    columnKind: null
+    conversion: null
+    defaultEncoding: null
+    defaultSourceLanguage: null
+    externalPropertyFileReferences: null
+    graphs: []
+    invocations: []
+    language: en-US
+    logicalLocations: []
+    newlineSequences:
+    - "\r\n"
+    - '
+
+      '
+    originalUriBaseIds:
+      PROJECTROOT:
+        description: null
+        index: -1
+        properties: null
+        uri: <REPO>/tests/test_data/snapshot_fixture/workspace/web/
+        uriBaseId: null
+    policies: []
+    properties:
+      tags: []
+      workspace_project: web
+      workspace_project_label: snapshot-web
+      workspace_project_path: web
+    redactionTokens: []
+    results:
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: main.tf
+            uriBaseId: PROJECTROOT
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 4
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 1
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: S3 Bucket has an ACL defined which allows public READ access.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: HIGH
+        scanner_details:
+          tool_invocation:
+            duration: 2.0
+            end_time: '2026-01-15T12:00:02+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: checkov
+          tool_version: 3.2.469
+        scanner_name: checkov
+        scanner_version: 3.2.469
+        tags:
+        - checkov
+        workspace_project: web
+        workspace_uri: web/main.tf
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CKV_AWS_20
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: main.tf
+            uriBaseId: PROJECTROOT
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 2
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 2
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Bucket name is hardcoded; derive it from a variable.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        scanner_details:
+          tool_invocation:
+            duration: 1.5
+            end_time: '2026-01-15T12:00:03.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:02+00:00'
+          tool_name: semgrep
+          tool_version: 1.140.0
+        scanner_name: semgrep
+        scanner_version: 1.140.0
+        tags:
+        - semgrep
+        workspace_project: web
+        workspace_uri: web/main.tf
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: terraform.aws.best-practice.s3-bucket-name-hardcoded
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    runAggregates: []
+    specialLocations: null
+    taxonomies: []
+    threadFlowLocations: []
+    tool:
+      driver:
+        associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: https://github.com/awslabs/automated-security-helper
+        fullDescription: null
+        fullName: awslabs/automated-security-helper
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://awslabs.github.io/automated-security-helper
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: AWS Labs - Automated Security Helper
+        notifications: []
+        organization: Amazon Web Services
+        product: null
+        productSuite: null
+        properties: null
+        releaseDateUtc: null
+        rules: []
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: <ASH_VERSION>
+      extensions:
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: null
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: checkov
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 2.0
+              end_time: '2026-01-15T12:00:02+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:00+00:00'
+            tool_name: checkov
+            tool_version: 3.2.469
+          tags:
+          - checkov
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: null
+          id: CKV_AWS_20
+          messageStrings: null
+          name: S3 Bucket has an ACL defined which allows public READ access.
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: S3 Bucket has an ACL defined which allows public READ access.
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 3.2.469
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: null
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: semgrep
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 1.5
+              end_time: '2026-01-15T12:00:03.500000+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:02+00:00'
+            tool_name: semgrep
+            tool_version: 1.140.0
+          tags:
+          - semgrep
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: null
+          id: terraform.aws.best-practice.s3-bucket-name-hardcoded
+          messageStrings: null
+          name: terraform.aws.best-practice.s3-bucket-name-hardcoded
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: Bucket name is hardcoded.
+        semanticVersion: 1.140.0
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 1.140.0
+      properties: null
+    translations: []
+    versionControlProvenance: []
+    webRequests: []
+    webResponses: []
+  version: 2.1.0
+scanner_results:
+  bandit:
+    actionable_finding_count: 1
+    dependencies_satisfied: true
+    duration: 0.0
+    excluded: false
+    exit_code: 0
+    finding_count: 1
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: FAILED
+    suppressed_finding_count: 0
+  checkov:
+    actionable_finding_count: 1
+    dependencies_satisfied: true
+    duration: 0.0
+    excluded: false
+    exit_code: 0
+    finding_count: 1
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: FAILED
+    suppressed_finding_count: 0
+  npm-audit:
+    actionable_finding_count: 0
+    dependencies_satisfied: false
+    duration: 0.0
+    excluded: false
+    exit_code: 0
+    finding_count: 0
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: MISSING
+    suppressed_finding_count: 0
+  semgrep:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 0.0
+    excluded: false
+    exit_code: 0
+    finding_count: 1
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    status: PASSED
+    suppressed_finding_count: 0
+used_suppressions: []
+validation_checkpoints: []
+workspace:
+  exit_code: 2
+  max_parallel_projects: 1
+  project_timeout: null
+  projects:
+  - actionable_finding_count: 1
+    ceiling_unreachable_findings: {}
+    display_label: snapshot-api
+    duration_seconds: 0.0
+    error: null
+    exceeds_threshold: true
+    finding_count: 1
+    incomplete_scanners:
+    - npm-audit
+    invalid_config: false
+    no_scanner_ran: false
+    output_path: projects/api
+    policy_origin_finding_count: 0
+    project: api
+    relative_path: api
+    sarif_run_index: 0
+    scan_incomplete: true
+    scanners:
+      bandit: FAILED
+      npm-audit: MISSING
+    severity_threshold: MEDIUM
+    skip_detail: null
+    skip_reason: null
+    status: completed
+  - actionable_finding_count: 1
+    ceiling_unreachable_findings: {}
+    display_label: snapshot-web
+    duration_seconds: 0.0
+    error: null
+    exceeds_threshold: true
+    finding_count: 2
+    incomplete_scanners: []
+    invalid_config: false
+    no_scanner_ran: false
+    output_path: projects/web
+    policy_origin_finding_count: 0
+    project: web
+    relative_path: web
+    sarif_run_index: 1
+    scan_incomplete: false
+    scanners:
+      checkov: FAILED
+      semgrep: PASSED
+    severity_threshold: HIGH
+    skip_detail: null
+    skip_reason: null
+    status: completed
+  - actionable_finding_count: 0
+    ceiling_unreachable_findings: {}
+    display_label: docs
+    duration_seconds: 0.0
+    error: null
+    exceeds_threshold: false
+    finding_count: 0
+    incomplete_scanners: []
+    invalid_config: false
+    no_scanner_ran: false
+    output_path: projects/docs
+    policy_origin_finding_count: 0
+    project: docs
+    relative_path: docs
+    sarif_run_index: null
+    scan_incomplete: false
+    scanners: {}
+    severity_threshold: null
+    skip_detail: '''docs'' does not exist as a directory at ''<REPO>/tests/test_data/snapshot_fixture/workspace/docs'''
+    skip_reason: error
+    status: skipped
+  refusal_detail: null
+  skipped_projects:
+  - detail: '''docs'' does not exist as a directory at ''<REPO>/tests/test_data/snapshot_fixture/workspace/docs'''
+    project: docs
+    reason: error
+  status: completed
+  unconvertible_finding_paths: 0
+  wall_clock_seconds: 0.0
+  workspace_file: <REPO>/tests/test_data/snapshot_fixture/workspace/snapshot-with-skipped.code-workspace
+  workspace_root: <REPO>/tests/test_data/snapshot_fixture/workspace

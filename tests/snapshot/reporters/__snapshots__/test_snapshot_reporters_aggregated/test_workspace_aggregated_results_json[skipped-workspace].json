@@ -1,0 +1,561 @@
+{
+  "name": "ASH Workspace Scan: workspace",
+  "description": "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
+  "metadata": {
+    "report_id": "ASH-WORKSPACE-snapshot-with-skipped",
+    "project_name": "workspace",
+    "tool_version": "<ASH_VERSION>",
+    "description": "Automated Security Helper workspace-mode aggregated report"
+  },
+  "workspace": {
+    "workspace_file": "<REPO>/tests/test_data/snapshot_fixture/workspace/snapshot-with-skipped.code-workspace",
+    "workspace_root": "<REPO>/tests/test_data/snapshot_fixture/workspace",
+    "status": "completed",
+    "exit_code": 2,
+    "projects": [
+      {
+        "project": "api",
+        "relative_path": "api",
+        "display_label": "snapshot-api",
+        "status": "completed",
+        "severity_threshold": "MEDIUM",
+        "finding_count": 1,
+        "actionable_finding_count": 1,
+        "policy_origin_finding_count": 0,
+        "exceeds_threshold": true,
+        "duration_seconds": 0.0,
+        "output_path": "projects/api",
+        "sarif_run_index": 0,
+        "scanners": {
+          "npm-audit": "MISSING",
+          "bandit": "FAILED"
+        },
+        "incomplete_scanners": [
+          "npm-audit"
+        ],
+        "no_scanner_ran": false,
+        "scan_incomplete": true,
+        "ceiling_unreachable_findings": {},
+        "skip_reason": null,
+        "skip_detail": null,
+        "error": null,
+        "invalid_config": false
+      },
+      {
+        "project": "web",
+        "relative_path": "web",
+        "display_label": "snapshot-web",
+        "status": "completed",
+        "severity_threshold": "HIGH",
+        "finding_count": 2,
+        "actionable_finding_count": 1,
+        "policy_origin_finding_count": 0,
+        "exceeds_threshold": true,
+        "duration_seconds": 0.0,
+        "output_path": "projects/web",
+        "sarif_run_index": 1,
+        "scanners": {
+          "checkov": "FAILED",
+          "semgrep": "PASSED"
+        },
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "scan_incomplete": false,
+        "ceiling_unreachable_findings": {},
+        "skip_reason": null,
+        "skip_detail": null,
+        "error": null,
+        "invalid_config": false
+      },
+      {
+        "project": "docs",
+        "relative_path": "docs",
+        "display_label": "docs",
+        "status": "skipped",
+        "severity_threshold": null,
+        "finding_count": 0,
+        "actionable_finding_count": 0,
+        "policy_origin_finding_count": 0,
+        "exceeds_threshold": false,
+        "duration_seconds": 0.0,
+        "output_path": "projects/docs",
+        "sarif_run_index": null,
+        "scanners": {},
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "scan_incomplete": false,
+        "ceiling_unreachable_findings": {},
+        "skip_reason": "error",
+        "skip_detail": "'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'",
+        "error": null,
+        "invalid_config": false
+      }
+    ],
+    "max_parallel_projects": 1,
+    "project_timeout": null,
+    "wall_clock_seconds": 0.0,
+    "unconvertible_finding_paths": 0,
+    "refusal_detail": null,
+    "skipped_projects": [
+      {
+        "project": "docs",
+        "reason": "error",
+        "detail": "'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'"
+      }
+    ]
+  },
+  "scanner_results": {
+    "bandit": {
+      "status": "FAILED",
+      "finding_count": 1,
+      "actionable_finding_count": 1,
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "exit_code": 0
+    },
+    "checkov": {
+      "status": "FAILED",
+      "finding_count": 1,
+      "actionable_finding_count": 1,
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "exit_code": 0
+    },
+    "npm-audit": {
+      "status": "MISSING",
+      "finding_count": 0,
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": false,
+      "excluded": false,
+      "exit_code": 0
+    },
+    "semgrep": {
+      "status": "PASSED",
+      "finding_count": 1,
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "exit_code": 0
+    }
+  },
+  "converter_results": {},
+  "additional_reports": {},
+  "validation_checkpoints": [],
+  "used_suppressions": [],
+  "sarif": {
+    "version": "2.1.0",
+    "runs": [
+      {
+        "tool": {
+          "driver": {
+            "name": "AWS Labs - Automated Security Helper",
+            "organization": "Amazon Web Services",
+            "fullName": "awslabs/automated-security-helper",
+            "version": "<ASH_VERSION>",
+            "downloadUri": "https://github.com/awslabs/automated-security-helper",
+            "informationUri": "https://awslabs.github.io/automated-security-helper",
+            "notifications": [],
+            "rules": [],
+            "taxa": [],
+            "locations": [],
+            "language": "en-US",
+            "contents": [
+              "localizedData",
+              "nonLocalizedData"
+            ],
+            "isComprehensive": false,
+            "supportedTaxonomies": []
+          },
+          "extensions": [
+            {
+              "name": "bandit",
+              "version": "1.8.6",
+              "notifications": [],
+              "rules": [
+                {
+                  "id": "B602",
+                  "name": "subprocess_popen_with_shell_equals_true",
+                  "shortDescription": {
+                    "text": "subprocess call with shell=True identified, security issue."
+                  },
+                  "relationships": []
+                }
+              ],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "bandit"
+                ],
+                "scanner_details": {
+                  "tool_name": "bandit",
+                  "tool_version": "1.8.6",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 1.0,
+                    "start_time": "2026-01-15T12:00:00+00:00",
+                    "end_time": "2026-01-15T12:00:01+00:00"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "invocations": [],
+        "language": "en-US",
+        "versionControlProvenance": [],
+        "logicalLocations": [],
+        "graphs": [],
+        "results": [
+          {
+            "ruleId": "B602",
+            "ruleIndex": -1,
+            "kind": "fail",
+            "level": "error",
+            "message": {
+              "text": "subprocess call with shell=True identified, security issue.",
+              "arguments": []
+            },
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "app.py",
+                    "index": -1,
+                    "uriBaseId": "PROJECTROOT"
+                  },
+                  "region": {
+                    "startLine": 7,
+                    "endLine": 7,
+                    "charOffset": -1,
+                    "byteOffset": -1
+                  }
+                },
+                "logicalLocations": [],
+                "annotations": [],
+                "relationships": []
+              }
+            ],
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "rank": -1.0,
+            "attachments": [],
+            "fixes": [],
+            "taxa": [],
+            "properties": {
+              "tags": [
+                "bandit"
+              ],
+              "issue_severity": "HIGH",
+              "issue_confidence": "HIGH",
+              "scanner_name": "bandit",
+              "scanner_version": "1.8.6",
+              "scanner_details": {
+                "tool_name": "bandit",
+                "tool_version": "1.8.6",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 1.0,
+                  "start_time": "2026-01-15T12:00:00+00:00",
+                  "end_time": "2026-01-15T12:00:01+00:00"
+                }
+              },
+              "workspace_project": "api",
+              "workspace_uri": "api/app.py"
+            }
+          }
+        ],
+        "runAggregates": [],
+        "redactionTokens": [],
+        "newlineSequences": [
+          "\r\n",
+          "\n"
+        ],
+        "threadFlowLocations": [],
+        "taxonomies": [],
+        "addresses": [],
+        "translations": [],
+        "policies": [],
+        "webRequests": [],
+        "webResponses": [],
+        "properties": {
+          "tags": [],
+          "workspace_project": "api",
+          "workspace_project_path": "api",
+          "workspace_project_label": "snapshot-api"
+        },
+        "originalUriBaseIds": {
+          "PROJECTROOT": {
+            "uri": "<REPO>/tests/test_data/snapshot_fixture/workspace/api/"
+          }
+        }
+      },
+      {
+        "tool": {
+          "driver": {
+            "name": "AWS Labs - Automated Security Helper",
+            "organization": "Amazon Web Services",
+            "fullName": "awslabs/automated-security-helper",
+            "version": "<ASH_VERSION>",
+            "downloadUri": "https://github.com/awslabs/automated-security-helper",
+            "informationUri": "https://awslabs.github.io/automated-security-helper",
+            "notifications": [],
+            "rules": [],
+            "taxa": [],
+            "locations": [],
+            "language": "en-US",
+            "contents": [
+              "localizedData",
+              "nonLocalizedData"
+            ],
+            "isComprehensive": false,
+            "supportedTaxonomies": []
+          },
+          "extensions": [
+            {
+              "name": "checkov",
+              "version": "3.2.469",
+              "notifications": [],
+              "rules": [
+                {
+                  "id": "CKV_AWS_20",
+                  "name": "S3 Bucket has an ACL defined which allows public READ access.",
+                  "shortDescription": {
+                    "text": "S3 Bucket has an ACL defined which allows public READ access."
+                  },
+                  "relationships": []
+                }
+              ],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "checkov"
+                ],
+                "scanner_details": {
+                  "tool_name": "checkov",
+                  "tool_version": "3.2.469",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 2.0,
+                    "start_time": "2026-01-15T12:00:00+00:00",
+                    "end_time": "2026-01-15T12:00:02+00:00"
+                  }
+                }
+              }
+            },
+            {
+              "name": "semgrep",
+              "version": "1.140.0",
+              "semanticVersion": "1.140.0",
+              "notifications": [],
+              "rules": [
+                {
+                  "id": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
+                  "name": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
+                  "shortDescription": {
+                    "text": "Bucket name is hardcoded."
+                  },
+                  "relationships": []
+                }
+              ],
+              "taxa": [],
+              "locations": [],
+              "language": "en-US",
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "isComprehensive": false,
+              "supportedTaxonomies": [],
+              "properties": {
+                "tags": [
+                  "semgrep"
+                ],
+                "scanner_details": {
+                  "tool_name": "semgrep",
+                  "tool_version": "1.140.0",
+                  "tool_invocation": {
+                    "exit_code": 0,
+                    "duration": 1.5,
+                    "start_time": "2026-01-15T12:00:02+00:00",
+                    "end_time": "2026-01-15T12:00:03.500000+00:00"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "invocations": [],
+        "language": "en-US",
+        "versionControlProvenance": [],
+        "logicalLocations": [],
+        "graphs": [],
+        "results": [
+          {
+            "ruleId": "CKV_AWS_20",
+            "ruleIndex": -1,
+            "kind": "fail",
+            "level": "error",
+            "message": {
+              "text": "S3 Bucket has an ACL defined which allows public READ access.",
+              "arguments": []
+            },
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "main.tf",
+                    "index": -1,
+                    "uriBaseId": "PROJECTROOT"
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "endLine": 4,
+                    "charOffset": -1,
+                    "byteOffset": -1
+                  }
+                },
+                "logicalLocations": [],
+                "annotations": [],
+                "relationships": []
+              }
+            ],
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "rank": -1.0,
+            "attachments": [],
+            "fixes": [],
+            "taxa": [],
+            "properties": {
+              "tags": [
+                "checkov"
+              ],
+              "issue_severity": "HIGH",
+              "scanner_name": "checkov",
+              "scanner_version": "3.2.469",
+              "scanner_details": {
+                "tool_name": "checkov",
+                "tool_version": "3.2.469",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 2.0,
+                  "start_time": "2026-01-15T12:00:00+00:00",
+                  "end_time": "2026-01-15T12:00:02+00:00"
+                }
+              },
+              "workspace_project": "web",
+              "workspace_uri": "web/main.tf"
+            }
+          },
+          {
+            "ruleId": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
+            "ruleIndex": -1,
+            "kind": "fail",
+            "level": "warning",
+            "message": {
+              "text": "Bucket name is hardcoded; derive it from a variable.",
+              "arguments": []
+            },
+            "locations": [
+              {
+                "id": -1,
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "main.tf",
+                    "index": -1,
+                    "uriBaseId": "PROJECTROOT"
+                  },
+                  "region": {
+                    "startLine": 2,
+                    "endLine": 2,
+                    "charOffset": -1,
+                    "byteOffset": -1
+                  }
+                },
+                "logicalLocations": [],
+                "annotations": [],
+                "relationships": []
+              }
+            ],
+            "stacks": [],
+            "codeFlows": [],
+            "graphs": [],
+            "graphTraversals": [],
+            "relatedLocations": [],
+            "rank": -1.0,
+            "attachments": [],
+            "fixes": [],
+            "taxa": [],
+            "properties": {
+              "tags": [
+                "semgrep"
+              ],
+              "issue_severity": "MEDIUM",
+              "scanner_name": "semgrep",
+              "scanner_version": "1.140.0",
+              "scanner_details": {
+                "tool_name": "semgrep",
+                "tool_version": "1.140.0",
+                "tool_invocation": {
+                  "exit_code": 0,
+                  "duration": 1.5,
+                  "start_time": "2026-01-15T12:00:02+00:00",
+                  "end_time": "2026-01-15T12:00:03.500000+00:00"
+                }
+              },
+              "workspace_project": "web",
+              "workspace_uri": "web/main.tf"
+            }
+          }
+        ],
+        "runAggregates": [],
+        "redactionTokens": [],
+        "newlineSequences": [
+          "\r\n",
+          "\n"
+        ],
+        "threadFlowLocations": [],
+        "taxonomies": [],
+        "addresses": [],
+        "translations": [],
+        "policies": [],
+        "webRequests": [],
+        "webResponses": [],
+        "properties": {
+          "tags": [],
+          "workspace_project": "web",
+          "workspace_project_path": "web",
+          "workspace_project_label": "snapshot-web"
+        },
+        "originalUriBaseIds": {
+          "PROJECTROOT": {
+            "uri": "<REPO>/tests/test_data/snapshot_fixture/workspace/web/"
+          }
+        }
+      }
+    ]
+  }
+}

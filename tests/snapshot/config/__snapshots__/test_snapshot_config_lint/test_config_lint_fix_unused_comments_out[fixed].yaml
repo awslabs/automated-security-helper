@@ -1,0 +1,12 @@
+project_name: snapshot-demo
+global_settings:
+  suppressions:
+    - path: src/app.py
+      rule_id: B101
+      line_start: 10
+      line_end: 12
+      reason: Still matches a finding
+    # [ash-lint 2026-01-15] Commented out: unused suppression (not matched in last scan)
+    # - path: src/old.py
+    # rule_id: B105
+    # reason: The file was deleted
