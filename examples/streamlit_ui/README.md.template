@@ -27,7 +27,7 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERS
 pip install streamlit
 ```
 
-> **Tip**: You can also use the `v3` floating tag (`@v3`) instead of a specific version to always get the latest stable v3.x release.
+> **Tip**: You can also use the `v{{MAJOR_VERSION}}` floating tag (`@v{{MAJOR_VERSION}}`) instead of a specific version to always get the latest stable v{{MAJOR_VERSION}}.x release.
 
 ## Usage
 

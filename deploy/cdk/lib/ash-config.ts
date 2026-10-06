@@ -213,8 +213,12 @@ export function ashVersion(scope: Stack): CfnParameter {
     default: DEFAULT_ASH_VERSION,
     minLength: 1,
     description:
-      'ASH git ref (tag, branch, or commit) to build the image from, for example ' +
-      'v3.7.0. Pinning a tag makes the build reproducible; the scheduled rebuild ' +
+      // No concrete release here. The release bump rewrites only the "Default" line
+      // of the committed templates, so a version in this text would leave them out
+      // of step with a fresh synth and fail the template-drift check on the release PR.
+      'ASH git ref (tag, branch, or commit) to build the image from, for example a ' +
+      'release tag like vMAJOR.MINOR.PATCH. ' +
+      'Pinning a tag makes the build reproducible; the scheduled rebuild ' +
       'still repulls base-image and OS patches for that same ASH revision.',
   });
 }

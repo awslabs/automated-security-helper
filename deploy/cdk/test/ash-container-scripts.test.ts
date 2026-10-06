@@ -548,7 +548,7 @@ exit 1
 
   test('an explicit fallback starts stateful with a warning instead of exiting 65', () => {
     /*
-     * Maintainer decision D6's second option. The first -- pointing
+     * The interim fix. The lasting one -- pointing
      * DEFAULT_ASH_VERSION at a ref whose `ashx mcp` accepts the flag -- needs a
      * release cut from main, which no change here can make, so the shipped
      * one-click AgentCore template was undeployable with its own defaults.

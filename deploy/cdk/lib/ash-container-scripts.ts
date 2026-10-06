@@ -276,7 +276,7 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * that follows AgentCore's own guidance to adopt the rotating id it returns, which
  * is refused on its third call. That message has been corrected to say so.
  *
- * This is maintainer decision D6's second option. The first — moving
+ * Two fixes were possible, and this is the interim one. The other — moving
  * `DEFAULT_ASH_VERSION` to a ref whose `ashx mcp` accepts the flag — is the right
  * end state and needs a release cut from `main`, which no change here can make.
  * When that release exists, delete this fallback rather than keeping both.

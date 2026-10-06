@@ -5,7 +5,7 @@
 
 Why this file exists
 --------------------
-Ten documentation files under this repository are generated. Each has a sibling
+Eleven documentation files under this repository are generated. Each has a sibling
 ``<name>.template`` holding ``{{VERSION}}`` where the release version goes, and
 ``scripts/version_template_manager.py generate`` renders the template over the
 committed file.
@@ -74,9 +74,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "version_template_manager.py"
 PLACEHOLDER = "{{VERSION}}"
 
-# Floor for the positive control. The manager names ten targets today; a floor rather
-# than an equality so adding an eleventh templated doc does not need an edit here,
-# while losing the list entirely fails.
+# Floor for the positive control. The manager names eleven targets today; a floor rather
+# than an equality so adding another templated doc does not need an edit here, while
+# losing the list entirely fails.
 _MINIMUM_TARGETS = 10
 
 
@@ -111,7 +111,9 @@ def _targets() -> list[str]:
 
 
 def _render(template_text: str) -> str:
-    return template_text.replace(PLACEHOLDER, _packaged_version())
+    # The manager's own substitution, so a placeholder added there (such as
+    # {{MAJOR_VERSION}}) is rendered here too instead of reading as drift.
+    return VersionTemplateManager(REPO_ROOT).render(template_text, _packaged_version())
 
 
 class TestTemplatesRenderToTheCommittedDocs:

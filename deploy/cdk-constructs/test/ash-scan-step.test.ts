@@ -303,7 +303,7 @@ describe('install modes', () => {
     // `automated-security-helper.git@v<semver>` wherever it appears and cannot
     // tell a jest assertion from a real one, so a tag here either goes stale at
     // the next release or costs that guard an exemption covering the whole
-    // file -- including the two live `@v3.7.0` pins it should keep watching.
+    // file -- including the two live release pins it should keep watching.
     // A commit is unambiguous, and it covers the third ref kind `version`
     // documents; the default above already covers the tag case.
     const commit = '0123456789abcdef0123456789abcdef01234567';
