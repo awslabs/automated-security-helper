@@ -6,6 +6,9 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
     model_validator,
 )
 from typing import Annotated, Any, List, Dict, Literal, Optional
@@ -350,6 +353,64 @@ class ScannerConfigSegment(_PluginConfigSegment):
     )
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
+
+    def _untouched_opt_in_fields(self) -> set[str]:
+        """Field names of opt-in scanners whose config here is still the default.
+
+        An opt-in scanner (``ScannerPluginBase.OPT_IN``) declares a field on this
+        segment so the schema and ``ash config`` document it. Every dump or repr
+        of the segment would otherwise carry it, and ASH writes those into
+        ``ash_aggregated_results.json``, the YAML report and the AWS reporter
+        payloads -- so shipping an opt-in scanner changed the default output of
+        every user who never enabled it, which is what opt-in exists to avoid.
+
+        Only a value equal to the field's default is left out, so the omission is
+        lossless: loading the dump back gives the same default. An enabled or
+        option-carrying opt-in scanner is written like any other.
+
+        Opt-in is read from the scanner classes in the plugin registry. Importing
+        this module imports every builtin scanner module for its config class,
+        and the decorator registers the class on import, so the registry holds
+        them whenever this runs. If it cannot be read nothing is left out, which
+        is the behavior from before opt-in scanners existed.
+        """
+        try:
+            from automated_security_helper.core.scanner_opt_in import (
+                _declared_config_class,
+                is_opt_in,
+            )
+            from automated_security_helper.plugins import ash_plugin_manager
+
+            opt_in_configs = {
+                _declared_config_class(cls)
+                for cls in ash_plugin_manager.plugin_modules("scanner")
+                if is_opt_in(cls)
+            }
+        except Exception:  # nosec B110 - fall back to dumping every field
+            return set()
+        return {
+            name
+            for name, field in type(self).model_fields.items()
+            if type(field.default) in opt_in_configs
+            and getattr(self, name, None) == field.default
+        }
+
+    @model_serializer(mode="wrap")
+    def _omit_untouched_opt_in_scanners(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> Any:
+        data = handler(self)
+        if not isinstance(data, dict):
+            return data
+        fields = type(self).model_fields
+        for name in self._untouched_opt_in_fields():
+            data.pop((fields[name].alias or name) if info.by_alias else name, None)
+        return data
+
+    def __repr_args__(self) -> Any:
+        """The repr, which the workspace AWS payloads embed, skips them too."""
+        omitted = self._untouched_opt_in_fields()
+        return [(k, v) for k, v in super().__repr_args__() if k not in omitted]
 
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
