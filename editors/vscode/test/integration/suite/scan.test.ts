@@ -22,6 +22,9 @@
  *   incomplete  detect-secrets,opengrep, offline, no
  *               rule cache (see tests/e2e/README.md)    -> exit 1, opengrep MISSING
  *   clean       detect-secrets on a tree with no secret -> exit 0
+ *
+ * One test adds a workspace .ash/.ash.yaml to the findings case that suppresses
+ * SECRET-SECRET-KEYWORD on leak.py: exit 2, 2 actionable findings, 1 suppressed.
  */
 
 import * as assert from 'assert';
@@ -177,7 +180,7 @@ async function arrange(outcome: Outcome): Promise<Expected> {
  * Real mode: the shared verdict over the output the extension's scan wrote. A
  * no-op in stub mode, whose replayed scans write no aggregated results.
  */
-function assertContract(outcome: Outcome, report: ScanReport): void {
+function assertContract(outcome: Outcome, report: ScanReport, findings?: number): void {
   if (MODE !== 'real') {
     return;
   }
@@ -193,6 +196,8 @@ function assertContract(outcome: Outcome, report: ScanReport): void {
       OUTPUT_DIR,
       '--rc',
       String(report.exitCode),
+      // assert_outcome counts actionable results only, so a suppression lowers it.
+      ...(findings === undefined ? [] : ['--findings', String(findings)]),
     ],
     { encoding: 'utf8' },
   );
@@ -201,6 +206,11 @@ function assertContract(outcome: Outcome, report: ScanReport): void {
     0,
     `assert_outcome rejected the ${outcome} scan:\n${verdict.stdout}${verdict.stderr}${verdict.error?.message ?? ''}`,
   );
+}
+
+/** Removes everything a previous scan wrote, leaving the workspace's sources. */
+function clearOutput(): void {
+  fs.rmSync(OUTPUT_DIR, { recursive: true, force: true });
 }
 
 async function scan(): Promise<ScanReport> {
@@ -278,11 +288,15 @@ suite('ASH in a real VS Code', () => {
       assert.deepStrictEqual(invokedAs(), ['ash', 'ash']);
     }
 
+    // The verdict below reads the output directory, so the first scan's output
+    // goes first: a second scan that wrote nothing must not be judged on it.
+    clearOutput();
     const second = await scan();
+    assertContract('findings', second);
+    assert.strictEqual(second.status, 'ok', second.detail);
     assert.strictEqual(second.executable, 'ash');
     assert.strictEqual(second.fallbackNotice, 'already-shown');
     assert.strictEqual(second.exitCode, expected.exitCode);
-    assertContract('findings', second);
   });
 
   test('puts exit 2 findings in the editor and leaves the suppressed one out', async () => {
@@ -308,6 +322,44 @@ suite('ASH in a real VS Code', () => {
       assert.strictEqual(diagnostic.severity, vscode.DiagnosticSeverity.Error);
       assert.strictEqual(diagnostic.source, 'ASH (detect-secrets)');
     }
+  });
+
+  test('leaves out a finding suppressed in .ash.yaml and counts it as suppressed', async () => {
+    const expected = await arrange('findings');
+    let suppressed: Expected = expected;
+    if (MODE === 'real') {
+      // The shared case carries no suppressions, so this one adds a single rule
+      // to it: of the three detect-secrets reports on leak.py, two stay actionable.
+      fs.mkdirSync(path.join(WORKSPACE, '.ash'), { recursive: true });
+      fs.writeFileSync(
+        path.join(WORKSPACE, '.ash', '.ash.yaml'),
+        [
+          'project_name: vscode-integration',
+          'global_settings:',
+          '  suppressions:',
+          '    - rule_id: "SECRET-SECRET-KEYWORD"',
+          '      path: leak.py',
+          '      reason: integration fixture',
+          '',
+        ].join('\n'),
+      );
+      suppressed = { ...expected, diagnostics: expected.diagnostics - 1, suppressed: 1 };
+    }
+
+    const report = await scan();
+
+    assert.strictEqual(report.status, 'ok', report.detail);
+    assert.strictEqual(report.exitCode, suppressed.exitCode);
+    assertContract('findings', report, suppressed.diagnostics);
+    assert.strictEqual(report.summary?.suppressed, suppressed.suppressed);
+    const diagnostics = ashDiagnostics(SECRET_FILE);
+    assert.strictEqual(diagnostics.length, suppressed.diagnostics);
+    assert.strictEqual(allAshDiagnostics(), suppressed.diagnostics, 'findings landed on other files');
+    // Both modes suppress SECRET-SECRET-KEYWORD and keep the other two.
+    assert.deepStrictEqual(
+      diagnostics.map((diagnostic) => String(diagnostic.code)).sort(),
+      ['SECRET-AWS-ACCESS-KEY', 'SECRET-BASE64-HIGH-ENTROPY-STRING'],
+    );
   });
 
   test('shows the partial findings of an exit 1 scan and reports it incomplete', async () => {
