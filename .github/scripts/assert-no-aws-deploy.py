@@ -16,8 +16,12 @@ WHAT IT LOOKS FOR
 
 Every `*.yml` / `*.yaml` under .github/workflows and .github/actions. Each file is
 read as text, comment lines are dropped, backslash-continued lines are joined,
-and each line is split into commands at `&&`, `||`, `;` and `|`. A command is a
-deploy when it contains, as whole whitespace-separated tokens:
+and each line is split into commands at `&&`, `||`, `;`, `|` and `&`. Each
+whitespace-separated token is normalized to the tool it names before matching:
+the part after the last `/` (so `./node_modules/.bin/cdk` is `cdk`), without an
+`@version` or `@tag` suffix (so `aws-cdk@2.150.0` and `cdk@latest` are `aws-cdk`
+and `cdk`), with the npm package `aws-cdk` read as `cdk` and OpenTofu's `tofu`
+read as `terraform`. A command is a deploy when it contains, as whole tokens:
 
   * `cdk` followed later by `deploy`, `destroy` or `bootstrap`
     (bootstrap creates a stack too);
@@ -31,8 +35,11 @@ It also refuses `uses:` of the CloudFormation deploy action
 (aws-actions/aws-cloudformation-github-deploy).
 
 Whole tokens, not substrings, because this repository is full of paths that
-contain the words: `deploy/cdk`, `deploy/cdk-constructs`, `terraform-hygiene`.
-A substring match would fire on all of them and train people to ignore it.
+contain the words: `deploy/cdk-constructs`, `terraform-hygiene`. A substring
+match would fire on all of them and train people to ignore it. The basename rule
+does read a directory such as `deploy/cdk` as `cdk`, so a command that names that
+directory and later has a bare `deploy` argument is flagged; that errs toward a
+red run, and no workflow here has that shape.
 
 KNOWN LIMITS
 
@@ -80,7 +87,15 @@ DEPLOY_VERBS: dict[str, frozenset[str]] = {
 
 DEPLOY_ACTIONS = ("aws-actions/aws-cloudformation-github-deploy",)
 
-SEPARATORS = re.compile(r"&&|\|\||;|\|")
+# `&&` and `||` before their single-character forms; a lone `&` backgrounds a job,
+# which still runs it, so it ends a command the same way `;` does.
+SEPARATORS = re.compile(r"&&|\|\||;|\||&")
+
+# Other names the same tool runs under, after normalize_tool().
+TOOL_ALIASES = {
+    "aws-cdk": "cdk",  # the npm package: `npx aws-cdk deploy`
+    "tofu": "terraform",  # OpenTofu takes terraform's subcommands
+}
 USES = re.compile(r"^\s*-?\s*uses:\s*['\"]?([^'\"\s@]+)")
 
 
@@ -114,11 +129,19 @@ def logical_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
+def normalize_tool(token: str) -> str:
+    """The tool a token names: `./node_modules/.bin/cdk`, `aws-cdk@2.150.0` and `cdk@latest` are all `cdk`."""
+    # An npm scope (`@aws-cdk/...`) sits before the last `/`, so any `@` left after
+    # the basename starts a version or dist-tag.
+    name = token.rsplit("/", 1)[-1].split("@", 1)[0]
+    return TOOL_ALIASES.get(name, name)
+
+
 def deploy_reason(command: str) -> str | None:
     """Why `command` is a deploy, or None."""
     tokens = [t.strip("'\"") for t in command.split()]
     for index, token in enumerate(tokens):
-        verbs = DEPLOY_VERBS.get(token)
+        verbs = DEPLOY_VERBS.get(normalize_tool(token))
         if verbs is None:
             continue
         for later in tokens[index + 1 :]:
@@ -173,6 +196,19 @@ PLANTED_DEPLOYS = (
     "run: terraform destroy -auto-approve",
     "run: sam deploy --guided",
     "run: |\n  aws cloudformation \\\n    create-stack --stack-name s",
+    # The tool spelled as a package name, a pinned package, or a path.
+    "run: npx aws-cdk deploy --all",
+    "run: npx aws-cdk@2.150.0 deploy",
+    "run: npx cdk@latest deploy",
+    "run: ./node_modules/.bin/cdk deploy",
+    "run: npx --yes aws-cdk@latest destroy --force",
+    "run: /usr/local/bin/terraform apply -auto-approve",
+    # A background job is its own command, as `;` is.
+    "run: cdk deploy&",
+    "run: cdk deploy & wait",
+    # OpenTofu is a drop-in for terraform.
+    "run: tofu apply",
+    "run: tofu -chdir=deploy/terraform destroy -auto-approve",
     "- uses: aws-actions/aws-cloudformation-github-deploy@0123456789abcdef0123456789abcdef01234567",
 )
 
@@ -188,6 +224,12 @@ LOOK_ALIKES = (
     "run: aws cloudformation validate-template --template-body file://t.json",
     "name: terraform-hygiene apply checks",
     "run: python3 deploy/tests/cfn-lint-guard.py check",
+    "run: npx aws-cdk@2.150.0 synth --quiet",
+    "run: ./node_modules/.bin/cdk synth",
+    "run: tofu init -backend=false && tofu validate",
+    "run: ls deploy/cdk/ & echo deploy",
+    "run: npm install aws-cdk-lib@2.150.0",
+    "run: echo foo@deploy",
 )
 
 

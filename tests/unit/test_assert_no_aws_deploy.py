@@ -77,3 +77,26 @@ def test_separators_split_commands(guard: ModuleType) -> None:
     # `deploy` after the separator belongs to a different command than `cdk`.
     assert guard.scan_text("x.yml", "run: npx cdk synth && echo deploy") == []
     assert guard.scan_text("x.yml", "run: echo ok; npx cdk deploy") != []
+
+
+@pytest.mark.parametrize(
+    ("token", "tool"),
+    [
+        ("cdk", "cdk"),
+        ("aws-cdk", "cdk"),
+        ("aws-cdk@2.150.0", "cdk"),
+        ("cdk@latest", "cdk"),
+        ("./node_modules/.bin/cdk", "cdk"),
+        ("/usr/local/bin/terraform", "terraform"),
+        ("tofu", "terraform"),
+        ("aws-cdk-lib@2.150.0", "aws-cdk-lib"),
+        ("deploy/cdk-constructs", "cdk-constructs"),
+    ],
+)
+def test_normalize_tool(guard: ModuleType, token: str, tool: str) -> None:
+    assert guard.normalize_tool(token) == tool
+
+
+def test_a_background_job_ends_a_command(guard: ModuleType) -> None:
+    assert guard.scan_text("x.yml", "run: cdk deploy&") != []
+    assert guard.scan_text("x.yml", "run: npx cdk synth & echo deploy") == []
