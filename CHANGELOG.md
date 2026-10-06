@@ -625,6 +625,11 @@
   severity read 0. The `actionable_only` and severity filters on scan results had the
   same mistake and left the real counts unfiltered.
 
+- **`ash scan --mode nix` refuses with a message instead of a traceback.** With no
+  `nix` on PATH, and when the recursion guard found it already inside a Nix-mode
+  run, the scan ended in an uncaught `RuntimeError`. It now prints the same message
+  on stderr and exits 1, like the other refused invocations.
+
 ### Reporting changes
 
 - **Reports now carry the age of every content database a scan used.** Additive:
