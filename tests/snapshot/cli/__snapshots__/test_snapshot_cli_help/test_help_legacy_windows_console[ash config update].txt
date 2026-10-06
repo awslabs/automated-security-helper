@@ -12,8 +12,9 @@
 │                           scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml',   │
 │                           'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml',   │
 │                           '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml',             │
-│                           'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a  table   │
-│                           in pyproject.toml at the root; the first found is used.               │
+│                           'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the        │
+│                           tool.ash table of pyproject.toml at the root; the first found is      │
+│                           used.                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --set                        <str>  Configuration modifications specified as key-value pairs    │

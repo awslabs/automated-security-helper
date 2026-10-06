@@ -138,12 +138,13 @@
 │                                                                         'ashrc.yaml',            │
 │                                                                         'ashrc.yml',             │
 │                                                                         'ashrc.json'] at the     │
-│                                                                         root, then a  table in   │
-│                                                                         pyproject.toml at the    │
-│                                                                         root; the first found is │
-│                                                                         used. Alternatively, the │
-│                                                                         full path to a config    │
-│                                                                         file can be provided by  │
+│                                                                         root, then the tool.ash  │
+│                                                                         table of pyproject.toml  │
+│                                                                         at the root; the first   │
+│                                                                         found is used.           │
+│                                                                         Alternatively, the full  │
+│                                                                         path to a config file    │
+│                                                                         can be provided by       │
 │                                                                         setting the ASH_CONFIG   │
 │                                                                         environment variable     │
 │                                                                         before running ASH.      │

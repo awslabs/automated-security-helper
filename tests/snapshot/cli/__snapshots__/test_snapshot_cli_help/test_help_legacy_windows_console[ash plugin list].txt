@@ -28,7 +28,7 @@
 │                                                                   '.ashrc.json', 'ashrc.toml',  │
 │                                                                   'ashrc.yaml', 'ashrc.yml',    │
 │                                                                   'ashrc.json'] at the root,    │
-│                                                                   then a  table in              │
+│                                                                   then the tool.ash table of    │
 │                                                                   pyproject.toml at the root;   │
 │                                                                   the first found is used.      │
 │                                                                   Alternatively, the full path  │
