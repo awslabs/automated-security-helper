@@ -96,6 +96,20 @@ def _cases(plugin_type):
     ]
 
 
+def _probe_enabled(plugin_class) -> bool:
+    """The ``enabled`` value the probe config writes for a plugin.
+
+    False, so the plugin is built but never run -- except for an opt-in scanner
+    (``OPT_IN = True``), which the scan phase does not build at all unless it is
+    enabled (core/scanner_opt_in.py). For those the probe writes True, which is
+    just as much a value that only arrives if the config reached the plugin: the
+    class default is False.
+    """
+    from automated_security_helper.core.scanner_opt_in import is_opt_in
+
+    return is_opt_in(plugin_class)
+
+
 def _probe_config(plugin_type) -> AshConfig:
     segment_key, _ = SEGMENTS[plugin_type]
     return AshConfig.model_validate(
@@ -103,7 +117,7 @@ def _probe_config(plugin_type) -> AshConfig:
             "project_name": "probe",
             segment_key: {
                 _documented_key(plugin_type, cls): {
-                    "enabled": False,
+                    "enabled": _probe_enabled(cls),
                     "options": {"probe_marker": MARKER},
                 }
                 for cls in _shipped(plugin_type)
@@ -124,7 +138,7 @@ def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
 
 
 def _assert_reached(instance):
-    assert instance.config.enabled is False, (
+    assert instance.config.enabled is _probe_enabled(type(instance)), (
         f"{type(instance).__name__} runs with enabled={instance.config.enabled}; "
         "its configuration never reached it"
     )

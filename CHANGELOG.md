@@ -46,6 +46,21 @@
 
 ## Unreleased
 
+### Features
+
+- **GuardDog scanner (opt-in).** `ash scan --scanners guarddog`, or
+  `scanners.guarddog.enabled: true`, runs [GuardDog](https://github.com/DataDog/guarddog)
+  3.2.0 over every PyPI, npm, Go, GitHub Action, RubyGems and crates package root in
+  the target, looking for malicious-package heuristics such as an install hook that
+  downloads and executes or `exec` of a base64-decoded payload. Local source scans run
+  offline; `options.verify` additionally downloads and checks every declared dependency
+  and is refused in offline mode with an `ERROR` naming the reason. Severities come
+  from GuardDog's own risk correlation; see
+  [the scanner page](docs/content/docs/plugins/builtin/guarddog.md). Not enabled, the
+  scanner leaves no trace in a scan's output. Installed through `uv tool` with an
+  explicit version and a Python interpreter below 3.14, and included in the container
+  image.
+
 ### Behavior changes
 
 - **`fail_on_incomplete_scanners` now defaults to `true`.** A scan in which a

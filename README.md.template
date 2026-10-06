@@ -77,6 +77,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 | [cdk-nag](https://github.com/cdklabs/cdk-nag)                 | IaC       | CloudFormation                                                                               | Included with ASH                                                       |
 | [npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit) | SCA       | JavaScript/Node.js                                                                           | Install Node.js/npm                                                     |
 | [Grype](https://github.com/anchore/grype)                     | SCA       | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Grype Installation](https://github.com/anchore/grype#installation) |
+| [GuardDog](https://github.com/DataDog/guarddog) (opt-in)      | Malware   | PyPI, npm, Go, GitHub Actions, RubyGems and crates packages                                  | Managed via UV tool isolation (auto-installed: `guarddog==3.2.0`)       |
 | [Syft](https://github.com/anchore/syft)                       | SBOM      | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Syft Installation](https://github.com/anchore/syft#installation)   |
 
 ## Prerequisites

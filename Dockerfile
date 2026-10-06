@@ -421,6 +421,15 @@ RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 #
+# GuardDog (opt-in scanner). Installed by `ash dependencies install` above through
+# uv, with the version and interpreter the scanner pins
+# (GUARDDOG_DEFAULT_VERSION_CONSTRAINT, GUARDDOG_PYTHON_REQUEST in
+# guarddog_scanner.py). Checked here so a failed install fails the build instead
+# of the first scan that enables the scanner.
+#
+RUN guarddog --version
+
+#
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
 #
 ENV ASH_IN_CONTAINER="YES"
@@ -493,6 +502,8 @@ ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
+# GuardDog again, for the non-root user's own uv tool install.
+RUN guarddog --version
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD command -v ash || exit 1
