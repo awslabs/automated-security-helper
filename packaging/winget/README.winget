@@ -25,10 +25,14 @@ validated and cannot be submitted, and describing it as anything else would be w
 Two other fields are absent for related reasons, and a submission would need both:
 
   PackageFamilyName   the Identity Name joined to a 13-character hash of the publisher
-                      string. It can only be computed from the signed package, and a
-                      wrong value matches the schema pattern exactly, which is the
-                      worst failure shape available: it validates, and winget would use
-                      it to correlate this package with something else.
+                      string, which is the signing certificate's subject. A wrong value
+                      matches the schema pattern exactly, which is the worst failure
+                      shape available: it validates, and winget would use it to
+                      correlate this package with something else. The loopback set the
+                      e2e job installs does carry it (see below), because `winget
+                      uninstall` and `winget upgrade --manifest` cannot find an
+                      installed MSIX without it; a release set cannot until there is a
+                      real certificate.
   SignatureSha256     the digest of the signature file inside the package. For a
                       self-signed build it describes a signature no machine trusts, so
                       publishing it would assert something untrue about the artifact.
@@ -153,15 +157,31 @@ How this is tested
 
   uv run packaging/winget/validate-manifests.py
 
-That is the whole verification, and it is what .github/workflows/ash-package.yml runs.
-It needs no Windows machine and does not need the wheel.
+Two jobs in .github/workflows/ash-package.yml run this directory. The `winget` job runs
+the command above. It needs no Windows machine and does not need the wheel.
 
-`winget validate` would be the authoritative check and is not reachable: the Windows
-Package Manager client is not on the GitHub Actions Windows runner images. The runner
-image documentation for windows-latest lists Chocolatey and does not mention winget
-anywhere.
+The `winget-client` job runs packaging/winget/verify-on-windows.ps1 on windows-latest
+against the .msix the `msix` job built. It gets a winget client, runs `winget validate`
+on the release-rendered set, requires a manifest with a wrong InstallerSha256 to be
+refused, installs through `winget install --manifest`, runs the three shared e2e cases
+(tests/e2e/README.md), uninstalls, installs an N-1 build, upgrades it with
+`winget upgrade --manifest`, and uninstalls again. No release asset exists for an
+unreleased commit, so it serves the .msix from 127.0.0.1 and renders a loopback set for
+it with `set-release-metadata.py --local-url-base`. validate-manifests.py
+`--local-installer` accepts only a loopback URL there, so that set cannot pass as a
+release set, and requires a PackageFamilyName. set-release-metadata.py computes that
+from the AppxManifest's Identity Name and Publisher, and after each install
+verify-on-windows.ps1 requires it to equal the one Get-AppxPackage reports. The client must be at least
+winget 1.12.210, the first release with the 1.12 manifest schemas.
 
-So the schemas are the check. They are a real one, because they carry every required
+The runner image documentation for windows-latest lists Chocolatey and does not mention
+winget. The script therefore uses a client already registered for the runner account if
+there is one, then tries to register the App Installer that Windows Server 2025 can
+carry, then installs a pinned winget-cli release whose downloads are checked against
+SHA-256 digests in the script. If none of the three yields a working client, the job
+fails. It does not skip.
+
+The schemas are still checked on their own. They are a real check, because they carry every required
 field, pattern, and enum the client enforces. The script also checks the four things a
 schema cannot: that the three files agree with each other, that the version they declare
 is the version this repository builds, that the installer URL names the matching release

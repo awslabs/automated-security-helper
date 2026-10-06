@@ -669,11 +669,12 @@ jobs:
 
   # The winget manifest set, checked against Microsoft's published JSON Schemas.
   #
-  # This is the whole verification winget gets, and the reason it is a schema check and
-  # not `winget validate` is that the Windows Package Manager client is not on the
-  # runner images. images/windows/Windows2025-VS2026-Readme.md in actions/runner-images
-  # lists Chocolatey and does not mention winget anywhere. The schemas are a real check
-  # in its place: they carry every required field, pattern and enum the client enforces.
+  # The checked-in set, on Linux, with no client and no artifact. The winget-client job
+  # below runs the real client (`winget validate`, install, upgrade, uninstall) on the
+  # sets rendered from the built .msix; this job is the fast check of the files as
+  # committed, and it also checks what a schema cannot: that the three files agree, that
+  # the version is the one pyproject.toml declares, and that the installer URL names the
+  # release tag and the filename packaging/msix/build.ps1 writes.
   #
   # Its own job rather than a step on the nuspec job above, so that the two Windows
   # packaging formats can be landed and reverted independently of each other.
@@ -707,6 +708,74 @@ jobs:
       # against roughly a minute for a project sync.
       - name: Validate the winget manifests against Microsoft's published JSON Schemas
         run: uv run packaging/winget/validate-manifests.py
+
+  # The winget channel end to end, through the real client: validate, a refused install
+  # with a wrong InstallerSha256, a fresh install, the three shared e2e cases (exit 2, 0
+  # and 1, judged by scripts/e2e/assert_outcome.py), an uninstall, an N-1 to N upgrade,
+  # and a second uninstall. packaging/winget/verify-on-windows.ps1 has the detail.
+  #
+  # It installs the .msix the msix job built and uploaded, not one of its own, so the
+  # artifact winget installs is the artifact that job gated. No release asset exists
+  # for an unreleased commit, so the script serves that file from 127.0.0.1 and renders
+  # a loopback manifest set for it (set-release-metadata.py --local-url-base, which
+  # validate-manifests.py --local-installer holds to loopback). The release-URL set is
+  # rendered too, from the same file, and that is the one `winget validate` reads.
+  #
+  # THE CLIENT. The hosted Windows images do not list winget:
+  # images/windows/Windows2025-VS2026-Readme.md in actions/runner-images lists
+  # Chocolatey and does not mention it. The script uses a client already registered
+  # for the runner account if there is one, then tries to register the App Installer
+  # Windows Server 2025 can carry, then installs one pinned winget-cli release whose two
+  # downloads are checked against SHA-256 digests in the script. A client older than
+  # 1.12.210, the first with the 1.12 manifest schemas, does not count. It prints which
+  # of the three it used. If none works this job fails rather than skipping, because a
+  # winget leg that passes without a client has tested nothing.
+  #
+  # The signing secrets are passed for the N-1 build only: a real certificate, once
+  # configured, has to sign N-1 with the same subject as N, or Windows sees two
+  # different packages and the upgrade is not one. They are empty on a fork and on a
+  # call from ash-package-formats.yml, and build.ps1 then self-signs, as in the msix job.
+  winget-client:
+    name: "native: winget client (windows-latest)"
+    needs: [build, msix]
+    runs-on: windows-latest
+    # Two first-run venv bootstraps (N and N-1), one N-1 wheel and .msix build, and a
+    # client download of about 300 MB when the host has no winget.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          # No cache: a cache save is a publish surface (.github/scripts/
+          # assert-publish-surfaces.py), and this job gains nothing a cold uv lacks.
+          enable-cache: false
+
+      # The same interpreter the msix job pins, for the same reason. It also runs
+      # scripts/e2e/run_case.py, lower_version.py (tomllib) and the loopback server.
+      - name: Use a Python this project is exercised on
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Download the .msix built and installed by the msix job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/msix-artifact
+
+      - name: Install, scan, upgrade and uninstall ASH through the winget client
+        shell: pwsh
+        env:
+          MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}
+          MSIX_SIGNING_PFX_PASSWORD: ${{ secrets.MSIX_SIGNING_PFX_PASSWORD }}
+        run: |
+          ./packaging/winget/verify-on-windows.ps1 `
+            -PfxBase64 "$env:MSIX_SIGNING_PFX_BASE64" `
+            -PfxPassword "$env:MSIX_SIGNING_PFX_PASSWORD"
   # The Homebrew tap, exercised rather than parsed.
   #
   # WHY THIS JOB IS HERE AND NOT IN ash-install-methods.yml

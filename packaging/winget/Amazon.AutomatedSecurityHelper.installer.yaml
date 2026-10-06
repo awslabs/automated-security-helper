@@ -39,12 +39,16 @@
 # WHAT IS OMITTED, AND WHY OMISSION IS THE RIGHT ANSWER
 #
 # PackageFamilyName and SignatureSha256 are both recommended for an msix installer and
-# both are absent. PackageFamilyName is the Identity Name joined to a 13-character hash
-# of the publisher string; it can only be computed from the signed package, and a value
-# that matches the schema pattern but is wrong is worse than no value, because winget
-# would use it to correlate packages. SignatureSha256 is the digest of the signature
-# file inside the package, which for a self-signed build describes a signature no
-# machine trusts. Both belong to the same submission gap README.winget documents.
+# both are absent here. PackageFamilyName is the Identity Name joined to a 13-character
+# hash of the Publisher, and the Publisher is the subject of the signing certificate,
+# which a release does not have yet. A value that matches the schema pattern but is
+# wrong is worse than no value, because winget uses it to correlate packages.
+# set-release-metadata.py --local-url-base computes it for the loopback set the e2e job
+# installs, where verify-on-windows.ps1 checks it against Get-AppxPackage and where
+# `winget uninstall` and `winget upgrade --manifest` need it. SignatureSha256 is the
+# digest of the signature file inside the package, which for a self-signed build
+# describes a signature no machine trusts. Both belong to the same submission gap
+# README.winget documents.
 #
 # Architecture and MinimumOSVersion are the two fields that must agree with
 # packaging/msix/AppxManifest.xml. They are not hand-maintained here either:

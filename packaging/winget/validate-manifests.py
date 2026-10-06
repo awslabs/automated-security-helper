@@ -99,6 +99,9 @@ MANIFEST_VERSION = "1.12.0"
 
 SENTINEL_SHA256 = "0" * 64
 
+# What --local-installer accepts: a loopback host, an explicit port, and a filename.
+LOCAL_URL = re.compile(r"^http://(127\.0\.0\.1|localhost):[0-9]{1,5}/[^/?#]+$")
+
 # type -> (filename suffix, the field ManifestType must hold)
 MANIFEST_TYPES = {
     "version": ("", "version"),
@@ -277,7 +280,18 @@ def main() -> int:
             "InstallerSha256 and reject the all-zero sentinel"
         ),
     )
+    parser.add_argument(
+        "--local-installer",
+        action="store_true",
+        help=(
+            "with --released: the set was rendered for an end-to-end install from a "
+            "loopback HTTP server (set-release-metadata.py --local-url-base), so "
+            "require a loopback InstallerUrl instead of the release asset path"
+        ),
+    )
     args = parser.parse_args()
+    if args.local_installer and not args.released:
+        parser.error("--local-installer describes a rendered set; pass --released too")
 
     repo = Path(__file__).resolve().parents[2]
     directory: Path = args.directory.resolve()
@@ -387,15 +401,42 @@ def main() -> int:
 
     installer = documents["installer"]["Installers"][0]
 
-    print("== the installer URL names the matching release tag")
     url = str(installer["InstallerUrl"])
-    expected_fragment = f"/releases/download/v{package_version}/"
-    if expected_fragment not in url:
-        raise Failure(
-            f"InstallerUrl does not contain {expected_fragment!r}:\n    {url}\n"
-            f"    The release tag format is v$version (tag_format in "
-            f"[tool.commitizen]), so an asset for this version lives under that path."
-        )
+    if args.local_installer:
+        # The end-to-end leg in .github/workflows/ash-package.yml (winget-client) serves
+        # the built .msix from a loopback HTTP server, because no release asset exists
+        # for an unreleased commit. That set must never be mistaken for a release, so
+        # the host is held to loopback rather than to "anything but the release path".
+        print("== the installer URL is a loopback server (an e2e set, not a release)")
+        if LOCAL_URL.match(url) is None:
+            raise Failure(
+                f"InstallerUrl is {url!r}, and --local-installer requires "
+                f"http://127.0.0.1:<port>/<file> or http://localhost:<port>/<file>.\n"
+                f"    A rendered set pointing anywhere else is either a release set or a "
+                f"mistake, and neither belongs to the e2e leg."
+            )
+        # winget uninstall --manifest and winget upgrade --manifest correlate an
+        # installed MSIX through this field and nothing else, so a loopback set without
+        # it installs and then cannot be uninstalled or upgraded. The schema checks its
+        # shape; verify-on-windows.ps1 checks it against Get-AppxPackage.
+        family_name = installer.get("PackageFamilyName")
+        if not family_name:
+            raise Failure(
+                "the loopback set has no PackageFamilyName. `winget uninstall "
+                "--manifest` and `winget upgrade --manifest` find an installed MSIX by "
+                "it,\n    and fail with NO_APPLICATIONS_FOUND without it. "
+                "set-release-metadata.py --local-url-base writes it."
+            )
+        print(f"   PackageFamilyName: {family_name}")
+    else:
+        print("== the installer URL names the matching release tag")
+        expected_fragment = f"/releases/download/v{package_version}/"
+        if expected_fragment not in url:
+            raise Failure(
+                f"InstallerUrl does not contain {expected_fragment!r}:\n    {url}\n"
+                f"    The release tag format is v$version (tag_format in "
+                f"[tool.commitizen]), so an asset for this version lives under that path."
+            )
     print(f"   {url}")
 
     # The check above passes on a URL whose FILENAME is wrong, and one was: this

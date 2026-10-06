@@ -64,6 +64,7 @@ on:
       - "tests/unit/test_homebrew_formula_*.py"
       - "tests/unit/test_msix_e2e_script.py"
       - "tests/unit/test_e2e_prev_tree.py"
+      - "tests/unit/test_winget_e2e.py"
   workflow_dispatch: {}
 
 permissions:
@@ -118,3 +119,4 @@ jobs:
           tests/unit/test_homebrew_formula_version.py
           tests/unit/test_msix_e2e_script.py
           tests/unit/test_e2e_prev_tree.py
+          tests/unit/test_winget_e2e.py
