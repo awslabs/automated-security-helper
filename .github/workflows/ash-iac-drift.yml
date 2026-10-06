@@ -79,6 +79,8 @@ on:
   # cdk-nag, cfn-lint and cfn-guard checks would otherwise never run on the tree
   # that ships them. A push there that also has an open pull request gets a second
   # run of the same tree; that duplicate was accepted for the same reason as main's.
+  # The quick-create e2e leg (scripts/e2e/quick_create.sh) runs in this workflow too,
+  # so those branches get its verdict on every pushed commit as well.
   push:
     branches:
       - main
@@ -1619,6 +1621,23 @@ jobs:
           git diff -- "$GEN"
           echo "::endgroup::"
           exit 1
+
+      # The e2e leg. The committed document carries no URLs (no bucket is configured,
+      # by design), so the steps above never see a rendered link. This renders the
+      # head's templates against a scratch dotted bucket and a scratch undotted one,
+      # asserts path-style and virtual-hosted addressing respectively with a judge that
+      # shares no code with the renderer, cfn-lints every template a link names in the
+      # regions it launches in, and shows five negative controls failing. Nothing is
+      # written into the checkout; the script checks that last.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Render a dotted and an undotted bucket and judge both
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/e2e/quick_create.sh "$RUNNER_TEMP/quick-create-e2e"
 
   # ---------------------------------------------------------------------------
   # cfn-lint and cfn-guard over every committed template.

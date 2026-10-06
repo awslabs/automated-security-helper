@@ -208,9 +208,14 @@ CONSOLE_URL_RE = re.compile(
 NO_LINK_PLACEHOLDER = "`NO-BUCKET-CONFIGURED`"
 
 
-def load_hosting() -> dict[str, Any]:
-    """Read the hosting configuration, defaulting every key to "not configured"."""
-    hosting = json.loads(HOSTING_CONFIG.read_text(encoding="utf-8"))
+def load_hosting(path: Path | None = None) -> dict[str, Any]:
+    """Read the hosting configuration, defaulting every key to "not configured".
+
+    ``path`` defaults to the committed ``deploy/quick-create-hosting.json``. Another path
+    is for rendering against a bucket without editing that file, which must stay empty
+    in this repository; the e2e leg uses it to render a dotted and an undotted bucket.
+    """
+    hosting = json.loads((path or HOSTING_CONFIG).read_text(encoding="utf-8"))
     return {
         "bucket": str(hosting.get("bucket") or "").strip(),
         "bucket_region": str(hosting.get("bucket_region") or "").strip(),
@@ -658,6 +663,7 @@ def render_tables(
     hosting: dict[str, Any],
     stacks: dict[str, dict[str, dict[str, Any]]],
     plan: dict[str, list[tuple[str, str]]],
+    config_name: str | None = None,
 ) -> dict[str, str]:
     """The generated regions of the document."""
     bucket = str(hosting["bucket"])
@@ -681,7 +687,7 @@ def render_tables(
         values = ", ".join(f"`{name}`=`{value}`" for name, value in plan[stack])
         param_rows.append(f"| `{stack}` | {values or '—'} |")
 
-    config_name = HOSTING_CONFIG.name
+    config_name = config_name or HOSTING_CONFIG.name
     if not bucket:
         note = (
             "> **No links below, because ASH hosts no template bucket — by design.**\n"
@@ -724,7 +730,7 @@ def render_tables(
     }
 
 
-def render_text() -> tuple[str, list[str]]:
+def render_text(hosting_path: Path | None = None) -> tuple[str, list[str]]:
     """The document the committed inputs imply, without writing anything.
 
     Separate from `render` so a test can compare the committed file against a fresh
@@ -732,7 +738,8 @@ def render_text() -> tuple[str, list[str]]:
     looking for and pass on the second run -- the same reasoning
     tests/unit/test_version_template_round_trip.py records for not invoking `generate`.
     """
-    hosting = load_hosting()
+    hosting_path = hosting_path or HOSTING_CONFIG
+    hosting = load_hosting(hosting_path)
     stacks = load_templates()
     plan, problems = parameter_plan(stacks)
     problems = hosting_problems(hosting) + problems
@@ -740,7 +747,7 @@ def render_text() -> tuple[str, list[str]]:
         return "", problems
 
     text = DOC_TEMPLATE.read_text(encoding="utf-8")
-    for token, value in render_tables(hosting, stacks, plan).items():
+    for token, value in render_tables(hosting, stacks, plan, hosting_path.name).items():
         text = text.replace(token, value)
 
     # Any surviving {{...}} is a token this script does not know about. Writing it out
@@ -756,8 +763,10 @@ def render_text() -> tuple[str, list[str]]:
     return text, []
 
 
-def render(write: bool) -> int:
-    text, problems = render_text()
+def render(
+    write: bool, hosting_path: Path | None = None, out_path: Path | None = None
+) -> int:
+    text, problems = render_text(hosting_path)
     if problems:
         sys.stderr.write(
             "Refusing to render:\n" + "".join(f"  - {line}\n" for line in problems)
@@ -765,28 +774,35 @@ def render(write: bool) -> int:
         return 1
 
     if write:
-        DOC_OUTPUT.write_text(text, encoding="utf-8")
-        sys.stdout.write(f"rendered {_display(DOC_OUTPUT)}\n")
+        out_path = out_path or DOC_OUTPUT
+        out_path.write_text(text, encoding="utf-8")
+        sys.stdout.write(f"rendered {_display(out_path)}\n")
     else:
         sys.stdout.write(text)
     return 0
 
 
-def check() -> int:
-    """Verify the committed document against the committed templates."""
-    hosting = load_hosting()
+def check(hosting_path: Path | None = None, doc_path: Path | None = None) -> int:
+    """Verify a rendered document against the committed templates.
+
+    By default that is the committed document and hosting file. ``hosting_path`` and
+    ``doc_path`` point it at a render made with ``--hosting`` and ``--out`` instead; the
+    templates are always the committed ones.
+    """
+    doc_path = doc_path or DOC_OUTPUT
+    hosting = load_hosting(hosting_path)
     stacks = load_templates()
     plan, problems = parameter_plan(stacks)
     problems = hosting_problems(hosting) + problems
 
-    if not DOC_OUTPUT.exists():
+    if not doc_path.exists():
         sys.stderr.write(
-            f"{_display(DOC_OUTPUT)} does not exist. Run "
+            f"{_display(doc_path)} does not exist. Run "
             "'python3 scripts/render_quick_create_links.py render'.\n"
         )
         return 1
 
-    text = DOC_OUTPUT.read_text(encoding="utf-8")
+    text = doc_path.read_text(encoding="utf-8")
     urls = CONSOLE_URL_RE.findall(text)
     for url in urls:
         problems.extend(validate_url(url, stacks, plan))
@@ -1061,13 +1077,39 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="prove the validator rejects a malformed link, and check nothing else",
     )
+    parser.add_argument(
+        "--hosting",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "hosting configuration to read instead of deploy/quick-create-hosting.json, "
+            "which stays empty in this repository"
+        ),
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "document to write (render) or verify (check) instead of "
+            "deploy/quick-create-links.md"
+        ),
+    )
     args = parser.parse_args(argv[1:])
 
     if args.self_test:
+        if args.hosting or args.out:
+            parser.error(
+                "--self-test uses built-in cases and takes no --hosting or --out"
+            )
         return self_test()
+    if args.action == "print" and args.out:
+        parser.error("print writes to stdout; --out applies to render and check")
     if args.action == "check":
-        return check()
-    return render(write=args.action == "render")
+        return check(args.hosting, args.out)
+    return render(args.action == "render", args.hosting, args.out)
 
 
 if __name__ == "__main__":

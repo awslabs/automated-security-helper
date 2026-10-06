@@ -136,3 +136,14 @@ the same reason as on the other channels. `scripts/e2e/container.sh` adds `--off
 to the incomplete case for that reason and leaves the case's expectations alone. An
 image built with `--offline` would ship a populated cache, and this trigger would not
 fire there.
+
+## Channels that run no scan
+
+The quick-create links (`deploy/quick-create-links.md`) are a document, not an install,
+so that leg uses none of the cases above. `scripts/e2e/quick_create.sh` renders the
+head's templates against a scratch dotted bucket and a scratch undotted one, judges each
+render with `scripts/e2e/assert_quick_create.py` (path-style and virtual-hosted
+addressing, one link per template and launch region, every `param_` against its
+template), runs cfn-lint at error level on each template a link names, and shows five
+negative controls failing. It runs in the `quick-create-link-drift` job of
+`.github/workflows/ash-iac-drift.yml`. The committed hosting file stays empty.
