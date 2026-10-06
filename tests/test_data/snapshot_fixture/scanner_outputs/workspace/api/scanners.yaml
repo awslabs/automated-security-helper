@@ -1,0 +1,9 @@
+# The api project of the snapshot workspace. Same format as ../../scanners.yaml.
+scanners:
+  - name: bandit
+    outcome: ran
+    output: bandit.sarif
+    version: "1.8.6"
+    duration_seconds: 1.0
+  - name: npm-audit
+    outcome: missing

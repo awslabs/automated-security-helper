@@ -65,16 +65,42 @@
       #
       # npm-audit is likewise not a package -- it is a subcommand of npm, which is why
       # nodejs appears instead.
+      #
+      # bandit, checkov and semgrep are checked against the same requirement ASH would
+      # hand `uv tool run --from` (utils/pre_installed_tool.py reads each wrapper's
+      # closure), and offline a flake tool that falls short is reported MISSING rather
+      # than swapped for a PyPI build. Two nixpkgs packages fall short as shipped, so
+      # they are completed here instead of loosening ASH's requirement:
+      #
+      #   - bandit lacks its `sarif` extra (sarif-om, jschema-to-python). ASH runs
+      #     `bandit --format sarif`, and bandit without that extra has no such
+      #     formatter. The `toml` extra needs nothing: it is tomli on Python < 3.11.
+      #   - semgrep declares `pyjwt[crypto]`, and nixpkgs builds it against a pyjwt
+      #     without cryptography. Its runtime-deps check does not look at extras of a
+      #     dependency, so the gap ships.
+      #
+      # Both are additions to the closure, not version changes: the pins stay
+      # whatever this nixpkgs revision provides.
       scannersFor = system:
-        let pkgs = pkgsFor system;
+        let
+          pkgs = pkgsFor system;
+          py = pkgs.python3Packages;
+          bandit = pkgs.bandit.overridePythonAttrs (old: {
+            dependencies = (old.dependencies or [ ])
+              ++ [ py.sarif-om py.jschema-to-python ];
+          });
+          semgrep = pkgs.semgrep.overridePythonAttrs (old: {
+            dependencies = (old.dependencies or [ ])
+              ++ py.pyjwt.optional-dependencies.crypto;
+          });
         in [
-          pkgs.bandit
+          bandit
           pkgs.cfn-nag
           pkgs.checkov
           pkgs.detect-secrets
           pkgs.grype
           pkgs.nodejs # provides `npm audit`
-          pkgs.semgrep
+          semgrep
           pkgs.syft
           pkgs.trivy # community-mode scanner set
           pkgs.zizmor # opt-in; runs only when enabled or named with --scanners

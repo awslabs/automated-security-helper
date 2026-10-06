@@ -1,0 +1,52 @@
+# One entry per scanner in the snapshot fixture, in the order the scan phase
+# records them. tests/snapshot/support/fixture_model.py turns each entry into the
+# ScanResultsContainer that scanner would hand the scan phase, then runs ASH's own
+# aggregation over the set. See ../README.md for what each outcome exercises.
+#
+# outcome:
+#   ran      -- the scanner ran and returned `output`; its status is computed by
+#               ScanResultsContainer.determine_status, exactly as the executor does.
+#   error    -- the scanner ran and failed on every target it attempted (ERROR).
+#   missing  -- the scanner's tool is not installed (MISSING).
+#   excluded -- the operator excluded the scanner (SKIPPED).
+scanners:
+  - name: bandit
+    outcome: ran
+    output: bandit.sarif
+    version: "1.8.6"
+    duration_seconds: 1.25
+  - name: checkov
+    outcome: ran
+    output: checkov.sarif
+    version: "3.2.469"
+    duration_seconds: 7.5
+  - name: semgrep
+    outcome: ran
+    output: semgrep.sarif
+    version: "1.140.0"
+    duration_seconds: 4.0
+  - name: detect-secrets
+    outcome: ran
+    output: detect-secrets.sarif
+    version: "1.5.0"
+    duration_seconds: 0.5
+  - name: grype
+    outcome: ran
+    output: grype.sarif
+    version: "0.100.0"
+    duration_seconds: 3.0
+  - name: syft
+    outcome: ran
+    output: syft.cdx.json
+    version: "1.33.0"
+    duration_seconds: 2.0
+  - name: cfn-nag
+    outcome: error
+    version: "0.8.10"
+    duration_seconds: 0.25
+    failed_target: infra/main.tf
+    error: "cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation template"
+  - name: npm-audit
+    outcome: missing
+  - name: cdk-nag
+    outcome: excluded

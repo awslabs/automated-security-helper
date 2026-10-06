@@ -1,0 +1,5 @@
+{
+  "runs[].results[].ruleIndex": {
+    "bandit": true
+  }
+}

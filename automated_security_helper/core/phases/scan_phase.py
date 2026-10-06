@@ -408,9 +408,12 @@ class ScanPhase(EnginePhase):
                         # MISSING because it is reached before any dependency
                         # question is asked; the two paths are told apart by which
                         # status they carry.
-                        failed_name = (
-                            getattr(plugin_config, "name", None) or plugin_name
-                        )
+                        # The resolved config's name, then the name the config
+                        # class declares, then the class name. get_plugin_config
+                        # returns a dict, and reading it with getattr always missed
+                        # and fell back to the class name; a plugin with no config
+                        # entry still declares its name on its config class.
+                        failed_name = opt_in_scanner_name(plugin_class, plugin_config)
                         construction_error = (
                             f"Scanner {failed_name} could not be constructed, so it "
                             f"did not run: {type(e).__name__}: {e}"
@@ -510,17 +513,27 @@ class ScanPhase(EnginePhase):
                 unresolved = [
                     name for name, key in requested if key not in registered_names
                 ]
+                # Opt-in scanners left out of this run are still scanners ASH
+                # has; listing them keeps a typo from reading as "no such
+                # scanner" when the real name is one --scanners can enable.
+                opt_in_note = (
+                    "; opt-in, not enabled: "
+                    + ", ".join(sorted(set(self._omitted_opt_in_scanners)))
+                    if self._omitted_opt_in_scanners
+                    else ""
+                )
                 if unresolved:
                     ASH_LOGGER.warning(
                         "No registered scanner matches "
                         f"{', '.join(sorted(unresolved))}. Registered scanners: "
-                        f"{', '.join(sorted(registered_names))}"
+                        f"{', '.join(sorted(registered_names))}{opt_in_note}"
                     )
                 if not any(key in registered_names for _, key in requested):
                     raise ScannerSelectionError(
                         "None of the requested scanners exist: "
                         f"{', '.join(sorted(unresolved))}. "
-                        f"Registered scanners: {', '.join(sorted(registered_names))}. "
+                        f"Registered scanners: {', '.join(sorted(registered_names))}"
+                        f"{opt_in_note}. "
                         "Refused rather than scanned, because an allowlist that "
                         "matches nothing selects nothing: every scanner would be "
                         "recorded SKIPPED, the run would produce no findings, and a "

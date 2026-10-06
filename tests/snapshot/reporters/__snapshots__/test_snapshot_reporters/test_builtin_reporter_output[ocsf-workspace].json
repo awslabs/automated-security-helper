@@ -1,0 +1,155 @@
+[
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "subprocess call with shell=True identified, security issue.",
+      "title": "B602 in app.py - subprocess call with shell=True identified, security issue.",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "labels": [
+        "workspace_project:api"
+      ],
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 7,
+            "file": {
+              "name": "app.py",
+              "path": "app.py",
+              "type_id": 1
+            },
+            "start_line": 7
+          }
+        ],
+        "cve": {
+          "desc": "subprocess call with shell=True identified, security issue.",
+          "uid": "B602"
+        },
+        "desc": "subprocess call with shell=True identified, security issue.",
+        "severity": "ERROR",
+        "title": "B602"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "S3 Bucket has an ACL defined which allows public READ access.",
+      "title": "CKV_AWS_20 in main.tf - S3 Bucket has an ACL defined which allows public READ access.",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "labels": [
+        "workspace_project:web"
+      ],
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 4,
+            "file": {
+              "name": "main.tf",
+              "path": "main.tf",
+              "type_id": 1
+            },
+            "start_line": 1
+          }
+        ],
+        "cve": {
+          "desc": "S3 Bucket has an ACL defined which allows public READ access.",
+          "uid": "CKV_AWS_20"
+        },
+        "desc": "S3 Bucket has an ACL defined which allows public READ access.",
+        "severity": "ERROR",
+        "title": "CKV_AWS_20"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Bucket name is hardcoded; derive it from a variable.",
+      "title": "terraform.aws.best-practice.s3-bucket-name-hardcoded in main.tf - Bucket name is hardcoded; derive it from a variable.",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "labels": [
+        "workspace_project:web"
+      ],
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 2,
+            "file": {
+              "name": "main.tf",
+              "path": "main.tf",
+              "type_id": 1
+            },
+            "start_line": 2
+          }
+        ],
+        "cve": {
+          "desc": "Bucket name is hardcoded; derive it from a variable.",
+          "uid": "terraform.aws.best-practice.s3-bucket-name-hardcoded"
+        },
+        "desc": "Bucket name is hardcoded; derive it from a variable.",
+        "severity": "WARNING",
+        "title": "terraform.aws.best-practice.s3-bucket-name-hardcoded"
+      }
+    ]
+  }
+]

@@ -122,8 +122,12 @@ runs:
     # The step the install exists for. Uses the same stdio invocation the
     # start/stop check above uses -- `ash mcp` with no transport flag, which
     # defaults to stdio -- except that here a real client performs the
-    # initialization handshake and calls tools/list, and the reply is diffed
-    # against .github/actions/validate-mcp/tool_surface.golden.json.
+    # initialization handshake and calls tools/list, resources/list,
+    # resources/templates/list and prompts/list (one spawn each), and each reply
+    # is diffed against its key in
+    # .github/actions/validate-mcp/tool_surface.golden.json. Windows skips this
+    # step; tests/unit/cli/mcp/test_mcp_wire_golden_in_process.py checks the same
+    # golden against the in-process registry on every leg, Windows included.
     #
     # Regenerate that golden with exactly one command, from the repository root:
     #
@@ -133,7 +137,7 @@ runs:
     # are normalized, what was measured to justify each one, and what this check
     # covers that tests/unit/cli/mcp/test_tool_surface_parity.py cannot. A missing
     # golden fails the step loudly and is never auto-created.
-    - name: "mcp: protocol handshake and golden tool surface"
+    - name: "mcp: protocol handshake and golden wire surface"
       if: runner.os != 'Windows'
       shell: bash
       run: python "${GITHUB_ACTION_PATH}/compare_tool_surface.py"
