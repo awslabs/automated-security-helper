@@ -163,10 +163,32 @@ def get(
     if config_path is not None and not Path(config_path).exists():
         typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
+    # The file this command is about: the one named, or the one resolve_config
+    # would discover. When there is one, it is loaded with fallback_to_default
+    # off. resolve_config's default is to log a file it cannot parse and return
+    # the default configuration -- right for a scan, which records the warning
+    # and carries on, and wrong here: `ash config get` on a file with a YAML
+    # syntax error exited 0 and printed the defaults as though they were that
+    # file's contents.
+    config_file = Path(config_path) if config_path is not None else find_config_file()
     try:
-        config = resolve_config(config_path, config_overrides=config_overrides)
+        config = resolve_config(
+            config_file,
+            config_overrides=config_overrides,
+            fallback_to_default=config_file is None,
+        )
     except ASHConfigValidationError as e:
         typer.secho(f"Invalid configuration: {e}", fg=typer.colors.RED)
+        raise typer.Exit(3)
+    except (yaml.YAMLError, ValueError, OSError) as e:
+        # Exit 3 for the same reason as the schema failure above: the CLI's
+        # documented code for an invalid configuration. A file that does not
+        # parse is the most invalid kind. (json.JSONDecodeError and
+        # UnicodeDecodeError are both ValueErrors.)
+        typer.secho(
+            f"Invalid configuration: could not parse {config_file}: {e}",
+            fg=typer.colors.RED,
+        )
         raise typer.Exit(3)
     print(
         Syntax(
