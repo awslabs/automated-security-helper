@@ -70,3 +70,19 @@ def test_the_loader_count_leaves_opt_in_scanners_out(caplog, test_plugin_context
         r.getMessage() for r in caplog.records if r.getMessage().startswith("Loaded ")
     ]
     assert lines and f", {expected} scanners," in lines[-1], lines
+
+
+def test_the_workspace_plan_leaves_untouched_opt_in_scanners_out():
+    """Neither listed as a scanner nor contributing a pin until enabled."""
+    from automated_security_helper.workspace.resolver import _scanner_state
+
+    names, pins = _scanner_state(get_default_config())
+    assert not set(OPT_IN) & set(names)
+    assert not set(OPT_IN) & set(pins), pins
+
+    enabled = AshConfig.model_validate(
+        {"project_name": "p", "scanners": {"cfn-lint": {"enabled": True}}}
+    )
+    names, pins = _scanner_state(enabled)
+    assert "cfn-lint" in names
+    assert pins["cfn-lint"] == ">=1.43.3,<2.0.0"

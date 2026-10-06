@@ -23,6 +23,8 @@ ash scan --config-overrides 'scanners.cfn-lint.enabled=true'
 
 `--exclude-scanners cfn-lint` still wins over both. Once enabled, cfn-lint behaves like every other scanner: if the tool is missing it is reported as MISSING and the scan exits 1 (pass `--no-fail-on-incomplete-scanners` to accept a partial scan).
 
+The config ASH records in `ash_aggregated_results.json` lists cfn-lint only when its config differs from the default (enabled, or options changed). A run that enables it only through `--scanners` still reports its results and status; the recorded config just shows no `cfn-lint` entry.
+
 ## Installation
 
 cfn-lint is a Python package (MIT-0). ASH installs it with `uv tool install 'cfn-lint[sarif]>=1.43.3,<2.0.0'`, either on first use or ahead of time:

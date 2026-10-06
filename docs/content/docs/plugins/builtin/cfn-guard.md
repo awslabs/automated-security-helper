@@ -21,6 +21,8 @@ ash scan --config-overrides 'scanners.cfn-guard.enabled=true'
 
 Naming it in `--scanners` runs it even if the config says `enabled: false`; `--exclude-scanners cfn-guard` wins over both. Once enabled, a missing binary or missing rules are reported as MISSING with the reason, and the scan exits 1 unless you pass `--no-fail-on-incomplete-scanners`.
 
+The config ASH records in `ash_aggregated_results.json` lists cfn-guard only when its config differs from the default (enabled, or options changed). A run that enables it only through `--scanners` still reports its results and status; the recorded config just shows no `cfn-guard` entry.
+
 ## Installation
 
 ```bash
