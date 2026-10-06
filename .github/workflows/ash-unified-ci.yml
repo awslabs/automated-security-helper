@@ -776,12 +776,23 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync --extra cdk --extra symbols
+      # cfn-lint and cfn-guard are opt-in scanners, so nothing else in this job installs
+      # them, and tests/integration/scanners/test_cfn_lint_and_cfn_guard_real.py runs
+      # both for real. This is the installer users run, so it also exercises the pinned
+      # cfn-guard download and the rules-bundle install. ASH_REQUIRE_CFN_TOOLS below
+      # makes a missing tool fail those tests instead of skipping them.
+      - name: Install cfn-lint and cfn-guard
+        run: |
+          uv run ash dependencies install --tool cfn-lint --tool cfn-guard
+          echo "$HOME/.ash/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan.
       - name: Run the integration suite
         env:
           ASH_REQUIRE_CDK_EXTRA: "1"
+          ASH_REQUIRE_CFN_TOOLS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         run: |
           uv run pytest \

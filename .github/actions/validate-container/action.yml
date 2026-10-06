@@ -612,3 +612,53 @@ runs:
 
         print(f"PASS: all {len(image_supplied)} image-supplied scanners participated")
         PY
+
+    # cfn-lint and cfn-guard are opt-in, so the default scan above never runs them and
+    # the participation check cannot see them. This scans one compliant template with
+    # both named, which is the only way to learn that the image actually ships cfn-lint,
+    # the cfn-guard binary and the Guard Rules Registry bundle cfn-guard needs: a tool or
+    # the rules missing from the image is MISSING here, and
+    # --fail-on-incomplete-scanners turns that into exit 1. The template is the
+    # compliant fixture from tests/test_data/scanners/cfn_lint_guard, so both scanners
+    # must report PASSED and the scan must exit 0.
+    - name: "Scan with the image's opt-in CloudFormation scanners"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        rm -rf /tmp/ash-cfn-selftest
+        mkdir -p /tmp/ash-cfn-selftest
+        cp tests/test_data/scanners/cfn_lint_guard/repo/templates/compliant.yaml /tmp/ash-cfn-selftest/
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --source-dir /tmp/ash-cfn-selftest \
+          --output-dir /tmp/ash-cfn-selftest/output \
+          --scanners cfn-lint,cfn-guard \
+          --simple \
+          --fail-on-incomplete-scanners \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        python3 - <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        results = pathlib.Path("/tmp/ash-cfn-selftest/output/ash_aggregated_results.json")
+        if not results.exists():
+            sys.exit(f"FAIL: no results at {results}")
+        rows = json.loads(results.read_text()).get("scanner_results") or {}
+        statuses = {name: str(row.get("status")) for name, row in rows.items()}
+        print(statuses)
+        bad = {n: statuses.get(n, "ABSENT") for n in ("cfn-guard", "cfn-lint") if statuses.get(n) != "PASSED"}
+        if bad:
+            sys.exit(f"FAIL: opt-in CloudFormation scanners did not pass on a compliant template: {bad}")
+        print("PASS: cfn-lint and cfn-guard ran from the image")
+        PY
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::the opt-in CloudFormation scan exited $rc on a compliant template"
+          exit "$rc"
+        fi
