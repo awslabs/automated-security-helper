@@ -123,6 +123,16 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
+          # Restore everywhere, save only from main. This setup-uv major defaults
+          # prune-cache to false, so the entry is the full wheel set (~254 MB on
+          # x86_64), and a pull request saves it under its own ref, where no other
+          # pull request can read it. On 2026-10-06 that one key family was 43
+          # entries and 3.62 GB, one copy per open pull request, which put the
+          # repository at 10.84 GB against its 10 GB quota and evicting. A pull
+          # request falls back to its base branch's entry, so saving from main is
+          # what every pull request already reads; the per-PR copies only served
+          # a second push to the same pull request.
+          save-cache: ${{ github.event_name == 'push' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -1257,10 +1267,37 @@ jobs:
   #
   # THE TWO WAYS A GATE LIKE THIS FAILS OPEN
   #
-  # `if: always()` is load-bearing, not defensive. Without it a failed dependency makes this job
+  # `always()` is load-bearing, not defensive. Without it a failed dependency makes this job
   # *skipped*, and GitHub counts a skipped required check as a pass -- so the gate would
   # disappear at exactly the moment it is supposed to speak. That is the whole failure mode this
   # job exists to remove, so it must not reproduce it.
+  #
+  # WHY THE GATE ONLY TAKES A RUNNER WHEN SOMETHING DID NOT SUCCEED
+  #
+  # The rest of the condition is `contains(needs.*.result, ...)` over failure, cancelled and
+  # skipped, so the job runs -- and fails, in the census step below -- whenever any dependency
+  # reported anything but success, which is every case the census's own result check rejects.
+  # It is skipped in exactly one case: every dependency succeeded. That is the one case where
+  # running it could only print a pass, and GitHub reports a skipped job as Success and does
+  # not let it block a merge even when it is a required check:
+  # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions
+  # So the verdict is unchanged in both directions: red whenever it was red before, and green
+  # without waiting for a runner when it was green.
+  #
+  # The waiting was most of the wall clock. This job is created the moment its last dependency
+  # finishes and then queues for an ubuntu-latest runner like any other job, behind every other
+  # open pull request's legs, to run for about five seconds. Measured over nine pull_request and
+  # push runs on 2026-10-06 (37485671493 through 37499915881): it waited a median 84 minutes and
+  # up to 105, against a median of 129 minutes for the whole run, and the gate was the last job
+  # to start in every one of them. In run 37499915881, 102 of its 194 minutes were this job
+  # waiting to execute a five-second script.
+  #
+  # The drift half of the census does not depend on this job running. The census script still
+  # runs here whenever the gate does, and tests/unit/test_required_checks_census.py takes the
+  # same census against the committed `needs` list -- read with yaml.safe_load, a stronger
+  # instrument than the script's scanner -- inside every unit-test leg, and unit-test is one of
+  # this job's dependencies. A job added to the workflow without being added to `needs` fails
+  # those tests, which fails unit-test, which makes this job run and fail.
   #
   # The second way is drift: a job added to this workflow and not added to `needs` escapes the
   # gate silently, and the gate keeps reporting success over a shrinking share of the suite. So
@@ -1289,7 +1326,7 @@ jobs:
   # two apart.
   required-checks:
     name: required-checks
-    if: always()
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')) }}
     needs:
       - lint
       - snapshot-trailers
