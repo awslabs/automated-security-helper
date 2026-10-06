@@ -284,5 +284,5 @@ workspace:
   max_parallel_projects: null
   project_timeout: null
 
-Successfully updated config file: <CWD>/ash.yaml
+Successfully updated config file: <TMP>/demo-project/ash.yaml
 [exit code: 0]

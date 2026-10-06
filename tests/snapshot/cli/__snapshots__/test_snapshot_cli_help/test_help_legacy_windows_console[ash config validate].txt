@@ -21,10 +21,11 @@
      ash config validate --verbose
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --config   -c      <str>  The path to the configuration file to validate. By default, ASH looks │
-│                           for config files in .ash/.ash.yaml                                    │
+│ --config   -c      <str>  The path to the configuration file to validate. By default, ASH       │
+│                           validates the config a scan of the current directory would use (see   │
+│                           the configuration guide for the discovery order), falling back to     │
+│                           .ash/.ash.yaml.                                                       │
 │                           [env var: ASH_CONFIG]                                                 │
-│                           [default: .ash/.ash.yaml]                                             │
 │ --verbose  -v             Enable verbose logging                                                │
 │ --debug    -d             Enable debug logging                                                  │
 │ --help                    Show this message and exit.                                           │

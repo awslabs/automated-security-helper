@@ -4,7 +4,7 @@ $ ash config validate-plugin-dependencies invalid.yaml
                         Input should be 'ONLINE' or 'OFFLINE'
                           For further information visit
                       https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/literal_error
-Config file '<CWD>/invalid.yaml' is not valid: Configuration validation failed for 'invalid.yaml': 1 validation error for AshConfig
+Config file '<TMP>/demo-project/invalid.yaml' is not valid: Configuration validation failed for 'invalid.yaml': 1 validation error for AshConfig
 build.build_mode
   Input should be 'ONLINE' or 'OFFLINE' [type=literal_error, input_value='online', input_type=str]
     For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/literal_error. Run 'ash config lint' to identify and fix issues.

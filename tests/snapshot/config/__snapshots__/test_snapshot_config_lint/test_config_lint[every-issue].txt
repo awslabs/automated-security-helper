@@ -1,5 +1,5 @@
 $ ash config lint
-Linting configuration file: .ash/.ash.yaml
+Linting configuration file: <TMP>/demo-project/.ash/.ash.yaml
 
 Found 16 issue(s):
   ❌ Missing required top-level field: 'project_name' at 'project_name'

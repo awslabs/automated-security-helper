@@ -211,7 +211,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <CWD>',
+        'run_ash_scan tool called in cwd: <TMP>/cwd',
       ]),
       list([
         'info',
@@ -527,7 +527,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <CWD>',
+        'run_ash_scan tool called in cwd: <TMP>/cwd',
       ]),
       list([
         'info',
@@ -792,7 +792,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <CWD>',
+        'run_ash_scan tool called in cwd: <TMP>/cwd',
       ]),
       list([
         'info',
@@ -1105,7 +1105,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <CWD>',
+        'run_ash_scan tool called in cwd: <TMP>/cwd',
       ]),
       list([
         'info',
@@ -2838,7 +2838,7 @@
     ]),
     'result': dict({
       'context': dict({
-        'cwd': '<CWD>',
+        'cwd': '<TMP>/cwd',
         'directory_path': '<TMP>/allowed/never-scanned/.ash/ash_output',
         'error_category': 'file_not_found',
       }),
@@ -2867,7 +2867,7 @@
     ]),
     'result': dict({
       'context': dict({
-        'cwd': '<CWD>',
+        'cwd': '<TMP>/cwd',
         'directory_path': '<TMP>/outside/.ash/ash_output',
         'error_category': 'invalid_path',
         'resolved_path': '<TMP>/outside/.ash/ash_output',
@@ -2891,17 +2891,17 @@
     'client_messages': list([
       list([
         'info',
-        'Getting results from ASH scan in directory: <CWD>/.ash/ash_output (filter_level=full)',
+        'Getting results from ASH scan in directory: <TMP>/cwd/.ash/ash_output (filter_level=full)',
       ]),
     ]),
     'result': dict({
       'context': dict({
-        'cwd': '<CWD>',
-        'directory_path': '<CWD>/.ash/ash_output',
+        'cwd': '<TMP>/cwd',
+        'directory_path': '<TMP>/cwd/.ash/ash_output',
         'error_category': 'invalid_path',
-        'resolved_path': '<CWD>/.ash/ash_output',
+        'resolved_path': '<TMP>/cwd/.ash/ash_output',
       }),
-      'error': "Scan target is outside the permitted roots: <CWD>/.ash/ash_output. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
+      'error': "Scan target is outside the permitted roots: <TMP>/cwd/.ash/ash_output. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
       'error_category': 'invalid_path',
       'error_type': 'MCPResourceError',
       'operation': 'get_scan_results',
@@ -2953,7 +2953,7 @@
     ]),
     'result': dict({
       'context': dict({
-        'cwd': '<CWD>',
+        'cwd': '<TMP>/cwd',
         'directory_path': '<TMP>/allowed/never-scanned/.ash/ash_output',
         'error_category': 'file_not_found',
       }),
@@ -2977,7 +2977,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <CWD>',
+        'run_ash_scan tool called in cwd: <TMP>/cwd',
       ]),
       list([
         'error',
@@ -3048,7 +3048,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <CWD>',
+        'run_ash_scan tool called in cwd: <TMP>/cwd',
       ]),
       list([
         'error',
@@ -3069,7 +3069,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <CWD>',
+        'run_ash_scan tool called in cwd: <TMP>/cwd',
       ]),
       list([
         'info',
@@ -3093,7 +3093,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <CWD>',
+        'run_ash_scan tool called in cwd: <TMP>/cwd',
       ]),
       list([
         'error',

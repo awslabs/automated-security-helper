@@ -481,9 +481,18 @@ def default_normalizer(
     # path under it as <CWD>/..., and run from a parent of the checkout it would mask
     # the repo's siblings by where the developer happened to stand. Either way the
     # snapshot would depend on the directory pytest was started from.
+    # A test that chdirs into tmp_path before this runs must still see <TMP>: the two
+    # spellings are the same length, so which token won would depend on order.
     cwd = Path.cwd().resolve()
     repo = REPO_ROOT.resolve()
-    if not (cwd.is_relative_to(repo) or repo.is_relative_to(cwd)):
+    temp_roots = [Path(p).resolve() for p in tmp_paths] + [
+        Path(tempfile.gettempdir()).resolve()
+    ]
+    if not (
+        cwd.is_relative_to(repo)
+        or repo.is_relative_to(cwd)
+        or any(cwd.is_relative_to(t) for t in temp_roots)
+    ):
         normalizer.add_root(cwd, "CWD")
     normalizer.add_root(Path.home(), "HOME")
     normalizer.add_relative_path(ASH_DEFAULT_CONFIG)

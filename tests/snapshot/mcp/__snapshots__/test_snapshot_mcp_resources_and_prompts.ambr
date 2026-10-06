@@ -204,7 +204,7 @@
         'content': dict({
           'text': '''
             Please analyze these ASH security scan results in the source_dir:
-            <CWD> and provide:
+            <TMP>/cwd and provide:
             
             1. **Summary**: Brief overview of the security scan results
             2. **Key Findings**: Most important security issues discovered
@@ -234,7 +234,7 @@
       dict({
         'content': dict({
           'text': '''
-            Please run an ASH security scan of the following directory: <CWD>
+            Please run an ASH security scan of the following directory: <TMP>/cwd
             
             The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
             

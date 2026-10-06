@@ -10,7 +10,10 @@
 │   config_path      <str>  The path to the configuration file to update. By default, ASH looks   │
 │                           for the following config file names in the source directory of a      │
 │                           scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml',   │
-│                           'ash.json'].                                                          │
+│                           'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml',   │
+│                           '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml',             │
+│                           'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a  table   │
+│                           in pyproject.toml at the root; the first found is used.               │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --set                        <str>  Configuration modifications specified as key-value pairs    │

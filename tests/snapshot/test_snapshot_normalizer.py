@@ -500,16 +500,21 @@ class TestWorkingDirectoryRoot:
 
     def test_a_directory_outside_the_repo_masks_as_cwd(self, monkeypatch, tmp_path):
         # Not inside the repo checkout, and not a parent of it.
-        outside = tmp_path / "work"
-        outside.mkdir()
-        monkeypatch.chdir(outside)
-        out = default_normalizer().text(str(outside / "a.txt"))
-        # A --basetemp inside the checkout puts tmp_path under <REPO>; then <TMP>, the
-        # longer and more specific root, is what must win, and <CWD> must not appear.
-        if outside.resolve().is_relative_to(REPO_ROOT.resolve()):
-            assert "<CWD>" not in out
-        else:
-            assert out == "<CWD>/a.txt"
+        # Neither inside the repo nor a temp dir: the shared normalizer takes a fake
+        # cwd so the case is reachable on any host.
+        outside = PurePosixPath("/srv/elsewhere/work")
+        monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: Path(outside)))
+        out = default_normalizer().text(f"{outside}/a.txt")
+        assert out == "<CWD>/a.txt"
+
+    def test_a_cwd_inside_tmp_path_masks_as_tmp(self, monkeypatch, tmp_path):
+        # Tests chdir into tmp_path before asking for the normalizer; <CWD> and <TMP>
+        # would then be the same length and which one won would depend on order.
+        work = tmp_path / "work"
+        work.mkdir()
+        monkeypatch.chdir(work)
+        out = default_normalizer(tmp_paths=[tmp_path]).text(str(work / "a.txt"))
+        assert out == "<TMP>/work/a.txt"
 
 
 class TestFileUriSpellings:

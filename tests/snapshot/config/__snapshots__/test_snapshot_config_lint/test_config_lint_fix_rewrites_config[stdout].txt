@@ -1,5 +1,5 @@
 $ ash config lint --fix --non-interactive
-Linting configuration file: .ash/.ash.yaml
+Linting configuration file: <TMP>/demo-project/.ash/.ash.yaml
 
 Found 16 issue(s):
   ❌ Missing required top-level field: 'project_name' at 'project_name'
@@ -32,5 +32,5 @@ Found 16 issue(s):
   • Remove expired suppression
   • Rename scanners.'cdk_nag' to the canonical form 'cdk-nag'
 
-✅ Fixed 8 issue(s) in .ash/.ash.yaml
+✅ Fixed 8 issue(s) in <TMP>/demo-project/.ash/.ash.yaml
 [exit code: 0]

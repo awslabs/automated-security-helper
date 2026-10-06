@@ -101,6 +101,12 @@ global_settings:
       reason: The file was deleted
 """
 
+# `extends` names a base config that does not exist, so resolving it fails.
+BAD_EXTENDS = """\
+extends: base-that-does-not-exist.yaml
+project_name: snapshot-demo
+"""
+
 UNUSED_REPORT = {
     "unused_suppressions": [
         {"path": "src/old.py", "rule_id": "B105", "reason": "The file was deleted"}
@@ -118,6 +124,7 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (project / "broken.yaml").write_text(BROKEN, encoding="utf-8")
     (project / "clean.yaml").write_text(CLEAN, encoding="utf-8")
     (project / "unused.yaml").write_text(WITH_UNUSED, encoding="utf-8")
+    (project / "extends.yaml").write_text(BAD_EXTENDS, encoding="utf-8")
     report = project / "out" / "reports" / "ash.unused-suppressions.json"
     report.parent.mkdir(parents=True)
     report.write_text(json.dumps(UNUSED_REPORT), encoding="utf-8")
@@ -158,6 +165,7 @@ def test_fixtures_exercise_every_lint_category(project_dir, snapshot):
             output_dir=project_dir / "out",
             check_unused=True,
         ),
+        "bad-extends": ConfigLinter.lint(project_dir / "extends.yaml"),
     }
 
     seen = {issue.category for r in results.values() for issue in r.issues}
@@ -176,6 +184,9 @@ def test_fixtures_exercise_every_lint_category(project_dir, snapshot):
         pytest.param(["config", "lint", "-c", "broken.yaml"], None, 1, id="broken"),
         pytest.param(["config", "lint", "-c", "clean.yaml"], None, 0, id="clean"),
         pytest.param(["config", "lint", "-c", "missing.yaml"], None, 1, id="missing"),
+        pytest.param(
+            ["config", "lint", "-c", "extends.yaml"], None, 1, id="bad-extends"
+        ),
         pytest.param(["config", "lint", "--fix"], "n\n", 0, id="fix-declined"),
     ],
 )

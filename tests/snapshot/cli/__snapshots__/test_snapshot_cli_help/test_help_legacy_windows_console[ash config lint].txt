@@ -39,10 +39,11 @@
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --config                 -c                <str>  The path to the configuration file to lint.   │
-│                                                   By default, ASH looks for config files in     │
-│                                                   .ash/.ash.yaml                                │
+│                                                   By default, ASH lints the config a scan of    │
+│                                                   the current directory would use (see the      │
+│                                                   configuration guide for the discovery order), │
+│                                                   falling back to .ash/.ash.yaml.               │
 │                                                   [env var: ASH_CONFIG]                         │
-│                                                   [default: .ash/.ash.yaml]                     │
 │ --output-dir             -o                <str>  Path to the ASH output directory (for unused  │
 │                                                   suppressions report). Defaults to             │
 │                                                   .ash/ash_output                               │

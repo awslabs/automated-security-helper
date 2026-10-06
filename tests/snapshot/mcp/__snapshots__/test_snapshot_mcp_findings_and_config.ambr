@@ -416,7 +416,7 @@
   dict({
     'result': dict({
       'context': dict({
-        'cwd': '<CWD>',
+        'cwd': '<TMP>/cwd',
         'directory_path': '<TMP>/outside',
         'error_category': 'invalid_path',
         'resolved_path': '<TMP>/outside',
@@ -1813,9 +1813,9 @@
           'field': '',
           'message': '''
             YAML parsing error: while parsing a flow sequence
-              in "<TMP>/server-tmp/tmpvalidate_config.yaml", line 1, column 15
+              in "<TMP>/server-tmp/tmpvalidate_config/config.yaml", line 1, column 15
             expected ',' or ']', but got '<stream end>'
-              in "<TMP>/server-tmp/tmpvalidate_config.yaml", line 2, column 1
+              in "<TMP>/server-tmp/tmpvalidate_config/config.yaml", line 2, column 1
           ''',
           'type': 'yaml_parse_error',
         }),

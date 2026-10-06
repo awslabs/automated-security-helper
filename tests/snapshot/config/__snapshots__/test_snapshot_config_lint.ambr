@@ -1,6 +1,16 @@
 # serializer version: 1
 # name: test_fixtures_exercise_every_lint_category
   dict({
+    'bad-extends': list([
+      dict({
+        'category': 'extends-error',
+        'fix_description': '',
+        'fixable': False,
+        'message': "Config extends error: 'extends: base-that-does-not-exist.yaml' in <TMP>/demo-project/extends.yaml names <TMP>/demo-project/base-that-does-not-exist.yaml, which does not exist or is not a file",
+        'path': 'extends',
+        'severity': 'error',
+      }),
+    ]),
     'broken': list([
       dict({
         'category': 'syntax-error',
@@ -8,9 +18,9 @@
         'fixable': False,
         'message': '''
           Failed to parse config file: while parsing a flow sequence
-            in "<CWD>/broken.yaml", line 1, column 15
+            in "<TMP>/demo-project/broken.yaml", line 1, column 15
           expected ',' or ']', but got '<stream end>'
-            in "<CWD>/broken.yaml", line 2, column 1
+            in "<TMP>/demo-project/broken.yaml", line 2, column 1
         ''',
         'path': '',
         'severity': 'error',
