@@ -58,8 +58,10 @@ one-minute limit, since a cold Python start can take seconds. A second
 
 The extension does not run in an untrusted workspace (`capabilities.untrustedWorkspaces`
 is `supported: false`). A scan runs ASH over the workspace, and ASH reads the
-workspace's own `.ash/.ash.yaml`, whose `ash_plugin_modules` imports Python
-modules, so opening a repository and scanning it can run code that repository
+workspace's own ASH config, whose `ash_plugin_modules` imports Python modules.
+That config can be `.ash/.ash.yaml`, an `.ashrc.*` file, or a `[tool.ash]` table
+in `pyproject.toml`, all discovered under the folder passed as `--source-dir`.
+Opening a repository and scanning it can therefore run code that repository
 supplies. `limited` support with `restrictedConfigurations` was considered and
 rejected: it would only stop the repository's `.vscode/settings.json` from
 changing this extension's settings, and the code path above goes through none of

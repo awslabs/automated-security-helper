@@ -14,9 +14,9 @@ const manifest = JSON.parse(
 ) as Record<string, unknown>;
 
 describe('package.json', () => {
-  // A scan runs ASH over the workspace, and ASH reads the workspace's own
-  // .ash/.ash.yaml, which can load plugin modules and so run code the repository
-  // supplies. No subset of this extension's settings makes that safe, so the
+  // A scan runs ASH over the workspace, and ASH reads the workspace's own config
+  // (.ash/.ash.yaml, an .ashrc file, or [tool.ash] in pyproject.toml), which can
+  // load plugin modules and so run code the repository supplies. No subset of this extension's settings makes that safe, so the
   // extension does not run in Restricted Mode at all. Leaving the field out has
   // the same effect, since VS Code treats an undeclared extension as not
   // supporting Workspace Trust, but declaring it records the decision and shows
@@ -28,5 +28,8 @@ describe('package.json', () => {
     expect(untrusted?.supported).toBe(false);
     expect(typeof untrusted?.description).toBe('string');
     expect(untrusted?.description).toContain('.ash');
+    // Every config source can set ash_plugin_modules, so the reason names them all.
+    expect(untrusted?.description).toContain('.ashrc');
+    expect(untrusted?.description).toContain('[tool.ash]');
   });
 });

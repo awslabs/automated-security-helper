@@ -906,7 +906,7 @@ exports[`what the manifest and activation present package.json contributions and
   "activationEvents": [],
   "capabilities": {
     "untrustedWorkspaces": {
-      "description": "A scan runs ASH over the workspace, and ASH reads the workspace's own .ash/.ash.yaml, which can load Python plugin modules and so run code the repository supplies. Trust the workspace to scan it.",
+      "description": "A scan runs ASH over the workspace, and ASH reads the workspace's own ASH config (.ash/.ash.yaml, an .ashrc file, or [tool.ash] in pyproject.toml), which can load Python plugin modules and so run code the repository supplies. Trust the workspace to scan it.",
       "supported": false,
     },
   },

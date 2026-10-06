@@ -23,8 +23,10 @@
  *               rule cache (see tests/e2e/README.md)    -> exit 1, opengrep MISSING
  *   clean       detect-secrets on a tree with no secret -> exit 0
  *
- * One test adds a workspace .ash/.ash.yaml to the findings case that suppresses
+ * Three tests add a config to the findings case that suppresses
  * SECRET-SECRET-KEYWORD on leak.py: exit 2, 2 actionable findings, 1 suppressed.
+ * The config is a workspace .ash/.ash.yaml, a root pyproject.toml with
+ * [tool.ash], or a root .ashrc.yaml.
  */
 
 import * as assert from 'assert';
@@ -361,6 +363,65 @@ suite('ASH in a real VS Code', () => {
       ['SECRET-AWS-ACCESS-KEY', 'SECRET-BASE64-HIGH-ENTROPY-STRING'],
     );
   });
+
+  // The extension passes the workspace folder as --source-dir and sets no working
+  // directory (see CommandOptions in src/ash-cli.ts), so ASH has to find the
+  // config from --source-dir alone. The two newer config sources are discovered
+  // at the scan root only, so each gets the same suppression as the .ash.yaml
+  // test above, and the same outcome is required of it.
+  const NEWER_CONFIG_SOURCES: ReadonlyArray<{ readonly name: string; readonly body: string }> = [
+    {
+      name: 'pyproject.toml',
+      body: [
+        '[project]',
+        'name = "vscode-integration"',
+        '',
+        '[tool.ash]',
+        'project_name = "vscode-integration"',
+        '',
+        '[[tool.ash.global_settings.suppressions]]',
+        'rule_id = "SECRET-SECRET-KEYWORD"',
+        'path = "leak.py"',
+        'reason = "integration fixture"',
+        '',
+      ].join('\n'),
+    },
+    {
+      name: '.ashrc.yaml',
+      body: [
+        'project_name: vscode-integration',
+        'global_settings:',
+        '  suppressions:',
+        '    - rule_id: "SECRET-SECRET-KEYWORD"',
+        '      path: leak.py',
+        '      reason: integration fixture',
+        '',
+      ].join('\n'),
+    },
+  ];
+
+  for (const source of NEWER_CONFIG_SOURCES) {
+    test(`leaves out a finding suppressed in ${source.name} at the workspace root`, async () => {
+      const expected = await arrange('findings');
+      let suppressed: Expected = expected;
+      if (MODE === 'real') {
+        fs.writeFileSync(path.join(WORKSPACE, source.name), source.body);
+        suppressed = { ...expected, diagnostics: expected.diagnostics - 1, suppressed: 1 };
+      }
+
+      const report = await scan();
+
+      assert.strictEqual(report.status, 'ok', report.detail);
+      assert.strictEqual(report.exitCode, suppressed.exitCode);
+      assertContract('findings', report, suppressed.diagnostics);
+      assert.strictEqual(report.summary?.suppressed, suppressed.suppressed);
+      const diagnostics = ashDiagnostics(SECRET_FILE);
+      assert.deepStrictEqual(
+        diagnostics.map((diagnostic) => String(diagnostic.code)).sort(),
+        ['SECRET-AWS-ACCESS-KEY', 'SECRET-BASE64-HIGH-ENTROPY-STRING'],
+      );
+    });
+  }
 
   test('shows the partial findings of an exit 1 scan and reports it incomplete', async () => {
     const expected = await arrange('incomplete');
