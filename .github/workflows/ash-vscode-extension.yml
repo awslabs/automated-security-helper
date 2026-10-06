@@ -63,6 +63,17 @@ on:
       - "automated_security_helper/core/scanner_statistics_calculator.py"
       - "automated_security_helper/utils/content_db_staleness.py"
       - "automated_security_helper/models/asharp_model.py"
+      # The integration-real job installs ASH from this commit and scans with it, so
+      # any change to the product, its build, or the shared e2e contract has to run
+      # it. These are broader than the coverage-parity entries above and include them.
+      - "automated_security_helper/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "scripts/e2e/**"
+      - "tests/e2e/**"
+      # The integration-real job sources this for the CLI name it installs and
+      # checks, so a rename there alone changes what that job runs.
+      - "packaging/cli-name.sh"
   pull_request:
     branches:
       - "**"
@@ -77,6 +88,12 @@ on:
       - "automated_security_helper/core/scanner_statistics_calculator.py"
       - "automated_security_helper/utils/content_db_staleness.py"
       - "automated_security_helper/models/asharp_model.py"
+      - "automated_security_helper/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "scripts/e2e/**"
+      - "tests/e2e/**"
+      - "packaging/cli-name.sh"
   # merge_group takes no paths filter -- GitHub scopes paths to push, pull_request
   # and pull_request_target only. So this leg runs on every queue entry, including
   # entries that touch nothing here. That costs a build on unrelated entries and
@@ -240,6 +257,93 @@ jobs:
 
       - name: Run the integration suite under Xvfb
         run: xvfb-run -a npm run test:integration
+
+  # The VS Code channel end to end, against a real ASH built from this commit:
+  # the .vsix the package job built and inspected, installed into a real VS Code
+  # with its own CLI, then the integration suite in real mode against that
+  # installed copy. Every scan is one of the shared e2e cases
+  # (tests/e2e/fixtures/cases.json) and is judged by scripts/e2e/assert_outcome.py:
+  # exit 2 with 3 findings, exit 0 clean, exit 1 with opengrep MISSING. The first
+  # scans run with only `ash` on PATH (the ashx -> ash fallback), a later one with
+  # `ashx`. Then uninstall, and an upgrade from an N-1 .vsix to N. Negative
+  # controls: a truncated .vsix must be refused, the suite against a cases file
+  # expecting one finding too many must fail through assert_outcome, and the
+  # post-uninstall absence check must fail while the extension is installed. See
+  # editors/vscode/test/integration/vsix-e2e.ts.
+  integration-real:
+    name: "e2e: .vsix install, real ashx scans, upgrade, uninstall"
+    needs: package
+    # Pinned for the same apt package names as the integration job.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      ASH_IT_VSCODE_VERSION: "1.140.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No caches: an e2e leg is a fresh install by definition, and each Actions
+      # cache is a publish surface (.github/scripts/assert-publish-surfaces.py).
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # From a `git archive` export, so the build never writes into the checkout,
+      # into a venv that has never held ASH. The installed version must be this
+      # commit's, or the scans below would be judging some other build.
+      - name: Build the head wheel and install it into a fresh venv
+        env:
+          WORK: ${{ runner.temp }}/ash-e2e-vscode
+        run: |
+          set -euo pipefail
+          . packaging/cli-name.sh
+          mkdir -p "$WORK/src" "$WORK/dist"
+          git archive HEAD | tar -x -C "$WORK/src"
+          (cd "$WORK/src" && uv build --wheel --out-dir "$WORK/dist")
+          wheels=("$WORK"/dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one wheel, found ${#wheels[@]}"
+            exit 1
+          fi
+          uv venv --python 3.12 "$WORK/venv"
+          uv pip install --python "$WORK/venv/bin/python" --no-cache "${wheels[0]}"
+          want="$(uv run --no-project --python 3.12 python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          got="$("$WORK/venv/bin/$ASH_CLI_NAME" --version)"
+          echo "$ASH_CLI_NAME --version: $got (want $want)"
+          case "$got" in
+            *"v$want") ;;
+            *) echo "::error::the installed $ASH_CLI_NAME reports '$got', not version $want"; exit 1 ;;
+          esac
+          for name in "$ASH_CLI_NAME" ash; do
+            test -x "$WORK/venv/bin/$name" || { echo "::error::the venv has no $name entry point"; exit 1; }
+          done
+          echo "ASH_IT_REAL_ASH_DIR=$WORK/venv/bin" >> "$GITHUB_ENV"
+
+      - name: Download the .vsix the package job built and inspected
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-vscode-extension
+          path: ${{ runner.temp }}/ash-e2e-vscode/vsix
+
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Install a virtual display and Electron's runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libnss3 libgbm1 libasound2t64
+
+      - name: Install, scan, uninstall, upgrade, negative controls
+        working-directory: editors/vscode
+        env:
+          ASH_IT_VSIX: ${{ runner.temp }}/ash-e2e-vscode/vsix/ash-vscode.vsix
+        run: xvfb-run -a npm run test:e2e-vsix
 
   # ASH's own coverage rule over the cases src/coverage.ts is tested against.
   # coverage_complete is not a field of ash_aggregated_results.json, so the

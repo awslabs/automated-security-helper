@@ -277,11 +277,24 @@ xvfb-run -a npm run test:integration
 
 By default the CLI is `test/integration/ash-stub.ts` behind wrappers named `ash`
 and `ashx`, replaying the captured runs under `test/fixtures/scans/` with their
-exit codes. Set `ASH_IT_REAL_ASH_DIR` to a directory holding an installed `ash`
-to run the same suite against genuine scans instead. Both modes cover the
-`ashx` -> `ash` fallback and its one-time notice, exit 2 findings with a
-suppression, exit 1 with partial findings, exit 0 clearing the editor, exit 1 with
-no report, and a configured executable used as given.
+exit codes. Set `ASH_IT_REAL_ASH_DIR` to a directory holding an installed ASH
+(a venv's `bin/`, with both `ashx` and `ash`) to run the same suite against
+genuine scans instead. Real mode scans the shared e2e cases in
+`tests/e2e/fixtures/cases.json` and judges each output directory with
+`scripts/e2e/assert_outcome.py`, the verdict every install channel uses. Both
+modes cover the `ashx` -> `ash` fallback and its one-time notice, exit 2
+findings, exit 1 with partial findings, exit 0 clearing the editor, exit 1 with no
+report, a scan timeout, and a configured executable used as given.
+
+`npm run test:e2e-vsix` is the channel end to end. It needs `ASH_IT_REAL_ASH_DIR`
+and a built `ash-vscode.vsix` (or `ASH_IT_VSIX`). It installs the `.vsix` into a
+fresh extensions directory with VS Code's own CLI, runs the real-mode suite
+against that installed copy, uninstalls it, and upgrades from an N-1 `.vsix`
+built from this tree at a lower version. Its negative controls are a truncated
+`.vsix` that must be refused, a suite run against a cases file expecting one
+finding too many that must fail through `assert_outcome`, and the post-uninstall
+absence check run while the extension is still installed, where it must fail. See
+`test/integration/vsix-e2e.ts`.
 
 VS Code is launched with `--force-disable-user-env`. Without it VS Code resolves
 your login shell's environment and puts its PATH ahead of the suite's, so an
