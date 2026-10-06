@@ -180,3 +180,48 @@ jobs:
         with:
           path: ~/.cache/grype/db
           key: grype-db-${{ runner.os }}-${{ steps.key.outputs.grype-db }}
+
+  # The `ash` job above skips push, so run-ash-security-scan.yml's default-branch
+  # save of the OpenGrep binary never fires in this repository. This job is that
+  # save, the way grype-db-cache is for the grype database: without it every pull
+  # request misses and downloads the binary. The key and path must stay identical
+  # to the restore in run-ash-security-scan.yml. A week that already has an entry
+  # is a lookup and nothing else.
+  opengrep-cache:
+    name: Refresh the OpenGrep binary cache (main only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Compute the OpenGrep cache key
+        id: key
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+      - name: Look up this week's entry
+        id: lookup
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opengrep/cli/latest
+          key: opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}
+          lookup-only: true
+      - name: Download the OpenGrep release binary
+        if: steps.lookup.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$HOME/.opengrep/cli/latest"
+          mkdir -p "$INSTALL_DIR"
+          gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
+          chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
+          "$INSTALL_DIR/opengrep_manylinux_x86" --version
+      - name: Save the OpenGrep binary cache (main only)
+        if: >-
+          steps.lookup.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opengrep/cli/latest
+          key: opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}

@@ -34,6 +34,10 @@ What it does not cover
 Nothing here runs the gate on a runner, so it cannot prove ``${{ github.job }}``
 expands to ``required-checks`` -- that is GitHub's contract, asserted by reading the
 step's text rather than by executing it.
+
+Since the gate stopped taking a runner when every dependency succeeded, the census in
+``TestTheGateCoversItsWorkflow`` is also the one that runs on a green pull request: this
+file runs in every unit-test leg, and unit-test is in the gate's ``needs``.
 """
 
 from __future__ import annotations
@@ -373,6 +377,44 @@ class TestTheGateActuallyRunsTheScript:
             f"{GATE_JOB} does not check out the repository, but the census script reads "
             "the workflow off disk."
         )
+
+    def test_the_gate_runs_on_every_non_success_result(self):
+        """The gate is skipped only when every dependency succeeded.
+
+        GitHub reports a skipped job as Success, so the gate's `if:` decides the verdict
+        on its own whenever it skips the job. It must keep `always()` -- without it the
+        implicit `success()` skips the gate on exactly the failures it exists to report
+        -- and it must run for each result the census's own check rejects, so a skip
+        can only ever stand in for a pass the census would have printed.
+        """
+        data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+        condition = re.sub(r"\s+", "", str(data["jobs"][GATE_JOB].get("if", "")))
+        assert condition.startswith("${{always()&&("), (
+            f"{GATE_JOB}'s `if:` no longer starts from always(): {condition!r}. "
+            "Without it a failed dependency skips the gate, and a skipped required "
+            "check is a pass."
+        )
+        for result in ("failure", "cancelled", "skipped"):
+            assert f"contains(needs.*.result,'{result}')" in condition, (
+                f"{GATE_JOB} does not run when a dependency's result is {result!r}, so "
+                f"that result reaches the ruleset as a skipped gate, which GitHub "
+                f"counts as a pass. Condition: {condition!r}"
+            )
+        # Every term must widen when the gate runs, never narrow it. A `success()` or a
+        # negation anywhere in the expression could skip the gate on a bad result.
+        assert "success()" not in condition and "!" not in condition, condition
+        assert condition.count("&&") == 1, condition
+
+    def test_unit_test_carries_the_census_to_the_gate(self):
+        """The drift half of the census reaches the gate through unit-test.
+
+        When every dependency succeeds the gate does not run, so the script's census
+        is not taken on a runner. TestTheGateCoversItsWorkflow takes it instead, and it
+        only gates a merge because this file is collected by the unit-test legs and
+        unit-test is in the gate's `needs`.
+        """
+        assert "unit-test" in _needs_of(UNIFIED_CI, GATE_JOB)
+        assert Path(__file__).resolve().is_relative_to(REPO_ROOT / "tests" / "unit")
 
     def test_the_old_count_literal_is_gone(self):
         """A regression guard on the fix itself.
