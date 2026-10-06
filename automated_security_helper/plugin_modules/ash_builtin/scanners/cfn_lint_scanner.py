@@ -343,6 +343,27 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         return args
 
     @staticmethod
+    def _recorded_args(option_args: List[str], source_dir: Path) -> List[str]:
+        """``option_args`` as recorded in the report, without host-specific paths.
+
+        ASH's own empty configuration is recorded by name only, and an operator's
+        config file relative to the source directory, so the aggregated results do
+        not carry the machine's absolute paths.
+        """
+        recorded = []
+        for arg in option_args:
+            if arg.startswith("--config-file="):
+                path = Path(arg.split("=", 1)[1])
+                shown = (
+                    path.name
+                    if path.name == "ash-empty.cfnlintrc"
+                    else display_path(path, source_dir)
+                )
+                arg = f"--config-file={shown}"
+            recorded.append(arg)
+        return recorded
+
+    @staticmethod
     def batches(paths: List[str], budget: int = _ARGV_CHAR_BUDGET) -> List[List[str]]:
         """Split ``paths`` into consecutive batches whose joined length fits ``budget``.
 
@@ -531,7 +552,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             report.runs[0].invocations = [
                 Invocation(
                     commandLine="cfn-lint",
-                    arguments=["--format", "sarif", *option_args],
+                    arguments=[
+                        "--format",
+                        "sarif",
+                        *self._recorded_args(option_args, source_dir),
+                    ],
                     startTimeUtc=self.start_time,
                     endTimeUtc=self.end_time,
                     executionSuccessful=self.targets_failed == 0,

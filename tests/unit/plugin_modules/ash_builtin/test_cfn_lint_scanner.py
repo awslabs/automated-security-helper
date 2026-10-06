@@ -326,6 +326,15 @@ class TestScan:
         assert scanner.targets_attempted == 2 and scanner.targets_failed == 0
         _assert_parses_to(report, EXPECTED_INSECURE)
 
+    def test_the_recorded_invocation_carries_no_host_path(self, repo):
+        fake = FakeCfnLint({}, returncode=0)
+        report = self._run(_scanner(repo), fake)
+        recorded = report.runs[0].invocations[0].arguments
+        assert "--config-file=ash-empty.cfnlintrc" in recorded
+        assert not any(str(repo) in a for a in recorded), recorded
+        # The tool itself still gets the absolute path.
+        assert any(a.startswith("--config-file=/") or ":/" in a for a in fake.calls[0])
+
     def test_template_names_are_glob_escaped_and_cannot_be_options(self, repo):
         templates = repo / "templates"
         shutil.copy(templates / "compliant.yaml", templates / "g[1].yaml")
