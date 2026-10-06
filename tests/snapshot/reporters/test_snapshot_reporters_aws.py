@@ -76,9 +76,9 @@ class AwsStub:
         client = botocore.session.Session().create_client(
             service_name,
             region_name=region_name or REGION,
-            aws_access_key_id="testing",
-            aws_secret_access_key="testing",
-            aws_session_token="testing",
+            aws_access_key_id="testing",  # pragma: allowlist secret
+            aws_secret_access_key="testing",  # pragma: allowlist secret
+            aws_session_token="testing",  # pragma: allowlist secret
         )
         client.meta.events.register("provide-client-params.*.*", self._record)
         client.meta.events.register_first("before-call.*.*", self._respond)

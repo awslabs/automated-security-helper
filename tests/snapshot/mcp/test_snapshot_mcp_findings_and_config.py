@@ -151,7 +151,7 @@ async def test_diff_scan_results(allowed, snapshot):
             "rule": "B105",
             "level": "warning",
             "severity": "MEDIUM",
-            "message": "Possible hardcoded password: 'hunter2'",
+            "message": "Possible hardcoded password: 'hunter2'",  # pragma: allowlist secret
             "path": "src/settings.py",
             "line": 7,
             "suppressed": False,
