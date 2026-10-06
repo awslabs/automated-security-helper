@@ -1,0 +1,36 @@
+{
+  "runs[].results[].ruleId": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].level": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].message.text": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.artifactLocation.uri": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.region.startLine": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.region.endLine": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].properties": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.region.snippet.text": {
+    "bandit": true
+  },
+  "runs[].results[].fingerprints.bandit/v1": {
+    "bandit": true
+  }
+}

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal, Optional, TYPE_CHECKING
 
@@ -104,48 +105,38 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     add an N+1st object holding the lossy ``scanner_results`` rollup and an
     ``ash_config`` belonging to no project.
 
-    The object key needs care for this ruling to hold, and the reason is worse
-    than a race.
+    The object key needs care for this ruling to hold.
 
-    The key is ``f"{key_prefix}ash-report-{timestamp}.{ext}"`` with ``timestamp``
-    taken from ``model.metadata.summary_stats.start``. That field is **not set
-    yet** when a reporter runs: ``ScanExecutionEngine.execute_phases`` assigns it
-    in a ``finally`` block (``execution_engine.py`` around line 547) that runs
-    *after* ``ReportPhase`` (around line 492). So every reporter observes ``None``,
-    and the key every scan computes is literally ``ash-report-None.json``.
+    The key is ``f"{key_prefix}[{project}/]ash-report-{timestamp}.{ext}"``, as
+    documented in ``docs/plugins/aws/s3-reporter.md``. ``timestamp`` used to be
+    read only from ``model.metadata.summary_stats.start``, and that field is
+    **not set yet** when a reporter runs: ``ScanExecutionEngine.execute_phases``
+    assigns it in a ``finally`` block that runs *after* ``ReportPhase``. So every
+    scan uploaded to the literal key ``ash-report-None.json``, and every run
+    overwrote the one before it.
 
-    Verified rather than reasoned about, by probing ``ReportPhase._execute_phase``
-    during a real scan: ``start`` is ``None`` there and
-    ``'2026-08-26T00:38:09+00:00'`` once the scan returns -- a second-granular
-    string, so even if it were available in time it would not separate concurrent
-    projects reliably.
+    The timestamp is now ``metadata.generated_at``, which ``ReportMetadata``
+    always sets (to the second, in UTC) when the results model is built, and
+    which nothing reassigns afterwards. Because it is stored in
+    ``ash_aggregated_results.json``, re-reporting a finished scan with
+    ``ash report --format s3`` computes the same key the scan did and replaces
+    that object rather than minting a second one. ``summary_stats.start`` is only
+    a fallback: preferring it would give the scan and a later ``ash report`` two
+    different keys, since it is unset during the first and set in the second.
+    Moving when ``summary_stats.start`` is assigned was rejected: more than this
+    reporter reads it.
 
-    Consequences, in order of how much they matter here:
+    Two projects in one workspace can still share a second, and ``PutObject``
+    overwrites silently, so the project segment stays: without it N-1 projects'
+    reports could vanish with no message.
 
-    * All N projects in a workspace compute the same key and overwrite each other.
-      ``PutObject`` overwrites silently, so N-1 projects' reports vanish with no
-      message -- a false negative with extra steps, in the feature this PR
-      completes. The project segment below closes this, which is the part this
-      ruling owns.
-    * Every *run* of a single-directory scan also overwrites the previous one,
-      because the key is a constant. That is a pre-existing defect orthogonal to
-      workspace mode, and it is deliberately **not** fixed here.
-
-      Not deferred for convenience: both behaviours are defensible and either
-      choice breaks someone. A constant key loses every run but the last. A
-      varying key breaks anyone treating that object as a stable "latest report"
-      pointer, and accumulates objects indefinitely for anyone without a
-      lifecycle policy. That is a product decision about a customer-facing AWS
-      integration, and it belongs to whoever owns that integration rather than to
-      a workspace-mode change.
-
-      Also deliberately not fixed by making the timestamp available earlier:
-      ``summary_stats.start`` is read by more than this reporter, so moving when
-      it is assigned has a much wider blast radius than the key does.
-
-      ``tests/unit/workspace/test_project_attribution.py::TestS3KeysCannotCollideAcrossProjects::test_the_start_timestamp_is_unset_when_a_reporter_runs``
-      pins the premise, so if the timestamp ever does become available the
-      assumption fails loudly rather than silently producing a different key.
+    ``report()`` returns a JSON receipt -- bucket, key, URL, format and the path of
+    the local copy -- which ``ReportPhase`` writes to ``reports/ash.s3.json``. It
+    used to return the bare ``s3://`` URL, so a file named ``.json`` held text
+    that is not JSON, and an upload failure wrote the error message there as if
+    it were the report. A failed upload now returns ``None``, which ``ReportPhase``
+    reports as a reporter that produced nothing. The uploaded content itself is
+    kept locally at ``reports/s3-report.{ext}``, as the docs describe.
 
     The project is read from ``metadata.workspace_project`` rather than from
     ``model.workspace``, because a project inside a workspace is scanned as a
@@ -191,20 +182,20 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             )
         return self.dependencies_satisfied
 
-    def report(self, model: "AshAggregatedResults") -> str:
-        """Format ASH model and upload to S3 bucket."""
+    def report(self, model: "AshAggregatedResults") -> str | None:
+        """Upload the results to S3 and return a JSON receipt, or None on failure."""
         if isinstance(self.config, dict):
             self.config = S3ReporterConfig.model_validate(self.config)
 
-        # Create a key for the S3 object.
-        #
-        # `timestamp` is None here in every real scan -- summary_stats.start is
-        # assigned after the report phase, not before it -- so without the
-        # project segment every project in a workspace computes the identical key
-        # and PutObject silently overwrites all but the last. See the class
-        # docstring for the verification and for why the single-project key is
-        # left exactly as it is.
-        timestamp = model.metadata.summary_stats.start
+        # Create a key for the S3 object. generated_at is set when the model is
+        # built and is the same during the scan and in a later `ash report`;
+        # summary_stats.start is unset during a scan. See the class docstring.
+        # The project segment keeps workspace projects apart.
+        timestamp = (
+            model.metadata.generated_at
+            or model.metadata.summary_stats.start
+            or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        )
         file_extension = "json" if self.config.options.file_format == "json" else "yaml"
         project = getattr(model.metadata, "workspace_project", None)
         project_segment = f"{project}/" if isinstance(project, str) and project else ""
@@ -245,7 +236,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             s3_url = f"s3://{self.config.options.bucket_name}/{s3_key}"
             ASH_LOGGER.info(f"Successfully uploaded report to {s3_url}")
 
-            # Also write to local file if needed
+            # The documented local copy of the uploaded content.
             output_path = (
                 Path(self.context.output_dir)
                 / "reports"
@@ -256,7 +247,18 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(output_content)
 
-            return s3_url
+            # What ReportPhase writes to reports/ash.s3.json: a receipt for the
+            # upload, as JSON so the file matches its extension.
+            return json.dumps(
+                {
+                    "url": s3_url,
+                    "bucket": self.config.options.bucket_name,
+                    "key": s3_key,
+                    "file_format": self.config.options.file_format,
+                    "local_copy": output_path.as_posix(),
+                },
+                indent=2,
+            )
         except Exception as e:
             error_msg = f"Error uploading to S3 after retries: {str(e)}"
             self._plugin_log(
@@ -264,7 +266,10 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 level=logging.ERROR,
                 append_to_stream="stderr",
             )
-            return error_msg
+            # None, not the message: ReportPhase reports a None result as a
+            # reporter that produced nothing, and writes no ash.s3.json. Returning
+            # the message used to write it into that file as if it were a report.
+            return None
 
     def _put_object_with_retry(self, s3_client, **kwargs):
         """Put object to S3, retrying on the schedule this reporter was configured with.

@@ -1,0 +1,3 @@
+project_name: snapshot-web
+global_settings:
+  severity_threshold: HIGH

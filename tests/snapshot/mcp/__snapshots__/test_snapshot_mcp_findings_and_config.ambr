@@ -1,0 +1,1827 @@
+# serializer version: 1
+# name: test_check_installation[result]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Checking ASH installation',
+      ]),
+    ]),
+    'result': dict({
+      'ash_command_available': True,
+      'ash_command_output': 'ASH version <ASH_VERSION>',
+      'installed': True,
+      'success': True,
+      'timestamp': '2026-01-15T12:00:00',
+      'version': '<ASH_VERSION>',
+    }),
+    'tool': 'check_installation',
+  })
+# ---
+# name: test_diff_scan_results[after_path_missing]
+  dict({
+    'result': dict({
+      'error': 'after_path does not exist: <TMP>/allowed/absent.json',
+      'success': False,
+    }),
+    'tool': 'diff_scan_results',
+  })
+# ---
+# name: test_diff_scan_results[before_path_missing]
+  dict({
+    'result': dict({
+      'error': 'before_path does not exist: <TMP>/allowed/absent.json',
+      'success': False,
+    }),
+    'tool': 'diff_scan_results',
+  })
+# ---
+# name: test_diff_scan_results[identical]
+  dict({
+    'result': dict({
+      'new': list([
+      ]),
+      'resolved': list([
+      ]),
+      'severity_changed': list([
+      ]),
+    }),
+    'tool': 'diff_scan_results',
+  })
+# ---
+# name: test_diff_scan_results[new_resolved_and_severity_changed]
+  dict({
+    'result': dict({
+      'new': list([
+        dict({
+          'code_snippet': None,
+          'cve_id': None,
+          'cwe_id': None,
+          'description': "Possible hardcoded password: 'h******'",
+          'detected_at': '2026-01-15T12:00:00+00:00',
+          'file_path': 'src/settings.py',
+          'fix_available': None,
+          'id': 'bandit-B105-35f80ca8',
+          'is_suppressed': False,
+          'line_end': 7,
+          'line_start': 7,
+          'package_name': None,
+          'package_path': None,
+          'package_version': None,
+          'properties': '{"tags": ["bandit"], "scanner_name": "bandit", "issue_severity": "MEDIUM"}',
+          'raw_data': '{"ruleId":"B105","ruleIndex":-1,"kind":"fail","level":"warning","message":{"text":"Possible hardcoded password: \'hunter2\'","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"src/settings.py","index":-1},"region":{"startLine":7,"endLine":7,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"MEDIUM"}}',
+          'references': None,
+          'rule_id': 'B105',
+          'scanner': 'bandit',
+          'scanner_type': 'UNKNOWN',
+          'severity': 'MEDIUM',
+          'suppression_justification': None,
+          'suppression_kind': None,
+          'tags': '["bandit"]',
+          'title': 'B105',
+          'workspace_project': None,
+        }),
+      ]),
+      'resolved': list([
+        dict({
+          'code_snippet': None,
+          'cve_id': None,
+          'cwe_id': None,
+          'description': 'Use of assert detected.',
+          'detected_at': '2026-01-15T12:00:00+00:00',
+          'file_path': 'tests/test_app.py',
+          'fix_available': None,
+          'id': 'bandit-B101-c969d24b',
+          'is_suppressed': True,
+          'line_end': 4,
+          'line_start': 4,
+          'package_name': None,
+          'package_path': None,
+          'package_version': None,
+          'properties': '{"tags": ["bandit"], "scanner_name": "bandit", "issue_severity": "LOW"}',
+          'raw_data': '{"ruleId":"B101","ruleIndex":-1,"kind":"fail","level":"note","message":{"text":"Use of assert detected.","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"tests/test_app.py","index":-1},"region":{"startLine":4,"endLine":4,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"suppressions":[{"kind":"external","justification":"Asserts are expected in tests."}],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"LOW"}}',
+          'references': None,
+          'rule_id': 'B101',
+          'scanner': 'bandit',
+          'scanner_type': 'UNKNOWN',
+          'severity': 'LOW',
+          'suppression_justification': 'Asserts are expected in tests.',
+          'suppression_kind': 'external',
+          'tags': '["bandit"]',
+          'title': 'B101',
+          'workspace_project': None,
+        }),
+        dict({
+          'code_snippet': None,
+          'cve_id': None,
+          'cwe_id': None,
+          'description': 'AWS Access Key detected in configuration file.',
+          'detected_at': '2026-01-15T12:00:00+00:00',
+          'file_path': 'config/settings.ini',
+          'fix_available': None,
+          'id': 'detect-secrets-SECRET-AWS-ACCESS-KEY-8af19541',
+          'is_suppressed': False,
+          'line_end': 3,
+          'line_start': 3,
+          'package_name': None,
+          'package_path': None,
+          'package_version': None,
+          'properties': '{"tags": ["detect-secrets"], "scanner_name": "detect-secrets", "issue_severity": "CRITICAL"}',
+          'raw_data': '{"ruleId":"SECRET-AWS-ACCESS-KEY","ruleIndex":-1,"kind":"fail","level":"error","message":{"text":"AWS Access Key detected in configuration file.","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"config/settings.ini","index":-1},"region":{"startLine":3,"endLine":3,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["detect-secrets"],"scanner_name":"detect-secrets","issue_severity":"CRITICAL"}}',
+          'references': None,
+          'rule_id': 'SECRET-AWS-ACCESS-KEY',
+          'scanner': 'detect-secrets',
+          'scanner_type': 'UNKNOWN',
+          'severity': 'CRITICAL',
+          'suppression_justification': None,
+          'suppression_kind': None,
+          'tags': '["detect-secrets"]',
+          'title': 'SECRET-AWS-ACCESS-KEY',
+          'workspace_project': None,
+        }),
+      ]),
+      'severity_changed': list([
+        dict({
+          'after_severity': 'CRITICAL',
+          'before_severity': 'HIGH',
+          'id': 'bandit-B602-e9f369ff',
+        }),
+      ]),
+    }),
+    'tool': 'diff_scan_results',
+  })
+# ---
+# name: test_diff_scan_results[unparseable]
+  dict({
+    'result': dict({
+      'error': '''
+        Failed to parse result file: 1 validation error for AshAggregatedResults
+          Input should be an object [type=model_type, input_value=[], input_type=list]
+            For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/model_type
+      ''',
+      'success': False,
+    }),
+    'tool': 'diff_scan_results',
+  })
+# ---
+# name: test_explain_finding[found_by_rule]
+  dict({
+    'B101': dict({
+      'result': dict({
+        'finding': dict({
+          'cve_id': None,
+          'cwe_id': None,
+          'description': 'Use of assert detected.',
+          'references': list([
+          ]),
+          'scanner': 'bandit',
+          'scanner_metadata': dict({
+            'attachments': list([
+            ]),
+            'codeFlows': list([
+            ]),
+            'fixes': list([
+            ]),
+            'graphTraversals': list([
+            ]),
+            'graphs': list([
+            ]),
+            'kind': 'fail',
+            'level': 'note',
+            'locations': list([
+              dict({
+                'annotations': list([
+                ]),
+                'id': -1,
+                'logicalLocations': list([
+                ]),
+                'physicalLocation': dict({
+                  'artifactLocation': dict({
+                    'index': -1,
+                    'uri': 'tests/test_app.py',
+                  }),
+                  'region': dict({
+                    'byteOffset': -1,
+                    'charOffset': -1,
+                    'endLine': 4,
+                    'startLine': 4,
+                  }),
+                }),
+                'relationships': list([
+                ]),
+              }),
+            ]),
+            'message': dict({
+              'arguments': list([
+              ]),
+              'text': 'Use of assert detected.',
+            }),
+            'properties': dict({
+              'issue_severity': 'LOW',
+              'scanner_name': 'bandit',
+              'tags': list([
+                'bandit',
+              ]),
+            }),
+            'rank': -1.0,
+            'relatedLocations': list([
+            ]),
+            'ruleId': 'B101',
+            'ruleIndex': -1,
+            'stacks': list([
+            ]),
+            'suppressions': list([
+              dict({
+                'justification': 'Asserts are expected in tests.',
+                'kind': 'external',
+              }),
+            ]),
+            'taxa': list([
+            ]),
+          }),
+          'severity': 'LOW',
+          'severity_rationale': 'LOW severity — below MEDIUM threshold',
+          'title': 'B101',
+        }),
+        'operation': 'explain_finding',
+        'success': True,
+      }),
+      'tool': 'explain_finding',
+    }),
+    'B602': dict({
+      'result': dict({
+        'finding': dict({
+          'cve_id': None,
+          'cwe_id': None,
+          'description': 'subprocess call with shell=True identified, security issue.',
+          'references': list([
+          ]),
+          'scanner': 'bandit',
+          'scanner_metadata': dict({
+            'attachments': list([
+            ]),
+            'codeFlows': list([
+            ]),
+            'fixes': list([
+            ]),
+            'graphTraversals': list([
+            ]),
+            'graphs': list([
+            ]),
+            'kind': 'fail',
+            'level': 'error',
+            'locations': list([
+              dict({
+                'annotations': list([
+                ]),
+                'id': -1,
+                'logicalLocations': list([
+                ]),
+                'physicalLocation': dict({
+                  'artifactLocation': dict({
+                    'index': -1,
+                    'uri': 'src/app.py',
+                  }),
+                  'region': dict({
+                    'byteOffset': -1,
+                    'charOffset': -1,
+                    'endLine': 12,
+                    'startLine': 12,
+                  }),
+                }),
+                'relationships': list([
+                ]),
+              }),
+            ]),
+            'message': dict({
+              'arguments': list([
+              ]),
+              'text': 'subprocess call with shell=True identified, security issue.',
+            }),
+            'properties': dict({
+              'issue_severity': 'HIGH',
+              'scanner_name': 'bandit',
+              'tags': list([
+                'bandit',
+              ]),
+            }),
+            'rank': -1.0,
+            'relatedLocations': list([
+            ]),
+            'ruleId': 'B602',
+            'ruleIndex': -1,
+            'stacks': list([
+            ]),
+            'taxa': list([
+            ]),
+          }),
+          'severity': 'HIGH',
+          'severity_rationale': 'HIGH severity — above MEDIUM threshold',
+          'title': 'B602',
+        }),
+        'operation': 'explain_finding',
+        'success': True,
+      }),
+      'tool': 'explain_finding',
+    }),
+    'SECRET-AWS-ACCESS-KEY': dict({
+      'result': dict({
+        'finding': dict({
+          'cve_id': None,
+          'cwe_id': None,
+          'description': 'AWS Access Key detected in configuration file.',
+          'references': list([
+          ]),
+          'scanner': 'detect-secrets',
+          'scanner_metadata': dict({
+            'attachments': list([
+            ]),
+            'codeFlows': list([
+            ]),
+            'fixes': list([
+            ]),
+            'graphTraversals': list([
+            ]),
+            'graphs': list([
+            ]),
+            'kind': 'fail',
+            'level': 'error',
+            'locations': list([
+              dict({
+                'annotations': list([
+                ]),
+                'id': -1,
+                'logicalLocations': list([
+                ]),
+                'physicalLocation': dict({
+                  'artifactLocation': dict({
+                    'index': -1,
+                    'uri': 'config/settings.ini',
+                  }),
+                  'region': dict({
+                    'byteOffset': -1,
+                    'charOffset': -1,
+                    'endLine': 3,
+                    'startLine': 3,
+                  }),
+                }),
+                'relationships': list([
+                ]),
+              }),
+            ]),
+            'message': dict({
+              'arguments': list([
+              ]),
+              'text': 'AWS Access Key detected in configuration file.',
+            }),
+            'properties': dict({
+              'issue_severity': 'CRITICAL',
+              'scanner_name': 'detect-secrets',
+              'tags': list([
+                'detect-secrets',
+              ]),
+            }),
+            'rank': -1.0,
+            'relatedLocations': list([
+            ]),
+            'ruleId': 'SECRET-AWS-ACCESS-KEY',
+            'ruleIndex': -1,
+            'stacks': list([
+            ]),
+            'taxa': list([
+            ]),
+          }),
+          'severity': 'CRITICAL',
+          'severity_rationale': 'CRITICAL severity — above any threshold',
+          'title': 'SECRET-AWS-ACCESS-KEY',
+        }),
+        'operation': 'explain_finding',
+        'success': True,
+      }),
+      'tool': 'explain_finding',
+    }),
+  })
+# ---
+# name: test_explain_finding[no_results_file]
+  dict({
+    'result': dict({
+      'error': 'Failed to load scan results: Results file not found: <TMP>/allowed/ash_aggregated_results.json',
+      'operation': 'explain_finding',
+      'success': False,
+    }),
+    'tool': 'explain_finding',
+  })
+# ---
+# name: test_explain_finding[results_path_outside_roots]
+  dict({
+    'result': dict({
+      'context': dict({
+        'cwd': '<TMP>/cwd',
+        'directory_path': '<TMP>/outside',
+        'error_category': 'invalid_path',
+        'resolved_path': '<TMP>/outside',
+      }),
+      'error': "Scan target is outside the permitted roots: <TMP>/outside. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
+      'error_category': 'invalid_path',
+      'error_type': 'MCPResourceError',
+      'operation': 'explain_finding',
+      'success': False,
+      'suggestions': list([
+        'Add the directory to ASH_MCP_ALLOWED_ROOTS if the MCP server should be able to read results from it',
+        'Verify that the path is correct',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'explain_finding',
+  })
+# ---
+# name: test_explain_finding[unknown_finding_id]
+  dict({
+    'result': dict({
+      'error': "Finding 'bandit-B999-00000000' not found in scan results",
+      'operation': 'explain_finding',
+      'success': False,
+    }),
+    'tool': 'explain_finding',
+  })
+# ---
+# name: test_get_config[discovered_raw]
+  dict({
+    'result': dict({
+      'fail_on_findings': False,
+      'global_settings': dict({
+        'severity_threshold': 'HIGH',
+      }),
+      'project_name': 'snapshot-project',
+    }),
+    'tool': 'get_config',
+  })
+# ---
+# name: test_get_config[explicit_path_missing_returns_defaults]
+  dict({
+    'result': dict({
+      'ash_plugin_modules': list([
+      ]),
+      'build': None,
+      'content_db_staleness': 'fail',
+      'converters': dict({
+        'archive': dict({
+          'enabled': True,
+          'name': 'archive',
+          'options': dict({
+          }),
+        }),
+        'jupyter': dict({
+          'enabled': True,
+          'name': 'jupyter',
+          'options': dict({
+            'install_timeout': 300,
+            'tool_version': '>=7.16.0,<8.0.0',
+          }),
+        }),
+      }),
+      'external_reports_to_include': list([
+      ]),
+      'fail_on_findings': True,
+      'fail_on_incomplete_scanners': True,
+      'global_settings': dict({
+        'ignore_paths': list([
+        ]),
+        'mcp': dict({
+          'runtime_overrides': dict({
+            'allowed_paths': list([
+            ]),
+            'denied_paths': list([
+              '/fail_on_findings',
+              '/fail_on_incomplete_scanners',
+              '/content_db_staleness',
+              '/global_settings/ignore_paths',
+              '/global_settings/suppressions',
+              '/reporters/bedrock-summary-reporter/options/aws_*',
+              '/reporters/cloudwatch-logs/**',
+            ]),
+            'denied_value_patterns': dict({
+            }),
+            'enabled': False,
+          }),
+        }),
+        'severity_threshold': 'MEDIUM',
+        'suppressions': list([
+        ]),
+      }),
+      'mcp_resource_management': dict({
+        'enable_health_checks': True,
+        'enable_resource_logging': True,
+        'health_check_interval_seconds': 60,
+        'log_resource_operations': False,
+        'max_concurrent_scans': 3,
+        'max_concurrent_tasks': 20,
+        'max_directory_size_mb': 1000,
+        'max_message_size_bytes': 10485760,
+        'max_path_length': 4096,
+        'memory_critical_threshold_mb': 2048,
+        'memory_warning_threshold_mb': 1024,
+        'operation_timeout_seconds': 180,
+        'scan_timeout_seconds': 1800,
+        'shutdown_timeout_seconds': 30,
+        'task_count_warning_threshold': 15,
+        'thread_pool_max_workers': 4,
+      }),
+      'project_name': 'ash-scan',
+      'reporters': dict({
+        'csv': dict({
+          'enabled': True,
+          'extension': 'csv',
+          'name': 'csv',
+          'options': dict({
+          }),
+        }),
+        'cyclonedx': dict({
+          'enabled': True,
+          'extension': 'cdx.json',
+          'name': 'cyclonedx',
+          'options': dict({
+          }),
+        }),
+        'flat_json': dict({
+          'enabled': True,
+          'extension': 'flat.json',
+          'name': 'flat-json',
+          'options': dict({
+            'include_metadata': True,
+            'include_scanner_metrics': True,
+            'include_summary_metrics': True,
+          }),
+        }),
+        'github_ghas': dict({
+          'enabled': True,
+          'extension': 'ghas.sarif',
+          'name': 'github-ghas',
+          'options': dict({
+            'exclude_suppressed': True,
+          }),
+        }),
+        'gitlab_cyclonedx': dict({
+          'enabled': True,
+          'extension': 'gl-dependency-scanning-report.cdx.json',
+          'name': 'gitlab-cyclonedx',
+          'options': dict({
+            'category': 'production',
+            'input_file_path_override': None,
+            'language_override': None,
+            'package_manager_override': None,
+          }),
+        }),
+        'gitlab_sast': dict({
+          'enabled': True,
+          'extension': 'gl-sast-report.json',
+          'name': 'gitlab-sast',
+          'options': dict({
+            'exclude_suppressed': False,
+          }),
+        }),
+        'html': dict({
+          'enabled': True,
+          'extension': 'html',
+          'name': 'html',
+          'options': dict({
+          }),
+        }),
+        'junitxml': dict({
+          'enabled': True,
+          'extension': 'junit.xml',
+          'name': 'junitxml',
+          'options': dict({
+            'respect_severity_threshold': True,
+          }),
+        }),
+        'markdown': dict({
+          'enabled': True,
+          'extension': 'summary.md',
+          'name': 'markdown',
+          'options': dict({
+            'compact': False,
+            'include_detailed_findings': True,
+            'include_findings_table': False,
+            'include_summary': True,
+            'max_detailed_findings': 20,
+            'top_hotspots_limit': 10,
+            'use_collapsible_details': True,
+          }),
+        }),
+        'ocsf': dict({
+          'enabled': True,
+          'extension': 'ocsf.json',
+          'name': 'ocsf',
+          'options': dict({
+          }),
+        }),
+        'sarif': dict({
+          'enabled': True,
+          'extension': 'sarif',
+          'name': 'sarif',
+          'options': dict({
+          }),
+        }),
+        'spdx': dict({
+          'enabled': False,
+          'extension': 'spdx.json',
+          'name': 'spdx',
+          'options': dict({
+          }),
+        }),
+        'text': dict({
+          'enabled': True,
+          'extension': 'summary.txt',
+          'name': 'text',
+          'options': dict({
+            'include_detailed_findings': False,
+            'include_findings_table': False,
+            'include_summary': True,
+            'max_detailed_findings': 20,
+            'top_hotspots_limit': 20,
+          }),
+        }),
+        'unused_suppressions': dict({
+          'enabled': True,
+          'extension': 'unused-suppressions.json',
+          'name': 'unused-suppressions',
+          'options': dict({
+            'output_format': 'both',
+          }),
+        }),
+        'yaml': dict({
+          'enabled': False,
+          'extension': 'yaml',
+          'name': 'yaml',
+          'options': dict({
+          }),
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'enabled': True,
+          'name': 'bandit',
+          'options': dict({
+            'additional_formats': list([
+            ]),
+            'confidence_level': 'all',
+            'config_file': None,
+            'excluded_paths': list([
+            ]),
+            'ignore_nosec': False,
+            'install_timeout': 300,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.7.0,<2.0.0',
+          }),
+        }),
+        'cdk_nag': dict({
+          'enabled': True,
+          'name': 'cdk-nag',
+          'options': dict({
+            'include_compliant_checks': False,
+            'nag_packs': dict({
+              'AwsSolutionsChecks': True,
+              'HIPAASecurityChecks': False,
+              'NIST80053R4Checks': False,
+              'NIST80053R5Checks': False,
+              'PCIDSS321Checks': False,
+            }),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'cfn_nag': dict({
+          'enabled': True,
+          'name': 'cfn-nag',
+          'options': dict({
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'checkov': dict({
+          'enabled': True,
+          'name': 'checkov',
+          'options': dict({
+            'additional_formats': list([
+              'cyclonedx_json',
+            ]),
+            'config_file': None,
+            'frameworks': list([
+              'all',
+            ]),
+            'install_timeout': 300,
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'skip_ash_output_dir': True,
+            'skip_frameworks': list([
+            ]),
+            'skip_path': list([
+            ]),
+            'tool_version': None,
+          }),
+        }),
+        'detect_secrets': dict({
+          'enabled': True,
+          'name': 'detect-secrets',
+          'options': dict({
+            'baseline_file': None,
+            'scan_settings': dict({
+              'filters_used': list([
+              ]),
+              'generated_at': None,
+              'plugins_used': list([
+              ]),
+              'results': dict({
+              }),
+              'version': None,
+            }),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'skip_generated_lockfiles': True,
+          }),
+        }),
+        'grype': dict({
+          'enabled': True,
+          'name': 'grype',
+          'options': dict({
+            'config_file': None,
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'npm_audit': dict({
+          'enabled': True,
+          'name': 'npm-audit',
+          'options': dict({
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'opengrep': dict({
+          'enabled': True,
+          'name': 'opengrep',
+          'options': dict({
+            'config': 'p/ci',
+            'exclude': list([
+              '*-converted.py',
+              '*_report_result.txt',
+            ]),
+            'exclude_rule': list([
+            ]),
+            'metrics': 'auto',
+            'offline': False,
+            'patterns': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity': list([
+            ]),
+            'severity_threshold': None,
+            'version': 'v1.15.1',
+          }),
+        }),
+        'semgrep': dict({
+          'enabled': True,
+          'name': 'semgrep',
+          'options': dict({
+            'config': 'p/ci',
+            'exclude': list([
+              '*-converted.py',
+              '*_report_result.txt',
+            ]),
+            'exclude_rule': list([
+            ]),
+            'install_timeout': 300,
+            'metrics': 'auto',
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity': list([
+            ]),
+            'severity_threshold': None,
+            'tool_version': None,
+          }),
+        }),
+        'syft': dict({
+          'enabled': True,
+          'name': 'syft',
+          'options': dict({
+            'additional_outputs': list([
+              'syft-table',
+            ]),
+            'config_file': None,
+            'exclude': list([
+            ]),
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+      }),
+      'workspace': dict({
+        'max_parallel_projects': None,
+        'project_timeout': None,
+      }),
+    }),
+    'tool': 'get_config',
+  })
+# ---
+# name: test_get_config[explicit_path_resolved]
+  dict({
+    'result': dict({
+      'ash_plugin_modules': list([
+      ]),
+      'build': None,
+      'content_db_staleness': 'fail',
+      'converters': dict({
+        'archive': dict({
+          'enabled': True,
+          'name': 'archive',
+          'options': dict({
+          }),
+        }),
+        'jupyter': dict({
+          'enabled': True,
+          'name': 'jupyter',
+          'options': dict({
+            'install_timeout': 300,
+            'tool_version': '>=7.16.0,<8.0.0',
+          }),
+        }),
+      }),
+      'external_reports_to_include': list([
+      ]),
+      'fail_on_findings': False,
+      'fail_on_incomplete_scanners': True,
+      'global_settings': dict({
+        'ignore_paths': list([
+        ]),
+        'mcp': dict({
+          'runtime_overrides': dict({
+            'allowed_paths': list([
+            ]),
+            'denied_paths': list([
+              '/fail_on_findings',
+              '/fail_on_incomplete_scanners',
+              '/content_db_staleness',
+              '/global_settings/ignore_paths',
+              '/global_settings/suppressions',
+              '/reporters/bedrock-summary-reporter/options/aws_*',
+              '/reporters/cloudwatch-logs/**',
+            ]),
+            'denied_value_patterns': dict({
+            }),
+            'enabled': False,
+          }),
+        }),
+        'severity_threshold': 'HIGH',
+        'suppressions': list([
+        ]),
+      }),
+      'mcp_resource_management': dict({
+        'enable_health_checks': True,
+        'enable_resource_logging': True,
+        'health_check_interval_seconds': 60,
+        'log_resource_operations': False,
+        'max_concurrent_scans': 3,
+        'max_concurrent_tasks': 20,
+        'max_directory_size_mb': 1000,
+        'max_message_size_bytes': 10485760,
+        'max_path_length': 4096,
+        'memory_critical_threshold_mb': 2048,
+        'memory_warning_threshold_mb': 1024,
+        'operation_timeout_seconds': 180,
+        'scan_timeout_seconds': 1800,
+        'shutdown_timeout_seconds': 30,
+        'task_count_warning_threshold': 15,
+        'thread_pool_max_workers': 4,
+      }),
+      'project_name': 'snapshot-project',
+      'reporters': dict({
+        'csv': dict({
+          'enabled': True,
+          'extension': 'csv',
+          'name': 'csv',
+          'options': dict({
+          }),
+        }),
+        'cyclonedx': dict({
+          'enabled': True,
+          'extension': 'cdx.json',
+          'name': 'cyclonedx',
+          'options': dict({
+          }),
+        }),
+        'flat_json': dict({
+          'enabled': True,
+          'extension': 'flat.json',
+          'name': 'flat-json',
+          'options': dict({
+            'include_metadata': True,
+            'include_scanner_metrics': True,
+            'include_summary_metrics': True,
+          }),
+        }),
+        'github_ghas': dict({
+          'enabled': True,
+          'extension': 'ghas.sarif',
+          'name': 'github-ghas',
+          'options': dict({
+            'exclude_suppressed': True,
+          }),
+        }),
+        'gitlab_cyclonedx': dict({
+          'enabled': True,
+          'extension': 'gl-dependency-scanning-report.cdx.json',
+          'name': 'gitlab-cyclonedx',
+          'options': dict({
+            'category': 'production',
+            'input_file_path_override': None,
+            'language_override': None,
+            'package_manager_override': None,
+          }),
+        }),
+        'gitlab_sast': dict({
+          'enabled': True,
+          'extension': 'gl-sast-report.json',
+          'name': 'gitlab-sast',
+          'options': dict({
+            'exclude_suppressed': False,
+          }),
+        }),
+        'html': dict({
+          'enabled': True,
+          'extension': 'html',
+          'name': 'html',
+          'options': dict({
+          }),
+        }),
+        'junitxml': dict({
+          'enabled': True,
+          'extension': 'junit.xml',
+          'name': 'junitxml',
+          'options': dict({
+            'respect_severity_threshold': True,
+          }),
+        }),
+        'markdown': dict({
+          'enabled': True,
+          'extension': 'summary.md',
+          'name': 'markdown',
+          'options': dict({
+            'compact': False,
+            'include_detailed_findings': True,
+            'include_findings_table': False,
+            'include_summary': True,
+            'max_detailed_findings': 20,
+            'top_hotspots_limit': 10,
+            'use_collapsible_details': True,
+          }),
+        }),
+        'ocsf': dict({
+          'enabled': True,
+          'extension': 'ocsf.json',
+          'name': 'ocsf',
+          'options': dict({
+          }),
+        }),
+        'sarif': dict({
+          'enabled': True,
+          'extension': 'sarif',
+          'name': 'sarif',
+          'options': dict({
+          }),
+        }),
+        'spdx': dict({
+          'enabled': False,
+          'extension': 'spdx.json',
+          'name': 'spdx',
+          'options': dict({
+          }),
+        }),
+        'text': dict({
+          'enabled': True,
+          'extension': 'summary.txt',
+          'name': 'text',
+          'options': dict({
+            'include_detailed_findings': False,
+            'include_findings_table': False,
+            'include_summary': True,
+            'max_detailed_findings': 20,
+            'top_hotspots_limit': 20,
+          }),
+        }),
+        'unused_suppressions': dict({
+          'enabled': True,
+          'extension': 'unused-suppressions.json',
+          'name': 'unused-suppressions',
+          'options': dict({
+            'output_format': 'both',
+          }),
+        }),
+        'yaml': dict({
+          'enabled': False,
+          'extension': 'yaml',
+          'name': 'yaml',
+          'options': dict({
+          }),
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'enabled': True,
+          'name': 'bandit',
+          'options': dict({
+            'additional_formats': list([
+            ]),
+            'confidence_level': 'all',
+            'config_file': None,
+            'excluded_paths': list([
+            ]),
+            'ignore_nosec': False,
+            'install_timeout': 300,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.7.0,<2.0.0',
+          }),
+        }),
+        'cdk_nag': dict({
+          'enabled': True,
+          'name': 'cdk-nag',
+          'options': dict({
+            'include_compliant_checks': False,
+            'nag_packs': dict({
+              'AwsSolutionsChecks': True,
+              'HIPAASecurityChecks': False,
+              'NIST80053R4Checks': False,
+              'NIST80053R5Checks': False,
+              'PCIDSS321Checks': False,
+            }),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'cfn_nag': dict({
+          'enabled': True,
+          'name': 'cfn-nag',
+          'options': dict({
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'checkov': dict({
+          'enabled': True,
+          'name': 'checkov',
+          'options': dict({
+            'additional_formats': list([
+              'cyclonedx_json',
+            ]),
+            'config_file': None,
+            'frameworks': list([
+              'all',
+            ]),
+            'install_timeout': 300,
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'skip_ash_output_dir': True,
+            'skip_frameworks': list([
+            ]),
+            'skip_path': list([
+            ]),
+            'tool_version': None,
+          }),
+        }),
+        'detect_secrets': dict({
+          'enabled': True,
+          'name': 'detect-secrets',
+          'options': dict({
+            'baseline_file': None,
+            'scan_settings': dict({
+              'filters_used': list([
+              ]),
+              'generated_at': None,
+              'plugins_used': list([
+              ]),
+              'results': dict({
+              }),
+              'version': None,
+            }),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'skip_generated_lockfiles': True,
+          }),
+        }),
+        'grype': dict({
+          'enabled': True,
+          'name': 'grype',
+          'options': dict({
+            'config_file': None,
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'npm_audit': dict({
+          'enabled': True,
+          'name': 'npm-audit',
+          'options': dict({
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'opengrep': dict({
+          'enabled': True,
+          'name': 'opengrep',
+          'options': dict({
+            'config': 'p/ci',
+            'exclude': list([
+              '*-converted.py',
+              '*_report_result.txt',
+            ]),
+            'exclude_rule': list([
+            ]),
+            'metrics': 'auto',
+            'offline': False,
+            'patterns': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity': list([
+            ]),
+            'severity_threshold': None,
+            'version': 'v1.15.1',
+          }),
+        }),
+        'semgrep': dict({
+          'enabled': True,
+          'name': 'semgrep',
+          'options': dict({
+            'config': 'p/ci',
+            'exclude': list([
+              '*-converted.py',
+              '*_report_result.txt',
+            ]),
+            'exclude_rule': list([
+            ]),
+            'install_timeout': 300,
+            'metrics': 'auto',
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity': list([
+            ]),
+            'severity_threshold': None,
+            'tool_version': None,
+          }),
+        }),
+        'syft': dict({
+          'enabled': True,
+          'name': 'syft',
+          'options': dict({
+            'additional_outputs': list([
+              'syft-table',
+            ]),
+            'config_file': None,
+            'exclude': list([
+            ]),
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+      }),
+      'workspace': dict({
+        'max_parallel_projects': None,
+        'project_timeout': None,
+      }),
+    }),
+    'tool': 'get_config',
+  })
+# ---
+# name: test_get_config[no_config_found_returns_defaults]
+  dict({
+    'result': dict({
+      'ash_plugin_modules': list([
+      ]),
+      'build': None,
+      'content_db_staleness': 'fail',
+      'converters': dict({
+        'archive': dict({
+          'enabled': True,
+          'name': 'archive',
+          'options': dict({
+          }),
+        }),
+        'jupyter': dict({
+          'enabled': True,
+          'name': 'jupyter',
+          'options': dict({
+            'install_timeout': 300,
+            'tool_version': '>=7.16.0,<8.0.0',
+          }),
+        }),
+      }),
+      'external_reports_to_include': list([
+      ]),
+      'fail_on_findings': True,
+      'fail_on_incomplete_scanners': True,
+      'global_settings': dict({
+        'ignore_paths': list([
+        ]),
+        'mcp': dict({
+          'runtime_overrides': dict({
+            'allowed_paths': list([
+            ]),
+            'denied_paths': list([
+              '/fail_on_findings',
+              '/fail_on_incomplete_scanners',
+              '/content_db_staleness',
+              '/global_settings/ignore_paths',
+              '/global_settings/suppressions',
+              '/reporters/bedrock-summary-reporter/options/aws_*',
+              '/reporters/cloudwatch-logs/**',
+            ]),
+            'denied_value_patterns': dict({
+            }),
+            'enabled': False,
+          }),
+        }),
+        'severity_threshold': 'MEDIUM',
+        'suppressions': list([
+        ]),
+      }),
+      'mcp_resource_management': dict({
+        'enable_health_checks': True,
+        'enable_resource_logging': True,
+        'health_check_interval_seconds': 60,
+        'log_resource_operations': False,
+        'max_concurrent_scans': 3,
+        'max_concurrent_tasks': 20,
+        'max_directory_size_mb': 1000,
+        'max_message_size_bytes': 10485760,
+        'max_path_length': 4096,
+        'memory_critical_threshold_mb': 2048,
+        'memory_warning_threshold_mb': 1024,
+        'operation_timeout_seconds': 180,
+        'scan_timeout_seconds': 1800,
+        'shutdown_timeout_seconds': 30,
+        'task_count_warning_threshold': 15,
+        'thread_pool_max_workers': 4,
+      }),
+      'project_name': 'ash-scan',
+      'reporters': dict({
+        'csv': dict({
+          'enabled': True,
+          'extension': 'csv',
+          'name': 'csv',
+          'options': dict({
+          }),
+        }),
+        'cyclonedx': dict({
+          'enabled': True,
+          'extension': 'cdx.json',
+          'name': 'cyclonedx',
+          'options': dict({
+          }),
+        }),
+        'flat_json': dict({
+          'enabled': True,
+          'extension': 'flat.json',
+          'name': 'flat-json',
+          'options': dict({
+            'include_metadata': True,
+            'include_scanner_metrics': True,
+            'include_summary_metrics': True,
+          }),
+        }),
+        'github_ghas': dict({
+          'enabled': True,
+          'extension': 'ghas.sarif',
+          'name': 'github-ghas',
+          'options': dict({
+            'exclude_suppressed': True,
+          }),
+        }),
+        'gitlab_cyclonedx': dict({
+          'enabled': True,
+          'extension': 'gl-dependency-scanning-report.cdx.json',
+          'name': 'gitlab-cyclonedx',
+          'options': dict({
+            'category': 'production',
+            'input_file_path_override': None,
+            'language_override': None,
+            'package_manager_override': None,
+          }),
+        }),
+        'gitlab_sast': dict({
+          'enabled': True,
+          'extension': 'gl-sast-report.json',
+          'name': 'gitlab-sast',
+          'options': dict({
+            'exclude_suppressed': False,
+          }),
+        }),
+        'html': dict({
+          'enabled': True,
+          'extension': 'html',
+          'name': 'html',
+          'options': dict({
+          }),
+        }),
+        'junitxml': dict({
+          'enabled': True,
+          'extension': 'junit.xml',
+          'name': 'junitxml',
+          'options': dict({
+            'respect_severity_threshold': True,
+          }),
+        }),
+        'markdown': dict({
+          'enabled': True,
+          'extension': 'summary.md',
+          'name': 'markdown',
+          'options': dict({
+            'compact': False,
+            'include_detailed_findings': True,
+            'include_findings_table': False,
+            'include_summary': True,
+            'max_detailed_findings': 20,
+            'top_hotspots_limit': 10,
+            'use_collapsible_details': True,
+          }),
+        }),
+        'ocsf': dict({
+          'enabled': True,
+          'extension': 'ocsf.json',
+          'name': 'ocsf',
+          'options': dict({
+          }),
+        }),
+        'sarif': dict({
+          'enabled': True,
+          'extension': 'sarif',
+          'name': 'sarif',
+          'options': dict({
+          }),
+        }),
+        'spdx': dict({
+          'enabled': False,
+          'extension': 'spdx.json',
+          'name': 'spdx',
+          'options': dict({
+          }),
+        }),
+        'text': dict({
+          'enabled': True,
+          'extension': 'summary.txt',
+          'name': 'text',
+          'options': dict({
+            'include_detailed_findings': False,
+            'include_findings_table': False,
+            'include_summary': True,
+            'max_detailed_findings': 20,
+            'top_hotspots_limit': 20,
+          }),
+        }),
+        'unused_suppressions': dict({
+          'enabled': True,
+          'extension': 'unused-suppressions.json',
+          'name': 'unused-suppressions',
+          'options': dict({
+            'output_format': 'both',
+          }),
+        }),
+        'yaml': dict({
+          'enabled': False,
+          'extension': 'yaml',
+          'name': 'yaml',
+          'options': dict({
+          }),
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'enabled': True,
+          'name': 'bandit',
+          'options': dict({
+            'additional_formats': list([
+            ]),
+            'confidence_level': 'all',
+            'config_file': None,
+            'excluded_paths': list([
+            ]),
+            'ignore_nosec': False,
+            'install_timeout': 300,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.7.0,<2.0.0',
+          }),
+        }),
+        'cdk_nag': dict({
+          'enabled': True,
+          'name': 'cdk-nag',
+          'options': dict({
+            'include_compliant_checks': False,
+            'nag_packs': dict({
+              'AwsSolutionsChecks': True,
+              'HIPAASecurityChecks': False,
+              'NIST80053R4Checks': False,
+              'NIST80053R5Checks': False,
+              'PCIDSS321Checks': False,
+            }),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'cfn_nag': dict({
+          'enabled': True,
+          'name': 'cfn-nag',
+          'options': dict({
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'checkov': dict({
+          'enabled': True,
+          'name': 'checkov',
+          'options': dict({
+            'additional_formats': list([
+              'cyclonedx_json',
+            ]),
+            'config_file': None,
+            'frameworks': list([
+              'all',
+            ]),
+            'install_timeout': 300,
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'skip_ash_output_dir': True,
+            'skip_frameworks': list([
+            ]),
+            'skip_path': list([
+            ]),
+            'tool_version': None,
+          }),
+        }),
+        'detect_secrets': dict({
+          'enabled': True,
+          'name': 'detect-secrets',
+          'options': dict({
+            'baseline_file': None,
+            'scan_settings': dict({
+              'filters_used': list([
+              ]),
+              'generated_at': None,
+              'plugins_used': list([
+              ]),
+              'results': dict({
+              }),
+              'version': None,
+            }),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'skip_generated_lockfiles': True,
+          }),
+        }),
+        'grype': dict({
+          'enabled': True,
+          'name': 'grype',
+          'options': dict({
+            'config_file': None,
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'npm_audit': dict({
+          'enabled': True,
+          'name': 'npm-audit',
+          'options': dict({
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'opengrep': dict({
+          'enabled': True,
+          'name': 'opengrep',
+          'options': dict({
+            'config': 'p/ci',
+            'exclude': list([
+              '*-converted.py',
+              '*_report_result.txt',
+            ]),
+            'exclude_rule': list([
+            ]),
+            'metrics': 'auto',
+            'offline': False,
+            'patterns': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity': list([
+            ]),
+            'severity_threshold': None,
+            'version': 'v1.15.1',
+          }),
+        }),
+        'semgrep': dict({
+          'enabled': True,
+          'name': 'semgrep',
+          'options': dict({
+            'config': 'p/ci',
+            'exclude': list([
+              '*-converted.py',
+              '*_report_result.txt',
+            ]),
+            'exclude_rule': list([
+            ]),
+            'install_timeout': 300,
+            'metrics': 'auto',
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity': list([
+            ]),
+            'severity_threshold': None,
+            'tool_version': None,
+          }),
+        }),
+        'syft': dict({
+          'enabled': True,
+          'name': 'syft',
+          'options': dict({
+            'additional_outputs': list([
+              'syft-table',
+            ]),
+            'config_file': None,
+            'exclude': list([
+            ]),
+            'offline': False,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+      }),
+      'workspace': dict({
+        'max_parallel_projects': None,
+        'project_timeout': None,
+      }),
+    }),
+    'tool': 'get_config',
+  })
+# ---
+# name: test_list_scanners[result]
+  dict({
+    'result': dict({
+      'bandit': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'bandit',
+        'offline_strategy': 'bundled',
+        'version': '<BANDIT_VERSION>',
+      }),
+      'cdk_nag': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'cdk_nag',
+        'offline_strategy': 'bundled',
+        'version': '<CDK_NAG_VERSION>',
+      }),
+      'cfn_nag': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'cfn_nag',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'checkov': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'checkov',
+        'offline_strategy': 'cache_flags',
+        'version': '<CHECKOV_VERSION>',
+      }),
+      'detect_secrets': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'detect_secrets',
+        'offline_strategy': 'bundled',
+        'version': '<DETECT_SECRETS_VERSION>',
+      }),
+      'ferret_scan': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'ferret_scan',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'grype': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'grype',
+        'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
+      'npm_audit': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'npm_audit',
+        'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
+      'opengrep': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'opengrep',
+        'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
+      'semgrep': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'semgrep',
+        'offline_strategy': 'cache_flags',
+        'version': '<SEMGREP_VERSION>',
+      }),
+      'snyk_code': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'snyk_code',
+        'offline_strategy': 'skip_offline',
+        'version': None,
+      }),
+      'syft': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'syft',
+        'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
+      'trivy_repo': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'trivy_repo',
+        'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
+    }),
+    'tool': 'list_scanners',
+  })
+# ---
+# name: test_suggest_suppression[results_file_missing]
+  dict({
+    'result': dict({
+      'error': 'Results file not found: <TMP>/allowed/project/nope.json',
+      'success': False,
+    }),
+    'tool': 'suggest_suppression',
+  })
+# ---
+# name: test_suggest_suppression[results_file_unparseable]
+  dict({
+    'result': dict({
+      'error': '''
+        Failed to parse results file: 1 validation error for AshAggregatedResults
+          Invalid JSON: key must be a string at line 1 column 2 [type=json_invalid, input_value='{not json', input_type=str]
+            For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
+      ''',
+      'success': False,
+    }),
+    'tool': 'suggest_suppression',
+  })
+# ---
+# name: test_suggest_suppression[unknown_finding_id]
+  dict({
+    'result': dict({
+      'error': 'Finding not found: bandit-B999-00000000',
+      'success': False,
+    }),
+    'tool': 'suggest_suppression',
+  })
+# ---
+# name: test_suggest_suppression[with_expiration_and_justification]
+  dict({
+    'result': dict({
+      'json': dict({
+        'expiration': '2031-01-31',
+        'line_end': 12,
+        'line_start': 12,
+        'path': 'src/app.py',
+        'reason': 'Input is a constant; no user data reaches the shell.',
+        'rule_id': 'B602',
+      }),
+      'success': True,
+      'yaml': '''
+        expiration: '2031-01-31'
+        line_end: 12
+        line_start: 12
+        path: src/app.py
+        reason: Input is a constant; no user data reaches the shell.
+        rule_id: B602
+  
+      ''',
+    }),
+    'tool': 'suggest_suppression',
+  })
+# ---
+# name: test_suggest_suppression_defaults[default_justification]
+  'Suppressed via ASH MCP suggest_suppression tool — review before merging'
+# ---
+# name: test_validate_config[file_not_found][result]
+  dict({
+    'result': dict({
+      'errors': list([
+        dict({
+          'field': 'config_path',
+          'message': 'Config file not found: <TMP>/allowed/absent.yaml',
+          'type': 'file_not_found',
+        }),
+      ]),
+      'valid': False,
+    }),
+    'tool': 'validate_config',
+  })
+# ---
+# name: test_validate_config[file_valid][result]
+  dict({
+    'result': dict({
+      'errors': list([
+      ]),
+      'valid': True,
+    }),
+    'tool': 'validate_config',
+  })
+# ---
+# name: test_validate_config[no_input][result]
+  dict({
+    'result': dict({
+      'errors': list([
+        dict({
+          'field': '',
+          'message': 'Either config_content or config_path must be provided.',
+          'type': 'missing_input',
+        }),
+      ]),
+      'valid': False,
+    }),
+    'tool': 'validate_config',
+  })
+# ---
+# name: test_validate_config[unknown_field][result]
+  dict({
+    'result': dict({
+      'errors': list([
+        dict({
+          'field': 'not_a_setting',
+          'message': "Unknown top-level field 'not_a_setting' - may cause parsing issues",
+          'type': 'unknown_field',
+        }),
+      ]),
+      'valid': False,
+    }),
+    'tool': 'validate_config',
+  })
+# ---
+# name: test_validate_config[valid][result]
+  dict({
+    'result': dict({
+      'errors': list([
+      ]),
+      'valid': True,
+    }),
+    'tool': 'validate_config',
+  })
+# ---
+# name: test_validate_config[wrong_type][result]
+  dict({
+    'result': dict({
+      'errors': list([
+      ]),
+      'valid': True,
+    }),
+    'tool': 'validate_config',
+  })
+# ---
+# name: test_validate_config[yaml_syntax_error][result]
+  dict({
+    'result': dict({
+      'errors': list([
+        dict({
+          'field': '',
+          'message': '''
+            YAML parsing error: while parsing a flow sequence
+              in "<TMP>/server-tmp/tmpvalidate_config/config.yaml", line 1, column 15
+            expected ',' or ']', but got '<stream end>'
+              in "<TMP>/server-tmp/tmpvalidate_config/config.yaml", line 2, column 1
+          ''',
+          'type': 'yaml_parse_error',
+        }),
+      ]),
+      'valid': False,
+    }),
+    'tool': 'validate_config',
+  })
+# ---

@@ -92,7 +92,7 @@ import pytest
 # The AWS documentation's example secret key. detect-secrets flags it, which is what
 # makes the findings assertions below real, and it is published as an example so
 # committing it leaks nothing.
-AWS_EXAMPLE_SECRET_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # nosec B105 — test fixture with dummy AWS key
+AWS_EXAMPLE_SECRET_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # nosec B105 — test fixture with dummy AWS key  # pragma: allowlist secret
 
 # How long to wait for a real local-mode scan of a one-file tree. The scan itself
 # measured 13 seconds; the ceiling is deliberately far above that because the suite

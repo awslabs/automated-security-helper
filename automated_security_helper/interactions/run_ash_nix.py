@@ -45,6 +45,15 @@ ASH_NIX_FLAKE_REF_ENV_VAR = "ASH_NIX_FLAKE_REF"
 _EXPERIMENTAL_FEATURES = "nix-command flakes"
 
 
+class NixModeRefused(RuntimeError):
+    """Nix mode cannot start here: `nix` is not on PATH, or this is already a Nix-mode run.
+
+    A subclass of RuntimeError so that callers which caught that keep working. The CLI
+    catches this class and prints the message, where a bare RuntimeError would end the
+    command in a traceback.
+    """
+
+
 def _repo_flake_dir() -> Optional[Path]:
     """Return the repository root if ASH is running from a source checkout with a flake.
 
@@ -155,10 +164,10 @@ def run_ash_nix(
     """Re-execute this scan inside a Nix shell holding the pinned scanners.
 
     Raises:
-        RuntimeError: if `nix` is not installed, or if called from inside a Nix-mode run.
+        NixModeRefused: if `nix` is not installed, or if called from inside a Nix-mode run.
     """
     if os.environ.get(ASH_IN_NIX_ENV_VAR, "NO").upper() in ["YES", "1", "TRUE"]:
-        raise RuntimeError(
+        raise NixModeRefused(
             "ASH is already running inside a Nix shell but was asked to enter one again. "
             "The inner invocation should carry --mode local; this is a bug, not a "
             "configuration problem."
@@ -169,7 +178,7 @@ def run_ash_nix(
         # Deliberately an error rather than a fallback to local mode. Silently downgrading
         # is exactly how a run ends up with MISSING scanners and a clean-looking report,
         # which is the failure Nix mode exists to prevent.
-        raise RuntimeError(
+        raise NixModeRefused(
             "--mode nix requires Nix, which was not found on PATH. Install it from "
             "https://nixos.org/download/ (Linux and macOS; on Windows use WSL2), or "
             "choose a different --mode. ASH will not fall back to --mode local here, "
