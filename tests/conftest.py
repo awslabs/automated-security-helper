@@ -1,12 +1,14 @@
 """Pytest configuration file for ASH tests."""
 
 import contextlib
+import errno
 import functools
 import importlib.abc
 import importlib.machinery
 import logging
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import pytest
@@ -39,8 +41,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # inodes, filled a 1,048,576-inode /tmp, and broke every process on the machine.
 #
 # NOW. One root, shared by every worker:
-#   - ASH_JSII_CACHE_DIR when set, otherwise <repo>/.cache/jsii-package-cache, which
-#     is gitignored and in the ASH self-scan ignore_paths. Never the temp directory.
+#   - <ASH_JSII_CACHE_DIR>/jsii-package-cache when the variable is set, otherwise
+#     <repo>/.cache/jsii-package-cache, which is gitignored and in the ASH self-scan
+#     ignore_paths. Never the temp directory. The override gets its own subdirectory
+#     because it may name a cache shared with other tools, such as ~/.cache.
 #   - Kernel.load is wrapped in an exclusive file lock (_JsiiKernelLoadLockHook). The
 #     first worker to load an assembly extracts it while holding our lock, which has
 #     no retry budget; the rest block on it and then get a cache hit, and jsii only
@@ -48,6 +52,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 #   - At session end the controller keeps the newest _JSII_CACHE_KEEP entries per
 #     package and removes the rest, so a checkout that has moved through several
 #     aws-cdk-lib versions holds a bounded number of extractions, not all of them.
+#     Only a directory holding jsii's _JSII_ENTRY_MARKER file counts as an entry;
+#     anything else under the root is left alone, whatever its age.
 #     jsii's own 30-day TTL prune still runs on top of that.
 #
 # A pre-existing JSII_RUNTIME_PACKAGE_CACHE_ROOT is overwritten for the test session
@@ -57,6 +63,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 _JSII_CACHE_ENV = "ASH_JSII_CACHE_DIR"
 _JSII_CACHE_KEEP = 2
 _JSII_LOAD_LOCK_NAME = ".ash-load.lock"
+_JSII_CACHE_SUBDIR = "jsii-package-cache"
+# jsii writes this file into every entry it extracts and touches it on every hit.
+_JSII_ENTRY_MARKER = ".jsii-runtime-package-cache"
+# What msvcrt.locking raises once LK_LOCK has used up its own retries on a lock
+# another handle holds. Anything else is a real error and is raised.
+# errno.EDEADLOCK, the name msvcrt documents, is the same number as EDEADLK.
+_WIN_LOCK_CONTENTION_ERRNOS = frozenset({errno.EACCES, errno.EDEADLK})
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -64,8 +77,8 @@ def _jsii_package_cache_root() -> Path:
     """The single jsii package cache root for this test session."""
     override = (os.environ.get(_JSII_CACHE_ENV) or "").strip()
     if override:
-        return Path(override).expanduser().resolve()
-    return _REPO_ROOT / ".cache" / "jsii-package-cache"
+        return Path(override).expanduser().resolve() / _JSII_CACHE_SUBDIR
+    return _REPO_ROOT / ".cache" / _JSII_CACHE_SUBDIR
 
 
 @contextlib.contextmanager
@@ -83,11 +96,13 @@ def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
             while True:
                 handle.seek(0)
                 try:
-                    # LK_LOCK retries for about 10 s and then raises; keep waiting.
+                    # LK_LOCK retries for about 10 s and then raises; keep waiting
+                    # while the lock is held elsewhere, and only then.
                     msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
                     break
-                except OSError:
-                    continue
+                except OSError as exc:
+                    if exc.errno not in _WIN_LOCK_CONTENTION_ERRNOS:
+                        raise
             try:
                 yield
             finally:
@@ -183,18 +198,22 @@ def _configure_jsii_package_cache() -> Path:
     return root
 
 
-def _jsii_entry_last_used(entry: Path) -> float:
-    """When jsii last used a cache entry.
+def _jsii_entry_last_used(entry: Path) -> Optional[float]:
+    """When jsii last used a cache entry, or None if ``entry`` is not one.
 
     jsii touches the ``.jsii-runtime-package-cache`` marker inside an entry on every
-    hit, not only on extraction, so its mtime is the last-use time. Falls back to the
-    entry directory's own mtime for an entry without one.
+    hit, not only on extraction, so its mtime is the last-use time. A directory
+    without the marker is not a jsii entry, and there is deliberately no fallback to
+    the directory's own mtime: the root may be shared, and a guess here deletes
+    something jsii did not write.
     """
-    marker = entry / ".jsii-runtime-package-cache"
     try:
-        return marker.stat().st_mtime
+        marker = os.lstat(entry / _JSII_ENTRY_MARKER)
     except OSError:
-        return entry.stat().st_mtime
+        return None
+    if not stat.S_ISREG(marker.st_mode):
+        return None
+    return marker.st_mtime
 
 
 def _prune_jsii_package_cache(root: Path, keep: int = _JSII_CACHE_KEEP) -> List[Path]:
@@ -202,7 +221,8 @@ def _prune_jsii_package_cache(root: Path, keep: int = _JSII_CACHE_KEEP) -> List[
 
     Counted per package. Packages may be scoped (``@aws-cdk/asset-awscli-v1``), so a
     package directory is any directory whose children are version directories
-    holding digest entries. Returns the entries removed.
+    holding digest entries. Only directories carrying jsii's marker file are
+    counted or removed. Returns the entries removed.
     """
     if not root.is_dir():
         return []
@@ -216,15 +236,18 @@ def _prune_jsii_package_cache(root: Path, keep: int = _JSII_CACHE_KEEP) -> List[
         else:
             package_dirs.append(child)
     for package_dir in package_dirs:
-        entries = [
-            entry
-            for version_dir in package_dir.iterdir()
-            if version_dir.is_dir()
-            for entry in version_dir.iterdir()
-            if entry.is_dir()
-        ]
-        entries.sort(key=_jsii_entry_last_used, reverse=True)
-        for stale in entries[keep:]:
+        dated: List[tuple[float, Path]] = []
+        for version_dir in package_dir.iterdir():
+            if not version_dir.is_dir():
+                continue
+            for entry in version_dir.iterdir():
+                if not entry.is_dir() or entry.is_symlink():
+                    continue
+                last_used = _jsii_entry_last_used(entry)
+                if last_used is not None:
+                    dated.append((last_used, entry))
+        dated.sort(key=lambda item: item[0], reverse=True)
+        for _, stale in dated[keep:]:
             shutil.rmtree(stale, ignore_errors=True)
             removed.append(stale)
             version_dir = stale.parent

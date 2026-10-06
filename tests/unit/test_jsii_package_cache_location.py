@@ -8,8 +8,10 @@ replacement: one repo-local root shared by every worker, a file lock that
 serializes assembly loads, and a size bound applied at session end.
 """
 
+import errno
 import os
 import sys
+import types
 import tempfile
 import threading
 import time
@@ -60,7 +62,7 @@ def test_live_cache_root_is_repo_local_and_not_in_a_temp_dir():
 
     override = (os.environ.get("ASH_JSII_CACHE_DIR") or "").strip()
     if override:
-        assert root == Path(override).expanduser().resolve()
+        assert root == Path(override).expanduser().resolve() / "jsii-package-cache"
     else:
         assert root == DEFAULT_ROOT
         for temp_root in _temp_roots():
@@ -88,9 +90,15 @@ def test_default_root_is_shared_and_ignores_tmpdir(
     assert not _under(root, tmp_path)
 
 
-def test_override_is_honored(monkeypatch, tmp_path, ash_conftest):
-    monkeypatch.setenv("ASH_JSII_CACHE_DIR", str(tmp_path / "jsii"))
-    assert ash_conftest._jsii_package_cache_root() == (tmp_path / "jsii").resolve()
+def test_override_is_honored_in_its_own_subdirectory(
+    monkeypatch, tmp_path, ash_conftest
+):
+    """The override may name a cache other tools share (~/.cache), so the prune
+    root is a subdirectory of it, never the directory itself."""
+    monkeypatch.setenv("ASH_JSII_CACHE_DIR", str(tmp_path / "shared"))
+    assert ash_conftest._jsii_package_cache_root() == (
+        (tmp_path / "shared").resolve() / "jsii-package-cache"
+    )
 
 
 def test_blank_override_falls_back_to_default(monkeypatch, ash_conftest):
@@ -280,3 +288,118 @@ def test_inherited_session_tmpdir_is_reused_and_not_removed(
 
     assert parent.is_dir()
     assert list(tmp_path.iterdir()) == [parent], "a second directory was created"
+
+
+def _plant_unmarked(root: Path, *parts: str) -> Path:
+    """A three-level directory that jsii did not write: no marker inside."""
+    path = root.joinpath(*parts)
+    path.mkdir(parents=True)
+    (path / "data").write_text("not jsii")
+    old = time.time() - 1_000_000
+    os.utime(path, (old, old))
+    return path
+
+
+def test_prune_leaves_directories_without_the_jsii_marker(tmp_path, ash_conftest):
+    """A root shared with other caches must lose only jsii's own entries.
+
+    The layout mirrors what ~/.cache holds (uv and pip both nest three deep), plus
+    a markerless directory beside real entries of one package. The old prune
+    ranked every third-level directory by its mtime and removed all but the
+    newest two of each.
+    """
+    root = tmp_path / "cache"
+    foreign = [
+        _plant_unmarked(root, "uv", "archive-v0", name)
+        for name in ("aaa1", "bbb2", "ccc3", "ddd4")
+    ]
+    foreign += [
+        _plant_unmarked(root, "pip", "http-v2", name) for name in ("0", "1", "2", "3")
+    ]
+    newest = _make_entry(root, "aws-cdk-lib", "2.3.0", "c" * 8, age=10)
+    middle = _make_entry(root, "aws-cdk-lib", "2.2.0", "b" * 8, age=100)
+    oldest = _make_entry(root, "aws-cdk-lib", "2.1.0", "a" * 8, age=1000)
+    beside = _plant_unmarked(root, "aws-cdk-lib", "2.0.0", "f" * 8)
+    # A marker that is a directory, not the file jsii writes, does not count.
+    fake_marker = _plant_unmarked(root, "aws-cdk-lib", "1.9.0", "g" * 8)
+    (fake_marker / ".jsii-runtime-package-cache").mkdir()
+
+    removed = ash_conftest._prune_jsii_package_cache(root, keep=2)
+
+    assert removed == [oldest]
+    for path in [*foreign, beside, fake_marker, newest, middle]:
+        assert path.is_dir(), f"{path} was removed but carries no jsii marker"
+
+
+def test_session_end_prunes_the_cache(monkeypatch, tmp_path, ash_conftest):
+    """pytest_unconfigure on the controller really runs the prune, under the lock."""
+    root = tmp_path / "cache"
+    keep_a = _make_entry(root, "aws-cdk-lib", "2.3.0", "c" * 8, age=10)
+    keep_b = _make_entry(root, "aws-cdk-lib", "2.2.0", "b" * 8, age=100)
+    stale = _make_entry(root, "aws-cdk-lib", "2.1.0", "a" * 8, age=1000)
+    monkeypatch.setattr(ash_conftest, "_jsii_package_cache_root", lambda: root)
+    # The live session's temp directory must survive this call.
+    monkeypatch.setattr(ash_conftest, "_remove_session_tmpdir", lambda: None)
+
+    locked = []
+    real_lock = ash_conftest._exclusive_file_lock
+
+    def recording_lock(path):
+        locked.append(path)
+        return real_lock(path)
+
+    monkeypatch.setattr(ash_conftest, "_exclusive_file_lock", recording_lock)
+
+    worker = types.SimpleNamespace(workerinput={"workerid": "gw0"})
+    ash_conftest.pytest_unconfigure(worker)
+    assert stale.is_dir(), "an xdist worker must not prune the shared cache"
+
+    ash_conftest.pytest_unconfigure(types.SimpleNamespace())
+
+    assert not stale.exists()
+    assert keep_a.is_dir() and keep_b.is_dir()
+    assert locked == [root / ".ash-load.lock"]
+
+
+class _FakeMsvcrt:
+    LK_LOCK = 1
+    LK_UNLCK = 0
+
+    def __init__(self, failures: list[int]):
+        self._failures = list(failures)
+        self.calls: list[int] = []
+
+    def locking(self, _fd: int, mode: int, _nbytes: int) -> None:
+        self.calls.append(mode)
+        if mode == self.LK_LOCK and self._failures:
+            code = self._failures.pop(0)
+            raise OSError(code, os.strerror(code))
+
+
+def _use_fake_msvcrt(monkeypatch, failures: list[int]) -> _FakeMsvcrt:
+    fake = _FakeMsvcrt(failures)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    return fake
+
+
+@pytest.mark.parametrize("contention", [errno.EACCES, errno.EDEADLK])
+def test_windows_lock_keeps_waiting_through_contention(
+    monkeypatch, tmp_path, ash_conftest, contention
+):
+    fake = _use_fake_msvcrt(monkeypatch, [contention, contention])
+    with ash_conftest._exclusive_file_lock(tmp_path / "load.lock"):
+        assert fake.calls == [fake.LK_LOCK] * 3
+    assert fake.calls[-1] == fake.LK_UNLCK
+
+
+@pytest.mark.parametrize("failure", [errno.EBADF, errno.EINVAL, errno.ENOSPC])
+def test_windows_lock_raises_anything_but_contention(
+    monkeypatch, tmp_path, ash_conftest, failure
+):
+    fake = _use_fake_msvcrt(monkeypatch, [failure])
+    with pytest.raises(OSError) as raised:
+        with ash_conftest._exclusive_file_lock(tmp_path / "load.lock"):
+            pytest.fail("the lock must not be reported as held")
+    assert raised.value.errno == failure
+    assert fake.calls == [fake.LK_LOCK]
