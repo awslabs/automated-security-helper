@@ -66,7 +66,8 @@ for name in "$ASH_CLI_NAME" "$FALLBACK_NAME"; do
   [ -x "$WORK/venv/bin/$name" ] || fail "the wheel installed no $name console script"
   # Without the vendored PYTHONPATH, as AshScanRealCliTest's wrapper runs the CLI: the
   # installed wheel has to work from its own venv alone.
-  line="$(env -u PYTHONPATH -u PYTHONHOME "$WORK/venv/bin/$name" --version)"
+  line="$(env -u PYTHONPATH -u PYTHONHOME "$WORK/venv/bin/$name" --version)" \
+    || fail "$name --version failed from the venv alone; the wheel may be missing a requirement"
   case "$line" in
     *"v$VERSION"*) printf '   %s --version: %s\n' "$name" "$line" ;;
     *) fail "$name --version printed '$line', expected v$VERSION" ;;
