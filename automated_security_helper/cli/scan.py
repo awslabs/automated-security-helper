@@ -723,8 +723,11 @@ def run_ash_scan_cli_command(
         if poss_existing_results.exists():
             existing_results = poss_existing_results.as_posix()
         else:
-            raise ValueError(
-                f"{poss_existing_results.name} not found in output directory at {poss_existing_results.as_posix()}"
+            # A clean refusal, not the uncaught ValueError traceback this was.
+            _fail_usage(
+                f"--use-existing was given, but there are no existing results to "
+                f"use: {poss_existing_results.as_posix()} does not exist. Run a "
+                "scan first, or point --output-dir at the output of a previous one."
             )
 
     cli_final_show_progress = (
