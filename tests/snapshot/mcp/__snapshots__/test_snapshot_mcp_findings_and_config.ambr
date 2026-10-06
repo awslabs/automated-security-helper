@@ -1590,6 +1590,20 @@
         'offline_strategy': 'bundled',
         'version': '<CDK_NAG_VERSION>',
       }),
+      'cfn_guard': dict({
+        'dependencies_satisfied': True,
+        'enabled': False,
+        'name': 'cfn_guard',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'cfn_lint': dict({
+        'dependencies_satisfied': True,
+        'enabled': False,
+        'name': 'cfn_lint',
+        'offline_strategy': 'bundled',
+        'version': '<CFN_LINT_VERSION>',
+      }),
       'cfn_nag': dict({
         'dependencies_satisfied': True,
         'enabled': True,

@@ -8,6 +8,10 @@ ASH Scanners
 ├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
 │ cdk-nag        │ True    │ CdkNagScanner  │ automated_sec… │ Unknown │ Unknown   │               │
 ├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
+│ cfn-guard      │ False   │ CfnGuardScann… │ automated_sec… │ Unknown │ Unknown   │               │
+├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
+│ cfn-lint       │ False   │ CfnLintScanner │ automated_sec… │ Unknown │ Unknown   │               │
+├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
 │ cfn-nag        │ True    │ CfnNagScanner  │ automated_sec… │ Unknown │ Unknown   │               │
 ├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
 │ checkov        │ True    │ CheckovScanner │ automated_sec… │ 3.2.470 │ Yes       │               │

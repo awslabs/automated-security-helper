@@ -11,6 +11,8 @@ Scanner configuration
 ┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
 │ bandit         │        no         │
 │ cdk-nag        │        yes        │
+│ cfn-guard      │        no         │
+│ cfn-lint       │        no         │
 │ cfn-nag        │        yes        │
 │ checkov        │        yes        │
 │ detect-secrets │        yes        │
@@ -22,6 +24,8 @@ Scanner configuration
 └────────────────┴───────────────────┘
   Enable bandit? [y/N]:
   Enable cdk-nag? [Y/n]:
+  Enable cfn-guard? [y/N]:
+  Enable cfn-lint? [y/N]:
   Enable cfn-nag? [Y/n]:
   Enable checkov? [Y/n]: n
   Enable detect-secrets? [Y/n]:

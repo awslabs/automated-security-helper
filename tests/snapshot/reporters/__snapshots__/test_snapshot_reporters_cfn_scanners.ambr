@@ -1,0 +1,27 @@
+# serializer version: 1
+# name: test_scanner_rows_and_severities
+  dict({
+    'cfn-guard': dict({
+      'severity_counts': dict({
+        'critical': 0,
+        'high': 0,
+        'info': 0,
+        'low': 0,
+        'medium': 24,
+        'suppressed': 0,
+      }),
+      'status': 'FAILED',
+    }),
+    'cfn-lint': dict({
+      'severity_counts': dict({
+        'critical': 0,
+        'high': 0,
+        'info': 0,
+        'low': 1,
+        'medium': 2,
+        'suppressed': 0,
+      }),
+      'status': 'FAILED',
+    }),
+  })
+# ---
