@@ -157,6 +157,19 @@ or put it on PATH, then reinstall the package.
 }
 Write-Host "ash: building the venv with $($python -join ' ') (Python $pythonVersion)"
 
+# The shims a previous version of this package recorded, read before anything is
+# rebuilt. An upgrade runs this script and not the old version's uninstall script, so
+# a name the old version shimmed and this one does not would otherwise stay on PATH,
+# pointing into the new venv. The v4 packages before the `ashx` rename shimmed `ash`,
+# and this one must not expose it. Only names in this package's own record are
+# touched: a shim this package never wrote is not its to remove.
+$previousShims = @()
+if (Test-Path -LiteralPath $shimList) {
+    $previousShims = @(Get-Content -LiteralPath $shimList |
+        ForEach-Object { ([string]$_).Trim() } |
+        Where-Object { $_ })
+}
+
 # A leftover venv from a failed install would make `python -m venv` reuse a tree
 # built by a different interpreter, and pip would then install into it happily. Start
 # clean. This is safe on upgrade because Chocolatey runs the new version's install
@@ -227,6 +240,14 @@ foreach ($name in $scriptNames) {
     }
     Install-BinFile -Name $name -Path $target
     Write-Host "ash: shimmed $name"
+}
+
+# Uninstall-BinFile, unlike the uninstall script's loop, is allowed to fail the install
+# here: an upgrade that cannot remove a stale shim has left a command on PATH the new
+# version does not provide, and reporting success would hide it.
+foreach ($name in @($previousShims | Where-Object { $scriptNames -notcontains $_ })) {
+    Uninstall-BinFile -Name $name -Path (Join-Path $venvDir "Scripts\$name.exe")
+    Write-Host "ash: removed the $name shim a previous version installed"
 }
 
 Write-Host ''

@@ -132,9 +132,12 @@ How this is tested
       prints "validates" cannot be a validator that checks nothing.
 
   pwsh packaging/chocolatey/verify-on-windows.ps1
-      Builds the package, installs it, asserts all three names resolve to
-      Chocolatey shims, scans a fixture containing a planted secret, parses the
-      SARIF and fails unless the result count is nonzero, then uninstalls and fails
-      if the venv survived. Needs Windows and an already-built wheel in dist/.
+      Builds the package, and an N-1 package from an older tree, installs it,
+      asserts all three names resolve to Chocolatey shims, and runs the three
+      shared e2e scans from tests/e2e (exit 2 with findings, exit 0 clean, exit 1
+      incomplete), judged by scripts/e2e/assert_outcome.py. Then uninstalls,
+      installs N-1, upgrades it to N and requires a rebuilt venv, uninstalls again,
+      and shows a package whose install script fails making `choco install` fail.
+      Needs Windows, git, uv and an already-built wheel in dist/.
       .github/workflows/ash-package.yml runs it on windows-latest, whose image
       ships Chocolatey preinstalled.
