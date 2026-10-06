@@ -75,9 +75,13 @@ file nothing compared (editors/jetbrains/assert-snapshots-used.py) instead; it i
 POLICY
 ------
 ``--policy`` fails when a workflow under .github/workflows passes an editor's snapshot
-update flag (``-Psnapshot-update``, ``ASH_SNAPSHOT_UPDATE=1``, ``--snapshot-update`` or
-jest's ``--updateSnapshot``). The suites also refuse their flag when CI or GITHUB_ACTIONS
-is "true", so this is the second of two locks: CI only ever compares.
+update flag: Gradle's ``-Psnapshot-update`` in any spelling (``-P snapshot-update``,
+``--project-prop``, ``ORG_GRADLE_PROJECT_snapshot-update``), ``ASH_SNAPSHOT_UPDATE=1``,
+``--snapshot-update``, or jest's ``--updateSnapshot``, ``--update-snapshot``, ``-u``,
+``--ci=false`` or ``--no-ci``. Lines are read with their YAML continuations joined (see
+``logical_lines``), so a flag folded onto the next line still counts. The suites also
+refuse their flag when CI or GITHUB_ACTIONS is "true", so this is the second of two
+locks: CI only ever compares.
 
 HOW THE RANGE IS CHOSEN (one per event; see ``resolve_range``)
 -------------------------------------------------------------
@@ -95,10 +99,12 @@ HOW THE RANGE IS CHOSEN (one per event; see ``resolve_range``)
   queue entry whose base moved is still checked from where it forked. The queue
   squashes, so each commit here is one pull request's squash commit. See
   ``message_sections`` for why its message is parsed per section.
-* push: ``before..after``. An all-zero ``before`` (a newly created ref) has no range, so
-  only ``after`` itself is checked against its first parent. A ``before`` that is no
-  longer in the clone (a force-push that discarded it) gets the same treatment, with a
-  warning, rather than a pass.
+* push: ``before..after``. An all-zero ``before`` (a newly created ref) has no range,
+  and neither has a ``before`` that is no longer in the clone (a force-push that
+  discarded it; that one also warns). Both check ``after`` from its merge base with the
+  default branch, the range a pull request from the branch would check, so the earlier
+  commits of a new branch are not let through. Pushed to the default branch itself,
+  where that range would be empty, only ``after`` is checked against its first parent.
 * workflow_dispatch: there is no event range, so the branch is checked against the
   merge base with the default branch, which is what a pull request from it would check.
   On the default branch itself that range is empty.
@@ -146,10 +152,93 @@ ZERO_SHA = "0" * 40
 DEFAULT_GOLDEN_ROOTS: tuple[str, ...] = ("editors",)
 GOLDEN_ROOTS: list[str] = list(DEFAULT_GOLDEN_ROOTS)
 
-# What passes an editor snapshot suite's update flag. Matched in workflow files only.
-UPDATE_FLAGS = re.compile(
-    r"-Psnapshot-update|ASH_SNAPSHOT_UPDATE\s*[:=]\s*['\"]?1|--snapshot-update|--updateSnapshot"
+# What passes an editor snapshot suite's update flag, matched against the logical lines
+# of workflow files (see ``logical_lines``). editors/vscode/test/snapshot-policy.test.ts
+# holds the same list for every file under .github/; a form added here goes there too.
+_UPDATE_FLAG_FORMS: tuple[str, ...] = (
+    # Gradle, for the JetBrains plugin: -P with or without a space, the long
+    # option, and the environment variable Gradle maps to the same property.
+    r"-P\s*snapshot-update",
+    r"--project-prop(?:=|\s+)snapshot-update",
+    r"ORG_GRADLE_PROJECT_snapshot-update",
+    # The VS Code suites' own flag and the variable it sets in the container.
+    r"--snapshot-update",
+    r"ASH_SNAPSHOT_UPDATE\s*[:=]\s*['\"]?1",
+    # jest's: both spellings of the long flag, the two ways to turn --ci off,
+    # and -u after a jest or npm test command.
+    r"--updateSnapshot",
+    r"--update-snapshot",
+    r"--no-ci\b",
+    r"--ci[= ]false",
+    r"\b(?:jest|npm\b.*\s(?:test|t))\b.*\s-u\b",
 )
+UPDATE_FLAGS = re.compile("|".join(_UPDATE_FLAG_FORMS))
+
+# A `#` at the start of a line or after whitespace starts a comment, in YAML and in
+# shell. Nothing a comment says is executed.
+_COMMENT = re.compile(r"(?:^|\s)#.*$")
+# A YAML line split into its indentation, its sequence dashes and the rest, and the
+# rest read as `key:` with an optional value.
+_LINE_PARTS = re.compile(r"^(\s*)((?:-\s+)*)(.*)$")
+_KEY_VALUE = re.compile(r"^[^\s#'\"][^:#]*:(?:\s+(\S.*))?$")
+
+
+def _scalar_owner(line: str) -> tuple[int, str] | None:
+    """For a line that starts a scalar, the column its continuations must be right of
+    and the scalar's first text; None for a line that starts none (`key:` alone, which
+    opens a mapping or a sequence, or anything that is not YAML structure).
+
+    `key: value` (also `key: |` or `key: >-`) continues right of the key's column;
+    a sequence item `- value` right of its dash.
+    """
+    lead, dashes, rest = _LINE_PARTS.match(line).groups()  # type: ignore[union-attr]
+    key = _KEY_VALUE.match(rest)
+    if key:
+        return (len(lead) + len(dashes), key.group(1)) if key.group(1) else None
+    if dashes:
+        return len(lead) + dashes.rstrip().rfind("-"), rest
+    return None
+
+
+def logical_lines(text: str) -> list[tuple[int, str]]:
+    """``text``'s lines, with every YAML scalar continuation joined to its first line.
+
+    A flag on the line after its command is still that command's flag when YAML folds
+    the two into one string: a `>` block, a plain or quoted scalar continued on a more
+    indented line, or a `|` block line ending in a shell `\\`. Each of those is joined
+    here, so the patterns see the command and its flag on one line. Lines of a `|`
+    block are separate shell commands and stay separate, so a `-u` given to some other
+    program in the same `run:` is not read as jest's. Returns (first line number, text)
+    pairs, comments removed and blank lines dropped. Not a YAML parser: it only has to
+    keep a command and its arguments together, and errs towards joining.
+    """
+    out: list[tuple[int, str]] = []
+    owner_indent: int | None = None  # the column a continuation must be right of
+    literal = False  # inside a `|` block
+    joins_next = False  # the previous line of a `|` block ended in a backslash
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = _COMMENT.sub("", raw).rstrip()
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if owner_indent is not None and indent > owner_indent:
+            body = line.strip()
+            if literal and not joins_next:
+                out.append((number, body))
+            else:
+                first, previous = out[-1]
+                joined = previous.removesuffix("\\").rstrip()
+                out[-1] = (first, f"{joined} {body}")
+            joins_next = literal and body.endswith("\\")
+            continue
+        out.append((number, line.strip()))
+        owner = _scalar_owner(line)
+        if owner:
+            owner_indent, literal = owner[0], owner[1].startswith("|")
+        else:
+            owner_indent, literal = None, False
+        joins_next = False
+    return out
 
 
 def golden_reason(path: str) -> str | None:
@@ -175,8 +264,10 @@ class GitError(RuntimeError):
 
 
 def git(repo: Path, *args: str, stdin: str | None = None, check: bool = True) -> str:
+    # core.quotepath=off as well as -z where paths are read: no git output this
+    # script parses, or prints, spells a path in git's quoted octal form.
     proc = subprocess.run(
-        ["git", "-C", str(repo), *args],
+        ["git", "-C", str(repo), "-c", "core.quotepath=off", *args],
         input=stdin,
         capture_output=True,
         text=True,
@@ -225,22 +316,22 @@ def touched_files(repo: Path, sha: str) -> list[str]:
     files the merge merely brought in from the other side are not.
     """
     parents = git(repo, "rev-list", "--parents", "-n", "1", sha).split()[1:]
-    if len(parents) > 1:
-        out = git(repo, "diff-tree", "-r", "-c", "--no-renames", "--name-only", sha)
-        names = out.splitlines()[1:]  # the first line is the commit id
-    else:
-        out = git(
-            repo,
-            "diff-tree",
-            "-r",
-            "--root",
-            "--no-commit-id",
-            "--no-renames",
-            "--name-only",
-            sha,
-        )
-        names = out.splitlines()
-    return [n for n in names if n]
+    # -z: NUL-separated and never quoted. Without it git quotes a path holding a
+    # non-ASCII byte, a quote, a backslash or a control character as "editors/...",
+    # whose first component is then `"editors` and is not under any golden root.
+    merge = ["-c"] if len(parents) > 1 else ["--root"]
+    out = git(
+        repo,
+        "diff-tree",
+        "-r",
+        *merge,
+        "-z",
+        "--no-commit-id",
+        "--no-renames",
+        "--name-only",
+        sha,
+    )
+    return [n for n in out.split("\0") if n]
 
 
 def commits_in_range(repo: Path, base: str | None, head: str) -> list[Commit]:
@@ -494,17 +585,21 @@ def resolve_range(repo: Path, event_name: str, payload: dict[str, Any]) -> Range
         before, after = payload.get("before") or ZERO_SHA, payload["after"]
         if after == ZERO_SHA:
             return None  # a deleted ref introduces nothing
+        if not ensure_commit(repo, after):
+            raise GitError(
+                f"{after} is not in the clone; check out with fetch-depth: 0"
+            )
         if before == ZERO_SHA:
-            return Range(None, after, "new ref: its tip commit only")
+            return _from_default_branch(repo, payload, after, "new ref")
         if not ensure_commit(repo, before):
             print(
                 f"::warning::push 'before' {before} is not in the clone (force-push?); "
-                f"checking only {after}."
+                f"checking {after} from its merge base with the default branch."
             )
-            return Range(None, after, "force-push: tip commit only")
+            return _from_default_branch(repo, payload, after, "force-push")
         return Range(before, after, "push")
     if event_name == "workflow_dispatch":
-        default = (payload.get("repository") or {}).get("default_branch") or "main"
+        default = _default_branch(payload)
         head = git(repo, "rev-parse", "HEAD").strip()
         ref = f"origin/{default}"
         if not commit_exists(repo, ref):
@@ -512,6 +607,35 @@ def resolve_range(repo: Path, event_name: str, payload: dict[str, Any]) -> Range
         base = git(repo, "merge-base", ref, head).strip()
         return Range(base, head, f"dispatch: branch vs merge base with {ref}")
     raise GitError(f"unsupported event {event_name!r}")
+
+
+def _default_branch(payload: dict[str, Any]) -> str:
+    return (payload.get("repository") or {}).get("default_branch") or "main"
+
+
+def _from_default_branch(
+    repo: Path, payload: dict[str, Any], head: str, why: str
+) -> Range:
+    """A push with no usable ``before``: ``head`` from its fork point with the default branch.
+
+    A new branch, or a force-push whose old tip is gone, has no ``before..after``.
+    Checking only the tip would let every earlier commit of the branch through, so
+    the range is what a pull request from the branch would check, as
+    workflow_dispatch already does. On the default branch itself the fork point is
+    the head, which would check nothing, so there only the tip is checked, as before.
+    """
+    default = _default_branch(payload)
+    tips = _base_branch_tip(repo, default)
+    if not tips:
+        raise GitError(
+            f"origin/{default} is not in the clone, so the {why} has no range; "
+            "check out with fetch-depth: 0"
+        )
+    base = fork_point(repo, tips, head)
+    head_sha = git(repo, "rev-parse", f"{head}^{{commit}}").strip()
+    if base == head_sha:
+        return Range(None, head, f"{why} on {default}: its tip commit only")
+    return Range(base, head, f"{why}: branch vs merge base with origin/{default}")
 
 
 def run_check(repo: Path, rng: Range) -> int:
@@ -630,13 +754,9 @@ def find_update_flags(root: Path) -> list[str]:
     hits = []
     workflows = sorted((root / ".github/workflows").glob("*.y*ml"))
     for wf in workflows:
-        for number, line in enumerate(wf.read_text(encoding="utf-8").splitlines(), 1):
-            if line.lstrip().startswith("#"):
-                continue
+        for number, line in logical_lines(wf.read_text(encoding="utf-8")):
             if UPDATE_FLAGS.search(line):
-                hits.append(
-                    f"{wf.relative_to(root).as_posix()}:{number}: {line.strip()}"
-                )
+                hits.append(f"{wf.relative_to(root).as_posix()}:{number}: {line}")
     return hits
 
 
@@ -839,6 +959,34 @@ def _case_png_and_other_editor(r: _Repo, f: _Fixture) -> list[str]:
     return sorted([f.png, f.other_png])
 
 
+def _quoted_name(f: _Fixture) -> str:
+    """A golden path git would quote: a non-ASCII letter, a double quote, a backslash."""
+    return str(PurePosixPath(f.snap).parent / 'caf\u00e9 "q" \\.test.ts.snap')
+
+
+def _case_non_ascii_golden(r: _Repo, f: _Fixture) -> list[str]:
+    r.write(_quoted_name(f), "x\n")
+    r.commit("test: a snapshot whose name git quotes")
+    return [_quoted_name(f)]
+
+
+def _case_non_ascii_golden_in_merge(r: _Repo, f: _Fixture) -> list[str]:
+    # An evil merge: the merge commit itself edits a golden file git quotes, so only
+    # the merge (-c) branch of touched_files can see it.
+    r.write(_quoted_name(f), "base\n")
+    r.commit(f"test: seed the quoted name\n\n{GOOD}")
+    r._git("checkout", "-q", "-b", "side")
+    r.write("side.txt", "1\n")
+    r.commit("chore: side")
+    r._git("checkout", "-q", "main")
+    r.write("main.txt", "1\n")
+    r.commit("chore: main")
+    r._git("merge", "-q", "--no-commit", "side")
+    r.write(_quoted_name(f), "edited in the merge\n")
+    r.commit("Merge branch 'side'")
+    return [_quoted_name(f)]
+
+
 _CASES = {
     "trailer present -> pass": (_case_trailer_present, False),
     "trailer missing -> fail": (_case_trailer_missing, False),
@@ -862,6 +1010,11 @@ _CASES = {
         _case_png_and_other_editor,
         False,
     ),
+    "golden name git quotes, no trailer -> fail": (_case_non_ascii_golden, False),
+    "golden name git quotes, edited in a merge -> fail": (
+        _case_non_ascii_golden_in_merge,
+        False,
+    ),
 }
 
 
@@ -871,15 +1024,18 @@ def _self_test_ranges(tmp: Path) -> list[str]:
     first = r.base
     r.write("a.txt", "a\n")
     second = r.commit("chore: second")
+    r._git("update-ref", "refs/remotes/origin/main", second)
+    # Pushed to the default branch itself: the fork point is the head, so the tip.
     got = resolve_range(r.path, "push", {"before": ZERO_SHA, "after": second})
     if not (got and got.base is None and got.head == second):
-        failures.append(f"push from all-zero before: got {got}")
+        failures.append(f"push of a new default branch: got {got}")
     got = resolve_range(r.path, "push", {"before": first, "after": second})
     if not (got and got.base == first):
         failures.append(f"push before..after: got {got}")
     got = resolve_range(r.path, "push", {"before": "1" * 40, "after": second})
     if not (got and got.base is None):
-        failures.append(f"push with a vanished before: got {got}")
+        failures.append(f"force-push to the default branch: got {got}")
+    failures += _self_test_new_branch(r, second)
     if resolve_range(r.path, "push", {"before": first, "after": ZERO_SHA}) is not None:
         failures.append("deleted ref should introduce nothing")
     pr = {"pull_request": {"base": {"sha": first}, "head": {"sha": second}}}
@@ -891,6 +1047,41 @@ def _self_test_ranges(tmp: Path) -> list[str]:
     if not (got and (got.base, got.head) == (first, second)):
         failures.append(f"merge_group: got {got}")
     failures += _self_test_stale_base(tmp)
+    return failures
+
+
+def _self_test_new_branch(r: _Repo, fork: str) -> list[str]:
+    """A new branch whose untrailered PNG is in its first commit, not its tip.
+
+    With only the tip checked, a push that creates the branch, or force-pushes it
+    over a tip the clone no longer has, lets that commit through.
+    """
+    failures = []
+    r._git("checkout", "-q", "-b", "feature", fork)
+    r.write(_VSCODE.png, "png\n")
+    r.commit("test: new picture")
+    r.write("feature.txt", "1\n")
+    tip = r.commit("feat: later work")
+    for before, why in ((ZERO_SHA, "new branch"), ("2" * 40, "force-pushed branch")):
+        got = resolve_range(r.path, "push", {"before": before, "after": tip})
+        if not (got and got.base == fork and got.head == tip):
+            failures.append(f"{why}: expected range {fork}..{tip}, got {got}")
+            continue
+        found = [
+            v.path
+            for v in find_violations(r.path, commits_in_range(r.path, got.base, tip))
+        ]
+        if found != [_VSCODE.png]:
+            failures.append(f"{why}: the untrailered PNG was not caught: {found}")
+    r._git("update-ref", "-d", "refs/remotes/origin/main")
+    try:
+        resolve_range(r.path, "push", {"before": ZERO_SHA, "after": tip})
+        failures.append(
+            "new branch with no origin/main: checked less instead of failing"
+        )
+    except GitError:
+        pass
+    r._git("checkout", "-q", "main")
     return failures
 
 
@@ -999,18 +1190,42 @@ def _self_test_policy(tmp: Path) -> list[str]:
     (wf / "clean.yml").write_text(
         "# -Psnapshot-update is never passed here\n"
         "run: ./gradlew uiTest\n"
-        "run: npm run snapshots -- structural\n"
+        "run: npm run snapshots -- structural  # not --snapshot-update\n"
+        "steps:\n"
+        "  - run: |\n"
+        "      npm test -- --ci\n"
+        "      sort -u names.txt\n"
+        "  - name: next step\n"
+        "    run: echo -u\n"
     )
     failures = [f"clean workflow reported: {h}" for h in find_update_flags(root)]
-    (wf / "bad.yml").write_text(
-        "run: ./gradlew test -Psnapshot-update\n"
-        "env:\n  ASH_SNAPSHOT_UPDATE: '1'\n"
-        "run: pytest --snapshot-update\n"
-        "run: npx jest --updateSnapshot\n"
-    )
-    hits = find_update_flags(root)
-    if len(hits) != 4:
-        failures.append(f"policy expected 4 hits, got {hits}")
+    bad = [
+        "run: ./gradlew test -Psnapshot-update",
+        "run: ./gradlew test -P snapshot-update",
+        "run: ./gradlew test --project-prop snapshot-update",
+        "run: ./gradlew test --project-prop=snapshot-update",
+        "env:\n  ORG_GRADLE_PROJECT_snapshot-update: 'true'",
+        "env:\n  ASH_SNAPSHOT_UPDATE: '1'",
+        "run: pytest --snapshot-update",
+        "run: npx jest --updateSnapshot",
+        "run: npx jest --update-snapshot",
+        "run: npx jest --no-ci",
+        "run: npx jest --ci=false",
+        "run: npm test -- -u",
+        "run: npm t -- -u",
+        "run: npm run test -- -u",
+        'run: npm --prefix "editors/vscode" test -- -u',
+        "run: >\n  npx jest --ci\n  -u",
+        "run: npx jest --ci\n  -u",
+        "- run: >-\n    npm test --\n    --update-snapshot",
+        "run: |\n  npx jest --ci \\\n    -u",
+    ]
+    for i, text in enumerate(bad):
+        (wf / f"bad{i}.yml").write_text(text + "\n")
+        hits = find_update_flags(root)
+        if len(hits) != 1:
+            failures.append(f"policy missed or overcounted {text!r}: {hits}")
+        (wf / f"bad{i}.yml").unlink()
     return failures
 
 

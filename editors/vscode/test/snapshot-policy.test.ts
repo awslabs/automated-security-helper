@@ -7,10 +7,13 @@
  * has stopped seeing anything cannot pass by default.
  *
  *   - Nothing CI runs passes an update flag: not this suite's `--snapshot-update`,
- *     not jest's `--updateSnapshot`/`-u`/`--ci=false`, not the visual suite's
- *     ASH_SNAPSHOT_UPDATE.
- *   - jest is configured never to write a snapshot unasked (`ci: true`), so a new
- *     snapshot fails locally too instead of being written on first run.
+ *     not jest's `--updateSnapshot`/`--update-snapshot`/`-u`/`--ci=false`/`--no-ci`,
+ *     not the visual suite's ASH_SNAPSHOT_UPDATE, not the JetBrains plugin's Gradle
+ *     property in any of its spellings.
+ *   - `npm test` runs `jest --ci`, so a new snapshot fails locally too instead of
+ *     being written on first run. Proved by running it, not by reading the config:
+ *     `"ci": true` in package.json's jest block did nothing, because jest's own
+ *     command-line default for `--ci` (whether CI is set) overrides it.
  *   - The update path refuses to run under CI.
  *   - The pixel suite's container is pinned: base image by digest, VS Code by
  *     version and SHA-256, and the version is the one the integration job uses.
@@ -19,7 +22,9 @@
  * which has its own self-test.
  */
 
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { UPDATE_ENV, UPDATE_FLAG, underCi, updateAllowed } from './update-policy';
 
@@ -28,21 +33,126 @@ const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
 
 // A `#` at line start or after whitespace starts a comment in YAML and shell; a note
 // explaining the rule must not trip it, and nothing a comment says is executed.
-const COMMENT = /(?:^|\s)#.*$/gm;
+const COMMENT = /(?:^|\s)#.*$/;
 
+// The same forms as UPDATE_FLAGS in .github/scripts/check-editor-snapshot-trailers.py,
+// which checks the workflows without node; a form added here goes there too.
 const BANNED: readonly RegExp[] = [
   // Prefix match, as core's policy test does, so --snapshot-update-anything is caught.
   new RegExp(UPDATE_FLAG),
-  /--updateSnapshot/,
-  /--ci[= ]false/,
   new RegExp(`\\b${UPDATE_ENV}\\b`),
-  // jest's short flag, on a jest or npm-test command line.
-  /\b(?:jest|npm(?: run)? test|npx jest)\b[^\n]*\s-u\b/,
+  // jest's long flag in both spellings, and the two ways to turn --ci off.
+  /--updateSnapshot/,
+  /--update-snapshot/,
+  /--no-ci\b/,
+  /--ci[= ]false/,
+  // jest's short flag, after a jest or npm test command (`npm t` and
+  // `npm --prefix <dir> test` included).
+  /\b(?:jest|npm\b.*\s(?:test|t))\b.*\s-u\b/,
+  // The JetBrains plugin's Gradle property: -P with or without a space, the long
+  // option, and the environment variable Gradle maps to it.
+  /-P\s*snapshot-update/,
+  /--project-prop(?:=|\s+)snapshot-update/,
+  /ORG_GRADLE_PROJECT_snapshot-update/,
 ];
 
+/**
+ * For a line that starts a YAML scalar, the column its continuation lines must be
+ * right of, and the scalar's first text. `key: value` (also `key: |`, `key: >-`)
+ * continues right of the key's column, `- value` right of its dash. A bare `key:`
+ * opens a mapping or sequence and starts no scalar.
+ */
+function scalarOwner(line: string): [number, string] | undefined {
+  const [, lead, dashes, rest] = /^(\s*)((?:-\s+)*)(.*)$/.exec(line) ?? ['', '', '', line];
+  const key = /^[^\s#'"][^:#]*:(?:\s+(\S.*))?$/.exec(rest);
+  if (key !== null) {
+    return key[1] === undefined ? undefined : [lead.length + dashes.length, key[1]];
+  }
+  if (dashes !== '') {
+    return [lead.length + dashes.trimEnd().lastIndexOf('-'), rest];
+  }
+  return undefined;
+}
+
+/**
+ * `text` with every YAML scalar continuation joined to its first line, the same way
+ * logical_lines in the trailer script does: a `>` block, a plain or quoted scalar
+ * continued on a more indented line, and a `|` block line ending in `\` all join,
+ * so a flag on the line after its command is still seen with the command. Lines of
+ * a `|` block are separate shell commands and stay separate.
+ */
+function logicalLines(text: string): string[] {
+  const out: string[] = [];
+  let ownerIndent: number | undefined;
+  let literal = false;
+  let joinsNext = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(COMMENT, '').trimEnd();
+    if (line.trim() === '') {
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    if (ownerIndent !== undefined && indent > ownerIndent) {
+      const body = line.trim();
+      if (literal && !joinsNext) {
+        out.push(body);
+      } else {
+        out[out.length - 1] = `${out[out.length - 1].replace(/\\$/, '').trimEnd()} ${body}`;
+      }
+      joinsNext = literal && body.endsWith('\\');
+      continue;
+    }
+    out.push(line.trim());
+    const owner = scalarOwner(line);
+    ownerIndent = owner?.[0];
+    literal = owner !== undefined && owner[1].startsWith('|');
+    joinsNext = false;
+  }
+  return out;
+}
+
 function bannedIn(text: string): string[] {
-  const code = text.replace(COMMENT, '');
-  return BANNED.filter((pattern) => pattern.test(code)).map((pattern) => pattern.source);
+  const lines = logicalLines(text);
+  return BANNED.filter((pattern) => lines.some((line) => pattern.test(line))).map((pattern) => pattern.source);
+}
+
+/**
+ * Runs the package's `test` script, exactly as package.json spells it, over one
+ * probe test that asserts a snapshot that does not exist, outside CI. Returns its
+ * exit status and whether the snapshot was written. `extra` is appended to the
+ * script's own arguments, for the negative control.
+ */
+function runTestScriptOverNewSnapshot(extra: readonly string[]): { status: number | null; written: boolean; output: string } {
+  const manifest = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')) as {
+    scripts: Record<string, string>;
+  };
+  const [program, ...args] = manifest.scripts.test.trim().split(/\s+/);
+  expect(program).toBe('jest');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ash-vscode-snapshot-probe-'));
+  try {
+    fs.writeFileSync(
+      path.join(dir, 'probe.test.js'),
+      "test('probe', () => { expect('a snapshot nobody asked for').toMatchSnapshot(); });\n",
+    );
+    const env = { ...process.env };
+    // A developer's shell: jest's --ci default would otherwise come from this run.
+    delete env.CI;
+    delete env.GITHUB_ACTIONS;
+    delete env.JEST_WORKER_ID;
+    const jest = path.join(PACKAGE_ROOT, 'node_modules', 'jest', 'bin', 'jest.js');
+    const result = spawnSync(
+      process.execPath,
+      [jest, ...args, ...extra, '--roots', dir, '--testMatch', '**/probe.test.js', '--coverage=false'],
+      { cwd: PACKAGE_ROOT, env, encoding: 'utf8' },
+    );
+    return {
+      status: result.status,
+      written: fs.existsSync(path.join(dir, '__snapshots__', 'probe.test.js.snap')),
+      output: `${result.stdout}${result.stderr}`,
+    };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 // The --policy checker in the trailer script names every update flag in order to look
@@ -73,6 +183,36 @@ describe('no CI path updates a snapshot', () => {
     expect(bannedIn('run: uv run pytest -n auto tests/unit')).toEqual([]);
   });
 
+  test.each([
+    'run: npx jest --update-snapshot',
+    'run: npx jest --no-ci',
+    'run: npm t -- -u',
+    'run: npm run test -- -u',
+    'run: npm --prefix "editors/vscode" test -- -u',
+    'run: >\n  npx jest --ci\n  -u',
+    'run: npx jest --ci\n  -u',
+    '- run: >-\n    npm test --\n    --update-snapshot',
+    'run: |\n  npx jest --ci \\\n    -u',
+    'run: ./gradlew test -P snapshot-update',
+    'run: ./gradlew test --project-prop snapshot-update',
+    'run: ./gradlew test --project-prop=snapshot-update',
+    'env:\n  ORG_GRADLE_PROJECT_snapshot-update: "true"',
+  ])('the scanner finds %j', (text) => {
+    expect(bannedIn(text)).not.toEqual([]);
+  });
+
+  test('a -u given to another command in the same run block is not jest\'s', () => {
+    const workflow = [
+      'steps:',
+      '  - run: |',
+      '      npm test -- --ci',
+      '      sort -u names.txt',
+      '  - name: next step',
+      '    run: echo -u',
+    ].join('\n');
+    expect(bannedIn(workflow)).toEqual([]);
+  });
+
   test('no file under .github/ and no npm script passes one', () => {
     const files = filesUnder(path.join(REPO_ROOT, '.github'));
     expect(files.some((file) => file.endsWith('ash-vscode-extension.yml'))).toBe(true);
@@ -100,14 +240,23 @@ describe('no CI path updates a snapshot', () => {
     expect(offenders).toEqual({});
   });
 
-  test('jest never writes a snapshot it was not asked to', () => {
-    const manifest = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')) as {
-      jest: { ci?: unknown };
-    };
-    // Without it, a local `npm test` writes every NEW snapshot silently, and only
+  test('npm test never writes a snapshot it was not asked to, outside CI too', () => {
+    // Without --ci, a local `npm test` writes every NEW snapshot silently, and only
     // CI (where jest detects CI itself) would refuse.
-    expect(manifest.jest.ci).toBe(true);
-  });
+    const plain = runTestScriptOverNewSnapshot([]);
+    expect(plain.written).toBe(false);
+    expect(plain.status).not.toBe(0);
+    expect(plain.output).toMatch(/not written/);
+  }, 60_000);
+
+  test('the probe sees a snapshot being written when one is', () => {
+    // Negative control for the test above: the same run with --ci turned off writes
+    // the snapshot and passes, so `written: false` there is the script's doing.
+    const control = runTestScriptOverNewSnapshot(['--ci=false']);
+    expect(control.output).toMatch(/1 written/);
+    expect(control.written).toBe(true);
+    expect(control.status).toBe(0);
+  }, 60_000);
 });
 
 describe('the update path', () => {

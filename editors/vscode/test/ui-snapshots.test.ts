@@ -35,9 +35,8 @@
  * filesystem are replaced. A snapshot of a hand-built host would pin what this
  * file's author wired up, not what the extension does.
  *
- * Updating: `npm run snapshots -- --snapshot-update structural`. jest is configured
- * with `ci: true` in package.json, so a plain `npm test` never writes a snapshot,
- * new or changed.
+ * Updating: `npm run snapshots -- --snapshot-update structural`. `npm test` is
+ * `jest --ci`, so it never writes a snapshot, new or changed.
  */
 
 import * as fs from 'fs';
@@ -250,6 +249,50 @@ function sarifWithUnplaceableFindings(): string {
   return JSON.stringify(doc);
 }
 
+/**
+ * A SARIF report with a result at every SARIF level, one with no level, and one of
+ * each kind the Problems panel must not show: a `kind: "pass"` result and a
+ * suppressed one. The captured scans are all `level: "error"`, so without this
+ * case the severity of every snapshotted diagnostic is Error and the level mapping
+ * in src/diagnostics.ts could change with no snapshot moving.
+ */
+function sarifAtEveryLevel(): string {
+  const doc = JSON.parse(capturedScan('findings').sarif) as {
+    runs: { results: Record<string, unknown>[] }[];
+  };
+  const results = doc.runs[0].results;
+  const template = results.find((r) => !Array.isArray(r.suppressions) || r.suppressions.length === 0);
+  if (template === undefined) {
+    throw new Error('the findings fixture has no unsuppressed result to copy');
+  }
+  const variant = (line: number, ruleId: string, changes: Record<string, unknown>): Record<string, unknown> => {
+    const copy = JSON.parse(JSON.stringify(template)) as Record<string, unknown> & {
+      locations: { physicalLocation: { region: { startLine: number; endLine: number } } }[];
+    };
+    copy.locations[0].physicalLocation.region.startLine = line;
+    copy.locations[0].physicalLocation.region.endLine = line;
+    copy.ruleId = ruleId;
+    copy.message = { text: `${ruleId} on line ${line}` };
+    delete copy.level;
+    return { ...copy, ...changes };
+  };
+  results.splice(
+    0,
+    results.length,
+    variant(1, 'LEVEL-ERROR', { level: 'error' }),
+    variant(2, 'LEVEL-WARNING', { level: 'warning' }),
+    variant(3, 'LEVEL-NOTE', { level: 'note' }),
+    variant(4, 'LEVEL-NONE', { level: 'none' }),
+    variant(5, 'LEVEL-ABSENT', {}),
+    variant(6, 'KIND-PASS', { level: 'error', kind: 'pass' }),
+    variant(7, 'SUPPRESSED-WARNING', {
+      level: 'warning',
+      suppressions: [{ kind: 'inSource', justification: 'fixture suppression' }],
+    }),
+  );
+  return JSON.stringify(doc);
+}
+
 beforeEach(() => {
   resetState();
 });
@@ -287,6 +330,10 @@ describe('the scan outcomes a user can see', () => {
     [
       'findings that cannot be placed in the editor',
       () => render({ sarif: sarifWithUnplaceableFindings(), aggregated: findings.aggregated, status: 2 }),
+    ],
+    [
+      'findings at every SARIF level, a pass and a suppressed result',
+      () => render({ sarif: sarifAtEveryLevel(), aggregated: findings.aggregated, status: 2 }),
     ],
     [
       'a stale report the extension could not delete',

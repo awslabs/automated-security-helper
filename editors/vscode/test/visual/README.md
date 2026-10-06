@@ -31,12 +31,16 @@ suites, and one rule for changing either.
 `--snapshot-update` is the same flag core ASH's snapshot suite uses, and like that
 suite's it is refused when `CI` or `GITHUB_ACTIONS` is `true`.
 `test/snapshot-policy.test.ts` fails if any file under `.github/` passes it, or jest's
-`--updateSnapshot`, `-u` or `--ci=false`, or sets `ASH_SNAPSHOT_UPDATE`. jest itself
-is configured with `ci: true`, so a plain `npm test` never writes a snapshot, not
-even a new one.
+`--updateSnapshot`, `--update-snapshot`, `-u`, `--ci=false` or `--no-ci`, or the
+JetBrains plugin's `-Psnapshot-update` in any spelling, or sets
+`ASH_SNAPSHOT_UPDATE`. A flag on the next line of a folded YAML string counts.
+`npm test` is `jest --ci`, so it never writes a snapshot, not even a new one; the
+policy test runs it over a new snapshot to prove that. (`"ci": true` in the jest
+configuration would not: jest's command-line default for `--ci` overrides it.)
 
 The `editor-snapshots` job runs `.github/scripts/check-editor-snapshot-trailers.py`
-over the commits of the push (`before..after`) or the pull request (fork point to
+over the commits of the push (`before..after`, or from the merge base with the
+default branch for a new branch or a force-push) or the pull request (fork point to
 head). It fails when a file under an `editors/**/__snapshots__/` directory changed
 in a commit that carries no `Snapshot-Update: <reason>`; every such commit needs its
 own. A separate commit that only adds the trailer does not count, and the placeholder
@@ -54,13 +58,15 @@ jest snapshots of the text and structure of every surface the extension has:
   descriptions and defaults) and the untrusted-workspace capability text;
 - what activation registers: the commands, the diagnostic collection's name, the
   output channel's name, and the Clear command's output;
-- for each of 27 scan outcomes: the diagnostics (file, range, severity, message,
+- for each of 28 scan outcomes: the diagnostics (file, range, severity, message,
   source, code), every notification in the order raised with its severity, the
   progress notification's title and Cancel button, and the output channel's text.
   The outcomes include exit 0, exit 2, exit 1 with partial results (the
   incomplete-scan warning), exit 1 with no report, every refused setting, every
-  executable lookup failure, and the `ashx` to `ash` fallback notice shown and
-  already shown.
+  executable lookup failure, the `ashx` to `ash` fallback notice shown and
+  already shown, and one report with a result at each SARIF level (error,
+  warning, note, none and no level), a `kind: "pass"` result and a suppressed
+  one, so the severity each level maps to is in the snapshot too.
 
 The extension has no tree view, CodeLens, hover provider, status bar item, quick
 pick, input box, webview, custom editor, code action, terminal or task. A test in
@@ -112,11 +118,25 @@ The image is built from the Dockerfile on each run and is never pushed.
 ### Threshold and determinism
 
 The threshold is zero: `compare -metric AE` with no fuzz, so one changed pixel
-fails. That is justified by measurement, not assumed. The suite was run three
-times in a row in the container on the same commit, and every capture of every
-scenario was byte-identical across the three runs and to the baselines. With no
-variance measured there is nothing for a tolerance to absorb, and a tolerance
-would only be room for a styling change to pass.
+fails. That is justified by measurement, not assumed.
+
+The suite was not always deterministic. Before `--disable-partial-raster`, 4 of
+10 runs in the container failed by exactly one pixel: the top end of the
+Problems toolbar's separator at (1218,518), or a part's rounded corner, one
+level of gray off (#5E5E5E against #606060). By default Chromium re-rasters only
+the damaged part of a tile, and its software rasterizer can round an
+anti-aliased edge pixel differently in a partial raster than in a whole one.
+Which edges get a partial raster depends on what changed in which frame, so the
+same state could be drawn two ways. With partial raster off, every tile is
+rastered whole: 20 runs, then 12 consecutive runs, then 20 more five at a time,
+every capture of every scenario identical. The cause is removed, so there is
+still nothing for a tolerance to absorb.
+
+Each scene also starts from the same empty workbench: a mocha `teardown` hides
+the hover and closes the editors, the panel and the notifications after every
+test, pass or fail, and each scene builds the state it shows itself. A failed
+comparison used to leave its hover on screen, and the next scene then failed by
+a whole screen.
 
 Each state is captured repeatedly until four consecutive captures have the same
 pixel signature, rather than after a fixed delay. A fixed delay is a guess that a
@@ -125,7 +145,7 @@ changing fails with a timeout instead of producing a baseline that depends on wh
 it was taken.
 
 One limit is known. The renderer is Chromium's software rasterizer, which picks
-SIMD code paths from the CPU it runs on. The three identical runs were on one
+SIMD code paths from the CPU it runs on. The identical runs were on one
 machine, so they do not show that a runner with a different CPU draws the same
 pixels. CI is the first cross-host check; if it differs, the fix is to measure the
 difference across runners, not to raise the threshold.
