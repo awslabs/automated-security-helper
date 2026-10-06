@@ -66,8 +66,8 @@ lists of real builds.
 
 | Directory | Format | Verified by |
 |---|---|---|
-| `deb/` | Debian, Ubuntu | build + payload gate + install + real scan + upgrade from N-1 + purge in `debian:bookworm` and `ubuntu:24.04` (`ash-native-packages.yml`) |
-| `rpm/` | Amazon Linux, RHEL | build + payload gate + install + real scan + upgrade from N-1 + erase in `amazonlinux:2023` and `ubi9` (`ash-native-packages.yml`) |
+| `deb/` | Debian, Ubuntu | build + payload gate + install beside the distribution's `ash` shell + the three e2e scans (exit 2, 0 and 1, `tests/e2e`) + upgrade from N-1 + purge in `debian:bookworm` and `ubuntu:24.04` (`ash-native-packages.yml`) |
+| `rpm/` | Amazon Linux, RHEL | build + payload gate + install beside a package owning `/usr/bin/ash` + the three e2e scans (exit 2, 0 and 1, `tests/e2e`) + upgrade from N-1 + erase in `amazonlinux:2023` and `ubi9` (`ash-native-packages.yml`) |
 | `flatpak/` | any Linux with flatpak | build + install + real scan against `org.freedesktop.Sdk//24.08` |
 | `msix/` | Windows 10, Windows 11 | build + sign + install + real scan on `windows-latest` |
 | `chocolatey/` | Windows, via Chocolatey | nuspec vs NuGet's XSD anywhere; build + install + real scan on `windows-latest` |
