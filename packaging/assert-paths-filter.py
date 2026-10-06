@@ -69,6 +69,18 @@ refused, because this check models neither.
 It also requires the push and pull_request lists to be identical, which the
 workflow's comment asks for and nothing checked.
 
+Opens are resolved when they happen, so a symlink is attributed to the file it
+named during the build. A path under /proc or /dev/fd is refused outright: it
+names a descriptor or a working directory, and reopening a file the build opened
+O_WRONLY through /proc/self/fd/N reads it with no read-mode open of its own. An
+O_PATH open counts as a read whatever its access mode.
+
+Threat model: this guards against accidental drift and ordinary edits, such as a
+new file the hook copies or a filter entry someone deletes. It does not try to
+stop an author who already controls the repository's code from evading it on
+purpose (closure tricks, ctypes, editing this script and the like); code
+review is the control there.
+
 The self-test runs each layer on its own against fixture repositories it builds
 with hatchling, so a deleted measurement in either layer turns it red.
 
@@ -518,6 +530,14 @@ SPAWN_EVENTS = frozenset(
 FORK_EXEC = "_posixsubprocess.fork_exec"
 # The event recorded for an open of a directory, in any mode.
 DIRECTORY_OPEN = "open of a directory"
+# The event recorded for an open of a path under /proc or /dev/fd, spelled there or
+# reached through a symlink. Such a path names a descriptor or a working directory
+# rather than a file: /proc/self/fd/N reopens whatever N is, including a file the
+# build opened O_WRONLY, and /proc/self/cwd is the build's directory only while the
+# build runs. Resolving either after the build gives a different answer, so the
+# open is refused rather than resolved.
+PROC_OPEN = "open under /proc or /dev/fd"
+PROC_ROOTS = ("/proc", "/dev/fd", "/dev/stdin", "/dev/stdout", "/dev/stderr")
 
 # Commands the build may run, keyed by (program name, *arguments). Each must read
 # nothing a paths entry could name. A command is attributed only when the program
@@ -540,19 +560,27 @@ def _audit(event: str, args: tuple[Any, ...]) -> None:
     if events is None:
         return
     if event == "open":
-        # Resolved later: an audit hook should do as little as it can. A directory
-        # is the exception, because whether a path is one can change by then. Any
-        # open of a directory counts, whatever its access mode: on Linux O_PATH
-        # ignores the mode, so O_PATH|O_WRONLY still gives a usable dir_fd.
+        # Resolved now, while the build's working directory and descriptors are the
+        # ones the path was opened against: a symlink to /proc/self/cwd/X, resolved
+        # after the build, names this script's directory instead. Any open of a
+        # directory counts, whatever its access mode: on Linux O_PATH ignores the
+        # mode, so O_PATH|O_WRONLY still gives a usable dir_fd.
         cwd = os.getcwd()
-        events.append(("open", args[0], args[1], args[2], cwd))
         raw = args[0]
-        if (
-            raw is not None
-            and not isinstance(raw, int)
-            and os.path.isdir(os.path.join(cwd, os.fsdecode(raw)))
+        if raw is None or isinstance(raw, int):
+            events.append(("open", raw, args[1], args[2], cwd))
+            return
+        path = os.path.join(cwd, os.fsdecode(raw))
+        resolved = os.path.realpath(path)
+        events.append(("open", resolved, args[1], args[2], cwd))
+        if any(
+            _inside(p, root)
+            for p in (os.path.normpath(path), resolved)
+            for root in PROC_ROOTS
         ):
-            events.append((DIRECTORY_OPEN, os.path.join(cwd, os.fsdecode(raw))))
+            events.append((PROC_OPEN, path))
+        if os.path.isdir(path):
+            events.append((DIRECTORY_OPEN, path))
     elif event == "subprocess.Popen":
         executable, argv, _cwd, env = args
         if isinstance(argv, (str, bytes, os.PathLike)):
@@ -670,6 +698,10 @@ def measured_build(
 
 def _opened_for_reading(mode: object, flags: object) -> bool:
     if isinstance(flags, int):
+        # O_PATH ignores the access mode: the descriptor names the file whatever
+        # O_WRONLY says, so it counts as a read.
+        if flags & getattr(os, "O_PATH", 0):
+            return True
         return (flags & os.O_ACCMODE) != os.O_WRONLY
     if isinstance(mode, str):
         return "r" in mode or "+" in mode
@@ -746,14 +778,19 @@ def measured_inputs(
                 f"{name} {event[1]!r}, whose descriptor can open any file relative to "
                 "it unseen"
             )
+        elif name == PROC_OPEN:
+            unattributed.append(
+                f"{name} {event[1]!r}, which names a descriptor or working directory "
+                "rather than a file"
+            )
         else:
             text = f"{name} {event[1]!r}"
             unattributed.append(text if len(text) <= 200 else text[:200] + "...")
     if unattributed:
         raise Unresolvable(
             "the build started a process this check cannot attribute, called into C, "
-            "or opened a directory, so what it read is not measured: "
-            + "; ".join(dict.fromkeys(unattributed))
+            "or opened a directory or a path under /proc, so what it read is not "
+            "measured: " + "; ".join(dict.fromkeys(unattributed))
         )
     return found
 
@@ -1484,6 +1521,113 @@ def self_test() -> int:
                 ),
             },
             "error: open of a directory",
+        ),
+        # A descriptor or a working directory reached through /proc resolves to
+        # something else once the build is over: the descriptor is closed, and
+        # /proc/self/cwd is this script's directory again. Linux only; elsewhere
+        # the opens fail, and the attempt is refused all the same.
+        (
+            "measured: the hook opens a root file O_WRONLY and reads it through /proc/self/fd",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "try:\n"
+                    '            fd = os.open("CHANGELOG.md", os.O_WRONLY)\n'
+                    '            data = open(f"/proc/self/fd/{fd}", "rb").read()\n'
+                    "            os.close(fd)\n"
+                    '            Path(ASH_ASSETS_PATH / "CL.md").write_bytes(data)\n'
+                    "        except OSError:\n"
+                    "            pass"
+                ),
+            },
+            "error: open under /proc or /dev/fd",
+        ),
+        (
+            "measured: the hook opens a root file O_PATH|O_WRONLY and reads it through /proc/self/fd",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "try:\n"
+                    '            fd = os.open("CHANGELOG.md", getattr(os, "O_PATH", 0) | os.O_WRONLY)\n'
+                    '            data = open(f"/proc/self/fd/{fd}", "rb").read()\n'
+                    "            os.close(fd)\n"
+                    '            Path(ASH_ASSETS_PATH / "CL.md").write_bytes(data)\n'
+                    "        except OSError:\n"
+                    "            pass"
+                ),
+            },
+            "error: open under /proc or /dev/fd",
+        ),
+        (
+            "measured: the hook reads a root file through /proc/self/cwd",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "try:\n"
+                    '            data = open("/proc/self/cwd/CHANGELOG.md", "rb").read()\n'
+                    '            Path(ASH_ASSETS_PATH / "CL.md").write_bytes(data)\n'
+                    "        except OSError:\n"
+                    "            pass"
+                ),
+            },
+            "error: open under /proc or /dev/fd",
+        ),
+        (
+            "measured: the hook reads a root file through /proc/<pid>/cwd",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "try:\n"
+                    '            data = open(f"/proc/{os.getpid()}/cwd/CHANGELOG.md", "rb").read()\n'
+                    '            Path(ASH_ASSETS_PATH / "CL.md").write_bytes(data)\n'
+                    "        except OSError:\n"
+                    "            pass"
+                ),
+            },
+            "error: open under /proc or /dev/fd",
+        ),
+        (
+            "measured: the hook opens a root file O_WRONLY and reads it through /dev/fd",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "try:\n"
+                    '            fd = os.open("CHANGELOG.md", os.O_WRONLY)\n'
+                    '            data = open(f"/dev/fd/{fd}", "rb").read()\n'
+                    "            os.close(fd)\n"
+                    '            Path(ASH_ASSETS_PATH / "CL.md").write_bytes(data)\n'
+                    "        except OSError:\n"
+                    "            pass"
+                ),
+            },
+            "error: open under /proc or /dev/fd",
+        ),
+        (
+            # O_PATH ignores the access mode, so the descriptor names the file
+            # whatever O_WRONLY says, and counts as a read of it.
+            "measured: the hook opens a root file O_PATH|O_WRONLY",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    "try:\n"
+                    '            os.close(os.open("CHANGELOG.md", getattr(os, "O_PATH", 0) | os.O_WRONLY))\n'
+                    "        except OSError:\n"
+                    "            pass"
+                ),
+            },
+            "problems",
+        ),
+        (
+            # Resolved when the open happens, through /proc while it still names the
+            # build's own directory.
+            "measured: a symlink in the package tree to a root file through /proc/self/cwd",
+            {
+                "layers": MEASURED,
+                "links": {
+                    "automated_security_helper/link.md": "/proc/self/cwd/CHANGELOG.md"
+                },
+            },
+            "problems",
         ),
         (
             "measured: the git first on PATH is inside the repository",
