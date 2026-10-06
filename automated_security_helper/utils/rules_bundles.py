@@ -344,7 +344,9 @@ def install_rules_bundle(
             json.dumps(_manifest_for(bundle, files), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        os.chmod(staging, 0o755)
+        # A directory: group/other need read and search (x) to load the rules, and
+        # nothing beyond the owner may write. B103 flags any group x bit.
+        os.chmod(staging, 0o755)  # nosec B103 - read-only rules directory
         for child in staging.iterdir():
             os.chmod(child, 0o644)
         if final.exists() or final.is_symlink():
