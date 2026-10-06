@@ -11,8 +11,8 @@ failed with "Unable to resolve an OCI_RUNNER". An empty value now falls back to
 discovery, as the bash wrapper's ``${OCI_RUNNER:-$(command -v ...)}`` does.
 
 Executed under ``pwsh`` rather than asserted as text, because the defect is in how
-PowerShell binds the parameter, which no reading of the script shows. Skipped where
-``pwsh`` is absent; the hosted Linux runners have it.
+PowerShell binds the parameter, which no reading of the script shows. Skipped only
+on a developer machine without ``pwsh``; in CI a missing ``pwsh`` fails the test.
 """
 
 from __future__ import annotations
@@ -28,12 +28,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
 PWSH = shutil.which("pwsh")
 
-pytestmark = [
-    pytest.mark.skipif(PWSH is None, reason="pwsh is not on PATH"),
-    pytest.mark.skipif(
-        os.name == "nt", reason="the stand-in runner is a POSIX shell script"
-    ),
-]
+_IN_CI = "true" in (os.environ.get("CI"), os.environ.get("GITHUB_ACTIONS"))
+
+
+@pytest.fixture(autouse=True)
+def _require_pwsh():
+    """Skip only on a developer machine without pwsh; in CI a missing pwsh is a failure.
+
+    Every hosted runner image ships pwsh, so its absence in CI means the runner
+    changed and this regression test would otherwise stop running unnoticed.
+    """
+    if PWSH is None:
+        if _IN_CI:
+            pytest.fail("pwsh is not on PATH; CI runners must run this regression test")
+        pytest.skip("pwsh is not on PATH (local run only; CI fails instead)")
 
 
 def _invoke(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
@@ -64,9 +72,13 @@ def path_with_only_docker(tmp_path) -> str:
     """A PATH whose only OCI runner is a stand-in ``docker`` that does nothing."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    runner = bin_dir / "docker"
-    runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    runner.chmod(0o755)
+    if os.name == "nt":
+        # Get-Command resolves "docker" through PATHEXT, so a .cmd stands in on Windows.
+        (bin_dir / "docker.cmd").write_text("@exit /b 0\r\n", encoding="utf-8")
+    else:
+        runner = bin_dir / "docker"
+        runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        runner.chmod(0o755)
     assert PWSH is not None
     return os.pathsep.join([bin_dir.as_posix(), Path(PWSH).resolve().parent.as_posix()])
 
