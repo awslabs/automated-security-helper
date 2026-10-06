@@ -696,15 +696,19 @@ jobs:
   # public repository, so GitHub-hosted macOS minutes are free and cost is not the
   # deciding factor; queue time is, and this job blocks nothing else.
   #
-  # WHAT THIS JOB TESTS, WHICH IS NOT THIS BRANCH'S CODE
+  # WHAT THIS JOB BUILDS: THIS COMMIT, THROUGH A COPY OF THE FORMULA
   #
-  # The formula builds from the git tag on its `url` line, so `brew install` fetches
-  # that release rather than the checked-out branch. That is deliberate and it is the
-  # honest scope: what is under test is whether the resource block installs and whether
-  # the resulting ASH can scan. tests/unit/test_homebrew_formula_version.py keeps the
-  # tag equal to this repository's version, so the two agree as long as
-  # `[project.dependencies]` is not edited in the same change that bumps the version
-  # without regenerating the block.
+  # Formula/ash.rb builds from the git tag on its `url` line, which is the form it is
+  # published in. Installed verbatim it would build that release, and its test block
+  # runs `ashx`, which a release before v4 does not have. So the tap gets a copy
+  # written by scripts/e2e/brew_formula.py: the same file with that one line pointed at
+  # a `git archive` tarball of this commit. The resource block, install and test block
+  # are the formula's own, and tests/unit/test_e2e_brew_formula.py holds the copy to
+  # that one-line difference. `brew audit --strict` then runs on the copy and on the
+  # release formula itself, so the published form is still checked as written.
+  # tests/unit/test_homebrew_formula_version.py keeps the release tag equal to this
+  # repository's version. The full e2e for this channel (exit codes, upgrade,
+  # uninstall, a missing-resource control) is the `homebrew` job in ash-e2e.yml.
   #
   # No version literal appears in this file on purpose. A number written here would be
   # a fourth place that pins ASH's version and nothing rewrites, which is the failure
@@ -754,25 +758,35 @@ jobs:
       # branch was written on -- this is the CI-only defect the formula work said to
       # read this job's first run for.
       #
-      # So the formula is copied into a throwaway local tap and installed by its
+      # So the formula goes into a throwaway local tap and is installed by its
       # qualified name. `brew tap-new` creates the directory layout and the git
       # repository Homebrew expects, with no flags: a tap without a git repository is
       # not one as far as `brew audit` is concerned, and no flag here can be verified
       # off a macOS runner, so the plain invocation is the one to use. The tap is local
       # to the runner and never pushed. Formula/ash.rb at the repository root stays the
-      # single source of truth; this copies it rather than maintaining a second one.
-      - name: Put the formula in a local tap, because Homebrew requires one
+      # single source of truth: the tap holds a copy rendered from it, pointed at a
+      # tarball of this commit (see WHAT THIS JOB BUILDS above), and the diff below
+      # shows the copy differs only in its source lines.
+      - name: Put a head-built copy of the formula in a local tap
         run: |
           set -euo pipefail
           brew tap-new ash/local
           tap_dir="$(brew --repository ash/local)"
           mkdir -p "${tap_dir}/Formula"
-          cp Formula/ash.rb "${tap_dir}/Formula/ash.rb"
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
+          tarball="${RUNNER_TEMP}/automated-security-helper-${version}.tar.gz"
+          git archive --format=tar.gz --prefix="automated-security-helper-${version}/" -o "${tarball}" HEAD
+          python3 scripts/e2e/brew_formula.py --formula Formula/ash.rb --tarball "${tarball}" \
+            --version "${version}" --out "${tap_dir}/Formula/ash.rb"
           echo "tap: ${tap_dir}"
-          # A copy nobody checks is a copy that can silently be the wrong file, and
-          # every step below now reads the copy rather than the original.
-          diff -u Formula/ash.rb "${tap_dir}/Formula/ash.rb"
-          echo "the tap's copy is byte-identical to the repository's formula"
+          rc=0
+          diff -u Formula/ash.rb "${tap_dir}/Formula/ash.rb" || rc=$?
+          # 1 is "they differ", which the copy must; 0 would mean the source line was
+          # not rewritten, and 2 that diff itself failed.
+          if [ "${rc}" -ne 1 ]; then
+            echo "::error::diff of the tap copy against Formula/ash.rb exited ${rc}, expected 1"
+            exit 1
+          fi
 
       - name: Install ASH from the formula
         run: brew install --verbose --build-from-source ash/local/ash
@@ -794,6 +808,15 @@ jobs:
       # If a strict-only finding does fire, satisfy it. Dropping `--strict` would remove
       # the check that catches a malformed resource block, which is the reason audit is
       # in this job at all.
+      #
+      # Both forms are audited: the copy that was just installed, then the release
+      # formula as published, put in the tap byte for byte.
       - name: Audit the formula against Homebrew's own rules
-        run: brew audit --strict ash/local/ash
+        run: |
+          set -euo pipefail
+          brew audit --strict ash/local/ash
+          tap_dir="$(brew --repository ash/local)"
+          cp Formula/ash.rb "${tap_dir}/Formula/ash.rb"
+          diff -u Formula/ash.rb "${tap_dir}/Formula/ash.rb"
+          brew audit --strict ash/local/ash
 
