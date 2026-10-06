@@ -374,8 +374,10 @@ val assertSnapshotsUsed = tasks.register<Exec>("assertSnapshotsUsed") {
         listOf(
             "python3",
             "assert-snapshots-used.py",
-            "--snapshot-dir", "src/test/snapshots/__snapshots__",
-            "--usage", "build/snapshot-usage/test.txt",
+            // From the same two values the test task is given, so the orphan check reads the
+            // directory the tests write to; assertSnapshotWiring below fails if they ever part.
+            "--snapshot-dir", structuralSnapshots.asFile.absolutePath,
+            "--usage", structuralSnapshotUsage.get().asFile.absolutePath,
         ) + (if (snapshotUpdate) listOf("--delete-unused") else emptyList()),
     )
 }
@@ -383,7 +385,7 @@ val assertSnapshotsUsed = tasks.register<Exec>("assertSnapshotsUsed") {
 tasks.check {
     // assertTestsRan explicitly, because it is the only one of the three that can fail when
     // the test task is skipped as NO-SOURCE.
-    dependsOn(tasks.test, assertTestsRan, assertCoverage, assertSnapshotsUsed)
+    dependsOn(tasks.test, assertTestsRan, assertCoverage, assertSnapshotsUsed, "assertSnapshotWiring")
 
     // The platform's own two checks, which the IntelliJ Platform Gradle plugin provides and
     // does not wire into `check` itself. They are the only things that read META-INF/plugin.xml
@@ -633,7 +635,7 @@ tasks.register<Exec>("assertUiTestsRan") {
     )
 }
 
-tasks.register<Exec>("assertUiSnapshotsUsed") {
+val assertUiSnapshotsUsed = tasks.register<Exec>("assertUiSnapshotsUsed") {
     group = "verification"
     description = "Fails on a PNG baseline that no visual test compared."
     dependsOn(uiTest)
@@ -648,8 +650,39 @@ tasks.register<Exec>("assertUiSnapshotsUsed") {
         listOf(
             "python3",
             "assert-snapshots-used.py",
-            "--snapshot-dir", "src/uiTest/snapshots/__snapshots__",
-            "--usage", "build/snapshot-usage/uiTest.txt",
+            "--snapshot-dir", uiSnapshots.asFile.absolutePath,
+            "--usage", uiSnapshotUsage.get().asFile.absolutePath,
         ) + (if (snapshotUpdate) listOf("--delete-unused") else emptyList()),
     )
+}
+
+// The orphan checks have to read the directory and the usage list their suite was given. Both are
+// derived from one value per suite above, and this task is the test that they still are: for each
+// suite it compares the --snapshot-dir and --usage its orphan check passes with the
+// ash.snapshot.dir and ash.snapshot.usage system properties its test task passes, as resolved
+// files. A path typed into one side, or a value repointed on one side only, fails here, where
+// otherwise the orphan check would read a directory no test writes to and pass on it. `check`
+// runs it; it starts no test and needs no IDE.
+tasks.register("assertSnapshotWiring") {
+    group = "verification"
+    description = "Fails if an orphan check reads a snapshot directory or usage list its suite does not use."
+    // Read at configuration, so the action below holds plain strings and no task references.
+    val checks = listOf(
+        tasks.test.get() to assertSnapshotsUsed.get(),
+        uiTest.get() to assertUiSnapshotsUsed.get(),
+    ).flatMap { (suite, orphanCheck) ->
+        val args = orphanCheck.commandLine.map { it.toString() }
+        listOf("--snapshot-dir" to "ash.snapshot.dir", "--usage" to "ash.snapshot.usage").map { (flag, property) ->
+            val at = args.indexOf(flag)
+            val passed = args.getOrNull(at + 1)?.takeIf { at >= 0 }?.let { orphanCheck.workingDir.resolve(it).canonicalPath }
+            val expected = suite.systemProperties[property]?.let { File(it.toString()).canonicalPath }
+            listOf("${orphanCheck.name} $flag", passed ?: "<not passed>", "${suite.name} $property", expected ?: "<not set>")
+        }
+    }
+    doLast {
+        val problems = checks.filter { (_, passed, _, expected) -> passed.startsWith("<") || passed != expected }
+            .map { (what, passed, against, expected) -> "$what is $passed, but $against is $expected" }
+        if (problems.isNotEmpty()) throw GradleException("snapshot wiring is inconsistent:\n  " + problems.joinToString("\n  "))
+        logger.lifecycle("snapshot wiring: ${checks.size} path(s) agree between the suites and their orphan checks")
+    }
 }
