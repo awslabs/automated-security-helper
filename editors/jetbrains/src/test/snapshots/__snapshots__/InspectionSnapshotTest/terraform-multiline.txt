@@ -2,6 +2,7 @@ file: main.tf
 highlights: 1
 
 1:1-4:2 ERROR
+  style: problem type GENERIC_ERROR, attributes ERRORS_ATTRIBUTES, forced attributes none
   text: resource "aws_s3_bucket" "b" {\n  bucket = "b"\n  acl    = "public-read"\n}
   description: ASH [bandit CKV_AWS_20]: S3 Bucket has an ACL defined which allows public READ access.
   tooltip: <html>ASH [bandit CKV_AWS_20]: S3 Bucket has an ACL defined which allows public READ access. <a href="#inspection/AshFinding">more…</a> (Ctrl+F1)</html>

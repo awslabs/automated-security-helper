@@ -23,13 +23,15 @@ import javax.imageio.ImageIO
  *
  * The IDE is the one runIdeForUiTests starts (see build.gradle.kts and ui-test-in-container.sh),
  * with this build's plugin installed, on a project holding the planted-secret fixture, and with
- * the ASH executable set to a stub that replays the captured real exit-1 run. The suite clicks
+ * the ASH executable set to a stub that replays the captured real exit-1 run, with one warning and
+ * one note added to its SARIF (src/uiTest/scan/README.txt says why). The suite clicks
  * nothing it does not have to: it invokes the plugin's own menu action through the IDE's action
  * system, as the Tools menu does, and then renders each scene.
  *
  * SCENES, the plugin's UI surfaces that have a look as well as words:
  *  1. the incomplete-scan notification balloon;
- *  2. the editor with the three findings highlighted and the error count in its corner;
+ *  2. the editor with the five findings highlighted (three errors, a warning and a note, so each
+ *     level's highlight style is in the pixels) and the problem counts in its corner;
  *  3. the error tooltip for the finding under the caret (Ctrl+F1, the same popup a hover shows);
  *  4. the Problems tool window's File tab listing the findings. The plugin registers no tool
  *     window of its own, so this is where its findings appear as a tool window;
@@ -186,17 +188,20 @@ class VisualSnapshotTest {
                 """,
             )
             waitFor("the incomplete-scan notification") { js("String(ash.findShowing(function (c) { return ash.is(c, 'javax.swing.JLabel') && ash.text(c).indexOf('ASH scan incomplete') >= 0; }) != null)") == "true" }
-            waitFor("the three ASH findings to be highlighted") {
+            // All five, whatever severity each was given: the scenes are where a change to a
+            // level's look is caught, so the wait counts findings and leaves severity and style
+            // to the pixels (and to InspectionSnapshotTest).
+            waitFor("the five ASH findings to be highlighted") {
                 js(
                     """
                     ash.wir(function () {
                       var p = ash.project();
                       var doc = ash.editor().getDocument();
-                      var infos = com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl.getHighlights(doc, com.intellij.lang.annotation.HighlightSeverity.ERROR, p);
+                      var infos = com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl.getHighlights(doc, com.intellij.lang.annotation.HighlightSeverity.INFORMATION, p);
                       var n = 0;
                       for (var i = 0; i < infos.size(); i++) { var d = infos.get(i).getDescription(); if (d != null && String(d).indexOf("ASH [") == 0) n++; }
                       var psi = com.intellij.psi.PsiDocumentManager.getInstance(p).getPsiFile(doc);
-                      return String(n == 3 && com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx.getInstanceEx(p).isErrorAnalyzingFinished(psi));
+                      return String(n == 5 && com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx.getInstanceEx(p).isErrorAnalyzingFinished(psi));
                     });
                     """,
                 ) == "true"
@@ -336,12 +341,13 @@ class VisualSnapshotTest {
             "ok";
             """,
         )
-        waitFor("the Problems view to list the three findings") {
+        // The file's row and its five findings.
+        waitFor("the Problems view to list the five findings") {
             js(
                 """
                 var tw = com.intellij.openapi.wm.ToolWindowManager.getInstance(ash.project()).getToolWindow("Problems View");
                 var tree = ash.find(tw.getComponent(), function (c) { return c instanceof javax.swing.JTree; });
-                String(tree != null && tree.getRowCount() == 4);
+                String(tree != null && tree.getRowCount() == 6);
                 """,
             ) == "true"
         }
