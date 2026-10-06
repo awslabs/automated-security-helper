@@ -25,6 +25,38 @@ from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
 
 
+# Reporters whose output is a JSON document, printed with rich's print_json.
+#
+# Every entry must be a real reporter's config name, because this is matched
+# against --format. The list used to carry names no reporter has (asff,
+# security-hub, security-lake, opensearch) and to miss JSON reporters, and spdx
+# sat here while that reporter emitted YAML, so `ash report --format spdx` died
+# in print_json. tests/unit/cli/test_report_format_output.py checks every name
+# against the registered reporters.
+#
+# print_json rather than print for a second reason: rich's print soft-wraps at
+# the console width, which breaks long JSON strings across lines when stdout is
+# not a terminal. print_json does not.
+JSON_STDOUT_FORMATS = frozenset(
+    {
+        "aws-security-hub",
+        "cloudwatch-logs",
+        "cyclonedx",
+        "flat-json",
+        "github-ghas",
+        "gitlab-cyclonedx",
+        "gitlab-sast",
+        "ocsf",
+        "s3",
+        "sarif",
+        "spdx",
+    }
+)
+
+# Reporters whose output is Markdown, rendered with rich's Markdown.
+MARKDOWN_STDOUT_FORMATS = frozenset({"markdown", "bedrock-summary-reporter"})
+
+
 def get_report_formats(incomplete: str = None) -> List[str]:
     report_formats = []
     # Get values from ExportFormat str enum
@@ -172,6 +204,7 @@ def report_command(
         plugin_type="reporter",
     )
     reporter_plugin = None
+    reporter_class = None
 
     for plugin_class in reporter_plugins:
         try:
@@ -185,6 +218,7 @@ def report_command(
                 if plugin_instance.config.name.lower() == report_format.lower():
                     ASH_LOGGER.info(f"Found reporter plugin {plugin_class.__name__}")
                     reporter_plugin = plugin_instance
+                    reporter_class = plugin_class
                     break
         except Exception as e:
             ASH_LOGGER.debug(
@@ -210,8 +244,18 @@ def report_command(
         plugin_config = ash_config.get_plugin_config(
             plugin_type="reporter", plugin_name=report_format
         )
-        if plugin_config is not None:
-            reporter_plugin.config = plugin_config
+        if plugin_config is not None and reporter_class is not None:
+            # get_plugin_config returns the section as a plain dict. Assigning
+            # that to reporter.config left a dict where every reporter reads
+            # attributes, so `self.config.options...` raised AttributeError
+            # (junitxml: 'dict' object has no attribute 'options') and the
+            # command exited 1. Constructing the reporter with it lets the
+            # plugin validate it into its own config model, which is what the
+            # report phase of a scan does (core/phases/report_phase.py).
+            reporter_plugin = reporter_class(
+                context=plugin_context,
+                config=plugin_config,
+            )
         report_content = reporter_plugin.report(model)
         if report_content is None:
             # `report` is annotated `-> str | None`, and a reporter returns None
@@ -225,30 +269,9 @@ def report_command(
                 "See the log above for the reason.[/red]"
             )
             raise typer.Exit(1)
-        if report_format in [
-            "asff",
-            "cloudwatch-logs",
-            # "csv",
-            "cyclonedx",
-            # "html",
-            "flat-json",
-            # "junitxml",
-            # "markdown",
-            "ocsf",
-            "opensearch",
-            "s3",
-            "sarif",
-            "security-hub",
-            "security-lake",
-            "spdx",
-            # "text",
-            # "yaml",
-        ]:
+        if report_format.lower() in JSON_STDOUT_FORMATS:
             print_json(report_content)
-        elif report_format in [
-            "markdown",
-            "bedrock-summary",
-        ]:
+        elif report_format.lower() in MARKDOWN_STDOUT_FORMATS:
             print(Markdown(report_content))
         else:
             print(report_content)
