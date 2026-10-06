@@ -11,8 +11,10 @@ import org.junit.ComparisonFailure
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.awt.image.BufferedImage
 import java.nio.file.Files
 import java.nio.file.Path
+import javax.imageio.ImageIO
 
 /**
  * The snapshot helper's own rules, each against a scratch directory so no committed snapshot is
@@ -26,8 +28,17 @@ class SnapshotsTest {
 
     private fun config(update: Boolean = false, env: Map<String, String> = emptyMap()): Snapshots.Config {
         val root = tmp.root.toPath()
-        return Snapshots.Config(root.resolve("__snapshots__"), update, root.resolve("usage.txt"), env)
+        return Snapshots.Config(root.resolve("__snapshots__"), update, root.resolve("usage.txt"), env, root.resolve("actual"))
     }
+
+    private fun image(width: Int = 4, height: Int = 3, paint: (BufferedImage) -> Unit = {}): BufferedImage {
+        val img = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until height) for (x in 0 until width) img.setRGB(x, y, 0xFF336699.toInt())
+        paint(img)
+        return img
+    }
+
+    private fun png(config: Snapshots.Config, name: String): Path = config.dir.resolve("SnapshotsTest").resolve("$name.png")
 
     private fun file(config: Snapshots.Config, name: String): Path =
         config.dir.resolve("SnapshotsTest").resolve("$name.txt")
@@ -143,5 +154,64 @@ class SnapshotsTest {
     @Test
     fun lineDiffMarksRemovedAndAddedLines() {
         assertEquals("  a\n- b\n+ c\n  d\n+ e\n", Snapshots.lineDiff("a\nb\nd\n", "a\nc\nd\ne\n"))
+    }
+
+    private fun writeBaseline(config: Snapshots.Config, name: String, img: BufferedImage) {
+        Files.createDirectories(png(config, name).parent)
+        ImageIO.write(img, "png", png(config, name).toFile())
+    }
+
+    @Test
+    fun aMissingImageFailsAndWritesOnlyTheReviewCopy() {
+        val config = config()
+        val error = assertThrows(AssertionError::class.java) {
+            Snapshots.assertImageMatches(config, javaClass, "img-missing", image())
+        }
+        assertTrue(error.message, error.message!!.contains("does not exist"))
+        assertFalse(Files.exists(png(config, "img-missing")))
+        assertTrue("the rendered image is saved for review", Files.exists(config.actualDir!!.resolve("SnapshotsTest/img-missing.actual.png")))
+    }
+
+    @Test
+    fun aMissingImageIsWrittenWithTheUpdateFlag() {
+        val config = config(update = true)
+        assertEquals(Snapshots.Result.WRITTEN, Snapshots.assertImageMatches(config, javaClass, "img-created", image()))
+        assertEquals(0xFF336699.toInt(), ImageIO.read(png(config, "img-created").toFile()).getRGB(3, 2))
+    }
+
+    @Test
+    fun anIdenticalImageMatchesWhateverItsPixelFormat() {
+        val config = config()
+        writeBaseline(config, "img-same", image())
+        val rgb = BufferedImage(4, 3, BufferedImage.TYPE_INT_RGB)
+        for (y in 0 until 3) for (x in 0 until 4) rgb.setRGB(x, y, 0x336699)
+        assertEquals(Snapshots.Result.MATCHED, Snapshots.assertImageMatches(config, javaClass, "img-same", rgb))
+    }
+
+    @Test
+    fun oneChangedPixelFailsWithItsLocationAndADiffImage() {
+        val config = config()
+        writeBaseline(config, "img-one-pixel", image())
+        val error = assertThrows(AssertionError::class.java) {
+            Snapshots.assertImageMatches(config, javaClass, "img-one-pixel", image { it.setRGB(2, 1, 0xFF336698.toInt()) })
+        }
+        assertTrue(error.message, error.message!!.contains("1 of 12 pixel(s) differ, within x=2..2 y=1..1"))
+        val diff = ImageIO.read(config.actualDir!!.resolve("SnapshotsTest/img-one-pixel.diff.png").toFile())
+        assertEquals(0xFFFF0000.toInt(), diff.getRGB(2, 1))
+        assertEquals("the snapshot is left alone", 0xFF336699.toInt(), ImageIO.read(png(config, "img-one-pixel").toFile()).getRGB(2, 1))
+    }
+
+    @Test
+    fun aChangedImageIsRewrittenOnlyWithTheUpdateFlag() {
+        val config = config(update = true)
+        writeBaseline(config, "img-rewritten", image())
+        assertEquals(Snapshots.Result.WRITTEN, Snapshots.assertImageMatches(config, javaClass, "img-rewritten", image(width = 5)))
+        assertEquals(5, ImageIO.read(png(config, "img-rewritten").toFile()).width)
+    }
+
+    @Test
+    fun aDifferentSizeIsADifference() {
+        assertEquals("size 5x3, snapshot is 4x3", Snapshots.compare(image(), image(width = 5)))
+        assertEquals(null, Snapshots.compare(image(), image()))
     }
 }

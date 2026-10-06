@@ -1,0 +1,6 @@
+<application>
+  <component name="UpdatesConfigurable">
+    <option name="CHECK_NEEDED" value="false" />
+    <option name="THIRD_PARTY_PLUGINS_ALLOWED" value="false" />
+  </component>
+</application>

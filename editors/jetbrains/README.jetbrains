@@ -327,6 +327,43 @@ including a status this plugin cannot read, is incomplete. A run where nothing r
 FAILED is reported separately, because every scanner SKIPPED leaves the incomplete set empty
 while nothing examined the target. An `excluded` scanner is not reported.
 
+Snapshot tests: a change to what the plugin shows needs a reason
+----------------------------------------------------------------
+
+Two suites hold the plugin's UI still, so a change to it fails CI until someone updates the
+snapshot on purpose and says why.
+
+The structural suite (src/test/kotlin/.../snapshot, run by `./gradlew check`) renders every
+surface as text and compares it with src/test/snapshots/__snapshots__: the inspection's
+highlights with their ranges, severities and tooltips; every notification a scan can end in,
+including the incomplete-scan warning, exit 1 with no report, and the ashx -> ash fallback
+notice; Settings | Tools | ASH as a component tree; and the plugin's contributions as the
+running platform reports them.
+
+The visual suite (src/uiTest, run by ui-test-in-container.sh inside ui-test/Dockerfile's image)
+starts a real IDE on an Xvfb display, drives it with Remote-Robot, and compares five scenes
+pixel for pixel with the PNGs in src/uiTest/snapshots/__snapshots__: the incomplete-scan
+balloon, the editor with the findings, the error tooltip, the Problems tool window, and the
+settings page. The threshold is zero. Repeated runs in that image render identical pixels, which
+ui-test-in-container.sh checks itself when given a run count above 1, as CI does. The plugin has
+no tool window or report view of its own, so neither has a scene.
+
+To change a snapshot on purpose:
+
+  1. Run the suite and read the failure: a line diff for text, and for an image a count of
+     changed pixels with the rendered image and a diff under build/ui-snapshots/.
+  2. Rewrite the snapshots: `./gradlew test -Psnapshot-update` for the structural suite, or
+     `ASH_SNAPSHOT_UPDATE=1 bash editors/jetbrains/ui-test-in-container.sh` in the image for the
+     visual one. Both refuse when CI or GITHUB_ACTIONS is "true", and no workflow passes them.
+  3. Review `git diff`, and look at every changed PNG.
+  4. Commit with a trailer saying why the output changed:
+     `git commit --trailer "Snapshot-Update: <why the output changed>"`.
+
+.github/scripts/check-editor-snapshot-trailers.py fails a push or pull request in which a file
+under a __snapshots__ directory changed in a commit with no Snapshot-Update trailer. A snapshot
+no test compares fails too (assert-snapshots-used.py), including one left behind by a deleted
+test class. The same rules, flag name and trailer as core ASH's syrupy suite.
+
 Known limitations
 -----------------
 
