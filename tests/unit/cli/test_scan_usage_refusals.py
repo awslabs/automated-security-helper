@@ -3,11 +3,13 @@
 
 """Regression tests: ``ash scan`` refuses unusable input with a message and exit 1.
 
+* ``--use-existing`` with no existing results raised an uncaught ``ValueError``,
+  so the operator got a traceback and whatever exit code the interpreter chose.
 * A ``--source-dir`` that does not exist was not refused at all. A real scan
   ran over nothing, every scanner found no files, and it could exit 0 -- the
   same answer as a clean scan of the directory the operator meant.
 
-It now exits 1, the code scan already uses for a refused shard selection
+Both now exit 1, the code scan already uses for a refused shard selection
 (``_fail_shard_selection``): 2 means "actionable findings", so a usage error
 that exited 2 would read to a CI gate as a scan that found problems.
 """
@@ -95,3 +97,50 @@ class TestNonexistentSourceDir:
             )
         assert result.exit_code == 0, result.output
         assert mock_run.call_args.kwargs["source_dir"] == str(source)
+
+
+class TestUseExistingWithoutResults:
+    def test_is_refused_with_a_message_not_a_traceback(self, runner, tmp_path):
+        source = tmp_path / "src"
+        source.mkdir()
+        output = tmp_path / "out"
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(
+                app,
+                [
+                    "scan",
+                    "--source-dir",
+                    str(source),
+                    "--output-dir",
+                    str(output),
+                    "--use-existing",
+                ],
+            )
+        _assert_refused(
+            result,
+            "--use-existing",
+            (output / "ash_aggregated_results.json").as_posix(),
+        )
+        mock_run.assert_not_called()
+
+    def test_existing_results_are_still_used(self, runner, tmp_path):
+        source = tmp_path / "src"
+        source.mkdir()
+        output = tmp_path / "out"
+        output.mkdir()
+        results = output / "ash_aggregated_results.json"
+        results.write_text("{}", encoding="utf-8")
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(
+                app,
+                [
+                    "scan",
+                    "--source-dir",
+                    str(source),
+                    "--output-dir",
+                    str(output),
+                    "--use-existing",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert mock_run.call_args.kwargs["existing_results"] == results.as_posix()
