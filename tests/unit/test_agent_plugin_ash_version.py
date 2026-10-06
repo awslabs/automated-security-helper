@@ -1179,3 +1179,51 @@ class TestGitignoredFilesAreSkipped:
         # ignore, tracked or not. An untracked file is new work, and new work is
         # exactly what this walk exists to check.
         assert {"pkg/.gitignore", "pkg/tracked.md", "pkg/untracked.md"} <= found, found
+
+    def test_a_tracked_file_matching_an_ignore_rule_is_still_walked(self, tmp_path):
+        # `git add -f` commits a file an ignore rule matches. It is ours to keep
+        # current, so the walk must check it: only untracked ignored output is
+        # skipped. `git check-ignore --no-index` would report both as ignored.
+        root = tmp_path / "repo"
+        (root / "gen").mkdir(parents=True)
+        self._git(root, "init", "-q")
+        (root / ".gitignore").write_text("*.log\ngen/\n", encoding="utf-8")
+        (root / "tracked.log").write_text("tracked\n", encoding="utf-8")
+        (root / "untracked.log").write_text("untracked\n", encoding="utf-8")
+        (root / "gen" / "tracked.md").write_text("tracked\n", encoding="utf-8")
+        (root / "gen" / "untracked.md").write_text("untracked\n", encoding="utf-8")
+        self._git(root, "add", ".gitignore")
+        self._git(root, "add", "-f", "tracked.log", "gen/tracked.md")
+
+        found = {path.relative_to(root).as_posix() for path in _candidate_files(root)}
+
+        assert {"tracked.log", "gen/tracked.md"} <= found, found
+        # The control: the same rules do skip the untracked files, so the
+        # assertion above is not passing because nothing is ignored at all.
+        assert not {"untracked.log", "gen/untracked.md"} & found, found
+
+    def test_outside_a_git_work_tree_every_file_is_walked(self, tmp_path, monkeypatch):
+        # `git check-ignore` exits 128 outside a work tree. That must walk more
+        # files, never fewer, so a .gitignore there is not honored.
+        root = tmp_path / "plain"
+        root.mkdir()
+        # Keep git from finding a repository above tmp_path, wherever basetemp is.
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+        (root / ".gitignore").write_text("*.log\n", encoding="utf-8")
+        (root / "a.log").write_text("a\n", encoding="utf-8")
+        (root / "b.md").write_text("b\n", encoding="utf-8")
+        probe = subprocess.run(
+            ["git", "check-ignore", "a.log"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert probe.returncode == 128, (
+            "precondition: this test needs a directory outside any git work tree, "
+            f"but git check-ignore exited {probe.returncode}: {probe.stderr}"
+        )
+
+        found = {path.relative_to(root).as_posix() for path in _candidate_files(root)}
+
+        assert found == {".gitignore", "a.log", "b.md"}, found
