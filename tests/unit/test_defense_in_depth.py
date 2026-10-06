@@ -413,7 +413,7 @@ class TestDockerBuildArgRevisionValidation:
             "main",
             "v3.2.7",
             "feature/my-branch",
-            "abc123def",
+            "abc123def",  # pragma: allowlist secret
             "refs/heads/main",
             "LOCAL",
             "v1.0-beta.1",

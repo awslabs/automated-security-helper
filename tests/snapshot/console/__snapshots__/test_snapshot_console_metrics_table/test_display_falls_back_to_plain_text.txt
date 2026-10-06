@@ -1,0 +1,4 @@
+ASH Scan Results Summary
+==================================================
+Error displaying detailed table: model is malformed
+Please check the output files for detailed results.

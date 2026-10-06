@@ -256,6 +256,37 @@
   excluded scanner is recorded `SKIPPED` rather than `MISSING`, which does not trip
   the completeness gate, and the report then says cdk-nag was not part of the run.
 
+- **`ash scan` refuses a `--source-dir` that does not exist.** A missing path, from
+  `--source-dir` or `ASH_SOURCE_DIR`, used to be scanned anyway: every scanner found
+  no files and the run could exit 0, the same answer as a clean scan of the directory
+  you meant. It now prints `Source directory does not exist: <path>` on stderr and
+  exits 1 before anything runs. A path that is not a directory is refused the same
+  way. Exit 1 rather than 2, because 2 already means "actionable findings were found".
+
+- **`ash scan --use-existing` with no existing results exits 1 with a message.** It
+  raised an uncaught `ValueError` and printed a traceback. It now names the
+  `ash_aggregated_results.json` it looked for, on stderr, and exits 1, like the other
+  refused invocations above.
+
+- **`ash config get` exits 3 on a configuration file that does not parse.** A file
+  with a YAML or JSON syntax error used to be logged and replaced by the default
+  configuration, so the command exited 0 and printed the defaults as though they
+  were the file's contents. It now prints `Invalid configuration: could not parse
+  <path>: <error>` and exits 3, the code for an invalid configuration and the one it
+  already used for a file that parses but does not validate. With no configuration
+  file at all it still prints the defaults. `ash scan` is unchanged: it still falls
+  back to the defaults and records a warning.
+
+- **A `**` at either end of a multi-segment `ignore_paths` or `suppressions` pattern
+  now takes effect.** The matcher anchored the first and last segments of a pattern
+  with two or more `**` to the start and end of the path, so `tests/**/__snapshots__/**`
+  matched nothing, `a/**/b/**` did not match `a/x/b/c`, and `**/x/**/y` did not match
+  `p/x/q/y`. Patterns written that way were silently inert; **they now suppress or
+  ignore what they say, so a scan they apply to can report fewer findings and change
+  its exit code.** A `**` inside a longer component, as in `src/**.py`, is now an
+  ordinary `*` (as in gitignore); it used to match only a file literally named `.py`.
+  Every other pattern shape matches exactly what it did.
+
 ### Breaking changes
 
 - **MCP scans can now end in a new terminal status, `incomplete`.** Clients
@@ -591,6 +622,69 @@
   reason that has nothing to do with Nix. `node` comes from `pkgs.nodejs` in the
   flake's dev shell, already there for `npm audit`, and ASH re-execs itself inside
   `nix develop`, so the in-process scanner finds it.
+
+- **`ash report --format spdx` works, and the SPDX reporter writes SPDX.** The
+  reporter was a stub that wrote the whole results model as YAML into
+  `ash.spdx.json`, and `ash report` exited 1 trying to print that as JSON. It now
+  emits an SPDX 2.3 JSON document built from the scan's CycloneDX SBOM, validated
+  against the SPDX 2.3 schema; see [Output formats](docs/content/docs/output-formats.md#spdx).
+  The reporter is still disabled by default.
+
+- **`ash report` passes a reporter its configured options.** The command assigned the
+  reporter's config section as a plain dict, so on any scan with a finding
+  `ash report --format junitxml` exited 1 with `'dict' object has no attribute
+  'options'`, and `github-ghas` failed the same way. Options such as junitxml's
+  `respect_severity_threshold` now take effect there as they do in a scan. The list
+  of formats `ash report` prints as JSON named reporters that do not exist (`asff`,
+  `security-hub`, `security-lake`, `opensearch`) and missed `github-ghas`,
+  `gitlab-sast` and `gitlab-cyclonedx`, whose stdout came out soft-wrapped with
+  newlines inside JSON strings; `bedrock-summary-reporter` was spelled
+  `bedrock-summary` and so was not rendered as Markdown.
+
+- **The text and html reports show each scanner's real duration.** The scanner rows
+  they render had no `duration`, so every scanner read `<1ms`. The rows, and the
+  `scanner_metrics` rows in `ash.flat.json`, now carry it. The markdown report's
+  legend no longer describes a Duration column its table has never had.
+
+- **S3 uploads are keyed by the scan's timestamp, and `ash.s3.json` is JSON.** The
+  key was `ash-reports/ash-report-None.json` for every scan, because it was read from
+  a field the engine sets only after reporting, so each run overwrote the last. It
+  now uses `metadata.generated_at`, which is the same during the scan and in a later
+  `ash report --format s3`. `reports/ash.s3.json` held the bare `s3://` URL (or, on a
+  failed upload, the error message); it is now a JSON receipt with the URL, bucket,
+  key, format and local copy path, and a failed upload writes no receipt.
+
+- **The MCP `get_scan_summary` tool reports real severity counts.** It read the
+  counts from the top level of `summary_stats`, where a real scan has none, so every
+  severity read 0. The `actionable_only` and severity filters on scan results had the
+  same mistake and left the real counts unfiltered.
+
+- **`ash scan --mode nix` refuses with a message instead of a traceback.** With no
+  `nix` on PATH, and when the recursion guard found it already inside a Nix-mode
+  run, the scan ended in an uncaught `RuntimeError`. It now prints the same message
+  on stderr and exits 1, like the other refused invocations.
+
+- **A container-mode refusal is no longer followed by "Results file not found".**
+  When `ash scan --mode container` refused before any container ran (no OCI
+  runner, a non-numeric `--container-uid` or `--container-gid`, an unsafe
+  `--ash-revision-to-install`, a missing Dockerfile, a failed image build), it went
+  on to log "Container execution failed" and then looked for a results file that
+  nothing could have written, ending in `Results file not found at
+  .../ash_aggregated_results.json`. It now stops after the refusal's own message,
+  with its exit code: 1, or the runner's status for a failed build.
+
+- **`ash scan --mode container --no-build` no longer needs a Dockerfile.** The
+  Dockerfile was looked up before ASH decided whether to build, so outside an ASH
+  checkout, with ASH installed from one, `--no-build` refused with `Dockerfile not
+  found` although nothing was going to be built. The lookup now happens only for a
+  build, and `--no-build` runs the image that is already present.
+
+- **The PowerShell `Invoke-ASH` finds an OCI runner when you do not name one.**
+  Without `-OCIRunner` and with `ASH_OCI_RUNNER` unset, PowerShell bound the
+  parameter to an empty string rather than `$null`, so `Invoke-ASH` tried to run a
+  runner named `""` and always failed. It now falls back to the first of `docker`,
+  `finch`, `nerdctl` and `podman` on PATH, as `./ash` falls back when `OCI_RUNNER`
+  is empty.
 
 ### Reporting changes
 

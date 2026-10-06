@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Bandit",
+          "version": "0.0.0-fixture"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "B105",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "Possible hardcoded password: 'hunter2'"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/app.py"
+                },
+                "region": {
+                  "startLine": 12,
+                  "endLine": 12,
+                  "snippet": {
+                    "text": "password = 'hunter2'"
+                  }
+                }
+              }
+            }
+          ],
+          "fingerprints": {
+            "bandit/v1": "b105-src-app-py-12"
+          },
+          "properties": {
+            "issue_confidence": "MEDIUM",
+            "issue_severity": "LOW"
+          }
+        }
+      ]
+    }
+  ]
+}
