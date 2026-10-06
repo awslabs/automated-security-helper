@@ -211,8 +211,11 @@ function Invoke-ASH {
             $ashCmdArgs.Add("--ignore-suppressions")
         }
 
-        # Resolve OCI runner
-        $runners = if ($null -ne $OCIRunner) {
+        # Resolve OCI runner. IsNullOrEmpty, not `$null -ne`: $OCIRunner is a [string]
+        # defaulting to $env:ASH_OCI_RUNNER, and with that unset PowerShell binds "" rather
+        # than $null, so the null test always chose @("") and Get-Command rejected the
+        # empty name. An empty value falls back to discovery, as ./ash does.
+        $runners = if (-not [string]::IsNullOrEmpty($OCIRunner)) {
             @($OCIRunner)
         }
         else {

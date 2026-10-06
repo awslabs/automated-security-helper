@@ -1,0 +1,21 @@
+
+ERROR (1) Exiting because 2 content database(s) are past their declared age bound
+  Content database semgrep-offline-rules (semgrep) is stale: downloaded 2025-12-13T08:00:00Z, 33d 4h old, past its 720h
+bound (ASH's bound); age read from the download time in `.ash-rules-fetched-at` in the cache directory, else the oldest
+rules file's mtime. The scan fails: a clean result from a stale database is not evidence of a clean target. To refresh
+it, rebuild the offline image (`ash build-image --offline`), which downloads the rulesets again, or download them into
+$SEMGREP_RULES_CACHE_DIR and record the time in .ash-rules-fetched-at. To scan against it anyway, pass
+--allow-stale-content-db or set `content_db_staleness: warn` in the ASH config.
+  Content database grype-db (grype): the time it was built could not be read (ValueError: grype executable not found),
+so it cannot be shown to be inside its 120h bound (grype's own bound). The scan fails: a clean result from a stale
+database is not evidence of a clean target. To refresh it, run `grype db update` with network access, or rebuild the
+offline image (`ash build-image --offline`) so it downloads a current database. To scan against it anyway, pass
+--allow-stale-content-db or set `content_db_staleness: warn` in the ASH config.
+
+ERROR (1) Exiting because the scan was incomplete: 3 selected scanner(s) did not evaluate everything they were given
+  cdk-nag: PASSED (4 of 10 targets unevaluated)
+  grype: MISSING
+  npm-audit: ERROR
+ERROR means the scanner ran and failed; MISSING means its dependencies were unavailable; a target count means the
+scanner ran but could not read that many of its inputs. Install the missing tools, fix or exclude the unreadable
+targets, exclude the scanners with --exclude-scanners, or drop --fail-on-incomplete-scanners to accept a partial scan.

@@ -1,0 +1,32 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Checkov",
+          "version": "3.2.469",
+          "rules": [
+            {
+              "id": "CKV_AWS_20",
+              "name": "S3 Bucket has an ACL defined which allows public READ access.",
+              "shortDescription": {"text": "S3 Bucket has an ACL defined which allows public READ access."}
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CKV_AWS_20",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {"text": "S3 Bucket has an ACL defined which allows public READ access."},
+          "locations": [
+            {"physicalLocation": {"artifactLocation": {"uri": "main.tf"}, "region": {"startLine": 1, "endLine": 4}}}
+          ],
+          "properties": {"issue_severity": "HIGH"}
+        }
+      ]
+    }
+  ]
+}

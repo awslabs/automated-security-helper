@@ -52,7 +52,7 @@ S3_SYNC_MARKER = "ash-s3-sync.py"
 MCP_ENTRYPOINT_MARKER = "ash-mcp-entrypoint.sh"
 GATE_HANDLER_MARKER = "ash_gate_handler.py"
 SSM_PARAMETER_MARKER = "ASH_BASE_CONFIG_SSM_PARAMETER"
-SECRETS_MARKER = "get_secret_value"
+SECRETS_MARKER = "get_secret_value"  # pragma: allowlist secret
 
 TERRAFORM_S3_SYNC = (
     REPO_ROOT

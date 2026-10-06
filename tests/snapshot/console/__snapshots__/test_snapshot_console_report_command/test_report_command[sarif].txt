@@ -1,0 +1,693 @@
+$ ash report --format sarif --log-level ERROR
+[exit 0]
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "AWS Labs - Automated Security Helper",
+          "organization": "Amazon Web Services",
+          "fullName": "awslabs/automated-security-helper",
+          "version": "<ASH_VERSION>",
+          "downloadUri": "https://github.com/awslabs/automated-security-helper",
+          "informationUri": "https://awslabs.github.io/automated-security-helper",
+          "notifications": [],
+          "rules": [],
+          "taxa": [],
+          "locations": [],
+          "language": "en-US",
+          "contents": [
+            "localizedData",
+            "nonLocalizedData"
+          ],
+          "isComprehensive": false,
+          "supportedTaxonomies": []
+        },
+        "extensions": []
+      },
+      "invocations": [],
+      "language": "en-US",
+      "versionControlProvenance": [],
+      "logicalLocations": [],
+      "graphs": [],
+      "results": [
+        {
+          "ruleId": "B602",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "subprocess call with shell=True",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/app.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 12,
+                  "endLine": 12,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "bandit",
+            "issue_severity": "HIGH"
+          }
+        },
+        {
+          "ruleId": "B105",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Possible hardcoded password",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/config.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 3,
+                  "endLine": 3,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "bandit",
+            "issue_severity": "MEDIUM"
+          }
+        },
+        {
+          "ruleId": "B108",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Probable insecure usage of temp file",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/app.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 40,
+                  "endLine": 40,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "bandit",
+            "issue_severity": "MEDIUM"
+          }
+        },
+        {
+          "ruleId": "B101",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Use of assert detected",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "tests/test_app.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 8,
+                  "endLine": 8,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "bandit",
+            "issue_severity": "LOW"
+          }
+        },
+        {
+          "ruleId": "B311",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Standard pseudo-random generator",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/util.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 5,
+                  "endLine": 5,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "suppressions": [
+            {
+              "kind": "external",
+              "justification": "Accepted risk: test fixture"
+            }
+          ],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "bandit",
+            "issue_severity": "LOW"
+          }
+        },
+        {
+          "ruleId": "python.lang.security.eval",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Detected use of eval()",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/app.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 77,
+                  "endLine": 77,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "semgrep",
+            "issue_severity": "CRITICAL"
+          }
+        },
+        {
+          "ruleId": "generic.secrets.gitleaks",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Example key in docs",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "README.md",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 1,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "semgrep",
+            "issue_severity": "INFO"
+          }
+        },
+        {
+          "ruleId": "python.lang.best-practice.open",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "open() without encoding",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/util.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 9,
+                  "endLine": 9,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "semgrep",
+            "issue_severity": "INFO"
+          }
+        },
+        {
+          "ruleId": "python.flask.debug",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Flask debug mode",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/web.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 4,
+                  "endLine": 4,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "suppressions": [
+            {
+              "kind": "external",
+              "justification": "Accepted risk: test fixture"
+            }
+          ],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "semgrep",
+            "issue_severity": "HIGH"
+          }
+        },
+        {
+          "ruleId": "python.requests.no-timeout",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Request without timeout",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/web.py",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 20,
+                  "endLine": 20,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "suppressions": [
+            {
+              "kind": "external",
+              "justification": "Accepted risk: test fixture"
+            }
+          ],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "semgrep",
+            "issue_severity": "MEDIUM"
+          }
+        },
+        {
+          "ruleId": "CKV_AWS_18",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "S3 access logging disabled",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "infra/bucket.yaml",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 6,
+                  "endLine": 6,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "checkov",
+            "issue_severity": "LOW"
+          }
+        },
+        {
+          "ruleId": "CKV_AWS_21",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "S3 versioning disabled",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "infra/bucket.yaml",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 6,
+                  "endLine": 6,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "checkov",
+            "issue_severity": "LOW"
+          }
+        },
+        {
+          "ruleId": "CKV_AWS_144",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Cross-region replication off",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "infra/bucket.yaml",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 6,
+                  "endLine": 6,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "checkov",
+            "issue_severity": "INFO"
+          }
+        },
+        {
+          "ruleId": "javascript.express.xss",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Unescaped user input",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "web/server.js",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 31,
+                  "endLine": 31,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [],
+            "scanner_name": "opengrep",
+            "issue_severity": "HIGH"
+          }
+        }
+      ],
+      "runAggregates": [],
+      "redactionTokens": [],
+      "newlineSequences": [
+        "\r\n",
+        "\n"
+      ],
+      "threadFlowLocations": [],
+      "taxonomies": [],
+      "addresses": [],
+      "translations": [],
+      "policies": [],
+      "webRequests": [],
+      "webResponses": [],
+      "properties": {
+        "tags": []
+      }
+    }
+  ],
+  "inlineExternalProperties": [],
+  "properties": {
+    "tags": []
+  }
+}

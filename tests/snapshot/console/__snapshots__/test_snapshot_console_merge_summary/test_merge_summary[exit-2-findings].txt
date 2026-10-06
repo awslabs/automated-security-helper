@@ -1,0 +1,5 @@
+
+=== ASH Merge: 3 of 3 shards recombined ===
+Merged results: merged/ash_aggregated_results.json
+Scanners: 6 | Findings: 11 | Actionable: 4 | Suppressed: 3
+ERROR (2) Exiting due to 4 actionable findings across the merged shards

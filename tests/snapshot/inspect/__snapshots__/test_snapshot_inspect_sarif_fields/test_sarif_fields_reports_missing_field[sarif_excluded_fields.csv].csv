@@ -1,0 +1,2 @@
+field,scanners,reason
+runs[].results[].ruleIndex,bandit,Intentionally excluded during aggregation

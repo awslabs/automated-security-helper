@@ -1,0 +1,3 @@
+$ ash config init
+Config file already exists at <TMP>/demo-project/.ash/.ash.yaml. Include --force to overwrite.
+[exit code: 1]

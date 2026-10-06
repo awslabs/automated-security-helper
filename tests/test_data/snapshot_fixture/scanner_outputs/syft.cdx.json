@@ -1,0 +1,63 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:pypi/requests@2.19.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "name": "requests",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "python"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/requirements.txt"
+        }
+      ],
+      "purl": "pkg:pypi/requests@2.19.1",
+      "type": "library",
+      "version": "2.19.1"
+    },
+    {
+      "bom-ref": "pkg:docker/python@3.12-slim",
+      "name": "python",
+      "properties": [
+        {
+          "name": "syft:location:0:path",
+          "value": "/Dockerfile"
+        }
+      ],
+      "purl": "pkg:docker/python@3.12-slim",
+      "type": "container",
+      "version": "3.12-slim"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "snapshot-fixture",
+      "name": "snapshot-fixture",
+      "type": "file"
+    },
+    "timestamp": "2026-01-15T12:00:00Z",
+    "tools": {
+      "components": [
+        {
+          "author": "anchore",
+          "name": "syft",
+          "type": "application",
+          "version": "1.33.0"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:00000000-0000-4000-8000-000000000001",
+  "specVersion": "1.6",
+  "version": 1
+}
