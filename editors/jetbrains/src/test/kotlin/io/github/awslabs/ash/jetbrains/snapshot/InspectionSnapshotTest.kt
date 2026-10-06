@@ -87,7 +87,18 @@ class InspectionSnapshotTest : BasePlatformTestCase() {
         myFixture.configureFromExistingVirtualFile(myFixture.tempDirFixture.createFile("leak.py", text))
         StubAshCli(bin).write("ashx", "exit2", exitCode = 2)
         AshScanController.scan(project, null, bin.toString(), notice = AshCliLocator.FallbackNotice(), sourceDir = sourceDir)
-        Snapshots.assertMatches(javaClass, "real-exit2-leak-py", render())
+        // The fixture's secret line is masked, and only that line: a committed snapshot quoting
+        // it would be a second copy of the planted credential for the repository's own secret
+        // scan to find, where .ash/.ash.yaml exempts exactly one, leak.py. The range on each
+        // highlight still pins exactly what is underlined.
+        val secretLine = text.lines()[1]
+        assertTrue("the fixture's second line is the planted key", secretLine.contains("wJalrXUtnFEMI"))
+        Snapshots.assertMatches(
+            javaClass,
+            "real-exit2-leak-py",
+            render(),
+            masks = mapOf(secretLine to "<leak.py line 2, the planted example key>"),
+        )
     }
 
     fun testEverySeverityAndTheInheritedOne() {
