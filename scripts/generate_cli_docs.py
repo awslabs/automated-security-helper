@@ -306,7 +306,11 @@ def render_command_section(command_name: str, func, description: str = "") -> st
         return ""
 
     lines = []
-    lines.append(f"### `ash {command_name}`")
+    # The heading names the command a reader types. It comes from the same constant
+    # the entry point uses, so a future rename cannot leave the reference behind.
+    from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
+
+    lines.append(f"### `{CANONICAL_CLI_NAME} {command_name}`")
     lines.append("")
 
     # Add description from docstring if available

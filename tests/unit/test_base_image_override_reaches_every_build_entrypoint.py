@@ -50,7 +50,7 @@ What this asserts, and why it is a separate file
 There are two independent build call sites, each with its own argv construction, and both
 are reachable from CI after the pre-pull runs:
 
-* ``run_ash_container.py::_build_image`` -- ``ash build-image`` and ``ash scan --mode
+* ``run_ash_container.py::_build_image`` -- ``ashx build-image`` and ``ashx scan --mode
   container``; every ``validate-container`` leg and the ``python-container`` scan legs;
 * ``utils/ash_helpers.ps1`` -- the ``powershell`` scan legs.
 

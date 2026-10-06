@@ -102,7 +102,7 @@ def test_run_ash_scan_container_mode_with_debug(
     # Mock container result
     mock_container_result = MagicMock()
     mock_container_result.returncode = 0
-    mock_container_result.args = ["ash", "scan", "--debug"]
+    mock_container_result.args = ["ashx", "scan", "--debug"]
     mock_container_result.stdout = "test output"
     mock_container_result.stderr = "test error"
     mock_run_ash_container.return_value = mock_container_result

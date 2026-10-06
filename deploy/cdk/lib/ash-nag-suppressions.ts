@@ -813,7 +813,7 @@ export function suppressParameterizedIngressRule(scope: IConstruct): void {
  *
  * Rotation is not merely unconfigured; it would be actively wrong here. ASH reads
  * the value once, at container start, and passes it to
- * `ash mcp --auth-header-value`. A rotation would change the expected value while
+ * `ashx mcp --auth-header-value`. A rotation would change the expected value while
  * every running task kept comparing against the old one, so callers would start
  * failing authentication until each task happened to restart — and nothing would
  * report why. Callers are configured with the same value out of band, so a

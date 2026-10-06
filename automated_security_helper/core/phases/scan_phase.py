@@ -133,7 +133,7 @@ class ScanPhase(EnginePhase):
         super().__init__(plugin_context, plugins or [], progress_display, asharp_model)
         self.validation_manager = ScannerValidationManager(plugin_context)
         # Set when this run is one shard of several; read by the caller to stamp
-        # provenance onto the results so `ash merge` can verify coverage.
+        # provenance onto the results so `ashx merge` can verify coverage.
         self._shard_assignment: ShardAssignment | None = None
 
     @property
@@ -427,7 +427,7 @@ class ScanPhase(EnginePhase):
             # name, and nothing checked that a name given on the command line named
             # a scanner at all. Measured on this tree against a one-file fixture:
             #
-            #   ash scan --scanners detect_secrets   # the name is detect-secrets
+            #   ashx scan --scanners detect_secrets   # the name is detect-secrets
             #     scanner_results: ten SKIPPED
             #     summary_stats:   passed=0 failed=0 missing=0 skipped=10 error=0
             #     exit code:       0
@@ -604,7 +604,7 @@ class ScanPhase(EnginePhase):
                         # identical position -- not selected -- different statuses
                         # depending on whether their tool happened to be installed.
                         # Measured on a host without cfn-nag, grype and syft:
-                        # `ash scan --scanners bandit` recorded those three MISSING
+                        # `ashx scan --scanners bandit` recorded those three MISSING
                         # and the six tool-present scanners it also left out SKIPPED.
                         # With the completeness gate on by default that is a non-zero
                         # exit for a scan that ran everything it was asked to run.

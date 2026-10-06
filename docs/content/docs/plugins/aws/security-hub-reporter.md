@@ -145,14 +145,14 @@ ASH findings are automatically converted to AWS Security Finding Format (ASFF):
 
 ```bash
 # Run scan with Security Hub reporting
-ash /path/to/code --reporters aws-security-hub
+ashx /path/to/code --reporters aws-security-hub
 ```
 
 ### With Multiple Reporters
 
 ```bash
 # Generate both SARIF and Security Hub reports
-ash /path/to/code --reporters sarif,aws-security-hub
+ashx /path/to/code --reporters sarif,aws-security-hub
 ```
 
 ### CI/CD Integration
@@ -165,7 +165,7 @@ ash /path/to/code --reporters sarif,aws-security-hub
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   run: |
-    ash . --reporters aws-security-hub,sarif
+    ashx . --reporters aws-security-hub,sarif
 ```
 
 ## Security Hub Integration
@@ -260,7 +260,7 @@ Enable debug logging to troubleshoot issues:
 
 ```bash
 # Run with debug output
-ash /path/to/code --reporters aws-security-hub --log-level DEBUG
+ashx /path/to/code --reporters aws-security-hub --log-level DEBUG
 ```
 
 ## Cost Considerations

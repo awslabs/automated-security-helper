@@ -282,7 +282,7 @@ reporters:
 ash-scan:
   stage: test
   script:
-    - ash scan --source-dir . --output-dir ash_output
+    - ashx scan --source-dir . --output-dir ash_output
   artifacts:
     reports:
       sast: ash_output/reports/ash.gl-sast-report.json

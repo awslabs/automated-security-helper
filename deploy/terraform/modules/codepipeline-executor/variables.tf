@@ -37,7 +37,7 @@ variable "container_image_uri" {
     ash-image-pipeline module.
 
     Used as the CodeBuild **environment image** for both the shard and merge
-    actions, so `ash` is on PATH with no Docker-in-Docker and no privileged
+    actions, so `ashx` is on PATH with no Docker-in-Docker and no privileged
     build. Because the image is private, CodeBuild pulls it with the project's
     service role.
   EOT
@@ -49,7 +49,7 @@ variable "shard_count" {
     Contract name: ShardCount.
 
     How many parallel shards the scan is split across. Each shard runs
-    `ash scan --shard-index <i> --shard-count <n>` with a zero-based index, and
+    `ashx scan --shard-index <i> --shard-count <n>` with a zero-based index, and
     every index from 0 to shard_count - 1 runs exactly once.
 
     All shards occupy one pipeline stage. CodePipeline permits up to 100 parallel
@@ -69,7 +69,7 @@ variable "shard_count" {
 variable "min_severity" {
   description = <<-EOT
     Lowest severity that counts as actionable for the pipeline's verdict, passed
-    straight through to `ash merge --min-severity`.
+    straight through to `ashx merge --min-severity`.
 
     This is a FLOOR on what counts as actionable, so a lower value is a stricter
     gate. ASH compares `rank(finding) >= rank(min_severity)`, which makes the
@@ -87,8 +87,8 @@ variable "min_severity" {
     toward passing a build that had findings. Raise it deliberately if that is
     what you want.
 
-    The comparison is made by ASH, never here. `ash merge` routes its exit code
-    through the same _compute_exit_code that `ash scan` uses, so a merged verdict
+    The comparison is made by ASH, never here. `ashx merge` routes its exit code
+    through the same _compute_exit_code that `ashx scan` uses, so a merged verdict
     and a scanned verdict cannot disagree about the same findings. Re-deriving the
     threshold in this module would be a third copy of a severity table that has
     already drifted once in this codebase.
@@ -120,7 +120,7 @@ variable "min_severity" {
 
 variable "fail_on_findings" {
   description = <<-EOT
-    Pass `--fail-on-findings` to `ash merge`, so actionable findings at or above
+    Pass `--fail-on-findings` to `ashx merge`, so actionable findings at or above
     min_severity fail the pipeline.
 
     Defaults to true and is passed explicitly rather than left to ASH's own

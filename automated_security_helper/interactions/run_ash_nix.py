@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
@@ -134,7 +135,7 @@ def build_nix_command(
     inner_args: List[str],
     nix_executable: str,
 ) -> List[str]:
-    """Assemble the `nix develop ... --command ash ...` invocation."""
+    """Assemble the `nix develop ... --command ashx ...` invocation."""
     return [
         nix_executable,
         "--extra-experimental-features",
@@ -142,7 +143,7 @@ def build_nix_command(
         "develop",
         flake_ref,
         "--command",
-        "ash",
+        CANONICAL_CLI_NAME,
         *inner_args,
     ]
 

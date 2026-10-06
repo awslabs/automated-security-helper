@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-import sys
 
 import typer
 from automated_security_helper.cli.config import config_app
+from automated_security_helper.cli.deprecations import warn_deprecated_command_alias
 from automated_security_helper.cli.dependencies import dependencies_app
 from automated_security_helper.cli.image import build_ash_image_cli_command
 from automated_security_helper.cli.inspect import inspect_app
@@ -17,7 +17,7 @@ from automated_security_helper.cli.report import report_command
 
 
 app = typer.Typer(
-    name="ash",
+    name="ashx",
     help="AWS Labs - Automated Security Helper",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
@@ -274,37 +274,42 @@ def run_app():
     app()
 
 
-ASHV3_DEPRECATION_MESSAGE = (
-    "warning: the 'ashv3' command is deprecated and is scheduled for removal; "
-    "use 'ash' instead."
-)
+def _run_deprecated_alias(alias):
+    """Announce that ``alias`` is deprecated, then run the app unchanged.
 
+    The notice is one stderr line and nothing else changes: the arguments, the
+    output and the exit code are exactly what ``ashx`` would produce, because
+    ``app()`` raises its ``SystemExit`` straight through this function.
 
-def _warn_ashv3_deprecation(stream=None):
-    """Announce that the ``ashv3`` console script is going away.
-
-    Written to stderr so it cannot corrupt a scan's stdout, which callers pipe
-    into report tooling.
+    The warning lives here, in a dedicated entry point per alias, rather than in a
+    Typer callback. A callback would fire for the ``ashx`` name too, and group
+    callbacks can run more than once for a single command line.
     """
-    print(ASHV3_DEPRECATION_MESSAGE, file=stream or sys.stderr)
+    reset_logging_config()
+    warn_deprecated_command_alias(alias)
+    app()
+
+
+def run_ash_alias():
+    """Entry point for the deprecated ``ash`` console script.
+
+    ``ash`` was the v3 command. v4 renamed it to ``ashx`` because ``ash`` is also
+    the Almquist shell's name on Alpine, BusyBox and MSYS2, so a bare ``ash`` on
+    PATH often is not ASH. The alias keeps v3 scripts working through v4.
+    """
+    _run_deprecated_alias("ash")
 
 
 def run_ashv3():
     """Entry point for the deprecated ``ashv3`` console script.
 
-    ``ashv3`` names a version, so it ages badly the moment v4 exists -- that is
+    ``ashv3`` names a version, so it ages badly now that v4 exists -- that is
     the reason it is deprecated rather than any problem with the alias itself.
     ``automated-security-helper`` is deliberately NOT deprecated alongside it: it
-    is the escape hatch for environments where a bare ``ash`` resolves to
-    something else, and that collision is real. MSYS2 ships the Almquist shell as
-    ``ash`` and it has already shadowed ASH's entry point.
-
-    The warning lives here, in a dedicated entry point, rather than in a Typer
-    callback. A callback would fire for the ``ash`` name too, and group callbacks
-    can run more than once for a single command line.
+    is the escape hatch for environments where a short name resolves to
+    something else.
     """
-    _warn_ashv3_deprecation()
-    app()
+    _run_deprecated_alias("ashv3")
 
 
 if __name__ == "__main__":

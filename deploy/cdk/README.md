@@ -231,7 +231,7 @@ depends on.
 `AgentRuntimeArtifact.ContainerConfiguration` has exactly one property,
 `ContainerUri`. There is no `Command`, `EntryPoint` or `Args`, so the MCP
 invocation cannot come from the template and is baked into the image instead. ASH's
-own image ends with `CMD ["ash"]`, so pointing AgentCore at it directly would start
+own image ends with `CMD ["ashx"]`, so pointing AgentCore at it directly would start
 a process that prints help and exits. The `mcp` image flavor adds a shell
 entrypoint that reads the tunables from environment variables, which AgentCore
 *can* set.
@@ -402,7 +402,7 @@ so an artifact per shard cannot express a six-way split at all.
 
 Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
 The shard and merge actions run with the ASH image as their CodeBuild environment
-image — which is what puts `ash` directly on `PATH` with no Docker-in-Docker — and
+image — which is what puts `ashx` directly on `PATH` with no Docker-in-Docker — and
 **the ASH image installs no AWS CLI.** It does depend on `boto3`, so `python3` is
 the only AWS API client guaranteed to be present. An `aws` invocation in these
 buildspecs exits 127 at runtime, after the scan has already succeeded, and takes
@@ -417,7 +417,7 @@ they run on your workstation, not in the image.
 
 Because the split is over scanners rather than files, a shard count above the
 number of enabled scanners produces empty shards and no extra parallelism. Check
-`ash plugin list` for the pinned version before raising it.
+`ashx plugin list` for the pinned version before raising it.
 
 Start a scan by uploading an archive and starting the pipeline; the source action
 does not poll:
@@ -454,10 +454,10 @@ aws codecommit associate-approval-rule-template-with-repository \
 Two things these templates invoke are being added alongside this change and are
 **not** present in ASH as of the commit this was written against:
 
-- `ash scan --shard-index <i> --shard-count <n>` — the sharding primitives exist in
+- `ashx scan --shard-index <i> --shard-count <n>` — the sharding primitives exist in
   `automated_security_helper/core/sharding.py` and are honoured by the scan phase,
-  but the flags are not yet on the `ash scan` CLI.
-- `ash merge --results ... --output-dir ...` — no `merge` command is registered yet.
+  but the flags are not yet on the `ashx scan` CLI.
+- `ashx merge --results ... --output-dir ...` — no `merge` command is registered yet.
 
 The `AshDistributedPipeline` template is written to the agreed contract for both:
 zero-based index, both shard flags always passed together, `--results` repeatable
@@ -530,8 +530,8 @@ here rather than to a variant.
   and the shared parameter surface has no slot for one. The load balancer is
   internal by default to match.
 - **No target sets `ASH_MCP_ALLOWED_ROOTS`, so the MCP scan boundary is the
-  permissive fallback.** Only two targets run `ash mcp` at all — AgentCore and
-  Fargate. The CodeCommit gate and the sharded pipeline invoke `ash scan` directly
+  permissive fallback.** Only two targets run `ashx mcp` at all — AgentCore and
+  Fargate. The CodeCommit gate and the sharded pipeline invoke `ashx scan` directly
   and are unaffected. On the two that do, the variable is unset, so scan targets
   fall back to a short denylist of system directories, which ASH's own docs call
   "a safety net rather than a boundary." On a network-reachable MCP endpoint that is

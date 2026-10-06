@@ -20,7 +20,7 @@
  * `--no-fail-on-findings` to state the intent.
  *
  * That flag was NOT verified from this worktree — ASH is not installed here, so
- * `ash scan --help` could not be run. Correctness deliberately does not depend on
+ * `ashx scan --help` could not be run. Correctness deliberately does not depend on
  * it. A shard succeeds if and only if ASH wrote `ash_aggregated_results.json`, and
  * the merge independently requires that file from every shard. Exit codes are only
  * recorded, never trusted, because Click reports a usage error as exit 2 and ASH
@@ -74,7 +74,7 @@
  * -------------------------------------------
  * Because the split is over scanners and not over files, a shard count higher
  * than the number of enabled scanners produces empty shards and no extra
- * parallelism. Run `ash plugin list` against the pinned version to see how many
+ * parallelism. Run `ashx plugin list` against the pinned version to see how many
  * scanners are enabled before raising it.
  */
 
@@ -100,6 +100,7 @@ import {
   ashOfflineMode, ashVersion, rebuildSchedule, resolveShardCount,
 } from './ash-config';
 import {
+  ASH_CLI,
   ASH_MATERIALIZED_CONFIG_PATH,
   ASH_S3_SYNC_PATH,
   MATERIALIZE_S3_SYNC_COMMAND,
@@ -500,7 +501,7 @@ export class AshDistributedPipelineStack extends Stack {
               // (results present) or the shard was clean (results present).
               [
                 'set +e',
-                'ash scan --source-dir "$CODEBUILD_SRC_DIR" --output-dir ./ash-shard-output \\',
+                `${ASH_CLI} scan --source-dir "$CODEBUILD_SRC_DIR" --output-dir ./ash-shard-output \\`,
                 '  --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" \\',
                 '  --no-fail-on-findings --no-progress --simple',
                 'ASH_EXIT=$?',
@@ -595,7 +596,7 @@ export class AshDistributedPipelineStack extends Stack {
               // The helper strips the prefix from each key, so a shard's object at
               // <prefix>/shard-2/ash_aggregated_results.json lands at
               // ./shard-results/shard-2/ash_aggregated_results.json — the layout
-              // the completeness check below and `ash merge` both expect.
+              // the completeness check below and `ashx merge` both expect.
               `python3 ${ASH_S3_SYNC_PATH} download ` +
                 '"$ASH_RESULTS_BUCKET" "$ASH_RESULTS_PREFIX" ./shard-results',
               [
@@ -645,7 +646,7 @@ export class AshDistributedPipelineStack extends Stack {
               // --results is repeatable and accepts a file or a directory. One
               // flag per shard directory, so a shard that vanished between the
               // check above and here still fails rather than being skipped.
-              ['ash merge \\', ...resultsFlags, '  --output-dir ./ash-merged-output'].join('\n'),
+              [`${ASH_CLI} merge \\`, ...resultsFlags, '  --output-dir ./ash-merged-output'].join('\n'),
             ],
           },
           post_build: {

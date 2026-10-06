@@ -136,6 +136,8 @@ jobs:
           uv pip install --python "${RUNNER_TEMP}/venv/bin/python" -q "${RUNNER_TEMP}/old"
           # Prove the starting point is genuinely functional before upgrading over
           # it; otherwise a broken "before" state would make the upgrade look fine.
+          # `ash`, not `ashx`, because it is the one name every starting point has:
+          # releases before v4 install only `ash`.
           "${RUNNER_TEMP}/venv/bin/ash" --version
 
       - name: Upgrade to the commit under test
@@ -148,11 +150,15 @@ jobs:
           set -euo pipefail
           VENV="${RUNNER_TEMP}/venv/bin"
           # Console script still resolves and reports the new version.
-          "${VENV}/ash" --version
-          "${VENV}/ash" --help > /dev/null
+          "${VENV}/ashx" --version
+          "${VENV}/ashx" --help > /dev/null
           # Subcommands whose entry points or imports could have moved.
-          "${VENV}/ash" mcp --help > /dev/null
-          "${VENV}/ash" config get > /dev/null
+          "${VENV}/ashx" mcp --help > /dev/null
+          "${VENV}/ashx" config get > /dev/null
+          # The `ash` a pre-v4 install put in this venv is now the deprecated alias:
+          # same exit code and --version output as `ashx`, one deprecation line on
+          # stderr. This is the upgrade a v3 user's scripts go through.
+          PATH="${VENV}:${PATH}" bash .github/actions/validate-install/assert-deprecated-alias.sh
           # Import the package fresh: catches modules left behind by the old
           # install shadowing the new one.
           "${VENV}/python" -c "import automated_security_helper as m; print('import ok:', m.__file__)"
@@ -176,7 +182,7 @@ jobs:
           # bandit is absent from pyproject.toml entirely, and BanditScanner installs
           # it with `uv tool install` at scan time, so this arm was reaching PyPI
           # mid-scan and a registry failure read as an upgrade that broke scanning.
-          "${VENV}/ash" scan --source-dir "$FIX" --output-dir "${FIX}/output" \
+          "${VENV}/ashx" scan --source-dir "$FIX" --output-dir "${FIX}/output" \
             --simple --phases scan --phases report --scanners detect-secrets
 
       - name: Record the arm in the run summary

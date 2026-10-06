@@ -21,7 +21,7 @@ description: >-
 # sees is "the scan produced no output", three steps removed from the cause.
 #
 # Pulling once per job, ahead of the build, puts the retry in one place instead of at every
-# `ash build-image` call site, and leaves the build itself untouched: the runtimes use a base
+# `ashx build-image` call site, and leaves the build itself untouched: the runtimes use a base
 # image already in the local store rather than going back to the registry.
 #
 # TWO QUOTAS WEAR THE SAME WIRE ERROR, AND ONLY ONE IS WORTH WAITING ON
@@ -218,7 +218,7 @@ description: >-
 #
 # Rejected: a composite-action `outputs:` value instead of GITHUB_ENV. The consumer is not the
 # workflow YAML; it is a build several layers inside two different entrypoints, reached by
-# `ash build-image`, `ash scan --mode container` and a PowerShell function. An output
+# `ashx build-image`, `ashx scan --mode container` and a PowerShell function. An output
 # would have to be threaded through every caller's argv, at six `uses:` sites across two
 # actions, each one a place to forget. GITHUB_ENV reaches every later step in the job whatever
 # the entrypoint, and it is already this repository's idiom for the same handoff --

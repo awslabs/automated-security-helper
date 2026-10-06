@@ -77,6 +77,35 @@ class TestTheValidatorCanFail:
         """
         assert renderer.self_test() == 0, capsys.readouterr().err
 
+    @pytest.mark.parametrize("default", ["v4.0.0", "v9.9.9"])
+    def test_self_test_survives_a_version_bump(
+        self, renderer, monkeypatch, capsys, default
+    ):
+        """The planted stale-value case must not depend on today's AshVersion default.
+
+        ``cz bump`` rewrites the templates' AshVersion default. A case that hardcodes the
+        current version stops planting anything after the bump, and the self-test then
+        reports a correct link as an accepted defect. ``v9.9.9`` is included because it
+        is a value a naive replacement might also pick.
+        """
+        real = renderer.load_templates()
+        bumped = {
+            stack: {
+                name: ({**spec, "Default": default} if name == "AshVersion" else spec)
+                for name, spec in params.items()
+            }
+            for stack, params in real.items()
+        }
+        assert any(
+            spec.get("Default") == default
+            for params in bumped.values()
+            for name, spec in params.items()
+            if name == "AshVersion"
+        ), "no template declares AshVersion, so this test plants nothing"
+        monkeypatch.setattr(renderer, "load_templates", lambda: bumped)
+
+        assert renderer.self_test() == 0, capsys.readouterr().err
+
     def test_an_unknown_parameter_name_is_rejected(self, renderer):
         """The single most important assertion in this file, stated directly.
 

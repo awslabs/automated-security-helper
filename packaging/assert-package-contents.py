@@ -50,15 +50,18 @@ Pointed at a real MSIX from the `msix` job in ash-package.yml it exited 1 with f
 violations, all on correct content: `ash.exe`, `ashv3.exe` and
 `automated-security-helper.exe` as native-binary, and `AppxMetadata/CodeIntegrity.cat`
 as an unrecognised member. The MSIX built here has THREE launchers, one per
-`[project.scripts]` entry, and signtool adds CodeIntegrity.cat to any signed package
+`[project.scripts]` entry it exposes (`ashx.exe`, `ashv3.exe` and
+`automated-security-helper.exe` since the v4 rename; see DEPRECATED_SCRIPTS_NOT_EXPOSED
+for the one entry it does not), and signtool adds CodeIntegrity.cat to any signed package
 carrying PE files.
 
 The repair is not "allow .exe". The launchers are exactly the names the PACKAGED
 AppxManifest.xml declares as Application/@Executable, read back out of the artifact,
 and those names must be exactly the [console_scripts] of the wheel the package
-carries, so the CLI's names come from `[project.scripts]` alone. Each launcher must
+carries, minus DEPRECATED_SCRIPTS_NOT_EXPOSED, so the CLI's names come from
+`[project.scripts]` alone. Each launcher must
 sit at the package root, be a managed (.NET) PE with a CLR header, and fit under
-LAUNCHER_MAX_BYTES. A native binary renamed to `ash.exe` has no CLR header, and
+LAUNCHER_MAX_BYTES. A native binary renamed to `ashx.exe` has no CLR header, and
 every scanner ASH refuses to vendor is tens of megabytes. An .exe the manifest does not
 declare, or one anywhere else in the package, is still refused as native-binary.
 
@@ -75,7 +78,8 @@ is exported from is enumerable, though, and packaging/flatpak/build.sh runs this
 `build-dir/files` before it exports the bundle. That tree holds the launcher (which
 must be byte-identical to packaging/flatpak/ash-launcher.sh), relative symlinks to it,
 flatpak-builder's manifest.json, and the one wheel. The names under bin/ must be
-exactly the wheel's console scripts, as for the MSIX launchers.
+exactly the wheel's console scripts minus DEPRECATED_SCRIPTS_NOT_EXPOSED, as for the
+MSIX launchers.
 
 WHAT IS NOT COVERED
 -------------------
@@ -550,10 +554,28 @@ def wheel_console_scripts(data: bytes) -> set[str]:
     return set(parser.options("console_scripts"))
 
 
+# Console scripts the wheel declares that these packages deliberately do NOT expose.
+#
+# `ash` is the v3 command. v4 renamed the command to `ashx` because Alpine, BusyBox,
+# MSYS2 and Git for Windows ship the Almquist shell as `ash`, and the wheel keeps `ash`
+# as a deprecated alias only for the channels that install every console script anyway
+# (pip, Homebrew, the container). The MSIX and the Flatpak, whose launchers this gate
+# checks, expose `ashx`, `ashv3` and `automated-security-helper`, and NOT `ash` (the
+# Chocolatey package's install script shims the same three); on Windows in particular a
+# launcher named ash.exe would claim the shell's name for a deprecated spelling. So the
+# expected launcher set is the wheel's console scripts minus this set, and a launcher
+# for a name in it is rejected outright rather than tolerated.
+#
+# packaging/msix/msix.py (NOT_EXPOSED_SCRIPTS) and packaging/winget/validate-manifests.py
+# carry the same set for the source manifests; change all three together.
+DEPRECATED_SCRIPTS_NOT_EXPOSED = frozenset({"ash"})
+
+
 def check_entry_points(
     artifact: str, shipped: set[str], wheels: list[str], members: dict[str, bytes]
 ) -> list[str]:
-    """The package's launchers must be exactly the wheel's console scripts."""
+    """The package's launchers must be exactly the wheel's console scripts, minus
+    the deprecated names in DEPRECATED_SCRIPTS_NOT_EXPOSED, which must be absent."""
     if len(wheels) != 1:
         return []  # wheel_members has already reported the count
     scripts = wheel_console_scripts(members[wheels[0]])
@@ -565,6 +587,15 @@ def check_entry_points(
             )
         ]
     problems = []
+    for name in sorted(shipped & DEPRECATED_SCRIPTS_NOT_EXPOSED):
+        problems.append(
+            f"{artifact}: ships a launcher for the deprecated {name!r} console script. "
+            "This package exposes 'ashx'; the deprecated alias is kept only for pip, "
+            "Homebrew and the container, and on Windows 'ash' is the Almquist shell's "
+            "name (see DEPRECATED_SCRIPTS_NOT_EXPOSED)"
+        )
+    shipped = shipped - DEPRECATED_SCRIPTS_NOT_EXPOSED
+    scripts = scripts - DEPRECATED_SCRIPTS_NOT_EXPOSED
     for name in sorted(shipped - scripts):
         problems.append(
             f"{artifact}: ships a launcher for {name!r}, which is not a console "
@@ -976,13 +1007,14 @@ def check_package(path: str) -> tuple[int, list[str]]:
 # --------------------------------------------------------------------------
 
 FIXTURE_WHEEL = "automated_security_helper-3.7.0-py3-none-any.whl"
-FIXTURE_LAUNCHERS = ("ash.exe", "ashv3.exe", "automated-security-helper.exe")
+FIXTURE_LAUNCHERS = ("ashx.exe", "ashv3.exe", "automated-security-helper.exe")
 FIXTURE_ASSETS = ("StoreLogo.png", "Square44x44Logo.png", "Square150x150Logo.png")
 
 
 FIXTURE_ENTRY_POINTS = (
     b"[console_scripts]\n"
-    b"ash = automated_security_helper.cli.entrypoint:main\n"
+    b"ashx = automated_security_helper.cli.entrypoint:main\n"
+    b"ash = automated_security_helper.cli.entrypoint:main_ash\n"
     b"ashv3 = automated_security_helper.cli.entrypoint:main_ashv3\n"
     b"automated-security-helper = automated_security_helper.cli.entrypoint:main\n"
 )
@@ -1131,8 +1163,8 @@ def write_flatpak_tree(
 ) -> Path:
     """The tree flatpak-builder wrote to build-dir/files for the v4 manifest."""
     files = {
-        "manifest.json": json.dumps({"id": "fixture", "command": "ash"}).encode(),
-        "bin/ash": FLATPAK_LAUNCHER_SOURCE.read_bytes()
+        "manifest.json": json.dumps({"id": "fixture", "command": "ashx"}).encode(),
+        "bin/ashx": FLATPAK_LAUNCHER_SOURCE.read_bytes()
         if launcher is None
         else launcher,
         f"share/ash/wheels/{FIXTURE_WHEEL}": fixture_wheel(),
@@ -1142,7 +1174,7 @@ def write_flatpak_tree(
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-    links = {"bin/ashv3": "ash", "bin/automated-security-helper": "ash"}
+    links = {"bin/ashv3": "ashx", "bin/automated-security-helper": "ashx"}
     links.update(extra_links or {})
     for name, link_target in links.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -1187,7 +1219,7 @@ def self_test_cases(root: Path) -> list[tuple[str, str, str]]:
         "native-binary",
     )
     native = fixture_msix_members()
-    native["ash.exe"] = fixture_native_pe()
+    native["ashx.exe"] = fixture_native_pe()
     native["AppxBlockMap.xml"] = fixture_blockmap(
         {k: v for k, v in native.items() if k not in MSIX_FOOTPRINT}
     )
@@ -1196,7 +1228,7 @@ def self_test_cases(root: Path) -> list[tuple[str, str, str]]:
         "an oversize launcher",
         _rebuild_blockmap(
             fixture_msix_members(),
-            {"ash.exe": fixture_managed_pe(LAUNCHER_MAX_BYTES + 1)},
+            {"ashx.exe": fixture_managed_pe(LAUNCHER_MAX_BYTES + 1)},
         ),
         "over",
     )
@@ -1207,6 +1239,14 @@ def self_test_cases(root: Path) -> list[tuple[str, str, str]]:
             {"trivy.exe": fixture_managed_pe()},
         ),
         "not a console script",
+    )
+    msix(
+        "a launcher for the deprecated ash alias",
+        _rebuild_blockmap(
+            fixture_msix_members(executables=(*FIXTURE_LAUNCHERS, "ash.exe")),
+            {"ash.exe": fixture_managed_pe()},
+        ),
+        "deprecated 'ash'",
     )
     msix(
         "a second wheel",
@@ -1300,7 +1340,12 @@ def self_test_cases(root: Path) -> list[tuple[str, str, str]]:
     tree(
         "a launcher name that is not a console script of the wheel",
         "not a console script",
-        extra_links={"bin/grype": "ash"},
+        extra_links={"bin/grype": "ashx"},
+    )
+    tree(
+        "a link for the deprecated ash alias",
+        "deprecated 'ash'",
+        extra_links={"bin/ash": "ashx"},
     )
     return cases
 

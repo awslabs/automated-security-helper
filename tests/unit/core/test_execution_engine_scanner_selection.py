@@ -11,7 +11,7 @@ who excludes every scanner they also selected gets the opposite of what they ask
 
 Measured on this tree, on a host with five of the ten scanner tools installed::
 
-    ash scan --scanners detect-secrets --exclude-scanners detect-secrets
+    ashx scan --scanners detect-secrets --exclude-scanners detect-secrets
     -> PASSED 5, FAILED 1, MISSING 3, SKIPPED 1
 
 detect-secrets -- the only scanner named -- is the one SKIPPED, and the nine that were

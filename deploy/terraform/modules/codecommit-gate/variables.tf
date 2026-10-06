@@ -75,7 +75,7 @@ variable "trigger_events" {
 variable "min_severity" {
   description = <<-EOT
     Lowest severity that counts as actionable for the gate, passed straight
-    through to `ash scan --min-severity`.
+    through to `ashx scan --min-severity`.
 
     This is a FLOOR on what counts as actionable, so a lower value is a stricter
     gate. ASH compares `rank(finding) >= rank(min_severity)`, which makes the
@@ -94,8 +94,8 @@ variable "min_severity" {
     never toward passing one that had findings. Raise it deliberately if that is
     what you want.
 
-    The comparison is made by ASH, never in the handler. `ash scan` routes its exit
-    code through _compute_exit_code, the same function `ash merge` uses, so this
+    The comparison is made by ASH, never in the handler. `ashx scan` routes its exit
+    code through _compute_exit_code, the same function `ashx merge` uses, so this
     gate's verdict cannot disagree with a scan's over identical findings.
   EOT
   type        = string
@@ -125,7 +125,7 @@ variable "min_severity" {
 
 variable "fail_on_findings" {
   description = <<-EOT
-    Pass `--fail-on-findings` to `ash scan`, so findings at or above min_severity
+    Pass `--fail-on-findings` to `ashx scan`, so findings at or above min_severity
     produce the "findings" outcome.
 
     Passed explicitly rather than left to ASH's default, which falls back to the
@@ -245,7 +245,7 @@ variable "reserved_concurrent_executions" {
 
 variable "ash_scan_extra_args" {
   description = <<-EOT
-    Extra arguments appended to the `ash scan` command line, split on whitespace.
+    Extra arguments appended to the `ashx scan` command line, split on whitespace.
 
     `--changed-files-only` together with `--base-ref` is worth considering here:
     it scales scan time with the size of the change rather than the size of the

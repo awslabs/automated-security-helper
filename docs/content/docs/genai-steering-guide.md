@@ -10,7 +10,7 @@ This document provides comprehensive guidance for GenAI tools (AI assistants, LL
 
 ```bash
 # Download the guide
-ash get-genai-guide -o ash-genai-guide.md
+ashx get-genai-guide -o ash-genai-guide.md
 ```
 
 ### Installation for AI Coding Tools
@@ -25,7 +25,7 @@ Choose the installation method based on your AI coding tool:
 mkdir -p ~/.kiro/steering
 
 # Download the guide
-ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
+ashx get-genai-guide -o ~/.kiro/steering/ash-integration.md
 ```
 
 Kiro will automatically load this as steering context for all workspaces. This is the recommended approach as it makes ASH guidance available everywhere.
@@ -36,7 +36,7 @@ Kiro will automatically load this as steering context for all workspaces. This i
 mkdir -p .kiro/steering
 
 # Download the guide
-ash get-genai-guide -o .kiro/steering/ash-integration.md
+ashx get-genai-guide -o .kiro/steering/ash-integration.md
 ```
 
 **Verification**:
@@ -56,14 +56,14 @@ After installation, you can verify Kiro sees the guide by checking the steering 
 mkdir -p .cline
 
 # Download the guide
-ash get-genai-guide -o .cline/ash-guide.md
+ashx get-genai-guide -o .cline/ash-guide.md
 ```
 
 **Option 2: VS Code workspace**:
 ```bash
 # Add to VS Code settings
 mkdir -p .vscode
-ash get-genai-guide -o .vscode/ash-integration-guide.md
+ashx get-genai-guide -o .vscode/ash-integration-guide.md
 ```
 
 Then reference it in your Cline prompts: "Please read the ASH guide at .cline/ash-guide.md before analyzing scan results."
@@ -76,7 +76,7 @@ Then reference it in your Cline prompts: "Please read the ASH guide at .cline/as
 mkdir -p ~/Documents/ai-guides
 
 # Download the guide
-ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
+ashx get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
 ```
 
 **Usage**: In your prompts, reference the guide:
@@ -91,7 +91,7 @@ before processing these scan results.
 ```bash
 # Add to project docs
 mkdir -p docs/ai-guides
-ash get-genai-guide -o docs/ai-guides/ash-integration.md
+ashx get-genai-guide -o docs/ai-guides/ash-integration.md
 ```
 
 **Usage**: Reference in your Q CLI prompts or add to project documentation index.
@@ -104,13 +104,13 @@ ash get-genai-guide -o docs/ai-guides/ash-integration.md
 mkdir -p .cursor
 
 # Download the guide
-ash get-genai-guide -o .cursor/ash-guide.md
+ashx get-genai-guide -o .cursor/ash-guide.md
 ```
 
 **Option 2: Project root** (for easy discovery):
 ```bash
 # Download to project root with clear name
-ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
+ashx get-genai-guide -o ASH_INTEGRATION_GUIDE.md
 ```
 
 **Usage**: Reference in `.cursorrules` or mention in prompts.
@@ -120,7 +120,7 @@ ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
 **Project root** (universal approach):
 ```bash
 # Download with descriptive name
-ash get-genai-guide -o ASH_GENAI_GUIDE.md
+ashx get-genai-guide -o ASH_GENAI_GUIDE.md
 ```
 
 Then reference it in your AI tool's context or prompts.
@@ -130,7 +130,7 @@ Then reference it in your AI tool's context or prompts.
 When ASH is updated, refresh the guide:
 ```bash
 # Re-download to the same location (overwrites existing)
-ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
+ashx get-genai-guide -o ~/.kiro/steering/ash-integration.md
 ```
 
 ### Verification
@@ -996,7 +996,7 @@ suppressions:
 
 4. **Re-run Scan to Verify**:
    ```bash
-   ash --mode local
+   ashx --mode local
    ```
 
 5. **Confirm Suppression Applied**:
@@ -1404,7 +1404,7 @@ high_priority_sast = await get_scan_results(
 
 1. **Use Specific Scanners**:
    ```bash
-   ash --scanners bandit,semgrep --exclude-scanners grype,npm-audit
+   ashx --scanners bandit,semgrep --exclude-scanners grype,npm-audit
    ```
 
 2. **Ignore Unnecessary Paths**:
@@ -1418,14 +1418,14 @@ high_priority_sast = await get_scan_results(
 
 3. **Use Parallel Strategy**:
    ```bash
-   ash --strategy parallel
+   ashx --strategy parallel
    ```
 
 ### For CI/CD Pipelines
 
 1. **Use Precommit Mode**:
    ```bash
-   ash --mode precommit
+   ashx --mode precommit
    ```
 
 2. **Cache Dependencies**:
@@ -1449,12 +1449,12 @@ high_priority_sast = await get_scan_results(
 
 **Check**:
 ```bash
-ash dependencies check
+ashx dependencies check
 ```
 
 **Solution**: Install missing dependencies or exclude scanner:
 ```bash
-ash --exclude-scanners cfn-nag
+ashx --exclude-scanners cfn-nag
 ```
 
 ### Results File Not Found
@@ -1466,7 +1466,7 @@ ls -la .ash/ash_output/ash_aggregated_results.json
 
 **Solution**: Verify scan completed successfully:
 ```bash
-ash --mode local --verbose
+ashx --mode local --verbose
 ```
 
 ### Suppression Not Working

@@ -6,7 +6,7 @@
 
 Why this module exists
 ----------------------
-Workspace mode was CLI-only. ``ash --workspace foo.code-workspace`` turns one file
+Workspace mode was CLI-only. ``ashx --workspace foo.code-workspace`` turns one file
 into N projects, scans each with its own config, threshold and policy, and
 aggregates the results -- and an MCP client had no way to ask for any of that. The
 two tools here are the MCP surface for it: :func:`mcp_resolve_workspace`, the
@@ -857,7 +857,7 @@ async def mcp_resolve_workspace(
 ) -> Dict[str, Any]:
     """Resolve a workspace and return the plan. Scans nothing.
 
-    The MCP equivalent of ``ash --workspace ... --dry-run``, which is
+    The MCP equivalent of ``ashx --workspace ... --dry-run``, which is
     ``typer.echo(plan.render())`` and an exit at 0. Both halves of that matter
     here. The rendered plan comes back verbatim under ``plan``, because a plan
     reduced to a JSON dump is not the artifact ``render()`` was written to produce

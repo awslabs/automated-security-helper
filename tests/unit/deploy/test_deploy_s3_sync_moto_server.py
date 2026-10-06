@@ -626,7 +626,7 @@ class TestCommittedBuildspecCommands:
         Proves the two halves agree: the keys this reads back are the ones the
         shard command above writes, under the same prefix layout. It lands them
         in `./shard-results/shard-N`, which is exactly where the merge's own
-        completeness check and `ash merge --results` look.
+        completeness check and `ashx merge --results` look.
         """
         for shard in range(4):
             s3.put_object(

@@ -26,7 +26,7 @@ also pass for a scan that failed for an unrelated reason, and the point of
 refusing is that the operator learns which of the five ways their matrix is wrong.
 
 The provenance tests read the results file back off disk rather than inspecting
-the in-memory model. ``ash merge`` has only the file, and a field that serialises
+the in-memory model. ``ashx merge`` has only the file, and a field that serialises
 but does not deserialise would leave merge with no provenance -- which
 ``verify_shard_coverage`` cannot distinguish from a scan that was never sharded.
 """
@@ -184,7 +184,7 @@ class TestFlagsReachTheScanPhase:
 
 
 class TestShardProvenanceOnDisk:
-    """What ``ash merge`` will actually read."""
+    """What ``ashx merge`` will actually read."""
 
     def _results_from_disk(self, output: Path) -> AshAggregatedResults:
         results_file = output / "ash_aggregated_results.json"

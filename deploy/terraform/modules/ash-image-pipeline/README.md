@@ -47,7 +47,7 @@ Two stacked Docker builds:
    - `ash-container-init` (the `ENTRYPOINT`) materializes the base config from
      SSM to `.ash/.ash.yaml`, resolves the MCP auth header value from Secrets
      Manager, then `exec`s whatever command it was given.
-   - `ash-mcp-serve` (the `CMD`) builds an `ash mcp` command line from
+   - `ash-mcp-serve` (the `CMD`) builds an `ashx mcp` command line from
      environment variables and execs it.
 
 The wrapper exists because Bedrock AgentCore Runtime has **no container command

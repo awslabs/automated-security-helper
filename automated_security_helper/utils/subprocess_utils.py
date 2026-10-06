@@ -48,7 +48,7 @@ def _bin_path() -> Path:
     """The ASH bin directory, resolved when asked rather than at import time.
 
     ``core.constants.ASH_BIN_PATH`` is computed the first time that module is
-    imported. ``ash dependencies install --bin-path X`` sets ASH_BIN_PATH in the
+    imported. ``ashx dependencies install --bin-path X`` sets ASH_BIN_PATH in the
     environment after that has already happened, so a lookup against the constant
     searched the default directory and reported a tool ASH had just installed into
     X as absent.

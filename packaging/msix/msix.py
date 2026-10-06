@@ -244,8 +244,25 @@ def _packaged_version(pyproject: dict) -> str:
     return pyproject["tool"]["commitizen"]["version"]
 
 
+# Console scripts the wheel declares that this package deliberately does NOT expose.
+#
+# `ash` is the v3 command, kept in [project.scripts] as a deprecated alias of `ashx`. The
+# alias survives only where installing the wheel puts every console script on PATH anyway
+# (pip, Homebrew, the container). On Windows it is the name MSYS2 and Git for Windows give
+# the Almquist shell, which is the reason v4 renamed the command, so an app execution alias
+# named ash.exe would claim the shell's name for a deprecated spelling. The wheel inside
+# the package still carries the `ash` script; nothing here puts it on PATH.
+#
+# packaging/assert-package-contents.py carries the same set as
+# DEPRECATED_SCRIPTS_NOT_EXPOSED, because it judges the BUILT package against its wheel's
+# entry points and runs without this file. Change both together.
+NOT_EXPOSED_SCRIPTS = frozenset({"ash"})
+
+
 def _console_scripts(pyproject: dict) -> set[str]:
-    return set(pyproject["project"]["scripts"])
+    """The console scripts this package must expose: [project.scripts] minus the
+    deprecated names in NOT_EXPOSED_SCRIPTS."""
+    return set(pyproject["project"]["scripts"]) - NOT_EXPOSED_SCRIPTS
 
 
 def _declared_namespaces(manifest_path: Path) -> dict[str, str]:
@@ -575,12 +592,21 @@ def _check_applications(root: ET.Element) -> list[str]:
             f"duplicate-application-id: Application/@Id values are {identifiers}."
         )
 
-    # The check that ties this manifest to the entry point contract. Three console scripts are
-    # declared in [project.scripts] and all three have to be reachable on Windows; the long
-    # name in particular exists because MSYS2 ships its own `ash`. A manifest with two
-    # Applications would install, run, and quietly not provide the escape hatch.
+    # The check that ties this manifest to the entry point contract. Every console script
+    # in [project.scripts] except the deprecated `ash` (NOT_EXPOSED_SCRIPTS) has to be
+    # reachable on Windows: `ashx`, the deprecated `ashv3`, and the long name, which exists
+    # because MSYS2 ships its own `ash`. A manifest missing one would install, run, and
+    # quietly not provide it. A manifest that exposes `ash` is refused outright.
     scripts = _console_scripts(_pyproject())
     provided = {Path(name).stem for name in executables}
+    for name in sorted(provided & NOT_EXPOSED_SCRIPTS):
+        failures.append(
+            f"deprecated-script-exposed: Application/@Executable {name}.exe exposes the "
+            f"deprecated `{name}` console script. This package exposes `ashx`; `{name}` is "
+            "the name MSYS2 and Git for Windows give the Almquist shell, and the alias is "
+            "kept only for pip, Homebrew and the container."
+        )
+    provided -= NOT_EXPOSED_SCRIPTS
     missing = sorted(scripts - provided)
     extra = sorted(provided - scripts)
     if missing:
@@ -641,7 +667,7 @@ def _check_alias(
         ]
     # The alias and the launcher filename must agree, because each launcher decides which venv
     # console script to run by reading its OWN filename. If they diverge, `ashv3` would run
-    # ash and the deprecation warning would silently vanish.
+    # ashx and the deprecation warning would silently vanish.
     if alias != executable:
         return [
             (

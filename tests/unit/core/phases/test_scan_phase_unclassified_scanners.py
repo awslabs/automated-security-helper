@@ -227,7 +227,7 @@ def test_the_completeness_gate_can_see_it(tmp_path, real_validation_manager):
     """The consequence, which is the point of the status choice.
 
     Asserted through ``incomplete_scanners`` rather than by re-reading the status,
-    because that function is what the exit code and ``ash merge`` both consult, and it
+    because that function is what the exit code and ``ashx merge`` both consult, and it
     reads through ``get_unified_scanner_metrics`` rather than off ``scanner_results``
     directly. A status that were correct in the model but invisible through that path
     would fix nothing.

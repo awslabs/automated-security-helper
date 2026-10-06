@@ -13,7 +13,7 @@ ASH v3 can run in multiple modes: `local`, `container`, or `precommit`. This gui
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
 
 # Add this alias to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 ```
@@ -66,10 +66,10 @@ Local mode runs scanners that are available in your PATH:
 
 ```bash
 # Basic scan
-ash --source-dir /path/to/code
+ashx --source-dir /path/to/code
 
 # Specify output directory
-ash --source-dir /path/to/code --output-dir /path/to/output
+ashx --source-dir /path/to/code --output-dir /path/to/output
 ```
 
 ### Container Mode
@@ -77,7 +77,7 @@ ash --source-dir /path/to/code --output-dir /path/to/output
 Container mode ensures all scanners are available by running in a container:
 
 ```bash
-ash --mode container --source-dir /path/to/code
+ashx --mode container --source-dir /path/to/code
 ```
 
 ## Initializing Configuration
@@ -85,7 +85,7 @@ ash --mode container --source-dir /path/to/code
 Create a default configuration file:
 
 ```bash
-ash config init
+ashx config init
 ```
 
 This creates `.ash/.ash.yaml` in your current directory with default settings.
@@ -103,10 +103,10 @@ ASH v3 runs natively on Windows with Python 3.10+:
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} $args }
+function ashx { uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} $args }
 
 # Use as normal
-ash --help
+ashx --help
 ```
 
 ### Container Mode on Windows
@@ -140,7 +140,7 @@ ASH v3 outputs results to `.ash/ash_output/` by default:
 You can also use the report command to view results:
 
 ```bash
-ash report
+ashx report
 ```
 
 ## Next Steps

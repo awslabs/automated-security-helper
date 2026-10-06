@@ -981,7 +981,7 @@ def mcp_diff_scan_results(before_path: str, after_path: str) -> Dict[str, Any]:
 # The probe logic that describes each scanner -- its detected version, whether
 # its dependencies are satisfied, its offline strategy, and whether it is enabled
 # -- now lives in ``automated_security_helper.core.scanner_inventory`` so the MCP
-# ``list_scanners`` tool and the ``ash plugin list`` CLI command call one path and
+# ``list_scanners`` tool and the ``ashx plugin list`` CLI command call one path and
 # cannot drift (the drift risk #626 calls out). These names are re-exported here
 # because existing tests import them from this module and monkeypatch
 # ``mcp_tools._loaded_scanner_classes`` by name; keeping them as module attributes

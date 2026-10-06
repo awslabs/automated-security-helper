@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The `ash mcp` process, started for real and spoken to over a real pipe.
+"""The `ashx mcp` process, started for real and spoken to over a real pipe.
 
 WHY THIS EXISTS
 ---------------
@@ -56,7 +56,7 @@ test_mcp_protocol_integration.py.
 ISOLATION
 ---------
 One subprocess per test, no port, no shared path, communicating over its own pipes.
-The subprocess is started from ``sys.executable`` rather than from an ``ash`` console
+The subprocess is started from ``sys.executable`` rather than from an ``ashx`` console
 script so that the test runs against the interpreter running the suite rather than
 against whatever is first on PATH.
 """
@@ -99,7 +99,7 @@ def _server_env() -> Dict[str, str]:
 
 @pytest.mark.asyncio
 async def test_the_real_process_serves_the_full_tool_surface() -> None:
-    """A client that spawns `ash mcp` gets the same server the in-process tests get.
+    """A client that spawns `ashx mcp` gets the same server the in-process tests get.
 
     This is the adopter's path: a client launches a command, speaks MCP over its stdin
     and stdout, and expects tools. Asserting the surface here as well as in
@@ -146,7 +146,7 @@ def _frame(payload: Dict[str, Any]) -> bytes:
 def _exchange(
     extra_args: List[str], frames: List[bytes], expect_ids: set[int]
 ) -> tuple[List[str], str, int]:
-    """Send ``frames`` to a real `ash mcp` process and return everything it wrote.
+    """Send ``frames`` to a real `ashx mcp` process and return everything it wrote.
 
     Reads responses *before* closing stdin, which is load-bearing rather than
     stylistic. Writing every frame with ``Popen.communicate(input=...)`` closes stdin as
@@ -326,13 +326,13 @@ def test_closing_the_input_stream_ends_the_process() -> None:
         process.kill()
         _, stderr = process.communicate()
         pytest.fail(
-            f"`ash mcp` was still running {PROCESS_TIMEOUT_SECONDS}s after stdin "
+            f"`ashx mcp` was still running {PROCESS_TIMEOUT_SECONDS}s after stdin "
             "closed. A stdio server that ignores EOF leaks one process per client "
             f"restart. stderr tail: {stderr.decode(errors='replace')[-2000:]}"
         )
 
     assert process.returncode == 0, (
-        f"`ash mcp` exited {process.returncode} on an ordinary client disconnect. "
+        f"`ashx mcp` exited {process.returncode} on an ordinary client disconnect. "
         "run_mcp_server treats a closed stream as expected and logs a warning, so a "
         "non-zero status means shutdown took the unexpected-error branch. stderr tail: "
         f"{stderr.decode(errors='replace')[-2000:]}"

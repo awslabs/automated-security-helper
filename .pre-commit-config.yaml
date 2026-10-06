@@ -181,7 +181,7 @@ repos:
       - id: ash
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
-        entry: uv run ash --mode=precommit
+        entry: uv run ashx --mode=precommit
         pass_filenames: false
         verbose: true
         language: system

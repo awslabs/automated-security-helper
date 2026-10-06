@@ -117,7 +117,7 @@ uv run ruff format .
 - Run a specific script:
 
 ```bash
-uv run ash
+uv run ashx
 ```
 
 ## Project Dependencies

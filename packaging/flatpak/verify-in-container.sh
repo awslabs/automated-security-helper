@@ -143,10 +143,12 @@ STRAY="$(flatpak run --command=sh "$APP_ID" -c \
 echo "   no installed Python distributions under /app"
 
 echo "== 5. all three entry points work"
-# The entry-point contract: ash is canonical, ashv3 is deprecated and warns once on
-# stderr, automated-security-helper is kept indefinitely and is silent. All three come
-# from the wheel's [project.scripts], so a package that installed a subset would drop
-# the escape-hatch name on exactly the hosts it exists for.
+# The entry-point contract: ashx is canonical (the app's `command`), ashv3 is
+# deprecated and warns once on stderr, automated-security-helper is kept indefinitely
+# and is silent. All three come from the wheel's [project.scripts], so a package that
+# installed a subset would drop the escape-hatch name on exactly the hosts it exists
+# for. The wheel's deprecated `ash` script is deliberately not exposed (that alias is
+# kept only for pip, Homebrew and the container image), and that is asserted too.
 #
 # This is also where the first run happens: the launcher builds the venv and pip-installs
 # the wheel, which needs the network grant asserted in step 4.
@@ -163,6 +165,19 @@ for name in ashv3 automated-security-helper; do
     echo "     stderr: $(head -2 /tmp/${name}.err | tr '\n' ' ')"
   fi
 done
+# Read from the installed app, so a bundle that gained /app/bin/ash after build.sh's
+# check is still caught. `ls` rather than `test -e` so the listing is in the log.
+APP_BIN="$(flatpak run --command=ls "$APP_ID" /app/bin)"
+echo "   /app/bin: $(printf '%s\n' "$APP_BIN" | tr '\n' ' ')"
+if printf '%s\n' "$APP_BIN" | grep -qx 'ash'; then
+  echo "   FAIL: the app exports /app/bin/ash. The Flatpak exposes ashx; the deprecated" >&2
+  echo "   ash alias is kept only for pip, Homebrew and the container image." >&2
+  exit 1
+fi
+printf '%s\n' "$APP_BIN" | grep -qx 'ashx' || {
+  echo "   FAIL: /app/bin/ashx is missing from the installed app." >&2
+  exit 1
+}
 
 echo "== 6. the venv was built in the app's own data directory, not in /app"
 # /app is a read-only OSTree checkout, so this is the property that makes the first-run
@@ -174,8 +189,8 @@ ls -d "$DATA_ROOT"/automated_security_helper-*-py3.* 2>/dev/null | sed 's/^/   /
   ls -la "$DATA_ROOT" 2>&1 | sed 's/^/     /' >&2 || true
   exit 1
 }
-echo -n "   ash resolved inside the venv: "
-flatpak run --command=sh "$APP_ID" -c 'command -v ash; readlink -f "$XDG_DATA_HOME" 2>/dev/null | head -1'
+echo -n "   ashx resolved inside the sandbox: "
+flatpak run --command=sh "$APP_ID" -c 'command -v ashx; readlink -f "$XDG_DATA_HOME" 2>/dev/null | head -1'
 
 echo "== 7. negative control: a fixture the sandbox cannot reach must find nothing"
 # Run BEFORE the real scan. This is the positive control for the whole verification:
@@ -236,7 +251,7 @@ flatpak run "$APP_ID" scan --source-dir "$FIX" \
   --scanners detect-secrets --no-progress 2>&1 | tail -25
 SCAN_RC=${PIPESTATUS[0]}
 set -e
-echo "   ash scan rc=$SCAN_RC"
+echo "   ashx scan rc=$SCAN_RC"
 
 echo "== 9. assert a finding was actually reported"
 python3 - "$FIX" <<'PY'

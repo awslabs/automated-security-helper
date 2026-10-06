@@ -53,10 +53,10 @@ scanners:
 
 ```bash
 # Scan current directory
-uv run ash --scanners trivy-repo
+uv run ashx --scanners trivy-repo
 
 # Scan specific directory
-uv run ash --scanners trivy-repo /path/to/project
+uv run ashx --scanners trivy-repo /path/to/project
 ```
 
 ## Configuration Options
@@ -132,7 +132,7 @@ scanners:
 
 ```bash
 # Use Trivy alongside other ASH scanners
-uv run ash --scanners trivy-repo,bandit,semgrep
+uv run ashx --scanners trivy-repo,bandit,semgrep
 ```
 
 ## Output Integration
@@ -181,7 +181,7 @@ ls -la ~/.cache/trivy/
 Enable verbose logging to troubleshoot issues:
 
 ```bash
-uv run ash --scanners trivy-repo --log-level DEBUG
+uv run ashx --scanners trivy-repo --log-level DEBUG
 ```
 
 ## Integration Examples
@@ -195,7 +195,7 @@ repos:
     hooks:
       - id: ash-trivy
         name: ASH Trivy Security Scan
-        entry: uv run ash --scanners trivy-repo --mode precommit
+        entry: uv run ashx --scanners trivy-repo --mode precommit
         language: system
         pass_filenames: false
 ```
@@ -206,7 +206,7 @@ repos:
 # GitHub Actions example
 - name: Security Scan with Trivy
   run: |
-    uv run ash --scanners trivy-repo --output-format sarif
+    uv run ashx --scanners trivy-repo --output-format sarif
     # Upload SARIF to GitHub Security tab
     gh api repos/${{ github.repository }}/code-scanning/sarifs \
       --method POST --field sarif=@.ash/ash_output/reports/results.sarif

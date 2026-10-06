@@ -3,7 +3,7 @@ version: 0.2
 # Collect action: merge every shard's results and let ASH decide the verdict.
 #
 # This action produces the pipeline's pass or fail, but it does not *compute* it.
-# `ash merge` does, and its exit code is propagated unchanged:
+# `ashx merge` does, and its exit code is propagated unchanged:
 #
 #   0  no actionable findings at or above --min-severity
 #   1  refused to merge - shard coverage is incomplete, so the findings are
@@ -11,18 +11,18 @@ version: 0.2
 #   2  actionable findings at or above --min-severity
 #
 # Nothing here re-derives that judgment. ASH already routes it through
-# _compute_exit_code, the same function `ash scan` uses, precisely so a merged
+# _compute_exit_code, the same function `ashx scan` uses, precisely so a merged
 # verdict and a scanned verdict cannot disagree. A severity comparison written
 # here would be a third copy of a table that has already drifted once in this
 # codebase, and when it drifted again the pipeline would report a different
-# verdict than `ash scan` does for the same findings, silently.
+# verdict than `ashx scan` does for the same findings, silently.
 #
 # Shard coverage is likewise ASH's to check. `merge_shard_results` raises
 # ShardCoverageError when the shard space is not fully covered, which is stronger
 # than anything this buildspec could do: it reads the shard_index and shard_count
 # recorded inside each shard's own results rather than trusting an external count.
 #
-# The build runs inside the ASH image, so `ash` is on PATH directly. That image
+# The build runs inside the ASH image, so `ashx` is on PATH directly. That image
 # carries no AWS CLI, so S3 transfers go through a small boto3 helper.
 #
 # Shell variables use the $NAME form so the template renderer and the shell cannot
@@ -84,11 +84,11 @@ phases:
       #
       # errexit is disabled around the merge so its exit code can be captured and
       # propagated from post_build after the results are safely uploaded. The
-      # explicit set +e / set -e pair is used rather than `if ! ash merge`,
+      # explicit set +e / set -e pair is used rather than `if ! ashx merge`,
       # because that form disables errexit for the whole compound statement.
       - |
         set -eu
-        set -- /usr/local/bin/ash-container-init ash merge \
+        set -- /usr/local/bin/ash-container-init ashx merge \
           --output-dir merged \
           --min-severity "$MIN_SEVERITY"
 
@@ -107,7 +107,7 @@ phases:
         "$@"
         MERGE_EXIT=$?
         set -e
-        echo "ash merge exited $MERGE_EXIT"
+        echo "ashx merge exited $MERGE_EXIT"
         printf '%s' "$MERGE_EXIT" > merge_exit_code
 
   post_build:
@@ -126,9 +126,9 @@ phases:
         set -eu
         MERGE_EXIT="$(cat merge_exit_code 2>/dev/null || echo 1)"
         case "$MERGE_EXIT" in
-          0) echo "ash merge: no actionable findings at or above $MIN_SEVERITY" ;;
-          1) echo "ash merge: refused to merge - shard coverage incomplete, findings UNKNOWN" >&2 ;;
-          2) echo "ash merge: actionable findings at or above $MIN_SEVERITY" >&2 ;;
-          *) echo "ash merge: exited $MERGE_EXIT" >&2 ;;
+          0) echo "ashx merge: no actionable findings at or above $MIN_SEVERITY" ;;
+          1) echo "ashx merge: refused to merge - shard coverage incomplete, findings UNKNOWN" >&2 ;;
+          2) echo "ashx merge: actionable findings at or above $MIN_SEVERITY" >&2 ;;
+          *) echo "ashx merge: exited $MERGE_EXIT" >&2 ;;
         esac
         exit "$MERGE_EXIT"

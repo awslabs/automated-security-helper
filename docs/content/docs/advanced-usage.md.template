@@ -9,7 +9,7 @@ ASH v3 supports three execution modes:
 ### Local Mode
 
 ```bash
-ash --mode local
+ashx --mode local
 ```
 
 - Runs entirely in the local Python process
@@ -20,7 +20,7 @@ ash --mode local
 ### Container Mode
 
 ```bash
-ash --mode container
+ashx --mode container
 ```
 
 - Runs non-Python scanners in a container
@@ -31,7 +31,7 @@ ash --mode container
 ### Precommit Mode
 
 ```bash
-ash --mode precommit
+ashx --mode precommit
 ```
 
 - Runs a subset of fast scanners
@@ -96,7 +96,7 @@ ash_plugin_modules:
 3. Use your custom scanner:
 
 ```bash
-ash --ash-plugin-modules my_ash_plugins
+ashx --ash-plugin-modules my_ash_plugins
 ```
 
 ## Offline Mode
@@ -105,16 +105,16 @@ For air-gapped environments:
 
 ```bash
 # Build an offline image
-ash build-image --offline --offline-semgrep-rulesets p/ci
+ashx build-image --offline --offline-semgrep-rulesets p/ci
 
 # Run in offline mode
-ash --mode container --offline
+ashx --mode container --offline
 ```
 
 An offline image's databases are frozen at build time, and ASH fails a scan whose
 database is past its bound: grype's 5 days (120h) after it was built, the offline
 semgrep and opengrep rulesets 30 days after they were downloaded. Rebuild the image
-(`ash build-image --offline`) at least that often. To scan with an older image
+(`ashx build-image --offline`) at least that often. To scan with an older image
 anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`; the scan
 then passes and every report names the stale database. See
 [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database).
@@ -125,13 +125,13 @@ ASH v3 executes scans in phases:
 
 ```bash
 # Run only specific phases
-ash --phases convert,scan
+ashx --phases convert,scan
 
 # Skip report generation
-ash --phases convert,scan
+ashx --phases convert,scan
 
 # Include inspection phase
-ash --phases convert,scan,report,inspect
+ashx --phases convert,scan,report,inspect
 ```
 
 ## Using Existing Results
@@ -140,10 +140,10 @@ You can generate reports from existing scan results:
 
 ```bash
 # Use existing results file
-ash --use-existing --output-dir /path/to/results
+ashx --use-existing --output-dir /path/to/results
 
 # Generate a specific report format
-ash report --format html --output-dir /path/to/results
+ashx report --format html --output-dir /path/to/results
 ```
 
 ## Interactive Findings Explorer
@@ -152,7 +152,7 @@ ASH v3 includes an interactive TUI for exploring findings:
 
 ```bash
 # Launch the findings explorer
-ash inspect findings --output-dir /path/to/results
+ashx inspect findings --output-dir /path/to/results
 ```
 
 ## Container Customization
@@ -161,10 +161,10 @@ ash inspect findings --output-dir /path/to/results
 
 ```bash
 # Use Podman instead of Docker
-ash --mode container --oci-runner podman
+ashx --mode container --oci-runner podman
 
 # Use Finch
-ash --mode container --oci-runner finch
+ashx --mode container --oci-runner finch
 ```
 
 ### Custom Container Images
@@ -178,22 +178,22 @@ rebuild cadence it commits you to, and offline builds.
 ```bash
 # Specify a custom container image
 export ASH_IMAGE_NAME="my-registry/ash:custom"
-ash --mode container
+ashx --mode container
 ```
 
 ### Building Custom Images
 
 ```bash
 # Build a custom image
-ash build-image --build-target ci --custom-containerfile ./my-dockerfile
+ashx build-image --build-target ci --custom-containerfile ./my-dockerfile
 ```
 
 ## Advanced Configuration Overrides
 
 ```bash
 # Complex configuration overrides
-ash --config-overrides 'scanners.semgrep.options.rules=["p/ci", "p/owasp-top-ten"]'
-ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ashx --config-overrides 'scanners.semgrep.options.rules=["p/ci", "p/owasp-top-ten"]'
+ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
 ## Working with Suppressions
@@ -202,10 +202,10 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 
 ```bash
 # Add a suppression rule
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
+ashx --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
 
 # Add a suppression with line range and expiration
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
+ashx --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
 ```
 
 ### Inline code suppressions
@@ -253,10 +253,10 @@ suppressions start with `"(ASH)"` while inline suppressions start with
 
 ```bash
 # Run a scan ignoring all suppression rules
-ash --ignore-suppressions
+ashx --ignore-suppressions
 
 # Useful for verifying if suppressed issues have been fixed
-ash --ignore-suppressions --output-dir ./verification-scan
+ashx --ignore-suppressions --output-dir ./verification-scan
 ```
 
 ## Programmatic Usage
@@ -308,7 +308,7 @@ jobs:
       - name: Install ASH
         run: pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
       - name: Run ASH scan
-        run: ash --mode local
+        run: ashx --mode local
       - name: Upload scan results
         uses: actions/upload-artifact@v3
         with:
@@ -323,7 +323,7 @@ ash-scan:
   image: python:3.10
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
-    - ash --mode local
+    - ashx --mode local
   artifacts:
     paths:
       - .ash/ash_output
@@ -333,26 +333,26 @@ ash-scan:
 
 ```bash
 # Run scanners in parallel (default)
-ash --strategy parallel
+ashx --strategy parallel
 
 # Run scanners sequentially
-ash --strategy sequential
+ashx --strategy sequential
 
 # Clean up temporary files after scan
-ash --cleanup
+ashx --cleanup
 ```
 
 ## Debugging
 
 ```bash
 # Enable debug logging
-ash --debug
+ashx --debug
 
 # Enable verbose logging
-ash --verbose
+ashx --verbose
 
 # Disable progress display
-ash --progress false
+ashx --progress false
 ```
 
 ### Scanner Validation

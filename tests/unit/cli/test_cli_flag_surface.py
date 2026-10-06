@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Flag-surface regression tests for the consolidated ``ash`` CLI.
+"""Flag-surface regression tests for the consolidated ``ashx`` CLI.
 
 The root ``ash`` bash script used to own a parallel flag surface and was deleted
 when the Python CLI absorbed it. These tests pin the v2-era spellings that had
@@ -59,7 +59,7 @@ def _resolve(path):
     """Walk from the root group to the command named by ``path``."""
     root = typer.main.get_command(app)
     cmd = root
-    ctx = click.Context(root, info_name="ash")
+    ctx = click.Context(root, info_name="ashx")
     for name in path:
         cmd = cmd.get_command(ctx, name)
         assert cmd is not None, f"no such command: {name}"
@@ -73,9 +73,9 @@ def _parse(path, argv):
     Raises the parser's usage error if the argv is rejected.
     """
     root, cmd = _resolve(path)
-    parent = click.Context(root, info_name="ash") if path else None
+    parent = click.Context(root, info_name="ashx") if path else None
     ctx = cmd.make_context(
-        path[-1] if path else "ash",
+        path[-1] if path else "ashx",
         list(argv),
         parent=parent,
         resilient_parsing=False,
@@ -110,7 +110,7 @@ def _all_commands():
                 child = click.Context(sub, parent=ctx, info_name=name)
                 yield from walk(sub, child, path + (name,))
 
-    return list(walk(root, click.Context(root, info_name="ash")))
+    return list(walk(root, click.Context(root, info_name="ashx")))
 
 
 def _spellings(path):

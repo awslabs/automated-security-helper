@@ -50,7 +50,7 @@ def build_ash_image_cli_command(
                 "Use the specified OCI runner instead of docker to run the containerized tools. "
                 "To prefix every OCI command with a wrapper (e.g. sudo), set the "
                 "OCI_RUNNER_WRAPPER environment variable instead of using this option "
-                "(e.g. OCI_RUNNER_WRAPPER=sudo ash ...)."
+                "(e.g. OCI_RUNNER_WRAPPER=sudo ashx ...)."
             ),
             envvar="OCI_RUNNER",
         ),

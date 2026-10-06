@@ -104,10 +104,12 @@ CONFIG_VALIDATE_STEP = "Validate ASH config files"
 WINDOWS_SCAN_STEP = "Validate ASH using Python Local (Windows)"
 PROMOTE_STEP = "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)"
 
-# A command invocation of `ash`, anchored at the start of a line so that a path
+# A command invocation of ASH, anchored at the start of a line so that a path
 # argument such as `--config .ash/.ash_community_plugins.yaml` is not counted, and
-# allowing pwsh's call operator so `& ash report` is.
-ASH_INVOCATION = re.compile(r"^\s*(?:&\s*)?ash\s", re.MULTILINE)
+# allowing pwsh's call operator so `& ashx report` is. Both names count: `ashx` is
+# the canonical command, and the deprecated `ash` alias is the one MSYS2 shadows,
+# so a step still calling it is exactly what these tests exist to find.
+ASH_INVOCATION = re.compile(r"^\s*(?:&\s*)?ashx?\s", re.MULTILINE)
 
 
 @pytest.fixture(scope="module")
@@ -162,7 +164,7 @@ def test_the_toolchain_lands_after_config_validation(steps):
 
 def test_the_toolchain_lands_before_the_windows_install(steps):
     assert _index(steps, WINDOWS_TOOLCHAIN_STEP) < _index(steps, WINDOWS_SCAN_STEP), (
-        f"{WINDOWS_SCAN_STEP!r} runs `ash dependencies install`, so the toolchain "
+        f"{WINDOWS_SCAN_STEP!r} runs `ashx dependencies install`, so the toolchain "
         "has to be in place before it or the gate declines."
     )
 
@@ -296,7 +298,7 @@ def test_the_promotion_does_not_hand_precedence_to_git_bash(steps):
     It does not work -- Git's ``bin`` ships no ``ash``, so MSYS2 still wins, and
     Git's ``usr/bin`` ships the same Almquist shell, so winning would only change
     which wrong ``ash`` ran. And it breaks the gem build, because
-    ``ash dependencies install`` inside the next step compiles psych's C extension
+    ``ashx dependencies install`` inside the next step compiles psych's C extension
     and needs MSYS2's sh rather than Git's. That is the 18e5cba9 failure.
     """
     body = steps[_index(steps, PROMOTE_STEP)]["run"]

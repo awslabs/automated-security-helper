@@ -20,12 +20,12 @@ Every template then failed inside the wrapper, the per-file skip branch decremen
 count back to zero, and the scan reported SKIPPED with exit code 0 -- which both completeness
 gates accept, because SKIPPED is on their allowlist. The documented remediation was dead in the
 same state: ``get_installation_commands`` appends its pip command only when ``_CDK_AVAILABLE`` is
-False, so ``ash dependencies install`` exited 0 having installed nothing.
+False, so ``ashx dependencies install`` exited 0 having installed nothing.
 
 Why a metadata probe and not an import probe
 --------------------------------------------
 Importing ``cdk_nag`` to prove it works would catch strictly more, and was rejected on cost: this
-module is imported during plugin discovery on every ASH invocation, ``ash --help`` included, and
+module is imported during plugin discovery on every ASH invocation, ``ashx --help`` included, and
 importing cdk_nag starts a jsii kernel, which spawns a NodeJS child process. The residual gap --
 all three distributions installed but importing them still fails -- is covered loudly rather than
 left silent: the wrapper's import guard returns a response carrying ``failure``, the scanner
@@ -363,7 +363,7 @@ def test_the_installer_is_armed_when_a_distribution_is_missing(scanner, monkeypa
 
     pip_commands = [command for command in commands if "pip" in command]
     assert pip_commands, (
-        "ash dependencies install must emit a pip command in this state; gating it on the "
+        "ashx dependencies install must emit a pip command in this state; gating it on the "
         "same flag the probe got wrong made the documented remediation a no-op"
     )
     installed = " ".join(pip_commands[0])

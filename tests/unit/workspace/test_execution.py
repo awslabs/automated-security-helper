@@ -590,7 +590,7 @@ class TestScannerCompleteness:
 
     The gap this closes. ``_compute_exit_code`` asks two questions in order --
     did the selected scanners run, and did they find anything -- and workspace
-    mode only ever asked the second. So ``ash --source-dir P`` exited 1 on a host
+    mode only ever asked the second. So ``ashx --source-dir P`` exited 1 on a host
     missing P's scanners while the same P inside a workspace reported SUCCESS,
     for the same reason a finding-count verdict cannot tell "nothing was wrong"
     from "nothing was checked".
@@ -634,7 +634,7 @@ class TestScannerCompleteness:
     def test_a_stale_content_database_follows_its_policy_not_the_flag(
         self, tmp_path, policy, incomplete, code
     ):
-        """`ash --source-dir P` exits 1 on a stale database; P inside a workspace must too.
+        """`ashx --source-dir P` exits 1 on a stale database; P inside a workspace must too.
 
         With the completeness gate explicitly off, so only the staleness arm can move it.
         """
@@ -781,7 +781,7 @@ class TestScannerCompleteness:
         exclusion and another shard's ownership are recorded. So a project whose
         *every* entry is SKIPPED cleared the per-entry pass having measured nothing:
         ``incomplete_scanners == []``, ``scan_incomplete == False``, COMPLETED, zero
-        actionable findings, workspace exit 0. ``ash --source-dir P`` on the same
+        actionable findings, workspace exit 0. ``ashx --source-dir P`` on the same
         project exits 1 through ``_compute_exit_code``'s own set-level check.
 
         Reachable without sharding and without operator error beyond one misspelled
@@ -814,7 +814,7 @@ class TestScannerCompleteness:
     ):
         """The control for the case above, at the boundary that decides it.
 
-        ``ash scan --scanners bandit`` inside a workspace leaves every other entry
+        ``ashx scan --scanners bandit`` inside a workspace leaves every other entry
         SKIPPED, and that is a scan which did what it was asked. Without this the
         set-level gate could be stuck at always-fail -- which would fail every
         narrowed workspace run -- and the test above would still pass.
@@ -899,7 +899,7 @@ class TestScannerCompleteness:
         knows, and ``ScannerStatisticsCalculator`` derives "missing" from
         ``dependencies_satisfied`` rather than from ``status``. Asserting True
         there while status says MISSING makes any tool that re-derives a verdict
-        from the workspace file -- ``ash report`` on a workspace output, or the
+        from the workspace file -- ``ashx report`` on a workspace output, or the
         completeness gate itself -- read the scanner as present.
         """
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))

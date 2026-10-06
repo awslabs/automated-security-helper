@@ -6,7 +6,7 @@ Common issues you may hit while running ASH, with the cause and fix for each. Fo
 
 **Symptom**
 
-`ash` pauses mid-scan with a prompt like:
+`ashx` pauses mid-scan with a prompt like:
 
 ```
 Enter your Semgrep registry token, or hit ENTER to skip login:
@@ -24,19 +24,19 @@ Provide a token via the `SEMGREP_APP_TOKEN` environment variable:
 
 ```bash
 export SEMGREP_APP_TOKEN=your-token-here
-ash --mode local
+ashx --mode local
 ```
 
 Or run in offline mode with pre-cached rulesets:
 
 ```bash
-ash --mode container --offline
+ashx --mode container --offline
 ```
 
 Or disable the Semgrep scanner if you don't need it:
 
 ```bash
-ash --config-overrides 'scanners.semgrep.enabled=false'
+ashx --config-overrides 'scanners.semgrep.enabled=false'
 ```
 
 ## cfn-nag Fails Because Ruby Is Missing
@@ -70,7 +70,7 @@ gem install cfn-nag
 Or switch to container mode, which bundles Ruby and cfn-nag:
 
 ```bash
-ash --mode container
+ashx --mode container
 ```
 
 ## Grype Cannot Fetch Vulnerability Database
@@ -93,7 +93,7 @@ Set proxy environment variables before running ASH:
 export HTTPS_PROXY=http://proxy.corp.example:8080
 export HTTP_PROXY=http://proxy.corp.example:8080
 export NO_PROXY=localhost,127.0.0.1
-ash --mode local
+ashx --mode local
 ```
 
 For air-gapped environments, pre-populate the Grype database cache and run in offline mode:
@@ -103,14 +103,14 @@ For air-gapped environments, pre-populate the Grype database cache and run in of
 grype db update
 # Copy ~/.cache/grype to the air-gapped host
 
-ash --mode container --offline
+ashx --mode container --offline
 ```
 
 ## Container Image Build Fails
 
 **Symptom**
 
-`ash build-image` exits with a Docker or Podman error — network timeout, `no space left on device`, or an `apt-get` failure mid-build.
+`ashx build-image` exits with a Docker or Podman error — network timeout, `no space left on device`, or an `apt-get` failure mid-build.
 
 **Cause**
 
@@ -126,7 +126,7 @@ Free space and rebuild from scratch:
 
 ```bash
 docker system prune -af
-ash build-image --force
+ashx build-image --force
 ```
 
 If the network is the issue, check that the daemon can reach the registries you need (often the host can but the container build context cannot). Configure proxies in `~/.docker/config.json` or `/etc/containers/containers.conf` for Podman.
@@ -157,13 +157,13 @@ uv tool install bandit
 Or run in container mode, which bundles every supported scanner:
 
 ```bash
-ash --mode container
+ashx --mode container
 ```
 
 Or explicitly exclude the scanner if you don't need it:
 
 ```bash
-ash --exclude-scanners checkov
+ashx --exclude-scanners checkov
 ```
 
 ## Docker Permission Denied on Socket
@@ -176,7 +176,7 @@ permission denied while trying to connect to the Docker daemon socket at unix://
 
 **Cause**
 
-The user running `ash` is not in the `docker` group, so they can't talk to `dockerd` over the default socket.
+The user running `ashx` is not in the `docker` group, so they can't talk to `dockerd` over the default socket.
 
 **Fix**
 
@@ -190,7 +190,7 @@ newgrp docker
 Or use Podman instead, which runs rootless by default:
 
 ```bash
-ash --mode container --oci-runner podman
+ashx --mode container --oci-runner podman
 ```
 
 ## Windows Path Separator Errors
@@ -250,7 +250,7 @@ uv --version
 uvx --version
 ```
 
-If `ash` still can't be found after UV is installed, reinstall it:
+If `ashx` still can't be found after UV is installed, reinstall it:
 
 ```bash
 uv tool install --force git+https://github.com/awslabs/automated-security-helper.git@v3
@@ -277,7 +277,7 @@ One of three things:
 Confirm the source directory:
 
 ```bash
-ash --source-dir ./src --debug
+ashx --source-dir ./src --debug
 ```
 
 Check for overly broad ignore paths in your config:

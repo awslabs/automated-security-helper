@@ -26,11 +26,11 @@
 #
 # WHY A SHIM AND NOT A WRAPPER SCRIPT
 #
-# packaging/deb/build.sh installs /usr/bin/ash as a shell wrapper rather than a
-# symlink, because `ash` shells out to sys.executable for the container runner and a
-# symlink leaves sys.executable pointing at /usr/bin/ash. That failure mode does not
-# reproduce here: the venv's ash.exe is a launcher that starts the venv's own
-# interpreter, and a Chocolatey shim starts ash.exe as a child process, so
+# packaging/deb/build.sh installs /usr/bin/ashx as a shell wrapper rather than a
+# symlink, because ASH shells out to sys.executable for the container runner and a
+# symlink leaves sys.executable pointing at /usr/bin. That failure mode does not
+# reproduce here: the venv's ashx.exe is a launcher that starts the venv's own
+# interpreter, and a Chocolatey shim starts ashx.exe as a child process, so
 # sys.executable is the venv python either way. verify-on-windows.ps1 checks the
 # consequence that matters, which is that a scan actually runs.
 
@@ -183,10 +183,18 @@ Write-Host 'ash: installing the bundled wheel and resolving its dependencies'
 Assert-NativeSuccess -What 'pip install' -ExitCode $LASTEXITCODE
 
 # The shim set comes from the wheel's own console_scripts metadata rather than from a
-# hardcoded list of three names. [project.scripts] in pyproject.toml declares ash,
-# ashv3 and automated-security-helper today; a list here would be a fourth place that
+# hardcoded list of names. [project.scripts] in pyproject.toml declares ashx, ash,
+# ashv3 and automated-security-helper today; a list here would be another place that
 # has to be edited when that changes, and the failure when it is not edited is silent
 # (the new name simply never reaches PATH).
+#
+# Minus one name, on purpose. `ash` is the v3 command, kept in the wheel as a deprecated
+# alias for pip, Homebrew and the container, and this package does not shim it: on
+# Windows `ash` is the name MSYS2 and Git for Windows give the Almquist shell, which is
+# why the v4 command is `ashx`. The venv still holds Scripts\ash.exe; nothing puts it on
+# PATH. packaging/assert-package-contents.py (DEPRECATED_SCRIPTS_NOT_EXPOSED) and
+# packaging/msix/msix.py (NOT_EXPOSED_SCRIPTS) carry the same one-name set.
+$notExposed = @('ash')
 $enumerate = Join-Path ([System.IO.Path]::GetTempPath()) ("ash-eps-" + [guid]::NewGuid().ToString('N') + ".py")
 Set-Content -LiteralPath $enumerate -Encoding ASCII -Value @'
 from importlib.metadata import distribution
@@ -201,6 +209,7 @@ try {
     Remove-Item -LiteralPath $enumerate -Force -ErrorAction SilentlyContinue
 }
 $scriptNames = @($scriptNames | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+$scriptNames = @($scriptNames | Where-Object { $notExposed -notcontains $_ })
 
 # An empty list here would leave a working venv with nothing on PATH and no error, so
 # it is checked rather than assumed. The floor is 1 and not 3 because the assertion is
@@ -221,8 +230,8 @@ foreach ($name in $scriptNames) {
 }
 
 Write-Host ''
-Write-Host "ash: installed. Run 'ash --help' to start."
-Write-Host "ash: on a machine where 'ash' resolves to something else (MSYS2 ships the"
-Write-Host "ash: Almquist shell under that name), 'automated-security-helper' is the"
-Write-Host "ash: same program under a name nothing else claims."
-Write-Host "ash: scanners are not installed by this package. Run 'ash dependencies install'."
+Write-Host "ash: installed. Run 'ashx --help' to start."
+Write-Host "ash: the command is 'ashx'. This package installs no 'ash' command, because on"
+Write-Host "ash: Windows that name is the Almquist shell (MSYS2, Git for Windows)."
+Write-Host "ash: 'automated-security-helper' is the same program under a name nothing else claims."
+Write-Host "ash: scanners are not installed by this package. Run 'ashx dependencies install'."

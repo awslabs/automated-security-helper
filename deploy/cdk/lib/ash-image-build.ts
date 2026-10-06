@@ -85,7 +85,7 @@ export const ASH_REPOSITORY_URL = 'https://github.com/awslabs/automated-security
  * - `mcp`    — the MCP server entrypoint baked in. Used by AgentCore and Fargate.
  * - `lambda` — the Lambda Runtime Interface Client plus the gate handler.
  * - `cli`    — plain ASH, used as a CodeBuild environment image by the sharded
- *              executor, where `ash scan` is invoked directly.
+ *              executor, where `ashx scan` is invoked directly.
  */
 export type AshImageFlavor = 'mcp' | 'lambda' | 'cli';
 
@@ -725,7 +725,7 @@ export class AshImageBuild extends Construct {
     ];
 
     if (flavor === 'cli') {
-      // Nothing to derive: the sharded executor invokes `ash scan` directly, so
+      // Nothing to derive: the sharded executor invokes `ashx scan` directly, so
       // ASH's own image is exactly what it needs.
       return [`docker tag "${base}" "ash-cli:local"`, ...push];
     }
@@ -766,7 +766,7 @@ export class AshImageBuild extends Construct {
           '# git-remote-codecommit gives git the codecommit:// transport so the',
           '# handler can clone using the function role. boto3 is named explicitly',
           '# rather than relied on transitively: the handler imports it from the',
-          '# system interpreter, while `ash` runs from its own environment.',
+          '# system interpreter, while `ashx` runs from its own environment.',
           'RUN python3 -m pip install --no-cache-dir --break-system-packages \\',
           '      awslambdaric boto3 git-remote-codecommit',
           // Lambda requires the image to run on a READ-ONLY root filesystem with only

@@ -713,7 +713,7 @@ def test_a_missing_policy_scanner_alone_is_a_project_that_measured_nothing(tmp_p
     A non-gating policy scanner that is MISSING is dropped from the completeness
     verdict. When it is the only scanner the project recorded, what is left is a
     project in which no scanner reached a verdict, and that fails the same way
-    ``ash --source-dir P`` on it does. Pins the case the test above had to add a
+    ``ashx --source-dir P`` on it does. Pins the case the test above had to add a
     passing scanner to avoid.
     """
     from automated_security_helper.core.enums import ScannerStatus

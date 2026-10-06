@@ -23,7 +23,7 @@ uv tool run semgrep --version
 
 ```bash
 export ASH_LOG_LEVEL=DEBUG
-ash --mode local
+ashx --mode local
 ```
 
 Look for log messages with these tags:
@@ -115,7 +115,7 @@ curl -I https://pypi.org/project/bandit/
 **Option C: Use offline mode**
 ```bash
 export ASH_OFFLINE=true
-ash --mode local
+ashx --mode local
 ```
 
 **Option D: Pre-install tools**
@@ -218,7 +218,7 @@ export ASH_OFFLINE=true
 **Option D: Disable offline mode temporarily**
 ```bash
 unset ASH_OFFLINE
-ash --mode local
+ashx --mode local
 ```
 
 ### 5. Permission Issues
@@ -447,7 +447,7 @@ export ASH_LOG_LEVEL=TRACE
 export UV_VERBOSE=1
 
 # Run with debug output
-ash --mode local 2>&1 | tee ash-debug.log
+ashx --mode local 2>&1 | tee ash-debug.log
 ```
 
 ### Manual Installation Testing
@@ -485,13 +485,13 @@ ulimit -a
 
 ```bash
 # Validate ASH configuration
-ash --validate-config
+ashx --validate-config
 
 # Check scanner configuration
-ash --list-scanners
+ashx --list-scanners
 
 # Test specific scanner
-ash --scanner bandit --dry-run
+ashx --scanner bandit --dry-run
 ```
 
 ## Prevention Strategies
@@ -566,8 +566,8 @@ python --version
 uv --version
 
 # ASH information
-ash --version
-ash --list-scanners
+ashx --version
+ashx --list-scanners
 
 # Configuration
 cat .ash/.ash.yaml

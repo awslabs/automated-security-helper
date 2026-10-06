@@ -1,10 +1,10 @@
-ash for Windows, as an MSIX package
+ASH for Windows, as an MSIX package
 ===================================
 
 Why this package needs a Python index at install time
 -----------------------------------------------------
 
-The package bundles ASH's own wheel and nothing else. The first time you run ash, the
+The package bundles ASH's own wheel and nothing else. The first time you run ashx, the
 launcher creates a virtualenv and installs that wheel into it, which resolves ASH's
 27 runtime dependencies from whatever Python index the machine is configured for.
 
@@ -20,7 +20,7 @@ publishes, not about what the bytes are allowed to do.
 On a machine with no reachable index, stage a wheelhouse first:
 
   pip download automated-security-helper==<version> -d C:\ash-wheels
-  # then, before the first ash invocation:
+  # then, before the first ashx invocation:
   setx PIP_NO_INDEX true
   setx PIP_FIND_LINKS C:\ash-wheels
 
@@ -73,7 +73,7 @@ The .deb creates the virtualenv in a postinst scriptlet and the .rpm in %post. M
 neither. A package is a signed, immutable directory that Windows extracts under
 C:\Program Files\WindowsApps and never runs anything from at install time, so the venv
 cannot exist when the package is installed and the only moment left to create it is the
-first time you run ash. That is what the bundled launchers do, and it is why the first
+first time you run ashx. That is what the bundled launchers do, and it is why the first
 invocation is slow and prints two lines to stderr saying so.
 
 The venv could not be shipped inside the package even if there were somewhere to put it.
@@ -111,8 +111,8 @@ The launcher decides whether to bootstrap by looking for the marker, not by look
 a console script, because pip writes the console scripts before the last of
 site-packages and a bootstrap interrupted near the end would otherwise leave something
 that looks finished. Deleting the marker is the supported way to force a rebuild on the
-next `ash`; the run will remove what is there and install again. The lock is what stops
-two shells running `ash` for the first time at the same moment from installing over each
+next `ashx`; the run will remove what is there and install again. The lock is what stops
+two shells running `ashx` for the first time at the same moment from installing over each
 other -- the second waits for the first and then finds the work done. If a run is killed
 hard the lock file is left behind, which is harmless: it holds no lock once the process
 is gone, and the next run reuses it.
@@ -130,11 +130,11 @@ Filesystem access, and the capability that is not the one doing the work
 The manifest declares two restricted capabilities. They are not interchangeable and the
 second one is the one people delete by mistake.
 
-  runFullTrust            what actually lets ash read the tree you point it at
-  broadFileSystemAccess   what puts ash in the Windows privacy settings page
+  runFullTrust            what actually lets ASH read the tree you point it at
+  broadFileSystemAccess   what puts ASH in the Windows privacy settings page
 
 A packaged app declared mediumIL, which this one is, runs with your own token and sees
-the file system you see. That is runFullTrust. Remove it and ash installs, runs, and
+the file system you see. That is runFullTrust. Remove it and ASH installs, runs, and
 scans nothing, because it is then an AppContainer app confined to its own storage.
 
 broadFileSystemAccess is an AppContainer capability: it grants a sandboxed app the access
@@ -149,7 +149,7 @@ privacy-sensitive capabilities even on full-trust packages for this reason.
 
 Why a narrower grant cannot express what ASH needs. ASH's default source directory is the
 process working directory, and its default output directory is `.ash\ash_output` inside
-that same tree (automated_security_helper/cli/scan.py:634-640). So the directory ash must
+that same tree (automated_security_helper/cli/scan.py:634-640). So the directory ASH must
 read and write is not a fixed location a manifest could name: it is wherever you happened
 to cd to, and it is different on every invocation. The narrower capabilities Windows
 offers each name one fixed known folder, and two of them additionally require the manifest
@@ -162,7 +162,7 @@ What it costs. broadFileSystemAccess is a restricted capability. Sideloading a p
 that declares one needs no approval from anybody, but submitting one to the Microsoft
 Store requires written justification on the submission form explaining why the narrower
 APIs are insufficient, and that submission can be refused. Nothing in this repository
-submits to the Store, so today the cost is the toggle: a user who switches it off gets ash
+submits to the Store, so today the cost is the toggle: a user who switches it off gets ASH
 terminated so Windows can apply the change.
 
 This package is self-signed, and that has consequences
@@ -237,20 +237,26 @@ it.
 The three names, and why one of them is deliberately unfashionable
 ------------------------------------------------------------------
 
-  ash                         canonical
+  ashx                        canonical
   ashv3                       deprecated; warns once on stderr, then runs the same CLI
   automated-security-helper   kept indefinitely, and silent
 
-The long name exists for Windows in particular. MSYS2 ships the Almquist shell as `ash`
-and has already shadowed ASH's entry point, producing an "Illegal option" error from a
-program nobody meant to run.
+This package does not install an `ash` command. The wheel still declares `ash` as a
+deprecated alias for pip, Homebrew and container users, but on Windows that name belongs
+to the Almquist shell: MSYS2 and Git for Windows ship it as `ash`, and it has already
+shadowed ASH's v3 entry point, producing an "Illegal option" error from a program nobody
+meant to run. That collision is why the v4 command is `ashx`. If you used `ash` with
+ASH v3, type `ashx` instead; arguments, output and exit codes are the same.
+
+The long name exists for the same reason, for hosts where a short name resolves to
+another program.
 
 Which is worth knowing before you trust the short name here, because an app execution
 alias is itself just a name on PATH. Windows resolves a collision between two apps
 claiming the same alias by invoking whichever one registered it last, and a real
 executable earlier on PATH wins over an alias outright. So installing this package does
-not guarantee that typing `ash` reaches ASH. If an MSYS2 shell is on your PATH, use the
-long name. That is what it is for.
+not guarantee that typing `ashx` reaches ASH. If another program claims that name on your
+PATH, use the long name. That is what it is for.
 
 You can also see and turn off each alias under Settings > Apps > Advanced app settings >
 App execution aliases.
@@ -263,8 +269,8 @@ Scanners are not installed by this package
 
 ASH drives third-party scanners; it does not contain them. After installing:
 
-  ash dependencies install              # everything ASH can provision
-  ash dependencies install --tool grype # or one at a time
+  ashx dependencies install              # everything ASH can provision
+  ashx dependencies install --tool grype # or one at a time
 
 The one exception is detect-secrets, which is a runtime dependency of ASH and drives in
 process, so it works immediately. The rest are correctly reported SKIPPED rather than
@@ -316,7 +322,7 @@ Files in the package
 --------------------
 
   AppxManifest.xml            identity, capabilities, and one Application per entry point
-  ash.exe                     launcher; bootstraps the venv, then runs the venv's ash
+  ashx.exe                    launcher; bootstraps the venv, then runs the venv's ashx
   ashv3.exe                   the same launcher, compiled under a different name
   automated-security-helper.exe   likewise
   wheels\                     ASH's wheel, the package's only payload

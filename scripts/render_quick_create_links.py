@@ -877,12 +877,26 @@ def self_test() -> int:
         return 1
     good = quick_create_url(hosting, stack, "us-east-1", plan[stack])
 
+    # The stale-value case is built from the plan's own AshVersion default, never a
+    # literal. `cz bump` rewrites that default, and a case naming today's version would
+    # plant nothing after the bump and report a correct link as an accepted defect.
+    planned = dict(plan[stack])
+    if "AshVersion" not in planned:
+        sys.stderr.write(
+            f"self-test needs {stack} to plan AshVersion, and it does not.\n"
+        )
+        return 1
+    current_version = planned["AshVersion"]
+    stale_version = "v0.0.0" if current_version != "v0.0.0" else "v0.0.1"
+    current_pair = f"param_AshVersion={urllib.parse.quote(current_version, safe='')}"
+    stale_pair = f"param_AshVersion={urllib.parse.quote(stale_version, safe='')}"
+
     # Each case is (name, url, substring the rejection must mention). The substring is
     # checked so that a case cannot pass by being rejected for an unrelated reason.
     cases: list[tuple[str, str, str]] = [
         (
             "misspelled parameter name",
-            good + "&param_AshVerison=v3.7.0",
+            good + f"&param_AshVerison={current_version}",
             "not a parameter",
         ),
         (
@@ -892,7 +906,7 @@ def self_test() -> int:
         ),
         (
             "value disagreeing with the template default",
-            good.replace("param_AshVersion=v3.7.0", "param_AshVersion=v9.9.9"),
+            good.replace(current_pair, stale_pair),
             "declares the default",
         ),
         (
@@ -950,6 +964,12 @@ def self_test() -> int:
         sys.stdout.write("control: a correctly generated link is accepted\n")
 
     for name, url, expected_substring in cases:
+        if url == good:
+            failures.append(
+                f"{name}: the case is identical to the correct link, so it plants no "
+                "defect. Its replacement target is no longer in the generated link."
+            )
+            continue
         found = validate_url(url, stacks, plan)
         if not found:
             failures.append(

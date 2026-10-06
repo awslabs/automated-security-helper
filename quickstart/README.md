@@ -24,7 +24,7 @@ By default, the owner of the AWS Cloud9 Environment will be the user that launch
 1. Wait until the Stack is created and status is `CREATE_COMPLETE`.
 1. Navigate to the AWS Cloud9 Console. You can use [this](https://console.aws.amazon.com/cloud9control/home) link.
 1. Use the `Open` link to access your AWS Cloud9 Environment.
-1. You can confirm that ASH is installed properly by running `ash -v` in the terminal. It will take a few minutes for the bootstrap process to complete, wait until you see an empty file with the name `ASH-READY` under  `/home/ec2-user/environment`. If you already launched a terminal, refresh the `PATH` environment variable by running `source ~/.bashrc` on your terminal and try again or close the terminal and launch a new one.
+1. You can confirm that ASH is installed properly by running `ashx -v` in the terminal. It will take a few minutes for the bootstrap process to complete, wait until you see an empty file with the name `ASH-READY` under  `/home/ec2-user/environment`. If you already launched a terminal, refresh the `PATH` environment variable by running `source ~/.bashrc` on your terminal and try again or close the terminal and launch a new one.
 
 
 ## Troubleshooting

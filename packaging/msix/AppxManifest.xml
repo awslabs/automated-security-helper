@@ -130,21 +130,25 @@
   </Capabilities>
 
   <!--
-    Three Applications, one per console script in [project.scripts], because MSIX documents
+    Three Applications, one per console script this package exposes, because MSIX documents
     one app execution alias per Application and all three names have to be reachable.
 
     The three names are not interchangeable, and the entry point contract is settled
-    elsewhere: `ash` is canonical, `ashv3` is deprecated and warns once on stderr, and
-    `automated-security-helper` is kept indefinitely and silent. The long name exists for
-    Windows in particular. MSYS2 ships the Almquist shell as `ash` and has already shadowed
-    ASH's entry point, producing an "Illegal option" error. pyproject.toml:161-164 records it.
+    elsewhere: `ashx` is canonical, `ashv3` is deprecated and warns once on stderr, and
+    `automated-security-helper` is kept indefinitely and silent. [project.scripts] also
+    declares `ash`, the v3 command, as a deprecated alias, and this package deliberately
+    does NOT expose it: MSYS2 and Git for Windows ship the Almquist shell as `ash`, which
+    has already shadowed ASH's v3 entry point with an "Illegal option" error, and that is
+    why v4's command is `ashx`. msix.py refuses a manifest with an ash.exe Application
+    (NOT_EXPOSED_SCRIPTS there). The wheel inside the package still carries the `ash`
+    script; nothing puts it on PATH.
 
     Which makes the alias mechanism worth stating carefully. An app execution alias is itself
     just a name on PATH, and Windows resolves a collision by invoking whichever app
     registered the alias last. So installing this package does not guarantee that typing
-    `ash` reaches ASH: if an MSYS2 shell is earlier on PATH, or another package claimed the
-    alias more recently, it does not. That is not a defect in this manifest. It is the exact
-    condition the long name is the escape hatch for.
+    `ashx` reaches ASH: if another package claimed the alias more recently, it does not.
+    That is not a defect in this manifest. It is the condition the long name is the escape
+    hatch for.
 
     Each launcher is a separate executable rather than one executable with three aliases,
     because a process launched through an alias cannot reliably tell which alias was typed.
@@ -154,11 +158,14 @@
 
     AppListEntry="none" on the two non canonical names keeps one Start menu entry instead of
     three. It does not affect the execution alias, which is a separate extension.
+
+    Application/@Id "Ash" is an identifier (part of the app's AUMID), not the command, so it
+    is unchanged by the rename to ashx.
   -->
   <Applications>
     <Application
       Id="Ash"
-      Executable="ash.exe"
+      Executable="ashx.exe"
       uap10:RuntimeBehavior="packagedClassicApp"
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements
@@ -170,7 +177,7 @@
       <Extensions>
         <uap5:Extension Category="windows.appExecutionAlias">
           <uap5:AppExecutionAlias>
-            <uap5:ExecutionAlias Alias="ash.exe" />
+            <uap5:ExecutionAlias Alias="ashx.exe" />
           </uap5:AppExecutionAlias>
         </uap5:Extension>
       </Extensions>
@@ -183,7 +190,7 @@
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements
         DisplayName="Automated Security Helper (ashv3, deprecated)"
-        Description="Deprecated name for ash. Warns on stderr, then runs the same CLI."
+        Description="Deprecated name for ashx. Warns on stderr, then runs the same CLI."
         BackgroundColor="transparent"
         Square150x150Logo="assets\Square150x150Logo.png"
         Square44x44Logo="assets\Square44x44Logo.png"
@@ -204,7 +211,7 @@
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements
         DisplayName="Automated Security Helper (long name)"
-        Description="Unambiguous name for hosts where a bare ash resolves to another program."
+        Description="Unambiguous name for hosts where a short name resolves to another program."
         BackgroundColor="transparent"
         Square150x150Logo="assets\Square150x150Logo.png"
         Square44x44Logo="assets\Square44x44Logo.png"

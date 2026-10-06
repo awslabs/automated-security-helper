@@ -318,7 +318,7 @@ class TestToolSelectionScopesFailures:
     The discovery loop records a failure for every plugin whose constructor raises,
     and that happens before the --tool filter. Folding those into the verdict
     unconditionally meant
-    `ash dependencies install --config .ash/.ash_community_plugins.yaml --tool
+    `ashx dependencies install --config .ash/.ash_community_plugins.yaml --tool
     trivy-repo` -- the command this change adds to CI -- exited 1 whenever any other
     community plugin failed to import, and named that other plugin in the panel.
     """
@@ -536,7 +536,7 @@ class TestToolSelection:
     "Nothing installed" panel accounts for the entire 451-byte difference between
     a first and a second invocation's captured length.
 
-    The product is not affected. A real ``ash dependencies install --tool
+    The product is not affected. A real ``ashx dependencies install --tool
     nonexistent`` prints the panel and exits 2;
     ``test_unknown_tool_reaches_a_real_stdout`` asserts that out of process, which
     is the only place it can honestly be asserted.
@@ -594,9 +594,9 @@ class TestToolSelection:
         entry point in its own process is what shows an operator who typed a tool
         name wrong gets told so, and gets a non-zero status to act on.
         """
-        ash = shutil.which("ash")
+        ash = shutil.which("ashx")
         if ash is None:
-            pytest.skip("the `ash` console script is not on PATH in this environment")
+            pytest.skip("the `ashx` console script is not on PATH in this environment")
         # encoding and errors are load-bearing, and not for tidiness.
         #
         # `text=True` on its own decodes the pipe with

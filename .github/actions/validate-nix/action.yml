@@ -92,7 +92,7 @@ runs:
       # reports a symptom and hides the cause, which cost a full CI round trip to diagnose.
       run: |
         set +e
-        ash scan \
+        ashx scan \
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
@@ -100,7 +100,7 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
-          echo "::error::ash scan --mode nix exited $rc (expected 0, or 2 for findings)"
+          echo "::error::ashx scan --mode nix exited $rc (expected 0, or 2 for findings)"
           exit "$rc"
         fi
         echo "scan exited $rc"

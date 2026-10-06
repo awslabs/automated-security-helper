@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Console-script entry point that cannot fail without saying why.
 
-The bug this exists for: ``ash --version`` exited 1 with *completely empty*
+The bug this exists for: ``ash --version`` (the v3 name of ``ashx``) exited 1 with *completely empty*
 stdout and stderr, leaving an operator a bare exit code and nothing to act on.
 Seen on the MSIX packaging leg (job 105400271151, run 35279579798), both through
 the Windows app-execution alias and by invoking the venv's own ``ash.exe``
@@ -51,10 +51,11 @@ the shape a new Python release produces -- would otherwise raise before any of
 this ran, and be discarded by the same missing sink. The ``_load_*`` helpers exist
 only to defer that import into :func:`_guarded`'s ``try``.
 
-Two console-script entry points sit on top of it: :func:`main` for ``ash`` and
-``automated-security-helper``, and :func:`main_ashv3` for the deprecated
-``ashv3``, which prints a notice before running. They differ only in which
-callable they load, so the failure ladder has exactly one copy.
+Three console-script entry points sit on top of it: :func:`main` for ``ashx``
+and ``automated-security-helper``, :func:`main_ash` for the deprecated ``ash``
+and :func:`main_ashv3` for the deprecated ``ashv3``. The two deprecated ones
+print a one-line notice before running. They differ only in which callable they
+load, so the failure ladder has exactly one copy.
 
 Known limitation: an exception raised while importing this module, or
 ``automated_security_helper/__init__.py`` above it, still precedes the repair and
@@ -70,7 +71,7 @@ import traceback
 
 #: Prefix for the last-resort report. Deliberately greppable, and it names the
 #: program because on this path nothing else has identified itself yet.
-_BANNER = "ash: fatal error"
+_BANNER = "ashx: fatal error"
 
 
 def _reattach(fd: int):
@@ -191,7 +192,7 @@ def _emit(text: str, stream) -> None:
 
 
 def _load_run_app():
-    """Import and return ``cli.main.run_app``, the target of ``ash``.
+    """Import and return ``cli.main.run_app``, the target of ``ashx``.
 
     The import lives in a function so :func:`_guarded` can perform it inside its
     own ``try``. See the module docstring: the import is the most likely thing to
@@ -200,6 +201,17 @@ def _load_run_app():
     from automated_security_helper.cli.main import run_app
 
     return run_app
+
+
+def _load_run_ash_alias():
+    """Import and return ``cli.main.run_ash_alias``, the target of ``ash``.
+
+    Like ``run_ashv3`` it prints its deprecation notice to ``sys.stderr``, so it
+    is reached through the stream repair for the same reason.
+    """
+    from automated_security_helper.cli.main import run_ash_alias
+
+    return run_ash_alias
 
 
 def _load_run_ashv3():
@@ -245,17 +257,27 @@ def _guarded(load) -> None:
 
 
 def main() -> None:
-    """Entry point for the ``ash`` and ``automated-security-helper`` scripts."""
+    """Entry point for the ``ashx`` and ``automated-security-helper`` scripts."""
     _guarded(_load_run_app)
+
+
+def main_ash() -> None:
+    """Entry point for the deprecated ``ash`` console script.
+
+    Separate from :func:`main` so the notice fires once per process and never for
+    the ``ashx`` name. The exit code is the CLI's own: the notice is printed and
+    then the same app runs.
+    """
+    _guarded(_load_run_ash_alias)
 
 
 def main_ashv3() -> None:
     """Entry point for the deprecated ``ashv3`` console script.
 
     Separate from :func:`main` so the deprecation notice fires once per process
-    and never for the ``ash`` name. ``automated-security-helper`` deliberately
+    and never for the ``ashx`` name. ``automated-security-helper`` deliberately
     keeps :func:`main` and stays silent: it is the escape hatch for hosts where a
-    bare ``ash`` resolves to something else, and that collision is real -- MSYS2
-    ships the Almquist shell under that name.
+    short name resolves to something else, and that collision is real -- MSYS2
+    ships the Almquist shell as ``ash``.
     """
     _guarded(_load_run_ashv3)

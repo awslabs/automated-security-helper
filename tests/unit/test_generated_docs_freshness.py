@@ -147,7 +147,7 @@ def _documented_env_vars() -> set[str]:
     """Env var names appearing in an 'Environment Variable' column of the CLI reference.
 
     Scoped to that column on purpose. The page also mentions names inside shell
-    examples and as output filenames (``ash get-genai-guide -o
+    examples and as output filenames (``ashx get-genai-guide -o
     ASH_INTEGRATION_GUIDE.md``), and treating those as documented variables would
     make this test fail on a filename.
     """

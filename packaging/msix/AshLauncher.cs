@@ -40,15 +40,16 @@
 //
 // WHY THREE COPIES OF ONE SOURCE
 //
-// [project.scripts] declares three console scripts (ash, ashv3, automated-security-helper)
-// and all three must be reachable. MSIX documents one app execution alias per Application,
-// so there are three Applications, and each needs its own Executable. Rather than three
+// The package exposes three of the console scripts [project.scripts] declares (ashx, ashv3,
+// automated-security-helper), and all three must be reachable. The fourth, the deprecated
+// `ash` alias, is deliberately not exposed on Windows; see NOT_EXPOSED_SCRIPTS in msix.py.
+// MSIX documents one app execution alias per Application, so there are three Applications, and each needs its own Executable. Rather than three
 // near-identical sources, msix.py compiles THIS source three times to three output names
 // and the program reads its own filename to decide which venv console script to run.
 //
 // That indirection is deliberate: it means `ashv3.exe` runs the venv's `ashv3.exe`, so the
 // deprecation warning users see comes from the wheel's own run_ashv3 wrapper. A launcher
-// that hardcoded "always run ash" would silently drop that warning, and a launcher that
+// that hardcoded "always run ashx" would silently drop that warning, and a launcher that
 // printed its own warning would be a second copy of a message that already exists.
 //
 // It reads its own FILE NAME rather than the alias that was typed, on purpose. A process
@@ -122,7 +123,7 @@ internal static class AshLauncher
             // A named failure with a next step. Everything this program deliberately fails at
             // is a condition the user can act on (no Python, no index, unwritable
             // LOCALAPPDATA), so a bare stack trace would be strictly worse than a sentence.
-            Console.Error.WriteLine("ash: " + error.Message);
+            Console.Error.WriteLine("ashx: " + error.Message);
             return 1;
         }
         catch (IOException error)
@@ -130,12 +131,12 @@ internal static class AshLauncher
             // Disk full, LOCALAPPDATA on a disconnected redirected profile, a venv directory
             // held open by another process. Also user-actionable, but the message comes from
             // Windows rather than from this program, so it is passed through with the path.
-            Console.Error.WriteLine("ash: file system error while preparing the virtualenv: " + error.Message);
+            Console.Error.WriteLine("ashx: file system error while preparing the virtualenv: " + error.Message);
             return 1;
         }
         catch (UnauthorizedAccessException error)
         {
-            Console.Error.WriteLine("ash: permission denied while preparing the virtualenv: " + error.Message);
+            Console.Error.WriteLine("ashx: permission denied while preparing the virtualenv: " + error.Message);
             return 1;
         }
         // Anything else is a defect in this launcher rather than a condition a user can fix,
@@ -273,7 +274,7 @@ internal static class AshLauncher
     // IsBootstrapped checking the marker rather than the console script, and an unfinished tree
     // found here is deleted and rebuilt rather than used.
     //
-    // Two shells can run ash for the first time at the same moment. Staging let both build a
+    // Two shells can run ashx for the first time at the same moment. Staging let both build a
     // full copy and threw one away, which cost a duplicate download of every dependency. The
     // lock makes the second wait for the first and then find the work already done.
     private static void CreateVenv(string venvDirectory, string packageRoot, string scriptName)
@@ -299,7 +300,7 @@ internal static class AshLauncher
             if (Directory.Exists(venvDirectory))
             {
                 Console.Error.WriteLine(
-                    "ash: removing an unfinished virtualenv at " + venvDirectory + " and starting over.");
+                    "ashx: removing an unfinished virtualenv at " + venvDirectory + " and starting over.");
                 Directory.Delete(venvDirectory, true);
             }
 
@@ -308,8 +309,8 @@ internal static class AshLauncher
             // Progress goes to stderr, not stdout. A first run can take a minute while pip
             // resolves ASH's dependencies, so saying nothing looks like a hang; but ASH's stdout
             // is read by scripts, and a banner mixed into it would corrupt a piped report.
-            Console.Error.WriteLine("ash: first run, creating a virtualenv at " + venvDirectory);
-            Console.Error.WriteLine("ash: this resolves ASH's dependencies from a Python index and happens once.");
+            Console.Error.WriteLine("ashx: first run, creating a virtualenv at " + venvDirectory);
+            Console.Error.WriteLine("ashx: this resolves ASH's dependencies from a Python index and happens once.");
 
             bool finished = false;
             try
@@ -354,7 +355,7 @@ internal static class AshLauncher
                     Environment.NewLine +
                     "The presence of THIS file, not of any console script, is what marks this" +
                     Environment.NewLine +
-                    "virtualenv usable. Deleting it forces the next ash run to rebuild." +
+                    "virtualenv usable. Deleting it forces the next ashx run to rebuild." +
                     Environment.NewLine);
                 finished = true;
             }
@@ -399,8 +400,8 @@ internal static class AshLauncher
                 if (DateTime.UtcNow >= deadline)
                 {
                     throw new LauncherError(
-                        "waited 30 minutes for another ash process to finish creating the " +
-                        "virtualenv at " + venvDirectory + ", and it never did. If no other ash " +
+                        "waited 30 minutes for another ASH process to finish creating the " +
+                        "virtualenv at " + venvDirectory + ", and it never did. If no other ASH " +
                         "is running, delete " + gatePath + " and run this again.");
                 }
                 System.Threading.Thread.Sleep(500);
@@ -574,7 +575,7 @@ internal static class AshLauncher
     // The arguments come from Environment.CommandLine with the leading program token removed,
     // NOT from a re-quoted string[] args. Rebuilding a command line from a parsed argv means
     // reimplementing the CommandLineToArgvW quoting rules in reverse, and getting that subtly
-    // wrong is how `ash scan --source-dir "C:\my repo"` turns into two arguments. Passing the
+    // wrong is how `ashx scan --source-dir "C:\my repo"` turns into two arguments. Passing the
     // original tail through is exact by construction.
     //
     // This also keeps the CLI's own option shapes intact without knowing anything about them,

@@ -64,6 +64,7 @@ environment where ASH is installed from outside this checkout.
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -300,19 +301,47 @@ def _commitizen_settings() -> dict:
     return _pyproject()["tool"]["commitizen"]
 
 
-def _candidate_files():
+def _candidate_files(root: Path = REPO_ROOT):
     # iter_repo_files rather than REPO_ROOT.rglob("*"): rglob raises from inside
     # its own descent when a directory disappears between being listed and being
     # scanned, which is what another xdist worker's ash_temp_path teardown does.
     # Measured on macos-14 py3.11, FileNotFoundError from os.scandir on
     # tests/pytest-temp/<uuid>/test_output_dir. Pruning during the walk removes
     # the race; filtering rglob's output cannot, because it never yields.
-    for path in iter_repo_files(REPO_ROOT, skip_dirs=_SKIP_DIRS):
+    candidates = []
+    for path in iter_repo_files(root, skip_dirs=_SKIP_DIRS):
         if not path.is_file() or path.is_symlink():
             continue
-        if any(part in _SKIP_DIRS for part in path.relative_to(REPO_ROOT).parts):
+        if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
             continue
-        yield path
+        candidates.append(path)
+    ignored = _gitignored(root, candidates)
+    for path in candidates:
+        if path not in ignored:
+            yield path
+
+
+def _gitignored(root: Path, paths: list[Path]) -> set[Path]:
+    """The subset of ``paths`` that git ignores, so generated output is not walked.
+
+    `git check-ignore` never reports a tracked file, so a committed file matching an
+    ignore pattern is still checked. Outside a git work tree (exit 128) nothing is
+    treated as ignored: that walks more files, never fewer.
+    """
+    if not paths:
+        return set()
+    result = subprocess.run(
+        ["git", "check-ignore", "-z", "--stdin"],
+        cwd=root,
+        input="\0".join(path.relative_to(root).as_posix() for path in paths),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # 0: some paths are ignored. 1: none are. Anything else is git failing.
+    if result.returncode not in (0, 1):
+        return set()
+    return {root / name for name in result.stdout.split("\0") if name}
 
 
 def _install_refs():
@@ -895,6 +924,24 @@ class TestCommitizenMaintainsTheReferences:
             f"trees stale, failing the drift gate. Current hooks: {hooks}"
         )
 
+    def test_a_bump_re_renders_the_quick_create_links(self):
+        """The same chain for the CDK templates' AshVersion default.
+
+        version_files rewrites that default in each committed template, and
+        deploy/quick-create-links.md tabulates it. The document has a .template
+        sibling, so it cannot be a version_files target itself; it has to be
+        re-rendered after the templates move, or the IaC drift workflow, which
+        renders it and fails on any diff, goes red on the bump commit.
+        """
+        hooks = _commitizen_settings().get("pre_bump_hooks") or []
+
+        assert any("render_quick_create_links.py render" in hook for hook in hooks), (
+            "No [tool.commitizen] pre_bump_hooks entry runs "
+            "`render_quick_create_links.py render`, so `cz bump` would move the CDK "
+            "templates' AshVersion default and leave deploy/quick-create-links.md "
+            f"on the old one. Current hooks: {hooks}"
+        )
+
     def test_the_two_pyproject_version_fields_agree(self):
         """`[project]` and `[tool.commitizen]` both carry a version.
 
@@ -1097,3 +1144,86 @@ class TestTheTwoMaintenanceMechanismsDoNotOverlap:
             "this one only has to be far enough above zero that the disjointness "
             "assertions above cannot pass vacuously."
         )
+
+
+class TestGitignoredFilesAreSkipped:
+    """Generated, gitignored output is not ours to keep current.
+
+    A local `jsii` build writes deploy/cdk-constructs/.jsii, which embeds the package
+    version with a trailing newline. The well-formedness walk read that as a malformed
+    pin, so the suite failed on any machine that had built the constructs and passed
+    on a fresh checkout. Skipping by gitignore rather than by name keeps the next
+    generated file from needing its own entry in _SKIP_DIRS.
+    """
+
+    @staticmethod
+    def _git(root: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", *args], cwd=root, check=True, capture_output=True, text=True
+        )
+
+    def test_an_ignored_file_is_skipped_and_the_rest_are_walked(self, tmp_path):
+        root = tmp_path / "repo"
+        (root / "pkg").mkdir(parents=True)
+        self._git(root, "init", "-q")
+        (root / "pkg" / ".gitignore").write_text(".jsii\n", encoding="utf-8")
+        (root / "pkg" / ".jsii").write_text('"version": "4.0.0\\n"\n', encoding="utf-8")
+        (root / "pkg" / "tracked.md").write_text("tracked\n", encoding="utf-8")
+        (root / "pkg" / "untracked.md").write_text("untracked\n", encoding="utf-8")
+        self._git(root, "add", "pkg/.gitignore", "pkg/tracked.md")
+
+        found = {path.relative_to(root).as_posix() for path in _candidate_files(root)}
+
+        assert "pkg/.jsii" not in found, found
+        # The control: skipping by gitignore must not also drop files git does not
+        # ignore, tracked or not. An untracked file is new work, and new work is
+        # exactly what this walk exists to check.
+        assert {"pkg/.gitignore", "pkg/tracked.md", "pkg/untracked.md"} <= found, found
+
+    def test_a_tracked_file_matching_an_ignore_rule_is_still_walked(self, tmp_path):
+        # `git add -f` commits a file an ignore rule matches. It is ours to keep
+        # current, so the walk must check it: only untracked ignored output is
+        # skipped. `git check-ignore --no-index` would report both as ignored.
+        root = tmp_path / "repo"
+        (root / "gen").mkdir(parents=True)
+        self._git(root, "init", "-q")
+        (root / ".gitignore").write_text("*.log\ngen/\n", encoding="utf-8")
+        (root / "tracked.log").write_text("tracked\n", encoding="utf-8")
+        (root / "untracked.log").write_text("untracked\n", encoding="utf-8")
+        (root / "gen" / "tracked.md").write_text("tracked\n", encoding="utf-8")
+        (root / "gen" / "untracked.md").write_text("untracked\n", encoding="utf-8")
+        self._git(root, "add", ".gitignore")
+        self._git(root, "add", "-f", "tracked.log", "gen/tracked.md")
+
+        found = {path.relative_to(root).as_posix() for path in _candidate_files(root)}
+
+        assert {"tracked.log", "gen/tracked.md"} <= found, found
+        # The control: the same rules do skip the untracked files, so the
+        # assertion above is not passing because nothing is ignored at all.
+        assert not {"untracked.log", "gen/untracked.md"} & found, found
+
+    def test_outside_a_git_work_tree_every_file_is_walked(self, tmp_path, monkeypatch):
+        # `git check-ignore` exits 128 outside a work tree. That must walk more
+        # files, never fewer, so a .gitignore there is not honored.
+        root = tmp_path / "plain"
+        root.mkdir()
+        # Keep git from finding a repository above tmp_path, wherever basetemp is.
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+        (root / ".gitignore").write_text("*.log\n", encoding="utf-8")
+        (root / "a.log").write_text("a\n", encoding="utf-8")
+        (root / "b.md").write_text("b\n", encoding="utf-8")
+        probe = subprocess.run(
+            ["git", "check-ignore", "a.log"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert probe.returncode == 128, (
+            "precondition: this test needs a directory outside any git work tree, "
+            f"but git check-ignore exited {probe.returncode}: {probe.stderr}"
+        )
+
+        found = {path.relative_to(root).as_posix() for path in _candidate_files(root)}
+
+        assert found == {".gitignore", "a.log", "b.md"}, found

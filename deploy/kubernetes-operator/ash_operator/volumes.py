@@ -1,8 +1,8 @@
 """The volume layout, and the guard that proves it is not the broken one.
 
-``ash scan`` tests source/output collision by **equality only**. ``ash merge``
+``ashx scan`` tests source/output collision by **equality only**. ``ashx merge``
 tests equality **or ancestry**, and its own docstring states the asymmetry:
-"Equal-to OR an ancestor-of, where ``ash scan`` checks only equality.
+"Equal-to OR an ancestor-of, where ``ashx scan`` checks only equality.
 ``--output-dir ..`` from a subdirectory reaches the same state without the paths
 ever being equal, and an ancestor is worse than equality rather than milder."
 
@@ -61,7 +61,7 @@ def assert_output_escapes_source(*, source_dir: str, output_dir: str) -> None:
     if is_ancestor_or_equal(output_dir, source_dir):
         raise VolumeLayoutError(
             f"outputDir {output_dir!r} is equal to, or an ancestor of, sourceDir "
-            f"{source_dir!r}. `ash scan` only checks equality, so this layout is "
+            f"{source_dir!r}. `ashx scan` only checks equality, so this layout is "
             f"accepted by the scan and then reports zero findings, because every "
             f"finding's location resolves inside the output directory and is "
             f"suppressed. Use sibling paths."

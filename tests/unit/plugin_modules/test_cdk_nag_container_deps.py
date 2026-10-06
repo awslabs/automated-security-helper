@@ -4,7 +4,7 @@ Two defects are covered, and they pull in opposite directions.
 
 The first: the Dockerfile installed ASH without the [cdk] optional extra and the
 cdk-nag scanner did not override ``get_installation_commands()``, so
-``ash dependencies install`` had no way to install the CDK dependencies and
+``ashx dependencies install`` had no way to install the CDK dependencies and
 cdk-nag was reported MISSING in container mode. That is why the scanner must
 emit an install command at all.
 
@@ -188,7 +188,7 @@ class TestCdkNagInstallationCommands:
 
         This is the supply-chain guard. ASH is not published to any package
         index, so any command naming its distribution resolves to whoever owns
-        that name -- and `ash dependencies install` executes these commands
+        that name -- and `ashx dependencies install` executes these commands
         inside CI. Asserted against the whole flattened argument list rather than
         one exact string so that reintroducing it in any form fails here:
         bare, with an extra, with a version pin, or under the underscore
@@ -417,7 +417,7 @@ class TestCdkExtraResolution:
     def test_falls_back_when_distribution_is_not_found(self) -> None:
         """An uninstalled checkout must still get a usable requirement list.
 
-        Returning nothing here would make `ash dependencies install` exit 0
+        Returning nothing here would make `ashx dependencies install` exit 0
         having installed nothing, which is the original MISSING-scanner defect.
 
         Both discovery strategies are defeated, and that is a change in what this
@@ -453,7 +453,7 @@ class TestCdkExtraResolution:
         and never enters the except block, so without this test the handler is
         present but unexecuted. Both exception types are covered because catching
         only one of them would let the other escape into
-        `ash dependencies install` as an unhandled traceback.
+        `ashx dependencies install` as an unhandled traceback.
 
         The raise now falls through to the install-location strategy instead of
         returning immediately, so that strategy is emptied too -- otherwise this
@@ -696,7 +696,7 @@ class TestCdkExtraResolution:
         with exactly the same confidence as the genuine one.
 
         Weighed as failure modes rather than as semantics: honoring an empty read
-        means ``ash dependencies install`` emits no pip command, exits 0, and
+        means ``ashx dependencies install`` emits no pip command, exits 0, and
         leaves cdk-nag MISSING, which is the original defect this whole area
         exists to remove and is invisible to a caller that only checks the exit
         code. Falling back installs pins that may lag pyproject.toml by a bound,

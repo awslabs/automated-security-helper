@@ -4,9 +4,9 @@
 
 """Asserts that a scan actually found something, and that the right tool found it.
 
-WHY THIS IS NOT `ash scan && echo ok`
+WHY THIS IS NOT `ashx scan && echo ok`
 -------------------------------------
-`ash scan` exits 0 when it finds nothing and 2 when it finds something -- the
+`ashx scan` exits 0 when it finds nothing and 2 when it finds something -- the
 default `fail_on_findings` is true. So on a fixture that is supposed to carry a
 finding, exit 0 is the FAILING outcome and exit 2 is the passing one. A check
 written as "install the package, run a scan, require exit 0" would therefore be
@@ -132,7 +132,7 @@ def check_sarif(path: str, minimum: int, require_scanner: str | None) -> list[st
             f"minimum of {minimum}. The caller asked for at least {minimum} "
             "because the tree that was scanned is known to contain something to "
             "find, so a shortfall means the scan did not do what it was asked -- "
-            "not that the tree is clean. Note that `ash scan` exits 0 when it "
+            "not that the tree is clean. Note that `ashx scan` exits 0 when it "
             "finds nothing, which is why the exit code is not what is checked."
         )
 
@@ -217,7 +217,7 @@ SELF_TEST_CASES = [
         False,
     ),
     (
-        "a scan that found nothing -- the case `ash scan` exits 0 for",
+        "a scan that found nothing -- the case `ashx scan` exits 0 for",
         sarif([]),
         1,
         "detect-secrets",
@@ -292,7 +292,7 @@ def run_self_test(stream: TextIO) -> int:
         f"{rejected} of them by being rejected.\n"
         "Every case here is decided on the CONTENT of the report. Two of them -- "
         "the empty result set and the empty run list -- are the ones a scan that "
-        "found nothing produces, and `ash scan` exits 0 for both, so no check on "
+        "found nothing produces, and `ashx scan` exits 0 for both, so no check on "
         "the exit code can tell them from a scan that worked.\n"
     )
     return 0

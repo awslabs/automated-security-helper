@@ -27,21 +27,21 @@
 - id: ash
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs various code scanners from Python directly
-  entry: ashv3 --mode=precommit
+  entry: ashx --mode=precommit
   language: python
   pass_filenames: false
   args: []
 - id: ash-simple-scan
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs various code scanners from Python directly
-  entry: ashv3 --mode=precommit
+  entry: ashx --mode=precommit
   language: python
   pass_filenames: false
   args: []
 - id: ash-full-scan
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs full ASH scan with container build and all scanners (takes several minutes)
-  entry: ashv3 --mode=container --simple
+  entry: ashx --mode=container --simple
   language: script
   pass_filenames: false
   args: []

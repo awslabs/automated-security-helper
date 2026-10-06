@@ -103,7 +103,7 @@ Known limitations
   than passing quietly. A gate that silently tests nothing is worse than a red one,
   so this is intentional -- but it does mean a broken tool install reads as a gate
   failure. The message names that cause explicitly, and the workflow runs
-  ``ash dependencies install`` as its own step so an install flake fails there
+  ``ashx dependencies install`` as its own step so an install flake fails there
   instead.
 * ``validation_checkpoints`` errors and discrepancies are reported as diagnostic
   context for a scanner at ERROR. They are not themselves a failure condition.
@@ -184,7 +184,7 @@ TOLERATED_EXIT_CODES = (0, 2)
 #: workflow's own comment records it: "On the Windows runner only bandit and
 #: checkov are available at all". Left unnarrowed, cfn-nag, grype, syft and the
 #: rest report MISSING. On its own that does not fail the run today, because
-#: ``fail_on_incomplete_scanners`` defaults to False and ``ash scan`` exits 0 on a
+#: ``fail_on_incomplete_scanners`` defaults to False and ``ashx scan`` exits 0 on a
 #: results file full of MISSING -- and that is the reason to name the set rather
 #: than a reason not to. An unnarrowed run would land inside
 #: TOLERATED_EXIT_CODES having exercised two scanners while appearing to cover ten,
@@ -716,7 +716,7 @@ def check_expected_rules_present(
     anywhere in this repository, so the citation resolved to nothing; and the gate as a
     whole does fail when one of the scanners it selected is MISSING. It fails in
     ``check_exit_code``: ``GATE_SCANNERS`` narrows the run to bandit and checkov, so a
-    MISSING one of those makes ``ash scan`` exit 1, and 1 is deliberately absent from
+    MISSING one of those makes ``ashx scan`` exit 1, and 1 is deliberately absent from
     ``TOLERATED_EXIT_CODES`` -- see the note there, which rejects adding it because that
     would tolerate exactly the state this gate exists to catch.
 
@@ -862,7 +862,7 @@ def check_exit_code(exit_code: int) -> List[str]:
         return []
     return [
         (
-            f"ash scan exited {exit_code}; expected one of "
+            f"ashx scan exited {exit_code}; expected one of "
             f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
             "Exit 1 is a scan error and exit 3 is an invalid config"
         )

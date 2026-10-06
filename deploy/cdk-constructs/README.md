@@ -49,7 +49,7 @@ npm run build
 ## There is no ASH container image
 
 ASH publishes no container image to any public registry, and will not, for
-licensing reasons. So this construct never references a prebuilt `ash` image.
+licensing reasons. So this construct never references a prebuilt `ashx` image.
 It defaults to a generic AWS-managed CodeBuild image and installs ASH into it.
 
 If you want a warm image, build one yourself from the `Dockerfile` at the root of
@@ -131,7 +131,7 @@ the merge action always runs at a later run order than every shard; and
 `--fail-on-findings` and `--no-fail-on-findings` so the escape hatch cannot be
 used to move the verdict.
 
-Because the merge action's exit code *is* the pipeline's verdict, `ash merge`
+Because the merge action's exit code *is* the pipeline's verdict, `ashx merge`
 must exit non-zero when the merged findings breach the configured threshold.
 
 Each shard also writes to its own output directory (`<outputDirectory>/shard-N`).
@@ -203,18 +203,18 @@ so ASH treats them as one.
 
 `severityThreshold` is applied to whichever action owns the verdict: the scan
 itself when unsharded, and the merge action when sharded. It is deliberately not
-passed to shards. On `ash scan` that option changes only that scan's exit code,
+passed to shards. On `ashx scan` that option changes only that scan's exit code,
 and a shard's exit code is discarded by design, so a floor passed to a shard would
 look like it was set while having no effect on anything.
 
 ### Triaging a failed merge
 
-`ash merge` refuses results whose `metadata.shard` provenance is missing, which is
+`ashx merge` refuses results whose `metadata.shard` provenance is missing, which is
 how it distinguishes one shard of several from a whole unsharded scan. Provenance
 is recorded only when a scan runs with both `--shard-index` and `--shard-count`,
 and it is skipped when the scan registered no scanners at all. So a merge action
 failing with "no shard provenance found" usually means the fault is upstream in a
-shard, not in the merge: either a shard ran `ash scan` without both flags, or a
+shard, not in the merge: either a shard ran `ashx scan` without both flags, or a
 shard's container registered zero scanners, for instance because a scanner plugin
 failed to load. The merge action is where it surfaces, not where it broke.
 
@@ -222,7 +222,7 @@ Setting `shardCount` higher than the number of enabled scanners is wasteful rath
 than broken. The surplus shards are assigned no scanners, still record provenance
 and still merge; they just cost a CodeBuild start each. That was measured at 50
 shards over a 5-scanner tree — 45 empty assignments, all 50 stamped, merged
-findings identical to one unsharded scan — and `ash merge` carries a regression
+findings identical to one unsharded scan — and `ashx merge` carries a regression
 test at that same ceiling, so it is a supported configuration rather than one that
 happens to work.
 
@@ -237,7 +237,7 @@ distribution name, and that is deliberate:
 
 - ASH is **not published to PyPI**. The name `automated-security-helper` on PyPI
   is an unrelated single-release placeholder package with no connection to this
-  project. Installing it would succeed, leave no `ash` on `PATH` so every build
+  project. Installing it would succeed, leave no `ashx` on `PATH` so every build
   would fail at the scan step, and pull a third party's code into the container
   running your security scan.
 - `aws-automated-security-helper` and `awslabs-automated-security-helper` do not

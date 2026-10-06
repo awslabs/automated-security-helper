@@ -190,7 +190,7 @@ def _log_unsatisfied_output_formats(unsatisfied: Dict[str, str]) -> None:
 
     Not raised, either. A run asked for ``markdown,asff`` must still write the
     markdown report; failing the whole scan over one unproducible format would cost
-    the operator every other report and, for ``ash scan``, the findings verdict
+    the operator every other report and, for ``ashx scan``, the findings verdict
     along with it.
     """
     for fmt, reason in sorted(unsatisfied.items()):

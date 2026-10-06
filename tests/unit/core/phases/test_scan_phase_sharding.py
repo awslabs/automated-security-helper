@@ -223,7 +223,7 @@ class TestShardAssignmentProvenance:
 
         assert assignment is not None
         assert assignment.candidate_scanners is not None, (
-            "the phase recorded no candidate set, so ash merge cannot verify the "
+            "the phase recorded no candidate set, so ashx merge cannot verify the "
             "union covers it"
         )
 
@@ -390,13 +390,13 @@ class TestShardAssignmentProvenance:
 
         assert set(assignment.selected_scanners) <= set(assignment.assigned_scanners), (
             f"shard {index} selected {assignment.selected_scanners} but owns only "
-            f"{assignment.assigned_scanners}; ash merge would refuse this"
+            f"{assignment.assigned_scanners}; ashx merge would refuse this"
         )
 
     def test_a_non_sharded_run_records_no_assignment(self, scan_phase):
         """An unsharded scan must stay unstamped.
 
-        ``ash merge`` refuses a file with no provenance precisely so it cannot
+        ``ashx merge`` refuses a file with no provenance precisely so it cannot
         accept a whole unsharded scan as a complete merge of a split.
         """
         _run(scan_phase, FOUR_SCANNERS)

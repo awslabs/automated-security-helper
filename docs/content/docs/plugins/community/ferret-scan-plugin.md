@@ -77,7 +77,7 @@ The plugin requires Ferret Scan to be installed and available in your system PAT
 
 **ASH (Recommended)** — installs the version the plugin is tested against:
 ```bash
-ash dependencies install --config .ash/.ash_community_plugins.yaml
+ashx dependencies install --config .ash/.ash_community_plugins.yaml
 ```
 
 **pip**: pass the supported range. A bare `pip install ferret-scan` resolves to
@@ -126,7 +126,7 @@ scanners:
 Use the `--ash-plugin-modules` flag when running ASH:
 
 ```bash
-uv run ash scan --source-dir /path/to/code \
+uv run ashx scan --source-dir /path/to/code \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
@@ -134,10 +134,10 @@ uv run ash scan --source-dir /path/to/code \
 
 ```bash
 # With config file
-uv run ash plugin list | grep -i ferret
+uv run ashx plugin list | grep -i ferret
 
 # Or with command line flag
-uv run ash plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins | grep -i ferret
+uv run ashx plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins | grep -i ferret
 ```
 
 You should see `ferret-scan` in the list of scanners.
@@ -156,16 +156,16 @@ scanners:
 
 ```bash
 # Scan current directory
-uv run ash --scanners ferret-scan
+uv run ashx --scanners ferret-scan
 
 # Scan specific directory
-uv run ash --source-dir /path/to/project --scanners ferret-scan
+uv run ashx --source-dir /path/to/project --scanners ferret-scan
 
 # Run with ferret-scan's own debug output
-uv run ash --scanners ferret-scan -o ferret_debug=true
+uv run ashx --scanners ferret-scan -o ferret_debug=true
 
 # Run with ferret-scan's own verbose output
-uv run ash --scanners ferret-scan -o ferret_verbose=true
+uv run ashx --scanners ferret-scan -o ferret_verbose=true
 ```
 
 ### Run Without Configuration File
@@ -174,11 +174,11 @@ If you want to run Ferret Scan without saving a configuration file:
 
 ```bash
 # Scan current directory only with ferret-scan
-uv run ash --scanners ferret-scan \
+uv run ashx --scanners ferret-scan \
   --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 
 # Scan with all available scanners (including ferret-scan)
-uv run ash --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
+uv run ashx --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
 ## Configuration Options
@@ -481,14 +481,14 @@ scanners:
 
 ```bash
 # Use Ferret Scan alongside other ASH scanners
-uv run ash --scanners ferret-scan,bandit,detect-secrets
+uv run ashx --scanners ferret-scan,bandit,detect-secrets
 ```
 
 ### CI/CD Integration
 
 ```bash
 # Run in container mode for CI/CD
-uv run ash --mode container --scanners ferret-scan
+uv run ashx --mode container --scanners ferret-scan
 ```
 
 ## Output Integration
@@ -556,10 +556,10 @@ Enable ferret-scan's own debug/verbose output to troubleshoot issues:
 
 ```bash
 # Enable ferret-scan's debug output (shows preprocessing and validation flow)
-uv run ash --scanners ferret-scan -o ferret_debug=true
+uv run ashx --scanners ferret-scan -o ferret_debug=true
 
 # Enable ferret-scan's verbose output (shows detailed finding info)
-uv run ash --scanners ferret-scan -o ferret_verbose=true
+uv run ashx --scanners ferret-scan -o ferret_verbose=true
 ```
 
 ## Integration Examples
@@ -573,7 +573,7 @@ repos:
     hooks:
       - id: ash-ferret-scan
         name: ASH Ferret Scan Sensitive Data Detection
-        entry: uv run ash --scanners ferret-scan --mode precommit
+        entry: uv run ashx --scanners ferret-scan --mode precommit
         language: system
         pass_filenames: false
 ```
@@ -600,7 +600,7 @@ jobs:
           pip install uv
       - name: Run ASH with Ferret Scan
         run: |
-          uv run ash --scanners ferret-scan --output-format sarif \
+          uv run ashx --scanners ferret-scan --output-format sarif \
             --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]"
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v2
@@ -618,7 +618,7 @@ ferret-security-scan:
   before_script:
     - pip install ferret-scan uv
   script:
-    - uv run ash --scanners ferret-scan \
+    - uv run ashx --scanners ferret-scan \
         --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]"
   artifacts:
     reports:
@@ -640,7 +640,7 @@ ferret-security-scan:
 
 Consider using both scanners together for comprehensive coverage:
 ```bash
-uv run ash --scanners ferret-scan,detect-secrets
+uv run ashx --scanners ferret-scan,detect-secrets
 ```
 
 ## Documentation

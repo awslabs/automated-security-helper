@@ -768,9 +768,9 @@ def apply_suppressions_to_sarif(
     # Every finding in the scanned tree resolves inside such an output directory, so
     # the exclusion would drop the entire result set -- and a run with no findings
     # exits 0, so emptying it is indistinguishable from a clean scan. That is the
-    # worst outcome this function can produce, and it is reachable: `ash merge`
+    # worst outcome this function can produce, and it is reachable: `ashx merge`
     # builds its context with source_dir=Path.cwd() and the operator's --output-dir
-    # verbatim, so `ash merge --output-dir .` lands here. `ash scan` relocates the
+    # verbatim, so `ashx merge --output-dir .` lands here. `ashx scan` relocates the
     # equal-paths case before reaching this point; this covers containment, which it
     # does not, and covers every other caller that builds a context directly.
     #
@@ -831,7 +831,7 @@ def apply_suppressions_to_sarif(
                         # source_dir; Path(uri).resolve() anchored it on cwd instead,
                         # which agrees only when cwd happens to equal source_dir.
                         # Anywhere else -- a CI job that checks out to one directory
-                        # and passes --source-dir for another, `ash merge`, any MCP
+                        # and passes --source-dir for another, `ashx merge`, any MCP
                         # session -- the resolution landed outside the output
                         # directory and the exclusion silently stopped firing, so
                         # ASH's own reports came back as findings about the scanned

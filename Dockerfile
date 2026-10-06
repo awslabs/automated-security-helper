@@ -103,7 +103,7 @@ FROM ${BASE_IMAGE} AS core
 # bash for exactly one of the three runtimes ASH supports.
 #
 # Removing it rather than forcing `--format docker` on every caller: the format is
-# the caller's choice, `ash --mode container` supports docker, podman and finch, and
+# the caller's choice, `ashx --mode container` supports docker, podman and finch, and
 # a plain `podman build` by hand should behave like CI. With this gone, every RUN
 # runs under /bin/sh everywhere, so a bashism fails the same way in all three.
 #
@@ -262,7 +262,7 @@ ENV PATH="/usr/local/bin:$PATH"
 #
 # syft, grype and trivy come from their pinned release assets, verified against the
 # SHA256 digests in automated_security_helper/utils/tool_downloads.py, which is the
-# same table `ash dependencies install` and the nix flake resolve. Before this, all
+# same table `ashx dependencies install` and the nix flake resolve. Before this, all
 # three were installed by piping a vendor install script into a shell, which pinned
 # no bytes and gave the endpoint code execution during the build -- the alternative
 # tool_downloads.py's own docstring rejects while naming this image as the place
@@ -417,7 +417,7 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
+RUN ashx dependencies install --bin-path "${ASH_BIN_PATH}"
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 #
@@ -431,7 +431,7 @@ ENV ASH_IN_CONTAINER="YES"
 # BUILD_DATE_EPOCH changes on every invocation - run_ash_container.py passes
 # --build-arg BUILD_DATE_EPOCH=<now>. Referencing it near the top of the stage
 # invalidated every layer below it, so the apt/node/ruby/uv installs, the
-# pinned syft+grype+trivy downloads and `ash dependencies install` were all
+# pinned syft+grype+trivy downloads and `ashx dependencies install` were all
 # rebuilt from scratch on every build, and no layer cache of any kind could
 # ever hit. Nothing reads this value at runtime - it is referenced only here
 # and in the ARG declaration - so evaluating it last keeps the metadata while
@@ -492,10 +492,10 @@ ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
-RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
+RUN ashx dependencies install --bin-path "${ASH_BIN_PATH}"
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
-    CMD command -v ash || exit 1
+    CMD command -v ashx || exit 1
 
 ENTRYPOINT [ ]
-CMD [ "ash" ]
+CMD [ "ashx" ]

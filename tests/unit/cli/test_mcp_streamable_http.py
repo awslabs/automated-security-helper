@@ -222,7 +222,7 @@ def test_streamable_http_check_installation_via_client(streamable_server) -> Non
 
 
 def test_mcp_wrapper_exposes_streamable_http_flags() -> None:
-    """``ash mcp --help`` must list the streamable-HTTP flags from the wrapper.
+    """``ashx mcp --help`` must list the streamable-HTTP flags from the wrapper.
 
     The typer wrapper in ``automated_security_helper/cli/main.py`` has to mirror
     the parameters added to ``mcp_command`` — otherwise users hit
@@ -248,4 +248,4 @@ def test_mcp_wrapper_exposes_streamable_http_flags() -> None:
         "--stateless-http",
         "--allowed-host",
     ):
-        assert flag in flat, f"Missing {flag} in `ash mcp --help`:\n{result.output}"
+        assert flag in flat, f"Missing {flag} in `ashx mcp --help`:\n{result.output}"

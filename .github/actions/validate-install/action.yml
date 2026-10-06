@@ -19,11 +19,11 @@ runs:
     # statement about what these jobs test rather than a way to quieten them.
     #
     # This action answers one question: after installing ASH by method X, does
-    # `ash scan` run end to end? It installs ASH and nothing else -- no
-    # `ash dependencies install`, no `[cdk]` extra, no ruby gem, no Go binaries --
+    # `ashx scan` run end to end? It installs ASH and nothing else -- no
+    # `ashx dependencies install`, no `[cdk]` extra, no ruby gem, no Go binaries --
     # so of the ten default scanners only the pip-installed ones could possibly
     # run here. Left unnarrowed, the scan selects all ten, five report MISSING for
-    # tools this job never intended to provide, and `ash scan` exits non-zero
+    # tools this job never intended to provide, and `ashx scan` exits non-zero
     # because a scan that could not run what it was asked to run is not a pass.
     #
     # Naming one scanner says which one the smoke test covers. The nine it leaves
@@ -49,6 +49,12 @@ runs:
     # gate whose green depends on a network fetch is a flaky gate, and flaky gates
     # get disabled.
 
+    # `ashx` is the canonical command. pip and pipx also install the deprecated
+    # `ash` alias, so their verify steps run assert-deprecated-alias.sh: same exit
+    # code and --version output as `ashx`, plus exactly one deprecation line on
+    # stderr. uvx runs one named script from a temporary environment and has no
+    # PATH alias to check, so it only exercises `ashx`.
+
     # === pip ===
     - name: "pip: install"
       if: inputs.method == 'pip'
@@ -58,12 +64,13 @@ runs:
       if: inputs.method == 'pip'
       shell: bash
       run: |
-        ash --version
-        ash --help
+        ashx --version
+        ashx --help
+        bash "${GITHUB_ACTION_PATH}/assert-deprecated-alias.sh"
     - name: "pip: self-test scan"
       if: inputs.method == 'pip'
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: ashx scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
 
     # === pipx ===
     - name: "pipx: install pipx"
@@ -78,12 +85,13 @@ runs:
       if: inputs.method == 'pipx'
       shell: bash
       run: |
-        ash --version
-        ash --help
+        ashx --version
+        ashx --help
+        bash "${GITHUB_ACTION_PATH}/assert-deprecated-alias.sh"
     - name: "pipx: self-test scan"
       if: inputs.method == 'pipx'
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: ashx scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
 
     # === uvx ===
     - name: "uvx: install uv (Unix)"
@@ -97,11 +105,11 @@ runs:
     - name: "uvx: verify"
       if: inputs.method == 'uvx'
       shell: bash
-      run: uvx --from . ash --version
+      run: uvx --from . ashx --version
     - name: "uvx: self-test scan"
       if: inputs.method == 'uvx'
       shell: bash
-      run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: uvx --from . ashx scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
 
     # === homebrew ===
     - name: "homebrew: validate formula"

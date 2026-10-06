@@ -773,7 +773,7 @@ class ScannerStatisticsCalculator:
             # incomplete_scanners entirely. Measured on this tree, one scanner
             # recorded ERROR: with 0 SARIF findings it read ERROR and tripped the
             # gate; with 3 it read FAILED and the gate reported nothing incomplete,
-            # so `ash scan` exited 2 rather than 1 for a run in which a scanner had
+            # so `ashx scan` exited 2 rather than 1 for a run in which a scanner had
             # crashed.
             #
             # Only ERROR is taken from the status. excluded and dependencies_missing

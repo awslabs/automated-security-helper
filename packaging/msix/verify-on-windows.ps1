@@ -31,7 +31,7 @@
       windows.appExecutionAlias among the extensions NOT supported on Windows Server 2019, and
       publishes no equivalent statement for 2022 or 2025; the MSIX feature matrix has no
       Windows Server 2025 column at all, and windows-latest is Windows Server 2025. So whether
-      typing `ash` works on this host is measured here and reported, not asserted. When aliases
+      typing `ashx` works on this host is measured here and reported, not asserted. When aliases
       are unavailable the scan still runs, through the packaged executable, because the
       question of whether ASH can scan is separate from the question of how it was invoked.
 
@@ -172,6 +172,16 @@ packaging/README.md.
 
     $launchers = @($entries | Where-Object { $_ -match '^[^/]+\.exe$' } | Sort-Object)
     Write-Host "   launchers: $($launchers -join ', ')"
+    # The wheel still declares the deprecated `ash` console script, but this package must not
+    # expose it: on Windows `ash` is the name MSYS2 and Git for Windows give the Almquist
+    # shell, which is why the v4 command is `ashx`. msix.py refuses such a manifest; this
+    # checks the package that was actually built.
+    if ($launchers -contains 'ash.exe') {
+        Fail 'the package ships an ash.exe launcher; it exposes ashx, ashv3 and automated-security-helper only'
+    }
+    if ($launchers -notcontains 'ashx.exe') {
+        Fail "the package ships no ashx.exe launcher; launchers are: $($launchers -join ', ')"
+    }
 }
 finally {
     $archive.Dispose()
@@ -226,8 +236,9 @@ Write-Host "   venv will be created at: $venv"
 Write-Step '5. are the three names reachable from a shell'
 # Measured, not asserted, for the Windows Server reason in the .DESCRIPTION above. All three
 # are checked because all three are part of the entry-point contract, and the long name in
-# particular is the escape hatch for hosts where a bare `ash` resolves to something else --
-# MSYS2 ships the Almquist shell under that name and has already shadowed ASH's entry point.
+# particular is the escape hatch for hosts where a short name resolves to something else --
+# MSYS2 ships the Almquist shell as `ash` and has already shadowed ASH's v3 entry point, which
+# is why the command is `ashx` and why this package exposes no `ash` at all.
 $windowsApps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
 if ($env:PATH -notlike "*$windowsApps*") {
     # The directory aliases land in is normally already on PATH. If it is not, adding it is
@@ -236,7 +247,7 @@ if ($env:PATH -notlike "*$windowsApps*") {
     $env:PATH = "$windowsApps;$env:PATH"
 }
 
-$expectedNames = @('ash', 'ashv3', 'automated-security-helper')
+$expectedNames = @('ashx', 'ashv3', 'automated-security-helper')
 $resolved = @{}
 foreach ($name in $expectedNames) {
     $aliasPath = Join-Path $windowsApps "$name.exe"
@@ -284,7 +295,7 @@ UNVERIFIED by this run.
 Write-Step '6. the entry point runs, which is also the first-run venv creation'
 # First invocation does the bootstrap, so this step is slow on purpose and is where a missing
 # Python interpreter or an unreachable package index surfaces.
-& $resolved['ash'] --version
+& $resolved['ashx'] --version
 $ashExit = $LASTEXITCODE
 
 # The state of the venv is inspected BEFORE the exit code is judged, and the reason is a
@@ -299,7 +310,7 @@ $ashExit = $LASTEXITCODE
 # remove, one layer down: an empty ASH scan exits 0, and here an empty ASH *error* exits 1.
 # So the venv is described first, unconditionally, and the exit code is judged after.
 $venvScripts = Join-Path $venv 'Scripts'
-$venvAsh = Join-Path $venvScripts 'ash.exe'
+$venvAsh = Join-Path $venvScripts 'ashx.exe'
 Write-Host "   venv present:        $(Test-Path $venv)"
 Write-Host "   venv console script: $(Test-Path $venvAsh)  ($venvAsh)"
 if (Test-Path $venvScripts) {
@@ -376,7 +387,7 @@ if ($ashExit -ne 0) {
     Write-Host "   re-running with stdout and stderr captured:"
     $stdoutPath = Join-Path $env:TEMP 'ash-version-stdout.txt'
     $stderrPath = Join-Path $env:TEMP 'ash-version-stderr.txt'
-    $process = Start-Process -FilePath $resolved['ash'] -ArgumentList '--version' `
+    $process = Start-Process -FilePath $resolved['ashx'] -ArgumentList '--version' `
         -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     Write-Host "     second run exit: $($process.ExitCode)"
@@ -392,7 +403,7 @@ if ($ashExit -ne 0) {
     # And the venv's own console script directly, which separates a broken launcher from a
     # broken ASH. If this one works, the bug is in AshLauncher.cs and not in the package.
     if (Test-Path $venvAsh) {
-        Write-Host "   the venv's own ash.exe, bypassing the launcher:"
+        Write-Host "   the venv's own ashx.exe, bypassing the launcher:"
         & $venvAsh --version
         Write-Host "     exit: $LASTEXITCODE"
     }
@@ -405,7 +416,7 @@ if ($ashExit -ne 0) {
     #
     #   * If A fails, the venv's interpreter is not usable at all and nothing below matters.
     #   * If A passes and C fails, the defect is in ASH's CLI rather than in this package.
-    #   * If A and C pass while ash.exe does not, the shim is broken in some way the moved-venv
+    #   * If A and C pass while ashx.exe does not, the shim is broken in some way the moved-venv
     #     check above did not catch, and that check is what needs widening.
     #
     # B and C pass -I, and that flag is load-bearing. Without it `python -c` puts the current
@@ -428,7 +439,7 @@ if ($ashExit -ne 0) {
         & $venvPython -I -c "import automated_security_helper as m; print('import ok', m.__file__)"
         Write-Host "     exit: $LASTEXITCODE"
 
-        # The same callable [project.scripts] binds `ash` to, reached without the .exe
+        # The same callable [project.scripts] binds `ashx` to, reached without the .exe
         # shim. This is the probe that distinguishes a broken shim from a broken CLI.
         Write-Host "   probe C -- the console-script callable, bypassing the .exe shim:"
         & $venvPython -I -c "from automated_security_helper.cli.main import app; app(['--version'])"
@@ -436,15 +447,15 @@ if ($ashExit -ne 0) {
     } else {
         Write-Host "   no python.exe in the venv's Scripts, so the venv itself is incomplete"
     }
-    Fail "ash --version exited $ashExit"
+    Fail "ashx --version exited $ashExit"
 }
 if (-not (Test-Path $venvAsh)) {
-    Fail "ash ran but created no venv at $venv, so nothing was bootstrapped where uninstall can reclaim it"
+    Fail "ashx ran but created no venv at $venv, so nothing was bootstrapped where uninstall can reclaim it"
 }
 Write-Host "   venv created at $venv"
 
 Write-Step '7. the deprecated name warns and the long name does not'
-# The entry-point contract, exercised rather than assumed. `ash` is canonical, `ashv3` warns
+# The entry-point contract, exercised rather than assumed. `ashx` is canonical, `ashv3` warns
 # once on stderr, and `automated-security-helper` is kept indefinitely and silent. The
 # launchers derive which venv console script to run from their own filenames, so this is what
 # catches all three collapsing onto the same one.
@@ -455,7 +466,7 @@ $ashv3Stderr = if (Test-Path $errorFile) { Get-Content -Raw $errorFile } else { 
 if ($ashv3Stderr -notmatch '(?i)deprecat') {
     Fail @"
 ashv3 --version printed nothing about deprecation on stderr. That warning comes from the
-wheel's own run_ashv3 wrapper, so its absence means ashv3.exe is running the `ash` console
+wheel's own run_ashv3 wrapper, so its absence means ashv3.exe is running the `ashx` console
 script instead of the `ashv3` one, and the three launchers have collapsed onto one target.
 stderr was: $ashv3Stderr
 "@
@@ -467,7 +478,7 @@ $longNameStderr = if (Test-Path $errorFile) { Get-Content -Raw $errorFile } else
 if ($longNameStderr -match '(?i)deprecat') {
     Fail @"
 automated-security-helper --version warned about deprecation. That name is kept indefinitely
-and is deliberately silent: it is the escape hatch for hosts where a bare `ash` resolves to
+and is deliberately silent: it is the escape hatch for hosts where a short name resolves to
 another program, and a warning on it would train users away from the one name that always
 works. stderr was: $longNameStderr
 "@
@@ -511,10 +522,10 @@ AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 # source IS the working directory, which is the behavior broadFileSystemAccess exists for, but
 # a test that depended on it would be testing Push-Location as much as the package.
 $outputDirectory = Join-Path $fixture '.ash\ash_output'
-& $resolved['ash'] scan --source-dir $fixture --output-dir $outputDirectory `
+& $resolved['ashx'] scan --source-dir $fixture --output-dir $outputDirectory `
     --scanners detect-secrets --no-progress
 $scanExit = $LASTEXITCODE
-Write-Host "   ash scan exit code: $scanExit"
+Write-Host "   ashx scan exit code: $scanExit"
 
 Write-Step '9. assert a finding was actually reported'
 # The load-bearing assertion. An empty ASH scan exits 0, so asserting the exit code alone would
@@ -549,14 +560,14 @@ Write-Step '10. a reinstall must not lose the venv'
 # it writes beside site-packages, so a reinstall that damaged the venv while leaving that marker
 # in place would be found and used.
 Add-AppxPackage -Path $msix -ForceUpdateFromAnyVersion -ErrorAction Stop
-if (-not (Test-Path (Join-Path $venv 'Scripts\ash.exe'))) {
+if (-not (Test-Path (Join-Path $venv 'Scripts\ashx.exe'))) {
     Fail 'the venv did not survive a reinstall'
 }
-& $resolved['ash'] --version | Out-Null
+& $resolved['ashx'] --version | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Fail "ash --version exited $LASTEXITCODE after a reinstall"
+    Fail "ashx --version exited $LASTEXITCODE after a reinstall"
 }
-Write-Host '   OK: venv survived, ash still runs'
+Write-Host '   OK: venv survived, ashx still runs'
 
 Write-Step '11. uninstall reclaims the venv'
 Remove-AshPackage

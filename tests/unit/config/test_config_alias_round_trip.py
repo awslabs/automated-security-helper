@@ -1,6 +1,6 @@
 """Tests pinning that a dump/revalidate round trip preserves aliased config keys.
 
-Three code paths take a config apart and put it back together: `ash config
+Three code paths take a config apart and put it back together: `ashx config
 update`, `apply_config_overrides`, and the MCP runtime JSON-Patch. Each dumps
 without `by_alias=True`, so the scanners, reporters and converters sub-dicts come
 out keyed by Python field name -- `cdk_nag`, not `cdk-nag`.
@@ -197,7 +197,7 @@ class TestSegmentsAcceptBothSpellings:
         ordering, or the same file resolves differently depending on how it was
         written. `_PluginConfigSegment` folds the field-name spelling into the
         alias key by key, the alias winning where both set the same key, so
-        nothing is left behind as an unvalidated extra. `ash config lint` is
+        nothing is left behind as an unvalidated extra. `ashx config lint` is
         what flags a hand-written config that carries both.
         """
         alias_first = ScannerConfigSegment.model_validate(
@@ -352,7 +352,7 @@ class TestApplyConfigOverrides:
 
 
 class TestConfigUpdateCommand:
-    """`ash config update`, end to end through the file on disk."""
+    """`ashx config update`, end to end through the file on disk."""
 
     @staticmethod
     def _write(tmp_path, body: str):

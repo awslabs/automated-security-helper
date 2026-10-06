@@ -1,40 +1,44 @@
-ash as a Flatpak
+ASH as a Flatpak
 ================
 
 This package is built and tested here and published as a GitHub Release asset. It is
 not submitted to Flathub, and nothing under packaging/flatpak/ talks to Flathub except
 to download the org.freedesktop runtime it builds against.
 
-What you get on PATH, which is not "ash"
-----------------------------------------
+What you get on PATH, which is not "ashx"
+-----------------------------------------
 
-The .deb and .rpm both install /usr/bin/ash. A Flatpak cannot: /app is a read-only
+The .deb and .rpm both install /usr/bin/ashx. A Flatpak cannot: /app is a read-only
 OSTree checkout, and the only host-visible name flatpak exports is the application ID.
 So after installing you have
 
   flatpak run io.github.awslabs.automated_security_helper scan --source-dir .
 
-and the app ID, not "ash", is what appears in
-/var/lib/flatpak/exports/bin. All three names the wheel declares are inside the
-sandbox, reachable with --command:
+and the app ID, not "ashx", is what appears in
+/var/lib/flatpak/exports/bin. Three of the four names the wheel declares are inside
+the sandbox, reachable with --command:
 
-  flatpak run --command=ash                       io.github.awslabs.automated_security_helper --version
+  flatpak run --command=ashx                      io.github.awslabs.automated_security_helper --version
   flatpak run --command=ashv3                     io.github.awslabs.automated_security_helper --version
   flatpak run --command=automated-security-helper io.github.awslabs.automated_security_helper --version
 
-ash is canonical. ashv3 warns once on stderr and then runs. automated-security-helper
-is silent and kept indefinitely, for hosts where a bare ash resolves to something else.
-Because "ash" is the default command, the first form above is what a bare
+ashx is canonical. ashv3 warns once on stderr and then runs. automated-security-helper
+is silent and kept indefinitely, for hosts where a short name resolves to something
+else. Because "ashx" is the default command, the first form above is what a bare
 `flatpak run io.github.awslabs.automated_security_helper` gives you.
+
+The wheel's fourth name, the deprecated `ash`, is not in the sandbox. That alias is
+kept only for pip, Homebrew and the container image; `ash` is the Almquist shell on
+Alpine, BusyBox and MSYS2, which is why the command was renamed to ashx.
 
 For a short name, alias it or link it yourself:
 
   # a shell alias
-  alias ash='flatpak run io.github.awslabs.automated_security_helper'
+  alias ashx='flatpak run io.github.awslabs.automated_security_helper'
 
   # or a wrapper on PATH, which also works from scripts and hooks
   printf '#!/bin/sh\nexec flatpak run io.github.awslabs.automated_security_helper "$@"\n' \
-    | sudo tee /usr/local/bin/ash >/dev/null && sudo chmod 0755 /usr/local/bin/ash
+    | sudo tee /usr/local/bin/ashx >/dev/null && sudo chmod 0755 /usr/local/bin/ashx
 
 The sandbox trade: this package grants --filesystem=host
 --------------------------------------------------------
@@ -47,7 +51,7 @@ Concretely, in automated_security_helper/cli/scan.py: --source-dir defaults to t
 process working directory, and --output-dir defaults to <source-dir>/.ash/ash_output.
 Both are host paths the user picks at invocation time.
 
-A Flatpak with no filesystem grant therefore installs cleanly, runs `ash --version`
+A Flatpak with no filesystem grant therefore installs cleanly, runs `ashx --version`
 cleanly, and then scans nothing. It does not error: the sandbox shows it an empty
 directory where the source tree should be, and an empty scan exits 0 with a report
 containing no findings. That is the worst available outcome -- a security tool that
@@ -121,7 +125,7 @@ you can reason about, and packaging/README.md points at both.
 Container mode does not work from inside this Flatpak
 -----------------------------------------------------
 
-`ash scan --mode container` cannot work here, and this is measured rather than assumed:
+`ashx scan --mode container` cannot work here, and this is measured rather than assumed:
 the verification script asserts it.
 
 ASH's container runner looks for finch, docker, nerdctl or podman on PATH and shells
@@ -146,7 +150,7 @@ Why this package needs a Python index on first run
 
 The Flatpak bundles ASH's own wheel and nothing else. There is no post-install hook in
 Flatpak -- an installed app is immutable and no code runs on your machine at install
-time -- so instead of a %post scriptlet, the launcher at /app/bin/ash creates a
+time -- so instead of a %post scriptlet, the launcher at /app/bin/ashx creates a
 virtualenv the first time you run it, under
 
   ~/.var/app/io.github.awslabs.automated_security_helper/data/
@@ -283,9 +287,9 @@ Files
 -----
 
   /app/share/ash/wheels/       ASH's wheel, the app's only payload
-  /app/bin/ash                 the launcher; creates the venv on first run
-  /app/bin/ashv3               symlink to ash, dispatching on basename
-  /app/bin/automated-security-helper   symlink to ash
+  /app/bin/ashx                the launcher; creates the venv on first run
+  /app/bin/ashv3               symlink to ashx, dispatching on basename
+  /app/bin/automated-security-helper   symlink to ashx
 
   ~/.var/app/io.github.awslabs.automated_security_helper/data/
                                where first run builds the venv, named after the wheel
@@ -294,7 +298,7 @@ Files
 The venv path contains the wheel filename and the interpreter version on purpose. An
 upgraded Flatpak carries a new wheel, so it gets a new venv rather than serving the old
 ASH out of the old one -- there is no post-install hook to clear it, and a stale venv
-would make `ash --version` report the previous release with no error anywhere. A new
+would make `ashx --version` report the previous release with no error anywhere. A new
 runtime branch changes the python version the same way.
 
 Old venvs stay behind after an upgrade. That is disk, not correctness:
@@ -309,7 +313,7 @@ Removing the package
 
 leaves ~/.var/app/io.github.awslabs.automated_security_helper alone, so the venv and
 anything else the app wrote survive. This differs from the .deb and .rpm, whose removal
-steps delete /usr/lib/ash/venv, and it is flatpak's design rather than a bug -- that
+steps delete /usr/lib/automated-security-helper/venv, and it is flatpak's design rather than a bug -- that
 directory is user data. To remove the app and its data together:
 
   flatpak uninstall --delete-data io.github.awslabs.automated_security_helper

@@ -36,7 +36,7 @@ module "ash_scan_pipeline" {
   codecommit_repository_arn = var.codecommit_repository_arn
   source_branch             = "main"
 
-  # Used as the CodeBuild environment image, so `ash` is on PATH with no
+  # Used as the CodeBuild environment image, so `ashx` is on PATH with no
   # Docker-in-Docker and no privileged build.
   container_image_uri = module.ash_image.image_uri
 
@@ -50,9 +50,9 @@ module "ash_scan_pipeline" {
   base_config_ssm_parameter_name = module.ash_image.base_config_ssm_parameter_name
   base_config_ssm_parameter_arn  = module.ash_image.base_config_ssm_parameter_arn
 
-  # Handed to `ash merge --min-severity`. ASH computes the verdict and this module
+  # Handed to `ashx merge --min-severity`. ASH computes the verdict and this module
   # propagates its exit code, so the pipeline can never disagree with what
-  # `ash scan` would say about the same findings.
+  # `ashx scan` would say about the same findings.
   #
   # This is a floor on what counts as actionable, so "low" is the STRICTEST
   # setting -- every severity fails the pipeline. "high" would be the laxest,

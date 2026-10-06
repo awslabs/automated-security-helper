@@ -1,6 +1,6 @@
 # Workspace mode over MCP
 
-Workspace mode resolves a VS Code `.code-workspace` file into N projects, scans each one with its own ASH config and its own severity threshold, and aggregates the results into a single workspace payload. It was CLI-only (`ash --workspace foo.code-workspace`). Two MCP tools now expose it:
+Workspace mode resolves a VS Code `.code-workspace` file into N projects, scans each one with its own ASH config and its own severity threshold, and aggregates the results into a single workspace payload. It was CLI-only (`ashx --workspace foo.code-workspace`). Two MCP tools now expose it:
 
 - `resolve_ash_workspace` — resolves the workspace and returns the plan. Scans nothing.
 - `run_ash_workspace_scan` — resolves, scans every project, and returns the per-project verdict.
@@ -9,7 +9,7 @@ Both are registered on the same server as the single-directory tools documented 
 
 ## When to use which
 
-`resolve_ash_workspace` is the MCP equivalent of `ash --workspace ... --dry-run`. It reads the workspace definition and every project's own ASH config, then reports which directories became projects, what key each was given, which config file was found for it, which scanners that config enables, which threshold the project will be judged against, and which projects were dropped and why. Nothing is scanned, no output tree is written, and no registry slot is taken.
+`resolve_ash_workspace` is the MCP equivalent of `ashx --workspace ... --dry-run`. It reads the workspace definition and every project's own ASH config, then reports which directories became projects, what key each was given, which config file was found for it, which scanners that config enables, which threshold the project will be judged against, and which projects were dropped and why. Nothing is scanned, no output tree is written, and no registry slot is taken.
 
 Call it first when a workspace is unfamiliar. Resolution is the cheap half; a workspace of eight repositories can take minutes to scan and milliseconds to resolve, and a definition problem — a folder nobody cloned, two entries naming one directory, a project config that will not parse — surfaces in the resolve call rather than after the scan has already run.
 
@@ -35,7 +35,7 @@ resolve_ash_workspace(
 
 The response carries:
 
-- `plan` — the rendered plan, the same text `ash --workspace ... --dry-run` prints. Written for a human to read; its layout is not a contract.
+- `plan` — the rendered plan, the same text `ashx --workspace ... --dry-run` prints. Written for a human to read; its layout is not a contract.
 - `projects` — the same decisions as structured data. Read this if you need to branch on a threshold or a scanner list.
 - `skipped_projects` — one entry per dropped project, with a reason.
 - `exit_code` — `0` on success. See [Exit codes](#exit-codes).
@@ -105,7 +105,7 @@ Both are config inputs. `ASH_MCP_ALLOWED_ROOTS` answers "which directories may t
 So a working configuration looks like this:
 
 ```bash
-ASH_MCP_ALLOWED_ROOTS=/srv/repos ash mcp
+ASH_MCP_ALLOWED_ROOTS=/srv/repos ashx mcp
 ```
 
 with the definition at `/srv/repos/platform/dev.code-workspace`, its projects at `/srv/repos/platform/api` and `/srv/repos/platform/web`, and a shared policy at `/etc/ash/workspace-policy.yaml`. One root entry covers every project beneath it at any depth; you do not enumerate projects, and you do not re-edit the variable when the workspace gains one.
@@ -150,7 +150,7 @@ So the MCP tools call `resolve_workspace` and `execute_workspace` directly. Both
 
 Workspace mode over MCP always runs locally. The MCP tools do not accept a run mode, and the local workspace branch is the one gated at `automated_security_helper/interactions/run_ash_scan.py:1085` on `opts.mode != RunMode.container`.
 
-The CLI's `ash --workspace --mode container` works by running `ash --workspace` *inside* the container and reading the workspace payload back out. There is no MCP equivalent, and adding one would mean the server building or pulling an image and starting a container on behalf of a client — which is a materially different privilege from reading a directory. If you need workspace mode in a container, drive the CLI.
+The CLI's `ashx --workspace --mode container` works by running `ashx --workspace` *inside* the container and reading the workspace payload back out. There is no MCP equivalent, and adding one would mean the server building or pulling an image and starting a container on behalf of a client — which is a materially different privilege from reading a directory. If you need workspace mode in a container, drive the CLI.
 
 ## Known limitations
 
@@ -162,4 +162,4 @@ The CLI's `ash --workspace --mode container` works by running `ash --workspace` 
 
 - [ASH MCP Server Guide](../mcp-server-guide.md) — the single-directory tools, the scan registry, and the allowed-roots setting in full.
 - [Streamable-HTTP MCP Deployment Guide](streamable-http.md) — running the server over the network, with per-session workspaces and config profiles.
-- [CLI Reference](../cli-reference.md) — `ash --workspace` and its flags.
+- [CLI Reference](../cli-reference.md) — `ashx --workspace` and its flags.

@@ -48,7 +48,7 @@ $ErrorActionPreference = 'Stop'
 
 # PowerShell 7.4 turned $PSNativeCommandUseErrorActionPreference on by default, so with
 # $ErrorActionPreference = 'Stop' a native command that exits nonzero throws. That is
-# wrong for this script in a way that would look like a packaging failure: `ash scan`
+# wrong for this script in a way that would look like a packaging failure: `ashx scan`
 # exits nonzero when it FINDS something, which is the expected outcome at step 6, and
 # the throw would happen before the SARIF was ever read. GitHub Actions also prepends
 # $ErrorActionPreference = 'stop' to every `shell: pwsh` step, so the default cannot be
@@ -179,26 +179,37 @@ $venvPython = Join-Path $venvDir 'Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $venvPython)) { Fail-Verification "$venvPython does not exist after install" }
 Write-Host "   venv interpreter: $(& $venvPython -V 2>&1)"
 
-Write-Host '== 5. every console script the wheel declares is on PATH and runs'
+Write-Host '== 5. every console script the package exposes is on PATH and runs'
 # All three names are required by name here, not read back from the wheel, because
 # this is the assertion about the entry-point contract rather than about the
 # mechanism. chocolateyinstall.ps1 derives the shim set from the wheel's metadata; if
 # that derivation ever drops a name, this step is what notices.
 #
-#   ash                        canonical.
+#   ashx                       canonical.
 #   ashv3                      deprecated, warns once on stderr, still works.
 #   automated-security-helper  kept indefinitely and silent. This is the escape hatch
-#                              for hosts where a bare `ash` resolves to something
-#                              else, and on Windows that is not hypothetical: MSYS2
-#                              ships the Almquist shell as `ash` and has already
-#                              shadowed this entry point in CI, with `Illegal option
-#                              --` as the symptom.
+#                              for hosts where a short name resolves to something
+#                              else.
+#
+# And one name is required to be ABSENT. The wheel still declares `ash`, the v3
+# command, as a deprecated alias, but this package must not shim it: MSYS2 ships the
+# Almquist shell as `ash` and has already shadowed ASH's v3 entry point in CI, with
+# `Illegal option --` as the symptom, which is why the v4 command is `ashx`.
 $chocoBin = Join-Path $env:ChocolateyInstall 'bin'
-foreach ($name in @('ash', 'ashv3', 'automated-security-helper')) {
+if (Test-Path -LiteralPath (Join-Path $chocoBin 'ash.exe')) {
+    Fail-Verification "the package created an ash shim at $(Join-Path $chocoBin 'ash.exe'); it must expose ashx, ashv3 and automated-security-helper only"
+}
+$shimList = Join-Path $env:ProgramData 'ash\installed-shims.txt'
+$shimmed = @(Get-Content -LiteralPath $shimList | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+if ($shimmed -contains 'ash') {
+    Fail-Verification "$shimList records an ash shim: $($shimmed -join ', ')"
+}
+Write-Host "   shims recorded: $($shimmed -join ', ') (no ash, as intended)"
+foreach ($name in @('ashx', 'ashv3', 'automated-security-helper')) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
     if (-not $cmd) { Fail-Verification "$name is not on PATH after install" }
     if (-not $cmd.Source.StartsWith($chocoBin, [StringComparison]::OrdinalIgnoreCase)) {
-        # A different `ash` earlier on PATH would make every check below measure
+        # A different program by this name earlier on PATH would make every check below measure
         # someone else's program.
         Fail-Verification "$name resolves to $($cmd.Source), not to a shim under $chocoBin"
     }
@@ -218,7 +229,7 @@ foreach ($name in @('ash', 'ashv3', 'automated-security-helper')) {
         if ($stderrText.Trim().Length -ne 0) {
             Fail-Verification @(
                 "$name wrote to stderr: $($stderrText.Trim())",
-                'Only ashv3 is deprecated. ash and automated-security-helper are silent.'
+                'Only ashv3 is deprecated. ashx and automated-security-helper are silent.'
             )
         }
     }
@@ -227,9 +238,9 @@ foreach ($name in @('ash', 'ashv3', 'automated-security-helper')) {
 
 # -V and not -v. -v is --verbose and has been for all of v3, so a package that got
 # this wrong would turn a verbose run into a version print for anyone with -v in CI.
-$shortForm = & ash -V
-Assert-NativeSuccess -What 'ash -V' -ExitCode $LASTEXITCODE
-Write-Host "   ash -V -> $(($shortForm -join ' ').Trim())"
+$shortForm = & ashx -V
+Assert-NativeSuccess -What 'ashx -V' -ExitCode $LASTEXITCODE
+Write-Host "   ashx -V -> $(($shortForm -join ' ').Trim())"
 
 Write-Host '== 6. scan a fixture with a KNOWN finding'
 $fixture = Join-Path ([System.IO.Path]::GetTempPath()) 'ash-choco-fixture'
@@ -255,14 +266,14 @@ try {
     #
     # The exit code is recorded and not asserted: ASH exits nonzero when it FINDS
     # something, which is the expected outcome here. Step 7 is the assertion.
-    & ash scan --source-dir $fixture --output-dir $outputDir --scanners detect-secrets --no-progress > $scanLog 2> $scanErrLog
+    & ashx scan --source-dir $fixture --output-dir $outputDir --scanners detect-secrets --no-progress > $scanLog 2> $scanErrLog
     $scanRc = $LASTEXITCODE
 } finally {
     Pop-Location
 }
 Get-Content -LiteralPath $scanLog -Tail 4 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "   $_" }
 Get-Content -LiteralPath $scanErrLog -Tail 4 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "   [stderr] $_" }
-Write-Host "   ash scan rc=$scanRc"
+Write-Host "   ashx scan rc=$scanRc"
 
 Write-Host '== 7. assert a finding was actually reported'
 # Run with the venv interpreter, so the parse cannot silently depend on whatever
@@ -305,7 +316,7 @@ Assert-NativeSuccess -What 'choco uninstall ash' -ExitCode $uninstallRc
 if (Test-Path -LiteralPath (Join-Path $env:ProgramData 'ash')) {
     Fail-Verification "$(Join-Path $env:ProgramData 'ash') survived the uninstall"
 }
-foreach ($name in @('ash', 'ashv3', 'automated-security-helper')) {
+foreach ($name in @('ashx', 'ashv3', 'automated-security-helper')) {
     if (Test-Path -LiteralPath (Join-Path $chocoBin "$name.exe")) {
         Fail-Verification "the $name shim survived the uninstall"
     }

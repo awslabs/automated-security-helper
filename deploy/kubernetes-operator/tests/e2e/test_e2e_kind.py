@@ -4,7 +4,7 @@ The six things this file has to demonstrate, and the order they matter in:
 
 1. **A planted finding comes back.** A scan of a tree with a known bandit finding
    and a known planted credential must report them. Zero findings on this fixture
-   fails the test, because given that `ash scan` checks source/output collision by
+   fails the test, because given that `ashx scan` checks source/output collision by
    equality only, a green scan of a dirty tree is reachable and looks like success.
 2. **A negative control.** A clean tree must report zero findings *and* succeed.
    Without it, (1) shows only that the pipeline reports something.
@@ -12,7 +12,7 @@ The six things this file has to demonstrate, and the order they matter in:
    consumed every one of them -- asserted from the provenance the shards stamped,
    not from the operator's own bookkeeping.
 4. **A partial scan reads as Incomplete, with its partial results.** A scanner
-   that cannot run makes `ash merge` exit 1 under ASH's default
+   that cannot run makes `ashx merge` exit 1 under ASH's default
    `fail_on_incomplete_scanners: true`; the run must end `Incomplete` with
    `coverageComplete: false` and the findings that did come back, never `Clean`.
 5. **A missing shard is refused, never silently clean.** Asserted twice: once
@@ -199,7 +199,7 @@ class TestDirtyFixtureReportsItsFinding:
 
     def test_the_planted_findings_came_back(self, result):
         # The assertion the whole e2e exists for. Given that --output-dir being an
-        # ancestor of the source passes `ash scan`'s equality-only collision check,
+        # ancestor of the source passes `ashx scan`'s equality-only collision check,
         # "0 findings on a fixture that has some" is a reachable false green.
         actionable = result["findings"]["actionable"]
         assert actionable is not None, "the merged report carried no finding count"
@@ -291,7 +291,7 @@ class TestShardFanOut:
 
     def test_ash_merge_agrees_about_what_it_consumed(self, uid):
         # Two independent accountings: the collector's index walk, and the shard
-        # count `ash merge` derived from the provenance inside the result files. A
+        # count `ashx merge` derived from the provenance inside the result files. A
         # disagreement between them is reported rather than averaged away.
         merge = scan_status("dirty-scan")["merge"]
         assert merge["mergeReportedShardCount"] == 3
@@ -370,7 +370,7 @@ class TestCleanFixtureNegativeControl:
 def incomplete_result(fixtures):
     # cfn-nag needs ruby, which the e2e image does not carry, so it is recorded
     # MISSING while bandit runs and finds the planted B602/B307. One shard owns
-    # both, so `ash merge` cannot refuse the shard as having completed nothing; it
+    # both, so `ashx merge` cannot refuse the shard as having completed nothing; it
     # writes the merged report and exits 1 for the gap, which is the #640 case.
     apply_scan(
         "partial-scan",
@@ -658,7 +658,7 @@ class TestProvenanceAbsentIsRefused:
     operator refuses.
 
     Why it has to refuse rather than warn: with the field absent from every shard,
-    ``ash merge`` skips the union check entirely. A mid-rollout state where two
+    ``ashx merge`` skips the union check entirely. A mid-rollout state where two
     executors partition different scanner sets without overlapping then merges into a
     report that reads as a complete scan of the whole tree, with a scanner having run
     nowhere. Nothing downstream can see it. For a while this operator detected exactly
@@ -686,7 +686,7 @@ class TestProvenanceAbsentIsRefused:
     def test_the_run_is_refused(self, result):
         assert result["phase"] == PHASE_REFUSED, (
             f"a scan whose shards recorded no candidate_scanners reported "
-            f"{result['phase']!r}. `ash merge` does not refuse that case, so the "
+            f"{result['phase']!r}. `ashx merge` does not refuse that case, so the "
             f"operator is the only thing that can -- and a detected coverage hole "
             f"reported as success is worse than one never detected. "
             f"merge={json.dumps(result.get('merge', {}))[:600]}"
@@ -884,7 +884,7 @@ class TestMcpServer:
         have left the one assertion that actually exercises Service DNS and routing
         not running at all on exactly the clusters where it matters most.
 
-        Any HTTP status counts. Measured directly against ``ash mcp``: a bare GET on
+        Any HTTP status counts. Measured directly against ``ashx mcp``: a bare GET on
         the mount path returns **401**, because the MCP SDK will not serve a request
         that is not a protocol handshake. A status code of any kind proves DNS
         resolved, the Service routed and the server answered; a connection refusal or

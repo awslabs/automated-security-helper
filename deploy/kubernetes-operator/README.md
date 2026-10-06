@@ -21,7 +21,7 @@ one: the end-to-end test loads both into a kind cluster with
 login or push appears. Neither is published anywhere, for the same reason ASH
 publishes no container image: installing ASH by distribution name is actively
 unsafe, because the name `automated-security-helper` on PyPI is an unrelated
-placeholder package. A name-based install succeeds, leaves no `ash` on `PATH`, and
+placeholder package. A name-based install succeeds, leaves no `ashx` on `PATH`, and
 puts a third party's code in the container that scans your source.
 
 ## Why it looks like this
@@ -33,7 +33,7 @@ pattern the two existing CDK backends implement means implementing that contract
 not importing anything.
 
 ```
-per shard:   ash scan --source-dir  /workspace/src \
+per shard:   ashx scan --source-dir  /workspace/src \
                       --output-dir  /workspace/out \
                       --shard-index K --shard-count N \
                       --no-fail-on-findings --no-progress --simple
@@ -41,12 +41,12 @@ per shard:   ash scan --source-dir  /workspace/src \
              verdict: none. exit 0 after publishing, even with findings.
 
 collector:   walk 0..N-1 by index; refuse a short set; then
-             ash merge --results <one per shard> --output-dir ... --min-severity ...
+             ashx merge --results <one per shard> --output-dir ... --min-severity ...
              verdict: this exit code, and only this one:
                       0 clean, 2 findings, 1 incomplete (partial results)
 ```
 
-The program name `ash` is held in one constant, `ASH_CLI` in
+The program name `ashx` is held in one constant, `ASH_CLI` in
 `ash_operator/constants.py`. Every argv builder, the MCP capability probe and the
 e2e harness read it from there, and `tests/test_contract.py` fails if a module
 spells the name itself.
@@ -60,7 +60,7 @@ integers.
 Each of these was measured, not reasoned about, and each one fails *green* — a scan
 that reports no findings and exits 0.
 
-**1. Run `ash scan` unmodified, so `ScanPhase` stamps the provenance.** Each shard's
+**1. Run `ashx scan` unmodified, so `ScanPhase` stamps the provenance.** Each shard's
 results carry a `ShardAssignment` with `assigned_scanners`, `candidate_scanners` and
 `selected_scanners`. The middle one is load-bearing: in a split-brain roster case
 where two pods partition different scanner sets without overlapping, the merge
@@ -79,7 +79,7 @@ that adds an early-sorting name. Nothing here is keyed on the index except
 `JOB_COMPLETION_INDEX`, read fresh inside the pod, and the results path, which is
 scoped to one run's UID.
 
-**3. Retry-safe result addressing.** `ash merge` refuses a duplicate shard index
+**3. Retry-safe result addressing.** `ashx merge` refuses a duplicate shard index
 arriving as two `--results` entries — "merging does not deduplicate" — but has no
 defence against **one** file that a retry overwrote. No CodeBuild backend faces
 this. A Kubernetes pod can be OOMKilled, evicted, preempted or drained, and the
@@ -104,8 +104,8 @@ backend's own, built from the contract, with the properties the contract require
 asserted in `tests/test_contract.py` — including a table run against ASH's own
 `validate_shard_selection` so the two cannot disagree about what is acceptable.
 
-**5. The output directory must not be inside or above the source.** `ash scan`
-checks source/output collision by **equality only**; `ash merge` checks equality
+**5. The output directory must not be inside or above the source.** `ashx scan`
+checks source/output collision by **equality only**; `ashx merge` checks equality
 **or ancestry** and its docstring says so. So `--output-dir /src` with
 `--source-dir /src/app` passes the scan's check, and the symptom is not untidiness:
 `apply_suppressions_to_sarif` excludes findings whose location resolves inside the
@@ -191,10 +191,10 @@ into the image you name in `spec.image`.
 
 ## Status
 
-`.status.phase` ends in one of four terminal values. Three are `ash merge`'s three
+`.status.phase` ends in one of four terminal values. Three are `ashx merge`'s three
 answers, as ASH defines its exit codes:
 
-| Phase | `ash merge` exit | Meaning |
+| Phase | `ashx merge` exit | Meaning |
 |---|---|---|
 | `Clean` | 0 | Nothing actionable at `minSeverity`. |
 | `Findings` | 2 | Actionable findings; `.status.findings` counts them. |
@@ -222,7 +222,7 @@ merged report to exist **and** to name a gap; exit 1 over a report with no gap i
 
 ASH's `fail_on_incomplete_scanners` defaults to **true**, and the operator leaves it
 there unless `spec.failOnIncompleteScanners` says otherwise. Setting it `false`
-accepts the gap: `ash merge` then exits 0 or 2, the phase follows that exit code as
+accepts the gap: `ashx merge` then exits 0 or 2, the phase follows that exit code as
 ASH's own MCP status does, and `coverageComplete: false` and
 `.status.incompleteScanners` stay beside it.
 
@@ -236,7 +236,7 @@ a collector summary the operator could not read, **or shards that recorded no
 `candidate_scanners`**.
 
 That last one is the case worth spelling out. If no shard stamped
-`candidate_scanners`, `ash merge` does **not** refuse — it skips the union check
+`candidate_scanners`, `ashx merge` does **not** refuse — it skips the union check
 entirely. A mid-rollout state where two executors partitioned different scanner sets
 without overlapping then merges into a report that reads as a complete scan of the
 whole tree, with a scanner having run nowhere, and nothing downstream can see it. The
@@ -288,18 +288,18 @@ It is worth knowing why it is not simply put in argv, because the obvious-lookin
 middle road is a security hole and this operator shipped it. An earlier version placed
 the literal string `${ASH_MCP_AUTH_HEADER_VALUE}` in argv and ran
 `sh -c 'exec "$0" "$@"' <argv>`, expecting the shell to expand it. **A positional
-parameter's value is never re-expanded.** So `ash mcp` received those 28 characters and
+parameter's value is never re-expanded.** So `ashx mcp` received those 28 characters and
 `hmac.compare_digest`'d every incoming header against them. The auth model inverts:
 anyone sending the literal `${ASH_MCP_AUTH_HEADER_VALUE}` — a constant in a public
 repository, also readable with `kubectl get deploy -o yaml` — authenticates, and the
-holder of the real secret gets 401. Nothing upstream rescues it: `ash mcp`'s
+holder of the real secret gets 401. Nothing upstream rescues it: `ashx mcp`'s
 `--auth-header-value` option declares no `envvar=`, so setting the variable alone
 supplies no value.
 
 A test asserted the literal was *present* in the rendered manifest, so the suite passed
 only while the bypass existed. `tests/test_manifests.py::TestMcpAuthIsNotBypassable`
 now asserts the opposite, executes the emitted command with a known value in the
-environment and checks what `ash` would actually receive, and requires that an empty
+environment and checks what `ashx` would actually receive, and requires that an empty
 Secret key makes the container exit 78 rather than start without auth. Reintroducing
 the bug in a scratch copy turns seven of those tests red, which is how they were
 checked for vacuity.
@@ -315,7 +315,7 @@ does.
 
 Two other things the `AshMcpServer` reconciler does that are easy to omit:
 
-* **A capability probe as an init container.** It runs `COLUMNS=200 ash mcp --help`,
+* **A capability probe as an init container.** It runs `COLUMNS=200 ashx mcp --help`,
   fixed-string-greps for `--stateless-http`, and **refuses to start with exit 65**
   when `statelessHttp` was requested and the image's ASH does not have the flag.
   Without it the server runs stateful, answers 404 to every session id the platform
@@ -329,7 +329,7 @@ Two other things the `AshMcpServer` reconciler does that are easy to omit:
 `transport: stdio` is not offered: there is no socket for a Service to route to.
 
 The probes are `tcpSocket`, not `httpGet`, and that is measured rather than a
-preference. `ash mcp --transport streamable-http --mount-path /mcp` answers **401**
+preference. `ashx mcp --transport streamable-http --mount-path /mcp` answers **401**
 to a bare `GET /mcp`, and 401 to a well-formed `initialize` POST without a session —
 the MCP SDK will not serve a request that is not a protocol handshake. A kubelet
 `httpGet` probe treats only 200–399 as success, so an `httpGet` probe on the mount
@@ -487,7 +487,7 @@ What it asserts, and why each one is there:
 * **A negative control**: a clean tree ends `Clean` with zero findings, with both
   selected scanners `PASSED` and their dependencies satisfied.
 * **A partial scan is `Incomplete`**: selecting `cfn-nag`, whose ruby toolchain the
-  e2e image does not carry, beside `bandit` makes `ash merge` exit 1 under ASH's
+  e2e image does not carry, beside `bandit` makes `ashx merge` exit 1 under ASH's
   default gate. The run must end `Incomplete` with `coverageComplete: false`, the gap
   named, and bandit's findings still reported. Without it, the
   first bullet shows only that the pipeline reports something.

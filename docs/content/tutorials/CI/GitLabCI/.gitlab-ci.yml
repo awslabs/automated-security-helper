@@ -1,5 +1,5 @@
 #
-# This example clones the ASH repo and the repo to be scanned, then runs `ash`
+# This example clones the ASH repo and the repo to be scanned, then runs `ashx`
 # against the repo.
 #
 # This will build the ASH container image, run the scan using the built image,
@@ -19,12 +19,12 @@ Run ASH Scan:
       git clone https://github.com/awslabs/automated-security-helper.git \
         ../automated-security-helper \
         --branch "$ASH_VERSION"
-    # Add the ASH repo path to $PATH so `ash` is available in PATH
+    # Add the ASH repo path to $PATH so `ashx` is available in PATH
     - export PATH="$(pwd)/../automated-security-helper:$PATH"
-    # Run `ash`.
+    # Run `ashx`.
     # This will build the ASH container first, then run the scan once built.
     - |-
-      ash \
+      ashx \
         --source-dir "$(pwd)" \
         --output-dir "$(pwd)/ash_output"
   artifacts:

@@ -16,9 +16,28 @@
 # ASH_PKG_NAME is the package name dpkg and rpm know it by, and the directory name it
 # installs under: /usr/lib/<name>, /usr/share/doc/<name>, /usr/share/licenses/<name>.
 # Debian requires lowercase letters, digits, '+', '-' and '.' (at least two
-# characters, starting alphanumeric). Renaming it ships a NEW package; an upgrade
-# from the old name also needs Replaces/Conflicts (deb) and Obsoletes (rpm) for the
-# old name, which these files do not carry yet.
+# characters, starting alphanumeric).
+#
+# WHY ashx AND automated-security-helper, AND NOT ash
+#
+# `ash` is the Almquist shell's name. Debian ships a package called `ash` (a
+# compatibility package for dash) that owns /bin/ash, and on a merged-/usr host
+# /bin/ash IS /usr/bin/ash, so a package installing /usr/bin/ash would overwrite the
+# shell without dpkg reporting a file conflict: dpkg compares the two path strings,
+# and they differ. So the command is ashx and the package is automated-security-helper,
+# and the packages ship ONLY /usr/bin/<ASH_CLI_NAME>: no /usr/bin/ash, no
+# update-alternatives entry, and no Provides or Conflicts naming `ash`. Both
+# verify-in-container.sh scripts assert /usr/bin/ash is absent from the package's
+# file list and install the distro's `ash` shell alongside the package.
+#
+# The packages carry no Replaces/Conflicts (deb) or Obsoletes (rpm) for an older
+# name, because there is no installed base to replace: no package named `ash` was
+# ever published from this repository. No GitHub release has carried a .deb or an
+# .rpm, and the deb/rpm packaging never reached main or a release tag.
+#
+# The wheel still declares a deprecated `ash` console script, so the venv under
+# /usr/lib/<ASH_PKG_NAME>/venv/bin contains one. Nothing puts it on PATH: the package
+# ships only the /usr/bin/<ASH_CLI_NAME> wrapper.
 #
 # Both names must match ASH_NAME_PATTERN below, which is Debian's rule for a package
 # name. Both builds call ash_check_names, and the payload checker applies the same
@@ -30,8 +49,8 @@
 #
 # Keep each name assignment on one line with no quoting: the payload checker reads them
 # with a regular expression rather than a shell.
-ASH_CLI_NAME=ash
-ASH_PKG_NAME=ash
+ASH_CLI_NAME=ashx
+ASH_PKG_NAME=automated-security-helper
 
 # An extended regular expression, matched against the whole name.
 ASH_NAME_PATTERN='[a-z0-9][a-z0-9+.-]+'

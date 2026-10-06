@@ -49,7 +49,7 @@ id: io.github.awslabs.automated_security_helper
 runtime: org.freedesktop.Sdk
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
-command: ash
+command: ashx
 
 # `stable` and not the flatpak default. flatpak-builder's default branch name is a term
 # this project does not use, and Flathub's own convention for a release branch is
@@ -63,7 +63,7 @@ branch: stable
 # inside them. Concretely: automated_security_helper/cli/scan.py:634-635 defaults
 # --source-dir to Path.cwd(), and :636-640 defaults --output-dir to
 # <source-dir>/.ash/ash_output. Both are host paths chosen by the user at invocation
-# time, and a Flatpak with no filesystem grant installs and runs `ash --version` and
+# time, and a Flatpak with no filesystem grant installs and runs `ashx --version` and
 # then cannot see either of them.
 #
 # Nothing narrower works, and this was checked against the documented option set
@@ -89,7 +89,7 @@ branch: stable
 #
 # --share=network, because the first run pip-installs ASH's wheel and resolves its
 # dependencies from a Python index. Without it the bootstrap in ash-launcher.sh fails
-# and keeps failing. ASH also downloads scanner binaries on `ash dependencies install`.
+# and keeps failing. ASH also downloads scanner binaries on `ashx dependencies install`.
 #
 # Nothing else is granted. No --socket=x11, --socket=wayland, --socket=pulseaudio,
 # --device=dri or --talk-name: ASH is a terminal program with no display, audio or
@@ -140,13 +140,17 @@ modules:
         fi
         install -Dm0644 "$1" "/app/share/ash/wheels/$(basename "$1")"
 
-        # All three names the wheel's [project.scripts] declares. One script, two
-        # symlinks, dispatching on basename -- so the three cannot drift apart, and
+        # Three of the four names the wheel's [project.scripts] declares: ashx (the
+        # command), the deprecated ashv3, and automated-security-helper. One script,
+        # two symlinks, dispatching on basename -- so the three cannot drift apart, and
         # `flatpak run --command=automated-security-helper` reaches the escape-hatch
-        # name that exists for hosts where a bare `ash` resolves to something else.
-        install -Dm0755 ash-launcher.sh /app/bin/ash
-        ln -s ash /app/bin/ashv3
-        ln -s ash /app/bin/automated-security-helper
+        # name that exists for hosts where a short name resolves to something else.
+        # The deprecated `ash` script is NOT exposed: that alias is kept only for pip,
+        # Homebrew and the container image, and a bare `ash` is the Almquist shell on
+        # Alpine, BusyBox and MSYS2.
+        install -Dm0755 ash-launcher.sh /app/bin/ashx
+        ln -s ashx /app/bin/ashv3
+        ln -s ashx /app/bin/automated-security-helper
 
         # Fail the build, not the first run, if the runtime's python is below ASH's
         # floor. This is the same defect the .rpm hit in CI on its first attempt --

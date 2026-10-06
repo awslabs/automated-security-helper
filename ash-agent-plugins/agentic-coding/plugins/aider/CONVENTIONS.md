@@ -439,7 +439,7 @@ Read these via the standard MCP resource read mechanism for context-free help.
 
 **Fix:** The MCP server needs ASH on its PATH. The standard install via `uvx`:
 ```
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx mcp
 ```
 This always uses the pinned ASH version regardless of system installs.
 
@@ -484,5 +484,5 @@ Note: container-mode hangs are not possible via the MCP server — it always run
 ## Note
 
 Aider does not support MCP servers. To run ASH security scans, invoke
-the ASH CLI directly (`ash scan`) or use one of the MCP-supporting agents
+the ASH CLI directly (`ashx scan`) or use one of the MCP-supporting agents
 (Claude Code, Codex, Cursor, Continue, Cline, etc.) for tool integration.

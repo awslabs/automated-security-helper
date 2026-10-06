@@ -228,7 +228,7 @@ Provides contextual risk analysis:
 
 ```bash
 # Generate AI summary with default settings
-ash /path/to/code --reporters bedrock-summary-reporter
+ashx /path/to/code --reporters bedrock-summary-reporter
 ```
 
 ### Custom Model and Style
@@ -236,7 +236,7 @@ ash /path/to/code --reporters bedrock-summary-reporter
 ```bash
 # Use a lighter model for faster, cost-effective summaries
 export ASH_BEDROCK_MODEL_ID="anthropic.claude-instant-v1"
-ash /path/to/code --reporters bedrock-summary-reporter
+ashx /path/to/code --reporters bedrock-summary-reporter
 ```
 
 ### CI/CD Integration
@@ -250,7 +250,7 @@ ash /path/to/code --reporters bedrock-summary-reporter
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   run: |
-    ash . --reporters sarif,bedrock-summary-reporter
+    ashx . --reporters sarif,bedrock-summary-reporter
 
 - name: Post Summary to PR
   uses: actions/github-script@v6
@@ -415,7 +415,7 @@ options:
 Enable debug logging:
 
 ```bash
-ash /path/to/code --reporters bedrock-summary-reporter --log-level DEBUG
+ashx /path/to/code --reporters bedrock-summary-reporter --log-level DEBUG
 ```
 
 ## Best Practices

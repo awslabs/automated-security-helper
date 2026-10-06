@@ -435,7 +435,7 @@ Read these via the standard MCP resource read mechanism for context-free help.
 
 **Fix:** The MCP server needs ASH on its PATH. The standard install via `uvx`:
 ```
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx mcp
 ```
 This always uses the pinned ASH version regardless of system installs.
 

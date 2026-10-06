@@ -328,8 +328,8 @@ export const ASH_IDENTITY_MARKER = 'automated-security-helper';
 /**
  * The entry point to recommend when the probe fails.
  *
- * ASH installs three console scripts. `ash` is canonical, `ashv3` is deprecated
- * and names a version, and this one is kept indefinitely and silent precisely so
+ * ASH installs four console scripts. `ashx` is canonical, `ash` and `ashv3` are
+ * deprecated aliases, and this one is kept indefinitely and silent precisely so
  * a host whose `ash` resolves elsewhere has something unambiguous to point at.
  */
 export const ASH_FALLBACK_EXECUTABLE = 'automated-security-helper';

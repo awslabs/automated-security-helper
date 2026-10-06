@@ -3,7 +3,7 @@
 This file exists so the end-to-end test can tell a working pipeline from one that
 always reports clean. If a scan of this tree returns zero findings, the test fails:
 a green scan of a tree with a known finding in it is the failure mode that looks
-most like success, and given that `ash scan` checks source/output collision by
+most like success, and given that `ashx scan` checks source/output collision by
 equality only, it is also a reachable one.
 """
 

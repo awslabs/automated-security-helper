@@ -8,7 +8,7 @@ ASH is not a client of other MCP servers: there is no outbound MCP transport, no
 server registry, nothing that takes a peer's address. So the three candidate
 readings of the requirement do not have equal standing:
 
-* *Launch them* -- the operator runs ``ash mcp`` as a Deployment behind a Service.
+* *Launch them* -- the operator runs ``ashx mcp`` as a Deployment behind a Service.
   This is implemented.
 * *Connect to existing ones* -- there is nothing in ASH to connect with. It would
   mean writing an MCP client ASH does not have, into a security tool, and giving
@@ -30,7 +30,7 @@ CRD deliberately has no field that would imply otherwise.
 route consecutive requests to different replicas. An image whose ASH predates the
 flag ignores it: the server then runs stateful, answers 404 to every session id
 the platform injects, and still passes a TCP health check. The Deployment's init
-container runs ``COLUMNS=200 ash mcp --help`` and refuses to start -- exit 65 --
+container runs ``COLUMNS=200 ashx mcp --help`` and refuses to start -- exit 65 --
 when stateless was asked for and the flag is absent. ``--allowed-host`` warns
 instead of refusing, because an adopter behind a load balancer cannot know the
 hostname in advance and a refusal there would block a working deployment.
@@ -73,7 +73,7 @@ if [ "${ASH_REQUIRE_STATELESS_HTTP:-0}" = "1" ]; then
   if printf '%s' "$HELP" | grep -qF -- '--stateless-http'; then
     log "image supports --stateless-http"
   else
-    log "FATAL: statelessHttp was requested but this image's ash mcp has no"
+    log "FATAL: statelessHttp was requested but this image's ashx mcp has no"
     log "--stateless-http. Without it the server runs stateful, answers 404 to"
     log "every session id the platform injects, and still passes its health check."
     exit 65
@@ -86,7 +86,7 @@ if [ -n "${ASH_ALLOWED_HOSTS:-}" ]; then
     # A warning and not a refusal: an adopter behind a load balancer cannot know
     # the hostname before the load balancer exists, so refusing here would block a
     # deployment that is about to work.
-    log "WARNING: allowedHosts was set but this image's ash mcp has no"
+    log "WARNING: allowedHosts was set but this image's ashx mcp has no"
     log "--allowed-host. DNS-rebinding protection will use the SDK default, which"
     log "enables it only for a loopback bind."
   fi
@@ -141,7 +141,7 @@ def reconcile_mcp(spec, meta, patch, body, **_):
     patch.status["endpoint"] = f"http://{meta['name']}.{namespace}.svc.cluster.local:{port}{mount}"
     patch.status["configMapName"] = configmap["metadata"]["name"]
     patch.status["statelessHttp"] = bool(spec.get("statelessHttp", False))
-    kopf.info(body, reason="Deployed", message=f"ash mcp serving on {mount}:{port}")
+    kopf.info(body, reason="Deployed", message=f"ashx mcp serving on {mount}:{port}")
 
 
 def _attach_capability_probe(deployment: dict[str, Any], spec: dict[str, Any]) -> None:

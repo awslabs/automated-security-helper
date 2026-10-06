@@ -57,7 +57,8 @@ Four ways a schema check can pass while checking nothing, all of them guarded he
 Beyond the schemas, this script checks the things a schema cannot: that the three files
 agree with each other, that the version they declare is the version this repository
 builds, that the installer URL names the matching release tag, and that the Commands
-list is exactly the console scripts pyproject.toml declares.
+list is exactly the console scripts pyproject.toml declares, minus the deprecated names
+the Windows packages deliberately do not expose (NOT_EXPOSED_SCRIPTS).
 """
 
 from __future__ import annotations
@@ -240,12 +241,23 @@ def invalid(manifest_type: str, exc: jsonschema.ValidationError) -> Failure:
     )
 
 
+# Console scripts the wheel declares that the MSIX this manifest installs does NOT expose.
+# `ash` is the v3 command, kept in [project.scripts] as a deprecated alias for pip,
+# Homebrew and the container. On Windows it is the name MSYS2 and Git for Windows give the
+# Almquist shell, which is why the v4 command is `ashx`, so the MSIX has no ash.exe alias
+# and Commands must not list it. The same set is NOT_EXPOSED_SCRIPTS in
+# packaging/msix/msix.py, which checks the MSIX manifest; change both together.
+NOT_EXPOSED_SCRIPTS = frozenset({"ash"})
+
+
 def project_metadata(repo: Path) -> tuple[str, list[str]]:
-    """Return pyproject.toml's version and its declared console script names."""
+    """Return pyproject.toml's version and the console script names the package
+    exposes: [project.scripts] minus NOT_EXPOSED_SCRIPTS."""
     with (repo / "pyproject.toml").open("rb") as handle:
         data = tomllib.load(handle)
     project = data["project"]
-    return project["version"], sorted(project.get("scripts", {}))
+    exposed = set(project.get("scripts", {})) - NOT_EXPOSED_SCRIPTS
+    return project["version"], sorted(exposed)
 
 
 def main() -> int:
@@ -454,11 +466,19 @@ def main() -> int:
             )
         print("   unfilled, as expected: InstallerSha256 is the all-zero sentinel")
 
-    print("== Commands matches the console scripts the wheel will declare")
+    print("== Commands matches the console scripts the package exposes")
     commands = sorted(documents["installer"].get("Commands", []))
+    exposed_deprecated = sorted(set(commands) & NOT_EXPOSED_SCRIPTS)
+    if exposed_deprecated:
+        raise Failure(
+            f"Commands lists {exposed_deprecated}, deprecated console scripts the MSIX "
+            f"does not expose.\n    On Windows `ash` is the Almquist shell's name; the "
+            f"command is `ashx`. See NOT_EXPOSED_SCRIPTS."
+        )
     if commands != script_names:
         raise Failure(
-            f"Commands is {commands} and [project.scripts] declares {script_names}.\n"
+            f"Commands is {commands} and the package exposes {script_names} "
+            f"([project.scripts] minus {sorted(NOT_EXPOSED_SCRIPTS)}).\n"
             f"    Every package installs whatever the wheel's console scripts provide, "
             f"so a name in one list and not the other is a name a user will not find."
         )

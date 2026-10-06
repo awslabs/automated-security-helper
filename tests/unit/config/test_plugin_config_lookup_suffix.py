@@ -93,7 +93,7 @@ class TestSuffixedConfigKeyIsReachable:
         `report_format` taken straight from --output-format, and
         scanner_statistics_calculator passes the registered scanner name. So
 
-            ash report --format bedrock-summary-reporter
+            ashx report --format bedrock-summary-reporter
 
         arrives here as "bedrock-summary-reporter".
 

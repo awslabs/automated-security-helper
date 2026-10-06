@@ -155,9 +155,9 @@ class TestBuildNixCommand:
 
     def test_runs_ash_inside_the_shell_with_the_forwarded_args(self):
         cmd = build_nix_command("path:/repo", ["scan", "--mode", "local"], "nix")
-        assert cmd[-4:] == ["ash", "scan", "--mode", "local"]
+        assert cmd[-4:] == ["ashx", "scan", "--mode", "local"]
         assert "--command" in cmd
-        assert cmd[cmd.index("--command") + 1] == "ash"
+        assert cmd[cmd.index("--command") + 1] == "ashx"
 
     def test_flake_ref_is_passed_to_develop(self):
         cmd = build_nix_command("github:owner/repo/v1", ["scan"], "nix")
@@ -272,7 +272,7 @@ class TestRunAshNix:
             "automated_security_helper.interactions.run_ash_nix.find_executable",
             lambda _: "/usr/bin/nix",
         )
-        monkeypatch.setattr(sys, "argv", ["ash", "scan", "--quiet", "--mode", "nix"])
+        monkeypatch.setattr(sys, "argv", ["ashx", "scan", "--quiet", "--mode", "nix"])
 
         captured = {}
 
@@ -285,7 +285,7 @@ class TestRunAshNix:
 
         run_ash_nix()
         # sys.argv[0] is the executable and must not be forwarded as a scan argument.
-        assert "ash" == captured["cmd"][captured["cmd"].index("--command") + 1]
+        assert "ashx" == captured["cmd"][captured["cmd"].index("--command") + 1]
         assert "--quiet" in captured["cmd"]
 
 

@@ -736,7 +736,7 @@ class TestRunAshScanContainerWorkspaceVerdict:
     def test_the_containers_own_verdict_is_used_rather_than_re_derived(
         self, quiet_logger, monkeypatch, tmp_path
     ):
-        """`ash --workspace` already ran inside the container; re-deriving on the
+        """`ashx --workspace` already ran inside the container; re-deriving on the
         host from a merged model would answer a different question."""
         results = AshAggregatedResults(
             workspace=WorkspaceResults(

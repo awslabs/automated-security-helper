@@ -3,7 +3,7 @@
 This is the one part of the design that has no precedent in the repository, so it
 is spelled out here rather than left to the reader.
 
-**The gap.** ``ash merge`` refuses a duplicate shard index when it arrives as two
+**The gap.** ``ashx merge`` refuses a duplicate shard index when it arrives as two
 ``--results`` entries -- its message is explicit, "merging does not deduplicate".
 It has no defence against **one** file that a retry overwrote. Neither CodeBuild
 backend faces this, because CodeBuild actions inside a CodePipeline run do not
@@ -32,7 +32,7 @@ marker as a second witness, because a name is a label and a UID is a fact.
 
 Order of operations in the worker, and why each step is where it is:
 
-1. ``ash scan`` writes to a node-local ``emptyDir``, not to the shared volume.
+1. ``ashx scan`` writes to a node-local ``emptyDir``, not to the shared volume.
    Writing the scan's own scratch directly to a shared volume would make a
    half-written file visible under the published name.
 2. Copy the output tree into ``<attempt-id>.partial/``. A reader that sees this
@@ -262,7 +262,7 @@ def verify_attempt(directory: str, *, expected_shard_index: int) -> AttemptMarke
 def resolve_shard_set(*, prefix: str, shard_count: int) -> list[SelectedAttempt]:
     """Walk ``0..shard_count-1`` and resolve each index to one verified attempt.
 
-    Walking indices rather than globbing is deliberate. ``ash merge`` learns
+    Walking indices rather than globbing is deliberate. ``ashx merge`` learns
     ``shard_count`` from the provenance *inside* the result files, so a collector
     that merges whatever it finds produces a short merge that is caught one layer
     later with a worse message -- and only if the provenance is intact. The index

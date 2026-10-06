@@ -418,7 +418,7 @@ class TestFindDockerfileLocal:
     def test_the_dockerfile_is_found_by_walking_up_to_the_repo_root(
         self, monkeypatch, tmp_path
     ):
-        """Running `ash` from a subdirectory of a clone still finds the Dockerfile."""
+        """Running `ashx` from a subdirectory of a clone still finds the Dockerfile."""
         repo = tmp_path / "repo"
         nested = repo / "packages" / "inner"
         nested.mkdir(parents=True)
@@ -635,7 +635,7 @@ class TestBuildImage:
 
         The value arrived in this function's signature from cli/image.py and cli/scan.py via
         run_ash_scan and was then never appended to the command, so
-        ``ash build-image --custom-build-arg FOO=bar`` built an image with no FOO. Nothing
+        ``ashx build-image --custom-build-arg FOO=bar`` built an image with no FOO. Nothing
         failed and nothing was logged; the arg simply had no effect.
         """
         monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
@@ -875,7 +875,7 @@ class TestAssembleRunCommandTerminalSize:
         cmd = _run_command(tmp_path, tmp_path / "out")
 
         assert not any(arg.startswith("COLUMNS=") for arg in cmd)
-        assert "ash" in cmd
+        assert "ashx" in cmd
 
 
 class TestAssembleRunCommandFlagPassthrough:
@@ -1047,7 +1047,7 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
 
     def _inner_argv(self, tmp_path, **overrides) -> List[str]:
         cmd = _run_command(tmp_path, tmp_path / "out", **overrides)
-        return cmd[cmd.index("ash") + 1 :]
+        return cmd[cmd.index("ashx") + 1 :]
 
     def _parse(self, argv: List[str]):
         import typer.main
@@ -1056,7 +1056,7 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
 
         app = typer.Typer()
         app.command()(run_ash_scan_cli_command)
-        return typer.main.get_command(app).make_context("ash", list(argv))
+        return typer.main.get_command(app).make_context("ashx", list(argv))
 
     def test_every_flag_a_fully_populated_invocation_emits_is_declared(self, tmp_path):
         out = tmp_path / "out"

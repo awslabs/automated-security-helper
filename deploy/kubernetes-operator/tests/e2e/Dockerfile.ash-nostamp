@@ -3,7 +3,7 @@
 # This exists to test one thing the main e2e image cannot: what the operator does when
 # the provenance is absent. `spec.image` pointing at an ASH build that predates
 # `ShardAssignment` stamping is a supported configuration, and in that state
-# `ash merge` does **not** refuse -- it skips the union check, so a coverage hole
+# `ashx merge` does **not** refuse -- it skips the union check, so a coverage hole
 # where two executors partitioned different scanner sets merges into a report that
 # reads as a complete scan of the whole tree. The operator's `derive_phase` is the
 # only thing standing there, and an assertion that the field was present proves

@@ -9,7 +9,7 @@ command can be *missing its interpreter*. Declaring the command unconditionally
 turned that into a much worse failure than an unavailable scanner:
 ``run_command`` catches ``FileNotFoundError`` and returns 1, a non-zero install
 command fails the whole run, and so on any host without Ruby
-``ash dependencies install`` exited non-zero for every plugin together, before any
+``ashx dependencies install`` exited non-zero for every plugin together, before any
 scan. That is reached from ``Dockerfile:253`` and ``:328`` and from both
 python-local branches of the scan action.
 
@@ -122,7 +122,7 @@ def test_no_compiler_means_no_install_command(context):
     This is the windows-latest case, and it is measured rather than predicted. With
     the gem command declared unconditionally the install reached
     "ERROR: Failed to build gem native extension", returned 1, and failed
-    `ash dependencies install` for every scanner at once -- so a Windows job whose
+    `ashx dependencies install` for every scanner at once -- so a Windows job whose
     only command was the installer went red for a constraint that belongs to one
     scanner.
     """

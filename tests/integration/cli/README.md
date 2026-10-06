@@ -76,7 +76,7 @@ the measurement are in that test's docstring.
 
 ### `test_mcp_stdio_server.py`
 
-The `ash mcp` process, launched for real and spoken to over its own pipes. Three tests,
+The `ashx mcp` process, launched for real and spoken to over its own pipes. Three tests,
 about six seconds.
 
 Covers that the CLI serves the same tool surface the in-process tests see; that every line

@@ -34,7 +34,7 @@ diagnostics with what the scan found. `ASH: Clear findings` empties them.
 |---|---|---|
 | `ash.executablePath` | empty | Empty runs `ashx` from PATH, and `ash` when no `ashx` is installed. Anything else is run exactly as given, with no fallback. Machine-scoped, so a cloned repository cannot set it. |
 | `ash.outputDirectory` | `.ash/ash_output` | Where the scan writes, relative to the workspace folder. It must resolve, symlinks included, to a folder inside the workspace: ASH clears directories under it before scanning, so an absolute path or an escape is refused and nothing runs. A symlink at `reports/`, `reports/ash.sarif` or `ash_aggregated_results.json` below it is refused too, before the previous report is deleted. |
-| `ash.extraArguments` | `[]` | Appended to `ash scan`, for example `--scanners detect-secrets` or `--offline`. `--output-dir` and `--source-dir` are refused, because the extension sets both. |
+| `ash.extraArguments` | `[]` | Appended to `ashx scan`, for example `--scanners detect-secrets` or `--offline`. `--output-dir` and `--source-dir` are refused, because the extension sets both. |
 | `ash.scanTimeoutSeconds` | `1800` | Seconds before a scan is stopped, with every process it started. `0` waits indefinitely. |
 
 The scan runs as a child process without blocking the editor, under a progress
@@ -93,11 +93,11 @@ would be indistinguishable from safety.
 So the extension runs `<executable> --version` before every scan and refuses to
 scan unless the answer contains the string `automated-security-helper`. The
 refusal names `automated-security-helper` as the fix, because that is the console
-script ASH keeps indefinitely and silently for exactly this case — `ash` is
-canonical and `ashv3` is deprecated.
+script ASH keeps indefinitely and silently for exactly this case — `ashx` is
+canonical, and `ash` and `ashv3` are deprecated aliases.
 
 Two details of that check are deliberate. It reads the output rather than the exit
-code, because `ash scan` exits 2 for "actionable findings detected" and the
+code, because `ashx scan` exits 2 for "actionable findings detected" and the
 Almquist shell also exits 2 for an illegal option, so no numeric test can tell
 them apart. And it uses `--version` and not `-v`: `-v` is `--verbose` and starts a
 logging session.

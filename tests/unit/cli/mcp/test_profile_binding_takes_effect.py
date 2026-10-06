@@ -117,7 +117,7 @@ def test_the_mcp_command_accepts_profile_specs():
     from automated_security_helper.cli.mcp import mcp_command
 
     assert "profile" in inspect.signature(mcp_command).parameters, (
-        "ash mcp has no --profile option, so register_profiles has no production "
+        "ashx mcp has no --profile option, so register_profiles has no production "
         "caller and the profile registry is empty on every real server"
     )
 

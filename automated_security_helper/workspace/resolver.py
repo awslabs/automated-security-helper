@@ -576,7 +576,7 @@ def _validate_plugin_modules(
     neither ordering is correct:
 
     * project-without-the-plugin first -- the project that DECLARED it loses it.
-      A silent false negative: fewer findings than ``ash --source-dir`` would
+      A silent false negative: fewer findings than ``ashx --source-dir`` would
       report, with no warning anywhere.
     * project-with-the-plugin first -- the other project gains a scanner it never
       declared.

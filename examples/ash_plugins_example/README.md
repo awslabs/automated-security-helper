@@ -26,7 +26,7 @@ Once installed, ASH will automatically discover and use these plugins when runni
 
 ```bash
 # Run ASH with the example plugins
-ash --source-dir /path/to/code
+ashx --source-dir /path/to/code
 ```
 
 ## Plugin Development

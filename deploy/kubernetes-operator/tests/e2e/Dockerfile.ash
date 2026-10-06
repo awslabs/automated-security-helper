@@ -3,7 +3,7 @@
 # Not a substitute for the real one. It carries the two scanners that are pure
 # Python -- bandit and detect-secrets -- and none of the eight that need ruby, node,
 # npm or a Go binary. That is enough to prove the contract, because what the e2e has
-# to demonstrate is that a real `ash scan` ran per shard, that its provenance was
+# to demonstrate is that a real `ashx scan` ran per shard, that its provenance was
 # stamped, that the merge consumed every index and that a planted finding came back.
 # A scanner that needs a toolchain would add minutes to the build and test nothing
 # the operator is responsible for.
@@ -22,7 +22,7 @@ ENV HOME=/home/ash \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Kubernetes never reads a Docker HEALTHCHECK, and this image runs `ash scan` to
+# Kubernetes never reads a Docker HEALTHCHECK, and this image runs `ashx scan` to
 # completion in a Job rather than serving anything, so there is nothing to probe.
 # NONE says so explicitly instead of leaving it to be inferred.
 HEALTHCHECK NONE
@@ -36,7 +36,7 @@ COPY ash-source /src
 # which is invisible while fail_on_incomplete_scanners stays off.
 RUN pip install --no-cache-dir . bandit detect-secrets \
     && python -c "import automated_security_helper; print(automated_security_helper.__version__)" \
-    && ash --version \
+    && ashx --version \
     && chown -R 1000:1000 /home/ash
 
 # Warm uv's tool environment as the running user, so the uv path works offline too.

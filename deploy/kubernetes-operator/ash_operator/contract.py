@@ -1,4 +1,4 @@
-"""Build the ``ash scan`` and ``ash merge`` command lines.
+"""Build the ``ashx scan`` and ``ashx merge`` command lines.
 
 ASH exposes no Python interface for remote execution -- no ABC, no plugin hook,
 no registry of execution targets. A backend implements a *command line* and a
@@ -21,11 +21,11 @@ that finds nothing exits 0 no matter what the other shards found. Gating on shar
 exit codes would pass whenever each individual slice happened to be clean. So
 ``--fail-on-findings``, ``--no-fail-on-findings``, ``--min-severity`` and
 ``--fail-on-incomplete-scanners`` are refused on the worker argv and belong to
-``ash merge`` alone. ``--no-fail-on-findings`` *is* passed to workers, by the
+``ashx merge`` alone. ``--no-fail-on-findings`` *is* passed to workers, by the
 builder rather than by an adopter, which is why it is also a reserved word in
 ``extraScanArguments``-equivalent input.
 
-*Provenance.* The worker runs ``ash scan`` unmodified, so ``ScanPhase`` stamps
+*Provenance.* The worker runs ``ashx scan`` unmodified, so ``ScanPhase`` stamps
 ``candidate_scanners`` onto the results. That field is the only check that can see
 a split-brain scanner roster: with it, a coverage hole is refused; without it, the
 same hole merges to a clean report with no refusal anywhere. Nothing here
@@ -50,7 +50,7 @@ class ContractError(ValueError):
     """An argv was asked for that the contract forbids."""
 
 
-# Flags whose only effect is on an exit code, passed to ``ash merge`` and refused
+# Flags whose only effect is on an exit code, passed to ``ashx merge`` and refused
 # on a worker. Kept as a frozenset so the membership test cannot drift from the
 # error message.
 VERDICT_OWNING_FLAGS = frozenset(
@@ -88,13 +88,13 @@ def shell_arg(value: str) -> str:
     ``build_shard_job`` emits ``command: [/bin/sh, <script>]`` with ``args: scan_argv``
     and the script runs ``"$@"``. There is no ``sh -c`` and no ``eval`` anywhere on
     that path, so a positional parameter's *value* is never re-parsed by the shell.
-    A semicolon in a path would reach ``ash scan`` as part of a path, not as a command
+    A semicolon in a path would reach ``ashx scan`` as part of a path, not as a command
     separator.
 
     That wrong belief is not harmless trivia -- it is the same misreading of ``sh -c``
     positional parameters that produced an auth bypass in the MCP path, where
     ``${ASH_MCP_AUTH_HEADER_VALUE}`` was passed as an argv element on the assumption
-    the shell would expand it. It does not, and ``ash`` received the literal as the
+    the shell would expand it. It does not, and ``ashx`` received the literal as the
     expected credential. So the rationale is corrected here rather than left to be
     rediscovered, and this guard is deliberately **kept**: it stops a path containing
     a newline from corrupting the entrypoint's own log lines, it keeps the operator
@@ -120,7 +120,7 @@ def shell_arg(value: str) -> str:
 
 
 def validate_shard_selection(shard_index: int | None, shard_count: int | None) -> None:
-    """Reject a shard selection ``ash scan`` would reject, before scheduling it.
+    """Reject a shard selection ``ashx scan`` would reject, before scheduling it.
 
     Duplicates ``automated_security_helper.core.sharding.validate_shard_selection``
     on purpose rather than importing it: this runs in the *controller*, which must
@@ -192,7 +192,7 @@ def build_scan_argv(
     extra_arguments: list[str] | None = None,
     ash_binary: str = ASH_CLI,
 ) -> list[str]:
-    """Return the ``ash scan`` argv for one worker.
+    """Return the ``ashx scan`` argv for one worker.
 
     ``--no-progress`` and ``--simple`` are unconditional: a pod has no terminal,
     and the live progress renderer writes control sequences into the pod log,
@@ -238,7 +238,7 @@ def build_merge_argv(
     output_formats: list[str] | None = None,
     ash_binary: str = ASH_CLI,
 ) -> list[str]:
-    """Return the ``ash merge`` argv for the collector.
+    """Return the ``ashx merge`` argv for the collector.
 
     One ``--results`` per shard directory, never the shared parent.
     ``resolve_results_file`` searches a directory recursively and requires exactly
@@ -256,7 +256,7 @@ def build_merge_argv(
     if results_dirs is not None:
         if not results_dirs:
             raise ContractError(
-                "ash merge over an empty result set would exit 0, and an empty "
+                "ashx merge over an empty result set would exit 0, and an empty "
                 "report is indistinguishable from a clean scan. Refuse before "
                 "merging."
             )
@@ -300,7 +300,7 @@ def build_mcp_argv(
     auth_value_from_environment: bool = False,
     ash_binary: str = ASH_CLI,
 ) -> list[str]:
-    """Return the ``ash mcp`` argv for a long-lived server pod.
+    """Return the ``ashx mcp`` argv for a long-lived server pod.
 
     **``--auth-header-value`` is not in this argv, and must never be.** It is
     appended by the pod's entrypoint script, which reads the value out of the
@@ -313,7 +313,7 @@ def build_mcp_argv(
     And the obvious-looking way to avoid that does not work. This function used to
     emit the literal string ``${ASH_MCP_AUTH_HEADER_VALUE}`` as an argv element, with
     the pod running ``sh -c 'exec "$0" "$@"' <argv>``. A positional parameter's
-    *value* is never re-expanded by the shell, so ``ash`` received the placeholder
+    *value* is never re-expanded by the shell, so ``ashx`` received the placeholder
     verbatim and ``hmac.compare_digest``'d incoming headers against those 28
     characters. That inverts the auth model: anyone sending the literal
     ``${ASH_MCP_AUTH_HEADER_VALUE}`` -- a constant in a public repository, also
@@ -322,7 +322,7 @@ def build_mcp_argv(
     environment, ``sh -c 'exec "$0" "$@"' … '${ASH_MCP_AUTH_HEADER_VALUE}'`` passes
     the literal through unchanged.
 
-    Nothing upstream rescues it either: ``ash mcp``'s ``--auth-header-value`` option
+    Nothing upstream rescues it either: ``ashx mcp``'s ``--auth-header-value`` option
     declares no ``envvar=``, so setting the variable alone supplies no value.
 
     ``auth_value_from_environment`` therefore says only *that* a value will be

@@ -111,7 +111,7 @@
             # the external scanner binaries; ASH comes from the ambient environment (uv,
             # pipx or a venv), exactly as it comes from the image in container mode. Since
             # `nix develop` prepends its packages to the inherited PATH rather than
-            # replacing it, an `ash` on the caller's PATH stays reachable inside.
+            # replacing it, an `ashx` on the caller's PATH stays reachable inside.
             shellHook = ''
               # Tells ASH's scanners not to install tools this shell already provides.
               # Thirteen scanners prefer `uv tool install` when uv is present, and

@@ -17,8 +17,8 @@
 #    by the name check (its message is matched, so a later failure for an unrelated
 #    reason does not count); a good name must get past the check in all three.
 # 2. Each shipped README is substituted with a renamed package and command, and must
-#    then name only the renamed paths. A literal /usr/lib/ash in a README describes a
-#    directory a renamed package does not have.
+#    then name only the renamed paths. A literal /usr/lib/automated-security-helper in a
+#    README describes a directory a renamed package does not have.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -88,7 +88,8 @@ for variable in ASH_PKG_NAME ASH_CLI_NAME; do
   for bad in '../etc' 'a/b' 'a*' 'a b' '$(id)' 'Ash' 'a_b' '-ash' 'a' $'ash\n../etc' $'ash\n'; do
     check_name "$variable" "$bad" refuse
   done
-  # ashx and automated-security-helper are the planned rename targets.
+  # ashx and automated-security-helper are the names cli-name.sh sets; ash is the v3
+  # name, still a valid name for the check even though the packages no longer use it.
   for good in ash ashx automated-security-helper ash-tool ash2.0+x; do
     check_name "$variable" "$good" accept
   done
@@ -102,8 +103,10 @@ ASH_CLI_NAME=renamedcli
 for readme in deb/debian/README.Debian rpm/README.rpm; do
   out="$SCRATCH/$(basename "$readme")"
   ash_substitute_names "$HERE/$readme" "$out" || { fail "could not substitute $readme"; continue; }
-  # Any path component spelled `ash` is a default name left in the text.
-  stale="$(grep -nE '/(lib|bin|doc|licenses)/ash([/ ]|$)' "$out" || true)"
+  # A path component spelled as a configured name, or as the v3 name `ash`, is a
+  # default left in the text. /usr/bin/ash followed by punctuation is prose about the
+  # Almquist shell's path, which no rename changes.
+  stale="$(grep -nE '/(lib|bin|doc|licenses)/(ash|ashx|automated-security-helper)([/ ]|$)' "$out" || true)"
   [ -z "$stale" ] || fail "$readme still names the default paths after a rename:"$'\n'"$stale"
   grep -q "/usr/lib/renamedpkg/wheels/" "$out" || fail "$readme does not name /usr/lib/renamedpkg/wheels/"
   grep -q "/usr/bin/renamedcli" "$out" || fail "$readme does not name /usr/bin/renamedcli"

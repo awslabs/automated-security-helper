@@ -18,6 +18,8 @@ import { Template } from 'aws-cdk-lib/assertions';
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
 import { ASH_PARAMETER_NAMES } from '../lib/ash-config';
 import {
+  ASH_CLI,
+  ASH_CLI_V3,
   ASH_MATERIALIZED_CONFIG_PATH,
   ASH_S3_SYNC_PATH,
   ASH_S3_SYNC_SCRIPT,
@@ -28,10 +30,21 @@ import {
 
 describe('MCP entrypoint script', () => {
   test('invokes the streamable-http transport with the AgentCore-mandated host and port', () => {
-    expect(MCP_ENTRYPOINT_SCRIPT).toContain('ash mcp --transport streamable-http');
+    expect(MCP_ENTRYPOINT_SCRIPT).toContain('"$ASH_CLI" mcp --transport streamable-http');
     expect(MCP_ENTRYPOINT_SCRIPT).toContain('${ASH_MCP_HOST:-0.0.0.0}');
     expect(MCP_ENTRYPOINT_SCRIPT).toContain('${ASH_MCP_PORT:-8000}');
     expect(MCP_ENTRYPOINT_SCRIPT).toContain('${ASH_MCP_MOUNT_PATH:-/mcp}');
+  });
+
+  test('runs the canonical ashx, falling back to ash only when the image lacks it', () => {
+    expect(ASH_CLI).toBe('ashx');
+    expect(ASH_CLI_V3).toBe('ash');
+    expect(MCP_ENTRYPOINT_SCRIPT).toContain(
+      'ASH_CLI=ashx\ncommand -v "$ASH_CLI" >/dev/null 2>&1 || ASH_CLI=ash\n',
+    );
+    // Neither the probe nor the exec spells a name directly; both use $ASH_CLI.
+    // Operator-facing messages may still name `ashx mcp` in prose.
+    expect(MCP_ENTRYPOINT_SCRIPT).not.toMatch(/\bashx? mcp --(transport|help)\b/);
   });
 
   test('is the image ENTRYPOINT, because AgentCore cannot supply a command', () => {
@@ -45,7 +58,7 @@ describe('MCP entrypoint script', () => {
     // ASH spells this as a paired flag, so the script names the direction it
     // wants rather than inheriting whatever ASH's default happens to be.
     //
-    // Both spellings are now emitted only when `ash mcp --help` advertises them;
+    // Both spellings are now emitted only when `ashx mcp --help` advertises them;
     // which branch runs, and what happens when neither is available, is covered
     // by the "MCP entrypoint capability probe" suite below. This test only pins
     // that the script still knows both spellings.
@@ -119,6 +132,16 @@ describe('CodeCommit gate handler', () => {
     expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_SCANNER_ERROR = 1');
     expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_INVALID_CONFIG = 3');
     expect(CODECOMMIT_GATE_HANDLER).toContain('"errored"');
+  });
+
+  test('scans with ashx, falling back to ash on a v3 image', () => {
+    // Looked up on the scan environment's PATH, not the handler's: Lambda replaces
+    // PATH, and _scan_env restores the image's.
+    expect(CODECOMMIT_GATE_HANDLER).toContain(
+      'cli = "ashx" if shutil.which("ashx", path=scan_env.get("PATH")) else "ash"',
+    );
+    expect(CODECOMMIT_GATE_HANDLER).toContain('argv = [cli, "scan", ');
+    expect(CODECOMMIT_GATE_HANDLER).not.toMatch(/\["ashx?", "scan"/);
   });
 
   test('only APPROVEs a passing scan', () => {
@@ -384,7 +407,7 @@ describe('MCP entrypoint script is valid shell', () => {
  *
  * Asserting that the script merely contains `--stateless-http` cannot tell a
  * working branch from a broken one — the string is present either way. These
- * tests execute the real entrypoint against a fake `ash` whose `mcp --help`
+ * tests execute the real entrypoint against a fake ASH whose `mcp --help`
  * advertises either the modern option set or v3.7.0's, and then read back the
  * argv the entrypoint actually exec'd.
  */
@@ -400,7 +423,7 @@ describe('MCP entrypoint capability probe', () => {
    */
   const FAKE_ASH = `#!/bin/sh
 if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
-  echo "Usage: ash mcp [OPTIONS]"
+  echo "Usage: ashx mcp [OPTIONS]"
   echo "  --transport TEXT"
   echo "  --host TEXT"
   echo "  --port INTEGER"
@@ -416,6 +439,7 @@ fi
 if [ -n "\${FAKE_ASH_HELP_BROKEN:-}" ]; then
   exit 1
 fi
+basename "$0" > "\${FAKE_ASH_ARGV}.name"
 : > "\${FAKE_ASH_ARGV}"
 for fake_arg in "$@"; do
   echo "\${fake_arg}" >> "\${FAKE_ASH_ARGV}"
@@ -429,23 +453,40 @@ echo "ImportError: cannot import name 'mcp'" >&2
 exit 1
 `;
 
+  /**
+   * PATH holds only the fake's directory and the system directories, so a real
+   * `ashx` or `ash` elsewhere on the developer's PATH cannot answer for the fake.
+   */
   function runEntrypoint(
     env: Record<string, string>,
     fakeAsh: string = FAKE_ASH,
-  ): { status: number | null; stderr: string; argv: string[] } {
+    names: string[] = ['ashx'],
+  ): { status: number | null; stderr: string; argv: string[]; ran: string | null } {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ash-probe-'));
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin);
-    const ash = path.join(bin, 'ash');
-    fs.writeFileSync(ash, fakeAsh, { mode: 0o755 });
+    for (const name of names) {
+      fs.writeFileSync(path.join(bin, name), fakeAsh, { mode: 0o755 });
+    }
     const entrypoint = path.join(dir, 'entrypoint.sh');
     fs.writeFileSync(entrypoint, MCP_ENTRYPOINT_SCRIPT);
     const argvFile = path.join(dir, 'argv');
+    const searchPath = `${bin}:/usr/bin:/bin`;
+    for (const other of ['ashx', 'ash']) {
+      if (names.includes(other)) continue;
+      const found = spawnSync('sh', ['-c', `command -v ${other}`], {
+        encoding: 'utf-8',
+        env: { PATH: searchPath },
+      });
+      if (found.status === 0) {
+        throw new Error(`a real ${other} at ${found.stdout.trim()} would shadow the fake`);
+      }
+    }
 
     const result = spawnSync('sh', [entrypoint], {
       encoding: 'utf-8',
       env: {
-        PATH: `${bin}:${process.env.PATH}`,
+        PATH: searchPath,
         FAKE_ASH_ARGV: argvFile,
         ...env,
       },
@@ -454,8 +495,34 @@ exit 1
     const argv = fs.existsSync(argvFile)
       ? fs.readFileSync(argvFile, 'utf-8').split('\n').filter((line: string) => line !== '')
       : [];
-    return { status: result.status, stderr: result.stderr ?? '', argv };
+    const nameFile = `${argvFile}.name`;
+    const ran = fs.existsSync(nameFile) ? fs.readFileSync(nameFile, 'utf-8').trim() : null;
+    return { status: result.status, stderr: result.stderr ?? '', argv, ran };
   }
+
+  test('runs ashx when the image has it, even beside the deprecated ash', () => {
+    const { status, ran, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1' }, FAKE_ASH, [
+      'ashx',
+      'ash',
+    ]);
+    expect(status).toBe(0);
+    expect(ran).toBe('ashx');
+    expect(argv.slice(0, 3)).toEqual(['mcp', '--transport', 'streamable-http']);
+  });
+
+  test('falls back to ash on an image built from a v3 tag, which ships no ashx', () => {
+    const { status, ran, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1' }, FAKE_ASH, ['ash']);
+    expect(status).toBe(0);
+    expect(ran).toBe('ash');
+    expect(argv.slice(0, 3)).toEqual(['mcp', '--transport', 'streamable-http']);
+  });
+
+  test('names the command it probed when neither ashx nor ash is installed', () => {
+    const { status, stderr, ran } = runEntrypoint({}, FAKE_ASH, []);
+    expect(status).toBe(69);
+    expect(ran).toBeNull();
+    expect(stderr).toContain("'ash mcp --help' exited non-zero");
+  });
 
   test('passes --stateless-http when the ASH in the image supports it', () => {
     const { status, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1' });
@@ -482,7 +549,7 @@ exit 1
   test('an explicit fallback starts stateful with a warning instead of exiting 65', () => {
     /*
      * Maintainer decision D6's second option. The first -- pointing
-     * DEFAULT_ASH_VERSION at a ref whose `ash mcp` accepts the flag -- needs a
+     * DEFAULT_ASH_VERSION at a ref whose `ashx mcp` accepts the flag -- needs a
      * release cut from main, which no change here can make, so the shipped
      * one-click AgentCore template was undeployable with its own defaults.
      *
@@ -680,7 +747,7 @@ exit 1
   });
 
   test('distinguishes a broken ASH install from a missing option', () => {
-    // Reading a failed `ash mcp --help` as "the flag is absent" would report the
+    // Reading a failed `ashx mcp --help` as "the flag is absent" would report the
     // wrong cause and, worse, would let the stateful path look satisfiable.
     const { status, stderr } = runEntrypoint({}, FAKE_ASH_BROKEN_HELP);
     expect(status).toBe(69);

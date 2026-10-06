@@ -178,7 +178,7 @@ UV tool execution is required but UV is not available
 
 **Solutions:**
 - Install UV: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- Use offline mode: `ASH_OFFLINE=true ash --mode local`
+- Use offline mode: `ASH_OFFLINE=true ashx --mode local`
 - Pre-install tools manually
 
 #### Installation Timeout
@@ -206,7 +206,7 @@ Failed to install UV tool checkov>=3.2.0,<4.0.0 after 3 attempts
 Enable verbose logging for detailed UV tool information:
 
 ```bash
-ash --mode local --verbose
+ashx --mode local --verbose
 ```
 
 This provides:

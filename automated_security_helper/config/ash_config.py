@@ -222,7 +222,7 @@ class _PluginConfigSegment(BaseModel):
     the two whole, silently reverting either the override or the rest of the
     file. They are merged key by key instead, the alias -- the documented
     spelling -- winning where both set the same key. A hand-written config with
-    both is also flagged by ``ash config lint``.
+    both is also flagged by ``ashx config lint``.
     """
 
     @model_validator(mode="before")

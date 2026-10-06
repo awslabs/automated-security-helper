@@ -126,7 +126,7 @@ Set the `ASH_OFFLINE` environment variable:
 
 ```bash
 export ASH_OFFLINE=true
-ash --mode local
+ashx --mode local
 ```
 
 Or configure in scanner options:
@@ -237,7 +237,7 @@ Enable debug logging for detailed diagnostics:
 
 ```bash
 export ASH_LOG_LEVEL=DEBUG
-ash --mode local
+ashx --mode local
 ```
 
 ## Performance Optimization
@@ -406,7 +406,7 @@ scanners:
 
 - name: Run ASH Security Scan
   run: |
-    ash --mode local
+    ashx --mode local
 ```
 
 ## Best Practices

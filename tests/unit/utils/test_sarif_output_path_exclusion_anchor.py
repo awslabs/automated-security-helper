@@ -14,7 +14,7 @@ the process's current working directory instead.
 
 Those two agree only when ``cwd == source_dir``, which is the common interactive
 case and the reason this survived. Run from anywhere else -- a CI job that checks
-out to one directory and passes ``--source-dir`` for another, ``ash merge``, any
+out to one directory and passes ``--source-dir`` for another, ``ashx merge``, any
 MCP session -- and the resolution lands on a path that does not exist, is not under
 the output directory, and the exclusion silently stops firing. ASH's own HTML and
 SARIF reports then come back as findings about the customer's repository.
@@ -215,8 +215,8 @@ class TestTheDecisionIsTheSameFromEveryWorkingDirectory:
 class TestAnOutputDirContainingTheSourceDirDisablesTheExclusion:
     """The configuration in which the exclusion would empty the whole run.
 
-    ``ash merge`` builds its plugin context with ``source_dir=Path.cwd()`` and the
-    operator's ``--output-dir`` verbatim, so ``ash merge --output-dir .`` makes the
+    ``ashx merge`` builds its plugin context with ``source_dir=Path.cwd()`` and the
+    operator's ``--output-dir`` verbatim, so ``ashx merge --output-dir .`` makes the
     output directory an ancestor of the source directory. With the anchor fixed,
     every finding then resolves inside the output directory and the exclusion drops
     the entire result set -- at exit 0, because a run with no findings is clean.

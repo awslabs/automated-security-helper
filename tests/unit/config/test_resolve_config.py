@@ -225,11 +225,11 @@ class TestConfigPathHonoredWithoutSourceDir:
     Why this class exists
     ---------------------
     resolve_config used to return the default config whenever source_dir was
-    None, before it ever looked at config_path. `ash report --config <file>`
+    None, before it ever looked at config_path. `ashx report --config <file>`
     calls resolve_config(config_path=..., config_overrides=...) and passes no
     source_dir, so the option was accepted and then silently ignored: the
     command reported against default settings while appearing to honour the
-    file. `ash config` (cli/config.py) has the same call shape.
+    file. `ashx config` (cli/config.py) has the same call shape.
 
     Why it was not caught
     ---------------------
@@ -242,7 +242,7 @@ class TestConfigPathHonoredWithoutSourceDir:
     """
 
     def test_config_path_is_loaded_when_source_dir_omitted(self, tmp_path):
-        """The `ash report --config <file>` shape: config_path, no source_dir."""
+        """The `ashx report --config <file>` shape: config_path, no source_dir."""
         config_path = tmp_path / ".ash.yaml"
         config_path.write_text("project_name: from-file\n")
 

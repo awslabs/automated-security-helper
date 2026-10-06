@@ -77,7 +77,7 @@ spec:
                 description: Handle each streamable-HTTP request independently. Required behind anything
                   that may route consecutive requests to different replicas, so effectively required whenever
                   replicas > 1. An init container refuses to start -- exit 65 -- if this is set and the
-                  image's ash mcp has no --stateless-http, because without the flag the server runs stateful,
+                  image's ashx mcp has no --stateless-http, because without the flag the server runs stateful,
                   answers 404 to every injected session id, and still passes its health check.
               allowedHosts:
                 type: array
@@ -267,7 +267,7 @@ spec:
                     description: 'Whether to exit with non-zero code if findings are detected
 
 
-                      IGNORED BY THE OPERATOR: Set on `ash merge` from spec.failOnFindings instead. A
+                      IGNORED BY THE OPERATOR: Set on `ashx merge` from spec.failOnFindings instead. A
                       shard''s exit code is discarded, so setting it here would read as a gate that never
                       fires.'
                     type: boolean
@@ -284,8 +284,8 @@ spec:
                       is recorded SKIPPED and the report then says what was not measured.
 
 
-                      IGNORED BY THE OPERATOR: Set on `ash merge` from spec.failOnIncompleteScanners instead,
-                      for the same reason as fail_on_findings.'
+                      IGNORED BY THE OPERATOR: Set on `ashx merge` from spec.failOnIncompleteScanners
+                      instead, for the same reason as fail_on_findings.'
                     type: boolean
                   content_db_staleness:
                     description: What a scan does when a scanner's content database (grype's or trivy's

@@ -209,16 +209,23 @@ Repository = "https://github.com/awslabs/automated-security-helper"
 # sys.stderr is None (a console-less Windows app; see that module's docstring) a
 # failure there exits 1 with both streams empty. These entry points reattach the
 # streams first, then import.
-ash = "automated_security_helper.cli.entrypoint:main"
+ashx = "automated_security_helper.cli.entrypoint:main"
+# Deprecated: `ash` was the v3 command. v4 renamed it because Alpine, BusyBox and
+# MSYS2 ship the Almquist shell as `ash`, so a bare `ash` on PATH is often not ASH.
+# It stays through v4 so existing scripts keep working: `main_ash` prints one
+# deprecation line to stderr and then runs the same app, so arguments, output and
+# exit codes are unchanged. The deb and rpm do not put it on PATH; see
+# packaging/cli-name.sh.
+ash = "automated_security_helper.cli.entrypoint:main_ash"
 # Deprecated: `main_ashv3` warns on stderr and then runs the app. It names a
-# version, so it reads wrong the moment v4 exists. It is a separate entry point
-# from `main` rather than a Typer callback so the warning fires once per process
-# and never for the `ash` name. Routing it through cli.entrypoint too is what
-# lets the warning itself reach a stream on a console-less host.
+# version, so it reads wrong now that v4 exists. Each deprecated name is its own
+# entry point rather than a Typer callback so the warning fires once per process
+# and never for `ashx`. Routing it through cli.entrypoint too is what lets the
+# warning itself reach a stream on a console-less host.
 ashv3 = "automated_security_helper.cli.entrypoint:main_ashv3"
 # Kept indefinitely and deliberately silent. This is the escape hatch for hosts
-# where a bare `ash` resolves to something else -- MSYS2 ships the Almquist shell
-# under that name and has already shadowed this entry point.
+# where a short name resolves to something else -- MSYS2 ships the Almquist shell
+# as `ash` and has already shadowed ASH's v3 entry point.
 automated-security-helper = "automated_security_helper.cli.entrypoint:main"
 
 [tool.commitizen]
@@ -348,6 +355,52 @@ version_files = [
     # because its kopf and kubernetes pins live in a dependencies array whose
     # entries are indented strings, never a bare `version =` key.
     "deploy/kubernetes-operator/pyproject.toml:^version",
+    # The CDK defaults: DEFAULT_ASH_VERSION is the ASH tag deploy/cdk builds
+    # images from, and DEFAULT_ASH_REF the tag deploy/cdk-constructs installs in
+    # CodeBuild. Each is one `export const NAME = 'v<version>';` line, so
+    # commitizen rewrites the version inside it and leaves the leading "v" alone,
+    # as with Formula/ash.rb.
+    #
+    # The files after each constant are committed output generated from it, and
+    # each has a drift gate that byte-compares it against a fresh generation:
+    # synth-templates.sh --check for the templates, check:buildspec and the
+    # constructs jest suite for the buildspecs. Rewriting only the constant would
+    # hand those gates a failure on the bump commit, the same way _base/ needs the
+    # transpiler hook below. These entries rewrite the generated lines in place,
+    # and the gates then confirm the result equals a regeneration. Measured with
+    # `cz bump 4.0.0 --files-only`: each template changes on its `"Default"` line
+    # only and each buildspec on its `ASH_VERSION:` line only, and both gates pass
+    # afterwards. AshEksOperator.template.json has no AshVersion parameter, which
+    # is why the templates are listed one by one rather than globbed: a glob
+    # would include it, and an entry that matches no line fails
+    # test_every_version_files_entry_rewrites_a_line.
+    #
+    # deploy/quick-create-links.md is generated from those templates too, but it
+    # has a .template sibling, so it is re-rendered by a pre_bump_hook below
+    # instead of being listed here; see
+    # test_no_version_files_target_has_a_template_sibling.
+    #
+    # Two jest tripwires in deploy/cdk/test still compare AshVersion's default to
+    # a literal v3.7.0 and are deliberately NOT listed. They exist so that moving
+    # the default forces a decision about the MCP stateless-HTTP fallback, which
+    # only a v3 default needs, and rewriting them here would make that decision
+    # silently. The 4.0.0 bump is expected to trip them.
+    "deploy/cdk/lib/ash-config.ts:^export const DEFAULT_ASH_VERSION =",
+    'deploy/cdk/templates/AshAgentCore.template.json:^\s+"Default": "v',
+    'deploy/cdk/templates/AshCodeCommitGate.template.json:^\s+"Default": "v',
+    'deploy/cdk/templates/AshDistributedPipeline.template.json:^\s+"Default": "v',
+    'deploy/cdk/templates/AshFargate.template.json:^\s+"Default": "v',
+    'deploy/cdk/templates/AshImagePipeline.template.json:^\s+"Default": "v',
+    "deploy/cdk/README.md:^\\| `AshVersion`",
+    "deploy/cdk-constructs/src/private/commands.ts:^export const DEFAULT_ASH_REF =",
+    'deploy/cdk-constructs/buildspec.yml:^\s+ASH_VERSION: v',
+    'deploy/cdk-constructs/buildspec-shard.yml:^\s+ASH_VERSION: v',
+    'deploy/cdk-constructs/buildspec-merge.yml:^\s+ASH_VERSION: v',
+    "deploy/cdk-constructs/README.md:automated-security-helper.git@",
+    # Two jest assertions spell the default install ref as a literal tag, which
+    # the tree-wide pin walk watches like any other install command. Listing the
+    # file moves them with DEFAULT_ASH_REF rather than exempting it from the walk.
+    "deploy/cdk-constructs/test/ash-scan-step.test.ts:automated-security-helper.git@",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-
@@ -355,8 +408,14 @@ version_files = [
 # drift failure on the release commit. This hook runs after version_files are
 # rewritten and before the bump commit is made, and commitizen commits with
 # `git commit -a`, so the regenerated trees land in that same commit.
+#
+# The second hook re-renders deploy/quick-create-links.md, whose parameter table
+# is read from the CDK templates that version_files has just rewritten. The
+# IaC drift workflow re-renders the document and fails on any git diff, so a
+# bump that left the table on the old AshVersion would fail it.
 pre_bump_hooks = [
     "uv run --project ash-agent-plugins/agentic-coding/transpiler agentic-plugins build",
+    "uv run python scripts/render_quick_create_links.py render",
 ]
 tag_format = "v$version"
 changelog_file = "CHANGELOG.md"

@@ -285,7 +285,7 @@ AUTH_SPEC = {
     },
 }
 
-# The exact string an earlier version of this operator handed to `ash mcp` as the
+# The exact string an earlier version of this operator handed to `ashx mcp` as the
 # expected credential. Named once, so every test below refers to the same bytes.
 BYPASS_LITERAL = "${ASH_MCP_AUTH_HEADER_VALUE}"
 
@@ -304,11 +304,11 @@ class TestMcpAuthIsNotBypassable:
 
     The bug: ``build_mcp_argv`` emitted the literal ``${ASH_MCP_AUTH_HEADER_VALUE}``
     as an argv element and the container ran ``sh -c 'exec "$0" "$@"' <argv>``. A
-    positional parameter's *value* is never re-expanded, so ``ash`` received the
+    positional parameter's *value* is never re-expanded, so ``ashx`` received the
     placeholder verbatim and ``hmac.compare_digest``'d request headers against those
     28 characters -- a constant in a public repository, also readable with
     ``kubectl get deploy -o yaml``. Anyone sending the literal authenticated; the
-    holder of the real secret got 401. ``ash mcp``'s ``--auth-header-value`` declares
+    holder of the real secret got 401. ``ashx mcp``'s ``--auth-header-value`` declares
     no ``envvar=``, so nothing upstream supplied the real value either.
 
     The test that used to live here asserted the literal was *present* in the
@@ -346,16 +346,16 @@ class TestMcpAuthIsNotBypassable:
         assert 'exec "$0" "$@"' not in script
 
     def test_the_real_value_reaches_argv_when_the_script_runs(self):
-        """Run the emitted command for real and check what `ash` would receive.
+        """Run the emitted command for real and check what `ashx` would receive.
 
         The structural assertions above would both pass for a script that referenced
         the wrong variable name, so this executes the actual emitted script with a
         known value in the environment and inspects the resulting argv. `true` stands
-        in for `ash`; `printf` records what it was called with.
+        in for `ashx`; `printf` records what it was called with.
         """
         command = mcp_deployment(AUTH_SPEC)["spec"]["template"]["spec"]["containers"][0]["command"]
         script, label, argv = command[2], command[3], command[4:]
-        # Swap `ash` for something that prints its argv, keeping every other element.
+        # Swap `ashx` for something that prints its argv, keeping every other element.
         probe_argv = ["/bin/echo", *argv[1:]]
         result = subprocess.run(
             ["/bin/sh", "-c", script, label, *probe_argv],
@@ -456,7 +456,7 @@ class TestMcpShapes:
         assert "0.0.0.0" in command  # noqa: S104 - asserting the bind address
 
     def test_the_probes_are_tcp_not_http(self):
-        # Measured: `ash mcp` answers 401 to a bare GET on its mount path, and a
+        # Measured: `ashx mcp` answers 401 to a bare GET on its mount path, and a
         # kubelet httpGet probe accepts only 200-399. An httpGet probe there can
         # never pass -- the pod stays unready and the rollout times out while the
         # server is working. If this assertion is ever flipped back, re-measure what

@@ -185,7 +185,7 @@ class TestNothingRanIsAFailure:
     def test_every_scanner_skipped_fails(self, tmp_path, capsys):
         """The regression a typo in --scanners produces.
 
-        Measured on this tree: ``ash scan --scanners detect_secrets`` -- underscore,
+        Measured on this tree: ``ashx scan --scanners detect_secrets`` -- underscore,
         where the registered name is ``detect-secrets`` -- matched no scanner, so all
         ten took the not-selected path and the results file held ten SKIPPED entries
         with zero findings. Every status was individually legitimate, so the
@@ -432,7 +432,7 @@ class TestTheRosterIsAnIndependentDenominator:
     def test_no_roster_leaves_the_gate_as_it_was(self, tmp_path):
         """Backward compatibility, and it is load-bearing rather than polite.
 
-        ``ash merge`` reads shard results from whatever ASH wrote each one, and the
+        ``ashx merge`` reads shard results from whatever ASH wrote each one, and the
         reusable workflow runs this script against files produced by released
         versions. A missing roster has to read as "this producer recorded none",
         not as "every scanner is missing".

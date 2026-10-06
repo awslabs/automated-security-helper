@@ -1,9 +1,9 @@
-"""The collector's verdict: three answers from ``ash merge``, and when exit 1 is not one.
+"""The collector's verdict: three answers from ``ashx merge``, and when exit 1 is not one.
 
-``ash merge`` exits 0 for a clean scan, 2 for findings, and 1 both for a scan that
+``ashx merge`` exits 0 for a clean scan, 2 for findings, and 1 both for a scan that
 finished with partial coverage and for an error during execution. The collector
 separates the last two by reading the merged report, and these tests drive
-``collect.main`` against a stand-in ``ash merge`` that writes a chosen report and
+``collect.main`` against a stand-in ``ashx merge`` that writes a chosen report and
 exits a chosen code, so each mapping is measured through the real index walk and
 the real termination message rather than by calling the mapping function alone.
 """

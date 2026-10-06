@@ -59,7 +59,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
 
 # Use as normal
-ash --help
+ashx --help
 ```
 
 > **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v{{VERSION}}` to stay up to date automatically. Pin a specific version when you need reproducible builds.
@@ -74,11 +74,11 @@ ash --help
 ```bash
 # Linux/macOS
 curl -sSf https://astral.sh/uv/install.sh | sh
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
 
 # Windows PowerShell
 irm https://astral.sh/uv/install.ps1 | iex
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} $args }
+function ashx { uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} $args }
 ```
 
 #### Using `pip`
@@ -100,13 +100,13 @@ pip install .
 
 ```bash
 # Run a scan in local mode (Python only)
-ash --mode local
+ashx --mode local
 
 # Run a scan in container mode (all tools)
-ash --mode container
+ashx --mode container
 
 # Run a scan in precommit mode (fast subset of tools)
-ash --mode precommit
+ashx --mode precommit
 ```
 
 ### Sample Output
@@ -138,8 +138,8 @@ To investigate...
     - HTML report of all findings: '.ash/ash_output/reports/ash.html'
     - Markdown summary: '.ash/ash_output/reports/ash.summary.md'
     - Text summary: '.ash/ash_output/reports/ash.summary.txt'
-  2. Use ash report to view a short text summary of the scan in your terminal
-  3. Use ash inspect findings to explore the findings interactively
+  2. Use ashx report to view a short text summary of the scan in your terminal
+  3. Use ashx inspect findings to explore the findings interactively
   4. Review scanner-specific reports and outputs in the '.ash/ash_output/scanners' directory
 
 === ASH Exit Codes ===
@@ -224,7 +224,7 @@ ASH respects `.gitignore` files. You can also configure ignore paths in your `.a
 <details>
 <summary>How do I run ASH in an offline/air-gapped environment?</summary>
 
-Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
+Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment.
 </details>
 
 <details>

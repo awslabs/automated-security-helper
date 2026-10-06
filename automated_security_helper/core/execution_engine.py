@@ -508,7 +508,7 @@ class ScanExecutionEngine:
                         )
                         # Store the completed scanners for metrics display
                         self._completed_scanners = scan_phase._completed_scanners
-                        # Stamp shard provenance, so `ash merge` can verify
+                        # Stamp shard provenance, so `ashx merge` can verify
                         # coverage from the result files alone rather than being
                         # told out of band how many shards to expect. Taken from
                         # the phase rather than from self._shard_index/_count

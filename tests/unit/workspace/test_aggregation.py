@@ -5,7 +5,7 @@
 
 The three properties these tests exist to hold:
 
-* A project's actionable count is what ``ash --source-dir P`` would compute. The
+* A project's actionable count is what ``ashx --source-dir P`` would compute. The
   equivalence is asserted against ``_compute_exit_code`` itself rather than
   reasoned about, because that function is the definition.
 * Path conversion happens once, through Phase 0's ``to_workspace_pattern``, and a
@@ -521,7 +521,7 @@ class TestParityWithComputeExitCode:
 
     @staticmethod
     def _standalone_exit_code(tmp_path, results, threshold):
-        """What ``ash --source-dir P`` would exit with, for this SARIF.
+        """What ``ashx --source-dir P`` would exit with, for this SARIF.
 
         Both the persisted file and the in-memory model are populated, because
         ``_compute_exit_code`` reads both and they gate different things: the file
@@ -638,7 +638,7 @@ class TestCompletenessParityWithComputeExitCode:
     run, and did they find anything. The class above pins the second. This pins
     the first, which the workspace layer did not mirror at all -- so a project
     whose scanners never ran reported zero findings, and zero findings read as a
-    pass. ``ash --source-dir P`` exited 1 on that project and the same P inside a
+    pass. ``ashx --source-dir P`` exited 1 on that project and the same P inside a
     workspace exited 0.
 
     Asserted as an agreement between the two derivations rather than against
@@ -764,7 +764,7 @@ class TestCompletenessParityWithComputeExitCode:
         in which *every* entry is SKIPPED clears that pass having measured nothing,
         and before ``no_scanner_ran_for_project`` existed the workspace layer had no
         second question to ask: the project reported zero findings and COMPLETED
-        while ``ash --source-dir P`` on the same project exited 1.
+        while ``ashx --source-dir P`` on the same project exited 1.
 
         Asserted through the same agreement the rest of this class uses, so a
         workspace-side derivation that stopped answering cannot keep this passing.
@@ -828,7 +828,7 @@ class TestCompletenessParityWithComputeExitCode:
         ``ScanPhase`` is what records it -- a roster means the phase ran.
 
         The workspace helper called the delegate with one argument, so it answered
-        the benign reading for both states while ``ash --source-dir P`` on the same
+        the benign reading for both states while ``ashx --source-dir P`` on the same
         project answered 1. That is the same divergence this class was opened for,
         reappearing through a caller left on the older signature.
         """

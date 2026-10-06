@@ -10,7 +10,7 @@ Workspace mode parallelises *projects* across an in-process thread pool
 CI fleet had no way to spread one scan over several jobs. This module supplies the
 assignment half of that: each executor is told ``--shard-index k --shard-count n``
 and works out its own slice with no coordination, no lock and no shared state. The
-recombination half is ``ash merge``.
+recombination half is ``ashx merge``.
 
 Why the split is by scanner and not by file
 -------------------------------------------
@@ -116,7 +116,7 @@ __all__ = [
 class ShardAssignment(BaseModel):
     """What one shard was actually asked to run.
 
-    Recorded on each shard's results so ``ash merge`` can verify coverage from the
+    Recorded on each shard's results so ``ashx merge`` can verify coverage from the
     result files alone, without being told out of band how many shards to expect.
     Taking the expected count as a merge argument would mean an operator who
     changed their matrix in one place and not the other gets a silently short
@@ -302,7 +302,7 @@ def scanners_to_exclude(
 def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
     """Check that *assignments* reconstruct exactly one whole scan.
 
-    Called by ``ash merge`` before merging anything. Every condition checked here
+    Called by ``ashx merge`` before merging anything. Every condition checked here
     would otherwise yield a well-formed report that is quietly missing whole
     scanners, or that counts some findings twice.
 

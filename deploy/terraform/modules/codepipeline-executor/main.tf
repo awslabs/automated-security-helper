@@ -5,8 +5,8 @@
 #
 #   Source  -> CodeCommit
 #   Scan    -> N CodeBuild actions, all at run_order 1 so they run in parallel,
-#              each `ash scan --shard-index <i> --shard-count <n>`
-#   Merge   -> one CodeBuild action, `ash merge --results ... --output-dir ...`
+#              each `ashx scan --shard-index <i> --shard-count <n>`
+#   Merge   -> one CodeBuild action, `ashx merge --results ... --output-dir ...`
 #
 # The merge action owns the verdict. This is the single most important property of
 # the design: a shard that happens to own no findings exits 0, so gating on shard
@@ -420,7 +420,7 @@ resource "aws_codebuild_project" "shard" {
     type         = var.build_environment_type
     compute_type = var.build_compute_type
 
-    # The ASH image is the build environment, so `ash` is on PATH with no
+    # The ASH image is the build environment, so `ashx` is on PATH with no
     # Docker-in-Docker and no privileged_mode. SERVICE_ROLE credentials are
     # required for a private ECR image.
     image                       = var.container_image_uri
@@ -478,7 +478,7 @@ resource "aws_codebuild_project" "merge" {
       }
     }
 
-    # Passed straight through to `ash merge --min-severity`. The threshold is
+    # Passed straight through to `ashx merge --min-severity`. The threshold is
     # evaluated by ASH, not compared here, so there is exactly one
     # implementation of "does this breach".
     environment_variable {

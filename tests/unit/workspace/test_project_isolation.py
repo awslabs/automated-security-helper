@@ -16,7 +16,7 @@ available way for this to fail. It is a silent false negative on a security
 scanner, on exactly the axis the central invariant protects:
 
     For any project P, the findings reported for P and the pass/fail verdict for
-    P are identical to what ``ash --source-dir P`` would produce.
+    P are identical to what ``ashx --source-dir P`` would produce.
 
 What an earlier version of this file got wrong, and why it is recorded here
 --------------------------------------------------------------------------

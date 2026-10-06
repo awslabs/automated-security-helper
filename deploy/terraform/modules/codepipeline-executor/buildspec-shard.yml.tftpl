@@ -2,7 +2,7 @@ version: 0.2
 
 # One shard of a sharded ASH scan.
 #
-# Runs `ash scan --shard-index <i> --shard-count <n>` over the source artifact and
+# Runs `ashx scan --shard-index <i> --shard-count <n>` over the source artifact and
 # uploads this shard's output to a per-execution S3 prefix. The merge action
 # collects all of them.
 #
@@ -17,7 +17,7 @@ version: 0.2
 #      propagate. Failing here stops the pipeline rather than letting the merge
 #      action produce a clean-looking verdict from incomplete data.
 #
-# The build runs inside the ASH image, so `ash` is on PATH directly. That image
+# The build runs inside the ASH image, so `ashx` is on PATH directly. That image
 # carries no AWS CLI, so S3 transfers go through a small boto3 helper.
 #
 # Shell variables use the $NAME form so the template renderer and the shell cannot
@@ -42,7 +42,7 @@ phases:
   build:
     commands:
       # errexit is deliberately disabled around this one command so the exit code
-      # can be inspected. Using `if ! ash ...` instead would disable errexit for
+      # can be inspected. Using `if ! ashx ...` instead would disable errexit for
       # the whole compound statement, including anything it called.
       # ash-container-init is invoked explicitly rather than relied on as the
       # image ENTRYPOINT. CodeBuild runs buildspec commands through its own agent
@@ -58,7 +58,7 @@ phases:
         set -eu
         mkdir -p ash_output
         set +e
-        /usr/local/bin/ash-container-init ash scan \
+        /usr/local/bin/ash-container-init ashx scan \
           --source-dir . \
           --output-dir ash_output \
           --shard-index "$SHARD_INDEX" \
@@ -66,7 +66,7 @@ phases:
           --no-fail-on-findings
         ASH_EXIT=$?
         set -e
-        echo "ash scan exited $ASH_EXIT"
+        echo "ashx scan exited $ASH_EXIT"
 
         # With --no-fail-on-findings, a non-zero exit is a genuine failure, not a
         # report of findings. Stop now: a silently missing shard would let the
@@ -83,7 +83,7 @@ phases:
 
   post_build:
     commands:
-      # No completion marker is written. `ash merge` establishes shard coverage
+      # No completion marker is written. `ashx merge` establishes shard coverage
       # from the shard_index and shard_count recorded inside each shard's own
       # results and raises ShardCoverageError when the space is not fully
       # covered, which is stronger than a marker file this buildspec invented:

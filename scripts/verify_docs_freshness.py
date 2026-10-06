@@ -300,10 +300,11 @@ def cli_option_spellings() -> set[str]:
     import click
     import typer.main
 
+    from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
     from automated_security_helper.cli.main import app
 
     root = typer.main.get_command(app)
-    ctx = click.Context(root, info_name="ash")
+    ctx = click.Context(root, info_name=CANONICAL_CLI_NAME)
     scan = root.get_command(ctx, "scan")
 
     spellings: set[str] = set()

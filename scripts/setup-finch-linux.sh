@@ -60,7 +60,7 @@ finch --version
 
 # `finch --version` only proves the binary is on PATH; it passes even when
 # buildkit and containerd are unreachable. Probe the daemon so a broken runtime
-# surfaces here in under a minute rather than wedging `ash build-image` until the
+# surfaces here in under a minute rather than wedging `ashx build-image` until the
 # job timeout. Both probes are bounded, so this step can never be the thing that
 # hangs.
 echo "=== Verifying the Finch daemon responds ==="

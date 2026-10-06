@@ -293,16 +293,16 @@ Choose scanners based on your technology stack:
 
 ```bash
 # Python projects
-ash --scanners bandit,detect-secrets,semgrep
+ashx --scanners bandit,detect-secrets,semgrep
 
 # Infrastructure projects
-ash --scanners checkov,cfn-nag,cdk-nag
+ashx --scanners checkov,cfn-nag,cdk-nag
 
 # Container projects
-ash --scanners grype,syft,checkov
+ashx --scanners grype,syft,checkov
 
 # Node.js projects
-ash --scanners npm-audit,detect-secrets,semgrep
+ashx --scanners npm-audit,detect-secrets,semgrep
 ```
 
 ### Performance Optimization
@@ -339,7 +339,7 @@ scanners:
 **Scanner not found**:
 ```bash
 # Check dependencies
-ash dependencies --check --scanner bandit
+ashx dependencies --check --scanner bandit
 
 # Install missing tools
 pip install bandit semgrep detect-secrets
@@ -348,10 +348,10 @@ pip install bandit semgrep detect-secrets
 **Performance issues**:
 ```bash
 # Run with fewer concurrent scanners
-ash --max-workers 2
+ashx --max-workers 2
 
 # Exclude resource-intensive scanners
-ash --exclude-scanners grype,syft
+ashx --exclude-scanners grype,syft
 ```
 
 **False positives**:

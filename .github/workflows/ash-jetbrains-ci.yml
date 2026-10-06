@@ -18,7 +18,7 @@ name: JetBrains plugin CI
 #
 # That workflow builds ASH's wheel and every native package downstream of it, and each of
 # those jobs starts by downloading the wheel artifact. This plugin has no such dependency: it
-# ships no ASH code and invokes whatever `ash` is on the user's PATH, so a job here would need
+# ships no ASH code and invokes whatever `ashx` (or, failing that, `ash`) is on the user's PATH, so a job here would need
 # neither the wheel nor the build job it comes from. Putting it there would also make an
 # unrelated failure in the wheel gate block the plugin's only signal.
 #

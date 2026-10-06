@@ -23,9 +23,11 @@
 -->
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
-    <!-- `ash` rather than `automated-security-helper`: a Chocolatey package id is
-         what a user types, and the shipped deb and rpm are both named ash. The
-         longer console script name is still installed; see chocolateyinstall.ps1. -->
+    <!-- The package id is `ash`, a distribution identifier: it is what a user types
+         after `choco install`, not the command the package installs. The command is
+         `ashx`, and the deprecated `ashv3` and the long `automated-security-helper`
+         are shimmed too; the wheel's deprecated `ash` script is deliberately not.
+         See chocolateyinstall.ps1. Renaming the id would strand existing installs. -->
     <id>ash</id>
     <version>3.7.0</version>
     <title>ASH - Automated Security Helper</title>
@@ -47,7 +49,8 @@ README.chocolatey in the package for how to stage a wheelhouse on a machine
 without one.
 
 ASH drives third-party scanners; it does not contain them. After installing, run
-`ash dependencies install` to provision the ones ASH can install itself.
+`ashx dependencies install` to provision the ones ASH can install itself. The
+command is `ashx`; this package installs no `ash` command.
     </description>
     <!-- `admin` is Chocolatey's convention for a package whose install needs an
          elevated shell. This one writes under %ProgramData% and creates shims in

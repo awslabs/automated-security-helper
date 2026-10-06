@@ -57,3 +57,42 @@ def warn_deprecated_option_spellings(
                 f"removal; use '{replacement}' instead.",
                 file=out,
             )
+
+
+#: The console script v4 installs as the canonical command. Everything that
+#: names the command in a message reads it from here, so a rename is one edit.
+CANONICAL_CLI_NAME = "ashx"
+
+# Deprecated console-script name -> the command that replaces it. ``ash`` was the
+# v3 name and keeps working through v4 so existing scripts and CI jobs do not
+# break on upgrade. ``ashv3`` pins a version number in the command itself, so it
+# reads wrong now that v4 exists. ``automated-security-helper`` is absent on
+# purpose: it is the silent escape hatch for hosts where a short name resolves to
+# something else (MSYS2 and Alpine ship the Almquist shell as ``ash``).
+DEPRECATED_COMMAND_ALIASES = {
+    "ash": CANONICAL_CLI_NAME,
+    "ashv3": CANONICAL_CLI_NAME,
+}
+
+
+def deprecated_command_message(alias: str) -> str:
+    """Return the one-line notice for the deprecated console script ``alias``."""
+    replacement = DEPRECATED_COMMAND_ALIASES[alias]
+    return (
+        f"warning: the '{alias}' command is deprecated and is scheduled for "
+        f"removal; use '{replacement}' instead."
+    )
+
+
+def warn_deprecated_command_alias(alias: str, stream: Optional[TextIO] = None) -> None:
+    """Print the deprecation notice for ``alias`` as exactly one stderr line.
+
+    Written to stderr so it cannot corrupt a scan's stdout, which callers pipe
+    into report tooling. It prints and returns; it never raises and never exits,
+    so the command's exit code is whatever the CLI itself returns.
+
+    Call it once, from the console script's own entry point, not from a Typer
+    callback: a callback would also fire for the canonical name, and group
+    callbacks can run more than once for a single command line.
+    """
+    print(deprecated_command_message(alias), file=stream or sys.stderr)

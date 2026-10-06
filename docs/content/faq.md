@@ -23,7 +23,7 @@ No. ASH is designed to help identify common security issues early in the develop
 You have several options:
 ```bash
 # Using uvx (recommended)
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
 
 # Using pipx
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
@@ -38,7 +38,7 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 We maintain a `v3` Git tag that always points to the latest stable v3.x release. This means you can use `@v3` in your installation commands instead of a specific version like `@v3.7.0`:
 
 ```bash
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3"
 ```
 
 This is convenient for local development where you always want the latest version. For CI/CD pipelines or environments where reproducibility matters, we recommend pinning to a specific release tag (e.g., `@v3.7.0`).
@@ -62,19 +62,19 @@ ASH v3 supports three execution modes:
 ### How do I run a basic scan?
 ```bash
 # Run in local mode (Python-based scanners only)
-ash --mode local
+ashx --mode local
 
 # Run in container mode (all scanners)
-ash --mode container
+ashx --mode container
 
 # Run in precommit mode (fast subset of scanners)
-ash --mode precommit
+ashx --mode precommit
 ```
 
 ### How do I specify which files to scan?
 ```bash
 # Scan a specific directory
-ash --source-dir /path/to/code
+ashx --source-dir /path/to/code
 
 # Configure ignore paths in .ash/.ash.yaml
 global_settings:
@@ -89,19 +89,19 @@ ASH respects `.gitignore` files. You can also configure ignore paths in your `.a
 ### How do I run specific scanners?
 ```bash
 # Run only specific scanners
-ash --scanners bandit,semgrep
+ashx --scanners bandit,semgrep
 
 # Exclude specific scanners
-ash --exclude-scanners cfn-nag,cdk-nag
+ashx --exclude-scanners cfn-nag,cdk-nag
 ```
 
 ### How do I generate specific report formats?
 ```bash
 # Generate specific report formats
-ash --output-formats markdown,html,json
+ashx --output-formats markdown,html,json
 
 # Generate a report from existing results
-ash report --format html --output-dir ./my-scan-results
+ashx report --format html --output-dir ./my-scan-results
 ```
 
 ## Configuration
@@ -128,16 +128,16 @@ subdirectory.
 ### How do I create a configuration file?
 ```bash
 # Initialize a new configuration file
-ash config init
+ashx config init
 ```
 
 ### How do I override configuration values at runtime?
 ```bash
 # Enable a specific scanner
-ash --config-overrides 'scanners.bandit.enabled=true'
+ashx --config-overrides 'scanners.bandit.enabled=true'
 
 # Change severity threshold
-ash --config-overrides 'global_settings.severity_threshold=LOW'
+ashx --config-overrides 'global_settings.severity_threshold=LOW'
 ```
 
 ## Scanners and Tools
@@ -185,13 +185,13 @@ repos:
 ### How do I fail CI builds on security findings?
 ```bash
 # Exit with non-zero code if findings are found
-ash --mode local --fail-on-findings
+ashx --mode local --fail-on-findings
 ```
 
 ## Advanced Usage
 
 ### How do I run ASH in an offline/air-gapped environment?
-Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
+Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment.
 
 ### Can I use ASH programmatically?
 Yes, ASH v3 can be used programmatically in Python:
@@ -209,10 +209,10 @@ results = run_ash_scan(
 ```bash
 # Specify a custom container image
 export ASH_IMAGE_NAME="my-registry/ash:custom"
-ash --mode container
+ashx --mode container
 
 # Build a custom image
-ash build-image --build-target ci --custom-containerfile ./my-dockerfile
+ashx build-image --build-target ci --custom-containerfile ./my-dockerfile
 ```
 
 ## Troubleshooting
@@ -245,10 +245,10 @@ For detailed information about the scanner validation system, see the [Scanner V
 ### How do I debug ASH?
 ```bash
 # Enable debug logging
-ash --debug
+ashx --debug
 
 # Enable verbose logging
-ash --verbose
+ashx --verbose
 ```
 
 ## AI Integration and MCP
@@ -271,7 +271,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
          "command": "uvx",
          "args": [
            "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-           "ash",
+           "ashx",
            "mcp"
          ],
          "disabled": false,
@@ -289,7 +289,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
          "command": "uvx",
          "args": [
            "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-           "ash",
+           "ashx",
            "mcp"
          ]
        }
@@ -305,7 +305,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
          "command": "uvx",
          "args": [
            "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-           "ash",
+           "ashx",
            "mcp"
          ],
          "disabled": false,
@@ -365,16 +365,16 @@ MCP dependencies are included by default in ASH v3. If you're still getting erro
 2. **Check Python version**: Ensure Python 3.10+ is available: `uv python list`
 3. **Test the MCP server**: Try running the server directly:
    ```bash
-   uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp --help
+   uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx mcp --help
    ```
 
 ### How do I test the ASH MCP server?
 ```bash
 # Test MCP server startup
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp --debug
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx mcp --debug
 
 # Check ASH version
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash --version
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx --version
 ```
 
 ### How do I monitor MCP server performance?

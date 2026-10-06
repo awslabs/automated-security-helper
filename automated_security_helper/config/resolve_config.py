@@ -226,7 +226,7 @@ def resolve_config(
         # An explicit config_path has to survive a missing source_dir. source_dir
         # only drives *discovery* of a config file; when the caller already named
         # one, there is nothing to discover and no reason to bail out to the
-        # default. Testing source_dir alone here meant `ash report --config
+        # default. Testing source_dir alone here meant `ashx report --config
         # <file>` accepted the option and then reported against default settings,
         # because cli/report.py passes config_path with no source_dir (as does
         # cli/config.py). Below, source_dir falls back to Path.cwd(), which is
@@ -327,7 +327,7 @@ def resolve_config(
             ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
             raise ASHConfigValidationError(
                 f"Configuration validation failed for '{config_path}': {str(e)}. "
-                "Run 'ash config lint' to identify and fix issues."
+                "Run 'ashx config lint' to identify and fix issues."
             ) from e
 
         return config

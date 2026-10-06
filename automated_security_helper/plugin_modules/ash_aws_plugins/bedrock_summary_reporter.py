@@ -264,7 +264,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     produces advice that is either generic across all of them or silently focused
     on whichever project dominates the prompt, and there is no way for a reader to
     tell which happened. Per project, each summary is grounded in one codebase,
-    exactly as ``ash --source-dir P`` would produce it.
+    exactly as ``ashx --source-dir P`` would produce it.
 
     Cost is a secondary argument in the same direction: this reporter makes a paid
     inference call, and a workspace-level invocation would add an N+1st call whose

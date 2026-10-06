@@ -3,6 +3,7 @@
 
 import { Match } from 'aws-cdk-lib/assertions';
 import { ASHInstallMode, ASHSeverityThreshold } from '../src';
+import { refProvidesAshx } from '../src/private/commands';
 import { ashBuildSpec, buildStep, synthesizeWithStep, SynthesizedAction } from './helpers';
 
 /** Actions this step created, i.e. everything except the pipeline's own steps. */
@@ -46,7 +47,7 @@ describe('unsharded scan', () => {
 
     template.hasResourceProperties('AWS::CodeBuild::Project', {
       Source: Match.objectLike({
-        BuildSpec: Match.stringLikeRegexp('ash scan'),
+        BuildSpec: Match.stringLikeRegexp('command -v ashx [|][|] echo ash[)][^ ]* scan'),
       }),
     });
   });
@@ -117,7 +118,7 @@ describe('sharded scan', () => {
       .filter((a) => a.name.includes('Shard'))
       .flatMap((a) => a.outputs);
 
-    expect(command).toContain('ash merge');
+    expect(command).toContain('ashx merge');
     expect(command.match(/--results/g)).toHaveLength(3);
 
     // Each --results points at the CodeBuild directory for one shard artifact,
@@ -255,7 +256,7 @@ describe('severityThreshold', () => {
     });
     const shards = ashActions(actions).filter((a) => a.name.includes('Shard'));
 
-    // On `ash scan`, --min-severity changes only that scan's exit code, and a
+    // On `ashx scan`, --min-severity changes only that scan's exit code, and a
     // shard's exit code is discarded by design. Passing it to a shard would read
     // as if it set the floor while changing nothing; the floor goes to merge.
     expect(shards).toHaveLength(3);
@@ -344,7 +345,9 @@ describe('install modes', () => {
     const spec = JSON.parse((scan![1] as any).Properties.Source.BuildSpec);
 
     expect(spec.phases.install.commands).toEqual([]);
-    expect(spec.phases.build.commands.join('\n')).toContain('ash scan');
+    expect(spec.phases.build.commands.join('\n')).toContain(
+      '"$(command -v ashx || echo ash)" scan',
+    );
   });
 
   test('UVX resolves the git repository at scan time, installing nothing first', () => {
@@ -352,9 +355,82 @@ describe('install modes', () => {
     const spec = ashBuildSpec(template);
 
     expect(spec.phases.install.commands).toEqual([]);
-    expect(spec.phases.build.commands.join('\n')).toContain(
-      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0" ash scan',
-    );
+    // The ref on this line moves with `cz bump` (it is a version_files target), and
+    // the command name has to move with it: a v3 tag has only `ash`, a v4 tag has
+    // `ashx`. The name is derived from the ref on that line with the same rule the
+    // code uses, so a bump to any shape the release tooling writes (`v4.0.0`,
+    // `v4.0.0rc1`) keeps the two in step. The rule itself is pinned by the
+    // explicit cases below.
+    const requirement =
+      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"';
+    const ref = /@([^"]+)"$/.exec(requirement)![1];
+    const cli = refProvidesAshx(ref) ? 'ashx' : 'ash';
+    expect(spec.phases.build.commands.join('\n')).toContain(`${requirement} ${cli} scan `);
+  });
+
+  // A full release, the PEP 440 prerelease shapes `cz bump` writes, a two-digit
+  // major (compared as a number, not a string), and the floating major tag that
+  // ash-tag-on-merge moves on each release.
+  test.each([
+    'v4.0.0',
+    '4.0.0',
+    'v4.0.0rc1',
+    'v4.0.0a1',
+    'v4.0.0b2',
+    'v4.0.0.dev1',
+    'v4.1.0.post1',
+    'v10.0.0',
+    'v4',
+    'v10',
+  ])(
+    'UVX runs ashx for an unsharded scan on the v4-or-later ref %s',
+    (version) => {
+      const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version });
+      const commands = ashBuildSpec(template).phases.build.commands.join('\n');
+
+      expect(commands).toContain(`@${version}" ashx scan `);
+      expect(commands).not.toMatch(/" ash scan /);
+    },
+  );
+
+  // v3 releases ship no `ashx`, and uvx cannot fall back at run time. `v3.99.0`
+  // catches a comparison that reads the minor instead of the major; the floating
+  // `v3` and a v3 prerelease are the same major.
+  test.each(['v3.6.1', 'v3.99.0', 'v3.0.0-beta-1', 'v3.8.0rc1', 'v3'])(
+    'UVX keeps the deprecated ash for an unsharded scan on the v3 ref %s',
+    (version) => {
+      const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version });
+      const commands = ashBuildSpec(template).phases.build.commands.join('\n');
+
+      expect(commands).toContain(`@${version}" ash scan `);
+    },
+  );
+
+  test('UVX keeps the deprecated ash when the ref names no major version', () => {
+    // A branch, a commit (an all-digit short hash too) or an environment variable
+    // could be either major. `ash` runs on both, so it is the only name that
+    // cannot fail for the wrong reason.
+    for (const version of ['main', '0123456789abcdef0123456789abcdef01234567', '1234567', '$ASH_VERSION']) {
+      const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version });
+      const commands = ashBuildSpec(template).phases.build.commands.join('\n');
+      expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ash scan /m);
+    }
+  });
+
+  test('UVX runs ashx for shards and the merge, which need a v4 ref anyway', () => {
+    // The unsharded UVX scan above keeps the deprecated `ash`, because uvx cannot
+    // fall back and the default ref is a v3 tag with no `ashx`. Shards and the
+    // merge use flags and a command v3 does not have, so they get the canonical name.
+    const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, shardCount: 2 });
+    const projects = template.findResources('AWS::CodeBuild::Project');
+    const commands = Object.entries(projects)
+      .filter(([id]) => id.includes('SecurityScan'))
+      .map(([, p]) => JSON.parse((p as any).Properties.Source.BuildSpec).phases.build.commands.join('\n'))
+      .join('\n');
+
+    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ashx scan /m);
+    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ashx merge /m);
+    expect(commands).not.toMatch(/" ash (scan|merge) /);
   });
 
   test('rejects a non-https repository at synth', () => {
@@ -376,7 +452,7 @@ describe('install modes', () => {
   ])('%s never installs ASH by distribution name', (installMode) => {
     // ASH is not published to PyPI. The name `automated-security-helper` there is
     // an unrelated placeholder package, so a name-based install would succeed,
-    // leave no `ash` on PATH, and pull a third party's code into the scan
+    // leave no `ashx` on PATH, and pull a third party's code into the scan
     // container. Every install has to name the git repository.
     const { template } = synthesizeWithStep({ installMode, shardCount: 2 });
     const projects = template.findResources('AWS::CodeBuild::Project');

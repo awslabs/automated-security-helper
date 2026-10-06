@@ -36,7 +36,7 @@ class TestScanArgv:
         assert "--fail-on-findings" not in argv
 
     def test_a_worker_is_never_given_a_severity_floor(self):
-        # On `ash scan` --min-severity changes only that scan's exit code, and a
+        # On `ashx scan` --min-severity changes only that scan's exit code, and a
         # shard's exit code is discarded. Passing it would read as setting a floor
         # while having no effect.
         argv = contract.build_scan_argv(
@@ -273,7 +273,7 @@ class TestMcpArgv:
 
         This test replaces one that asserted ``"${ASH_TOKEN}" in argv``, which pinned
         an auth bypass: a positional parameter's value is never re-expanded, so the
-        placeholder reached ``ash`` verbatim and became the expected credential. Any
+        placeholder reached ``ashx`` verbatim and became the expected credential. Any
         occurrence of ``--auth-header-value`` here is the bug returning, whatever the
         value beside it looks like.
         """
@@ -285,7 +285,7 @@ class TestMcpArgv:
         assert "--auth-header-value" not in argv
         assert not [token for token in argv if "${" in token], (
             f"argv contains a shell placeholder: {argv!r}. Positional parameters are "
-            f"not re-expanded, so this reaches ash as a literal."
+            f"not re-expanded, so this reaches ashx as a literal."
         )
 
     def test_a_header_name_without_a_value_source_is_refused(self):
@@ -326,14 +326,16 @@ class TestTheCliNameLivesInOneConstant:
         assert contract.build_mcp_argv()[0] == ASH_CLI
 
     def test_no_module_spells_the_binary_name_itself(self):
-        """No code names the program; prose about ``ash merge`` is allowed.
+        """No code names the program; prose about ``ashx merge`` is allowed.
 
         Two shapes are code. A string constant that is exactly the program name, and
         a line of shell -- in an entrypoint script, or in a multi-line string such as
         the MCP capability probe -- that invokes it. Docstrings, comments and the
         ``log`` lines of a script describe the command rather than run it.
         """
-        invocation = re.compile(r"(?:^|[\s(;|&`])ash\s+(?:scan|merge|mcp)\b")
+        # Both spellings count: the canonical ``ashx`` and the deprecated ``ash``
+        # alias, so a hard-coded old name cannot slip past the constant either.
+        invocation = re.compile(r"(?:^|[\s(;|&`])ashx?\s+(?:scan|merge|mcp)\b")
 
         def shell_offenders(label: str, text: str, first_line: int) -> list[str]:
             found = []
@@ -366,7 +368,7 @@ class TestTheCliNameLivesInOneConstant:
                     continue
                 if id(node) in docstrings:
                     continue
-                if node.value == "ash":
+                if node.value in {"ash", "ashx"}:
                     offenders.append(f"{label}:{node.lineno}: {node.value!r}")
                 elif "\n" in node.value:
                     offenders += shell_offenders(label, node.value, node.lineno)

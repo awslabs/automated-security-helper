@@ -12,7 +12,7 @@ The intended end state is a single page: this one, with the hand-written page's 
 
 ## Commands
 
-### `ash scan`
+### `ashx scan`
 
 Runs an ASH scan against the source-dir, outputting results to the output-dir.
 
@@ -52,7 +52,7 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--compact-report` | bool | False |  | Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings. |
 | `--changed-files-only` | bool | False | ASH_CHANGED_FILES_ONLY | Limit the scan to files changed between the base branch and HEAD. Useful in CI to scan only PR changes. Falls back to a full scan when git is unavailable. |
 | `--base-ref` | str | `origin/main` | ASH_BASE_REF | Git ref to diff against when --changed-files-only is set. |
-| `--shard-index` | int |  | ASH_SHARD_INDEX | Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'. |
+| `--shard-index` | int |  | ASH_SHARD_INDEX | Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ashx merge'. |
 | `--shard-count` | int |  | ASH_SHARD_COUNT | Total number of shards this scan is split across. Requires --shard-index. Balance is by scanner count rather than scanner cost, so counts above about four buy little: wall clock is bounded by the slowest single scanner. |
 | `--workspace` | str |  | ASH_WORKSPACE | Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir. |
 | `--workspace-config` | str |  | ASH_WORKSPACE_CONFIG | Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings. |
@@ -71,7 +71,7 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
-### `ash build-image`
+### `ashx build-image`
 
 Builds the ASH container image then runs a scan with it.
 
@@ -80,7 +80,7 @@ Builds the ASH container image then runs a scan with it.
 | `--no-build` | bool | False |  | Skip building the ASH container image; reuse an existing image if present |
 | `--no-run` | bool | False |  | Build the ASH container image but do not run a scan |
 | `--force`, `-f` | bool | False |  | Force rebuild of the ASH container image |
-| `--oci-runner`, `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...). |
+| `--oci-runner`, `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ashx ...). |
 | `--container-network` | str | `bridge` |  | Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). Pass 'none' to force offline/airgapped network isolation independently of --offline. |
 | `--build-target` | enum(non-root, ci) | `non-root` |  | Specify the target stage of the ASH image to build |
 | `--offline-semgrep-rulesets` | str | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
@@ -100,7 +100,7 @@ Builds the ASH container image then runs a scan with it.
 | `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
-### `ash report`
+### `ashx report`
 
 Generate a report from ASH scan results using the specified reporter plugin.
 
@@ -117,7 +117,7 @@ Generate a report from ASH scan results using the specified reporter plugin.
 | `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
-### `ash merge`
+### `ashx merge`
 
 Merges the results of a sharded scan into one unified report.
 
@@ -127,7 +127,7 @@ Merges the results of a sharded scan into one unified report.
 | `--output-dir` | str | *required* | ASH_OUTPUT_DIR | Directory to write the merged results and reports to. |
 | `--output-formats` | List[str] |  |  | Comma-separated report formats to generate. Defaults to the formats the scan's own configuration asks for. |
 | `--min-severity` | str | `low` |  | Minimum severity that counts as actionable for the exit code. |
-| `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report every finding regardless of suppression status. Mirrors 'ash scan --ignore-suppressions', so the same tree gives the same verdict sharded or not. |
+| `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report every finding regardless of suppression status. Mirrors 'ashx scan --ignore-suppressions', so the same tree gives the same verdict sharded or not. |
 | `--fail-on-findings/--no-fail-on-findings` | bool |  |  | Exit non-zero when the merged report has actionable findings. Defaults to the scan configuration's value, then to true. |
 | `--fail-on-incomplete-scanners/--no-fail-on-incomplete-scanners` | bool |  |  | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is ERROR or MISSING. Without it, a shard whose scanners never ran contributes no findings and the merged report reads as a complete, clean scan. Defaults to the scan configuration's value, then to true; pass --no-fail-on-incomplete-scanners to merge a partial union anyway. |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
@@ -137,7 +137,7 @@ Merges the results of a sharded scan into one unified report.
 | `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
-### `ash mcp`
+### `ashx mcp`
 
 Start the ASH MCP server (Model Context Protocol).
 
@@ -157,7 +157,7 @@ Start the ASH MCP server (Model Context Protocol).
 | `--stateless-http/--no-stateless-http` | bool | False |  | Handle each streamable-HTTP request independently instead of binding it to a server-held session. Required behind a load balancer that may route consecutive requests to different replicas, and by managed runtimes that inject their own Mcp-Session-Id. Only valid with --transport streamable-http. |
 | `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Without this, protection is enabled only when --host is loopback, matching the MCP SDK's own default. |
 
-### `ash get-genai-guide`
+### `ashx get-genai-guide`
 
 Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 
@@ -169,7 +169,7 @@ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 
 ## Config Subcommands
 
-### `ash config init`
+### `ashx config init`
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
@@ -179,7 +179,7 @@ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 | `--color/--no-color`, `/-C` | bool | True |  | Enable/disable colorized output |
 | `--force` | bool | False |  | Overwrite the config file if it already exists at the target path. |
 
-### `ash config get`
+### `ashx config get`
 
 **Arguments:**
 
@@ -194,7 +194,7 @@ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 | `--debug` | bool | False |  | Enable debug logging |
 | `--color/--no-color`, `/-C` | bool | True |  | Enable/disable colorized output |
 
-### `ash config update`
+### `ashx config update`
 
 Update an existing configuration file with the specified modifications.
 
@@ -212,7 +212,7 @@ Update an existing configuration file with the specified modifications.
 | `--color/--no-color`, `/-C` | bool | True |  | Enable/disable colorized output |
 | `--dry-run` | bool | False |  | Show changes without writing to file |
 
-### `ash config validate-plugin-dependencies`
+### `ashx config validate-plugin-dependencies`
 
 **Arguments:**
 
@@ -227,7 +227,7 @@ Update an existing configuration file with the specified modifications.
 | `--debug` | bool | False |  | Enable debug logging |
 | `--color/--no-color`, `/-C` | bool | True |  | Enable/disable colorized output |
 
-### `ash config lint`
+### `ashx config lint`
 
 Lint an ASH configuration file for issues and optionally auto-fix them.
 
@@ -242,7 +242,7 @@ Lint an ASH configuration file for issues and optionally auto-fix them.
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color/--no-color`, `/-C` | bool | True |  | Enable/disable colorized output |
 
-### `ash config wizard`
+### `ashx config wizard`
 
 Interactive configuration wizard.
 
@@ -253,7 +253,7 @@ Interactive configuration wizard.
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color/--no-color`, `/-C` | bool | True |  | Enable/disable colorized output |
 
-### `ash config validate`
+### `ashx config validate`
 
 Validate an ASH configuration file for common issues.
 
@@ -265,7 +265,7 @@ Validate an ASH configuration file for common issues.
 
 ## Inspect Subcommands
 
-### `ash inspect findings`
+### `ashx inspect findings`
 
 Interactively explore security findings.
 
@@ -275,7 +275,7 @@ Interactively explore security findings.
 | `--report-file` | str | `ash_aggregated_results.json` |  | Name of the report file to analyze. Defaults to 'ash_aggregated_results.json'. |
 | `--config`, `-c` | Path |  | ASH_CONFIG | Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. |
 
-### `ash inspect sarif-fields`
+### `ashx inspect sarif-fields`
 
 Analyze SARIF fields across different scanners to understand their schema.
 
