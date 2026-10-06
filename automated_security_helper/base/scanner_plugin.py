@@ -101,6 +101,33 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     tool_type: ScannerToolType = ScannerToolType.UNKNOWN
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.UNKNOWN
 
+    OPT_IN: ClassVar[bool] = False
+    """Whether this scanner stays out of a run until the operator asks for it.
+
+    False, the default, is every scanner ASH shipped before this attribute
+    existed: it is part of every run, and a scanner whose config says
+    ``enabled: false`` is still recorded, as SKIPPED.
+
+    True means the scanner is not part of a run at all unless it is enabled --
+    its config says ``enabled: true``, or its name is passed in the scanner
+    selection (``--scanners``, the MCP ``scanners`` argument, ``run_ash_scan``'s
+    ``scanners``). An opt-in scanner nobody enabled leaves no trace in the
+    results: no ``scanner_results`` row, no summary count, no reporter row, no
+    SARIF run, and no entry in the expected-scanner roster or the shard
+    partition. Once enabled it is an ordinary scanner, so a missing tool is
+    MISSING and fails the completeness gate like any other.
+
+    Why this exists: a builtin added later with ``enabled: false`` would
+    otherwise appear as one more SKIPPED row in every existing user's default
+    scan, which changes output they did not ask to change. An opt-in scanner's
+    config class should also default ``enabled`` to False, so that the config
+    file, the schema and ``ash plugin list`` describe it as off.
+
+    The decision is made by
+    :func:`automated_security_helper.core.scanner_opt_in.opt_in_scanner_enabled`,
+    in the scan phase, before the scanner is constructed.
+    """
+
     command: Annotated[
         str | None,
         Field(

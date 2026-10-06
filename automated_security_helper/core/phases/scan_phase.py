@@ -24,6 +24,12 @@ from automated_security_helper.core.phases.scanner_executor import ScannerExecut
 from automated_security_helper.core.phases.scan_result_processor import (
     ScanResultProcessor,
 )
+from automated_security_helper.core.scanner_opt_in import (
+    is_opt_in,
+    named_in_selection,
+    opt_in_scanner_enabled,
+    opt_in_scanner_name,
+)
 from automated_security_helper.core.sharding import (
     ShardAssignment,
     partition_scanners,
@@ -292,6 +298,11 @@ class ScanPhase(EnginePhase):
 
             # Create scanner instances for validation and processing
             scanner_instances = []
+            # Opt-in scanners left out of this run, by name, and the opt-in
+            # classes the selection enabled. The first is read by the roster
+            # below; see core/scanner_opt_in.py.
+            self._omitted_opt_in_scanners: List[str] = []
+            selected_opt_in_classes = set()
             if scanner_classes:
                 ASH_LOGGER.debug(
                     f"Creating instances for {len(scanner_classes)} scanner classes"
@@ -325,11 +336,48 @@ class ScanPhase(EnginePhase):
                                 )
                             )
 
+                        # An opt-in scanner nobody enabled is not part of this run,
+                        # and is dropped here -- before construction, registration,
+                        # the --scanners resolution check and the shard partition --
+                        # because every one of those writes it somewhere a report
+                        # reads. Recording it SKIPPED instead, as a config-disabled
+                        # scanner is, would add a row to every default scan. See
+                        # core/scanner_opt_in.py for the rule and its precedence.
+                        if is_opt_in(plugin_class):
+                            opt_in_name = opt_in_scanner_name(
+                                plugin_class, plugin_config
+                            )
+                            if not opt_in_scanner_enabled(
+                                plugin_class, plugin_config, enabled_scanners
+                            ):
+                                ASH_LOGGER.debug(
+                                    f"Opt-in scanner {opt_in_name} is not enabled; "
+                                    "leaving it out of this run"
+                                )
+                                self._omitted_opt_in_scanners.append(opt_in_name)
+                                continue
+                            # Named in the selection, which enables an opt-in
+                            # scanner whatever its config says. Passed to the
+                            # constructor as enabled so every later reader of
+                            # config.enabled -- the selection filter below,
+                            # filter_enabled_plugins, the validation manager --
+                            # agrees that it was asked to run.
+                            if named_in_selection(opt_in_name, enabled_scanners):
+                                if isinstance(plugin_config, dict):
+                                    plugin_config = {**plugin_config, "enabled": True}
+                                selected_opt_in_classes.add(plugin_class)
+
                         # Create scanner instance
                         plugin_instance = plugin_class(
                             config=plugin_config,
                             context=self.plugin_context,
                         )
+                        # A scanner built with no resolved config takes its class
+                        # default, which for an opt-in scanner is disabled.
+                        if plugin_class in selected_opt_in_classes and hasattr(
+                            plugin_instance.config, "enabled"
+                        ):
+                            plugin_instance.config.enabled = True
                         scanner_instances.append(plugin_instance)
                         ASH_LOGGER.debug(f"Created scanner instance for: {plugin_name}")
                     except Exception as e:
@@ -1098,9 +1146,19 @@ class ScanPhase(EnginePhase):
                 for plugin_class in scanner_classes or []
             )
             if resolved_builtin_plugins:
-                aggregated_results.metadata.expected_scanners = (
-                    _declared_scanner_roster(self.plugin_context.config)
-                )
+                # Less the opt-in scanners left out above. Their config fields
+                # are declared like any builtin's, so the roster names them, and
+                # a roster entry with no row is reported as a scanner that went
+                # missing by .github/scripts/assert_scanners_completed.py.
+                omitted = {
+                    name.replace("-", "_").lower().strip()
+                    for name in self._omitted_opt_in_scanners
+                }
+                aggregated_results.metadata.expected_scanners = [
+                    name
+                    for name in _declared_scanner_roster(self.plugin_context.config)
+                    if str(name).replace("-", "_").lower().strip() not in omitted
+                ]
 
             # Validate scanner enablement after filtering
             self.validation_manager.validate_scanner_enablement(

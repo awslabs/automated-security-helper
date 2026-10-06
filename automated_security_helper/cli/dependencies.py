@@ -31,6 +31,7 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_SOURCES_DESCRIPTION,
     ASH_WORK_DIR_NAME,
 )
+from automated_security_helper.core.scanner_opt_in import is_opt_in
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
@@ -378,9 +379,17 @@ def install_dependencies(
         )
         outcomes.append(outcome)
 
+        # Installed like any other scanner's, so an image or CI runner provisioned
+        # by this command can run it once enabled; labelled so the line does not
+        # read as a promise that a default scan will use it.
+        opt_in_note = (
+            " (opt-in: runs only when enabled in config or named with --scanners)"
+            if is_opt_in(plugin_instance)
+            else ""
+        )
         print(
             f"Installing dependencies for {escape(plugin_type)} plugin: "
-            f"{escape(plugin_name)}"
+            f"{escape(plugin_name)}{opt_in_note}"
         )
         try:
             commands = plugin_instance.get_installation_commands(platform_name, arch)
