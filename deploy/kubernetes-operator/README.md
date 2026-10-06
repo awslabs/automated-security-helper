@@ -26,7 +26,9 @@ kubectl delete -f manifests/         # namespace, RBAC, operator Deployment
 The operator puts no finalizer on either kind, so the first command does not wait
 for the operator, and the garbage collector removes each scan's Jobs, pods,
 ConfigMap and results claim, and each MCP server's Deployment and Service. The
-results claim goes with its scan, so copy any report you want to keep first.
+results claim goes with its scan, so copy any report you want to keep first, and
+delete any pod of your own that mounted the claim to do it: pvc-protection keeps a
+claim in Terminating while a pod object names it, even a finished one.
 `tests/e2e/test_e2e_lifecycle.py` runs both procedures on kind, upgrading from the
 operator as it was before its most recent code change.
 

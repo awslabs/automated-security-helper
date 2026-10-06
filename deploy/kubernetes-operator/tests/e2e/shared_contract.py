@@ -166,7 +166,18 @@ def read_merged_output(scan_name: str, status: dict[str, Any], dest: Path) -> Pa
         dest.parent.mkdir(parents=True, exist_ok=True)
         kubectl("-n", NAMESPACE, "cp", f"{pod}:{prefix}/{MERGED_SUBDIR}", str(dest), timeout=300)
     finally:
-        kubectl("-n", NAMESPACE, "delete", "pod", pod, "--ignore-not-found", "--wait=false")
+        # Waited for, because a pod object naming the claim keeps it from being deleted
+        # (pvc-protection), and the lifecycle test uninstalls right after reading.
+        kubectl(
+            "-n",
+            NAMESPACE,
+            "delete",
+            "pod",
+            pod,
+            "--ignore-not-found",
+            "--grace-period=1",
+            "--wait=true",
+        )
     assert dest.is_dir(), f"kubectl cp produced no directory at {dest}"
     return dest
 

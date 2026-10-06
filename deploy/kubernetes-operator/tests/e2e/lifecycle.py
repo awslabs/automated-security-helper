@@ -137,11 +137,32 @@ def uninstall_manifests(operator_dir: Path) -> None:
 
 
 def wait_no_leftovers(timeout: int = 300) -> None:
-    wait_for(
-        lambda: not owned_leftovers() or None,
-        timeout=timeout,
-        what="the garbage collector to remove every object a scan or MCP server owned",
-    )
+    seen: list[list[str]] = [[]]
+
+    def gone() -> bool:
+        seen[0] = owned_leftovers()
+        return not seen[0]
+
+    try:
+        wait_for(
+            gone,
+            timeout=timeout,
+            what="the garbage collector to remove every object a scan or MCP server owned",
+        )
+    except AssertionError as err:
+        # What is left, and what holds a claim: pvc-protection keeps a claim while any
+        # pod object names it, including a finished pod nothing owns.
+        claims = kubectl(
+            "-n",
+            NAMESPACE,
+            "get",
+            "pods,persistentvolumeclaims",
+            "-o",
+            "custom-columns=KIND:.kind,NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,"
+            "FINALIZERS:.metadata.finalizers,CLAIMS:.spec.volumes[*].persistentVolumeClaim.claimName",
+            check=False,
+        ).stdout
+        raise AssertionError(f"{err}\nstill present: {seen[0]}\n{claims}") from err
 
 
 def git(*args: str) -> str:

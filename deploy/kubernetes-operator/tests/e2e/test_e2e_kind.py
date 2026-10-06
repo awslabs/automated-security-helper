@@ -404,7 +404,12 @@ class TestAMissingShardIsRefused:
         pods = kubectl_json("-n", NAMESPACE, "get", "pods", "-l", "job-name=hole-probe")
         pod = pods["items"][0]
         terminated = pod["status"]["containerStatuses"][0]["state"]["terminated"]
-        return terminated
+        yield terminated
+        # The probe is this test's own Job, not the scan's, so nothing collects it. Its
+        # finished pod still names hole-scan's results claim, and pvc-protection keeps
+        # a claim that any pod object names, finished or not: measured on kind, the
+        # claim sat in Terminating until the Job was deleted, which held up uninstall.
+        kubectl("-n", NAMESPACE, "delete", "job", "hole-probe", "--wait=true", "--timeout=120s")
 
     def test_the_collector_exits_non_zero(self, probe):
         assert probe["exitCode"] != 0, (
