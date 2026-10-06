@@ -19,6 +19,7 @@ import typer
 # reasons about this exact import form.
 from rich import print  # noqa: A004
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -27,7 +28,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import (
     ASH_BIN_PATH,
-    ASH_CONFIG_FILE_NAMES,
+    ASH_CONFIG_SOURCES_DESCRIPTION,
     ASH_WORK_DIR_NAME,
 )
 from automated_security_helper.plugins import ash_plugin_manager
@@ -134,11 +135,17 @@ def run_command(args: List[str], shell: bool = False):
 
     try:
         result = run_cmd(args=args, shell=shell, check=False, log_level=logging.INFO)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
-        print(result.stdout)
-        print(result.stderr)
+        # The child's output is not markup. pip alone prints `[notice]` lines and
+        # echoes extras such as `ash[sarif,toml]`, which rich would otherwise
+        # consume as tags and delete from the log.
+        print(escape(result.stdout))
+        print(escape(result.stderr))
         return result.returncode
     except Exception as e:
-        print(f"[bold red]Error running command {' '.join(args)}: {str(e)}[/bold red]")
+        print(
+            f"[bold red]Error running command {escape(' '.join(args))}: "
+            f"{escape(str(e))}[/bold red]"
+        )
         return 1
 
 
@@ -174,7 +181,7 @@ def install_dependencies(
         typer.Option(
             "--config",
             "-c",
-            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
             envvar="ASH_CONFIG",
         ),
     ] = None,
@@ -219,8 +226,8 @@ def install_dependencies(
     console.print(
         Panel(
             f"[bold green]Installing ASH dependencies[/bold green]\n"
-            f"[cyan]Target bin path:[/cyan] {target_bin_path}\n"
-            f"[cyan]Plugin types:[/cyan] {', '.join(plugin_types)}",
+            f"[cyan]Target bin path:[/cyan] {escape(str(target_bin_path))}\n"
+            f"[cyan]Plugin types:[/cyan] {escape(', '.join(plugin_types))}",
             title="ASH Dependency Installer",
             expand=False,
         )
@@ -305,8 +312,8 @@ def install_dependencies(
                 # what it was asked about, so an unrelated plugin that will not
                 # construct is information rather than this run's failure.
                 print(
-                    f"[bold yellow]Plugin {plugin_class.__name__} could not be "
-                    f"loaded: {str(e)}[/bold yellow]",
+                    f"[bold yellow]Plugin {escape(plugin_class.__name__)} could not "
+                    f"be loaded: {escape(str(e))}[/bold yellow]",
                 )
                 # Held aside rather than added to `outcomes` directly. `outcomes` is
                 # what the verdict is computed from, and a plugin that failed to
@@ -342,13 +349,15 @@ def install_dependencies(
                     "\n[yellow]Note:[/yellow] "
                     f"{len(construction_failures)} plugin(s) failed to load and are "
                     "absent from that list: "
-                    + ", ".join(sorted(o.name for o in construction_failures))
+                    + escape(", ".join(sorted(o.name for o in construction_failures)))
                 )
             )
             console.print(
                 Panel(
-                    f"[bold red]Unknown tool(s): {', '.join(sorted(unknown))}[/bold red]\n"
-                    f"[cyan]Available:[/cyan] {', '.join(available)}{broken_note}",
+                    f"[bold red]Unknown tool(s): "
+                    f"{escape(', '.join(sorted(unknown)))}[/bold red]\n"
+                    f"[cyan]Available:[/cyan] {escape(', '.join(available))}"
+                    f"{broken_note}",
                     title="Nothing installed",
                     expand=False,
                 )
@@ -369,13 +378,16 @@ def install_dependencies(
         )
         outcomes.append(outcome)
 
-        print(f"Installing dependencies for {plugin_type} plugin: {plugin_name}")
+        print(
+            f"Installing dependencies for {escape(plugin_type)} plugin: "
+            f"{escape(plugin_name)}"
+        )
         try:
             commands = plugin_instance.get_installation_commands(platform_name, arch)
         except Exception as e:
             print(
                 f"[bold red]Error getting installation commands for plugin "
-                f"{plugin_name}: {str(e)}[/bold red]"
+                f"{escape(plugin_name)}: {escape(str(e))}[/bold red]"
             )
             outcome.errors.append(str(e))
             continue
@@ -389,7 +401,7 @@ def install_dependencies(
             if not cmd:
                 print(
                     f"[yellow]Skipping an empty install command declared by "
-                    f"{plugin_name}[/yellow]"
+                    f"{escape(plugin_name)}[/yellow]"
                 )
                 outcome.commands_skipped_empty += 1
                 continue
@@ -404,7 +416,9 @@ def install_dependencies(
                 # Fix the Python command by properly importing Path
                 cmd = [sys.executable, "-c", "from pathlib import Path; " + cmd[2]]
 
-            print(f"Running command: {' '.join(cmd)}")
+            # An argv routinely carries brackets -- `pip install ash[sarif,toml]` --
+            # and rich would read `[sarif,toml]` as a tag and drop it from the line.
+            print(f"Running command: {escape(' '.join(cmd))}")
             outcome.commands_attempted += 1
             cmd_exit_code = run_command(cmd)
             if cmd_exit_code != 0:
@@ -465,14 +479,15 @@ def _report_and_exit(
         # Python-only plugins are the bulk of the list and say nothing useful here.
         if outcome.status == "PYTHON-ONLY" and not outcome.commands_attempted:
             continue
+        # Table cells are markup too; a resolved path or plugin name is not.
         table.add_row(
-            outcome.name,
-            outcome.plugin_type,
-            outcome.command or "-",
+            escape(outcome.name),
+            escape(outcome.plugin_type),
+            escape(outcome.command or "-"),
             str(outcome.commands_attempted),
             str(outcome.commands_failed),
-            outcome.status,
-            outcome.executable or "-",
+            escape(outcome.status),
+            escape(outcome.executable or "-"),
         )
     console.print(table)
 
@@ -536,7 +551,7 @@ def _report_and_exit(
             f"requested tool(s) still not on PATH: {', '.join(unsatisfied_requests)}"
         )
 
-    verified_names = f" -- {', '.join(verified)}" if verified else ""
+    verified_names = f" -- {escape(', '.join(verified))}" if verified else ""
     summary = [
         f"[cyan]Commands run:[/cyan] {commands_attempted} ({commands_failed} failed)",
         f"[cyan]Tools verified on PATH:[/cyan] {len(verified)}{verified_names}",
@@ -544,12 +559,12 @@ def _report_and_exit(
     if unprovisionable:
         summary.append(
             f"[yellow]No install path on this platform:[/yellow] "
-            f"{', '.join(unprovisionable)}"
+            f"{escape(', '.join(unprovisionable))}"
         )
     if missing_after_install:
         summary.append(
             f"[yellow]Install ran but tool not found on PATH:[/yellow] "
-            f"{', '.join(missing_after_install)}"
+            f"{escape(', '.join(missing_after_install))}"
         )
 
     if reasons:
@@ -557,7 +572,7 @@ def _report_and_exit(
             Panel(
                 "\n".join(summary)
                 + "\n\n[bold red]"
-                + "; ".join(reasons)
+                + escape("; ".join(reasons))
                 + "[/bold red]",
                 title="Installation Incomplete",
                 expand=False,

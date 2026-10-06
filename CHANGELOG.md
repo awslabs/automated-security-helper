@@ -448,6 +448,25 @@
   pre-commit hook, ferret-scan detected pre-commit mode from `PRE_COMMIT=1`, exited 1
   on findings (reported as a scanner failure) and narrowed its results.
 
+- **SARIF upload can hold `security-events: write`.** `run-ash-security-scan.yml`
+  declares only contents, checks and pull-requests, and a called workflow can only
+  narrow its caller's token, so its "Upload ASH SARIF file" step never had
+  `security-events: write` even when the caller granted it. Same-repo pull requests
+  uploaded anyway; `workflow_dispatch` failed with "Resource not accessible by
+  integration".
+
+  The new reusable workflow `upload-ash-sarif.yml` declares the permission and
+  uploads the report from the `ash_output` artifact. To use it, set
+  `collect-sarif-report: false` on the scan and call it from a second job that
+  `needs` the scan job, granting `security-events: write` to that job only.
+  `run-ash-security-scan.yml` is unchanged for existing callers.
+
+  The permission was not added to the scan workflow, not even on a job gated by
+  `collect-sarif-report`. GitHub validates every permission a called workflow
+  declares when the run starts, including on a job whose `if:` is false, and fails
+  a caller that does not grant it before any job runs. That would have broken
+  every caller that never granted `security-events`.
+
 - **cdk-nag now evaluates CDK-synthesized CloudFormation templates.** A template
   produced by `cdk synth` carries a `BootstrapVersion` parameter and a
   `CheckBootstrapVersion` rule of its own. ASH re-includes a template under
@@ -596,6 +615,30 @@
     `warning`/`informational`. The actionable counts do not move here because those
     15 were already suppressed; on a tree where they are not, the scanner's
     high-severity count drops by however many of its rules raised.
+
+### Configuration sources
+
+- **`pyproject.toml [tool.ash]` and `ashrc` files are config sources (#313).**
+  Without `--config`, ASH uses the first of: the existing `.ash.*` / `ash.*` names
+  (root, then `.ash/`, in their existing order), then `.ashrc.{toml,yaml,yml,json}`
+  and `ashrc.{toml,yaml,yml,json}` at the root, then a `pyproject.toml` that has a
+  `[tool.ash]` table. Sources are never merged: the one used is logged, and every
+  other source found is logged as ignored. The older names still win, so a
+  repository with `.ash/.ash.yaml` keeps its settings; when one of them shadows a
+  newer source the warning says those names are deprecated. Results still go to
+  `.ash/`.
+
+- **A config can `extends` other configs and `patch` the result (#289).**
+  `extends` names one or more base files (relative to the extending file);
+  mappings merge key by key, lists and scalars from the extending file replace the
+  base's, and `patch` applies RFC 6902 `add`/`remove`/`replace`/`test` operations
+  afterwards. Bases must resolve inside the scanned repository, symlinks included,
+  and URLs are refused. A missing base, a cycle, or a chain past 10 levels or 50
+  files fails the load instead of falling back to the default config.
+  `ash config validate` and `ash config lint` follow the chain and print it.
+  `ash config validate` and `ash config lint` without `--config` now check the
+  config a scan of the current directory would use, instead of always
+  `.ash/.ash.yaml`.
 
 ## v3.7.0 (2026-08-27)
 
