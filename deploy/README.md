@@ -104,8 +104,8 @@ The stack header in `cdk/lib/ash-eks-operator-stack.ts` says what each unmet
 precondition looks like when it fails.
 
 **Deleting the stack does not remove everything it created, on purpose.** It removes
-the Deployment — so the operator stops — along with the ServiceAccounts, Role and
-RoleBinding. It deliberately leaves the namespace, both CustomResourceDefinitions, the
+the Deployment — so the operator stops — along with its NetworkPolicy, the
+ServiceAccounts, Role and RoleBinding. It deliberately leaves the namespace, both CustomResourceDefinitions, the
 ClusterRole and the ClusterRoleBinding in place, because all of those are cluster-scoped
 and this stack may not be their only owner: deleting a namespace cascade-deletes
 everything in it, and deleting `ashscans.ash.awslabs.github.io` would destroy every

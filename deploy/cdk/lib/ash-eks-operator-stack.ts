@@ -239,8 +239,8 @@
  * carrying the operator's entire reporting path.
  *
  * THE CONTAINER ARGV, WHICH IS SETTLED AND LOAD-BEARING: the Deployment passes
- * `args: ["--namespace", "$(WATCH_NAMESPACE)"]` with `WATCH_NAMESPACE` a fieldRef on
- * the pod's own namespace, and leaves `command` unset. Kubernetes APPENDS args to the
+ * `args: ["--namespace", "$(WATCH_NAMESPACE)", "--liveness=..."]` with `WATCH_NAMESPACE`
+ * a fieldRef on the pod's own namespace, and leaves `command` unset. Kubernetes APPENDS args to the
  * image ENTRYPOINT, which already carries `kopf run --standalone -m
  * ash_operator.main`, so `--standalone` is not repeated here and `--namespace` is the
  * one part that must come from the manifest. Removing it does not fail — kopf switches
@@ -248,6 +248,28 @@
  * scan that reaches `Complete 3/3` and then hangs with no verdict. An earlier revision
  * of this comment said both flags were "gone"; that was written during the window when
  * they were, and it contradicted the code. See `deployment()` for the measurement.
+ *
+ * The fieldRef rather than the namespace literal is deliberate: the kubelet expands
+ * `$(WATCH_NAMESPACE)` from the pod's own namespace, so the watched namespace cannot
+ * disagree with where the Deployment landed. A literal is a second copy of the value,
+ * and the two desyncing produces the silent hang above rather than an error.
+ * `--liveness` starts kopf's /healthz endpoint, which both probes read; it answers 200
+ * only while kopf's event loop runs, so a hung operator is restarted.
+ *
+ * THE DEPLOYMENT AND ITS NETWORKPOLICY MATCH `manifests/operator.yaml`, field for field
+ * on args, env, ports, probes, resources, both securityContexts, the ServiceAccount and
+ * the NetworkPolicy spec. They drifted once: the YAML gained probes, a CPU limit and the
+ * deny-all-ingress policy while this copy changed only its uid, and checkov, which scans
+ * the YAML, cannot see Python inside the template's ZipFile.
+ * `tests/unit/deploy/test_eks_operator_applier.py` (TestParityWithOperatorYaml) executes
+ * the committed applier and compares the two, so change both files together. The
+ * NetworkPolicy is tagged NAMESPACED and applied just before the Deployment, so the pod
+ * never runs without it and a stack delete removes it along with the Deployment.
+ *
+ * `runAsUser` is the image's uid, 10001, which deploy/kubernetes-operator/Dockerfile
+ * creates and selects with USER. A uid the image does not create runs the process with
+ * no passwd entry and no home, so `pwd.getpwuid` raises KeyError; that happened here
+ * once, with the numbers the other way round.
  *
  * One replica, because `--standalone` in the ENTRYPOINT disables peering. Raising it is
  * a three-part change — drop `--standalone`, re-add the `leases` rule, then raise the
@@ -565,6 +587,7 @@ OPERATOR_SA = "${OPERATOR_SERVICE_ACCOUNT}"
 SCAN_SA = "${SCAN_SERVICE_ACCOUNT}"
 CLUSTER_ROLE = "ash-operator-crd-reader"
 ROLE = "ash-operator"
+POLICY = "ash-operator-ingress"
 TOKEN_TTL_SECONDS = 60
 ATTEMPTS = 5
 # "Custom resource response -- the maximum amount of data that a custom resource
@@ -576,6 +599,7 @@ LABELS = {
     "app.kubernetes.io/name": "ash-operator",
     "app.kubernetes.io/managed-by": "ash-cfn",
 }
+SELECTOR = {"app.kubernetes.io/name": "ash-operator"}
 
 RBAC = "/apis/rbac.authorization.k8s.io/v1"
 
@@ -752,31 +776,28 @@ def role_binding(namespace):
 
 
 def deployment(namespace, image):
-    """The operator Deployment.
+    """The operator Deployment. Keep it equal to manifests/operator.yaml.
 
-    replicas is an int, not a string, which is the reason these manifests are
-    built here instead of being routed through the custom resource's properties:
-    CloudFormation renders every property value as a string and the API server
-    rejects "1".
+    replicas is an int: CloudFormation renders properties as strings and the API
+    server rejects "1", which is why the manifests are built here.
 
-    'args' IS LOAD-BEARING. DO NOT REMOVE IT. Without '--namespace' kopf does not
-    fail -- it switches to cluster scope, every watcher 403s against the namespaced
-    Role, and a scan reaches 'Complete 3/3' and then hangs with no verdict. Leave
-    'command' unset: setting it replaces the ENTRYPOINT and drops 'kopf run'.
-
-    Full reasoning, the measured symptom and the cluster-wide recipe are in the
-    stack header of ash-eks-operator-stack.ts under THE CONTAINER ARGV.
+    'args' IS LOAD-BEARING: without '--namespace' kopf switches to cluster scope and
+    every scan hangs. Leave 'command' unset. See THE CONTAINER ARGV in the header.
     """
+    probe = {"httpGet": {"path": "/healthz", "port": "health"}}
     container = {
         "name": "operator",
         "image": image,
-        # Appended to the image ENTRYPOINT; removing it makes every scan hang after the
-        # Job completes rather than failing. $(WATCH_NAMESPACE) rather than the
-        # namespace literal: the kubelet expands it from the env var below, a fieldRef
-        # on the pod's OWN namespace, so the watched namespace cannot disagree with
-        # where the Deployment landed. A literal would be a second copy, and two copies
-        # of this value desyncing produces the silent hang rather than an error.
-        "args": ["--namespace", "$(WATCH_NAMESPACE)"],
+        # $(WATCH_NAMESPACE), a fieldRef on the pod's own namespace, so the watched
+        # namespace cannot disagree with where the Deployment landed.
+        "args": [
+            "--namespace",
+            "$(WATCH_NAMESPACE)",
+            "--liveness=http://0.0.0.0:8080/healthz",
+        ],
+        "ports": [{"name": "health", "containerPort": 8080}],
+        "livenessProbe": {**probe, "initialDelaySeconds": 10, "periodSeconds": 20},
+        "readinessProbe": {**probe, "periodSeconds": 10},
         "env": [
             {
                 "name": "WATCH_NAMESPACE",
@@ -785,12 +806,15 @@ def deployment(namespace, image):
         ],
         "securityContext": {
             "allowPrivilegeEscalation": False,
+            "privileged": False,
+            "runAsNonRoot": True,
             "readOnlyRootFilesystem": True,
             "capabilities": {"drop": ["ALL"]},
+            "seccompProfile": {"type": "RuntimeDefault"},
         },
         "resources": {
-            "requests": {"cpu": "100m", "memory": "256Mi"},
-            "limits": {"memory": "512Mi"},
+            "requests": {"cpu": "50m", "memory": "128Mi"},
+            "limits": {"cpu": "500m", "memory": "512Mi"},
         },
         "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}],
     }
@@ -798,11 +822,7 @@ def deployment(namespace, image):
         "serviceAccountName": OPERATOR_SA,
         "securityContext": {
             "runAsNonRoot": True,
-            # THE IMAGE'S UID, NOT AN INVENTED ONE. deploy/kubernetes-operator/Dockerfile
-            # creates one user at uid 10001 and ends with USER 10001, and its own
-            # manifest sets the same runAsUser. A uid the image does not create runs
-            # the process with no passwd entry and no home, so pwd.getpwuid raises
-            # KeyError; that happened here once, with the numbers the other way round.
+            # The uid the operator Dockerfile creates; any other has no passwd entry.
             "runAsUser": 10001,
             "seccompProfile": {"type": "RuntimeDefault"},
         },
@@ -814,19 +834,22 @@ def deployment(namespace, image):
         "kind": "Deployment",
         "metadata": {"name": ROLE, "namespace": namespace, "labels": LABELS},
         "spec": {
-            # ONE REPLICA, AND SCALING OUT IS A THREE-PART CHANGE, NOT A NUMBER.
-            # The ENTRYPOINT carries --standalone, which disables kopf peering, so a
-            # second replica would process every event twice. Going above one needs
-            # all three together: drop --standalone (which means overriding the
-            # ENTRYPOINT, so read the args note above first), re-add the
-            # coordination.k8s.io/leases rule peering needs, and only then raise this.
-            # Any one or two of the three alone is broken.
+            # One: --standalone disables peering. See the header before raising it.
             "replicas": 1,
-            "selector": {
-                "matchLabels": {"app.kubernetes.io/name": "ash-operator"},
-            },
+            "selector": {"matchLabels": SELECTOR},
             "template": {"metadata": {"labels": LABELS}, "spec": pod},
         },
+    }
+
+
+def network_policy(namespace):
+    """Deny all ingress; the kubelet's probes are still admitted from the node."""
+    meta = {"name": POLICY, "namespace": namespace, "labels": LABELS}
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": meta,
+        "spec": {"podSelector": {"matchLabels": SELECTOR}, "policyTypes": ["Ingress"]},
     }
 
 
@@ -891,6 +914,16 @@ def documents(namespace, image):
         (
             RBAC + "/namespaces/" + namespace + "/rolebindings/" + ROLE,
             role_binding(namespace),
+            NAMESPACED,
+        )
+    )
+    out.append(
+        (
+            "/apis/networking.k8s.io/v1/namespaces/"
+            + namespace
+            + "/networkpolicies/"
+            + POLICY,
+            network_policy(namespace),
             NAMESPACED,
         )
     )
@@ -1375,8 +1408,8 @@ export class AshEksOperatorStack extends Stack {
         'Namespace to create and install the operator into. It is created if absent, and it ' +
         'is ALWAYS left in place when the stack is deleted -- deleting a namespace ' +
         'cascade-deletes everything in it. Stack delete removes the Deployment, ' +
-        'ServiceAccounts, Role and RoleBinding; the CRDs, ClusterRole and ClusterRoleBinding ' +
-        'are kept.',
+        'NetworkPolicy, ServiceAccounts, Role and RoleBinding; the CRDs, ClusterRole and ' +
+        'ClusterRoleBinding are kept.',
     });
 
     /**
@@ -1557,7 +1590,7 @@ export class AshEksOperatorStack extends Stack {
       handler: 'index.handler',
       code: lambda.Code.fromInline(ASH_OPERATOR_APPLIER),
       role: installerRole,
-      // Ten documents, each one HTTPS round trip plus bounded retries. Well
+      // Eleven documents, each one HTTPS round trip plus bounded retries. Well
       // inside Lambda's ceiling, unlike the image build in ash-image-build.ts --
       // which is why this one answers CloudFormation itself.
       timeout: Duration.minutes(10),

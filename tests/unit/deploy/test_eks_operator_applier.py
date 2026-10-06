@@ -42,9 +42,11 @@ import tempfile
 import types
 
 import pytest
+import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TEMPLATE = REPO_ROOT / "deploy/cdk/templates/AshEksOperator.template.json"
+OPERATOR_YAML = REPO_ROOT / "deploy/kubernetes-operator/manifests/operator.yaml"
 GROUP = "ash.awslabs.github.io"
 
 # Transcribed from the operator's own generated manifests at
@@ -168,8 +170,8 @@ def test_scope_constants_are_distinct_and_non_empty(applier: dict) -> None:
     assert cluster != namespaced
 
 
-def test_ten_documents_with_distinct_paths(docs: list) -> None:
-    assert len(docs) == 10
+def test_eleven_documents_with_distinct_paths(docs: list) -> None:
+    assert len(docs) == 11
     paths = [path for path, _, _ in docs]
     assert len(set(paths)) == len(paths)
     kinds = [manifest["kind"] for _, manifest, _ in docs]
@@ -295,7 +297,7 @@ class TestDeleteRule:
         namespaced = [
             path for path, _, scope in reversed(docs) if scope == applier["NAMESPACED"]
         ]
-        assert len(namespaced) == 5
+        assert len(namespaced) == 6
         assert deleted == namespaced
 
     @pytest.mark.parametrize(
@@ -319,6 +321,10 @@ class TestDeleteRule:
         """The converse control: a rule that deleted nothing would pass every test above."""
         assert any("/deployments/" in path for path in deleted)
         assert sum("/serviceaccounts/" in path for path in deleted) == 2
+        # The NetworkPolicy goes too, and only after the Deployment it guards.
+        policies = [i for i, path in enumerate(deleted) if "/networkpolicies/" in path]
+        deployments = [i for i, path in enumerate(deleted) if "/deployments/" in path]
+        assert len(policies) == 1 and deployments[0] < policies[0], deleted
         assert all("/namespaces/ash-system" in path for path in deleted)
 
 
@@ -327,7 +333,7 @@ class TestApplyForce:
 
     def test_only_crds_skip_force(self, applier: dict, monkeypatch, tmp_path) -> None:
         calls, _ = _run_handler(applier, monkeypatch, tmp_path, "Create")
-        assert len(calls) == 10
+        assert len(calls) == 11
         assert {method for method, _, _ in calls} == {"PATCH"}
         for _, path, kwargs in calls:
             is_crd = "/customresourcedefinitions/" in path
@@ -512,7 +518,7 @@ class TestDeployment:
         `--namespace` does.
         """
         container = self._deployment(docs)["spec"]["template"]["spec"]["containers"][0]
-        assert container["args"] == ["--namespace", "$(WATCH_NAMESPACE)"]
+        assert container["args"][:2] == ["--namespace", "$(WATCH_NAMESPACE)"]
         assert container["env"] == [
             {
                 "name": "WATCH_NAMESPACE",
@@ -562,6 +568,91 @@ class TestDeployment:
         spec = self._deployment(docs)["spec"]
         selector = spec["selector"]["matchLabels"]
         assert selector.items() <= spec["template"]["metadata"]["labels"].items()
+
+
+# The only container fields the two install paths may disagree on.
+IMAGE_FIELDS = ("image", "imagePullPolicy")
+
+
+def _without(mapping: dict, *keys: str) -> dict:
+    return {k: v for k, v in mapping.items() if k not in keys}
+
+
+class TestParityWithOperatorYaml:
+    """The CloudFormation install and `kubectl apply` of operator.yaml must agree.
+
+    There are two install paths for one operator, and they drifted once: operator.yaml
+    gained kopf's --liveness endpoint, its probes, a CPU limit and a deny-all-ingress
+    NetworkPolicy while the applier's Deployment changed only its uid. checkov scans
+    the YAML and cannot see Python inside a template's ZipFile, so nothing flagged it.
+
+    These compare the Deployment spec, the pod spec and the container whole, so a field
+    added to either side fails until the other has it. The image, the namespace and the
+    labels legitimately differ (the stack takes the first two as parameters and adds a
+    managed-by label), so object metadata and the container's image fields are left out.
+    """
+
+    @staticmethod
+    def _yaml_docs() -> list:
+        return [d for d in yaml.safe_load_all(OPERATOR_YAML.read_text()) if d]
+
+    @staticmethod
+    def _one(docs: list, kind: str) -> dict:
+        found = [d for d in docs if d["kind"] == kind]
+        assert len(found) == 1, f"expected one {kind}, found {len(found)}"
+        return found[0]
+
+    @pytest.fixture
+    def pods(self, docs: list) -> tuple[dict, dict]:
+        cdk = self._one([m for _, m, _ in docs], "Deployment")
+        shipped = self._one(self._yaml_docs(), "Deployment")
+        return cdk["spec"]["template"]["spec"], shipped["spec"]["template"]["spec"]
+
+    def test_deployment_spec_matches_outside_the_pod_template(self, docs: list) -> None:
+        cdk = self._one([m for _, m, _ in docs], "Deployment")["spec"]
+        shipped = self._one(self._yaml_docs(), "Deployment")["spec"]
+        assert _without(cdk, "template") == _without(shipped, "template")
+
+    def test_pod_spec_matches_outside_the_containers(
+        self, pods: tuple[dict, dict]
+    ) -> None:
+        cdk, shipped = pods
+        assert _without(cdk, "containers") == _without(shipped, "containers")
+
+    def test_container_matches_except_the_image(self, pods: tuple[dict, dict]) -> None:
+        """Whole, so a field added to operator.yaml fails here until the applier has it.
+
+        Only the image reference and its pull policy may differ: the stack takes the
+        image as a parameter, and operator.yaml carries a local development tag.
+        """
+        (cdk,) = pods[0]["containers"]
+        (shipped,) = pods[1]["containers"]
+        assert cdk["image"] == "example.dkr.ecr.us-east-1.amazonaws.com/op:v1"
+        assert _without(cdk, *IMAGE_FIELDS) == _without(shipped, *IMAGE_FIELDS)
+
+    def test_network_policy_matches(self, applier: dict, docs: list) -> None:
+        shipped = self._one(self._yaml_docs(), "NetworkPolicy")
+        found = [(m, s) for _, m, s in docs if m["kind"] == "NetworkPolicy"]
+        assert len(found) == 1, f"the applier installs {len(found)} NetworkPolicies"
+        cdk, scope = found[0]
+        assert cdk["metadata"]["name"] == shipped["metadata"]["name"]
+        assert cdk["spec"] == shipped["spec"]
+        # Namespaced, so a stack delete removes it with the Deployment it guards.
+        assert scope == applier["NAMESPACED"]
+
+    def test_network_policy_selects_the_installed_pod(self, docs: list) -> None:
+        manifests = [m for _, m, _ in docs]
+        policy = self._one(manifests, "NetworkPolicy")
+        deployment = self._one(manifests, "Deployment")
+        assert policy["metadata"]["namespace"] == deployment["metadata"]["namespace"]
+        selector = policy["spec"]["podSelector"]["matchLabels"]
+        labels = deployment["spec"]["template"]["metadata"]["labels"]
+        assert selector and selector.items() <= labels.items()
+
+    def test_network_policy_is_applied_before_the_deployment(self, docs: list) -> None:
+        """So the pod never runs, even briefly, without the policy in place."""
+        kinds = [m["kind"] for _, m, _ in docs]
+        assert kinds.index("NetworkPolicy") < kinds.index("Deployment")
 
 
 class TestResponseBound:

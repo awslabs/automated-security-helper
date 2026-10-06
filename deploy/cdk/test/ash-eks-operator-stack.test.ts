@@ -455,7 +455,7 @@ describe('REGRESSION: stack deletion must not delete anything cluster-scoped', (
      * RETURNS.
      *
      * The set membership -- exactly which five documents are cluster-scoped, and that a
-     * delete issues five DELETEs touching none of them -- is asserted by
+     * delete issues six DELETEs touching none of them -- is asserted by
      * `tests/unit/deploy/test_eks_operator_applier.py`, which reassembles the applier out
      * of the committed template, EXECUTES it, and simulates the delete loop against what
      * `documents()` actually returns. That check cannot be satisfied by reformatting.
@@ -504,7 +504,7 @@ describe('REGRESSION: stack deletion must not delete anything cluster-scoped', (
     // document. Pinned to the same split deploy/README.md states.
     const description: string = JSON_TEMPLATE.Parameters.OperatorNamespace.Description;
     expect(description).not.toMatch(/(CRD|RBAC|ClusterRole)[^.;]*\bremoved\b/i);
-    expect(description).toMatch(/removes the Deployment, ServiceAccounts, Role and RoleBinding/);
+    expect(description).toMatch(/removes the Deployment, NetworkPolicy, ServiceAccounts, Role and RoleBinding/);
     expect(description).toMatch(/the CRDs, ClusterRole and ClusterRoleBinding are kept/);
   });
 });
@@ -1065,7 +1065,7 @@ describe('the CRD and ServiceAccount contract', () => {
      * concludes, which is why neither reading the Dockerfile nor reading this file
      * caught it.
      */
-    expect(ASH_OPERATOR_APPLIER).toContain('"args": ["--namespace", "$(WATCH_NAMESPACE)"]');
+    expect(ASH_OPERATOR_APPLIER).toMatch(/"args": \[\s*"--namespace",\s*"\$\(WATCH_NAMESPACE\)",/);
 
     /*
      * The namespace arrives via a fieldRef on the pod's own metadata.namespace, not as
