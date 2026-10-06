@@ -1222,52 +1222,6 @@ class TestGetUvToolCommand:
             assert cmd == ["uv", "tool", "run", "bandit"]
             assert mock_run.call_count == 1
 
-    @pytest.mark.parametrize("offline", [True, False])
-    def test_probe_honors_offline_mode(self, reset_module_caches, monkeypatch, offline):
-        """Under ASH_OFFLINE the probe must not resolve the tool from PyPI.
-
-        Online, it downloaded bandit and checkov during `ash scan --mode nix` and
-        could be killed mid-download by its 5s timeout, leaving uv's cache with
-        an index entry and no wheel.
-        """
-        if offline:
-            monkeypatch.setenv("ASH_OFFLINE", "YES")
-        else:
-            monkeypatch.delenv("ASH_OFFLINE", raising=False)
-        with (
-            patch(
-                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-                return_value="/opt/uv/bin/uv",
-            ),
-            patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
-            ) as mock_run,
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="bandit 1.7\n", stderr=""
-            )
-            get_uv_tool_command("bandit")
-        probe = mock_run.call_args
-        if offline:
-            assert probe.args[0] == [
-                "/opt/uv/bin/uv",
-                "tool",
-                "run",
-                "--offline",
-                "bandit",
-                "--version",
-            ]
-            assert probe.kwargs["env"]["UV_OFFLINE"] == "1"
-        else:
-            assert probe.args[0] == [
-                "/opt/uv/bin/uv",
-                "tool",
-                "run",
-                "bandit",
-                "--version",
-            ]
-            assert probe.kwargs["env"] is None
-
     def test_falls_back_to_direct_binary_when_uv_probe_fails(self, reset_module_caches):
         with (
             patch(

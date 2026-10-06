@@ -68,14 +68,7 @@
       scannersFor = system:
         let pkgs = pkgsFor system;
         in [
-          # With its `sarif` extra. ASH runs `bandit -f sarif`, and nixpkgs' bandit
-          # ships without sarif-om and jschema-to-python, so its -f choices stop at
-          # yaml. ASH checks the extras of the bandit it finds on PATH; without these
-          # two it reports bandit MISSING offline, naming the `sarif` extra.
-          (pkgs.bandit.overridePythonAttrs (old: {
-            dependencies = (old.dependencies or [ ])
-              ++ (with pkgs.python3Packages; [ sarif-om jschema-to-python ]);
-          }))
+          pkgs.bandit
           pkgs.cfn-nag
           pkgs.checkov
           pkgs.detect-secrets
