@@ -46,11 +46,12 @@
 name: ASH - IaC Drift
 
 on:
-  # Push on main only, for the reasons set out at length on ash-unified-ci.yml's
-  # triggers. In short: the active "Protect main" ruleset requires the merge queue for
+  # Push on main, plus the v4 branches covered at the end of this comment. Main gets
+  # push for the reasons set out at length on ash-unified-ci.yml's triggers. In
+  # short: the active "Protect main" ruleset requires the merge queue for
   # main and this workflow runs on merge_group, so anything reaching main through the
   # queue is already gated -- but the ruleset also grants one repository role an
-  # always-on bypass, and a merge taken under it lands on main with none of these seven
+  # always-on bypass, and a merge taken under it lands on main with none of these nine
   # checks having run. Pull request 565 is the measured instance: no merge_group run of
   # any workflow, and only the docs deploy and the default code-scanning run against
   # its commit on main.
@@ -60,19 +61,29 @@ on:
   # once `["!main"]`, which matches no branch at all rather than every branch but main;
   # this workflow had zero push runs across its whole history as a result.
   #
-  # The duplicate run on a queued merge is real and was accepted: seven more single-runner
+  # The duplicate run on a queued merge is real and was accepted: nine more single-runner
   # jobs per merge to cover the merge that skips the queue. The eviction hazard that
   # made an earlier attempt at this trigger unsafe is handled by the per-commit
   # concurrency group below, not by leaving the trigger off.
   #
   # Worth stating for this file specifically, because its jobs are cheap and the
   # temptation to run them everywhere is real: cost is not the argument for keeping the
-  # filter narrow. All seven jobs are single-runner and offline -- cdk synth, terraform
-  # validate, cdk-nag and the link renderer read local files only. The argument is that a
+  # filter narrow. All nine jobs are single-runner and offline -- cdk synth, terraform
+  # validate, cdk-nag, cfn-lint, cfn-guard and the link renderer read local files only
+  # (fetching the pinned tools is a public artifact download). The argument is that a
   # second verdict on a tree pull_request already covered is not a second check.
+  #
+  # v4-capabilities and v4/** are the exception, added for the v4 e2e plan. v4 work
+  # lands on those branches without a pull request to main, so on them push is the
+  # only event that runs these gates at all: the EKS stack's synth, equivalence,
+  # cdk-nag, cfn-lint and cfn-guard checks would otherwise never run on the tree
+  # that ships them. A push there that also has an open pull request gets a second
+  # run of the same tree; that duplicate was accepted for the same reason as main's.
   push:
     branches:
       - main
+      - v4-capabilities
+      - "v4/**"
   pull_request:
     # "**" not "*": GitHub branch filters treat "*" as matching any character
     # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
@@ -199,6 +210,7 @@ jobs:
             echo "| --- | --- | --- |"
             echo "| CDK template drift | \`deploy/cdk/cdk.json\` | \`$cdk\` |"
             echo "| cdk-nag | \`deploy/cdk/cdk.json\` | \`$cdk\` |"
+            echo "| cfn-lint and cfn-guard | \`deploy/cdk/cdk.json\` | \`$cdk\` |"
             echo "| Generated buildspec drift | \`deploy/cdk-constructs/package.json\` | \`$constructs\` |"
             echo "| Terraform hygiene | \`deploy/terraform/**/*.tf\` | \`$terraform\` |"
             echo "| Quick-create link drift | \`deploy/quick-create-links.md.template\` | \`$quickcreate\` |"
@@ -1609,6 +1621,130 @@ jobs:
           exit 1
 
   # ---------------------------------------------------------------------------
+  # cfn-lint and cfn-guard over every committed template.
+  #
+  # The drift job above proves the committed templates are exactly what the app
+  # synthesizes, so linting the committed files lints the synth output. Both
+  # tools are offline. Everything about what fails, what counts as a
+  # suppression, and why a rule that matches nothing is a failure is in the
+  # script's docstring: deploy/tests/cfn-lint-guard.py.
+  #
+  # Pinning. cfn-lint and its eight dependencies install from a hash-locked
+  # requirements file, so a new release of any of them cannot change the verdict
+  # without a reviewed edit. cfn-guard has no PyPI package; the release tarball is
+  # fetched by exact version and checked against the sha256 below, which is the
+  # digest GitHub publishes for that asset. Bumping either is an edit to this file
+  # or to deploy/tests/cfn-lint-requirements.in.
+  #
+  # The self-test runs first and on every run, not only when the script changes.
+  # It breaks copies of the committed templates on purpose and requires each tool
+  # to reject each break, so a tool that stopped reading its input, or a guard
+  # rule that stopped matching, turns this job red instead of reporting a clean
+  # tree.
+  # ---------------------------------------------------------------------------
+  cfn-lint-guard:
+    name: cfn-lint and cfn-guard
+    needs: discover
+    if: needs.discover.outputs.cdk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CFN_GUARD_VERSION: "3.2.1"
+      CFN_GUARD_ASSET: cfn-guard-v3-x86_64-ubuntu-latest.tar.gz
+      CFN_GUARD_SHA256: 09c2b8cfd81d513374a8da89d4805dc55006a3da52bbf598e272022d4d198e94
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install cfn-lint from the hash-locked requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/cfn-lint"
+          "$RUNNER_TEMP/cfn-lint/bin/python" -m pip install --quiet --disable-pip-version-check \
+            --require-hashes --no-deps -r deploy/tests/cfn-lint-requirements.txt
+          "$RUNNER_TEMP/cfn-lint/bin/cfn-lint" --version
+          echo "CFN_LINT=$RUNNER_TEMP/cfn-lint/bin/cfn-lint" >> "$GITHUB_ENV"
+
+      - name: Install cfn-guard from its release, verified by sha256
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The asset is the x86_64 build; a runner image on another architecture
+          # would fail at exec time with a less obvious error.
+          if [ "$(uname -m)" != "x86_64" ]; then
+            echo "::error::$CFN_GUARD_ASSET is an x86_64 binary and this runner is $(uname -m)."
+            exit 1
+          fi
+          dest="$RUNNER_TEMP/cfn-guard"
+          mkdir -p "$dest"
+          curl -fsSL --proto '=https' --retry 3 -o "$dest/$CFN_GUARD_ASSET" \
+            "https://github.com/aws-cloudformation/cloudformation-guard/releases/download/${CFN_GUARD_VERSION}/${CFN_GUARD_ASSET}"
+          echo "${CFN_GUARD_SHA256}  $dest/$CFN_GUARD_ASSET" | sha256sum --check --strict -
+          tar -xzf "$dest/$CFN_GUARD_ASSET" -C "$dest"
+          bin="$dest/${CFN_GUARD_ASSET%.tar.gz}/cfn-guard"
+          reported="$("$bin" --version)"
+          echo "$reported"
+          if [ "$reported" != "cfn-guard $CFN_GUARD_VERSION" ]; then
+            echo "::error::expected cfn-guard $CFN_GUARD_VERSION, the binary reports '$reported'."
+            exit 1
+          fi
+          echo "CFN_GUARD=$bin" >> "$GITHUB_ENV"
+
+      - name: Prove both tools reject planted defects
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 deploy/tests/cfn-lint-guard.py self-test --work-dir "$RUNNER_TEMP"
+
+      - name: Lint and guard every committed template
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 deploy/tests/cfn-lint-guard.py check
+
+  # ---------------------------------------------------------------------------
+  # No workflow or composite action may deploy anything.
+  #
+  # Every check in this file is offline by design, and deploying a stack needs
+  # an AWS account and the operator's authorization that no CI job here has. A
+  # comment saying so is not a check, so this job is: it reads every workflow
+  # and action under .github/ and fails on cdk deploy/destroy/bootstrap, a
+  # stack-mutating aws cloudformation subcommand, terraform apply/destroy/import,
+  # sam deploy, or the CloudFormation deploy action. Not conditional on discover:
+  # a deploy step can be added to any workflow whether or not deploy/ exists.
+  # ---------------------------------------------------------------------------
+  no-aws-deploy:
+    name: no deploy in CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Prove the detector catches planted deploy commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/assert-no-aws-deploy.py --self-test
+
+      - name: Assert no workflow or action deploys infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/assert-no-aws-deploy.py
+
+  # ---------------------------------------------------------------------------
   # One stable name for branch protection to require.
   #
   # Every check above except discover is conditional, and a required check that
@@ -1627,6 +1763,8 @@ jobs:
       - iac-equivalence
       - cdk-nag
       - quick-create-link-drift
+      - cfn-lint-guard
+      - no-aws-deploy
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

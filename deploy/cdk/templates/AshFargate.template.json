@@ -933,8 +933,7 @@
     "Timeout": 60
    },
    "DependsOn": [
-    "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
-    "ImageBootstrapStarterRole4262AC52"
+    "ImageBootstrapStarterRoleDefaultPolicy10189EBF"
    ]
   },
   "ImageBootstrapBuildCBE6CA7A": {
@@ -2315,7 +2314,6 @@
    },
    "DependsOn": [
     "ImageBootstrapBuildCBE6CA7A",
-    "LoadBalancerListenerMcpGroupABC8DC42",
     "LoadBalancerListenerE1A099B9",
     "TaskDefinitionTaskRoleDefaultPolicy282E8624",
     "TaskDefinitionTaskRoleFD40A61D"
