@@ -1118,7 +1118,7 @@ class TestReceiptDirectoryPermissions:
 
 class TestAssetResolution:
     def test_downloadable_tools(self):
-        assert downloadable_tools() == ["grype", "syft", "trivy"]
+        assert downloadable_tools() == ["actionlint", "grype", "syft", "trivy"]
 
     @pytest.mark.parametrize("tool", ["grype", "syft", "trivy"])
     def test_linux_and_darwin_are_provisionable_on_both_arches(self, tool):

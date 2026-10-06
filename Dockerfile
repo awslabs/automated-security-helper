@@ -300,6 +300,12 @@ ARG GRYPE_VERSION="v0.111.0"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
+# actionlint is an opt-in scanner (off unless enabled), installed here so enabling it
+# in a container scan needs no download. Same pinned-asset path as syft and grype.
+ARG ACTIONLINT_VERSION="v1.7.12"
+RUN with-retry 'install-pinned-tool actionlint -b /usr/local/bin'
+RUN actionlint --version
+
 # POSIX `[ ... = ... ]`, not `[[ ... == ... ]]`. This block did not run at all under
 # podman or finch, in either direction of the condition, and nothing said so.
 #

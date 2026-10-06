@@ -123,6 +123,7 @@ from typing import FrozenSet
 #: Add a scanner to the registry without adding it here and that test fails.
 SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(
     {
+        "actionlint",
         "bandit",
         "cdk-nag",
         "cfn-nag",

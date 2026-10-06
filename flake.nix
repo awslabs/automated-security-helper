@@ -68,6 +68,7 @@
       scannersFor = system:
         let pkgs = pkgsFor system;
         in [
+          pkgs.actionlint # opt-in scanner; ASH disables its shellcheck/pyflakes wrappers
           pkgs.bandit
           pkgs.cfn-nag
           pkgs.checkov

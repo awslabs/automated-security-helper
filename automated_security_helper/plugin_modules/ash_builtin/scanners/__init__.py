@@ -1,6 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+    ActionlintScanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScanner,
 )
@@ -34,6 +37,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
 )
 
 __all__ = [
+    "ActionlintScanner",
     "BanditScanner",
     "CdkNagScanner",
     "CfnNagScanner",

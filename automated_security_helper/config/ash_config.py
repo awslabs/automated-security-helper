@@ -76,6 +76,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+    ActionlintScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -348,6 +351,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
 
+    actionlint: Annotated[
+        ActionlintScannerConfig,
+        Field(description="Configure the options for actionlint"),
+    ] = ActionlintScannerConfig()
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
     ] = BanditScannerConfig()

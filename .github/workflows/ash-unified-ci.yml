@@ -776,11 +776,17 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync --extra cdk --extra symbols
+      # Opt-in scanners are not installed by default anywhere a default scan would
+      # notice, so the integration suite installs the ones it runs for real.
+      - name: Install opt-in scanner binaries for the integration suite
+        run: uv run ash dependencies install --tool actionlint
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
-      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan.
+      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
+      # and ASH_REQUIRE_ACTIONLINT for the actionlint tests.
       - name: Run the integration suite
         env:
+          ASH_REQUIRE_ACTIONLINT: "1"
           ASH_REQUIRE_CDK_EXTRA: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         run: |

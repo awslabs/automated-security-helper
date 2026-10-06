@@ -640,6 +640,20 @@
   config a scan of the current directory would use, instead of always
   `.ash/.ash.yaml`.
 
+### Features
+
+- **actionlint scanner (opt-in).** Lints GitHub Actions workflow files
+  (`.github/workflows/*.yml|yaml`) with actionlint 1.7.12, installed from its
+  pinned, SHA256-checked release asset by `ash dependencies install`, in the
+  container image and in the nix flake. Off by default and absent from default
+  scan output; enable with `scanners.actionlint.enabled: true` or `--scanners
+  actionlint`. Script injection from untrusted event data and hard-coded container
+  credentials are HIGH, always-true `if:` conditions, invalid `permissions:` and
+  `set-env`/`add-path` are MEDIUM, other lint findings are LOW. actionlint's
+  shellcheck and pyflakes integrations are disabled unless configured, so results
+  do not depend on what is installed on the host. See
+  `docs/content/docs/plugins/builtin/actionlint.md`.
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat

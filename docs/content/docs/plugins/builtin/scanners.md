@@ -8,6 +8,7 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 
 | Scanner                               | Purpose                         | Languages/Formats               | Key Features                               |
 |---------------------------------------|---------------------------------|---------------------------------|--------------------------------------------|
+| **[actionlint](actionlint.md)** (opt-in) | GitHub Actions workflow linter | GitHub Actions workflow YAML | Script injection, expression and syntax checks |
 | **[Bandit](#bandit)**                 | Python security linter          | Python                          | AST-based analysis, security-focused rules |
 | **[CDK-Nag](#cdk-nag)**               | AWS CDK security checker        | TypeScript, Python, Java        | CDK-specific security rules                |
 | **[CFN-Nag](#cfn-nag)**               | CloudFormation security         | YAML, JSON                      | AWS resource security validation           |
