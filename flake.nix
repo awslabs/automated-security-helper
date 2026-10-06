@@ -72,6 +72,7 @@
           pkgs.cfn-nag
           pkgs.checkov
           pkgs.detect-secrets
+          pkgs.gitleaks # opt-in gitleaks scanner
           pkgs.grype
           pkgs.nodejs # provides `npm audit`
           pkgs.semgrep

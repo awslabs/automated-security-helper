@@ -96,6 +96,7 @@ runs:
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
+          --config-overrides 'scanners.gitleaks.enabled=true' \
           --simple
         rc=$?
         set -e
@@ -142,11 +143,16 @@ runs:
         # own exit code: fail_on_incomplete_scanners is on by default, so a cdk-nag that
         # goes MISSING or leaves a target unevaluated fails the step before this
         # assertion runs.
+        #
+        # gitleaks is opt-in, so the scan above enables it with --config-overrides;
+        # otherwise it would be absent from the report and this list could not
+        # check that the flake supplies it.
         flake_supplied = [
             "bandit",
             "cfn-nag",
             "checkov",
             "detect-secrets",
+            "gitleaks",
             "grype",
             "npm-audit",
             "opengrep",

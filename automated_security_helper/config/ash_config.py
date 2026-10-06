@@ -91,6 +91,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     DetectSecretsScannerConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+    GitleaksScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
     GrypeScannerConfig,
 )
@@ -369,6 +372,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
             alias="detect-secrets",
         ),
     ] = DetectSecretsScannerConfig()
+    gitleaks: Annotated[
+        GitleaksScannerConfig,
+        Field(description="Configure the options for Gitleaks"),
+    ] = GitleaksScannerConfig()
     grype: Annotated[
         GrypeScannerConfig, Field(description="Configure the options for Grype")
     ] = GrypeScannerConfig()

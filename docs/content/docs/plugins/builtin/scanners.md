@@ -1,6 +1,6 @@
 # Built-in Security Scanners
 
-ASH includes 10 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
+ASH includes 11 built-in security scanners, one of which (gitleaks) is opt-in, that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
 
 > For detailed visual diagrams of the built-in scanner architecture and workflows, see [Built-in Scanner Diagrams](scanners-diagrams.md).
 
@@ -13,6 +13,7 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[CFN-Nag](#cfn-nag)**               | CloudFormation security         | YAML, JSON                      | AWS resource security validation           |
 | **[Checkov](#checkov)**               | Infrastructure-as-Code scanner  | Terraform, CF, K8s, Docker      | Policy-as-code framework                   |
 | **[Detect-Secrets](#detect-secrets)** | Secret detection                | All text files                  | Entropy-based secret detection             |
+| **[Gitleaks](#gitleaks-opt-in)** (opt-in) | Secret detection            | All text files                  | Rule-based credential detection            |
 | **[Grype](#grype)**                   | Container vulnerability scanner | Container images, SBOMs         | CVE database matching                      |
 | **[NPM Audit](#npm-audit)**           | Node.js dependency scanner      | package.json, package-lock.json | NPM vulnerability database                 |
 | **[Opengrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
@@ -157,6 +158,28 @@ scanners:
 - API keys and tokens
 
 **Dependencies**: `detect-secrets` Python package
+
+---
+
+### Gitleaks (opt-in)
+
+**Purpose**: Rule-based credential detection over the files in the scan target. Off by default; a default scan does not run or list it.
+
+**Configuration**:
+```yaml
+scanners:
+  gitleaks:
+    enabled: true          # or: ash scan --scanners gitleaks
+    options:
+      config_file: null    # gitleaks TOML config; defaults to .gitleaks.toml in the source directory
+      baseline_path: null  # gitleaks JSON report of findings to ignore
+```
+
+**Severity**: every finding is CRITICAL, the same as detect-secrets. Secret values are redacted by gitleaks and never reach ASH's reports.
+
+**Dependencies**: `gitleaks` binary (pinned release; in the container image and installed by `ash dependencies install`)
+
+See [Gitleaks scanner](gitleaks.md) for config resolution, suppressions and exit codes.
 
 ---
 

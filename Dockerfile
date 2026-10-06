@@ -300,6 +300,12 @@ ARG GRYPE_VERSION="v0.111.0"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
+# gitleaks backs the opt-in gitleaks scanner. Installed here even though the scanner
+# is off by default, so enabling it in a container needs no network.
+ARG GITLEAKS_VERSION="v8.30.1"
+RUN with-retry 'install-pinned-tool gitleaks -b /usr/local/bin'
+RUN gitleaks --version
+
 # POSIX `[ ... = ... ]`, not `[[ ... == ... ]]`. This block did not run at all under
 # podman or finch, in either direction of the condition, and nothing said so.
 #

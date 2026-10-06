@@ -16,6 +16,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     DetectSecretsScanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+    GitleaksScanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
     GrypeScanner,
 )
@@ -39,6 +42,7 @@ __all__ = [
     "CfnNagScanner",
     "CheckovScanner",
     "DetectSecretsScanner",
+    "GitleaksScanner",
     "GrypeScanner",
     "NpmAuditScanner",
     "OpengrepScanner",

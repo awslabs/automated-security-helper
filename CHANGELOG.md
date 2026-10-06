@@ -640,6 +640,21 @@
   config a scan of the current directory would use, instead of always
   `.ash/.ash.yaml`.
 
+### Features
+
+- **gitleaks, as an opt-in builtin scanner.** `scanners.gitleaks.enabled: true`, or
+  `--scanners gitleaks`, runs [gitleaks](https://github.com/gitleaks/gitleaks) 8.30.1
+  (`gitleaks dir`, working tree only) next to detect-secrets, which stays on by
+  default and unchanged. A default scan neither runs nor lists it, so existing
+  output and exit codes do not change. Findings are CRITICAL, like detect-secrets;
+  secret values are redacted by gitleaks (`--redact=100`) and never reach ASH's
+  reports. A `.gitleaks.toml` in the source directory (or `options.config_file`),
+  `.gitleaksignore`, `gitleaks:allow` comments and `options.baseline_path` apply
+  alongside ASH suppressions. The binary is in the container image, installed by
+  `ash dependencies install` from the release asset checked against a pinned SHA256,
+  and supplied by the nix flake. Enabled with the binary absent, it reports `MISSING`
+  and the scan exits 1. See `docs/content/docs/plugins/builtin/gitleaks.md`.
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat

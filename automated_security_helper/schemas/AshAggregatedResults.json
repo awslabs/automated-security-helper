@@ -1638,6 +1638,17 @@
                 "skip_generated_lockfiles": true
               }
             },
+            "gitleaks": {
+              "enabled": false,
+              "name": "gitleaks",
+              "options": {
+                "baseline_path": null,
+                "config_file": null,
+                "max_target_megabytes": null,
+                "scan_timeout": 1800,
+                "severity_threshold": null
+              }
+            },
             "grype": {
               "enabled": true,
               "name": "grype",
@@ -7901,6 +7912,124 @@
         }
       },
       "title": "GitLabSASTReporterConfigOptions",
+      "type": "object"
+    },
+    "GitleaksScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "gitleaks",
+          "default": "gitleaks",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/GitleaksScannerConfigOptions",
+          "default": {
+            "baseline_path": null,
+            "config_file": null,
+            "max_target_megabytes": null,
+            "scan_timeout": 1800,
+            "severity_threshold": null
+          },
+          "description": "Configure the gitleaks scanner"
+        }
+      },
+      "title": "GitleaksScannerConfig",
+      "type": "object"
+    },
+    "GitleaksScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "baseline_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a gitleaks JSON report, relative to the source directory, whose findings gitleaks ignores (gitleaks --baseline-path). A path that does not exist fails the scan.",
+          "title": "Baseline Path"
+        },
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a gitleaks TOML config, relative to the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Defaults to `.gitleaks.toml`, then `.ash/.gitleaks.toml`, in the source directory; when neither exists, or GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML is set, gitleaks resolves its own config. A path that does not exist fails the scan.",
+          "title": "Config File"
+        },
+        "max_target_megabytes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file.",
+          "title": "Max Target Megabytes"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "GitleaksScannerConfigOptions",
       "type": "object"
     },
     "Graph": {
@@ -16150,6 +16279,21 @@
             }
           },
           "description": "Configure the options for DetectSecrets"
+        },
+        "gitleaks": {
+          "$ref": "#/$defs/GitleaksScannerConfig",
+          "default": {
+            "enabled": false,
+            "name": "gitleaks",
+            "options": {
+              "baseline_path": null,
+              "config_file": null,
+              "max_target_megabytes": null,
+              "scan_timeout": 1800,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Gitleaks"
         },
         "grype": {
           "$ref": "#/$defs/GrypeScannerConfig",

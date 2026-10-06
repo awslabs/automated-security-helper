@@ -85,6 +85,7 @@ class ToolAsset:
 # (see the ARG lines in Dockerfile), so a scan run from a container, from nix and
 # from a bare `ash dependencies install` all execute the same tool versions.
 TOOL_VERSIONS: dict[str, str] = {
+    "gitleaks": "v8.30.1",
     "grype": "v0.111.0",
     "syft": "v1.42.4",
     "trivy": "v0.69.3",
@@ -99,6 +100,15 @@ CFN_NAG_GEM_VERSION = "0.8.10"
 # ---------------------------------------------------------------------------
 # Asset filenames, per tool, exactly as published upstream.
 # ---------------------------------------------------------------------------
+
+_GITLEAKS_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "gitleaks_8.30.1_linux_x64.tar.gz",
+    ("linux", "arm64"): "gitleaks_8.30.1_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "gitleaks_8.30.1_darwin_x64.tar.gz",
+    ("darwin", "arm64"): "gitleaks_8.30.1_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "gitleaks_8.30.1_windows_x64.zip",
+    ("windows", "arm64"): "gitleaks_8.30.1_windows_arm64.zip",
+}
 
 _GRYPE_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "grype_0.111.0_linux_amd64.tar.gz",
@@ -133,6 +143,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #
 # Transcribed verbatim from the checksums file published with each release, so a
 # reviewer can diff this block against the upstream file line for line:
+#   https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
 #   https://github.com/anchore/grype/releases/download/v0.111.0/grype_0.111.0_checksums.txt
 #   https://github.com/anchore/syft/releases/download/v1.42.4/syft_1.42.4_checksums.txt
 #   https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_checksums.txt
@@ -149,6 +160,13 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # ---------------------------------------------------------------------------
 
 _DIGESTS: dict[str, str] = {
+    # gitleaks v8.30.1
+    "gitleaks_8.30.1_linux_x64.tar.gz": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",  # pragma: allowlist secret
+    "gitleaks_8.30.1_linux_arm64.tar.gz": "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",  # pragma: allowlist secret
+    "gitleaks_8.30.1_darwin_x64.tar.gz": "dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709",  # pragma: allowlist secret
+    "gitleaks_8.30.1_darwin_arm64.tar.gz": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",  # pragma: allowlist secret
+    "gitleaks_8.30.1_windows_x64.zip": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",  # pragma: allowlist secret
+    "gitleaks_8.30.1_windows_arm64.zip": "b95f5e4f5c425cedca7ee203d9afd29597e692c4924a12ed42f970537c72cc0f",  # pragma: allowlist secret
     # grype v0.111.0
     "grype_0.111.0_linux_amd64.tar.gz": "18ed2048d7a233566b681121d4632364f5f25d72cca86acc4c7ac57210d78a87",  # pragma: allowlist secret
     "grype_0.111.0_linux_arm64.tar.gz": "1a8b9bd691ce274e44056e7572cdf8c6970bdf9ec694001f7b4b17962b121b43",  # pragma: allowlist secret
@@ -172,12 +190,14 @@ _DIGESTS: dict[str, str] = {
 
 
 _RELEASE_BASE_URLS: dict[str, str] = {
+    "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
 }
 
 _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
+    "gitleaks": _GITLEAKS_ASSETS,
     "grype": _GRYPE_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
