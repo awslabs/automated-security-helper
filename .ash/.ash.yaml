@@ -186,28 +186,19 @@ global_settings:
         deploy/cdk-constructs; each tree now has its own entry.
     # === Time-boxed: braces GHSA-vfj7-8cjw-p6xm, no patched version (expires 2026-11-04) ===
     # braces <= 3.0.3 is affected and no fixed release exists, so neither an upgrade
-    # nor an npm `overrides` pin can remove it. Both CDK lockfiles reach it only
-    # through dev and build tooling: micromatch, pulled in by jest in deploy/cdk and
-    # by fast-glob and jsii-rosetta/jsii-pacmak in deploy/cdk-constructs. None of it
-    # ships in the wheel or the container image. Revisit when a fixed braces ships.
+    # nor an npm `overrides` pin can remove it. deploy/cdk-constructs reaches it only
+    # through build tooling: micromatch, pulled in by fast-glob and
+    # jsii-rosetta/jsii-pacmak. None of it ships in the wheel or the container image.
+    # Revisit when a fixed braces ships. deploy/cdk had an entry too, reached through
+    # micromatch under jest 29; jest 30 no longer depends on micromatch, braces left
+    # that lockfile, and the entry was removed rather than left matching nothing.
     #
     # npm-audit reports the advisory once per lockfile under its GHSA id, and then
     # reports every package whose `via` chain reaches it as a separate
     # `npm-audit-transitive-<package>` finding. Those need no entries of their own:
     # a transitive finding is suppressed when every root advisory in its chain is,
-    # so the two entries below cover them. A transitive finding that gains a second,
+    # so the entry below covers them. A transitive finding that gains a second,
     # unsuppressed root stays visible and fails the scan.
-    - rule_id: "GHSA-vfj7-8cjw-p6xm"
-      path: "node_modules/braces/package.json"
-      package_name: "braces"
-      package_version: "3.0.3"
-      package_path: "deploy/cdk/node_modules/braces"
-      expiration: "2026-11-04"
-      reason: >-
-        GHSA-vfj7-8cjw-p6xm: braces 3.0.3 in deploy/cdk/package-lock.json. No patched
-        version exists. Reachable only through dev/build tooling (micromatch via
-        jest) and not shipped in the wheel or container image. Revisit when a fix
-        ships; see the block comment above.
     - rule_id: "GHSA-vfj7-8cjw-p6xm"
       path: "node_modules/braces/package.json"
       package_name: "braces"
