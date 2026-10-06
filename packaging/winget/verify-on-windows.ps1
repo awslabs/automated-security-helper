@@ -542,7 +542,14 @@ try {
     Write-Host '   OK: the leg rejects a wrong exit code'
 
     Write-Step '8. winget uninstall'
-    $result = Invoke-Winget -Arguments @('uninstall', '--manifest', $localN, '--disable-interactivity', '--silent') -LogName 'uninstall-N'
+    # uninstall opens the default sources to match the installed package, and the msstore
+    # source asks for its agreement first. Without --accept-source-agreements that prompt
+    # ends the command with 0x8A150046 (SOURCE_AGREEMENTS_NOT_ACCEPTED). uninstall takes
+    # no --accept-package-agreements.
+    $result = Invoke-Winget -Arguments @(
+        'uninstall', '--manifest', $localN, '--accept-source-agreements',
+        '--disable-interactivity', '--silent'
+    ) -LogName 'uninstall-N'
     if ($result.Code -ne 0) {
         Fail "winget uninstall --manifest exited $($result.Code)"
     }
@@ -621,7 +628,10 @@ try {
 
     Write-Step '11. winget uninstall after the upgrade'
     $venv = Join-Path $env:LOCALAPPDATA "Packages\$($package.PackageFamilyName)\LocalCache\ash-venv"
-    $result = Invoke-Winget -Arguments @('uninstall', '--manifest', $localN, '--disable-interactivity', '--silent') -LogName 'uninstall-upgraded'
+    $result = Invoke-Winget -Arguments @(
+        'uninstall', '--manifest', $localN, '--accept-source-agreements',
+        '--disable-interactivity', '--silent'
+    ) -LogName 'uninstall-upgraded'
     if ($result.Code -ne 0) {
         Fail "winget uninstall --manifest after the upgrade exited $($result.Code)"
     }
