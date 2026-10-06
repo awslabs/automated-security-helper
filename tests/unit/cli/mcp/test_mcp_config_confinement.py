@@ -795,6 +795,20 @@ class TestInsideTheRootsStillWorks:
         assert result["success"] is True, result
         git.assert_called()
 
+    @pytest.mark.parametrize("url", ["--upload-pack=touch x", "ext::sh -c true"])
+    def test_set_source_git_reports_url_rules_before_confinement(self, layout, url):
+        from automated_security_helper.cli import mcp_server
+
+        with patch(
+            "automated_security_helper.cli.mcp.source_delivery.subprocess.run"
+        ) as git:
+            result = _run(mcp_server.set_source_git(_ctx(), url=url))
+
+        assert result["success"] is False
+        assert "outside the permitted roots" not in result["error"]
+        assert result.get("error_type") != "scan_target_not_permitted"
+        git.assert_not_called()
+
     @pytest.mark.parametrize(
         "url",
         [

@@ -1680,9 +1680,17 @@ def mcp_set_source_git(
     """
     from automated_security_helper.cli.mcp.scan_target import validate_scan_target
     from automated_security_helper.cli.mcp.source_delivery import (
+        _validate_clone_url,
         local_clone_path,
         set_source_git,
     )
+
+    # The URL's own rules first, so an option-like or command-executing URL gets
+    # that refusal rather than being read as a filesystem path.
+    try:
+        _validate_clone_url(url)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
 
     # A local clone source reads the server's filesystem, so it gets the scan
     # roots a scan target gets. Checked before anything is created or cloned.
