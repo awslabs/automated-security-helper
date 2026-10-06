@@ -1,9 +1,11 @@
 $ ash plugin list
-[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
 ASH Scanners
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Enabled ┃ Class                ┃ Module                         ┃ Plugin Config ┃
 ┡━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ actionlint     │ False   │ ActionlintScanner    │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ bandit         │ True    │ BanditScanner        │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ cdk-nag        │ True    │ CdkNagScanner        │ automated_security_helper.plu… │               │

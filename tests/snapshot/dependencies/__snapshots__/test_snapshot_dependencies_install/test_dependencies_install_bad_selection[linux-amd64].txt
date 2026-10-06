@@ -6,11 +6,12 @@ $ ash dependencies install --bin-path bin --tool grype --tool gryp
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: linux, architecture: amd64
-[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
 ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
 │ Unknown tool(s): gryp                                                                            │
-│ Available: ArchiveConverter, bandit, cdk-nag, cfn-nag, checkov, csv, cyclonedx, detect-secrets,  │
-│ flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, grype, html, junitxml, jupyter, markdown, │
-│ npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, text, unused-suppressions, yaml           │
+│ Available: ArchiveConverter, actionlint, bandit, cdk-nag, cfn-nag, checkov, csv, cyclonedx,      │
+│ detect-secrets, flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, grype, html, junitxml,    │
+│ jupyter, markdown, npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, text,                  │
+│ unused-suppressions, yaml                                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 2]

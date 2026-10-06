@@ -9,6 +9,7 @@ Scanner configuration
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Currently enabled ┃
 ┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ actionlint     │        no         │
 │ bandit         │        yes        │
 │ cdk-nag        │        yes        │
 │ cfn-nag        │        yes        │
@@ -20,6 +21,7 @@ Scanner configuration
 │ semgrep        │        yes        │
 │ syft           │        yes        │
 └────────────────┴───────────────────┘
+  Enable actionlint? [y/N]:
   Enable bandit? [Y/n]:
   Enable cdk-nag? [Y/n]:
   Enable cfn-nag? [Y/n]:

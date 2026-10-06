@@ -1,5 +1,114 @@
 {
   "$defs": {
+    "ActionlintScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "actionlint",
+          "default": "actionlint",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ActionlintScannerConfigOptions",
+          "default": {
+            "config_file": null,
+            "pyflakes": null,
+            "scan_timeout": 1800,
+            "severity_threshold": null,
+            "shellcheck": null
+          },
+          "description": "Configure the actionlint scanner"
+        }
+      },
+      "title": "ActionlintScannerConfig",
+      "type": "object"
+    },
+    "ActionlintScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to an actionlint config file, relative to the source directory. Defaults to .github/actionlint.yaml or .github/actionlint.yml under the scan target, and to an empty config when neither exists. A path set here that does not exist fails the scan.",
+          "title": "Config File"
+        },
+        "pyflakes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Command name or path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. When set and not found, the scanner reports MISSING.",
+          "title": "Pyflakes"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
+        "shellcheck": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Command name or path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. When set and not found, the scanner reports MISSING.",
+          "title": "Shellcheck"
+        }
+      },
+      "title": "ActionlintScannerConfigOptions",
+      "type": "object"
+    },
     "ArchiveConverterConfig": {
       "additionalProperties": true,
       "description": "Archive (ZIP/TAR/GZIP/etc) converter configuration.",
@@ -323,6 +432,17 @@
         "scanners": {
           "$ref": "#/$defs/ScannerConfigSegment",
           "default": {
+            "actionlint": {
+              "enabled": false,
+              "name": "actionlint",
+              "options": {
+                "config_file": null,
+                "pyflakes": null,
+                "scan_timeout": 1800,
+                "severity_threshold": null,
+                "shellcheck": null
+              }
+            },
             "bandit": {
               "enabled": true,
               "name": "bandit",
@@ -3138,6 +3258,21 @@
         ]
       },
       "properties": {
+        "actionlint": {
+          "$ref": "#/$defs/ActionlintScannerConfig",
+          "default": {
+            "enabled": false,
+            "name": "actionlint",
+            "options": {
+              "config_file": null,
+              "pyflakes": null,
+              "scan_timeout": 1800,
+              "severity_threshold": null,
+              "shellcheck": null
+            }
+          },
+          "description": "Configure the options for actionlint"
+        },
         "bandit": {
           "$ref": "#/$defs/BanditScannerConfig",
           "default": {

@@ -1,0 +1,18 @@
+# serializer version: 1
+# name: test_actionlint_status_and_counts
+  dict({
+    'actionable_finding_count': 4,
+    'duration': 0.25,
+    'finding_count': 8,
+    'severity_counts': dict({
+      'critical': 0,
+      'high': 2,
+      'info': 0,
+      'low': 4,
+      'medium': 2,
+      'suppressed': 0,
+    }),
+    'status': 'FAILED',
+    'suppressed_finding_count': 0,
+  })
+# ---

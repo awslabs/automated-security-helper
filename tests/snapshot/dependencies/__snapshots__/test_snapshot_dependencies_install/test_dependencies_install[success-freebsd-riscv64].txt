@@ -6,11 +6,13 @@ $ ash dependencies install --bin-path bin
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: unknown, architecture: unknown
-[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
 Installing dependencies for converter plugin: ArchiveConverter
 Installing dependencies for converter plugin: jupyter
 Running command: uv tool install nbconvert>=7.16.0,<8.0.0
 Command succeeded with exit code: 0
+Installing dependencies for scanner plugin: actionlint (opt-in: runs only when enabled in config or
+named with --scanners)
 Installing dependencies for scanner plugin: bandit
 Running command: uv tool install bandit[sarif,toml]>=1.7.0,<2.0.0
 Command succeeded with exit code: 0
@@ -50,6 +52,7 @@ Installing dependencies for reporter plugin: yaml
 ┃ Plugin         ┃ Type      ┃ Tool            ┃ Cmds ┃ Failed ┃ Status          ┃ Resolved to     ┃
 ┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
 │ jupyter        │ converter │ jupyter-nbconv… │    1 │      0 │ INSTALLED       │ bin/jupyter-nb… │
+│ actionlint     │ scanner   │ actionlint      │    0 │      0 │ ALREADY PRESENT │ bin/actionlint  │
 │ bandit         │ scanner   │ bandit          │    1 │      0 │ INSTALLED       │ bin/bandit      │
 │ cdk-nag        │ scanner   │ python          │    1 │      0 │ INSTALLED       │ bin/python      │
 │ cfn-nag        │ scanner   │ cfn_nag_scan    │    0 │      0 │ ALREADY PRESENT │ bin/cfn_nag_sc… │
@@ -63,8 +66,9 @@ Installing dependencies for reporter plugin: yaml
 └────────────────┴───────────┴─────────────────┴──────┴────────┴─────────────────┴─────────────────┘
 ╭───────────────────────────────────── Installation Complete ──────────────────────────────────────╮
 │ Commands run: 5 (0 failed)                                                                       │
-│ Tools verified on PATH: 11 -- bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, jupyter, │
-│ npm-audit, opengrep, semgrep, syft                                                               │
-│ No install path on this platform: cfn-nag, detect-secrets, grype, npm-audit, opengrep, syft      │
+│ Tools verified on PATH: 12 -- actionlint, bandit, cdk-nag, cfn-nag, checkov, detect-secrets,     │
+│ grype, jupyter, npm-audit, opengrep, semgrep, syft                                               │
+│ No install path on this platform: actionlint, cfn-nag, detect-secrets, grype, npm-audit,         │
+│ opengrep, syft                                                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 0]

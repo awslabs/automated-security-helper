@@ -659,6 +659,17 @@
         }),
       }),
       'scanners': dict({
+        'actionlint': dict({
+          'enabled': False,
+          'name': 'actionlint',
+          'options': dict({
+            'config_file': None,
+            'pyflakes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'shellcheck': None,
+          }),
+        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1031,6 +1042,17 @@
         }),
       }),
       'scanners': dict({
+        'actionlint': dict({
+          'enabled': False,
+          'name': 'actionlint',
+          'options': dict({
+            'config_file': None,
+            'pyflakes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'shellcheck': None,
+          }),
+        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1403,6 +1425,17 @@
         }),
       }),
       'scanners': dict({
+        'actionlint': dict({
+          'enabled': False,
+          'name': 'actionlint',
+          'options': dict({
+            'config_file': None,
+            'pyflakes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'shellcheck': None,
+          }),
+        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1576,6 +1609,13 @@
 # name: test_list_scanners[result]
   dict({
     'result': dict({
+      'actionlint': dict({
+        'dependencies_satisfied': True,
+        'enabled': False,
+        'name': 'actionlint',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
       'bandit': dict({
         'dependencies_satisfied': True,
         'enabled': True,
