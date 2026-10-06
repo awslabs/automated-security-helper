@@ -204,7 +204,8 @@ function assertGitRef(ref: string): string {
  * probed that way: it reports a missing executable with exit code 1, which is
  * also ASH's scanner-error code, so try-`ashx`-then-retry could not tell a
  * missing name from a failed scan. So the name is chosen from the ref at synth
- * time: `ashx` for a release tag of v4 or later, and otherwise the deprecated
+ * time: `ashx` for a release tag of v4 or later (a full version, a PEP 440
+ * prerelease such as `v4.0.0rc1`, or the floating `v4`), and otherwise the deprecated
  * `ash`, which both majors provide. A branch, a commit or an `$ENV_VAR` could be
  * either major, so it gets `ash` too.
  */
@@ -220,10 +221,33 @@ function ashInvocation(install: InstallOptions, v3Compatible = false): string {
   return `uvx --from ${requirement} ${cli}`;
 }
 
-/** Whether `ref` is a release tag, `v4.0.0` or later, known to ship `ashx`. */
-function refProvidesAshx(ref: string): boolean {
-  const match = /^v?(\d+)\.\d+\.\d+(?:[-+][0-9A-Za-z.-]*)?$/.exec(ref);
-  return match !== null && Number(match[1]) >= 4;
+/**
+ * A release tag: either a full version or a floating major tag.
+ *
+ * The full version follows commitizen's default PEP 440 scheme with
+ * `tag_format = "v$version"`, so `cz bump --prerelease rc` writes `v4.0.0rc1`,
+ * with no separator before the suffix. The trailing `-`/`+` tail keeps the
+ * semver-shaped tags this repository has released before (`v3.0.0-beta-*`).
+ *
+ * The floating major tag (`v4`) is the one ash-tag-on-merge moves to each
+ * release of that major. It needs the `v`: without one, an all-digit short
+ * commit hash would read as a major version.
+ */
+const RELEASE_TAG =
+  /^(?:v?(\d+)\.\d+\.\d+(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:[-+][0-9A-Za-z.-]*)?|v(\d+))$/;
+
+/**
+ * Whether `ref` is a release tag of v4 or later, which ships `ashx`.
+ *
+ * The major is compared as a number, so `v10.0.0` counts. A floating `v4` tag
+ * only exists once a v4 release has been made, so it is as safe as a full tag.
+ */
+export function refProvidesAshx(ref: string): boolean {
+  const match = RELEASE_TAG.exec(ref);
+  if (match === null) {
+    return false;
+  }
+  return Number(match[1] ?? match[2]) >= 4;
 }
 
 /**

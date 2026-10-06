@@ -3,6 +3,7 @@
 
 import { Match } from 'aws-cdk-lib/assertions';
 import { ASHInstallMode, ASHSeverityThreshold } from '../src';
+import { refProvidesAshx } from '../src/private/commands';
 import { ashBuildSpec, buildStep, synthesizeWithStep, SynthesizedAction } from './helpers';
 
 /** Actions this step created, i.e. everything except the pipeline's own steps. */
@@ -356,33 +357,60 @@ describe('install modes', () => {
     expect(spec.phases.install.commands).toEqual([]);
     // The ref on this line moves with `cz bump` (it is a version_files target), and
     // the command name has to move with it: a v3 tag has only `ash`, a v4 tag has
-    // `ashx`. Deriving the name from the same line keeps the two in step.
+    // `ashx`. The name is derived from the ref on that line with the same rule the
+    // code uses, so a bump to any shape the release tooling writes (`v4.0.0`,
+    // `v4.0.0rc1`) keeps the two in step. The rule itself is pinned by the
+    // explicit cases below.
     const requirement =
       'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"';
-    const cli = /@v[0-3]\./.test(requirement) ? 'ash' : 'ashx';
+    const ref = /@([^"]+)"$/.exec(requirement)![1];
+    const cli = refProvidesAshx(ref) ? 'ashx' : 'ash';
     expect(spec.phases.build.commands.join('\n')).toContain(`${requirement} ${cli} scan `);
   });
 
-  test('UVX runs ashx for an unsharded scan on a v4 ref', () => {
-    const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version: 'v4.0.0' });
-    const commands = ashBuildSpec(template).phases.build.commands.join('\n');
+  // A full release, the PEP 440 prerelease shapes `cz bump` writes, a two-digit
+  // major (compared as a number, not a string), and the floating major tag that
+  // ash-tag-on-merge moves on each release.
+  test.each([
+    'v4.0.0',
+    '4.0.0',
+    'v4.0.0rc1',
+    'v4.0.0a1',
+    'v4.0.0b2',
+    'v4.0.0.dev1',
+    'v4.1.0.post1',
+    'v10.0.0',
+    'v4',
+    'v10',
+  ])(
+    'UVX runs ashx for an unsharded scan on the v4-or-later ref %s',
+    (version) => {
+      const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version });
+      const commands = ashBuildSpec(template).phases.build.commands.join('\n');
 
-    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+@v4\.0\.0" ashx scan /m);
-    expect(commands).not.toMatch(/" ash scan /);
-  });
+      expect(commands).toContain(`@${version}" ashx scan `);
+      expect(commands).not.toMatch(/" ash scan /);
+    },
+  );
 
-  test('UVX keeps the deprecated ash for an unsharded scan on a v3 ref', () => {
-    // v3 releases ship no `ashx`, and uvx cannot fall back at run time.
-    const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version: 'v3.6.1' });
-    const commands = ashBuildSpec(template).phases.build.commands.join('\n');
+  // v3 releases ship no `ashx`, and uvx cannot fall back at run time. `v3.99.0`
+  // catches a comparison that reads the minor instead of the major; the floating
+  // `v3` and a v3 prerelease are the same major.
+  test.each(['v3.6.1', 'v3.99.0', 'v3.0.0-beta-1', 'v3.8.0rc1', 'v3'])(
+    'UVX keeps the deprecated ash for an unsharded scan on the v3 ref %s',
+    (version) => {
+      const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version });
+      const commands = ashBuildSpec(template).phases.build.commands.join('\n');
 
-    expect(commands).toMatch(/^uvx --from "git\+https:[^"]+@v3\.6\.1" ash scan /m);
-  });
+      expect(commands).toContain(`@${version}" ash scan `);
+    },
+  );
 
   test('UVX keeps the deprecated ash when the ref names no major version', () => {
-    // A branch, a commit or an environment variable could be either major. `ash`
-    // runs on both, so it is the only name that cannot fail for the wrong reason.
-    for (const version of ['main', '0123456789abcdef0123456789abcdef01234567', '$ASH_VERSION']) {
+    // A branch, a commit (an all-digit short hash too) or an environment variable
+    // could be either major. `ash` runs on both, so it is the only name that
+    // cannot fail for the wrong reason.
+    for (const version of ['main', '0123456789abcdef0123456789abcdef01234567', '1234567', '$ASH_VERSION']) {
       const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX, version });
       const commands = ashBuildSpec(template).phases.build.commands.join('\n');
       expect(commands).toMatch(/^uvx --from "git\+https:[^"]+" ash scan /m);
