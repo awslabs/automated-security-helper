@@ -111,11 +111,12 @@ import json
 import logging
 import os
 from pathlib import Path, PurePosixPath
-from typing import Annotated, ClassVar, Dict, List, Literal, Optional
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
-from pydantic import Field, model_validator
+from pydantic import AnyUrl, Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -140,7 +141,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 #: hadolint level -> (ASH severity, SARIF level). See the module docstring.
-HADOLINT_LEVEL_MAP: Dict[str, tuple] = {
+HADOLINT_LEVEL_MAP: Dict[str, Tuple[str, Level]] = {
     "error": ("HIGH", Level.error),
     "warning": ("MEDIUM", Level.warning),
     "info": ("LOW", Level.note),
@@ -238,9 +239,9 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     OPT_IN: ClassVar[bool] = True
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     # With --no-fail, 0 is the only status hadolint gives a run that completed.
-    success_exit_codes: ClassVar[set] = {0}
+    success_exit_codes: ClassVar[Set[int]] = {0}
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = HadolintScannerConfig()
         self.command = "hadolint"
@@ -260,7 +261,9 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         self.custom_install_commands.update(pinned_tool_install_commands("hadolint"))
         return self
 
-    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+    def _execute_scan(
+        self, target: Any, target_type: Any, global_ignore_paths: Any
+    ) -> Any:
         """Abstract stub: hadolint overrides scan() directly."""
         raise NotImplementedError(
             f"{self.__class__.__name__} overrides scan() directly."
@@ -269,6 +272,22 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     # ------------------------------------------------------------------
     # Inputs
     # ------------------------------------------------------------------
+
+    @property
+    def _ctx(self) -> PluginContext:
+        """The plugin context; the base class refuses to construct without one."""
+        if self.context is None:  # pragma: no cover - model_post_init raises first
+            raise ScannerError("HadolintScanner has no plugin context")
+        return self.context
+
+    @property
+    def _options(self) -> HadolintScannerConfigOptions:
+        options = getattr(self.config, "options", None)
+        if isinstance(options, HadolintScannerConfigOptions):
+            return options
+        return HadolintScannerConfigOptions.model_validate(
+            options.model_dump() if options is not None else {}
+        )
 
     def _resolve_config_file(self) -> Optional[Path]:
         """The hadolint config to pass with ``--config``, or None for none.
@@ -282,8 +301,8 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 ignores and severity overrides the user asked for, and nothing in
                 the report would say so.
         """
-        source_dir = Path(self.context.source_dir)
-        configured = self.config.options.config_file
+        source_dir = Path(self._ctx.source_dir)
+        configured = self._options.config_file
         if configured is not None and str(configured).strip():
             candidate = Path(configured)
             if not candidate.is_absolute():
@@ -321,19 +340,19 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         the report.
         """
         if target_type == "converted":
-            candidates = list(Path(self.context.work_dir).rglob("*"))
+            candidates = list(Path(self._ctx.work_dir).rglob("*"))
         else:
             candidates = [
                 Path(p)
                 for p in scan_set(
-                    source=self.context.source_dir,
-                    output=self.context.output_dir,
+                    source=str(self._ctx.source_dir),
+                    output=str(self._ctx.output_dir),
                 )
             ]
 
         root = Path(target).resolve()
-        absolute_output_dir = Path(self.context.output_dir).absolute()
-        source_dir = Path(self.context.source_dir).resolve()
+        absolute_output_dir = Path(self._ctx.output_dir).absolute()
+        source_dir = Path(self._ctx.source_dir).resolve()
 
         selected: List[Path] = []
         for path in candidates:
@@ -396,7 +415,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         """
         # absolute() and not resolve(): a symlink that passed the containment
         # check in _dockerfiles is reported under its own name, not its target's.
-        source_dir = Path(self.context.source_dir).absolute()
+        source_dir = Path(self._ctx.source_dir).absolute()
         absolute = path.absolute()
         try:
             return PurePosixPath(absolute.relative_to(source_dir).as_posix()).as_posix()
@@ -409,7 +428,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         return {k: v for k, v in os.environ.items() if k not in _INVOCATION_ENV_VARS}
 
     def _base_args(self, config_file: Optional[Path]) -> List[str]:
-        args = [self.command, "--no-fail", "--no-color"]
+        args = [self.command or "hadolint", "--no-fail", "--no-color"]
         if config_file is not None:
             args.extend(["--config", config_file.as_posix()])
         return args
@@ -427,7 +446,9 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                         driver=ToolComponent(
                             name="Hadolint",
                             version=self.tool_version,
-                            informationUri="https://github.com/hadolint/hadolint",
+                            informationUri=AnyUrl(
+                                "https://github.com/hadolint/hadolint"
+                            ),
                         )
                     ),
                     results=[],
@@ -440,9 +461,9 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: HadolintScannerConfig | None = None,
-        *args,
-        **kwargs,
+        config: HadolintScannerConfig | ScannerPluginConfigBase | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> SarifReport | bool:
         """Lint every Dockerfile under *target* with one hadolint invocation."""
         if global_ignore_paths is None:
@@ -491,7 +512,9 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             self.targets_attempted = len(dockerfiles)
             argv_paths = [self._argv_path(p) for p in dockerfiles]
 
-            results_dir = self.results_dir.joinpath(target_type)
+            results_dir = Path(self.results_dir or self._ctx.output_dir).joinpath(
+                target_type
+            )
             results_dir.mkdir(parents=True, exist_ok=True)
             results_file = results_dir.joinpath("hadolint.sarif")
             results_file.unlink(missing_ok=True)
@@ -631,7 +654,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             )
             return None
 
-        seen: Dict[str, set] = {}
+        seen: Dict[str, Set[str]] = {}
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
@@ -669,7 +692,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     def validate_plugin_dependencies(self) -> bool:
         if self.dependency_unavailable_reason:
             return False
-        found = find_executable(self.command)
+        found = find_executable(self.command or "hadolint")
         if not found:
             ASH_LOGGER.warning(
                 "hadolint executable not found in PATH. Install it with "
@@ -678,7 +701,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         return found is not None
 
 
-def _level_name(level) -> Optional[str]:
+def _level_name(level: Any) -> Optional[str]:
     """A SARIF level's string value, whether it holds the enum or the string."""
     if level is None:
         return None
