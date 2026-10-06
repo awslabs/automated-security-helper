@@ -31,12 +31,16 @@ suites, and one rule for changing either.
 `--snapshot-update` is the same flag core ASH's snapshot suite uses, and like that
 suite's it is refused when `CI` or `GITHUB_ACTIONS` is `true`.
 `test/snapshot-policy.test.ts` fails if any file under `.github/` passes it, or jest's
-`--updateSnapshot`, `-u` or `--ci=false`, or sets `ASH_SNAPSHOT_UPDATE`. jest itself
-is configured with `ci: true`, so a plain `npm test` never writes a snapshot, not
-even a new one.
+`--updateSnapshot`, `--update-snapshot`, `-u`, `--ci=false` or `--no-ci`, or the
+JetBrains plugin's `-Psnapshot-update` in any spelling, or sets
+`ASH_SNAPSHOT_UPDATE`. A flag on the next line of a folded YAML string counts.
+`npm test` is `jest --ci`, so it never writes a snapshot, not even a new one; the
+policy test runs it over a new snapshot to prove that. (`"ci": true` in the jest
+configuration would not: jest's command-line default for `--ci` overrides it.)
 
 The `editor-snapshots` job runs `.github/scripts/check-editor-snapshot-trailers.py`
-over the commits of the push (`before..after`) or the pull request (fork point to
+over the commits of the push (`before..after`, or from the merge base with the
+default branch for a new branch or a force-push) or the pull request (fork point to
 head). It fails when a file under an `editors/**/__snapshots__/` directory changed
 in a commit that carries no `Snapshot-Update: <reason>`; every such commit needs its
 own. A separate commit that only adds the trailer does not count, and the placeholder

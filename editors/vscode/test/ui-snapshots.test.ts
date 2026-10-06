@@ -35,9 +35,8 @@
  * filesystem are replaced. A snapshot of a hand-built host would pin what this
  * file's author wired up, not what the extension does.
  *
- * Updating: `npm run snapshots -- --snapshot-update structural`. jest is configured
- * with `ci: true` in package.json, so a plain `npm test` never writes a snapshot,
- * new or changed.
+ * Updating: `npm run snapshots -- --snapshot-update structural`. `npm test` is
+ * `jest --ci`, so it never writes a snapshot, new or changed.
  */
 
 import * as fs from 'fs';
