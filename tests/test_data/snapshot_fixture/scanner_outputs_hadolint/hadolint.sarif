@@ -1,0 +1,373 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Hadolint",
+          "shortDescription": {
+            "text": "Dockerfile linter, validate inline bash, written in Haskell"
+          },
+          "fullName": "Haskell Dockerfile Linter",
+          "version": "2.15.1",
+          "downloadUri": "https://github.com/hadolint/hadolint"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "DL3007",
+          "level": "warning",
+          "message": {
+            "text": "Using latest is prone to errors if the image will ever update. Pin the version explicitly to a release tag"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 1,
+                  "endLine": 2,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "hadolint_level": "warning"
+          }
+        },
+        {
+          "ruleId": "DL3015",
+          "level": "note",
+          "message": {
+            "text": "Avoid additional packages by specifying `--no-install-recommends`"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1,
+                  "endLine": 3,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "LOW",
+            "hadolint_level": "info"
+          }
+        },
+        {
+          "ruleId": "DL3008",
+          "level": "warning",
+          "message": {
+            "text": "Pin versions in apt get install. Instead of `apt-get install <package>` use `apt-get install <package>=<version>`"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1,
+                  "endLine": 3,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "hadolint_level": "warning"
+          }
+        },
+        {
+          "ruleId": "DL3009",
+          "level": "note",
+          "message": {
+            "text": "Delete the apt lists (/var/lib/apt/lists) after installing something"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1,
+                  "endLine": 3,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "LOW",
+            "hadolint_level": "info"
+          }
+        },
+        {
+          "ruleId": "DL3003",
+          "level": "warning",
+          "message": {
+            "text": "Use WORKDIR to switch to a directory"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 4,
+                  "startColumn": 1,
+                  "endLine": 4,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "hadolint_level": "warning"
+          }
+        },
+        {
+          "ruleId": "SC2086",
+          "level": "note",
+          "message": {
+            "text": "Double quote to prevent globbing and word splitting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 4,
+                  "startColumn": 1,
+                  "endLine": 4,
+                  "endColumn": 1,
+                  "sourceLanguage": "sh"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "LOW",
+            "hadolint_level": "info"
+          }
+        },
+        {
+          "ruleId": "SC2006",
+          "level": "none",
+          "message": {
+            "text": "Use $(...) notation instead of legacy backticks `...`."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 5,
+                  "startColumn": 1,
+                  "endLine": 5,
+                  "endColumn": 1,
+                  "sourceLanguage": "sh"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "INFO",
+            "hadolint_level": "style"
+          }
+        },
+        {
+          "ruleId": "DL4000",
+          "level": "error",
+          "message": {
+            "text": "MAINTAINER is deprecated"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 6,
+                  "startColumn": 1,
+                  "endLine": 6,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "HIGH",
+            "hadolint_level": "error"
+          }
+        },
+        {
+          "ruleId": "DL1000",
+          "level": "error",
+          "message": {
+            "text": "unexpected 'N'\nexpecting '#', '\\', ADD, ARG, CMD, COPY, ENTRYPOINT, ENV, EXPOSE, FROM, HEALTHCHECK, LABEL, MAINTAINER, ONBUILD, RUN, SHELL, STOPSIGNAL, USER, VOLUME, WORKDIR, a pragma, at least one space, or end of input"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "services/Dockerfile.broken"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1,
+                  "endLine": 3,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "HIGH",
+            "hadolint_level": "error"
+          }
+        },
+        {
+          "ruleId": "DL3013",
+          "level": "warning",
+          "message": {
+            "text": "Pin versions in pip. Instead of `pip install <package>` use `pip install <package>==<version>` or `pip install --requirement <requirements file>`"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "services/api.Dockerfile"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 1,
+                  "endLine": 2,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "hadolint_level": "warning"
+          }
+        },
+        {
+          "ruleId": "DL3042",
+          "level": "warning",
+          "message": {
+            "text": "Avoid use of cache directory with pip. Use `pip install --no-cache-dir <package>`"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "services/api.Dockerfile"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 1,
+                  "endLine": 2,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "hadolint_level": "warning"
+          }
+        },
+        {
+          "ruleId": "DL3002",
+          "level": "warning",
+          "message": {
+            "text": "Last USER should not be root"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "services/api.Dockerfile"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1,
+                  "endLine": 3,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "hadolint_level": "warning"
+          }
+        },
+        {
+          "ruleId": "DL3066",
+          "level": "note",
+          "message": {
+            "text": "Non-numeric user-id may not be resolvable by host system"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "services/api.Dockerfile"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1,
+                  "endLine": 3,
+                  "endColumn": 1,
+                  "sourceLanguage": "dockerfile"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "LOW",
+            "hadolint_level": "info"
+          }
+        }
+      ],
+      "defaultSourceLanguage": "dockerfile"
+    }
+  ]
+}

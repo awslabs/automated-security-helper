@@ -2100,6 +2100,91 @@
       "title": "HTMLReporterConfigOptions",
       "type": "object"
     },
+    "HadolintScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "hadolint",
+          "default": "hadolint",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/HadolintScannerConfigOptions",
+          "default": {
+            "config_file": null,
+            "scan_timeout": 1800,
+            "severity_threshold": null
+          },
+          "description": "Configure hadolint"
+        }
+      },
+      "title": "HadolintScannerConfig",
+      "type": "object"
+    },
+    "HadolintScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a hadolint configuration file, relative to the source directory. When unset, ASH looks for .hadolint.yaml, .hadolint.yml, .ash/.hadolint.yaml and .ash/hadolint.yaml in the source directory and passes the first it finds. A path that is set and does not exist fails the scan rather than running with hadolint's defaults.",
+          "title": "Config File"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "HadolintScannerConfigOptions",
+      "type": "object"
+    },
     "IgnorePathWithReason": {
       "description": "Represents a path exclusion entry.",
       "properties": {
@@ -3248,6 +3333,19 @@
             }
           },
           "description": "Configure the options for Grype"
+        },
+        "hadolint": {
+          "$ref": "#/$defs/HadolintScannerConfig",
+          "default": {
+            "enabled": false,
+            "name": "hadolint",
+            "options": {
+              "config_file": null,
+              "scan_timeout": 1800,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for hadolint (opt-in)"
         },
         "npm-audit": {
           "$ref": "#/$defs/NpmAuditScannerConfig",

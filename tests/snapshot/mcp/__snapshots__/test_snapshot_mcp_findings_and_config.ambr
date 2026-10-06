@@ -1625,6 +1625,13 @@
         'offline_strategy': 'cache_flags',
         'version': None,
       }),
+      'hadolint': dict({
+        'dependencies_satisfied': True,
+        'enabled': False,
+        'name': 'hadolint',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
       'npm_audit': dict({
         'dependencies_satisfied': True,
         'enabled': True,

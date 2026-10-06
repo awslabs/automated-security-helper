@@ -136,6 +136,19 @@ ASH Scanners
 │                │         │                      │                       │   }                    │
 │                │         │                      │                       │ }                      │
 ├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ hadolint       │ False   │ HadolintScanner      │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "hadolint",  │
+│                │         │                      │                       │   "enabled": false,    │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
 │ npm-audit      │ True    │ NpmAuditScanner      │ automated_security_h… │ {                      │
 │                │         │                      │                       │   "name": "npm-audit", │
 │                │         │                      │                       │   "enabled": true,     │
