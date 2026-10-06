@@ -85,6 +85,7 @@ class ToolAsset:
 # (see the ARG lines in Dockerfile), so a scan run from a container, from nix and
 # from a bare `ash dependencies install` all execute the same tool versions.
 TOOL_VERSIONS: dict[str, str] = {
+    "cfn-guard": "3.2.1",
     "grype": "v0.111.0",
     "syft": "v1.42.4",
     "trivy": "v0.69.3",
@@ -99,6 +100,25 @@ CFN_NAG_GEM_VERSION = "0.8.10"
 # ---------------------------------------------------------------------------
 # Asset filenames, per tool, exactly as published upstream.
 # ---------------------------------------------------------------------------
+
+# cfn-guard's release assets carry no version in their names: every release
+# publishes ``cfn-guard-v3-<arch>-<os>-latest.tar.gz``, and the version lives only
+# in the release tag, which is the path segment of the URL. So for cfn-guard the
+# digest is the whole pin, and a version bump that forgets the digests fails every
+# install with an integrity error rather than being caught by the filename check
+# the other tools get (see VERSIONLESS_ASSET_NAMES).
+#
+# The linux assets are the statically linked builds (``ldd`` reports "statically
+# linked" for x86_64-linux at 3.2.1), so they run on glibc and musl hosts alike.
+# The ``ubuntu-latest`` assets the same release also publishes are not used.
+_CFN_GUARD_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "cfn-guard-v3-x86_64-linux-latest.tar.gz",
+    ("linux", "arm64"): "cfn-guard-v3-aarch64-linux-latest.tar.gz",
+    ("darwin", "amd64"): "cfn-guard-v3-x86_64-macos-latest.tar.gz",
+    ("darwin", "arm64"): "cfn-guard-v3-aarch64-macos-latest.tar.gz",
+    ("windows", "amd64"): "cfn-guard-v3-x86_64-windows-latest.tar.gz",
+    ("windows", "arm64"): "cfn-guard-v3-aarch64-windows-latest.tar.gz",
+}
 
 _GRYPE_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "grype_0.111.0_linux_amd64.tar.gz",
@@ -137,6 +157,20 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #   https://github.com/anchore/syft/releases/download/v1.42.4/syft_1.42.4_checksums.txt
 #   https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_checksums.txt
 #
+# Two entries have no upstream checksums file to transcribe from, so their digests
+# were obtained differently and are stated here so a reviewer can redo it:
+#
+# * cfn-guard 3.2.1 publishes no checksums file. Its digests are the ``digest``
+#   field GitHub's release API reports for each asset
+#   (``gh release view 3.2.1 --repo aws-cloudformation/cloudformation-guard
+#   --json assets``), and each was confirmed by downloading the asset from
+#   https://github.com/aws-cloudformation/cloudformation-guard/releases/tag/3.2.1
+#   and hashing it with sha256sum.
+# * The AWS Guard Rules Registry 1.0.2 release predates GitHub's asset digests,
+#   so its one digest is sha256sum of
+#   https://github.com/aws-cloudformation/aws-guard-rules-registry/releases/download/1.0.2/ruleset-build-v1.0.2.zip
+#   as downloaded on 2026-10-06.
+#
 # Every line carries `# pragma: allowlist secret`, which is detect-secrets' own
 # inline marker. It is needed and it is honest: a 64-character hex string is exactly
 # what a high-entropy-string detector is built to find, and ASH scanning itself
@@ -149,6 +183,15 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # ---------------------------------------------------------------------------
 
 _DIGESTS: dict[str, str] = {
+    # cfn-guard 3.2.1
+    "cfn-guard-v3-x86_64-linux-latest.tar.gz": "8c66efb19c63e6c2bf26b9a41bbcf2f85baa8a937b01d350940194faaf64cf1d",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-linux-latest.tar.gz": "cd378026dad0f865926ab1d1c082e2faf825f7fd888a9fe6b5c142cdf175c129",  # pragma: allowlist secret
+    "cfn-guard-v3-x86_64-macos-latest.tar.gz": "5089dfaa05a766cf118a020518e62f77eddbd43acf3a0b69d36b23175c6c6fda",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-macos-latest.tar.gz": "4c1eb10c061731159eaaf0e7dbd465db9fa4b767b82186a4ab489671cc00b7d0",  # pragma: allowlist secret
+    "cfn-guard-v3-x86_64-windows-latest.tar.gz": "52af28c02081f1067c6710c08619d359899734ec59d51f17f68e1b4b396a1203",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-windows-latest.tar.gz": "faa9a14382314cd2c3ce6adc21388e0422280ab33ded3c8b1321877efd761300",  # pragma: allowlist secret
+    # aws-guard-rules-registry 1.0.2 (a rules bundle, not a binary; see RULES_BUNDLES)
+    "ruleset-build-v1.0.2.zip": "dc21aaad601c673843c299191d864cd9b9db32475b1937d930d6069ddde73296",  # pragma: allowlist secret
     # grype v0.111.0
     "grype_0.111.0_linux_amd64.tar.gz": "18ed2048d7a233566b681121d4632364f5f25d72cca86acc4c7ac57210d78a87",  # pragma: allowlist secret
     "grype_0.111.0_linux_arm64.tar.gz": "1a8b9bd691ce274e44056e7572cdf8c6970bdf9ec694001f7b4b17962b121b43",  # pragma: allowlist secret
@@ -172,16 +215,86 @@ _DIGESTS: dict[str, str] = {
 
 
 _RELEASE_BASE_URLS: dict[str, str] = {
+    "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
 }
 
 _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
+    "cfn-guard": _CFN_GUARD_ASSETS,
     "grype": _GRYPE_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
 }
+
+
+#: Tools whose upstream asset filenames do not carry the release version, so the
+#: "pinned version appears in the filename" check cannot apply to them. For these
+#: the version is asserted in the URL path instead, and the digest is the pin.
+VERSIONLESS_ASSET_NAMES: frozenset[str] = frozenset({"cfn-guard"})
+
+
+@dataclass(frozen=True)
+class RulesBundle:
+    """A pinned archive of rule files, installed as a directory rather than a binary.
+
+    ``member_dir`` is the directory inside the archive that holds the rule files
+    and ``member_suffix`` the extension they carry. Only regular files directly in
+    that directory with that suffix are extracted, each to its basename, so the
+    archive's own paths are never used as a destination. That also drops the
+    ``__MACOSX/`` resource-fork entries the registry's zip carries.
+    """
+
+    name: str
+    version: str
+    url: str
+    sha256: str
+    member_dir: str
+    member_suffix: str
+    license: str
+
+
+#: The AWS Guard Rules Registry, the rule source for the cfn-guard scanner.
+#:
+#: Release 1.0.2 (2022-09-02) is the newest release the registry has published;
+#: later commits on its default branch were never released, and a release asset is
+#: what can be pinned by digest. The archive holds 50 rule-set files, one per
+#: compliance framework plus ``guard-rules-registry-all-rules.guard``; all 50 parse
+#: under cfn-guard 3.2.1 (each was run against a template and exited 19, the
+#: rule-failure code, rather than 255). Apache-2.0, like cfn-guard itself.
+CFN_GUARD_RULES_VERSION = "1.0.2"
+
+RULES_BUNDLES: dict[str, RulesBundle] = {
+    "aws-guard-rules-registry": RulesBundle(
+        name="aws-guard-rules-registry",
+        version=CFN_GUARD_RULES_VERSION,
+        url=(
+            "https://github.com/aws-cloudformation/aws-guard-rules-registry/"
+            f"releases/download/{CFN_GUARD_RULES_VERSION}/"
+            f"ruleset-build-v{CFN_GUARD_RULES_VERSION}.zip"
+        ),
+        sha256=_DIGESTS[f"ruleset-build-v{CFN_GUARD_RULES_VERSION}.zip"],
+        member_dir="output",
+        member_suffix=".guard",
+        license="Apache-2.0",
+    ),
+}
+
+
+def get_rules_bundle(name: str) -> RulesBundle:
+    """The pinned rules bundle called ``name``.
+
+    Raises:
+        ToolNotProvisionableError: if no bundle of that name is pinned.
+    """
+    bundle = RULES_BUNDLES.get(name)
+    if bundle is None:
+        raise ToolNotProvisionableError(
+            f"{name} is not a pinned rules bundle. "
+            f"Pinned bundles: {', '.join(sorted(RULES_BUNDLES))}"
+        )
+    return bundle
 
 
 def downloadable_tools() -> list[str]:

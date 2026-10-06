@@ -58,7 +58,9 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.utils.tool_downloads import (
     _ASSET_TABLES,
     _DIGESTS,
+    RULES_BUNDLES,
     TOOL_VERSIONS,
+    VERSIONLESS_ASSET_NAMES,
     downloadable_tools,
     get_tool_asset,
     supported_platforms,
@@ -1118,7 +1120,7 @@ class TestReceiptDirectoryPermissions:
 
 class TestAssetResolution:
     def test_downloadable_tools(self):
-        assert downloadable_tools() == ["grype", "syft", "trivy"]
+        assert downloadable_tools() == ["cfn-guard", "grype", "syft", "trivy"]
 
     @pytest.mark.parametrize("tool", ["grype", "syft", "trivy"])
     def test_linux_and_darwin_are_provisionable_on_both_arches(self, tool):
@@ -1179,11 +1181,28 @@ class TestAssetResolution:
         referenced = {
             filename for table in _ASSET_TABLES.values() for filename in table.values()
         }
+        # A rules bundle's digest lives in the same table, so the one suppression
+        # range covers every published checksum; it is referenced by its URL.
+        referenced |= {
+            bundle.url.rsplit("/", 1)[-1] for bundle in RULES_BUNDLES.values()
+        }
         assert sorted(set(_DIGESTS) - referenced) == []
+
+    def test_every_rules_bundle_digest_is_the_table_entry(self):
+        for bundle in RULES_BUNDLES.values():
+            assert bundle.sha256 == _DIGESTS[bundle.url.rsplit("/", 1)[-1]]
+            assert bundle.version in bundle.url
 
     def test_pinned_versions_appear_in_their_asset_filenames(self):
         for tool, version in TOOL_VERSIONS.items():
             bare = version.lstrip("v")
+            if tool in VERSIONLESS_ASSET_NAMES:
+                # Upstream names every release's assets identically, so the version
+                # can only be checked where it is: the release tag in the URL.
+                for target_platform, arch in supported_platforms(tool):
+                    url = get_tool_asset(tool, target_platform, arch).url
+                    assert f"/download/{version}/" in url, url
+                continue
             for filename in _ASSET_TABLES[tool].values():
                 assert bare in filename, (
                     f"{tool} is pinned to {version} but asset {filename} does not "

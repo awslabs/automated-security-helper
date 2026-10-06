@@ -93,7 +93,9 @@ class TestTheDockerfileAndTheTableAgree:
 
     @pytest.mark.parametrize("tool", sorted(TOOL_VERSIONS))
     def test_the_arg_version_matches_the_pinned_version(self, tool):
-        arg = f"{tool.upper()}_VERSION"
+        # A Dockerfile ARG cannot carry a hyphen usefully (`${CFN-GUARD_VERSION}`
+        # parses as a default-value expansion), so cfn-guard is CFN_GUARD_VERSION.
+        arg = f"{tool.upper().replace('-', '_')}_VERSION"
         match = re.search(
             rf'^ARG {arg}="([^"]+)"$', DOCKERFILE.read_text(), re.MULTILINE
         )

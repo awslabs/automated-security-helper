@@ -354,6 +354,18 @@
                 "severity_threshold": null
               }
             },
+            "cfn-guard": {
+              "enabled": false,
+              "name": "cfn-guard",
+              "options": {
+                "rule_sets": [
+                  "wa-Security-Pillar"
+                ],
+                "rules_paths": [],
+                "scan_timeout": 1800,
+                "severity_threshold": null
+              }
+            },
             "cfn-lint": {
               "enabled": false,
               "name": "cfn-lint",
@@ -1065,6 +1077,97 @@
         }
       },
       "title": "CdkNagScannerConfigOptions",
+      "type": "object"
+    },
+    "CfnGuardScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "cfn-guard",
+          "default": "cfn-guard",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CfnGuardScannerConfigOptions",
+          "default": {
+            "rule_sets": [
+              "wa-Security-Pillar"
+            ],
+            "rules_paths": [],
+            "scan_timeout": 1800,
+            "severity_threshold": null
+          },
+          "description": "Configure the cfn-guard scanner"
+        }
+      },
+      "title": "CfnGuardScannerConfig",
+      "type": "object"
+    },
+    "CfnGuardScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "rule_sets": {
+          "default": [
+            "wa-Security-Pillar"
+          ],
+          "description": "Rule sets from the bundled AWS Guard Rules Registry to evaluate, by file name without the .guard extension, e.g. ['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the Well-Architected Security Pillar set. Set to [] to evaluate only rules_paths.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Rule Sets",
+          "type": "array"
+        },
+        "rules_paths": {
+          "default": [],
+          "description": "Your own cfn-guard rules: .guard files or directories of them, relative to the source directory. Evaluated in addition to rule_sets.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Rules Paths",
+          "type": "array"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "CfnGuardScannerConfigOptions",
       "type": "object"
     },
     "CfnLintScannerConfig": {
@@ -3326,6 +3429,22 @@
             }
           },
           "description": "Configure the options for CdkNag"
+        },
+        "cfn-guard": {
+          "$ref": "#/$defs/CfnGuardScannerConfig",
+          "default": {
+            "enabled": false,
+            "name": "cfn-guard",
+            "options": {
+              "rule_sets": [
+                "wa-Security-Pillar"
+              ],
+              "rules_paths": [],
+              "scan_timeout": 1800,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for cfn-guard (opt-in)"
         },
         "cfn-lint": {
           "$ref": "#/$defs/CfnLintScannerConfig",

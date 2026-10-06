@@ -380,6 +380,19 @@ ARG TRIVY_VERSION="v0.69.3"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
+# cfn-guard, an opt-in scanner, and the AWS Guard Rules Registry it evaluates
+# templates against. The binary comes from its pinned release asset like the three
+# above. The rules archive is pinned the same way (RULES_BUNDLES in
+# utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan
+# user cannot rewrite the rules a later scan trusts. `ash dependencies install`
+# below finds the bundle already in place, by its manifest, and leaves it alone.
+ARG CFN_GUARD_VERSION="3.2.1"
+ENV ASH_CFN_GUARD_RULES_DIR="/deps/cfn-guard-rules"
+RUN with-retry 'install-pinned-tool cfn-guard -b /usr/local/bin' && \
+    with-retry "install-pinned-tool aws-guard-rules-registry --rules-bundle -d ${ASH_CFN_GUARD_RULES_DIR}"
+RUN cfn-guard --version && \
+    test -s "${ASH_CFN_GUARD_RULES_DIR}/aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard"
+
 #
 # Setting default WORKDIR to /src
 #

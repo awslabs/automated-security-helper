@@ -642,11 +642,19 @@
 
 ### Features
 
+- **cfn-guard, an opt-in scanner.** Evaluates CloudFormation templates with AWS
+  CloudFormation Guard 3.2.1 against the AWS Guard Rules Registry 1.0.2. Both are
+  pinned by SHA256 and installed by `ash dependencies install --tool cfn-guard`, and
+  the container image ships them. The default rule set is the registry's
+  Well-Architected Security Pillar set (`wa-Security-Pillar`); `rule_sets` selects
+  any of the registry's 50 sets and `rules_paths` adds your own `.guard` files.
+  Violations are reported as MEDIUM. Off unless `scanners.cfn-guard.enabled: true`
+  or `--scanners cfn-guard`; see docs/plugins/builtin/cfn-guard.md.
 - **cfn-lint, an opt-in scanner.** Validates CloudFormation templates with cfn-lint
   (`>=1.43.3,<2.0.0`, installed with uv). Rule classes map to ASH severities as
   E to MEDIUM, W to LOW and I to INFO. Off unless `scanners.cfn-lint.enabled: true`
   or `--scanners cfn-lint`; see docs/plugins/builtin/cfn-lint.md.
-- cfn-lint reads the same templates cfn-nag reads and needs no network access to
+- Both read the same templates cfn-nag reads, and neither needs network access to
   scan. cfn-nag is unchanged. A default scan's output and exit code do not change:
   an opt-in scanner nobody enabled does not appear in it.
 
