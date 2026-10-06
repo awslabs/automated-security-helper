@@ -48,13 +48,15 @@ repos:
         # deploy/cdk/test/ash-template-size.test.ts), and the exclusion is still
         # needed without it.
         #
-        # The deploy/ npm manifests are excluded for the same reason: npm owns them.
+        # The npm manifests under deploy/ and editors/ are excluded for the same
+        # reason: npm owns them.
         # This hook sorts keys (it is not passed --no-sort-keys), so on any commit
         # touching package.json or package-lock.json it rewrote the whole file into
         # an order `npm install` immediately undoes -- several thousand lines per
         # lockfile, which is why lockfile commits used to be made with this hook
-        # skipped.
-        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^deploy/[^/]+/package(-lock)?\.json$'
+        # skipped. editors/vscode is the third npm tree and needs the same
+        # exclusion: without it the hook rewrites 3,261 lines of its lockfile.
+        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^(deploy|editors)/[^/]+/package(-lock)?\.json$'
         args:
           - "--autofix"
           - "--indent=2"
