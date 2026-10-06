@@ -355,7 +355,7 @@ export class AshAgentCoreStack extends Stack {
          * balancer that may route consecutive requests to different replicas,
          * nothing here excuses running stateful.
          *
-         * This is maintainer decision D6's second option, taken because the first
+         * This is the interim fix, taken because the lasting one
          * -- pointing `DEFAULT_ASH_VERSION` at a ref whose `ashx mcp` accepts the
          * flag -- needs a release that does not exist yet. Delete this line when
          * it does, rather than carrying both.

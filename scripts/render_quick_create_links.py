@@ -50,8 +50,9 @@ WHAT IS DERIVED, AND FROM WHERE
 * every parameter VALUE -- that parameter's own declared ``Default``.
 
 That last point is what keeps the version out of the staleness problem. The links carry
-``param_AshVersion=v3.7.0`` today, and a literal version in a committed document is
-normally something that has to join ``[tool.commitizen] version_files`` to stay current.
+``param_AshVersion`` set to the current release tag, and a literal version in a committed
+document is normally something that has to join ``[tool.commitizen] version_files`` to
+stay current.
 It does not here, because the value is copied from the template's declared default rather
 than typed, and ``check`` asserts the two are equal on every pull request. A
 ``version_files`` entry is only rewritten at a release; this is verified continuously,

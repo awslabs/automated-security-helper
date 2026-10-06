@@ -213,8 +213,10 @@ export function ashVersion(scope: Stack): CfnParameter {
     default: DEFAULT_ASH_VERSION,
     minLength: 1,
     description:
-      'ASH git ref (tag, branch, or commit) to build the image from, for example ' +
-      'v3.7.0. Pinning a tag makes the build reproducible; the scheduled rebuild ' +
+      // The example is the default itself, so the bump that moves the default moves
+      // the example with it instead of leaving an older release named here.
+      `ASH git ref (tag, branch, or commit) to build the image from, for example ${DEFAULT_ASH_VERSION}. ` +
+      'Pinning a tag makes the build reproducible; the scheduled rebuild ' +
       'still repulls base-image and OS patches for that same ASH revision.',
   });
 }
