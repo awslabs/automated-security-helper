@@ -36,6 +36,12 @@ on:
     paths:
       - "packaging/**"
       - "Formula/**"
+      # The product the packages carry, and the e2e contract the Flatpak leg judges it
+      # with. Without these a change to ASH itself rebuilt no package on push.
+      - "automated_security_helper/**"
+      - "hatch_build.py"
+      - "scripts/e2e/**"
+      - "tests/e2e/**"
       - "uv.lock"
       - "pyproject.toml"
       - ".github/scripts/assert-artifact-contents.py"
