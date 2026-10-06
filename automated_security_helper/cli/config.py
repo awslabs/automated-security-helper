@@ -26,11 +26,16 @@ from automated_security_helper.config.ash_config import (
     ReporterConfigSegment,
     ScannerConfigSegment,
 )
+from automated_security_helper.config.config_sources import (
+    EXTENDS_KEY,
+    PATCH_KEY,
+    describe_config_path,
+)
 from automated_security_helper.config.resolve_config import (
     find_config_file,
     resolve_config,
 )
-from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import get_logger
 
@@ -42,6 +47,55 @@ config_app = typer.Typer(
     pretty_exceptions_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
     in ["YES", "1", "TRUE"],
 )
+
+
+def _config_path_or_discovered(config: str | None) -> Path:
+    """The --config path, or the source a scan of the cwd would use."""
+    if config:
+        return Path(config)
+    return find_config_file(Path.cwd()) or Path(".ash/.ash.yaml")
+
+
+def _print_source_chain(config_path: Path) -> None:
+    """Print the files an extending config is built from, lowest precedence first."""
+    from automated_security_helper.config.config_validator import ConfigValidator
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+    try:
+        chain = ConfigValidator.resolve_source_chain(config_path)
+    except (ASHConfigSourceError, OSError, ValueError, yaml.YAMLError):
+        # The validator or linter has already reported why it does not resolve.
+        return
+    if len(chain) < 2:
+        return
+    typer.secho(
+        "Resolved source chain (lowest precedence first):", fg=typer.colors.BLUE
+    )
+    for i, label in enumerate(chain, 1):
+        typer.secho(f"  {i}. {label}", fg=typer.colors.BLUE)
+
+
+def _rewrite_refusal(config_path: Path) -> str | None:
+    """Why `config_path` must not be rewritten from a resolved config, or None.
+
+    `update` and `wizard` write the whole resolved config back as YAML. For a
+    TOML source that would replace the file's other content, and for a file that
+    uses `extends` or `patch` it would copy every base's settings into the child
+    and drop the directives, so later edits to a base would no longer apply.
+    """
+    if config_path.name.endswith(".toml"):
+        return "it is a TOML file, and this command writes YAML; edit it by hand"
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return None
+    if isinstance(raw, dict) and (EXTENDS_KEY in raw or PATCH_KEY in raw):
+        return (
+            f"it uses '{EXTENDS_KEY}' or '{PATCH_KEY}', which rewriting would "
+            "flatten into a copy of its bases; edit it by hand"
+        )
+    return None
 
 
 class IndentableYamlDumper(yaml.Dumper):
@@ -56,7 +110,7 @@ def init(
         typer.Option(
             "--config",
             "-c",
-            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
             envvar="ASH_CONFIG",
         ),
     ] = ".ash/.ash.yaml",
@@ -141,7 +195,7 @@ def get(
     config_path: Annotated[
         str,
         typer.Argument(
-            help=f"The name of the config file to get. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
+            help=f"The name of the config file to get. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
         ),
     ] = None,
     config_overrides: Annotated[
@@ -192,7 +246,7 @@ def update(
     config_path: Annotated[
         str,
         typer.Argument(
-            help=f"The path to the configuration file to update. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}.",
+            help=f"The path to the configuration file to update. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}.",
         ),
     ] = None,
     modifications: Annotated[
@@ -222,7 +276,11 @@ def update(
 
     # Find the config file if not specified
     if config_path is None:
-        found = find_config_file()
+        try:
+            found = find_config_file()
+        except ASHConfigValidationError as e:
+            typer.secho(f"Error locating config file: {e}", fg=typer.colors.RED)
+            raise typer.Exit(1)
         if found is not None:
             logger.info(f"Using config file found at: {found.as_posix()}")
             config_path = found.as_posix()
@@ -237,6 +295,10 @@ def update(
 
     # Load the existing config
     config_path = Path(config_path)
+    refusal = _rewrite_refusal(config_path)
+    if refusal:
+        typer.secho(f"Cannot update {config_path}: {refusal}", fg=typer.colors.RED)
+        raise typer.Exit(1)
     try:
         config = AshConfig.from_file(config_path=config_path)
     except Exception as e:
@@ -345,7 +407,7 @@ def validate_plugin_dependencies(
     config_path: Annotated[
         str,
         typer.Argument(
-            help=f"The name of the config file to create. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
+            help=f"The name of the config file to create. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
         ),
     ] = None,
     config_overrides: Annotated[
@@ -408,14 +470,14 @@ def validate_plugin_dependencies(
 @config_app.command()
 def lint(
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",
-            help="The path to the configuration file to lint. By default, ASH looks for config files in .ash/.ash.yaml",
+            help="The path to the configuration file to lint. By default, ASH lints the config a scan of the current directory would use (see the configuration guide for the discovery order), falling back to .ash/.ash.yaml.",
             envvar="ASH_CONFIG",
         ),
-    ] = ".ash/.ash.yaml",
+    ] = None,
     output_dir: Annotated[
         str,
         typer.Option(
@@ -506,14 +568,29 @@ def lint(
         use_color=color,
     )
 
-    config_path = Path(config)
+    try:
+        config_path = _config_path_or_discovered(config)
+    except ASHConfigValidationError as e:
+        typer.secho(f"❌ {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
     output_dir_path = Path(output_dir) if output_dir else None
 
     if not config_path.exists():
         typer.secho(f"❌ Config file not found: {config_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
-    typer.secho(f"Linting configuration file: {config_path}", fg=typer.colors.BLUE)
+    if (fix or fix_unused) and config_path.name.endswith(".toml"):
+        typer.secho(
+            f"❌ --fix and --fix-unused rewrite YAML and JSON config files only; "
+            f"edit {describe_config_path(config_path)} by hand.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+
+    typer.secho(
+        f"Linting configuration file: {describe_config_path(config_path)}",
+        fg=typer.colors.BLUE,
+    )
 
     # Run lint checks
     lint_result = ConfigLinter.lint(
@@ -521,6 +598,7 @@ def lint(
         output_dir=output_dir_path,
         check_unused=fix_unused,  # Only check unused when explicitly requested
     )
+    _print_source_chain(config_path)
 
     # Display issues
     if not lint_result.issues:
@@ -599,7 +677,12 @@ def _apply_fixes(
 
     typer.secho(f"\n🔧 Fixing {len(fixable)} issue(s):", fg=typer.colors.BLUE)
     for issue in fixable:
-        typer.secho(f"  • {issue.fix_description}", fg=typer.colors.CYAN)
+        # An issue that sets fixable=True without a fix_description would print an
+        # empty bullet, which tells the user a change is coming but not which one.
+        # The message always names the problem, so fall back to it.
+        typer.secho(
+            f"  • {issue.fix_description or issue.message}", fg=typer.colors.CYAN
+        )
 
     if not non_interactive:
         confirm = typer.confirm("\nApply these fixes?")
@@ -784,6 +867,13 @@ def wizard(
     config_path = Path(config)
 
     # --- Load existing config or start from defaults ---
+    if config_path.exists() and _rewrite_refusal(config_path):
+        typer.secho(
+            f"Cannot edit {config_path} with the wizard: "
+            f"{_rewrite_refusal(config_path)}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
     if config_path.exists():
         console.print(
             Panel(
@@ -964,14 +1054,14 @@ if __name__ == "__main__":
 @config_app.command()
 def validate(
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",
-            help="The path to the configuration file to validate. By default, ASH looks for config files in .ash/.ash.yaml",
+            help="The path to the configuration file to validate. By default, ASH validates the config a scan of the current directory would use (see the configuration guide for the discovery order), falling back to .ash/.ash.yaml.",
             envvar="ASH_CONFIG",
         ),
-    ] = ".ash/.ash.yaml",
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
     ] = False,
@@ -1009,17 +1099,19 @@ def validate(
     try:
         from automated_security_helper.config.config_validator import ConfigValidator
 
-        config_path = Path(config)
+        config_path = _config_path_or_discovered(config)
 
         if not config_path.exists():
             typer.secho(f"❌ Config file not found: {config_path}", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         typer.secho(
-            f"Validating configuration file: {config_path}", fg=typer.colors.BLUE
+            f"Validating configuration file: {describe_config_path(config_path)}",
+            fg=typer.colors.BLUE,
         )
 
         is_valid, errors = ConfigValidator.validate_config_file(config_path)
+        _print_source_chain(config_path)
 
         if is_valid:
             typer.secho("✅ Configuration is valid!", fg=typer.colors.GREEN)

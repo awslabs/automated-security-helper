@@ -103,3 +103,102 @@ class TestAnalyzeSarifFieldsLogic:
         data = _json.loads(fields_json.read_text())
         assert isinstance(data, dict)
         assert any("ruleId" in key for key in data)
+
+
+class TestInAggregatePercentage:
+    """`% in Aggregate` is the share of a scanner's included fields in the aggregate.
+
+    It used to subtract the scanner's intentionally excluded fields as well. Those
+    are never counted in the scanner's total (a path is either included or
+    excluded), so the result could fall below zero: 9 included fields, none
+    aggregated, and 1 excluded field printed -11.1%.
+    """
+
+    # Nine fields that survive should_include_field, plus ruleIndex, which is
+    # intentionally excluded from the comparison.
+    SCANNER_RESULT = {
+        "ruleId": "B1",
+        "ruleIndex": 0,
+        "level": "error",
+        "message": {"text": "m"},
+        "kind": "fail",
+        "rank": 1.0,
+        "baselineState": "new",
+        "hostedViewerUri": "x",
+        "guid": "g",
+        "correlationGuid": "c",
+    }
+
+    def _percentage(self, tmp_path, monkeypatch, capsys, aggregate_result):
+        import json
+        import re
+
+        import typer
+
+        from automated_security_helper.utils.sarif_field_analysis import (
+            analyze_sarif_fields,
+        )
+
+        monkeypatch.setenv("COLUMNS", "250")
+        sarif_dir = tmp_path / "ash_output"
+        (sarif_dir / "scanners" / "bandit").mkdir(parents=True)
+        (sarif_dir / "reports").mkdir(parents=True)
+        (sarif_dir / "scanners" / "bandit" / "bandit.sarif").write_text(
+            json.dumps({"runs": [{"results": [self.SCANNER_RESULT]}]})
+        )
+        (sarif_dir / "reports" / "ash.sarif").write_text(
+            json.dumps({"runs": [{"results": [aggregate_result]}]})
+        )
+
+        try:
+            analyze_sarif_fields(
+                sarif_dir=str(sarif_dir), output_dir=str(tmp_path / "out")
+            )
+        except typer.Exit:
+            pass  # exit 1 only signals unexpectedly missing fields
+
+        out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+        rows = [ln for ln in out.splitlines() if re.match(r"^│\s*bandit\s*│", ln)]
+        assert len(rows) == 1, out
+        cells = [c.strip() for c in rows[0].strip("│").split("│")]
+        # Scanner, Total, Unique, Missing (Unexpected), Missing (Intentional), %
+        return cells
+
+    def test_nothing_aggregated_is_zero_not_negative(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        cells = self._percentage(tmp_path, monkeypatch, capsys, {"foo": "bar"})
+        assert cells[1:] == ["9", "9", "9", "1", "0.0%"]
+
+    def test_everything_aggregated_is_one_hundred(self, tmp_path, monkeypatch, capsys):
+        aggregate = {k: v for k, v in self.SCANNER_RESULT.items() if k != "ruleIndex"}
+        cells = self._percentage(tmp_path, monkeypatch, capsys, aggregate)
+        assert cells[1:] == ["9", "0", "0", "1", "100.0%"]
+
+    def test_partial_aggregation_counts_only_included_fields(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        cells = self._percentage(tmp_path, monkeypatch, capsys, {"ruleId": "B1"})
+        assert cells[1:] == ["9", "8", "8", "1", "11.1%"]
+
+
+class TestHtmlReportWithNoFindings:
+    def test_matched_share_with_zero_findings_does_not_divide_by_zero(self, tmp_path):
+        from automated_security_helper.utils.meta_analysis.reporting import (
+            generate_html_report,
+        )
+
+        validation_results = {
+            "summary": {
+                "total_findings": 0,
+                "matched_findings": 0,
+                "critical_missing_fields": 0,
+                "important_missing_fields": 0,
+                "informational_missing_fields": 0,
+            },
+            "match_statistics": {},
+            "missing_fields": {},
+        }
+        out = tmp_path / "report.html"
+        generate_html_report(validation_results, str(out), {})
+        assert "Matched Findings: 0 (0.00%)" in out.read_text(encoding="utf-8")
