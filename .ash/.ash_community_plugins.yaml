@@ -259,20 +259,6 @@ global_settings:
     - path: docs/content/docs/plugins/development-guide.md
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive, not an actual secret
-    - path: docs/content/docs/testing/examples/*
-      reason: Documentation with test code examples focused on brevity.
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: ".ash/ash_output*/*.*"
-      reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: ".ash/ash_output*/reports/*.json"
-      reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: ".ash/ash_output*/scanners/*.json"
-      reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
-    - rule_id: "yaml.github-actions.security.run-shell-injection.run-shell-injection"
-      path: ".github/actions/run-scan-test/action.yml"
-      reason: "False positive — inputs.* in composite actions are author-defined, not attacker-controlled"
     - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
       path: "automated_security_helper/cli/main.py"
       reason: "False positive - ASH requires Python 3.10+"
@@ -364,29 +350,6 @@ global_settings:
     - rule_id: "bash.lang.security.ifs-tampering.ifs-tampering"
       path: "**/*.sh"
       reason: "IFS manipulation in ASH shell scripts is intentional for delimiter parsing"
-    - rule_id: "yaml.github-actions.security.run-shell-injection.run-shell-injection"
-      path: ".github/**/*.yml"
-      reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
-    # === Broad detect-secrets suppressions (test/doc fixtures) ===
-    - rule_id: "SECRET-SECRET-KEYWORD"
-      path: "tests/**"
-      reason: "Test fixtures contain intentional secret patterns for validation"
-    - rule_id: "SECRET-BASE64-HIGH-ENTROPY-STRING"
-      path: "tests/**"
-      reason: "Test fixtures contain intentional high-entropy strings"
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: "tests/**"
-      reason: "Test fixtures contain intentional hex strings"
-    - rule_id: "SECRET-SECRET-KEYWORD"
-      path: "docs/**"
-      reason: "Documentation examples showing detection patterns"
-    - rule_id: "SECRET-*"
-      path: "scripts/**"
-      reason: "Build scripts may contain example tokens"
-    # === All findings on test data (intentionally insecure fixtures) ===
-    - rule_id: "*"
-      path: "tests/test_data/**"
-      reason: "Intentionally insecure test data for scanner validation — not production code"
     # === Approved license findings (trivy license scanner) ===
     - rule_id: "*:MIT"
       path: "**"
