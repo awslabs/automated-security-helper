@@ -838,25 +838,24 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Install methods: method x OS x Python (matches ash-install-methods.yml)
+  # Install methods: method x OS x Python
   # ---------------------------------------------------------------------------
   #
-  # There are two install-validation surfaces and they are NOT redundant, so both
-  # have to carry every supported Python version. This one is unconditional --
-  # push, pull_request and merge_group -- and it is the one `required-checks`
-  # depends on, so it is what actually gates a merge. ash-install-methods.yml is
-  # path-filtered to pyproject.toml, hatch_build.py, automated_security_helper/**
-  # and a few others, and it adds the `nix` method this job does not carry.
+  # This is the install-validation surface for every method except `nix`. It is
+  # unconditional -- push, pull_request and merge_group -- and it is the one
+  # `required-checks` depends on, so it is what actually gates a merge.
+  # ash-install-methods.yml is path-filtered and carries only the four `nix` legs,
+  # which this job does not.
   #
-  # Keep the `python-version` axes of the two identical, deliberately: a version
-  # added to one and not the other leaves a supported interpreter untested on
-  # whichever surface was missed. The two still agree on which (os, python-version)
-  # cells pip, pipx, pre-commit and mcp cover, including macos-14 x {3.10, 3.11} --
-  # they just no longer agree on the SHAPE. ash-install-methods.yml keeps one leg
-  # per method; this job runs those four, plus uvx, as steps inside one `bundle`
-  # leg per cell (see the note above the job). So the thing to keep aligned is the
-  # cell coverage, not the leg names, and `method: [bundle, ...]` here against
-  # `method: [pip, pipx, ...]` there is not a drift to reconcile.
+  # ash-install-methods.yml used to repeat every cell of this job as well, one leg
+  # per method: 113 legs, each one a cell this job had already run, on every pull
+  # request touching package code. They were removed on 2026-10-06, when that
+  # workflow was 100+ of the jobs one push started while pull requests waited a
+  # median 36-48 minutes for ubuntu-latest and macOS runners. What they added over
+  # this job was a clean runner per method; here pip, pipx, mcp, pre-commit and uvx
+  # share one `bundle` leg, which is why the step order inside it is load-bearing
+  # (see below). So this job is now the only place those methods are validated, and
+  # tests/unit/test_ci_matrix_agreement.py fails if it stops carrying any of them.
   #
   # `unit-test` above excludes macos-14 x {3.10, 3.11} on the grounds that macOS
   # ARM only has 3.12 and later. THAT REASON IS FALSE, measured two ways:
@@ -1228,7 +1227,9 @@ jobs:
   # but the collapse shrank it: this file's install legs are now named `bundle (...)`,
   # `homebrew (...)`, `podman (...)`, `finch (...)` and `nerdctl (...)`, and the only values
   # ash-install-methods.yml still shares are those last four. Its pip, pipx, uvx, pre-commit,
-  # mcp and nix legs now have the namespace to themselves.
+  # mcp and nix legs now have the namespace to themselves. (Since 2026-10-06 that workflow
+  # carries only its four `nix` legs, so the collision no longer exists and the 278 and 93
+  # below describe the tree they were measured on.)
   # ash-install-methods.yml is path-filtered to pyproject.toml, hatch_build.py,
   # automated_security_helper/**, .pre-commit-hooks.yaml, Formula/**, itself, and the nix
   # leg's action and snapshot module, so whether it runs is decided by whether the commit

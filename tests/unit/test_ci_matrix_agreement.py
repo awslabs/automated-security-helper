@@ -13,7 +13,7 @@ red one. This file is the enforcement for the three of them that a unit test can
 gate itself runs.)
 
 * **Routing with no else.** Both install-validation jobs -- ``install-validation`` in
-  ``ash-unified-ci.yml`` and ``validate`` in ``ash-install-methods.yml`` -- end in
+  ``ash-unified-ci.yml`` and the nix-only ``validate`` in ``ash-install-methods.yml`` -- end in
   mutually exclusive ``if:`` steps with no default. A ``method`` satisfying none of them
   ran setup-python, did nothing, and exited 0; ``required-checks`` counted that as a
   success, so an entirely unvalidated install method read as validated on every pull
@@ -32,9 +32,13 @@ gate itself runs.)
   restatements cannot come back.
 
 * **Two install matrices with nothing tying them together.** The comment on
-  ``install-validation`` states the discipline -- "Keep the ``python-version`` axes of
+  ``install-validation`` stated a discipline -- "Keep the ``python-version`` axes of
   the two identical, deliberately" -- and nothing enforced it. No test read
-  ``ash-install-methods.yml`` at all.
+  ``ash-install-methods.yml`` at all. That second matrix has since been cut to its nix
+  legs, because every other cell it ran was a cell the unified job already ran
+  (TestTheNixSurfaceCarriesOnlyNix). What is enforced now is the premise of that cut:
+  the unified job still carries every method the removed legs did, and the nix surface
+  carries nothing else.
 
 The model
 ---------
@@ -46,10 +50,9 @@ silently, and that is the dominant failure mode for guards of exactly this shape
 
 What this file deliberately does not do
 ---------------------------------------
-It does not assert the excludes themselves, their count, or their shape. It asserts that
-the two matrices AGREE, which is a property that survives legs being added to both. A
-test pinning 113 and 117 would break on every legitimate matrix change and would teach
-people to edit the test rather than read it.
+It does not assert the excludes themselves, their count, or their shape. A test pinning
+leg counts would break on every legitimate matrix change and would teach people to edit
+the test rather than read it.
 """
 
 from __future__ import annotations
@@ -71,87 +74,36 @@ INSTALL_METHODS = WORKFLOWS / "ash-install-methods.yml"
 RUN_SCAN_TEST = ACTIONS / "run-scan-test" / "action.yml"
 RUN_UNIT_TESTS = ACTIONS / "run-unit-tests" / "action.yml"
 
-# The two install-validation surfaces, as (label, workflow path, job key). Both are
-# checked by everything in TestInstallMethodRoutingIsClosed; a check that ran on only one
-# of them would leave the other exactly as exposed as it was.
+# The two install-validation surfaces, as (label, workflow path, job key, minimum
+# methods on the axis, minimum validator steps). Both are checked by everything in
+# TestInstallMethodRoutingIsClosed; a check that ran on only one of them would leave the
+# other exactly as exposed as it was. The floors differ because the nix surface carries
+# one method routed to one validator, and a floor above that would be a tripwire on the
+# shape it is supposed to have.
 INSTALL_SURFACES = [
     pytest.param(
         "ash-unified-ci.yml install-validation",
         UNIFIED_CI,
         "install-validation",
+        5,
+        2,
         id="unified-ci",
     ),
     pytest.param(
         "ash-install-methods.yml validate",
         INSTALL_METHODS,
         "validate",
+        1,
+        1,
         id="install-methods",
     ),
 ]
 
-# A method carried by one install surface and not the other, mapped to the reason. This
-# is the one legitimate difference between the two matrices, and naming it here is what
-# lets the leg-by-leg comparison below be exact rather than approximate.
-#
-# An entry states why the method belongs on that surface only. "It was added there first"
-# is not a reason -- that is drift, which is what this file exists to catch.
-_METHOD_ONLY_IN: dict[str, str] = {
-    "nix": (
-        "ash-install-methods.yml only. It is path-filtered, and the nix toolchain "
-        "validation is slow enough that the unconditional surface -- the one "
-        "required-checks gates -- deliberately does not carry it."
-    ),
-    # The six below are ONE fact, not six. ash-unified-ci.yml folded pip, pipx, uvx,
-    # pre-commit and mcp into a single `bundle` method run as five steps;
-    # ash-install-methods.yml still carries them as five separate methods. So each of
-    # those five names is now on one surface only, and `bundle` -- the value that
-    # replaced them -- is on the other.
-    #
-    # This is a deliberate split rather than drift, and no coverage is lost: all five
-    # still run on both surfaces, as steps here and as legs there. What differs is the
-    # granularity of the leg, which is what the collapse was for.
-    #
-    # WHAT IT DOES COST, STATED SO IT IS NOT REDISCOVERED
-    #
-    # test_the_shared_methods_run_exactly_the_same_legs_on_both_surfaces iterates the
-    # INTERSECTION of the two method sets, so it can no longer cover these five. A
-    # python-version or an OS added to one surface and not the other is still caught for
-    # `homebrew` and the three container runtimes, and is NOT caught for pip, pipx, uvx,
-    # pre-commit or mcp. test_the_axes_are_identical is what still covers them, since
-    # both surfaces draw their os and python-version from axes that must match.
-    #
-    # If that residual gap ever matters, the fix is to compare the unified surface's
-    # bundle STEP conditions against the install-methods legs, not to un-collapse the
-    # matrix.
-    "bundle": (
-        "ash-unified-ci.yml only. Not an install method but five of them run as steps in "
-        "one leg -- pip, pipx, uvx, pre-commit and mcp. ash-install-methods.yml keeps "
-        "those five as separate legs, so the two surfaces express the same coverage at "
-        "different granularity."
-    ),
-    "pip": (
-        "ash-install-methods.yml only as a METHOD. ash-unified-ci.yml runs it as a step "
-        "inside the `bundle` leg, so the coverage is on both surfaces and only the leg "
-        "granularity differs."
-    ),
-    "pipx": (
-        "ash-install-methods.yml only as a METHOD; a step inside `bundle` on "
-        "ash-unified-ci.yml. See the pip entry."
-    ),
-    "uvx": (
-        "ash-install-methods.yml only as a METHOD; a step inside `bundle` on "
-        "ash-unified-ci.yml, conditioned to 3.12 there because uvx brings its own "
-        "interpreter. See the pip entry."
-    ),
-    "pre-commit": (
-        "ash-install-methods.yml only as a METHOD; a step inside `bundle` on "
-        "ash-unified-ci.yml. See the pip entry."
-    ),
-    "mcp": (
-        "ash-install-methods.yml only as a METHOD; a step inside `bundle` on "
-        "ash-unified-ci.yml, routed to validate-mcp there. See the pip entry."
-    ),
-}
+# What ash-unified-ci.yml's install-validation must keep carrying, because removing the
+# per-method legs from ash-install-methods.yml was justified by it carrying them. The five
+# cheap methods run as steps inside the `bundle` leg; the rest are `method` values.
+_BUNDLED_STEPS = ("pip", "pipx", "uvx", "pre-commit", "mcp")
+_UNIFIED_METHODS = ("bundle", "homebrew", "podman", "finch", "nerdctl")
 
 # Floors for the positive controls. Deliberately far below the current values (24
 # scan-validation rows, 9 install methods) so a legitimate matrix change does not touch
@@ -170,11 +122,9 @@ _METHOD_ONLY_IN: dict[str, str] = {
 # value is a tripwire on ordinary matrix edits, which is what teaches people to edit the
 # constant instead of reading it.
 #
-# Current values, for whoever moves this next: ash-unified-ci.yml 33 effective legs,
-# ash-install-methods.yml 117. Re-derive rather than trusting these; the check is the
-# expansion, not the comment.
+# Current value, for whoever moves this next: ash-unified-ci.yml 33 effective legs.
+# Re-derive rather than trusting it; the check is the expansion, not the comment.
 _MINIMUM_INSTALL_LEGS = 15
-_MINIMUM_INSTALL_METHODS = 5
 _MINIMUM_SCAN_ROWS = 10
 
 
@@ -288,8 +238,12 @@ def _has_fail_closed_default(script: str) -> bool:
 class TestInstallMethodRoutingIsClosed:
     """Every method on the axis reaches a validator, and the guard says so too."""
 
-    @pytest.mark.parametrize("label,path,key", INSTALL_SURFACES)
-    def test_every_method_on_the_axis_is_routed_to_a_validator(self, label, path, key):
+    @pytest.mark.parametrize(
+        "label,path,key,min_methods,min_validators", INSTALL_SURFACES
+    )
+    def test_every_method_on_the_axis_is_routed_to_a_validator(
+        self, label, path, key, min_methods, min_validators
+    ):
         job = _job(path, key)
         axis = set(_axes(job).get("method") or [])
         routed = _routed_methods(job)
@@ -301,8 +255,12 @@ class TestInstallMethodRoutingIsClosed:
             f"composite action.\nRouted today: {sorted(routed)}"
         )
 
-    @pytest.mark.parametrize("label,path,key", INSTALL_SURFACES)
-    def test_the_guard_exists_and_fails_closed(self, label, path, key):
+    @pytest.mark.parametrize(
+        "label,path,key,min_methods,min_validators", INSTALL_SURFACES
+    )
+    def test_the_guard_exists_and_fails_closed(
+        self, label, path, key, min_methods, min_validators
+    ):
         script = _guard_script(_job(path, key))
         assert script, (
             f"{label}: no step named '... routed to a validator' was found. Without the "
@@ -314,9 +272,11 @@ class TestInstallMethodRoutingIsClosed:
             "method would fall through it and the leg would still pass."
         )
 
-    @pytest.mark.parametrize("label,path,key", INSTALL_SURFACES)
+    @pytest.mark.parametrize(
+        "label,path,key,min_methods,min_validators", INSTALL_SURFACES
+    )
     def test_the_guard_arms_and_the_routing_conditions_name_the_same_methods(
-        self, label, path, key
+        self, label, path, key, min_methods, min_validators
     ):
         job = _job(path, key)
         arms = _case_arms(_guard_script(job))
@@ -331,8 +291,12 @@ class TestInstallMethodRoutingIsClosed:
             "have to be one statement."
         )
 
-    @pytest.mark.parametrize("label,path,key", INSTALL_SURFACES)
-    def test_the_guard_runs_before_any_validator(self, label, path, key):
+    @pytest.mark.parametrize(
+        "label,path,key,min_methods,min_validators", INSTALL_SURFACES
+    )
+    def test_the_guard_runs_before_any_validator(
+        self, label, path, key, min_methods, min_validators
+    ):
         """A guard after the work it guards reports on a leg that already ran."""
         steps = _job(path, key)["steps"]
         guard_at = [
@@ -353,14 +317,18 @@ class TestInstallMethodRoutingIsClosed:
             "a checkout and an interpreter install on work it will not do."
         )
 
-    @pytest.mark.parametrize("label,path,key", INSTALL_SURFACES)
-    def test_the_readers_found_something(self, label, path, key):
+    @pytest.mark.parametrize(
+        "label,path,key,min_methods,min_validators", INSTALL_SURFACES
+    )
+    def test_the_readers_found_something(
+        self, label, path, key, min_methods, min_validators
+    ):
         """Positive control. Every assertion above is satisfied by two empty sets."""
         job = _job(path, key)
         axis = _axes(job).get("method") or []
-        assert len(axis) >= _MINIMUM_INSTALL_METHODS, (
+        assert len(axis) >= min_methods, (
             f"{label}: the `method` axis holds {len(axis)} entries, below the floor of "
-            f"{_MINIMUM_INSTALL_METHODS}. With an empty axis the routing check above "
+            f"{min_methods}. With an empty axis the routing check above "
             "iterates nothing and passes."
         )
         assert _routed_methods(job), (
@@ -372,155 +340,99 @@ class TestInstallMethodRoutingIsClosed:
             f"{label}: the guard reader found no case arms. The equality check above "
             "would then be comparing two empty sets."
         )
-        assert len(_validator_steps(job)) >= 2, (
-            f"{label}: fewer than two validator steps were found, so the routing table "
+        assert len(_validator_steps(job)) >= min_validators, (
+            f"{label}: fewer than {min_validators} validator step(s) were found, so the routing table "
             "this file exists to reconcile is not being read."
         )
 
 
-class TestTheTwoInstallMatricesAgree:
-    """The discipline the comment states, enforced.
+class TestTheNixSurfaceCarriesOnlyNix:
+    """ash-install-methods.yml is nix and nothing else, and the unified job covers the rest.
 
-    ``ash-unified-ci.yml``'s ``install-validation`` is unconditional and is what
-    ``required-checks`` gates on. ``ash-install-methods.yml`` is path-filtered and adds
-    ``nix``. A version, an OS or an exclusion added to one and not the other leaves a
-    supported configuration untested on whichever surface was missed, and nothing said so
-    -- no test read ``ash-install-methods.yml`` at all.
+    It used to repeat every pip, pipx, uvx, pre-commit, mcp, homebrew, podman, finch and
+    nerdctl cell of ``install-validation`` as a leg of its own -- 113 legs, each one a
+    cell the unified job, unconditional and gated by ``required-checks``, already ran.
+    Those legs were removed on that premise, so the premise is what is asserted here: if
+    the unified job stops carrying a method, or this surface grows a non-nix method back,
+    the reason for the cut no longer holds and something here goes red.
     """
 
-    def _cells(self, path: Path, key: str) -> list[dict[str, Any]]:
-        return _effective_matrix(_job(path, key))
+    def test_install_methods_carries_nix_only(self):
+        job = _job(INSTALL_METHODS, "validate")
+        cells = _effective_matrix(job)
+        assert cells, "ash-install-methods.yml validate expands to no legs"
+        methods = sorted({c["method"] for c in cells})
+        assert methods == ["nix"], (
+            f"ash-install-methods.yml validate runs {methods}. Every method other than "
+            "nix is already run by ash-unified-ci.yml install-validation on the same "
+            "cells, so a non-nix leg here is a duplicate queued for a runner. Add the "
+            "coverage to install-validation instead."
+        )
 
-    def _legs(self, path: Path, key: str) -> set[tuple[str, str, str]]:
-        return {
-            (c["os"], str(c["python-version"]), c["method"])
-            for c in self._cells(path, key)
-        }
+    def test_unified_does_not_carry_nix(self):
+        """If it ever does, this workflow has nothing left to do and should go."""
+        methods = _axes(_job(UNIFIED_CI, "install-validation")).get("method") or []
+        assert "nix" not in methods
 
     @pytest.mark.parametrize("axis", ["python-version", "os"])
-    def test_the_axes_are_identical(self, axis):
-        unified = _axes(_job(UNIFIED_CI, "install-validation")).get(axis) or []
-        other = _axes(_job(INSTALL_METHODS, "validate")).get(axis) or []
-        assert unified, f"ash-unified-ci.yml install-validation has no `{axis}` axis"
-        assert other, f"ash-install-methods.yml validate has no `{axis}` axis"
-        assert [str(v) for v in unified] == [str(v) for v in other], (
-            f"the `{axis}` axes of the two install matrices differ:\n"
-            f"  ash-unified-ci.yml      : {unified}\n"
-            f"  ash-install-methods.yml : {other}\n"
-            "Keeping them identical is the stated discipline on both jobs. A value "
-            "present on one surface only is a supported configuration that goes "
-            "untested whenever the other surface is the one that runs."
-        )
-
-    def test_the_methods_carried_by_only_one_surface_are_named_with_a_reason(self):
-        unified = set(_axes(_job(UNIFIED_CI, "install-validation")).get("method") or [])
-        other = set(_axes(_job(INSTALL_METHODS, "validate")).get("method") or [])
-
-        unexplained = sorted((unified ^ other) - set(_METHOD_ONLY_IN))
-        assert not unexplained, (
-            f"these install methods are on one surface and not the other: {unexplained}.\n"
-            "That is either drift -- a method added to one matrix and forgotten on the "
-            "second -- or a deliberate split. If it is deliberate, add it to "
-            "_METHOD_ONLY_IN in this file with the reason it belongs on one surface "
-            "only.\n"
-            f"  ash-unified-ci.yml only      : {sorted(unified - other)}\n"
-            f"  ash-install-methods.yml only : {sorted(other - unified)}"
-        )
-
-    def test_no_method_only_in_entry_is_stale(self):
-        """An excuse for a method now on both surfaces, or on neither, is a false claim.
-
-        Deliberately a loop rather than a parametrization: parametrizing a collection
-        that may become empty yields a SKIPPED test, and a permanently skipped test reads
-        as "not run" in every report -- the same shape as a check that was quietly
-        disabled.
-        """
-        unified = set(_axes(_job(UNIFIED_CI, "install-validation")).get("method") or [])
-        other = set(_axes(_job(INSTALL_METHODS, "validate")).get("method") or [])
-
-        problems = []
-        for method, reason in sorted(_METHOD_ONLY_IN.items()):
-            on = [
-                name
-                for name, axis in (("unified", unified), ("install-methods", other))
-                if method in axis
-            ]
-            if len(on) == 2:
-                problems.append(
-                    f"  {method!r} is excused ({reason}) but both surfaces now carry it; "
-                    "remove the entry so the leg-by-leg comparison covers it."
-                )
-            if not on:
-                problems.append(
-                    f"  {method!r} is excused but neither surface carries it. There is "
-                    "nothing to excuse; remove the entry."
-                )
-        assert not problems, "Stale _METHOD_ONLY_IN entries:\n" + "\n".join(problems)
-
-    def test_the_shared_methods_run_exactly_the_same_legs_on_both_surfaces(self):
-        """The check the 64 and 81 hand-written excludes never had.
-
-        Compared leg by leg over the EFFECTIVE matrix, not by comparing exclude lists.
-        The two exclude lists are not identical and are not meant to be -- one workflow
-        has an extra method to exclude -- so the only comparison that means anything is
-        the set of cells that actually run.
-        """
-        shared = set(
-            _axes(_job(UNIFIED_CI, "install-validation")).get("method") or []
-        ) & set(_axes(_job(INSTALL_METHODS, "validate")).get("method") or [])
+    def test_nix_runs_on_cells_the_unified_job_also_runs(self, axis):
         unified = {
-            leg
-            for leg in self._legs(UNIFIED_CI, "install-validation")
-            if leg[2] in shared
+            str(v)
+            for v in _axes(_job(UNIFIED_CI, "install-validation")).get(axis) or []
         }
-        other = {
-            leg for leg in self._legs(INSTALL_METHODS, "validate") if leg[2] in shared
+        nix = {
+            str(c[axis]) for c in _effective_matrix(_job(INSTALL_METHODS, "validate"))
         }
-
-        only_unified = sorted(unified - other)
-        only_other = sorted(other - unified)
-        assert not only_unified and not only_other, (
-            "the two install matrices disagree on which legs they run for the methods "
-            "they share:\n"
-            f"  only ash-unified-ci.yml      ({len(only_unified)}): {only_unified}\n"
-            f"  only ash-install-methods.yml ({len(only_other)}): {only_other}\n"
-            "An exclusion added to one matrix and not the other silently drops a "
-            "configuration from whichever surface excluded it, and the other surface is "
-            "path-filtered so it may not even run."
+        assert unified and nix
+        assert nix <= unified, (
+            f"the nix legs run on {axis} {sorted(nix - unified)}, which "
+            "ash-unified-ci.yml install-validation does not carry. A configuration "
+            "supported on one surface only is untested by the other."
         )
 
-    def test_both_matrices_were_actually_expanded(self):
-        """Positive control, in two parts.
+    def test_the_unified_job_still_carries_every_removed_method(self):
+        job = _job(UNIFIED_CI, "install-validation")
+        methods = set(_axes(job).get("method") or [])
+        missing = sorted(set(_UNIFIED_METHODS) - methods)
+        assert not missing, (
+            f"install-validation no longer carries {missing}. The per-method legs were "
+            "removed from ash-install-methods.yml because this job ran them; restore "
+            "the method here, or the coverage is gone from both surfaces."
+        )
+
+        bundle_steps = {
+            str(step.get("name")): str(step.get("if", ""))
+            for step in job["steps"]
+            if "matrix.method == 'bundle'" in str(step.get("if", ""))
+            and str(step.get("uses", "")).startswith("./.github/actions/validate-")
+        }
+        missing_steps = sorted(set(_BUNDLED_STEPS) - set(bundle_steps))
+        assert not missing_steps, (
+            f"the `bundle` leg no longer runs {missing_steps} as validator steps. Those "
+            "methods have no other surface since ash-install-methods.yml was cut to nix."
+        )
+
+    def test_the_unified_matrix_was_actually_expanded(self):
+        """Positive control.
 
         Empty leg sets satisfy every comparison above. And a comparison that ignored the
         excludes -- comparing raw axis products -- would also pass while missing the
-        entire class of defect this test exists for, so the effective matrix is asserted
-        to be strictly smaller than the product.
+        class of defect the excludes exist for, so the effective matrix is asserted to be
+        strictly smaller than the product.
         """
-        for label, path, key in (
-            ("ash-unified-ci.yml", UNIFIED_CI, "install-validation"),
-            ("ash-install-methods.yml", INSTALL_METHODS, "validate"),
-        ):
-            job = _job(path, key)
-            axes = _axes(job)
-            product = 1
-            for values in axes.values():
-                product *= len(values)
-            effective = len(_effective_matrix(job))
-
-            assert effective >= _MINIMUM_INSTALL_LEGS, (
-                f"{label}: {effective} effective leg(s), below the floor of "
-                f"{_MINIMUM_INSTALL_LEGS}. With no legs the comparisons above are "
-                "vacuous."
-            )
-            assert effective < product, (
-                f"{label}: the effective matrix ({effective}) is not smaller than the "
-                f"axis product ({product}), so the `exclude` list removed nothing. "
-                "Either the excludes stopped matching any cell -- which is itself the "
-                "bug, since every one of them is there to drop a configuration that "
-                "cannot work -- or this file's matrix expansion has gone stale and is "
-                "comparing raw axes."
-            )
+        job = _job(UNIFIED_CI, "install-validation")
+        product = 1
+        for values in _axes(job).values():
+            product *= len(values)
+        effective = len(_effective_matrix(job))
+        assert effective >= _MINIMUM_INSTALL_LEGS, (
+            f"install-validation: {effective} effective leg(s), below the floor of "
+            f"{_MINIMUM_INSTALL_LEGS}. With no legs the comparisons above are vacuous."
+        )
+        assert effective < product, (
+            f"install-validation: the effective matrix ({effective}) is not smaller than "
+            f"the axis product ({product}), so the `exclude` list removed nothing."
+        )
 
 
 class TestScanValidationValuesAreDerived:

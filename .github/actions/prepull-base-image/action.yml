@@ -572,7 +572,7 @@ runs:
         # downstream.
         #
         # This action is not itself scheduled on macOS: every macOS x {podman, finch,
-        # nerdctl} cell is excluded in both ash-unified-ci.yml and ash-install-methods.yml,
+        # nerdctl} cell is excluded in ash-unified-ci.yml (and was in ash-install-methods.yml),
         # hosted macOS runners having no nested virtualization, and run-scan-test skips the
         # pre-pull for python-local. What ran on those legs was
         # tests/unit/test_prepull_base_image_registry_fallback.py, which extracts this

@@ -35,163 +35,59 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The second of two install-validation surfaces. ash-unified-ci.yml has its own
-  # `install-validation` job, which is unconditional and is what `required-checks`
-  # gates on; this workflow is path-filtered (see `paths` above) and adds the
-  # `nix` method that job does not carry. Keep the `python-version` axes of the
-  # two identical, deliberately -- a version added to one and not the other
-  # leaves a supported interpreter untested on whichever surface was missed.
+  # The nix install surface. Nothing else lives here any more.
   #
-  # The `method` axes are NOT meant to match and should not be "re-aligned". That
-  # job folded pip, pipx, uvx, pre-commit and mcp into one `bundle` value that runs
-  # them as steps, because 105 of its 113 legs were 21-second installs each paying
-  # a ~6.5-minute queue wait. This workflow is path-filtered and runs far less
-  # often, so a leg per method still buys the cleaner per-method check name here.
-  # Same cells, different shape; see the note above install-validation in
-  # ash-unified-ci.yml.
+  # This workflow used to be a second copy of ash-unified-ci.yml's
+  # `install-validation`: the same os x python-version cells for pip, pipx, uvx,
+  # pre-commit, mcp, homebrew, podman, finch and nerdctl, one leg per method, plus
+  # the four nix legs. The unified job runs every one of those cells -- pip, pipx,
+  # uvx, pre-commit and mcp as steps of one `bundle` leg per cell, and homebrew and
+  # the container runtimes as their own legs -- unconditionally, and it is what
+  # `required-checks` gates on. So the 96 non-nix legs here re-ran cells the gated
+  # surface had already run, on every pull request touching package code.
+  #
+  # Measured before they were removed, on 2026-10-06 (pull request 717 at f77d0b0f):
+  # this workflow was 100 of the 207 jobs one push started, 37 of them macOS, while
+  # pull requests were waiting a median 36-48 minutes for ubuntu-latest and macOS
+  # runners and spending 3-5 minutes on each job once one arrived. What the 96 legs
+  # added over the unified job was a clean runner per method, and the operator
+  # accepted losing that: inside `bundle`, pip runs after pipx on the same machine,
+  # and the step order there is load-bearing for that reason (see the note above
+  # install-validation in ash-unified-ci.yml).
+  #
+  # nix stays here, path-filtered, because the unified job does not carry it.
+  # tests/unit/test_ci_matrix_agreement.py asserts that this job carries nix only,
+  # on OSes and a Python version the unified job also runs.
   validate:
     name: ${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    # The container runtimes get the same 45 minutes ash-unified-ci.yml gives them.
-    # Both workflows route to .github/actions/validate-container, so one flat budget
-    # of 20 here meant the same work ran under two different caps -- and that action
-    # now scans with the image it builds as well as building it. Measured build-only
-    # durations on ubuntu-latest were about 5 minutes for podman and finch, so 20 was
-    # not tight yet; it would have become tight silently.
-    timeout-minutes: ${{ (matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl') && 45 || 20 }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, nerdctl, mcp, nix]
-        exclude:
-          # Native Windows Nix cannot supply the toolchain: it has no fixed-output
-          # derivations, which is the mechanism by which the scanners are fetched, and no
-          # build sandbox. Windows users go through WSL2, covered by the Linux entries.
-          - { os: windows-latest, method: nix }
-          # Nix supplies the scanners itself, so the host Python version does not change
-          # what is under test here. One version per OS is enough.
-          - { os: ubuntu-latest, python-version: "3.10", method: nix }
-          - { os: ubuntu-latest, python-version: "3.11", method: nix }
-          - { os: ubuntu-latest, python-version: "3.13", method: nix }
-          - { os: ubuntu-latest, python-version: "3.14", method: nix }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: nix }
-          - { os: ubuntu-24.04-arm, python-version: "3.11", method: nix }
-          - { os: ubuntu-24.04-arm, python-version: "3.13", method: nix }
-          - { os: ubuntu-24.04-arm, python-version: "3.14", method: nix }
-          - { os: macos-latest, python-version: "3.10", method: nix }
-          - { os: macos-latest, python-version: "3.11", method: nix }
-          - { os: macos-latest, python-version: "3.13", method: nix }
-          - { os: macos-latest, python-version: "3.14", method: nix }
-          - { os: macos-14, python-version: "3.10", method: nix }
-          - { os: macos-14, python-version: "3.11", method: nix }
-          - { os: macos-14, python-version: "3.13", method: nix }
-          - { os: macos-14, python-version: "3.14", method: nix }
-          # Homebrew not available on Windows
-          - { os: windows-latest, method: homebrew }
-          # Podman/Finch/nerdctl not available on Windows
-          - { os: windows-latest, method: podman }
-          - { os: windows-latest, method: finch }
-          - { os: windows-latest, method: nerdctl }
-          # Finch Linux release is x86_64 only
-          - { os: ubuntu-24.04-arm, method: finch }
-          # nerdctl: x86_64 only for now. containerd/nerdctl does publish a linux-arm64
-          # bundle, so this is not an upstream limitation -- scripts/setup-nerdctl-linux.sh
-          # verifies a pinned checksum and only the amd64 one has been confirmed against
-          # the artifact. Adding arm means pinning that checksum too, and the script fails
-          # loudly on any other architecture rather than downloading unverified bytes.
-          - { os: ubuntu-24.04-arm, method: nerdctl }
-          # nerdctl on macOS needs a Linux VM (Rancher Desktop, Lima), and hosted macOS
-          # runners have no nested virtualization -- the same reason podman and finch are
-          # excluded below.
-          - { os: macos-latest, method: nerdctl }
-          - { os: macos-14, method: nerdctl }
-          # Container runtimes only need one Python version
-          - { os: ubuntu-latest, python-version: "3.10", method: nerdctl }
-          - { os: ubuntu-latest, python-version: "3.11", method: nerdctl }
-          - { os: ubuntu-latest, python-version: "3.13", method: nerdctl }
-          - { os: ubuntu-latest, python-version: "3.14", method: nerdctl }
-          # Container runtimes only need one Python version
-          - { os: ubuntu-latest, python-version: "3.10", method: podman }
-          - { os: ubuntu-latest, python-version: "3.11", method: podman }
-          - { os: ubuntu-latest, python-version: "3.13", method: podman }
-          - { os: ubuntu-latest, python-version: "3.14", method: podman }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
-          - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
-          - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
-          - { os: ubuntu-24.04-arm, python-version: "3.14", method: podman }
-          # Podman/Finch not on macOS (no nested virtualization on hosted runners)
-          - { os: macos-latest, method: podman }
-          - { os: macos-14, method: podman }
-          - { os: ubuntu-latest, python-version: "3.10", method: finch }
-          - { os: ubuntu-latest, python-version: "3.11", method: finch }
-          - { os: ubuntu-latest, python-version: "3.13", method: finch }
-          - { os: ubuntu-latest, python-version: "3.14", method: finch }
-          - { os: macos-latest, method: finch }
-          - { os: macos-14, method: finch }
-          # Homebrew only needs one Python (formula validation)
-          - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
-          - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
-          - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
-          - { os: ubuntu-latest, python-version: "3.14", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.11", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.13", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.14", method: homebrew }
-          - { os: macos-latest, python-version: "3.10", method: homebrew }
-          - { os: macos-latest, python-version: "3.11", method: homebrew }
-          - { os: macos-latest, python-version: "3.13", method: homebrew }
-          - { os: macos-latest, python-version: "3.14", method: homebrew }
-          - { os: macos-14, python-version: "3.10", method: homebrew }
-          - { os: macos-14, python-version: "3.11", method: homebrew }
-          - { os: macos-14, python-version: "3.13", method: homebrew }
-          - { os: macos-14, python-version: "3.14", method: homebrew }
-          # uvx doesn't need Python setup (it bundles its own)
-          - { os: ubuntu-latest, python-version: "3.10", method: uvx }
-          - { os: ubuntu-latest, python-version: "3.11", method: uvx }
-          - { os: ubuntu-latest, python-version: "3.13", method: uvx }
-          - { os: ubuntu-latest, python-version: "3.14", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.11", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.13", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.14", method: uvx }
-          - { os: macos-latest, python-version: "3.10", method: uvx }
-          - { os: macos-latest, python-version: "3.11", method: uvx }
-          - { os: macos-latest, python-version: "3.13", method: uvx }
-          - { os: macos-latest, python-version: "3.14", method: uvx }
-          - { os: macos-14, python-version: "3.10", method: uvx }
-          - { os: macos-14, python-version: "3.11", method: uvx }
-          - { os: macos-14, python-version: "3.13", method: uvx }
-          - { os: macos-14, python-version: "3.14", method: uvx }
-          - { os: windows-latest, python-version: "3.10", method: uvx }
-          - { os: windows-latest, python-version: "3.11", method: uvx }
-          - { os: windows-latest, python-version: "3.13", method: uvx }
-          - { os: windows-latest, python-version: "3.14", method: uvx }
+        # No windows-latest: native Windows Nix cannot supply the toolchain. It has no
+        # fixed-output derivations, which is the mechanism by which the scanners are
+        # fetched, and no build sandbox. Windows users go through WSL2, covered by the
+        # Linux entries.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14]
+        # Nix supplies the scanners itself, so the host Python version does not change
+        # what is under test here. One version per OS is enough.
+        python-version: ["3.12"]
+        method: [nix]
     steps:
-      # FAIL CLOSED BEFORE ANY OF THE ROUTING CONDITIONS BELOW
+      # FAIL CLOSED BEFORE THE ROUTING CONDITION BELOW
       #
-      # The four `uses:` steps at the end of this job are mutually exclusive `if:`s with no else.
-      # A method that satisfies none of them -- a new entry on the `method` axis, or one renamed
-      # on the axis and not in the conditions -- runs checkout and setup-python, does no
-      # validation at all, and exits 0. Green, over nothing.
-      #
-      # Same guard, same reason, as .github/actions/validate-container/action.yml carries for its
-      # `runtime` input, and as ash-unified-ci.yml's `install-validation` job now carries for the
-      # three methods it routes. The arms here differ from that job's by exactly `nix`, which is
-      # the method this workflow adds.
-      #
-      # tests/unit/test_ci_matrix_agreement.py reconciles these arms against the routing
-      # conditions AND against the `method` axis, in both workflows.
+      # The validator step at the end of this job is an `if:` with no else. A method that
+      # does not satisfy it -- a new entry on the `method` axis, or one renamed on the axis
+      # and not in the condition -- runs checkout and setup-python, does no validation at
+      # all, and exits 0. Green, over nothing. Same guard, same reason, as
+      # ash-unified-ci.yml's `install-validation` job.
       - name: "Assert this install method is routed to a validator"
         shell: bash
         env:
           METHOD: ${{ matrix.method }}
         run: |
           case "${METHOD}" in
-            pip | pipx | uvx | homebrew | pre-commit) ;;
-            podman | finch | nerdctl) ;;
-            mcp) ;;
             nix) ;;
             *)
               echo "::error::This workflow has no validator for method '${METHOD}'. The routing conditions on the steps at the end of this job cover none of it, so this leg would run setup-python and then nothing, and exit 0. Route it to a composite action and add it to the case above."
@@ -199,35 +95,10 @@ jobs:
               ;;
           esac
           echo "${METHOD}: routed to a validator"
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # Python setup (skip for uvx which bundles its own)
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: matrix.method != 'uvx'
         with:
           python-version: ${{ matrix.python-version }}
-
-      # === pip / pipx / uvx / homebrew / pre-commit: install + verify + scan ===
-      - name: "Validate install method"
-        if: matrix.method == 'pip' || matrix.method == 'pipx' || matrix.method == 'uvx' || matrix.method == 'homebrew' || matrix.method == 'pre-commit'
-        uses: ./.github/actions/validate-install
-        with:
-          method: ${{ matrix.method }}
-
-      # === mcp: server health check + scan ===
-      - name: "Validate MCP"
-        if: matrix.method == 'mcp'
-        uses: ./.github/actions/validate-mcp
-
-      # === podman / finch / nerdctl: container runtime validation ===
-      - name: "Validate container runtime"
-        if: matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl'
-        uses: ./.github/actions/validate-container
-        with:
-          runtime: ${{ matrix.method }}
-
-      # === nix: pinned toolchain validation ===
       # Asserts no flake-supplied scanner reports MISSING. A Nix job that passes while
       # silently providing no tools is the exact failure this mode exists to prevent, so
       # the assertion reads the per-scanner status table rather than the finding total.
