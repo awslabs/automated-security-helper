@@ -23,6 +23,7 @@
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 1.25,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -42,6 +43,7 @@
       "status": "SKIPPED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -61,6 +63,7 @@
       "status": "ERROR",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.25,
       "targets_attempted": 1,
       "targets_failed": 1
     },
@@ -80,6 +83,7 @@
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 7.5,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -99,6 +103,7 @@
       "status": "PASSED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.5,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -118,6 +123,7 @@
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 3.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -137,6 +143,7 @@
       "status": "MISSING",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -156,6 +163,7 @@
       "status": "PASSED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 4.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -175,6 +183,7 @@
       "status": "PASSED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 2.0,
       "targets_attempted": null,
       "targets_failed": 0
     }

@@ -45,12 +45,10 @@ class TestArgumentRefusals:
         assert run_cli([*SCAN, "--use-existing", "--output-dir", "out"]) == snapshot
 
     def test_nonexistent_source_dir(self, run_cli, snapshot, monkeypatch):
-        # MEASURED, not assumed: nothing refuses a --source-dir that does not exist.
-        # It is not declared exists=True, and run with real scanners the scan goes
-        # ahead, scans nothing, writes every report, and exits on whatever the
-        # scanner availability gate says -- 0 on a host with every tool installed.
-        # The orchestrator is the first thing that would touch the directory, so it
-        # is replaced by a probe that reports whether it was reached and with what.
+        # The CLI refuses a --source-dir that does not exist before anything uses it.
+        # Before it did, the scan went ahead, scanned nothing, wrote every report and
+        # could exit 0. The orchestrator is the first thing that would touch the
+        # directory, so it is replaced by a probe that would say so if it were reached.
         monkeypatch.setattr(
             "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
             _report_orchestrator_reached,

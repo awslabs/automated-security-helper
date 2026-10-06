@@ -23,6 +23,7 @@
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -42,6 +43,7 @@
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -61,6 +63,7 @@
       "status": "MISSING",
       "excluded": false,
       "dependencies_missing": true,
+      "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -80,6 +83,7 @@
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0
     }

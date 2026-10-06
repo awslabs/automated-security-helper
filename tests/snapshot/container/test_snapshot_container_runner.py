@@ -78,12 +78,13 @@ class TestRefusals:
 
 class TestDockerfileLookup:
     def test_no_build_outside_a_checkout(self, run_cli, snapshot, fake_docker, in_tmp):
-        # MEASURED: --no-build still resolves a Dockerfile first. With ASH installed
-        # from a checkout (revision LOCAL) and the working directory outside it, the
-        # scan stops there although nothing was going to be built.
+        # ASH is installed from a checkout (revision LOCAL) and the working directory
+        # is outside it, so there is no Dockerfile to find. --no-build does not need
+        # one: it goes straight to running the image. The fake run leaves no results
+        # file, which is what the read-back then reports.
         (in_tmp / "Dockerfile").unlink()
         assert run_cli([*SCAN, "--no-build", "--output-dir", "out"]) == snapshot
-        assert fake_docker.calls == []
+        assert fake_docker.calls == ["run"]
 
 
 class TestBuildFailure:

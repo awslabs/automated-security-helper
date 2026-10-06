@@ -8,9 +8,11 @@
     'exit_code': 1,
     'nix_commands': list([
     ]),
-    'stderr': '',
+    'stderr': '''
+      ASH is already running inside a Nix shell but was asked to enter one again. The inner invocation should carry --mode local; this is a bug, not a configuration problem.
+  
+    ''',
     'stdout': '',
-    'uncaught_exception': 'RuntimeError: ASH is already running inside a Nix shell but was asked to enter one again. The inner invocation should carry --mode local; this is a bug, not a configuration problem.',
   })
 # ---
 # name: test_equals_form_of_mode_is_rewritten
@@ -52,9 +54,11 @@
 # name: test_nix_not_installed
   dict({
     'exit_code': 1,
-    'stderr': '',
+    'stderr': '''
+      --mode nix requires Nix, which was not found on PATH. Install it from https://nixos.org/download/ (Linux and macOS; on Windows use WSL2), or choose a different --mode. ASH will not fall back to --mode local here, because that would scan with whatever tools happen to be installed and report the absent ones as MISSING.
+  
+    ''',
     'stdout': '',
-    'uncaught_exception': 'RuntimeError: --mode nix requires Nix, which was not found on PATH. Install it from https://nixos.org/download/ (Linux and macOS; on Windows use WSL2), or choose a different --mode. ASH will not fall back to --mode local here, because that would scan with whatever tools happen to be installed and report the absent ones as MISSING.',
   })
 # ---
 # name: test_shell_exit_with_results

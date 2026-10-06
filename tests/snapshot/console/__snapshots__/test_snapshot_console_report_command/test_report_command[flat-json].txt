@@ -25,6 +25,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 12.5,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -44,6 +45,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "PASSED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 7.0,
       "targets_attempted": 10,
       "targets_failed": 4
     },
@@ -63,6 +65,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "PASSED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.5,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -82,6 +85,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "SKIPPED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 0.25,
       "targets_attempted": 0,
       "targets_failed": 0
     },
@@ -101,6 +105,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "MISSING",
       "excluded": false,
       "dependencies_missing": true,
+      "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -120,6 +125,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "ERROR",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 1.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -139,6 +145,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "PASSED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 95.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -158,6 +165,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
+      "duration": 48.0,
       "targets_attempted": null,
       "targets_failed": 0
     },
@@ -177,6 +185,7 @@ $ ash report --format flat-json --log-level ERROR
       "status": "SKIPPED",
       "excluded": true,
       "dependencies_missing": false,
+      "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0
     }

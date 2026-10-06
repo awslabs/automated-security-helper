@@ -34,15 +34,15 @@ The table below shows findings by scanner, with status based on severity thresho
 
 Scanner              Suppressed Critical     High   Medium      Low     Info   Duration Actionable Result   Threshold
 -------------------- -------- -------- -------- -------- -------- -------- ---------- ---------- -------- ---------------
-bandit                      0        0        1        0        1        0       <1ms          1 FAILED   MEDIUM (global)
+bandit                      0        0        1        0        1        0       1.2s          1 FAILED   MEDIUM (global)
 cdk-nag                     0        0        0        0        0        0       <1ms          0 SKIPPED  MEDIUM (global)
-cfn-nag                     0        0        0        0        0        0       <1ms          0 ERROR    MEDIUM (global)
-checkov                     0        0        1        2        1        0       <1ms          3 FAILED   MEDIUM (global)
-detect-secrets              1        0        0        0        0        0       <1ms          0 PASSED   MEDIUM (global)
-grype                       0        1        0        1        0        0       <1ms          2 FAILED   MEDIUM (global)
+cfn-nag                     0        0        0        0        0        0      250ms          0 ERROR    MEDIUM (global)
+checkov                     0        0        1        2        1        0       7.5s          3 FAILED   MEDIUM (global)
+detect-secrets              1        0        0        0        0        0      500ms          0 PASSED   MEDIUM (global)
+grype                       0        1        0        1        0        0         3s          2 FAILED   MEDIUM (global)
 npm-audit                   0        0        0        0        0        0       <1ms          0 MISSING  MEDIUM (global)
-semgrep                     0        0        0        0        1        1       <1ms          0 PASSED   MEDIUM (global)
-syft                        0        0        0        0        0        0       <1ms          0 PASSED   MEDIUM (global)
+semgrep                     0        0        0        0        1        1         4s          0 PASSED   MEDIUM (global)
+syft                        0        0        0        0        0        0         2s          0 PASSED   MEDIUM (global)
 
 Top 4 Hotspots:
 Files with the highest number of security findings:

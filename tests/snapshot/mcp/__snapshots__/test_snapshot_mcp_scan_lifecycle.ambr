@@ -271,12 +271,12 @@
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
-          'critical': 0,
-          'high': 0,
+          'critical': 1,
+          'high': 1,
           'info': 0,
           'low': 0,
           'medium': 0,
-          'suppressed': 0,
+          'suppressed': 1,
           'total': 3,
         }),
         'scan_stats': dict({
@@ -1165,12 +1165,12 @@
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
-          'critical': 0,
-          'high': 0,
+          'critical': 1,
+          'high': 1,
           'info': 0,
           'low': 0,
           'medium': 0,
-          'suppressed': 0,
+          'suppressed': 1,
           'total': 3,
         }),
         'scan_stats': dict({
@@ -1431,7 +1431,7 @@
           'info': 0,
           'low': 0,
           'medium': 0,
-          'suppressed': 1,
+          'suppressed': 0,
         }),
         'skipped': 0,
         'suppressed': 0,
@@ -1455,12 +1455,12 @@
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
-          'critical': 0,
-          'high': 0,
+          'critical': 1,
+          'high': 1,
           'info': 0,
           'low': 0,
           'medium': 0,
-          'suppressed': 0,
+          'suppressed': 1,
           'total': 3,
         }),
         'scan_stats': dict({
@@ -1533,12 +1533,12 @@
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
-          'critical': 0,
-          'high': 0,
+          'critical': 1,
+          'high': 1,
           'info': 0,
           'low': 0,
           'medium': 0,
-          'suppressed': 0,
+          'suppressed': 1,
           'total': 3,
         }),
         'scan_stats': dict({
@@ -1596,7 +1596,7 @@
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
-          'critical': 0,
+          'critical': 1,
           'high': 0,
           'info': 0,
           'low': 0,

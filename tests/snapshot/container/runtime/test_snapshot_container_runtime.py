@@ -251,13 +251,11 @@ def test_powershell_wrapper_without_a_runner(snapshot, in_tmp):
 
 
 def test_powershell_wrapper_default_runner_discovery(snapshot, fixture_repo, in_tmp):
-    # No -OCIRunner and no ASH_OCI_RUNNER. Invoke-ASH means to try docker, finch,
-    # nerdctl and podman in turn, and every leg running this has at least one of
-    # them; -NoRun stops before it would be used, so the record is the same on all.
-    # MEASURED: it never gets that far. The parameter is a [string] defaulting to
-    # $env:ASH_OCI_RUNNER, which PowerShell turns into "" rather than $null, so the
-    # `$null -ne $OCIRunner` test picks the one-element list @("") and Get-Command
-    # rejects the empty name.
+    # No -OCIRunner and no ASH_OCI_RUNNER. Invoke-ASH tries docker, finch, nerdctl
+    # and podman in turn, and every leg running this has at least one of them;
+    # -NoRun stops before it would be used, so the record is the same on all. The
+    # parameter is a [string] defaulting to $env:ASH_OCI_RUNNER, which PowerShell
+    # binds as "" rather than $null; the wrapper treats that empty value as unset.
     env = _wrapper_env()
     env.pop("ASH_OCI_RUNNER", None)
     result = _pwsh(

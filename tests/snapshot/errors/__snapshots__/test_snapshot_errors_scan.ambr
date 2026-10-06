@@ -31,15 +31,11 @@
 # name: TestArgumentRefusals.test_nonexistent_source_dir
   dict({
     'exit_code': 1,
-    'stderr': '',
-    'stdout': '''
-      [<LOG_TIME>] ERROR    probe: the scan reached the orchestrator with source_dir 'does-not-exist' (relative to the working directory), which exists=False
-                            <TRACEBACK>
-                            RuntimeError: probe: the scan reached the orchestrator with source_dir 'does-not-exist' (relative to the working directory), which exists=False
-      ERROR (1) Exiting due to exception during ASH scan: probe: the scan reached the orchestrator with
-      source_dir 'does-not-exist' (relative to the working directory), which exists=False
+    'stderr': '''
+      Source directory does not exist: does-not-exist. Check --source-dir (or ASH_SOURCE_DIR).
   
     ''',
+    'stdout': '',
   })
 # ---
 # name: TestArgumentRefusals.test_unknown_subcommand
@@ -59,9 +55,11 @@
 # name: TestArgumentRefusals.test_use_existing_without_results
   dict({
     'exit_code': 1,
-    'stderr': '',
+    'stderr': '''
+      --use-existing was given, but there are no existing results to use: out/ash_aggregated_results.json does not exist. Run a scan first, or point --output-dir at the output of a previous one.
+  
+    ''',
     'stdout': '',
-    'uncaught_exception': 'ValueError: ash_aggregated_results.json not found in output directory at out/ash_aggregated_results.json',
   })
 # ---
 # name: TestCliJsonInputRefusals.test_duplicate_key

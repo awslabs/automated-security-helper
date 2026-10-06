@@ -58,8 +58,8 @@
 # ---
 # name: test_powershell_wrapper_default_runner_discovery
   dict({
-    'exit_code': 1,
-    'first_error_line': "Invoke-ASH: Cannot validate argument on parameter 'Name'. The argument is null, empty, or an element of the argument collection contains a null value. Supply a collection that does not contain any null values and then try the command again.",
+    'exit_code': 0,
+    'first_error_line': '',
   })
 # ---
 # name: test_powershell_wrapper_scan_of_the_fixture

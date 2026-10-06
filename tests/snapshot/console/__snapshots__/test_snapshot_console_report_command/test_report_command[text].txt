@@ -41,21 +41,21 @@ Scanner              Suppressed Critical     High   Medium      Low     Info   D
 Result   Threshold
 -------------------- -------- -------- -------- -------- -------- -------- ---------- ----------
 -------- ---------------
-bandit                      1        0        1        2        1        0       <1ms          3
+bandit                      1        0        1        2        1        0      12.5s          3
 FAILED   MEDIUM (global)
-cdk-nag                     0        0        0        0        0        0       <1ms          0
+cdk-nag                     0        0        0        0        0        0         7s          0
 PASSED   MEDIUM (global)
-checkov                     0        0        0        0        2        1       <1ms          0
+checkov                     0        0        0        0        2        1      500ms          0
 PASSED   MEDIUM (global)
-detect-secrets              0        0        0        0        0        0       <1ms          0
+detect-secrets              0        0        0        0        0        0      250ms          0
 SKIPPED  MEDIUM (global)
 grype                       0        0        0        0        0        0       <1ms          0
 MISSING  MEDIUM (global)
-npm-audit                   0        0        0        0        0        0       <1ms          0
+npm-audit                   0        0        0        0        0        0         1s          0
 ERROR    MEDIUM (global)
-opengrep                    0        0        1        0        0        0       <1ms          0
+opengrep                    0        0        1        0        0        0     1m 35s          0
 PASSED   CRITICAL (config)
-semgrep                     2        1        0        0        0        2       <1ms          1
+semgrep                     2        1        0        0        0        2        48s          1
 FAILED   MEDIUM (global)
 syft                        0        0        0        0        0        0       <1ms          0
 SKIPPED  MEDIUM (global)

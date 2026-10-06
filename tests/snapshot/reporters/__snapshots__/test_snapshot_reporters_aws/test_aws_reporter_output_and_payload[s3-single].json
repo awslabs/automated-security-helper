@@ -1,1 +1,7 @@
-s3://snapshot-fixture-reports/ash-reports/ash-report-None.json
+{
+  "url": "s3://snapshot-fixture-reports/ash-reports/ash-report-2026-01-15T12:00:00+00:00.json",
+  "bucket": "snapshot-fixture-reports",
+  "key": "ash-reports/ash-report-2026-01-15T12:00:00+00:00.json",
+  "file_format": "json",
+  "local_copy": "<TMP>/ash_output/reports/s3-report.json"
+}

@@ -1,3 +1,37 @@
 $ ash report --format spdx --log-level ERROR
-[exit 1]
-Error generating report: Expecting value: line 1 column 1 (char 0)
+[exit 0]
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "ASH ASH SBOM",
+  "documentNamespace": "https://github.com/awslabs/automated-security-helper/spdx/ASH-<UUID>",
+  "creationInfo": {
+    "created": "2026-01-15T12:00:00Z",
+    "creators": [
+      "Tool: automated-security-helper-<ASH_VERSION>"
+    ]
+  },
+  "documentDescribes": [
+    "SPDXRef-RootPackage"
+  ],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-RootPackage",
+      "name": "ASH",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "SOURCE"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-RootPackage"
+    }
+  ]
+}

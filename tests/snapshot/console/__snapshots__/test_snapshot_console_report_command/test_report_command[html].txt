@@ -163,7 +163,7 @@ threshold</li>
                 <td>2</td>
                 <td>1</td>
                 <td>0</td>
-                <td><1ms</td>
+                <td>12.5s</td>
                 <td class="status-failed">3</td>
                 <td class="status-failed">FAILED</td>
                 <td>MEDIUM (global)</td>
@@ -177,7 +177,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><1ms</td>
+                <td>7s</td>
                 <td class="status-passed">0</td>
                 <td class="status-passed">PASSED</td>
                 <td>MEDIUM (global)</td>
@@ -191,7 +191,7 @@ threshold</li>
                 <td>0</td>
                 <td>2</td>
                 <td>1</td>
-                <td><1ms</td>
+                <td>500ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-passed">PASSED</td>
                 <td>MEDIUM (global)</td>
@@ -205,7 +205,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><1ms</td>
+                <td>250ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-skipped">SKIPPED</td>
                 <td>MEDIUM (global)</td>
@@ -233,7 +233,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><1ms</td>
+                <td>1s</td>
                 <td class="status-passed">0</td>
                 <td class="status-error">ERROR</td>
                 <td>MEDIUM (global)</td>
@@ -247,7 +247,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td><1ms</td>
+                <td>1m 35s</td>
                 <td class="status-passed">0</td>
                 <td class="status-passed">PASSED</td>
                 <td>CRITICAL (config)</td>
@@ -261,7 +261,7 @@ threshold</li>
                 <td>0</td>
                 <td>0</td>
                 <td>2</td>
-                <td><1ms</td>
+                <td>48s</td>
                 <td class="status-failed">1</td>
                 <td class="status-failed">FAILED</td>
                 <td>MEDIUM (global)</td>

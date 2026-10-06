@@ -21,8 +21,8 @@ Run at ``--log-level ERROR``, which keeps ASH's INFO and WARNING log lines out o
 document. Those lines go to the same stdout, and they cannot be pinned: rich's log handler
 prints the wall-clock time on a line only when the second has changed since the previous
 line, so whether a line starts with a timestamp or with blanks depends on where a second
-boundary fell during the run. The cost is that the SPDX reporter's "is a stub" WARNING, which
-an operator at the default level sees, is not covered here.
+boundary fell during the run. The cost is that a reporter's WARNING, which an operator at
+the default level sees, is not covered here.
 
 The clock is pinned (``pinned_clock``, at ``REPORT_RENDERED_AT``) in every module that
 stamps "now" into a report: ``FlatVulnerability.detected_at`` in every CSV, flat-JSON and
@@ -31,11 +31,6 @@ YAML row, the text and markdown reporters' "generated" line, the HTML footer and
 long enough that rich folds them at 100 columns in the middle of the timestamp, so no
 masking rule could even find them. Pinned, each is a value a user reads and the snapshot
 shows it as written.
-
-Two of these snapshots record failures, deliberately: ``spdx`` exits 1 because its YAML is
-handed to ``print_json``, and ``junitxml`` exits 1 because ``report_command`` assigns the
-plugin-config dict to ``reporter_plugin.config``. They are what the command prints today;
-fixing either is a change to this output and should update the snapshot with it.
 """
 
 from __future__ import annotations

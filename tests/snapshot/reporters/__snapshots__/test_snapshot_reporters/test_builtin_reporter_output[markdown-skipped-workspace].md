@@ -31,7 +31,6 @@ The table below shows findings by scanner, with status based on severity thresho
   - **Medium (M)**: Moderate risk findings
   - **Low (L)**: Lower risk findings
   - **Info (I)**: Informational findings with minimal risk
-- **Duration (Time)**: Time taken by the scanner to complete its execution
 - **Actionable**: Number of findings at or above the threshold severity level that require attention
 - **Result**:
   - **PASSED** = No findings at or above threshold
