@@ -1434,3 +1434,42 @@ def test_the_matched_code_is_the_region_snippet():
     )
     region = converted.results[0].locations[0].physicalLocation.root.region
     assert "eval(Buffer.from(" in region.snippet.text
+
+
+def test_a_rule_list_that_parses_to_nothing_fails_that_ecosystem(tmp_path, fake):
+    """A reformatted list-rules table must not silently drop the exclusions."""
+    repo = _repo(tmp_path)
+    fake.overrides[("go", "list-rules")] = {
+        "returncode": 0,
+        "stdout": "Rule name\nnothing here\n",
+    }
+    scanner = _scanner(
+        repo, tmp_path, ecosystems=["go", "npm"], exclude_rules=["typosquatting"]
+    )
+    with pytest.raises(
+        ScannerError, match="go scan of go_suspicious: could not list its rules"
+    ):
+        scanner.scan(target=repo, target_type="source")
+    assert {c[1] for c in fake.calls if c[2] == "scan"} == {"npm"}
+    # The go package root counts as attempted and failed; the two npm roots ran.
+    assert (scanner.targets_attempted, scanner.targets_failed) == (3, 1)
+
+
+def test_an_unknown_rule_with_nothing_run_says_the_configuration_is_unusable(
+    tmp_path, fake
+):
+    repo = tmp_path / "src"
+    shutil.copytree(FIXTURE_REPO / "go_suspicious", repo / "go_suspicious")
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"], rules=["no-such-rule"])
+    with pytest.raises(ScannerError, match="configuration is not usable.*no-such-rule"):
+        scanner.scan(target=repo, target_type="source")
+
+
+def test_metadata_only_rules_warn_that_a_local_scan_checks_nothing(
+    tmp_path, fake, caplog
+):
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["pypi"], rules=["typosquatting"])
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        scanner.scan(target=repo, target_type="source")
+    assert "only metadata rules" in caplog.text

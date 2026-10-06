@@ -144,6 +144,24 @@ _VERIFY_MANIFESTS: Dict[str, Tuple[str, ...]] = {
     "crates": ("Cargo.lock",),
 }
 
+#: GuardDog's metadata rules at the pinned version (``analyzer/metadata``). They
+#: read registry metadata, which a local ``scan`` of a directory does not have, so a
+#: ``rules`` selection made only of these checks nothing there. Used for a warning.
+_METADATA_ONLY_HINT = frozenset(
+    {
+        "bundled_binary",
+        "deceptive_author",
+        "direct_url_dependency",
+        "metadata_mismatch",
+        "potentially_compromised_email_domain",
+        "provenance_regression",
+        "repository_integrity_mismatch",
+        "risky_new_dependency",
+        "typosquatting",
+        "unclaimed_maintainer_email_domain",
+    }
+)
+
 #: Rule names as GuardDog spells them. Checked before they reach argv so a
 #: configured value can never be read as an option (``--metadata=...``).
 _RULE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -962,6 +980,14 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 if not selected:
                     self._skip_ecosystems.add(ecosystem)
                     continue
+                if all(r in _METADATA_ONLY_HINT for r in selected):
+                    self._plugin_log(
+                        f"options.rules selects only metadata rules for {ecosystem} "
+                        f"({', '.join(selected)}). GuardDog evaluates metadata rules "
+                        "on a local scan only when given package metadata, so the "
+                        "local scan checks nothing; they do run under options.verify.",
+                        level=logging.WARNING,
+                    )
                 for rule in selected:
                     args.extend(["--rules", rule])
             for rule in self._opts.exclude_rules:
@@ -1386,9 +1412,12 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             # check, so the run is not a clean scan however many others succeeded --
             # the same reasoning as cfn_nag_scanner's unrendered templates. Raised
             # after the report is on disk so the findings that were produced are kept.
-            raise ScannerError(
-                f"GuardDog did not complete {self.targets_failed} of "
-                f"{self.targets_attempted} target(s), so this run is not a clean "
-                f"scan: {' | '.join(failures)}"
-            )
+            if self.targets_failed:
+                summary = (
+                    f"GuardDog did not complete {self.targets_failed} of "
+                    f"{self.targets_attempted} target(s), so this run is not a clean scan"
+                )
+            else:
+                summary = "GuardDog's configuration is not usable, so this run is not a clean scan"
+            raise ScannerError(f"{summary}: {' | '.join(failures)}")
         return report
