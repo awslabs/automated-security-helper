@@ -376,8 +376,8 @@ jobs:
         run: uv run --group dev pytest tests/unit/test_vscode_coverage_parity.py -q --no-cov -p no:cacheprovider
 
   # Structural snapshots of what the extension shows a user, and the rules that make
-  # changing one a decision: a changed or new snapshot fails (jest runs with `ci: true`
-  # and --ci), an obsolete one fails (jest --ci exits 1 on an unchecked snapshot or an
+  # changing one a decision: a changed or new snapshot fails (jest runs with --ci),
+  # an obsolete one fails (jest --ci exits 1 on an unchecked snapshot or an
   # obsolete .snap file, measured), a snapshot or PNG no test owns fails (--orphans),
   # and a commit in this push or pull request that changed one without a
   # `Snapshot-Update: <reason>` trailer fails. Nothing here passes an update flag;
@@ -385,7 +385,9 @@ jobs:
   # editors/vscode/test/visual/README.md.
   #
   # The trailer range is the event's: before..after on a push, fork point..head on a
-  # pull request. fetch-depth: 0 because both ends have to be in the clone.
+  # pull request. A push that creates a branch, or force-pushes over a tip the clone
+  # does not have, is checked from its merge base with the default branch.
+  # fetch-depth: 0 because both ends have to be in the clone.
   editor-snapshots:
     name: "snapshots: structural, Snapshot-Update trailers, orphans"
     runs-on: ubuntu-latest
