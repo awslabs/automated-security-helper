@@ -25,7 +25,9 @@ Decisions, and why
    ignore rules. ASH instead takes every ``*.yml``/``*.yaml`` file whose parent
    directory is ``.github/workflows`` from the scan set, which applies ``.gitignore``
    and ``.ignore`` files, then drops ``global_settings.ignore_paths`` matches and
-   anything under ASH's own output directory. ``--`` ends the flags, so a path that
+   anything under ASH's own output directory. A workflow that is a symlink resolving
+   outside the scan root is skipped with a warning, because actionlint follows it and
+   copies its lines into the report. ``--`` ends the flags, so a path that
    begins with ``-`` is read as a file. A scan root with no workflow files does not
    run actionlint at all and reports SKIPPED ("evaluated nothing"), not PASSED.
 
@@ -35,7 +37,8 @@ Decisions, and why
    depend on what happens to be installed on the host. ASH passes ``-shellcheck=``
    and ``-pyflakes=`` (the documented way to disable them) unless the operator sets
    ``options.shellcheck`` / ``options.pyflakes`` to a command name or path. When one
-   is set and cannot be found, the scanner reports MISSING instead of running
+   is set and cannot be found or is not executable, the scanner reports MISSING
+   instead of running
    without it, so an enabled integration is never skipped quietly either.
 
 3. The config file is always explicit. actionlint discovers
@@ -87,6 +90,12 @@ severity gate separates exploitable workflow defects from lint:
 With ASH's default threshold (MEDIUM) a workflow with only lint findings passes and one
 with script injection fails.
 
+A ``credentials`` finding's snippet is the hard-coded password, so it is left out of
+the SARIF; the location still points at the line.
+
+A binary whose reported version differs from the pin (a nix or PATH install) runs,
+with a warning, since the kinds and messages the mapping keys on may differ.
+
 Overlap with zizmor
 -------------------
 zizmor also audits workflows, including template injection. If ASH's zizmor scanner
@@ -107,6 +116,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional
 
@@ -129,6 +139,10 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
+
+#: The version the severity mapping below was written against.
+PINNED_VERSION = TOOL_VERSIONS["actionlint"]
 
 #: The checks reference for the pinned release, used as every rule's helpUri.
 ACTIONLINT_CHECKS_URL = (
@@ -308,7 +322,9 @@ def build_sarif(payload: Any, exit_code: int) -> Dict[str, Any]:
                 # column after the last character.
                 region["endColumn"] = end_column + 1
         snippet = error.get("snippet")
-        if isinstance(snippet, str) and snippet:
+        # A credentials finding's snippet is the hard-coded password itself, so it
+        # is not copied into the report.
+        if isinstance(snippet, str) and snippet and kind != "credentials":
             region["snippet"] = {"text": snippet}
 
         results.append(
@@ -438,7 +454,15 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             configured = str(configured).strip()
             candidate = Path(configured)
             if candidate.is_absolute() or len(candidate.parts) > 1:
-                resolved[flag] = candidate.as_posix() if candidate.is_file() else None
+                # Relative to the source directory, and handed to actionlint as an
+                # absolute path because actionlint runs with the scan target as
+                # its working directory. A file that is not executable counts as
+                # absent: actionlint would otherwise drop the integration silently.
+                if not candidate.is_absolute():
+                    candidate = Path(self.context.source_dir) / candidate
+                candidate = candidate.absolute()
+                usable = candidate.is_file() and os.access(candidate, os.X_OK)
+                resolved[flag] = candidate.as_posix() if usable else None
             else:
                 resolved[flag] = find_executable(configured)
         return resolved
@@ -482,6 +506,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             )
 
         target_abs = Path(target).absolute()
+        target_real = Path(target).resolve()
         output_abs = Path(self.context.output_dir).absolute()
         relative: List[str] = []
         for item in candidates:
@@ -494,8 +519,18 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             if target_type != "converted" and path.is_relative_to(output_abs):
                 continue
             rel = path.relative_to(target_abs).as_posix()
-            if is_workflow_file(rel):
-                relative.append(rel)
+            if not is_workflow_file(rel):
+                continue
+            # A symlinked workflow is followed by actionlint, which copies the
+            # target's lines into the SARIF snippet. Only pass files whose real
+            # path is inside the real scan root.
+            if not path.resolve().is_relative_to(target_real):
+                self._plugin_log(
+                    f"Not linting {rel}: it resolves outside the scan root.",
+                    level=logging.WARNING,
+                )
+                continue
+            relative.append(rel)
 
         if global_ignore_paths:
             from automated_security_helper.utils.suppression_matcher import (
@@ -653,6 +688,15 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
             sarif_dict = build_sarif(payload, self.exit_code)
             self.tool_version = sarif_dict["runs"][0]["tool"]["driver"]["version"]
+            if self.tool_version.lstrip("v") != PINNED_VERSION.lstrip("v"):
+                self._plugin_log(
+                    f"actionlint {self.tool_version} is not the pinned "
+                    f"{PINNED_VERSION}. The severity mapping matches rule kinds and "
+                    "message text from the pinned version, so findings from this "
+                    "version may be classified differently.",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                )
             sarif_report = SarifReport.model_validate(sarif_dict)
             self._inject_invocation(sarif_report, final_args, target)
             (results_dir / "actionlint.sarif").write_text(

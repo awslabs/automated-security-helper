@@ -31,7 +31,7 @@ The pinned version and digests are in `automated_security_helper/utils/tool_down
 
 ## What is scanned
 
-ASH passes actionlint every `*.yml` / `*.yaml` file whose parent directory is `.github/workflows`, at any depth, taken from the scan set. Files excluded by `.gitignore`, `.ignore` or `global_settings.ignore_paths`, and anything under ASH's output directory, are not passed. Other YAML is never linted.
+ASH passes actionlint every `*.yml` / `*.yaml` file whose parent directory is `.github/workflows`, at any depth, taken from the scan set. Files excluded by `.gitignore`, `.ignore` or `global_settings.ignore_paths`, and anything under ASH's output directory, are not passed. A workflow that is a symlink pointing outside the scan root is skipped with a warning. Other YAML is never linted.
 
 If the scan root has no workflow files, actionlint does not run and the scanner reports `SKIPPED` (it evaluated nothing). A scan that selects only actionlint (`--scanners actionlint`) on such a tree therefore exits 1 with "Scan ran no scanners".
 
@@ -65,7 +65,7 @@ If the config has `paths.<glob>.ignore` patterns, actionlint drops matching find
 
 actionlint runs `shellcheck` on `run:` scripts and `pyflakes` on `shell: python` steps when they are on `PATH`, and skips them silently when they are not. Results would then depend on what a host happens to have installed, so ASH disables both by default (`-shellcheck= -pyflakes=`).
 
-To use them, set the option to a command name (looked up on `PATH` and in ASH's bin directory) or a path. If the configured tool cannot be found, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
+To use them, set the option to a command name (looked up on `PATH` and in ASH's bin directory) or a path. A relative path is resolved against the source directory. If the configured tool cannot be found or is not executable, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
 
 ## Severity mapping
 
@@ -77,7 +77,7 @@ actionlint has no severity of its own; its upstream SARIF template marks everyth
 | MEDIUM | `warning` | `if-cond` (an `if:` that is always true), `permissions`, and `deprecated-commands` for `set-env` / `add-path` |
 | LOW | `note` | everything else: `syntax-check`, other `expression` errors, `action`, `runner-label`, `job-needs`, `glob`, `matrix`, `events`, `id`, `env-var`, `shell-name`, `workflow-call`, `set-output` / `save-state` deprecations, `shellcheck`, `pyflakes` |
 
-A kind not in this table (a newer actionlint) is LOW and logged once. With the default MEDIUM threshold, lint-only findings do not fail a scan and script injection does.
+A kind not in this table (a newer actionlint) is LOW and logged once. A binary whose version differs from the pin runs with a warning, since the mapping keys on kinds and message text of the pinned release. The snippet of a `credentials` finding (the password itself) is not copied into the report. With the default MEDIUM threshold, lint-only findings do not fail a scan and script injection does.
 
 ## Suppressions
 

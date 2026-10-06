@@ -22,7 +22,7 @@ To recapture after a version bump, run from the fixture repo::
       .github/workflows/vulnerable.yml > ../actionlint-<version>-default.json
 
 The subprocess is replaced in these tests; the real binary runs in
-``tests/integration/scanners/test_actionlint_scanner.py``.
+``tests/integration/scanners/test_actionlint_real_binary.py``.
 """
 
 from __future__ import annotations
@@ -30,7 +30,9 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -725,3 +727,98 @@ def test_path_suppression_for_another_file_suppresses_nothing(default_report, tm
         )
         == []
     )
+
+
+# --------------------------------------------------------------------------- #
+# Review findings: confinement, integrations, exit codes, secrets, versions
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+def test_a_workflow_symlinked_outside_the_root_is_not_passed(
+    repo, tmp_path, monkeypatch, on_path
+):
+    outside = tmp_path / "outside.yml"
+    outside.write_text("on: push\n")
+    (repo / ".github" / "workflows" / "leak.yml").symlink_to(outside)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    files = argv[argv.index("--") + 1 :]
+    assert ".github/workflows/leak.yml" not in files
+    assert files == [".github/workflows/clean.yml", ".github/workflows/vulnerable.yml"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_a_relative_integration_path_is_resolved_against_the_source_dir(
+    repo, monkeypatch, on_path
+):
+    tool = repo / "tools" / "shellcheck"
+    tool.parent.mkdir()
+    tool.write_text("#!/bin/sh\n")
+    tool.chmod(0o755)
+    scanner = _scanner(repo, shellcheck="tools/shellcheck")
+    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert f"-shellcheck={tool.absolute().as_posix()}" in argv
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_a_non_executable_integration_path_is_missing(repo, monkeypatch, on_path):
+    tool = repo / "tools" / "shellcheck"
+    tool.parent.mkdir()
+    tool.write_text("not executable\n")
+    tool.chmod(0o644)
+    assert not os.access(tool, os.X_OK)
+    scanner = _scanner(repo, shellcheck=tool.as_posix())
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert "shellcheck" in scanner.dependency_unavailable_reason
+
+
+@pytest.mark.parametrize("returncode", [2, 3])
+def test_a_failing_exit_code_raises_even_with_valid_json(
+    repo, monkeypatch, on_path, returncode
+):
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', returncode)
+
+    with pytest.raises(ScannerError, match=f"exited {returncode}"):
+        scanner.scan(target=repo, target_type="source")
+
+
+def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
+    sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
+    credentials = sarif["runs"][0]["results"][0]
+    assert credentials["ruleId"] == "credentials"
+    region = credentials["locations"][0]["physicalLocation"]["region"]
+    assert "snippet" not in region
+    assert "hunter2" not in json.dumps(sarif)
+
+
+def test_a_version_other_than_the_pin_is_warned_about(
+    repo, monkeypatch, on_path, caplog
+):
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, '{"version":"1.6.0","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    assert any("not the pinned v1.7.12" in r.getMessage() for r in caplog.records)
+
+
+def test_the_pinned_version_is_not_warned_about(repo, monkeypatch, on_path, caplog):
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    assert not any("not the pinned" in r.getMessage() for r in caplog.records)
