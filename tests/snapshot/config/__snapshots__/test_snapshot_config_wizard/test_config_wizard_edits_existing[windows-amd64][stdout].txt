@@ -19,6 +19,7 @@ Scanner configuration
 │ opengrep       │        no         │
 │ semgrep        │        no         │
 │ syft           │        yes        │
+│ zizmor         │        no         │
 └────────────────┴───────────────────┘
   Enable bandit? [y/N]:
   Enable cdk-nag? [Y/n]:
@@ -30,6 +31,7 @@ Scanner configuration
   Enable opengrep? [y/N]:
   Enable semgrep? [y/N]:
   Enable syft? [Y/n]:
+  Enable zizmor? [y/N]:
 
 Output format configuration
               Output Formats

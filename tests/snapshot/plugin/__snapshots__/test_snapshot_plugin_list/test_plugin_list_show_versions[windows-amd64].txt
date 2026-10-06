@@ -1,5 +1,5 @@
 $ ash plugin list --show-versions
-[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
 ASH Scanners
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Enabled ┃ Class          ┃ Module         ┃ Version ┃ Reachable ┃ Plugin Config ┃
@@ -23,6 +23,8 @@ ASH Scanners
 │ semgrep        │ False   │ SemgrepScanner │ automated_sec… │ 1.139.0 │ Unknown   │               │
 ├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
 │ syft           │ True    │ SyftScanner    │ automated_sec… │ 1.33.0  │ No        │               │
+├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
+│ zizmor         │ False   │ ZizmorScanner  │ automated_sec… │ Unknown │ Unknown   │               │
 └────────────────┴─────────┴────────────────┴────────────────┴─────────┴───────────┴───────────────┘
 ASH Converters
 ┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓

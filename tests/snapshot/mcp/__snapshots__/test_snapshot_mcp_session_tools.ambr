@@ -368,7 +368,7 @@
               config:     ASH default config
               threshold:  MEDIUM
               scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              pins:       bandit >=1.7.0,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
@@ -377,7 +377,7 @@
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
               scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              pins:       bandit >=1.7.0,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone
               label:      gone
@@ -386,7 +386,7 @@
               config:     ASH default config
               threshold:  MEDIUM
               scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              pins:       bandit >=1.7.0,<2.0.0, zizmor >=1.29.0,<2.0.0
         
         Nothing has been scanned. This is a resolution and validation pass only.
       ''',
@@ -513,7 +513,7 @@
               config:     ASH default config
               threshold:  MEDIUM
               scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              pins:       bandit >=1.7.0,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
@@ -522,7 +522,7 @@
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
               scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              pins:       bandit >=1.7.0,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone  [skipped: error]
               label:      gone
