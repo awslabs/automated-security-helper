@@ -77,6 +77,7 @@ jobs:
       - name: Unit tests for the e2e contract
         run: >-
           uv run --group dev pytest tests/unit/test_e2e_assert_outcome.py
+          tests/unit/test_e2e_container_guards.py
           -p no:cacheprovider -o addopts="" -v
 
   wheel:

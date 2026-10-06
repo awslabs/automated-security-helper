@@ -17,10 +17,15 @@
 #                  ash-e2e-container:local). CI makes it unique per run. Two tags are
 #                  derived from it, <prefix>-fresh and <prefix>-upgrade, and both are
 #                  removed at the end.
+#   E2E_PRUNE_BUILD_CACHE  1 runs `docker builder prune` after each image is done with,
+#                  to keep a hosted runner's disk from filling. Default 1 on GitHub
+#                  Actions, 0 elsewhere: the build cache is the host's, not this run's.
 #
 # 1. Exports head and N-1 with `git archive` and lowers N-1's [project] version the way
-#    wheel.sh does, so the upgrade crosses a version change and a code change. Builds
-#    both wheels. Container mode is driven by a host `ashx`, so an install of this
+#    wheel.sh does, and appends a fixed marker line to N-1's
+#    automated_security_helper/__init__.py, so the upgrade crosses a version change and
+#    a code change even when N-1's package is HEAD's (any commit that touches only
+#    packaging, editors or workflows, and the merge of one). Builds both wheels. Container mode is driven by a host `ashx`, so an install of this
 #    channel is a host CLI plus the image it builds; the head wheel goes into a fresh
 #    host venv for step 2.
 # 2. Fresh install: requires the fresh tag to be absent, runs `ashx build-image --no-run
@@ -28,7 +33,9 @@
 #    byte for byte (scripts/e2e/image_provenance.py) and reports head's version. Then the
 #    three cases from tests/e2e/fixtures/cases.json through scripts/e2e/run_case.py with
 #    `--mode container --no-build`: findings (exit 2, 3 findings), clean (exit 0) and
-#    incomplete (exit 1, opengrep MISSING).
+#    incomplete (exit 1, opengrep MISSING). Then the negative controls that need this
+#    image (4), and the fresh tag is removed before N-1 is built, so at most two full
+#    images share the disk.
 # 3. Upgrade: installs the N-1 wheel into a second venv and has that CLI build N-1
 #    under the upgrade tag. Proves the image is N-1 (its code is not head's, which is
 #    also the provenance check's negative control) and scans findings with N-1's CLI.
@@ -39,8 +46,9 @@
 # 4. Negative controls, each seen failing: findings with --no-fail-on-findings fails on
 #    its exit code; the clean output judged as a findings outcome fails; the
 #    image-absence check fails while the images exist.
-# 5. Uninstall: `docker rmi` both tags and the N-1 image the upgrade left behind, then
-#    requires `docker image inspect` to fail for each.
+# 5. Uninstall: `docker rmi` the upgrade tag and the N-1 image the upgrade left behind
+#    (the fresh tag went in step 2), then requires `docker image inspect` to fail for
+#    each.
 #
 # WHY THE INCOMPLETE CASE GETS --offline HERE
 #
@@ -78,14 +86,32 @@ say() { printf '== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 harness() { uv run --no-project --python "$PYTHON" python "$@"; }
 
+if [ -n "${E2E_PRUNE_BUILD_CACHE:-}" ]; then
+  PRUNE_BUILD_CACHE="$E2E_PRUNE_BUILD_CACHE"
+elif [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  PRUNE_BUILD_CACHE=1
+else
+  PRUNE_BUILD_CACHE=0
+fi
+
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 
 image_id() { "$OCI" image inspect --format '{{.Id}}' "$1"; }
 image_size() { "$OCI" image inspect --format '{{.Size}}' "$1" | awk '{ printf "%.2f GB", $1 / 1e9 }'; }
 
-# Two full images share a hosted runner's disk at the peak, so each build records what
-# it left free. A run that dies of ENOSPC then says so in its own log.
+prune_build_cache() {
+  if [ "$PRUNE_BUILD_CACHE" = "1" ]; then
+    say "pruning the build cache after $1"
+    "$OCI" builder prune --force >/dev/null
+  else
+    say "keeping the host's build cache after $1 (E2E_PRUNE_BUILD_CACHE=$PRUNE_BUILD_CACHE)"
+  fi
+}
+
+# Two full images share a hosted runner's disk at the peak (N-1, untagged, and the head
+# rebuilt over it), so each build records what it left free. A run that dies of ENOSPC
+# then says so in its own log.
 disk_report() {
   local root
   root="$("$OCI" info --format '{{.DockerRootDir}}')"
@@ -170,10 +196,15 @@ if [ "$(tree_of "$PREV_SHA")" = "$(tree_of HEAD)" ]; then
   [ "$(tree_of "$PREV_SHA")" != "$(tree_of HEAD)" ] \
     || fail "HEAD's first parent has HEAD's tree too; there is no code change to upgrade across"
 fi
-# The upgrade is only an upgrade of the image if the package code differs.
+# N-1's package often equals HEAD's: a branch that touches only packaging, editors or
+# workflows, and the merge of one. The marker below gives N-1 code of its own
+# either way, so the provenance checks can always tell the two images apart.
 if git -C "$REPO" diff --quiet "$PREV_SHA" HEAD -- automated_security_helper; then
-  fail "N-1 ($PREV_SHA) and HEAD have the same automated_security_helper/; the provenance checks could not tell the images apart"
+  PREV_SAME_PACKAGE=yes
+else
+  PREV_SAME_PACKAGE=no
 fi
+PREV_MARKER="# e2e N-1 build"
 
 SRC_HEAD="$WORK/src-head"
 SRC_PREV="$WORK/src-prev"
@@ -201,7 +232,15 @@ if needle not in text:
 open(path, "w", encoding="utf-8", newline="").write(text.replace(needle, f'\nversion = "{new}"\n', 1))
 PY
 [ "$PREV_VERSION" != "$VERSION" ] || fail "N-1 version equals head's ($VERSION)"
-say "N = $VERSION at $HEAD_SHA; N-1 = $PREV_VERSION from $PREV_REF ($PREV_SHA)"
+# The same idea as the version: N-1's code is changed by a fixed, visible edit.
+PREV_INIT="$SRC_PREV/automated_security_helper/__init__.py"
+[ -f "$PREV_INIT" ] || fail "$PREV_REF has no automated_security_helper/__init__.py"
+# Its own line even if the file lacks a final newline.
+printf '\n%s\n' "$PREV_MARKER" >>"$PREV_INIT"
+if diff -rq "$SRC_PREV/automated_security_helper" "$SRC_HEAD/automated_security_helper" >/dev/null; then
+  fail "N-1's package still equals head's after the marker"
+fi
+say "N = $VERSION at $HEAD_SHA; N-1 = $PREV_VERSION from $PREV_REF ($PREV_SHA), package same as head before the marker: $PREV_SAME_PACKAGE"
 
 # A base image that moved between N-1 and head is pulled by N-1's own digest, so the N-1
 # build is pinned too. When they agree, as usual, the build takes the base image the
@@ -259,6 +298,29 @@ run_case "$CLI" "$TAG_FRESH" findings fresh-findings
 run_case "$CLI" "$TAG_FRESH" clean fresh-clean
 run_case "$CLI" "$TAG_FRESH" incomplete fresh-incomplete --offline
 
+say "negative control: findings scanned with --no-fail-on-findings must fail the exit-code check"
+rc=0
+neg_log="$WORK/negative-no-fail-on-findings.log"
+run_case "$CLI" "$TAG_FRESH" findings negative-no-fail-on-findings --no-fail-on-findings >"$neg_log" 2>&1 || rc=$?
+cat "$neg_log"
+[ "$rc" -eq 1 ] || fail "NEGATIVE CONTROL: run_case returned $rc for a findings scan that exited 0; expected 1"
+grep -q "exit code 0 (nothing actionable), expected exactly 2" "$neg_log" \
+  || fail "NEGATIVE CONTROL: run_case rejected the --no-fail-on-findings scan, but not for its exit code 0"
+say "   OK: rejected for exit code 0 (exit $rc)"
+
+say "negative control: the clean output judged as a findings outcome must fail"
+rc=0
+harness "$REPO/scripts/e2e/assert_outcome.py" --output-dir "$WORK/scans/fresh-clean/out" --rc 0 \
+  --expect-rc 2 --min-findings 1 --require-scanner detect-secrets --selected detect-secrets || rc=$?
+[ "$rc" -eq 1 ] || fail "NEGATIVE CONTROL: assert_outcome returned $rc on a clean output expected to hold findings"
+say "   OK: rejected (exit $rc)"
+
+# Done with the fresh image. Removing it now keeps a third full image off the disk.
+"$OCI" image rm "$TAG_FRESH" >/dev/null
+assert_images_absent "$TAG_FRESH" || fail "docker image rm left $TAG_FRESH behind"
+say "removed $TAG_FRESH"
+prune_build_cache "the N build"
+
 # --------------------------------------------------------------------------
 # 3. N-1 under the upgrade tag, then N rebuilt over it.
 # --------------------------------------------------------------------------
@@ -278,6 +340,7 @@ say "build N-1 as $TAG_UPGRADE"
 build "$PREV_CLI" "$SRC_PREV" "$TAG_UPGRADE" ${PREV_BUILD_ARGS[@]+"${PREV_BUILD_ARGS[@]}"}
 PREV_ID="$(image_id "$TAG_UPGRADE")"
 disk_report "the N-1 build" "$TAG_UPGRADE"
+prune_build_cache "the N-1 build"
 provenance "$TAG_UPGRADE" "$SRC_PREV" n-1 || fail "$TAG_UPGRADE does not carry N-1's code"
 version_line="$(image_version "$TAG_UPGRADE")"
 case "$version_line" in
@@ -316,35 +379,18 @@ run_case "$UPGRADED_CLI" "$TAG_UPGRADE" findings upgrade-after
 say "upgraded $TAG_UPGRADE: $PREV_ID ($PREV_VERSION) -> $UPGRADED_ID ($VERSION)"
 
 # --------------------------------------------------------------------------
-# 4. Negative controls.
+# 4. Negative controls. The two that need the fresh image ran in step 2.
 # --------------------------------------------------------------------------
-say "negative control: findings scanned with --no-fail-on-findings must fail the exit-code check"
-rc=0
-neg_log="$WORK/negative-no-fail-on-findings.log"
-run_case "$CLI" "$TAG_FRESH" findings negative-no-fail-on-findings --no-fail-on-findings >"$neg_log" 2>&1 || rc=$?
-cat "$neg_log"
-[ "$rc" -eq 1 ] || fail "NEGATIVE CONTROL: run_case returned $rc for a findings scan that exited 0; expected 1"
-grep -q "exit code 0 (nothing actionable), expected exactly 2" "$neg_log" \
-  || fail "NEGATIVE CONTROL: run_case rejected the --no-fail-on-findings scan, but not for its exit code 0"
-say "   OK: rejected for exit code 0 (exit $rc)"
-
-say "negative control: the clean output judged as a findings outcome must fail"
-rc=0
-harness "$REPO/scripts/e2e/assert_outcome.py" --output-dir "$WORK/scans/fresh-clean/out" --rc 0 \
-  --expect-rc 2 --min-findings 1 --require-scanner detect-secrets --selected detect-secrets || rc=$?
-[ "$rc" -eq 1 ] || fail "NEGATIVE CONTROL: assert_outcome returned $rc on a clean output expected to hold findings"
-say "   OK: rejected (exit $rc)"
-
 say "negative control: the image-absence check must fail while the images exist"
 rc=0
-assert_images_absent "$TAG_FRESH" "$TAG_UPGRADE" "$PREV_ID" || rc=$?
+assert_images_absent "$TAG_UPGRADE" "$PREV_ID" || rc=$?
 [ "$rc" -ne 0 ] || fail "NEGATIVE CONTROL: the absence check passed while the e2e images exist"
 say "   OK: rejected (exit $rc)"
 
 # --------------------------------------------------------------------------
 # 5. Uninstall.
 # --------------------------------------------------------------------------
-"$OCI" image rm "$TAG_FRESH" "$TAG_UPGRADE" >/dev/null
+"$OCI" image rm "$TAG_UPGRADE" >/dev/null
 # The upgrade untagged N-1's image rather than deleting it; removing it is part of
 # uninstalling. Only when no other tag holds it, which on CI is always.
 if "$OCI" image inspect "$PREV_ID" >/dev/null 2>&1; then
