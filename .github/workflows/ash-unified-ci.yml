@@ -777,13 +777,28 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync --extra cdk --extra symbols
+      # ferret-scan is not a Python dependency of ASH. The operator-auth pin scan in
+      # tests/integration/test_operator_auth_ferret_pins_scan.py runs it, so install it
+      # against the constraint its plugin declares, read from the plugin as
+      # run-scan-test does rather than repeated here.
+      - name: Install ferret-scan
+        run: |
+          FERRET_CONSTRAINT="$(uv run python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import DEFAULT_VERSION_CONSTRAINT as c; print(c)')"
+          if [ -z "$FERRET_CONSTRAINT" ]; then
+            echo "::error::Could not read ferret-scan's declared version constraint from its ASH plugin."
+            exit 1
+          fi
+          uv pip install "ferret-scan${FERRET_CONSTRAINT}"
+          uv run ferret-scan --version
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
-      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan.
+      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
+      # and ASH_REQUIRE_FERRET_SCAN for the operator-auth pin scan.
       - name: Run the integration suite
         env:
           ASH_REQUIRE_CDK_EXTRA: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
+          ASH_REQUIRE_FERRET_SCAN: "1"
         run: |
           uv run pytest \
             tests/integration \

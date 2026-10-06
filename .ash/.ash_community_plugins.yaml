@@ -1126,6 +1126,28 @@ global_settings:
       reason: >-
         A deliberate eval, planted beside the B602 for the same e2e assertion. Same
         entry as in .ash/.ash.yaml.
+    # ferret-scan's unquoted-assignment heuristic, described in the
+    # API_KEY_OR_SECRET block near the top of this file. Each entry is pinned to
+    # the one line ferret reports, so a secret on any other line of either file is
+    # still reported. tests/unit/config/test_operator_auth_ferret_pins.py ties each
+    # range to that line's text, so an edit that moves the line fails a test
+    # instead of leaving the range on whatever moved in.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/kubernetes-operator/ash_operator/auth.py
+      line_start: 80
+      line_end: 80
+      reason: >-
+        False positive. The line assigns a local named for the bearer credential
+        from the service account file the kubelet projects into the pod. The value
+        is read at run time; nothing is hardcoded.
+    - rule_id: API_KEY_OR_SECRET
+      path: deploy/kubernetes-operator/tests/test_auth.py
+      line_start: 34
+      line_end: 34
+      reason: >-
+        False positive. The line passes a placeholder string as the token the test
+        writes into a temporary service account directory. It is a fixture value,
+        not a credential.
     # trivy-repo's RBAC rules on the operator's namespaced Role. Each verb below
     # is the operator's job, and tests/test_least_privilege.py pins the Role rule
     # for rule, so widening any of them fails there first.

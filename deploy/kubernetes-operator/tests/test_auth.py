@@ -26,17 +26,15 @@ def write_service_account(tmp_path, token="tok", ca=True, namespace="ash-system"
     return directory
 
 
-# What the bearer-token test writes into the projected file and expects back.
-PROJECTED = "the-projected-token"
 ENV = {"KUBERNETES_SERVICE_HOST": "10.96.0.1", "KUBERNETES_SERVICE_PORT": "443"}
 
 
 class TestInClusterConnection:
     def test_it_carries_the_bearer_token(self, tmp_path):
-        directory = write_service_account(tmp_path, token=PROJECTED + "\n")
+        directory = write_service_account(tmp_path, token="the-projected-token\n")
         info = in_cluster_connection(service_account_dir=directory, env=ENV)
         assert info is not None
-        assert info.token == PROJECTED
+        assert info.token == "the-projected-token"
         assert info.scheme == "Bearer"
 
     def test_it_points_at_the_api_server_from_the_environment(self, tmp_path):
