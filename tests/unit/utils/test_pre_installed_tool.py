@@ -33,6 +33,8 @@ pytestmark = pytest.mark.skipif(
 
 # uv is a runtime dependency of ASH, so its absence is a failure, not a skip.
 UV = shutil.which("uv") or "uv"
+# makeWrapper names bash by absolute path; so do these fixtures.
+BASH = shutil.which("bash") or "/bin/bash"
 
 
 @pytest.fixture(autouse=True)
@@ -204,3 +206,157 @@ def test_build_requirement_matches_the_uv_from_spec():
         build_requirement("checkov", None, ">=3.2.0,<4.0.0") == "checkov>=3.2.0,<4.0.0"
     )
     assert build_requirement("semgrep", [], None) == "semgrep"
+
+
+# --- nixpkgs-wrapped programs -------------------------------------------------
+#
+# The layouts below copy what nixpkgs builds for a Python application (checked
+# against checkov 3.3.9, bandit 1.9.4 and semgrep 1.172.0 from the flake):
+# bin/<tool> is a makeWrapper bash script that execs bin/.<tool>-wrapped, whose
+# shebang is a BARE interpreter and whose second or third line puts the
+# closure on sys.path with site.addsitedir. The interpreter here is a fresh
+# venv's python, so like Nix's it has nothing installed of its own.
+
+
+def _nix_store_path(store: Path, name: str, dists) -> str:
+    site_packages = store / name / "lib" / "python3" / "site-packages"
+    site_packages.mkdir(parents=True)
+    for dist_name, version, requires in dists:
+        _add_dist(site_packages, dist_name, version, requires)
+    return str(site_packages)
+
+
+def _nix_program(tmp_path, tool, version, closure, *, make_wrapper=True):
+    """A Nix-shaped ``tool``. ``closure`` is ``[(store_name, [(dist, ver, reqs)])]``."""
+    interpreter_root = tmp_path / "nix-python"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(interpreter_root)
+    interpreter = interpreter_root / "bin" / "python"
+
+    store = tmp_path / "store"
+    site_dirs = [_nix_store_path(store, name, dists) for name, dists in closure]
+    bin_dir = store / f"{tool}-{version}" / "bin"
+    bin_dir.mkdir(parents=True)
+
+    sitedir_list = ",".join(f"'{d}'" for d in site_dirs)
+    wrapped = bin_dir / (f".{tool}-wrapped" if make_wrapper else tool)
+    wrapped.write_text(
+        f"#!{interpreter}\n"
+        "# -*- coding: utf-8 -*-\n"
+        f"import sys;import site;import functools;sys.argv[0] = '{bin_dir / tool}';"
+        f"functools.reduce(lambda k, p: site.addsitedir(p, k), [{sitedir_list}], "
+        "site._init_pathinfo());\n"
+        f"print('{tool} {version}')\n"
+    )
+    wrapped.chmod(0o755)
+    if make_wrapper:
+        wrapper = bin_dir / tool
+        wrapper.write_text(
+            f"#! {BASH} -e\n"
+            "export PYTHONNOUSERSITE='true'\n"
+            f'exec -a "$0" "{wrapped}"  "$@" \n'
+        )
+        wrapper.chmod(0o755)
+    return bin_dir / tool, str(interpreter), site_dirs
+
+
+CHECKOV_CLOSURE = [
+    ("checkov", [("checkov", "3.3.9", ["pyyaml>=6"])]),
+    ("pyyaml", [("pyyaml", "6.0.2", [])]),
+]
+
+
+def test_a_nix_wrapped_program_is_verified_against_its_closure(tmp_path):
+    """Before: 'could not locate the Python environment', so uv ran a PyPI build."""
+    program, interpreter, site_dirs = _nix_program(
+        tmp_path, "checkov", "3.3.9", CHECKOV_CLOSURE
+    )
+
+    assert pre_installed_tool.find_nix_python_environment(str(program)) == (
+        interpreter,
+        tuple(site_dirs),
+    )
+    verdict = verify_pre_installed_tool(
+        str(program), "checkov", None, ">=3.2.0,<4.0.0", uv_executable=UV
+    )
+
+    assert verdict.status == "satisfied", verdict.detail
+    assert verdict.from_nix is True
+
+
+def test_a_nix_wrapped_program_that_is_too_old_names_the_version(tmp_path):
+    program, _, _ = _nix_program(tmp_path, "checkov", "3.3.9", CHECKOV_CLOSURE)
+
+    verdict = verify_pre_installed_tool(
+        str(program), "checkov", None, ">=3.4.0,<4.0.0", uv_executable=UV
+    )
+
+    assert verdict.status == "unsatisfied"
+    assert verdict.from_nix is True
+    assert "Nix environment" in verdict.detail
+    assert "installed checkov does not satisfy '>=3.4.0,<4.0.0'" in verdict.detail
+
+
+def test_a_nix_closure_missing_an_extra_names_the_extra(tmp_path):
+    """nixpkgs' bandit omits the sarif extra the scan's --format sarif needs."""
+    program, _, _ = _nix_program(
+        tmp_path,
+        "bandit",
+        "1.9.4",
+        [("bandit", [("bandit", "1.9.4", ['sarif-om>=1.0.4; extra == "sarif"'])])],
+    )
+
+    verdict = verify_pre_installed_tool(
+        str(program), "bandit", ["sarif"], ">=1.7.0,<2.0.0", uv_executable=UV
+    )
+
+    assert verdict.status == "unsatisfied"
+    assert verdict.missing_extras == ("sarif",)
+    assert "does not satisfy '>=1.7.0,<2.0.0'" not in verdict.detail
+
+
+def test_a_gap_deeper_in_a_nix_closure_is_not_called_a_version_mismatch(tmp_path):
+    """nixpkgs' semgrep requires pyjwt[crypto] but ships pyjwt without cryptography."""
+    program, _, _ = _nix_program(
+        tmp_path,
+        "semgrep",
+        "1.172.0",
+        [
+            ("semgrep", [("semgrep", "1.172.0", ["pyjwt[crypto]>=2.13"])]),
+            (
+                "pyjwt",
+                [("pyjwt", "2.13.0", ['cryptography>=3.4.0; extra == "crypto"'])],
+            ),
+        ],
+    )
+
+    verdict = verify_pre_installed_tool(
+        str(program), "semgrep", None, ">=1.125.0,<2.0.0", uv_executable=UV
+    )
+
+    assert verdict.status == "unsatisfied"
+    assert "does not satisfy '>=1.125.0,<2.0.0'" not in verdict.detail
+    assert "because cryptography was not found" in verdict.detail
+    assert "\x1b[" not in verdict.detail
+
+
+def test_a_nix_wrapped_script_installed_without_make_wrapper(tmp_path):
+    """No makeWrapper arguments: bin/<tool> is the python script itself."""
+    program, interpreter, _ = _nix_program(
+        tmp_path, "checkov", "3.3.9", CHECKOV_CLOSURE, make_wrapper=False
+    )
+
+    # The shebang names a bare interpreter, which is what the venv path would
+    # have used, and whose empty environment satisfies nothing.
+    assert find_tool_interpreter(str(program)) == interpreter
+    verdict = verify_pre_installed_tool(
+        str(program), "checkov", None, ">=3.2.0,<4.0.0", uv_executable=UV
+    )
+
+    assert verdict.status == "satisfied", verdict.detail
+    assert verdict.from_nix is True
+
+
+def test_a_venv_tool_is_not_mistaken_for_a_nix_program(tool_env):
+    _, _, script = tool_env
+
+    assert pre_installed_tool.find_nix_python_environment(str(script)) is None

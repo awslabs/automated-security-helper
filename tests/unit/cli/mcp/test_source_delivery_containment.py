@@ -148,7 +148,7 @@ class TestEveryUploadPathBuilderValidates:
             "upload-2",
             "upload_3",
             "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0",
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0",  # pragma: allowlist secret
             "tok==",
             "a~b",
             "a+b",

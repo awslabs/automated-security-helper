@@ -1,0 +1,29 @@
+$ ash dependencies install --bin-path bin -t scanner --tool grype --tool semgrep
+╭─ ASH Dependency Installer ──╮
+│ Installing ASH dependencies │
+│ Target bin path: bin        │
+│ Plugin types: scanner       │
+╰─────────────────────────────╯
+Getting platform and architecture
+Installing dependencies for platform: darwin, architecture: amd64
+[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+Installing dependencies for scanner plugin: grype
+Running command: python3 -c import sys; from pathlib import Path; from
+automated_security_helper.utils.download_utils import install_pinned_tool;
+install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])) grype darwin amd64 bin
+Command succeeded with exit code: 0
+Installing dependencies for scanner plugin: semgrep
+Running command: uv tool install semgrep>=1.125.0,<2.0.0
+Command succeeded with exit code: 0
+                     Dependency installation results
+┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ Plugin  ┃ Type    ┃ Tool    ┃ Cmds ┃ Failed ┃ Status    ┃ Resolved to ┃
+┡━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ grype   │ scanner │ grype   │    1 │      0 │ INSTALLED │ bin/grype   │
+│ semgrep │ scanner │ semgrep │    1 │      0 │ INSTALLED │ bin/semgrep │
+└─────────┴─────────┴─────────┴──────┴────────┴───────────┴─────────────┘
+╭─────────── Installation Complete ───────────╮
+│ Commands run: 2 (0 failed)                  │
+│ Tools verified on PATH: 2 -- grype, semgrep │
+╰─────────────────────────────────────────────╯
+[exit code: 0]

@@ -1,11 +1,61 @@
 {
-  "_comment": "Golden copy of the ASH MCP server's tools/list reply, as a real client receives it over stdio. Compared by .github/actions/validate-mcp/compare_tool_surface.py, which the validate-mcp composite action runs in CI. Read that script before editing this file: it explains which fields are normalized and why, and why regenerating rather than reading a diff is the wrong instinct. Do not hand-edit -- regenerate.",
+  "_comment": "Golden copy of the ASH MCP server's tools/list, resources/list, resources/templates/list and prompts/list replies, as a real client receives them over stdio. Compared by .github/actions/validate-mcp/compare_tool_surface.py, which the validate-mcp composite action runs in CI, and against the in-process registry by tests/unit/cli/mcp/test_mcp_wire_golden_in_process.py. Read that script before editing this file: it explains which fields are normalized and why, and why regenerating rather than reading a diff is the wrong instinct. Do not hand-edit -- regenerate.",
   "_normalization": [
     "description: inspect.cleandoc (CPython 3.14 dedents docstrings, 3.10-3.13 do not)",
     "object keys: sorted (JSON objects are unordered per RFC 8259)",
     "required/enum arrays: sorted (both are sets per JSON Schema)"
   ],
   "_regenerate": "python .github/actions/validate-mcp/compare_tool_surface.py --update",
+  "prompts": {
+    "analyze_security_findings": {
+      "arguments": [
+        {
+          "name": "source_dir",
+          "required": false
+        }
+      ],
+      "description": "This prompt advises the agent to review an existing ASH scan and provide and overview and opinionated guidance",
+      "title": "Analyze ASH Security Findings"
+    },
+    "run_ash_security_scan": {
+      "arguments": [
+        {
+          "name": "source_dir",
+          "required": false
+        }
+      ],
+      "description": "This prompt invokes an ASH security scan of the source directory, defaulting to the current one",
+      "title": "Run ASH Security Scan"
+    }
+  },
+  "resourceTemplates": {},
+  "resources": {
+    "ash://exit-codes": {
+      "description": "Return the meaning of each ASH exit code as JSON.",
+      "mimeType": "text/plain",
+      "name": "get_ash_exit_codes"
+    },
+    "ash://help": {
+      "description": "Get help information about ASH usage.",
+      "mimeType": "text/plain",
+      "name": "get_ash_help"
+    },
+    "ash://schema/config": {
+      "description": "Return the AshConfig JSON schema.",
+      "mimeType": "text/plain",
+      "name": "get_ash_config_schema"
+    },
+    "ash://schema/suppression": {
+      "description": "Return the AshSuppression JSON schema.",
+      "mimeType": "text/plain",
+      "name": "get_ash_suppression_schema"
+    },
+    "ash://status": {
+      "description": "Get the current status of ASH installation.",
+      "mimeType": "text/plain",
+      "name": "get_ash_status"
+    }
+  },
   "tools": {
     "cancel_scan": {
       "description": "Cancel a running scan and clean up its resources.\n\nArgs:\n    scan_id: The scan ID to cancel",

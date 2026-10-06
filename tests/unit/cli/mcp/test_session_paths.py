@@ -53,6 +53,7 @@ REFUSED = [
 #: to be deliberate.
 ACCEPTED = [
     "session-a",
+    # pragma: allowlist nextline secret
     "6f1d2c3b4a5e6f70",
     "b7f3e1c2-4d5a-6b7c-8d9e-0f1a2b3c4d5e",
     "under_score",

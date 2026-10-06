@@ -1,0 +1,32 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Semgrep OSS",
+          "semanticVersion": "1.140.0",
+          "rules": [
+            {
+              "id": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
+              "name": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
+              "shortDescription": {"text": "Bucket name is hardcoded."}
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {"text": "Bucket name is hardcoded; derive it from a variable."},
+          "locations": [
+            {"physicalLocation": {"artifactLocation": {"uri": "main.tf"}, "region": {"startLine": 2, "endLine": 2}}}
+          ],
+          "properties": {"issue_severity": "MEDIUM"}
+        }
+      ]
+    }
+  ]
+}

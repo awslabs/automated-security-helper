@@ -1,0 +1,61 @@
+$ ash report --format junitxml --log-level ERROR
+[exit 0]
+<testsuites name="ASH Scan Report"><testsuite name="bandit" tests="5" errors="3" failures="0"
+skipped="2" time="0"><testcase name="subprocess call with shell=True [B602]" classname="B602"><error
+message="subprocess call with shell=True" type="error" /><system-out>tags: []
+scanner_name: bandit
+issue_severity: HIGH</system-out></testcase><testcase name="Possible hardcoded password [B105]"
+classname="B105"><error message="Possible hardcoded password" type="error" /><system-out>tags: []
+scanner_name: bandit
+issue_severity: MEDIUM</system-out></testcase><testcase name="Probable insecure usage of temp file
+[B108]" classname="B108"><error message="Probable insecure usage of temp file" type="error"
+/><system-out>tags: []
+scanner_name: bandit
+issue_severity: MEDIUM</system-out></testcase><testcase name="Use of assert detected [B101]"
+classname="B101"><skipped message="Finding is below configured severity threshold" type="threshold"
+/><system-out>tags: []
+scanner_name: bandit
+issue_severity: LOW</system-out></testcase><testcase name="Standard pseudo-random generator [B311]"
+classname="B311"><skipped message="Accepted risk: test fixture" type="suppression"
+/><system-out>tags: []
+scanner_name: bandit
+issue_severity: LOW</system-out></testcase></testsuite><testsuite name="semgrep" tests="5"
+errors="1" failures="0" skipped="4" time="0"><testcase name="Detected use of eval() "
+classname="python.lang.security.eval"><error message="Detected use of eval()" type="error"
+/><system-out>tags: []
+scanner_name: semgrep
+issue_severity: CRITICAL</system-out></testcase><testcase name="Example key in docs "
+classname="generic.secrets.gitleaks"><skipped message="Finding is below configured severity
+threshold" type="threshold" /><system-out>tags: []
+scanner_name: semgrep
+issue_severity: INFO</system-out></testcase><testcase name="open() without encoding "
+classname="python.lang.best-practice.open"><skipped message="Finding is below configured severity
+threshold" type="threshold" /><system-out>tags: []
+scanner_name: semgrep
+issue_severity: INFO</system-out></testcase><testcase name="Flask debug mode "
+classname="python.flask.debug"><skipped message="Accepted risk: test fixture" type="suppression"
+/><system-out>tags: []
+scanner_name: semgrep
+issue_severity: HIGH</system-out></testcase><testcase name="Request without timeout "
+classname="python.requests.no-timeout"><skipped message="Accepted risk: test fixture"
+type="suppression" /><system-out>tags: []
+scanner_name: semgrep
+issue_severity: MEDIUM</system-out></testcase></testsuite><testsuite name="checkov" tests="3"
+errors="0" failures="0" skipped="3" time="0"><testcase name="S3 access logging disabled
+[CKV_AWS_18]" classname="CKV_AWS_18"><skipped message="Finding is below configured severity
+threshold" type="threshold" /><system-out>tags: []
+scanner_name: checkov
+issue_severity: LOW</system-out></testcase><testcase name="S3 versioning disabled [CKV_AWS_21]"
+classname="CKV_AWS_21"><skipped message="Finding is below configured severity threshold"
+type="threshold" /><system-out>tags: []
+scanner_name: checkov
+issue_severity: LOW</system-out></testcase><testcase name="Cross-region replication off
+[CKV_AWS_144]" classname="CKV_AWS_144"><skipped message="Finding is below configured severity
+threshold" type="threshold" /><system-out>tags: []
+scanner_name: checkov
+issue_severity: INFO</system-out></testcase></testsuite><testsuite name="opengrep" tests="1"
+errors="1" failures="0" skipped="0" time="0"><testcase name="Unescaped user input "
+classname="javascript.express.xss"><error message="Unescaped user input" type="error"
+/><system-out>tags: []
+scanner_name: opengrep
+issue_severity: HIGH</system-out></testcase></testsuite></testsuites>

@@ -1,0 +1,12 @@
+# The web project of the snapshot workspace. Same format as ../../scanners.yaml.
+scanners:
+  - name: checkov
+    outcome: ran
+    output: checkov.sarif
+    version: "3.2.469"
+    duration_seconds: 2.0
+  - name: semgrep
+    outcome: ran
+    output: semgrep.sarif
+    version: "1.140.0"
+    duration_seconds: 1.5
