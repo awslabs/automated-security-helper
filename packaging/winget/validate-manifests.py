@@ -415,6 +415,19 @@ def main() -> int:
                 f"    A rendered set pointing anywhere else is either a release set or a "
                 f"mistake, and neither belongs to the e2e leg."
             )
+        # winget uninstall --manifest and winget upgrade --manifest correlate an
+        # installed MSIX through this field and nothing else, so a loopback set without
+        # it installs and then cannot be uninstalled or upgraded. The schema checks its
+        # shape; verify-on-windows.ps1 checks it against Get-AppxPackage.
+        family_name = installer.get("PackageFamilyName")
+        if not family_name:
+            raise Failure(
+                "the loopback set has no PackageFamilyName. `winget uninstall "
+                "--manifest` and `winget upgrade --manifest` find an installed MSIX by "
+                "it,\n    and fail with NO_APPLICATIONS_FOUND without it. "
+                "set-release-metadata.py --local-url-base writes it."
+            )
+        print(f"   PackageFamilyName: {family_name}")
     else:
         print("== the installer URL names the matching release tag")
         expected_fragment = f"/releases/download/v{package_version}/"

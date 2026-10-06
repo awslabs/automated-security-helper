@@ -25,10 +25,14 @@ validated and cannot be submitted, and describing it as anything else would be w
 Two other fields are absent for related reasons, and a submission would need both:
 
   PackageFamilyName   the Identity Name joined to a 13-character hash of the publisher
-                      string. It can only be computed from the signed package, and a
-                      wrong value matches the schema pattern exactly, which is the
-                      worst failure shape available: it validates, and winget would use
-                      it to correlate this package with something else.
+                      string, which is the signing certificate's subject. A wrong value
+                      matches the schema pattern exactly, which is the worst failure
+                      shape available: it validates, and winget would use it to
+                      correlate this package with something else. The loopback set the
+                      e2e job installs does carry it (see below), because `winget
+                      uninstall` and `winget upgrade --manifest` cannot find an
+                      installed MSIX without it; a release set cannot until there is a
+                      real certificate.
   SignatureSha256     the digest of the signature file inside the package. For a
                       self-signed build it describes a signature no machine trusts, so
                       publishing it would assert something untrue about the artifact.
@@ -165,7 +169,10 @@ refused, installs through `winget install --manifest`, runs the three shared e2e
 unreleased commit, so it serves the .msix from 127.0.0.1 and renders a loopback set for
 it with `set-release-metadata.py --local-url-base`. validate-manifests.py
 `--local-installer` accepts only a loopback URL there, so that set cannot pass as a
-release set.
+release set, and requires a PackageFamilyName. set-release-metadata.py computes that
+from the AppxManifest's Identity Name and Publisher, and after each install
+verify-on-windows.ps1 requires it to equal the one Get-AppxPackage reports. The client must be at least
+winget 1.12.210, the first release with the 1.12 manifest schemas.
 
 The runner image documentation for windows-latest lists Chocolatey and does not mention
 winget. The script therefore uses a client already registered for the runner account if

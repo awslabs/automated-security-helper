@@ -620,11 +620,12 @@ jobs:
 
   # The winget manifest set, checked against Microsoft's published JSON Schemas.
   #
-  # This is the whole verification winget gets, and the reason it is a schema check and
-  # not `winget validate` is that the Windows Package Manager client is not on the
-  # runner images. images/windows/Windows2025-VS2026-Readme.md in actions/runner-images
-  # lists Chocolatey and does not mention winget anywhere. The schemas are a real check
-  # in its place: they carry every required field, pattern and enum the client enforces.
+  # The checked-in set, on Linux, with no client and no artifact. The winget-client job
+  # below runs the real client (`winget validate`, install, upgrade, uninstall) on the
+  # sets rendered from the built .msix; this job is the fast check of the files as
+  # committed, and it also checks what a schema cannot: that the three files agree, that
+  # the version is the one pyproject.toml declares, and that the installer URL names the
+  # release tag and the filename packaging/msix/build.ps1 writes.
   #
   # Its own job rather than a step on the nuspec job above, so that the two Windows
   # packaging formats can be landed and reverted independently of each other.
@@ -671,13 +672,15 @@ jobs:
   # validate-manifests.py --local-installer holds to loopback). The release-URL set is
   # rendered too, from the same file, and that is the one `winget validate` reads.
   #
-  # THE CLIENT. The hosted Windows images do not list winget (see the schema job
-  # above). The script uses a client already registered for the runner account if
-  # there is one, then tries to register the App Installer Windows Server 2025 can
-  # carry, then installs one pinned winget-cli release whose two downloads are checked
-  # against SHA-256 digests in the script. It prints which of the three it used. If
-  # none works this job fails rather than skipping, because a winget leg that passes
-  # without a client has tested nothing.
+  # THE CLIENT. The hosted Windows images do not list winget:
+  # images/windows/Windows2025-VS2026-Readme.md in actions/runner-images lists
+  # Chocolatey and does not mention it. The script uses a client already registered
+  # for the runner account if there is one, then tries to register the App Installer
+  # Windows Server 2025 can carry, then installs one pinned winget-cli release whose two
+  # downloads are checked against SHA-256 digests in the script. A client older than
+  # 1.12.210, the first with the 1.12 manifest schemas, does not count. It prints which
+  # of the three it used. If none works this job fails rather than skipping, because a
+  # winget leg that passes without a client has tested nothing.
   #
   # The signing secrets are passed for the N-1 build only: a real certificate, once
   # configured, has to sign N-1 with the same subject as N, or Windows sees two

@@ -345,3 +345,270 @@ def test_set_release_metadata_can_run_the_validator_it_calls() -> None:
         WINGET / "validate-manifests.py"
     ) - _pep723_dependencies(WINGET / "set-release-metadata.py")
     assert not missing, missing
+
+
+# ---------------------------------------------------------------------------------------
+# PackageFamilyName. `winget uninstall --manifest` and `winget upgrade --manifest` find an
+# installed MSIX by the installer's PackageFamilyName; without one they fall back to the
+# PackageIdentifier, which never matches an MSIX entry, and fail with
+# NO_APPLICATIONS_FOUND. So the loopback set must carry it, and it must be right.
+
+MICROSOFT_CORPORATION = (
+    "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+)
+
+
+def _verify_ps1_family(variable: str) -> str:
+    match = re.search(
+        rf"^\${variable} = '([^']+)'$",
+        VERIFY_PS1.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert match, variable
+    return match.group(1)
+
+
+@pytest.mark.parametrize(
+    ("name", "publisher", "expected"),
+    [
+        # The App Installer family verify-on-windows.ps1 registers by name. Microsoft
+        # publishes it, and it is the family winget itself lives in.
+        (
+            "Microsoft.DesktopAppInstaller",
+            MICROSOFT_CORPORATION,
+            _verify_ps1_family("AppInstallerFamily"),
+        ),
+        # The Windows publisher, which every inbox shell package carries.
+        (
+            "Microsoft.Windows.ShellExperienceHost",
+            "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+            "Microsoft.Windows.ShellExperienceHost_cw5n1h2txyewy",
+        ),
+    ],
+)
+def test_package_family_name_matches_real_families(
+    name: str, publisher: str, expected: str
+) -> None:
+    module = _load(WINGET / "set-release-metadata.py", "set_release_metadata")
+    assert module.package_family_name(name, publisher) == expected
+
+
+def _installer_entry(out: Path) -> dict[str, object]:
+    return yaml.safe_load(
+        (out / "Amazon.AutomatedSecurityHelper.installer.yaml").read_text(
+            encoding="utf-8"
+        )
+    )["Installers"][0]
+
+
+def test_local_url_base_fills_the_package_family_name(tmp_path: Path) -> None:
+    result = _render(tmp_path, "--local-url-base", "http://127.0.0.1:8123")
+    assert result.returncode == 0, result.stderr
+    module = _load(WINGET / "set-release-metadata.py", "set_release_metadata")
+    # _fake_msix's Identity: Name AWSLabs.AutomatedSecurityHelper, Publisher CN=test.
+    expected = module.package_family_name("AWSLabs.AutomatedSecurityHelper", "CN=test")
+    assert re.fullmatch(r"AWSLabs\.AutomatedSecurityHelper_[0-9a-z]{13}", expected)
+    assert _installer_entry(tmp_path / "out")["PackageFamilyName"] == expected
+    assert f"PackageFamilyName: {expected}" in result.stdout
+
+
+def test_the_release_set_does_not_carry_a_package_family_name(tmp_path: Path) -> None:
+    result = _render(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "PackageFamilyName" not in _installer_entry(tmp_path / "out")
+
+
+def test_the_rendered_installer_does_not_call_its_digest_a_placeholder(
+    tmp_path: Path,
+) -> None:
+    for out, extra in (
+        ("release", ()),
+        ("loopback", ("--local-url-base", "http://127.0.0.1:1")),
+    ):
+        (tmp_path / out).mkdir()
+        result = _render(tmp_path / out, *extra)
+        assert result.returncode == 0, result.stderr
+        text = (
+            tmp_path / out / "out" / "Amazon.AutomatedSecurityHelper.installer.yaml"
+        ).read_text(encoding="utf-8")
+        assert "64 zeros" not in text, out
+        assert "set-release-metadata.py" in text.split("\n# yaml-language-server")[0]
+        # The schema header winget checks survives the rewrite.
+        assert "# yaml-language-server: $schema=" in text
+
+
+# ---------------------------------------------------------------------------------------
+# The rendered sets through the real validator. set-release-metadata.py calls
+# validate-manifests.py as a subprocess; here both run in this process, with the one
+# network call (fetch_schema) answered by a stand-in that enforces the constraints the
+# validator's self-test corrupts plus the PackageFamilyName pattern from the published
+# 1.12.0 installer schema. What is under test is the wiring and the URL rules, not the
+# published schemas, which the `winget` job in ash-package.yml checks against the real
+# ones.
+
+PFN_PATTERN = r"^[A-Za-z0-9][-\.A-Za-z0-9]+_[A-Za-z0-9]{13}$"
+STAND_IN_SCHEMAS: dict[str, dict[str, object]] = {
+    "version": {"type": "object", "required": ["PackageIdentifier"]},
+    "installer": {
+        "type": "object",
+        "properties": {
+            "Installers": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "InstallerSha256": {
+                            "type": "string",
+                            "pattern": "^[A-Fa-f0-9]{64}$",
+                        },
+                        "PackageFamilyName": {"type": "string", "pattern": PFN_PATTERN},
+                    },
+                },
+            }
+        },
+    },
+    "defaultLocale": {
+        "type": "object",
+        "properties": {
+            "PackageLocale": {
+                "type": "string",
+                "pattern": r"^([a-zA-Z]{2,3}|[iI]-[a-zA-Z]+|[xX]-[a-zA-Z]{1,8})(-[a-zA-Z]{1,8})*$",
+            }
+        },
+    },
+}
+
+
+@pytest.fixture
+def in_process_validator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ModuleType, ModuleType]:
+    """set-release-metadata.py and validate-manifests.py, with the validator's
+    subprocess call run in this process and its schema fetch stubbed."""
+    metadata = _load(WINGET / "set-release-metadata.py", "set_release_metadata")
+    validator = _load(WINGET / "validate-manifests.py", "validate_manifests")
+    monkeypatch.setattr(
+        validator,
+        "fetch_schema",
+        lambda manifest_type, _: STAND_IN_SCHEMAS[manifest_type],
+    )
+
+    def run_validator(args: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        assert Path(args[1]).name == "validate-manifests.py", args
+        monkeypatch.setattr(sys, "argv", args[1:])
+        try:
+            code = validator.main()
+        except validator.Failure as failure:
+            print(f"FAIL: {failure}", file=sys.stderr)
+            code = 1
+        return subprocess.CompletedProcess(args, code)
+
+    monkeypatch.setattr(metadata.subprocess, "run", run_validator)
+    return metadata, validator
+
+
+def _render_in_process(
+    metadata: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *extra: str,
+) -> Path:
+    version = _project_version()
+    msix = _fake_msix(tmp_path / f"automated-security-helper-{version}.msix", version)
+    out = tmp_path / "out"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["set-release-metadata.py", "--msix", str(msix), "--out-dir", str(out), *extra],
+    )
+    assert metadata.main() == 0
+    return out
+
+
+def _validate(
+    validator: ModuleType, monkeypatch: pytest.MonkeyPatch, *args: str
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["validate-manifests.py", *args])
+    assert validator.main() == 0
+
+
+def test_a_rendered_loopback_set_passes_the_local_installer_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    in_process_validator: tuple[ModuleType, ModuleType],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    metadata, _ = in_process_validator
+    # No --skip-validate: main() runs the validator on its own output, with the flags
+    # it chooses. Without --local-installer the loopback URL fails the release-tag
+    # check, so this fails if that flag is dropped from the call.
+    _render_in_process(
+        metadata, tmp_path, monkeypatch, "--local-url-base", "http://127.0.0.1:8123"
+    )
+    out = capsys.readouterr().out
+    assert "the installer URL is a loopback server" in out
+    assert "WINGET MANIFEST VALIDATION PASSED" in out
+
+
+def test_a_release_set_fails_the_local_installer_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    in_process_validator: tuple[ModuleType, ModuleType],
+) -> None:
+    metadata, validator = in_process_validator
+    out = _render_in_process(metadata, tmp_path, monkeypatch)
+    # The same set passes as what it is...
+    _validate(validator, monkeypatch, str(out), "--released")
+    # ...and is refused as a loopback set.
+    with pytest.raises(validator.Failure, match="--local-installer requires"):
+        _validate(validator, monkeypatch, str(out), "--released", "--local-installer")
+
+
+def test_a_loopback_set_without_a_package_family_name_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    in_process_validator: tuple[ModuleType, ModuleType],
+) -> None:
+    metadata, validator = in_process_validator
+    out = _render_in_process(
+        metadata, tmp_path, monkeypatch, "--local-url-base", "http://127.0.0.1:8123"
+    )
+    installer = out / "Amazon.AutomatedSecurityHelper.installer.yaml"
+    text = installer.read_text(encoding="utf-8")
+    stripped = re.sub(r"(?m)^  PackageFamilyName: .*\n", "", text)
+    assert stripped != text
+    installer.write_text(stripped, encoding="utf-8")
+    with pytest.raises(validator.Failure, match="PackageFamilyName"):
+        _validate(validator, monkeypatch, str(out), "--released", "--local-installer")
+
+
+# ---------------------------------------------------------------------------------------
+# verify-on-windows.ps1 wiring that cannot run off Windows.
+
+
+def test_the_family_name_is_checked_before_the_first_uninstall_or_upgrade() -> None:
+    text = VERIFY_PS1.read_text(encoding="utf-8")
+    first_uninstall = text.index("@('uninstall', '--manifest'")
+    first_upgrade = text.index("'upgrade', '--manifest'")
+    checks = [m.start() for m in re.finditer(r"Assert-FamilyName -Package", text)]
+    # One after the N install, one after the N-1 install.
+    assert len(checks) == 2, checks
+    assert checks[0] < first_uninstall
+    assert checks[0] < checks[1] < first_upgrade
+    for manifests in ("$localN", "$localPrevious"):
+        assert f"Assert-FamilyName -Package $package -Manifests {manifests}" in text
+
+
+def test_the_minimum_winget_version_is_the_first_with_the_manifest_schema() -> None:
+    # winget-cli added the 1.12 manifest schemas in v1.12.210-preview
+    # (src/AppInstallerCommonCore/Manifest/ManifestSchemaValidation.cpp gains
+    # s_ManifestVersionV1_12 there; v1.12.170-preview does not have it). An older client
+    # validates a 1.12.0 manifest against the newest schema it knows.
+    validator = _load(WINGET / "validate-manifests.py", "validate_manifests")
+    assert validator.MANIFEST_VERSION == "1.12.0"
+    assert _verify_ps1_family("MinimumWingetVersion") == "1.12.210"
+    text = VERIFY_PS1.read_text(encoding="utf-8")
+    assert text.count("Assert-WingetVersion -Client $client") == 1
+    # The client the script installs when none is usable must itself be new enough.
+    pinned = _verify_ps1_family("WingetReleaseTag").removeprefix("v")
+    assert tuple(map(int, pinned.split("."))) >= (1, 12, 210), pinned

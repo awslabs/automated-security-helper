@@ -14,12 +14,17 @@
          App Installer the OS may carry, then installs a pinned winget-cli release whose two
          files are checked against SHA-256 digests recorded below. Which of the three
          produced the client is printed. If none does, the script fails: that is the
-         measurement the operator decision about hosted runners rests on.
+         measurement the operator decision about hosted runners rests on. A client older
+         than $MinimumWingetVersion (set below) does not count: it checks the 1.12.0
+         manifests this directory holds against an older schema.
       2. Render two manifest sets from the .msix the msix job built, with
          set-release-metadata.py: the release set (the real release asset URL and the
          artifact's digest) for `winget validate`, and a loopback set (the same digest, the
-         same .msix served from 127.0.0.1) for `winget install`. No release asset exists
-         for an unreleased commit, so installing needs the loopback copy.
+         same .msix served from 127.0.0.1, and the package's PackageFamilyName) for
+         `winget install`. No release asset exists for an unreleased commit, so installing
+         needs the loopback copy. `winget uninstall --manifest` and `winget upgrade
+         --manifest` find the installed MSIX by that PackageFamilyName, so after each
+         install the value in the set must equal what Get-AppxPackage reports.
       3. `winget validate --manifest` on the release set.
       4. Negative control: the loopback set with a wrong InstallerSha256 must be refused
          with winget's installer-hash-mismatch code, and nothing may be installed.
@@ -88,6 +93,14 @@ $WingetDependenciesSha256 = 'BA875AFE9D190F61218985AC0292A99D1DB710BF93E13C68944
 $WingetReleaseBase = "https://github.com/microsoft/winget-cli/releases/download/$WingetReleaseTag"
 $AppInstallerFamily = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'
 
+# The oldest client that knows the 1.12 manifest schemas. winget-cli added them in
+# v1.12.210-preview (s_ManifestVersionV1_12 in
+# src/AppInstallerCommonCore/Manifest/ManifestSchemaValidation.cpp; v1.12.170-preview
+# does not have it). An older client does not refuse a 1.12.0 manifest: it reads it
+# against the newest schema it has, so a failure would name some field rather than the
+# client. The check below names the client instead.
+$MinimumWingetVersion = '1.12.210'
+
 # APPINSTALLER_CLI_ERROR_INSTALLER_HASH_MISMATCH, 0x8A150011, as the signed 32-bit exit code
 # winget returns.
 $HashMismatchExitCode = -1978335215
@@ -145,6 +158,38 @@ function Test-Winget {
     return @{ Path = $command.Source; Version = $version }
 }
 
+function ConvertTo-WingetVersion {
+    param([string] $Text)
+    # `winget --version` prints v1.29.380, or v1.30.140-preview for a preview build.
+    if ($Text -match '^v?(\d+)\.(\d+)\.(\d+)') {
+        return [version]::new([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    }
+    return $null
+}
+
+function Test-WingetVersion {
+    param($Client)
+    $parsed = ConvertTo-WingetVersion -Text $Client.Version
+    if ($parsed -and $parsed -ge [version]$MinimumWingetVersion) {
+        return $true
+    }
+    Write-Host "   winget $($Client.Version) at $($Client.Path) is older than $MinimumWingetVersion, or its version did not parse"
+    return $false
+}
+
+function Assert-WingetVersion {
+    param($Client)
+    if (-not (Test-WingetVersion -Client $Client)) {
+        Fail @"
+winget $($Client.Version) at $($Client.Path) is older than $MinimumWingetVersion, the first
+release that knows the 1.12 manifest schemas the manifests here declare (ManifestVersion
+1.12.0). It would read them against an older schema. Update the App Installer, or raise
+the pinned winget-cli release, which this script installs only when no usable client is
+registered.
+"@
+    }
+}
+
 # winget, like the MSIX's own aliases, lives under WindowsApps, which a service account's
 # PATH may not include.
 $windowsApps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
@@ -156,12 +201,12 @@ function Get-WingetClient {
     param([string] $Downloads)
 
     $client = Test-Winget
-    if ($client) {
+    if ($client -and (Test-WingetVersion -Client $client)) {
         Write-Host "   source: already registered for this user ($($client.Version))"
         return $client
     }
 
-    Write-Host '   no winget for this user; trying to register the App Installer the OS carries'
+    Write-Host '   no usable winget for this user; trying to register the App Installer the OS carries'
     try {
         Add-AppxPackage -RegisterByFamilyName -MainPackage $AppInstallerFamily -ErrorAction Stop
     }
@@ -169,7 +214,7 @@ function Get-WingetClient {
         Write-Host "   registration failed: $($_.Exception.Message)"
     }
     $client = Test-Winget
-    if ($client) {
+    if ($client -and (Test-WingetVersion -Client $client)) {
         Write-Host "   source: the OS App Installer, registered by family name ($($client.Version))"
         return $client
     }
@@ -247,6 +292,25 @@ function Assert-Installed {
     }
     Write-Host "   installed: $($packages[0].PackageFullName)"
     return $packages[0]
+}
+
+function Assert-FamilyName {
+    param($Package, [string] $Manifests)
+    # The loopback set's PackageFamilyName is computed by set-release-metadata.py from
+    # the AppxManifest. A wrong value still matches the schema pattern, and winget would
+    # then fail to find the package on uninstall or upgrade, so compare it with the one
+    # Windows assigned to the package just installed from that set.
+    $installer = Join-Path $Manifests "$PackageIdentifier.installer.yaml"
+    $match = [regex]::Match((Get-Content -Raw -LiteralPath $installer), '(?m)^  PackageFamilyName: (\S+)\s*$')
+    if (-not $match.Success) {
+        Fail "$installer has no PackageFamilyName, so winget uninstall and upgrade --manifest cannot find the package"
+    }
+    $declared = $match.Groups[1].Value
+    if ($declared -cne $Package.PackageFamilyName) {
+        Fail "$installer declares PackageFamilyName $declared, and Get-AppxPackage reports $($Package.PackageFamilyName)"
+    }
+    Write-Host "   PackageFamilyName $declared matches Get-AppxPackage"
+    return $declared
 }
 
 function Assert-NothingInstalled {
@@ -351,6 +415,7 @@ $script:work = (Resolve-Path -LiteralPath $WorkDirectory).Path
 
 Write-Step '1. a winget client'
 $client = Get-WingetClient -Downloads (Join-Path $script:work 'winget-client')
+Assert-WingetVersion -Client $client
 $script:winget = $client.Path
 Write-Host "   winget: $($client.Path), $($client.Version)"
 
@@ -456,6 +521,7 @@ try {
         Fail "winget install --manifest exited $($result.Code)"
     }
     $package = Assert-Installed -Version $version
+    $familyN = Assert-FamilyName -Package $package -Manifests $localN
     $venv = Join-Path $env:LOCALAPPDATA "Packages\$($package.PackageFamilyName)\LocalCache\ash-venv"
     $cli = Resolve-Cli -Package $package
     Assert-CliVersion -Cli $cli -Version $version
@@ -526,6 +592,12 @@ try {
         Fail "winget install --manifest (N-1) exited $($result.Code)"
     }
     $package = Assert-Installed -Version $previous
+    $familyPrevious = Assert-FamilyName -Package $package -Manifests $localPrevious
+    # The upgrade below finds N-1 through the family name in the N set, so the two sets
+    # must name the same family: the same Identity Name and the same signing subject.
+    if ($familyPrevious -cne $familyN) {
+        Fail "the N-1 set names family $familyPrevious and the N set names $familyN; winget upgrade --manifest would not find N-1"
+    }
     $cli = Resolve-Cli -Package $package
     Assert-CliVersion -Cli $cli -Version $previous
     Assert-Case -Cli $cli -Case 'findings' -Label 'upgrade-before'
