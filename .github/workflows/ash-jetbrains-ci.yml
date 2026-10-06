@@ -275,13 +275,12 @@ jobs:
       run:
         shell: bash
     steps:
+      # Two commits, so HEAD's parent is here for e2e-ide-cycle.sh's fallback below: a HEAD
+      # that is not v4-capabilities but has its tree builds N-1 from HEAD^, which a
+      # one-commit checkout does not have. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two commits:
-      # on a push to v4-capabilities HEAD is that ref, and e2e-ide-cycle.sh then builds N-1
-      # from HEAD's first parent instead. The same fetch as ash-e2e.yml's wheel job.
-      - name: Fetch the N-1 ref
-        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+        with:
+          fetch-depth: 2
 
       # No uv cache: the install has to be fresh, and a saved Actions cache is a publish surface
       # (.github/scripts/assert-publish-surfaces.py) this job has no reason to open. The same
@@ -298,6 +297,16 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/jb-real-cli" "$RUNNER_TEMP/jb-ide-cycle"
           chown -R gradle:gradle "$GITHUB_WORKSPACE" "$RUNNER_TEMP/jb-real-cli" "$RUNNER_TEMP/jb-ide-cycle"
+
+      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two commits:
+      # on a push to v4-capabilities HEAD is that ref, and e2e-ide-cycle.sh then builds N-1
+      # from HEAD's first parent instead. The same fetch as ash-e2e.yml's wheel job, but run
+      # as the checkout's owner and so after the chown above: the runner checks out as its host
+      # user, this container runs as root, and git refuses a repository root does not own
+      # ("detected dubious ownership"). actions/checkout's safe.directory entry is written to
+      # a temporary HOME and is gone once the checkout step ends.
+      - name: Fetch the N-1 ref
+        run: bash editors/jetbrains/run-unprivileged.sh git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
 
       - name: The plugin against a real ashx built from this commit
         run: bash editors/jetbrains/e2e-real-cli.sh "$RUNNER_TEMP/jb-real-cli"
