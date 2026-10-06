@@ -1070,7 +1070,7 @@ class TestPluginManagerSingletonState:
           leakage between cases rather than causing it between projects.
         * ``tests/snapshot/conftest.py`` (by path, not by name) narrows the
           registry to ASH's built-in plugins for each snapshot test and puts it
-          back afterwards, so a snapshot shows what a fresh ``ash`` process
+          back afterwards, so a snapshot shows what a fresh ``ashx`` process
           registers rather than whatever earlier tests in the worker imported.
           Same category as the one above: it stops leakage between tests.
         * ``tests/snapshot/test_snapshot_plugin_registry.py`` is the test of that

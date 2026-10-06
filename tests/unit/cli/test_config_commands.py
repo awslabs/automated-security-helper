@@ -98,7 +98,7 @@ class TestConfigGet:
 
 
 class TestConfigGetRefusesUnparseableFiles:
-    """``ash config get`` on a file that does not parse.
+    """``ashx config get`` on a file that does not parse.
 
     resolve_config logs a file it cannot parse and returns the default
     configuration, which is right for a scan and wrong for this command: it

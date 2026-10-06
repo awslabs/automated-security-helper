@@ -249,7 +249,7 @@ def get(
     # would discover. When there is one, it is loaded with fallback_to_default
     # off. resolve_config's default is to log a file it cannot parse and return
     # the default configuration -- right for a scan, which records the warning
-    # and carries on, and wrong here: `ash config get` on a file with a YAML
+    # and carries on, and wrong here: `ashx config get` on a file with a YAML
     # syntax error exited 0 and printed the defaults as though they were that
     # file's contents.
     config_file = Path(config_path) if config_path is not None else find_config_file()

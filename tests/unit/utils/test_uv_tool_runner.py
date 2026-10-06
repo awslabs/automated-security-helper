@@ -1226,7 +1226,7 @@ class TestGetUvToolCommand:
     def test_probe_honors_offline_mode(self, reset_module_caches, monkeypatch, offline):
         """Under ASH_OFFLINE the probe must not resolve the tool from PyPI.
 
-        Online, it downloaded bandit and checkov during `ash scan --mode nix` and
+        Online, it downloaded bandit and checkov during `ashx scan --mode nix` and
         could be killed mid-download by its 5s timeout, leaving uv's cache with
         an index entry and no wheel.
         """

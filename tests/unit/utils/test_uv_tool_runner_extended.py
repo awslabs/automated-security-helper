@@ -305,7 +305,7 @@ class TestResetUvToolRunner:
 class TestGetToolVersionOffline:
     """The version probe honors ASH_OFFLINE the way run_tool does.
 
-    It once was the only uv call that did not. Under ``ash scan --mode nix`` it
+    It once was the only uv call that did not. Under ``ashx scan --mode nix`` it
     resolved and downloaded the newest semgrep from PyPI and was killed at its
     15s timeout when the download was slow, leaving uv's cache with the index
     entry but not the wheel. The scan's ``uv tool run --offline`` then failed with

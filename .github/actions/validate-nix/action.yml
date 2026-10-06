@@ -175,7 +175,7 @@ runs:
         print(f"PASS: all {len(flake_supplied)} flake-supplied scanners participated")
         PY
 
-    # The snapshot tests run under uv, from this checkout, so their `ash` is the code under
+    # The snapshot tests run under uv, from this checkout, so their `ashx` is the code under
     # review. Same uv pin as .github/actions/setup-ash, which this job does not use. Its
     # cache is off: the Actions cache of a public repository is readable by anyone, and
     # .github/scripts/assert-publish-surfaces.py admits only the caches already reviewed.
@@ -185,7 +185,7 @@ runs:
         version: "0.11.4"
         enable-cache: false
 
-    # What `ash scan --mode nix` prints around the shell and exits with, against syrupy
+    # What `ashx scan --mode nix` prints around the shell and exits with, against syrupy
     # snapshots. tests/conftest.py deselects the module everywhere else, because only a leg
     # with Nix can enter the shell. After the scan above on purpose: that scan's first entry
     # into the shell already seeded the grype and rule caches, so this one downloads nothing.

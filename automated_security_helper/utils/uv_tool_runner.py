@@ -212,7 +212,7 @@ class UVToolRunner:
 
                 # Offline, the probe must be offline too, exactly as run_tool is.
                 # It used to be the one uv call that ignored ASH_OFFLINE: under
-                # `ash scan --mode nix` it resolved the newest semgrep on PyPI,
+                # `ashx scan --mode nix` it resolved the newest semgrep on PyPI,
                 # downloaded it, and was killed at the 15s timeout whenever the
                 # download was slow. A killed probe leaves uv's cache holding the
                 # index entry but not the wheel, so the scan's own

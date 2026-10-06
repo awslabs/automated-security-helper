@@ -24,7 +24,7 @@ NOASSERTION = "NOASSERTION"
 
 # The namespace every ASH-generated document URI lives under. uuid5 over it plus
 # the scan's identity gives a namespace that is unique per scan, as SPDX 2.3
-# section 6.5 requires, and stable for one scan: re-running `ash report` on the
+# section 6.5 requires, and stable for one scan: re-running `ashx report` on the
 # same results reproduces the same document rather than a new one.
 _NAMESPACE_BASE = "https://github.com/awslabs/automated-security-helper/spdx"
 _NAMESPACE_UUID = uuid.uuid5(uuid.NAMESPACE_URL, _NAMESPACE_BASE)
@@ -207,7 +207,7 @@ class SpdxReporter(ReporterPluginBase[SPDXReporterConfig]):
 
     This reporter used to be a stub that dumped the whole results model as YAML
     into ``ash.spdx.json``: a file that was neither SPDX nor JSON, which also
-    made ``ash report --format spdx`` exit 1 when the CLI tried to print it as
+    made ``ashx report --format spdx`` exit 1 when the CLI tried to print it as
     JSON. It now emits a real SPDX 2.3 document built from the scan's CycloneDX
     SBOM; see :func:`build_spdx_document`.
 

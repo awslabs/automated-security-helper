@@ -30,7 +30,7 @@ from automated_security_helper.utils.log import get_logger
 # Every entry must be a real reporter's config name, because this is matched
 # against --format. The list used to carry names no reporter has (asff,
 # security-hub, security-lake, opensearch) and to miss JSON reporters, and spdx
-# sat here while that reporter emitted YAML, so `ash report --format spdx` died
+# sat here while that reporter emitted YAML, so `ashx report --format spdx` died
 # in print_json. tests/unit/cli/test_report_format_output.py checks every name
 # against the registered reporters.
 #

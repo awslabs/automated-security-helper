@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression tests for ``ash report``: reporter config and stdout format routing.
+"""Regression tests for ``ashx report``: reporter config and stdout format routing.
 
 Two defects in ``report_command``, both reproduced end to end through the CLI
 rather than with the plugin manager mocked, because the mocked tests in
@@ -9,7 +9,7 @@ rather than with the plugin manager mocked, because the mocked tests in
 
 * The reporter's config section was assigned to ``reporter.config`` as the plain
   dict ``get_plugin_config`` returns. Every reporter reads it by attribute, so
-  ``ash report --format junitxml`` on a scan with any finding exited 1 with
+  ``ashx report --format junitxml`` on a scan with any finding exited 1 with
   ``'dict' object has no attribute 'options'``.
 * The list of formats printed with ``print_json`` named reporters that do not
   exist (asff, security-hub, security-lake, opensearch), missed JSON reporters

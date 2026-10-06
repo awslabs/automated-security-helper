@@ -341,7 +341,7 @@ def capture(
     the per-tool error detail on stderr, and exits 6. So a portability error does
     not cost the golden comparison: both verdicts are reported from one spawn.
     The other three methods run without `--strict`, measured to exit 0 against
-    `ash mcp` with inspector 2.8.0, so anything else from them is a failure.
+    `ashx mcp` with inspector 2.8.0, so anything else from them is a failure.
     """
     cmd = [inspector, "--cli", ash, "mcp", "--method", surface.method]
     if surface.strict:

@@ -237,7 +237,7 @@ For example:
 - `security-scans/ash-report-2024-01-15T10:30:00+00:00.yaml`
 
 `{timestamp}` is the scan's `metadata.generated_at`, so each scan gets its own
-object, and re-running `ash report --format s3` against the same results replaces
+object, and re-running `ashx report --format s3` against the same results replaces
 that scan's object rather than adding another. In a workspace scan the project key
 is inserted after the prefix: `{key_prefix}{project}/ash-report-{timestamp}.{extension}`.
 

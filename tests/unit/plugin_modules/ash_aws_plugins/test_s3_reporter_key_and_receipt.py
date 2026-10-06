@@ -79,7 +79,7 @@ def test_two_scans_get_two_keys(reporter):
 
 
 def test_re_reporting_a_finished_scan_reuses_its_key(reporter):
-    """``ash report`` reads a model whose ``start`` is set; the key must not move."""
+    """``ashx report`` reads a model whose ``start`` is set; the key must not move."""
     during_scan = AshAggregatedResults()
     during_scan.metadata.generated_at = "2026-10-01T09:00:00+00:00"
     after_scan = AshAggregatedResults.model_validate_json(
