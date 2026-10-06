@@ -8,24 +8,24 @@ on:
 # the workflow. (checkov's CKV_GHA_7 rejects workflow_dispatch inputs for the same
 # reason: a build's output should not depend on a parameter typed at run time.)
 #
-# main carries feat! commits (#640, #696) whose changes ship as 3.x by maintainer
-# decision: 4.0.0 is reserved for the v4 packaging work. Left to itself,
-# commitizen reads those commits and bumps 3.7.0 to 4.0.0.
+# `auto` is commitizen's own semver: a breaking commit produces a major. It is the
+# line for 4.x. e6099d50 (chore(release): set every version to 4.0.0) put every
+# version_files entry at 4.0.0, so the release after it is cut from 4.0.0 by
+# commitizen's normal rules.
 #
-# `3.x` keeps the release on the 3.x line. When commitizen detects a MAJOR
-# increment it is capped to MINOR with `cz bump --increment MINOR`, and the run
-# logs a warning naming every breaking commit it overrode. A PATCH or MINOR
-# increment passes through untouched. The commits themselves are never rewritten,
-# so their BREAKING CHANGE notes still render in CHANGELOG.md.
+# `3.x` kept main's releases on the 3.x line while v4 was being built: main carried
+# feat! commits (#640, #696) that shipped as 3.x by maintainer decision, with 4.0.0
+# reserved for the v4 packaging work. When commitizen detects a MAJOR increment it
+# is capped to MINOR with `cz bump --increment MINOR`, and the run logs a warning
+# naming every breaking commit it overrode. A PATCH or MINOR increment passes
+# through untouched. The commits themselves are never rewritten, so their BREAKING
+# CHANGE notes still render in CHANGELOG.md.
 #
-# `auto` is commitizen's own semver: a breaking commit produces a major.
-#
-# The cap is bounded. `3.x` refuses to run once the current version is not 3.x,
-# so it cannot hold a future line back by accident, and after a bump it fails the
-# job if the new version left 3.x. To cut 4.0.0 once v4 is on main, set this to
-# `auto` in the change that lands v4. See DEVELOPMENT.md "Release line".
+# The cap is bounded. `3.x` refuses to run once the current version is not 3.x, so
+# left set on 4.0.0 it would fail every release rather than cap one. See
+# DEVELOPMENT.md "Release line".
 env:
-  RELEASE_LINE: "3.x"
+  RELEASE_LINE: "auto"
 
 # Read-only default; the job below declares the write scopes it needs. A
 # job-level block replaces this one, so a job added here later starts with

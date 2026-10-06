@@ -412,16 +412,16 @@ uv run cz bump --changelog --dry-run
 
 ### Release line
 
-`main` carries breaking (`feat!`) commits that ship in 3.x by maintainer decision, because 4.0.0 is reserved for the v4 packaging work. The `RELEASE_LINE` value committed at the top of `ash-create-release.yml` controls this. It is not a dispatch input, so the line a release lands on is decided in reviewed history:
+The `RELEASE_LINE` value committed at the top of `ash-create-release.yml` decides how a detected major increment is treated. It is not a dispatch input, so the line a release lands on is decided in reviewed history. It is `auto` for 4.x:
 
-- `3.x` (the default): if commitizen detects a major increment, the workflow runs `cz bump --increment MINOR` instead, logs a warning that names every breaking commit it overrode, and lists them in the run summary. A patch or minor increment is left alone. The commits are not rewritten, so their `BREAKING CHANGE` notes still render in `CHANGELOG.md`. The job fails if the current version is not 3.x, or if the bump still produced a version outside 3.x.
-- `auto`: commitizen's own semver, so a breaking change produces a major.
+- `auto` (the setting for 4.x): commitizen's own semver, so a breaking change produces a major.
+- `3.x`: kept `main` on 3.x while v4 was being built, when `main` carried breaking (`feat!`) commits that shipped in 3.x by maintainer decision. If commitizen detects a major increment, the workflow runs `cz bump --increment MINOR` instead, logs a warning that names every breaking commit it overrode, and lists them in the run summary. A patch or minor increment is left alone. The commits are not rewritten, so their `BREAKING CHANGE` notes still render in `CHANGELOG.md`. The job fails if the current version is not 3.x, or if the bump still produced a version outside 3.x.
 
 A release whose version understates it can carry hand-written notes in `.github/release-notes/<tag>.md`. The changelog template (`.github/changelog/CHANGELOG.md.j2`) renders that file under the version heading, and the tag workflow publishes that version's `CHANGELOG.md` entry, curated notes included, at the top of the GitHub Release body, ahead of GitHub's generated notes. `v3.8.0.md` lists the behavior changes that 3.8.0 ships in a minor release, with their opt-outs.
 
 Hand-written notes go under `## Unreleased` in `CHANGELOG.md`. commitizen would replace that section with the generated entry, so before bumping, the workflow moves its body into `.github/release-notes/<next tag>.md`, below any curated notes already there, and removes the section. The new entry then carries the curated notes, the hand-written notes, and the generated sections, and so does the GitHub Release. The step fails before bumping if that text contains a Jinja delimiter (`{{`, `{%`, `{#`) or if the next tag cannot be determined. An empty or absent section is left alone.
 
-To cut 4.0.0 once v4 is on `main`: set `RELEASE_LINE` to `auto` in the change that lands v4, then run the workflow. Once the version is 4.x, `3.x` refuses to run, so a setting left at `3.x` fails loudly rather than capping 4.x.
+On v4 every `version_files` entry is 4.0.0 (`chore(release): set every version to 4.0.0`) and `RELEASE_LINE` is `auto`, so the workflow cuts 4.x releases by commitizen's own rules. On a 4.x version `3.x` refuses to run, so a setting put back to `3.x` fails loudly rather than capping 4.x.
 
 Preview either line locally:
 

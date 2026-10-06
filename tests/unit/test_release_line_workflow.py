@@ -353,9 +353,11 @@ class TestTheBumpStepBackstop:
 
 
 class TestTheReleaseLineSetting:
-    def test_the_line_is_committed_as_three_x(self):
+    def test_the_line_is_committed_as_auto(self):
+        # v4 is at 4.0.0, where `3.x` refuses to run (see the guard tests above), so
+        # the committed line is commitizen's own semver.
         doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-        assert doc["env"]["RELEASE_LINE"] == "3.x"
+        assert doc["env"]["RELEASE_LINE"] == "auto"
 
     def test_it_is_not_a_dispatch_input(self):
         """checkov's CKV_GHA_7 fails the repository scan on any dispatch input."""
