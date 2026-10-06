@@ -163,69 +163,6 @@ global_settings:
         line; ferret-scan does not honor that marker, hence this entry. Scoped to
         those two lines, and tests/unit/test_winget_e2e.py holds the range to them, so
         a version bump that moves them fails a test instead of drifting.
-    # === ferret-scan API_KEY_OR_SECRET: CDK logical ids in synthesized templates ===
-    # A third reason, unlike both blocks above. CDK names every resource with its
-    # construct path plus an 8-character uppercase hex hash, and ferret-scan's
-    # high-entropy detector reads those logical ids as secrets: VPC subnets, route
-    # tables, IAM policies, and the Secrets Manager resource AshRuntimeConfig creates
-    # (on its key and on every Ref to it). An id names a resource and holds no secret
-    # material.
-    #
-    # Measured with ferret-scan v2.5.2: every template below yields such hits, and
-    # whether any of them is actionable depends on ferret-scan's guess at the file's
-    # environment, not on the ids. The 4.0.0 docs pass added the word "release" to the
-    # AshVersion parameter description; that one word makes ferret-scan classify
-    # AshDistributedPipeline and AshCodeCommitGate as production, and the boost takes
-    # the auth secret's id from 82% (MEDIUM, not actionable here) to 100% (HIGH),
-    # eight times. Removing the word puts all eight back at 82%. The other templates
-    # sit at 55-82% today under a "test" or "production" guess that the next prose
-    # edit can change, so all six are covered alike rather than letting a description
-    # decide which stack fails.
-    #
-    # Whole-file, named template by template, for the reason the trivy block below
-    # gives: `cdk synth` regenerates these files and the lines move. What keeps that
-    # from hiding a real credential is where the content comes from. ash-iac-drift
-    # re-synthesizes every stack and fails when a committed template differs from
-    # the result, so a template holds only what deploy/cdk/bin, deploy/cdk/lib and
-    # cdk.json produce, and those stay scanned with no API_KEY_OR_SECRET
-    # suppression. A literal would surface there first.
-    # tests/unit/test_cdk_template_ferret_suppressions.py pins both halves: one
-    # entry per template that exists, no entry for anything else under deploy/cdk,
-    # and the drift workflow still comparing deploy/cdk/templates.
-    #
-    # Renaming constructs is not a fix: a new logical id makes CloudFormation replace
-    # the resource in every deployed stack, and for the auth secret that rotates the
-    # header value under its clients.
-    - path: deploy/cdk/templates/AshAgentCore.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Synthesized CDK output; ferret-scan reads hashed logical ids
-        as secrets. See the block comment above.
-    - path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Synthesized CDK output; ferret-scan reads hashed logical ids
-        as secrets. See the block comment above.
-    - path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Synthesized CDK output; ferret-scan reads hashed logical ids
-        as secrets. See the block comment above.
-    - path: deploy/cdk/templates/AshEksOperator.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Synthesized CDK output; ferret-scan reads hashed logical ids
-        as secrets. See the block comment above.
-    - path: deploy/cdk/templates/AshFargate.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Synthesized CDK output; ferret-scan reads hashed logical ids
-        as secrets. See the block comment above.
-    - path: deploy/cdk/templates/AshImagePipeline.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Synthesized CDK output; ferret-scan reads hashed logical ids
-        as secrets. See the block comment above.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
       line_start: 501
@@ -536,9 +473,7 @@ global_settings:
     # "contributes nothing" — that held for the pre-2.x binary but not for v2.4.5,
     # which is why the API_KEY_OR_SECRET suppressions now exist. v2.5.2 reports the
     # same set; it also scans `.github/`, which 2.4.x skipped because its --exclude
-    # matched `.git` as a substring. Later, once a template's prose tipped its
-    # environment guess, it also reported hashed CDK logical ids in
-    # deploy/cdk/templates; that block near the top of this file says why.
+    # matched `.git` as a substring.
     #
     # PATHS ARE NAMED FILE BY FILE. A trailing `**` is a whole-subtree match, so a
     # sixth template or a new terraform module would inherit a suppression nobody
