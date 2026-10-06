@@ -218,7 +218,7 @@ def resolve_config(
             return config
 
         # Only a source_dir the caller passed may widen where `extends` bases
-        # may live. The cwd fallback below must not: `ash report --config
+        # may live. The cwd fallback below must not: `ashx report --config
         # <file>` run from a home directory would otherwise let that file's
         # bases reach anywhere under it.
         confinement_source_dir = source_dir

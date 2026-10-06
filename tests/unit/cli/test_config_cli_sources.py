@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""`ash config validate|lint|update` and suppression writes, for pyproject.toml
+"""`ashx config validate|lint|update` and suppression writes, for pyproject.toml
 [tool.ash] sources (#313) and configs that use `extends` (#289)."""
 
 import textwrap

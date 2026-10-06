@@ -82,8 +82,8 @@ A validation error names the table and its line, for example
 resolved from the environment by the same rule as in YAML, including the limit
 on which variable names may be read; see the `!ENV` notes in
 [Configuration Overrides](config-overrides.md).
-`ash config update`, `ash config wizard`, `ash config lint --fix` and the
-suppression dialog in `ash inspect` edit YAML, so they refuse a TOML file rather
+`ashx config update`, `ashx config wizard`, `ashx config lint --fix` and the
+suppression dialog in `ashx inspect` edit YAML, so they refuse a TOML file rather
 than rewrite it; edit `[tool.ash]` by hand.
 
 A `pyproject.toml` that is not valid TOML is skipped, unless its text declares a
@@ -527,9 +527,9 @@ missing or unreadable base, a cycle (the error prints the chain, for example
 or more than 50 files read in total. `${VAR}` references in every file of the
 chain are resolved under the same allowlist as a single file.
 
-`ash config validate` and `ash config lint` follow the chain, report extends
+`ashx config validate` and `ashx config lint` follow the chain, report extends
 errors, and print the files the config was built from, lowest precedence first.
-`ash config update`, `ash config wizard` and the `ash inspect` suppression dialog
+`ashx config update`, `ashx config wizard` and the `ashx inspect` suppression dialog
 refuse to rewrite a file in a way that would copy its bases into it or drop their
 suppressions.
 
