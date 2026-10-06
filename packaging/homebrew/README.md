@@ -157,6 +157,29 @@ pin the exact version this repository resolved. If install time becomes the bind
 constraint, that trade is the lever, and it should be taken deliberately with a check
 that the supplied versions still satisfy `[project.dependencies]`.
 
+## Release form and head builds
+
+`Formula/ash.rb` keeps the release form: its `url` is the git repository at the tag
+for the current version, which is what a user's `brew install` builds. Its test block
+runs `ashx` and checks that the deprecated `ash` alias still runs and prints its
+deprecation line, so it only passes against a release that has `ashx`. Installing the
+formula verbatim in CI would build the last tag, not the commit under test.
+
+So CI never installs the release form. `scripts/e2e/brew_formula.py` writes a copy into
+a throwaway local tap with that one `url` line replaced by a `file://` URL and sha256
+for a `git archive` tarball of the commit, named `automated-security-helper-<version>.tar.gz`
+so Homebrew reads the version from it. Nothing else changes, and
+`tests/unit/test_e2e_brew_formula.py` holds the copy to that. Two jobs use it:
+
+- `homebrew` in `.github/workflows/ash-package.yml` installs the copy, runs `brew test`,
+  and runs `brew audit --strict` on the copy and then on the release formula itself.
+- `homebrew` in `.github/workflows/ash-e2e.yml` runs `scripts/e2e/homebrew.sh` in three
+  legs: a fresh install with the shared e2e cases (exit 2, 0 and 1) and `brew test`, an
+  N-1 to N `brew upgrade` and `brew cleanup`, and a copy with the `detect-secrets`
+  resource removed, which still installs and must then fail its scan and `brew test`.
+
+Edit the formula here. The copy is regenerated on every run and never committed.
+
 ## Known limitations
 
 - **The closure is for one Python minor version.** It is read from the formula's

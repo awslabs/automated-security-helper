@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The Homebrew channel end to end, built from the commit under test:
+#
+#   scripts/e2e/homebrew.sh fresh|upgrade|negative <work-dir>
+#
+#   E2E_HARNESS_PYTHON  the interpreter for the stdlib-only e2e scripts (default python3).
+#                       It is never the keg's Python: the uninstall checks have to run
+#                       after the keg is gone.
+#   E2E_PREV_REF        the git ref the N-1 formula and tarball come from (default
+#                       origin/v4-capabilities). When it names a commit with HEAD's tree,
+#                       HEAD's first parent is used instead, as in scripts/e2e/wheel.sh.
+#
+# Formula/ash.rb builds from the release tag on its `url` line, so installing it
+# verbatim tests the last release. Every leg here installs a copy written by
+# scripts/e2e/brew_formula.py instead: the same formula, with that one line pointed at a
+# `git archive` tarball of the tree under test. The release formula is never edited.
+# The copy lives in a throwaway local tap, because Homebrew refuses a formula outside
+# one, and nothing is pushed or published.
+#
+# Legs, one per CI matrix entry because each is a full source build of every resource:
+#
+#   fresh     install N, check the version, run the formula's own `brew test` (which
+#             runs ashx and checks the deprecated ash alias), run the three cases from
+#             tests/e2e/fixtures/cases.json through scripts/e2e/run_case.py (exit 2 with
+#             3 findings, exit 0, exit 1 with opengrep MISSING), two negative controls,
+#             then `brew uninstall` and require every link, the keg and the opt link gone.
+#   upgrade   install N-1 (E2E_PREV_REF's tree and its own formula, version lowered),
+#             scan with it, point the tap at N, `brew upgrade`, require N linked and the
+#             N-1 keg still present until `brew cleanup` removes it, scan again,
+#             uninstall.
+#   negative  install N from a copy missing the detect-secrets resource. Homebrew installs
+#             with --no-deps, so the install and `ashx --version` still succeed; the
+#             findings case and `brew test` must both fail, and for that reason.
+set -euo pipefail
+
+LEG="${1:?usage: homebrew.sh fresh|upgrade|negative <work-dir>}"
+WORK="${2:?usage: homebrew.sh fresh|upgrade|negative <work-dir>}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+HARNESS_PYTHON="${E2E_HARNESS_PYTHON:-python3}"
+PREV_REF="${E2E_PREV_REF:-origin/v4-capabilities}"
+
+case "$LEG" in
+  fresh | upgrade | negative) ;;
+  *) printf 'usage: homebrew.sh fresh|upgrade|negative <work-dir>\n' >&2; exit 3 ;;
+esac
+
+# shellcheck source=packaging/cli-name.sh
+. "$REPO/packaging/cli-name.sh"
+
+# Every console script the wheel declares; Homebrew links each into its bin.
+ENTRY_POINTS=("$ASH_CLI_NAME" ash ashv3 automated-security-helper)
+TAP="ash/local"
+FORMULA="$TAP/ash"
+# The resource the negative leg removes. detect-secrets is the one scanner these cases
+# select, and DetectSecretsScanner imports the library lazily, so `--version` still works
+# without it and only a scan shows the hole.
+DROPPED_RESOURCE="detect-secrets"
+
+# No auto-update: it would rewrite the brew under test mid-job. No install cleanup: the
+# upgrade leg has to see the N-1 keg survive `brew upgrade` before `brew cleanup` runs.
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ANALYTICS=1 \
+  HOMEBREW_NO_ENV_HINTS=1
+
+say() { printf '== %s\n' "$*"; }
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+harness() { "$HARNESS_PYTHON" "$@"; }
+
+mkdir -p "$WORK"
+WORK="$(cd "$WORK" && pwd)"
+BREW_PREFIX="$(brew --prefix)"
+BREW_BIN="$BREW_PREFIX/bin"
+KEGS="$(brew --cellar)/ash"
+OPT_LINK="$BREW_PREFIX/opt/ash"
+
+say "Homebrew: $(brew --version | head -n 1); harness: $("$HARNESS_PYTHON" --version 2>&1)"
+harness "$REPO/scripts/e2e/assert_outcome.py" --self-test
+
+version_of() { sed -n 's/^version = "\(.*\)"$/\1/p' "$1/pyproject.toml" | head -n 1; }
+
+# `brew list --versions ash` prints "ash 3.6.0 3.7.0"; this prints the versions only.
+installed_versions() {
+  local line
+  line="$(brew list --versions "$FORMULA" 2>/dev/null)" || return 1
+  printf '%s\n' "${line#ash }"
+}
+
+# Lists each console script, the keg directory or the opt link still present. Exits 0
+# only when none is.
+assert_uninstalled() {
+  local name found=()
+  for name in "${ENTRY_POINTS[@]}"; do
+    if [ -e "$BREW_BIN/$name" ] || [ -L "$BREW_BIN/$name" ]; then
+      found+=("$BREW_BIN/$name")
+    fi
+  done
+  if [ -e "$KEGS" ]; then
+    found+=("$KEGS")
+  fi
+  if [ -e "$OPT_LINK" ] || [ -L "$OPT_LINK" ]; then
+    found+=("$OPT_LINK")
+  fi
+  if brew list --versions "$FORMULA" >/dev/null 2>&1; then
+    found+=("brew still lists $FORMULA")
+  fi
+  if [ "${#found[@]}" -ne 0 ]; then
+    printf 'still present: %s\n' "${found[*]}" >&2
+    return 1
+  fi
+  return 0
+}
+
+run_case() {
+  local cli="$1" case_name="$2" label="$3"
+  shift 3
+  harness "$REPO/scripts/e2e/run_case.py" --cli "$cli" --case "$case_name" --work "$WORK/scans" --label "$label" -- "$@"
+}
+
+require_version_line() {
+  local cli="$1" version="$2" line
+  line="$("$cli" --version)" || fail "$cli --version exited non-zero"
+  case "$line" in
+    *"v$version"*) say "$(basename "$cli") --version: $line" ;;
+    *) fail "$cli --version printed '$line', expected v$version" ;;
+  esac
+}
+
+# The tap is created once per runner; a rerun on the same machine reuses it.
+TAP_DIR=""
+ensure_tap() {
+  if ! brew tap | grep -qx "$TAP"; then
+    brew tap-new "$TAP"
+  fi
+  TAP_DIR="$(brew --repository "$TAP")"
+  mkdir -p "$TAP_DIR/Formula"
+}
+
+# Puts a rendered formula into the tap and shows that it differs from the formula it
+# was rendered from only where brew_formula.py is meant to change it.
+use_formula() {
+  local rendered="$1" source_formula="$2"
+  cp "$rendered" "$TAP_DIR/Formula/ash.rb"
+  say "tap formula vs $source_formula:"
+  local rc=0
+  diff -u "$source_formula" "$TAP_DIR/Formula/ash.rb" || rc=$?
+  # 1 is "they differ", which a rendered copy always must; 0 means the url line was
+  # not rewritten and 2 means diff itself failed.
+  [ "$rc" -eq 1 ] || fail "diff of the tap formula against $source_formula exited $rc, expected 1"
+}
+
+# A tarball of a tree, with the one top-level directory Homebrew expects to cd into.
+tarball_of_head() {
+  local version="$1" out="$2"
+  git -C "$REPO" archive --format=tar.gz --prefix="automated-security-helper-$version/" -o "$out" HEAD
+}
+
+render() {
+  local formula="$1" tarball="$2" version="$3" out="$4"
+  shift 4
+  harness "$REPO/scripts/e2e/brew_formula.py" --formula "$formula" --tarball "$tarball" \
+    --version "$version" --out "$out" "$@"
+}
+
+ensure_tap
+if brew list --versions "$FORMULA" >/dev/null 2>&1; then
+  fail "$FORMULA is already installed on this machine; a fresh-install leg needs it absent"
+fi
+assert_uninstalled || fail "leftovers from an earlier install; a fresh-install leg needs none"
+
+VERSION="$(version_of "$REPO")"
+[ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
+HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+HEAD_TARBALL="$WORK/automated-security-helper-$VERSION.tar.gz"
+tarball_of_head "$VERSION" "$HEAD_TARBALL"
+HEAD_FORMULA="$WORK/formula-head/ash.rb"
+render "$REPO/Formula/ash.rb" "$HEAD_TARBALL" "$VERSION" "$HEAD_FORMULA"
+say "N = $VERSION at $HEAD_SHA"
+
+uninstall_and_check() {
+  say "negative control: the uninstall check must fail while ASH is installed"
+  local rc=0
+  assert_uninstalled 2>/dev/null || rc=$?
+  [ "$rc" -ne 0 ] || fail "NEGATIVE CONTROL: the uninstall check passed with $FORMULA installed"
+  say "   OK: rejected (exit $rc)"
+  brew uninstall --formula "$FORMULA"
+  assert_uninstalled || fail "brew uninstall left ASH behind"
+  say "uninstalled: no links, no keg, no opt link, not listed"
+}
+
+leg_fresh() {
+  use_formula "$HEAD_FORMULA" "$REPO/Formula/ash.rb"
+  brew install --verbose --build-from-source --formula "$FORMULA"
+  local got
+  got="$(installed_versions)" || fail "brew does not list $FORMULA after installing it"
+  [ "$got" = "$VERSION" ] || fail "brew lists ash $got, expected exactly $VERSION"
+  local cli="$BREW_BIN/$ASH_CLI_NAME"
+  [ -x "$cli" ] || fail "the install linked no $ASH_CLI_NAME into $BREW_BIN"
+  require_version_line "$cli" "$VERSION"
+
+  # The formula's own test block: ashx --version, the ash alias's deprecation line on
+  # stderr, and a real scan with a non-zero SARIF count.
+  brew test --verbose "$FORMULA"
+
+  run_case "$cli" findings fresh-findings
+  run_case "$cli" clean fresh-clean
+  run_case "$cli" incomplete fresh-incomplete
+
+  say "negative control: findings scanned with --no-fail-on-findings must fail the exit-code check"
+  local rc=0 log="$WORK/negative-no-fail-on-findings.log"
+  run_case "$cli" findings negative-no-fail-on-findings --no-fail-on-findings >"$log" 2>&1 || rc=$?
+  cat "$log"
+  [ "$rc" -eq 1 ] || fail "NEGATIVE CONTROL: run_case returned $rc for a findings scan that exited 0; expected 1"
+  grep -q "exit code 0 (nothing actionable), expected exactly 2" "$log" \
+    || fail "NEGATIVE CONTROL: run_case rejected the --no-fail-on-findings scan, but not for its exit code 0"
+  say "   OK: rejected for exit code 0 (exit $rc)"
+
+  uninstall_and_check
+  say "Homebrew fresh leg passed: $VERSION ($HEAD_SHA)"
+}
+
+leg_upgrade() {
+  local prev_sha
+  tree_of() { git -C "$REPO" rev-parse "$1^{tree}"; }
+  prev_sha="$(git -C "$REPO" rev-parse --verify --quiet "$PREV_REF^{commit}")" \
+    || fail "E2E_PREV_REF $PREV_REF does not name a commit"
+  if [ "$(tree_of "$prev_sha")" = "$(tree_of HEAD)" ]; then
+    say "$PREV_REF has HEAD's tree; using HEAD's first parent as N-1"
+    PREV_REF="HEAD^"
+    prev_sha="$(git -C "$REPO" rev-parse --verify --quiet "HEAD^1^{commit}")" \
+      || fail "HEAD has no parent in this clone; fetch at least one more commit of history"
+    [ "$(tree_of "$prev_sha")" != "$(tree_of HEAD)" ] \
+      || fail "HEAD's first parent has HEAD's tree too; there is no code change to upgrade across"
+  fi
+
+  local prev_root="$WORK/src-prev" base_version prev_version
+  rm -rf "$prev_root"
+  mkdir -p "$prev_root/tree"
+  git -C "$REPO" archive "$prev_sha" | tar -x -C "$prev_root/tree"
+  base_version="$(version_of "$prev_root/tree")"
+  [ -n "$base_version" ] || fail "no [project] version in $PREV_REF's pyproject.toml"
+  # The last non-zero component decremented, the derivation scripts/e2e/wheel.sh and
+  # packaging/verify-lib.sh use, so N-1 carries a version that was never released.
+  prev_version="$(printf '%s\n' "$base_version" | awk -F. '{
+    n = NF; while (n > 0 && $n == 0) n--;
+    if (n == 0) { exit 1 }
+    $n = $n - 1; for (i = n + 1; i <= NF; i++) $i = 0;
+    out = $1; for (i = 2; i <= NF; i++) out = out "." $i; print out }')" \
+    || fail "cannot derive a lower version from $base_version"
+  harness - "$prev_root/tree/pyproject.toml" "$base_version" "$prev_version" <<'PY'
+import sys
+path, old, new = sys.argv[1:]
+text = open(path, encoding="utf-8").read()
+needle = f'\nversion = "{old}"\n'
+if needle not in text:
+    sys.exit(f"no [project] version line {old!r} in {path}")
+open(path, "w", encoding="utf-8", newline="").write(text.replace(needle, f'\nversion = "{new}"\n', 1))
+PY
+  harness - "$prev_version" "$VERSION" <<'PY' \
+    || fail "N-1 version $prev_version does not sort below head's $VERSION; the upgrade would not move forward"
+import re, sys
+prev, head = sys.argv[1:]
+for v in (prev, head):
+    if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", v):
+        sys.exit(f"version {v!r} is not dotted integers")
+def key(v):
+    parts = [int(p) for p in v.split(".")]
+    return parts + [0] * (8 - len(parts))
+sys.exit(0 if key(prev) < key(head) else 1)
+PY
+  mv "$prev_root/tree" "$prev_root/automated-security-helper-$prev_version"
+  local prev_tarball="$WORK/automated-security-helper-$prev_version.tar.gz"
+  tar -C "$prev_root" -czf "$prev_tarball" "automated-security-helper-$prev_version"
+  # N-1's own formula, so its resource block matches its own dependencies.
+  local prev_formula="$WORK/formula-prev/ash.rb"
+  render "$prev_root/automated-security-helper-$prev_version/Formula/ash.rb" \
+    "$prev_tarball" "$prev_version" "$prev_formula"
+  say "N-1 = $prev_version from $PREV_REF ($prev_sha)"
+
+  use_formula "$prev_formula" "$prev_root/automated-security-helper-$prev_version/Formula/ash.rb"
+  brew install --verbose --build-from-source --formula "$FORMULA"
+  local got prev_cli
+  got="$(installed_versions)" || fail "brew does not list $FORMULA after installing N-1"
+  [ "$got" = "$prev_version" ] || fail "brew lists ash $got, expected exactly $prev_version"
+  # N-1 may predate the $ASH_CLI_NAME command; the v3 name is the one it is sure to have.
+  if [ -x "$BREW_BIN/$ASH_CLI_NAME" ]; then
+    prev_cli="$BREW_BIN/$ASH_CLI_NAME"
+  elif [ -x "$BREW_BIN/ash" ]; then
+    prev_cli="$BREW_BIN/ash"
+  else
+    fail "the N-1 install linked neither $ASH_CLI_NAME nor ash"
+  fi
+  require_version_line "$prev_cli" "$prev_version"
+  run_case "$prev_cli" findings upgrade-before
+
+  use_formula "$HEAD_FORMULA" "$REPO/Formula/ash.rb"
+  brew upgrade --verbose --build-from-source --formula "$FORMULA"
+  [ -d "$KEGS/$VERSION" ] || fail "brew upgrade did not create the $VERSION keg"
+  [ -d "$KEGS/$prev_version" ] \
+    || fail "the $prev_version keg is gone before brew cleanup, so this leg cannot show cleanup removes it"
+  local opt_target
+  opt_target="$(cd "$OPT_LINK" && pwd -P)" || fail "no opt link at $OPT_LINK after the upgrade"
+  [ "$opt_target" = "$(cd "$KEGS/$VERSION" && pwd -P)" ] \
+    || fail "$OPT_LINK resolves to $opt_target, not the $VERSION keg"
+  local cli="$BREW_BIN/$ASH_CLI_NAME"
+  [ -x "$cli" ] || fail "the upgrade linked no $ASH_CLI_NAME"
+  [ -x "$BREW_BIN/ash" ] || fail "the upgrade unlinked the deprecated ash command, which Homebrew keeps"
+  require_version_line "$cli" "$VERSION"
+
+  brew cleanup --prune=all "$FORMULA"
+  [ ! -e "$KEGS/$prev_version" ] || fail "brew cleanup left the $prev_version keg in $KEGS"
+  got="$(installed_versions)" || fail "brew does not list $FORMULA after cleanup"
+  [ "$got" = "$VERSION" ] || fail "after cleanup brew lists ash $got, expected exactly $VERSION"
+  say "upgraded $prev_version -> $VERSION; cleanup removed the old keg"
+
+  run_case "$cli" findings upgrade-after
+  uninstall_and_check
+  say "Homebrew upgrade leg passed: $prev_version ($PREV_REF $prev_sha) -> $VERSION ($HEAD_SHA)"
+}
+
+leg_negative() {
+  local broken="$WORK/formula-broken/ash.rb"
+  render "$REPO/Formula/ash.rb" "$HEAD_TARBALL" "$VERSION" "$broken" --drop-resource "$DROPPED_RESOURCE"
+  use_formula "$broken" "$REPO/Formula/ash.rb"
+
+  say "a formula missing the $DROPPED_RESOURCE resource still installs, because pip runs with --no-deps"
+  brew install --verbose --build-from-source --formula "$FORMULA"
+  local cli="$BREW_BIN/$ASH_CLI_NAME"
+  [ -x "$cli" ] || fail "the broken formula linked no $ASH_CLI_NAME, so this control shows nothing about scans"
+  require_version_line "$cli" "$VERSION"
+
+  say "negative control: the findings case must fail on this install"
+  local rc=0 log="$WORK/negative-missing-resource.log"
+  run_case "$cli" findings negative-missing-resource >"$log" 2>&1 || rc=$?
+  cat "$log"
+  [ "$rc" -eq 1 ] || fail "NEGATIVE CONTROL: run_case returned $rc on an install without $DROPPED_RESOURCE; expected 1"
+  grep -q "scanners did not complete: $DROPPED_RESOURCE=MISSING" "$log" \
+    || fail "NEGATIVE CONTROL: the findings case failed, but not because $DROPPED_RESOURCE was MISSING"
+  say "   OK: rejected, $DROPPED_RESOURCE MISSING (exit $rc)"
+
+  say "negative control: the formula's own test block must fail on this install"
+  rc=0
+  log="$WORK/negative-brew-test.log"
+  brew test --verbose "$FORMULA" >"$log" 2>&1 || rc=$?
+  cat "$log"
+  [ "$rc" -ne 0 ] || fail "NEGATIVE CONTROL: brew test passed on an install without $DROPPED_RESOURCE"
+  # The test block's scan is what has to fail, not its --version or alias checks.
+  grep -q "$DROPPED_RESOURCE: MISSING" "$log" \
+    || fail "NEGATIVE CONTROL: brew test failed, but not on its scan reporting $DROPPED_RESOURCE MISSING"
+  say "   OK: brew test failed on its scan, $DROPPED_RESOURCE MISSING (exit $rc)"
+
+  uninstall_and_check
+  say "Homebrew negative leg passed: a missing resource fails the scan and brew test"
+}
+
+"leg_$LEG"
