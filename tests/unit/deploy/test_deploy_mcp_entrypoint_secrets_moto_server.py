@@ -76,7 +76,7 @@ pytestmark = pytest.mark.skipif(
     reason="executes a POSIX entrypoint line destined for a Linux container",
 )
 
-SECRET_MARKER = "get_secret_value"
+SECRET_MARKER = "get_secret_value"  # pragma: allowlist secret
 ENTRYPOINT_HEREDOC_DELIMITER = "ASH_CDK_EOF"
 
 # The image build writes TWO scripts with heredocs sharing the ASH_CDK_EOF
@@ -87,7 +87,7 @@ ENTRYPOINT_DESTINATION = "ash-src/ash-mcp-entrypoint.sh"
 
 # The secret an adopter would store: no trailing newline, and containing the
 # characters a heredoc or a shell expansion would mangle if the quoting were wrong.
-SECRET_VALUE = "hdr-${not-expanded}-`not-run`-a1b2c3"
+SECRET_VALUE = "hdr-${not-expanded}-`not-run`-a1b2c3"  # pragma: allowlist secret
 
 
 def emitting_templates() -> dict[str, dict]:

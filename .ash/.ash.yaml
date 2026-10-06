@@ -229,21 +229,20 @@ global_settings:
     # Reach for a path entry below only where per-line marking is not available:
     # a generated or vendored file nobody hand-edits, a format with no comment
     # syntax, or a pattern spread over more lines than is reasonable to mark.
-    # The entries that follow predate this note and are left alone; narrowing
-    # them is a separate change with its own review.
-    - rule_id: "SECRET-*"
-      path: "tests/**"
-      reason: "Test fixtures contain intentional secret patterns for validation"
-    - rule_id: "SECRET-*"
-      path: "scripts/**"
-      reason: "Build scripts contain seeded test data generators"
+    #
+    # There are no directory-wide entries left. `SECRET-*` over `tests/**` and
+    # `scripts/**` hid 31 findings; each is now a pragma on its line, and
+    # tests/unit/config/test_no_directory_glob_secret_suppressions.py fails if a
+    # directory glob for this rule family comes back. Some sit on the line above
+    # as `# pragma: allowlist nextline secret` instead, in two cases: where ruff
+    # format would wrap the line and carry a trailing pragma off the line it
+    # covers, and where ferret-scan reads the file, because ferret counts the
+    # word "secret" in a trailing comment as evidence and raised three such
+    # lines to high confidence.
     # === detect-secrets: specific source files ===
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
       reason: "Module processes secret-related strings — keyword matches are inherent"
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: "docs/**"
-      reason: "Documentation examples showing detection patterns"
     - rule_id: SECRET-SECRET-KEYWORD
       path: deploy/terraform/modules/ash-image-pipeline/files/ash-container-init
       reason: >-
@@ -2460,13 +2459,13 @@ global_settings:
     - rule_id: "CKV_DOCKER_2"
       path: "automated_security_helper/assets/Dockerfile"
       reason: "Generated Dockerfile for CLI tool — HEALTHCHECK not applicable"
-    # === GitHub Actions rules (YAML — no inline suppression) ===
-    - path: ".github/**/*.yml"
-      rule_id: "yaml.github-actions.security.*"
-      reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
-    - path: "ash-agent-plugins/**/.github/**/*.yml"
-      rule_id: "yaml.github-actions.security.*"
-      reason: "Same rationale as the root .github rule: interpolations are author-defined inputs.*/matrix.*, not attacker-controlled github.event.* context. The repo pins actions by major tag by convention (see .github/workflows)."
+    # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
+    # over every workflow on the claim that interpolations were author-defined;
+    # removing it surfaced shell injection through `${{ inputs.* }}` in
+    # run-scan-test, a `curl | sh` install in validate-install and unpinned
+    # actions in the nested ash-agent-plugins workflow, all fixed in the files.
+    # A future false positive takes `# nosemgrep: <rule>` on its line, which
+    # opengrep and semgrep both honor in YAML.
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

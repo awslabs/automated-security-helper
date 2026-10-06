@@ -1251,6 +1251,7 @@ class TestAllowlistsAreWhatTheArtifactContains:
         """The false positive the digit requirement removes, pinned directly."""
         assert (
             _classify(
+                # pragma: allowlist nextline secret
                 "automated_security_helper/assets/ASH_INSTALLED_REVISION",
                 magic=b"BZh-fix/some-branch\n",
             )

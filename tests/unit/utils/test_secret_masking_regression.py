@@ -43,6 +43,7 @@ class TestSecretMasking:
         """B106 (hardcoded password in funcarg) must be masked."""
         from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
+        # pragma: allowlist nextline secret
         text = "Possible hardcoded " + "password: 'SuperSecret123'"
         result = mask_secret_in_text(text, rule_id="B106")
         assert "SuperSecret123" not in result
@@ -51,6 +52,7 @@ class TestSecretMasking:
         """B107 (hardcoded password in config) must be masked."""
         from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
+        # pragma: allowlist nextline secret
         text = "Possible hardcoded " + "password: 'MyPassw0rd'"
         result = mask_secret_in_text(text, rule_id="B107")
         assert "MyPassw0rd" not in result
@@ -59,6 +61,7 @@ class TestSecretMasking:
         """B105 masking should continue to work after the fix."""
         from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
+        # pragma: allowlist nextline secret
         text = "Possible hardcoded " + "password: 'secret123'"
         result = mask_secret_in_text(text, rule_id="B105")
         assert "secret123" not in result
@@ -68,6 +71,7 @@ class TestSecretMasking:
         """Secret containing a quote should still be fully masked."""
         from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
+        # pragma: allowlist nextline secret
         text = "Possible hardcoded " + "password: 'it\\'s_a_secret'"
         result = mask_secret_in_text(text, rule_id="B105")
         # The secret value should not appear in cleartext
@@ -77,6 +81,7 @@ class TestSecretMasking:
         """Secret in double quotes should be masked."""
         from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
+        # pragma: allowlist nextline secret
         text = "Possible hardcoded " + 'password: "MySecret99"'
         result = mask_secret_in_text(text, rule_id="B105")
         assert "MySecret99" not in result
