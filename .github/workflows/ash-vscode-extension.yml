@@ -71,6 +71,9 @@ on:
       - "uv.lock"
       - "scripts/e2e/**"
       - "tests/e2e/**"
+      # The integration-real job sources this for the CLI name it installs and
+      # checks, so a rename there alone changes what that job runs.
+      - "packaging/cli-name.sh"
   pull_request:
     branches:
       - "**"
@@ -90,6 +93,7 @@ on:
       - "uv.lock"
       - "scripts/e2e/**"
       - "tests/e2e/**"
+      - "packaging/cli-name.sh"
   # merge_group takes no paths filter -- GitHub scopes paths to push, pull_request
   # and pull_request_target only. So this leg runs on every queue entry, including
   # entries that touch nothing here. That costs a build on unrelated entries and
