@@ -318,7 +318,7 @@ def test_a_stale_report_is_removed_before_the_run(tmp_path):
 def test_a_failing_exit_code_refuses_even_a_present_report(tmp_path):
     scanner = _scanner(tmp_path)
     report = tmp_path / "r.sarif"
-    report.write_text(VULN_SARIF.read_text(encoding="utf-8"))
+    report.write_text(VULN_SARIF.read_text(encoding="utf-8"), encoding="utf-8")
     scanner.exit_code = 1
     with pytest.raises(ScannerError, match="trivy exited 1"):
         scanner._read_results_file(report)
