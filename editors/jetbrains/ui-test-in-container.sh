@@ -31,8 +31,11 @@
 #     /tmp/ash-ui/bin/ashx, because both appear in rendered text (the notification names the
 #     report's path);
 #   * the scan's output: the stub replays the captured real exit-1 run in
-#     src/test/resources/real-cli/exit1, so the findings and the incomplete-scan notification
-#     are ASH's own output and the same every time;
+#     src/test/resources/real-cli/exit1, so the incomplete-scan notification and the three
+#     error findings are ASH's own output and the same every time. The SARIF it replays is
+#     src/uiTest/scan/ash.sarif: that capture plus one warning and one note on line 1, because
+#     the capture holds errors only and each level's highlight style needs pixels of its own
+#     (see src/uiTest/scan/README.txt);
 #   * the locale, time zone and environment the IDE inherits.
 #
 # Nothing is published and nothing leaves the container but files under build/.
@@ -91,7 +94,7 @@ say "compile the plugin, the sandbox and the visual suite before the IDE starts"
 ./gradlew --no-daemon --console=plain -q uiTestClasses prepareSandbox_runIdeForUiTests
 
 # A fixed project with the planted secret, and a stub ASH CLI that replays the captured real
-# exit-1 run: three detect-secrets findings and cfn-nag MISSING.
+# exit-1 run (three detect-secrets errors and cfn-nag MISSING) with a warning and a note added.
 fresh_project() {
   rm -rf "$UI_ROOT"
   mkdir -p "$ASH_UI_PROJECT" "$UI_ROOT/bin"
@@ -100,13 +103,14 @@ fresh_project() {
   cp -R src/uiTest/project/. "$ASH_UI_PROJECT/"
   cp src/test/resources/fixtures/leak.py "$ASH_UI_PROJECT/leak.py"
   local capture="$HERE/src/test/resources/real-cli/exit1"
+  local sarif="$HERE/src/uiTest/scan/ash.sarif"
   cat > "$UI_ROOT/bin/ashx" <<SH
 #!/bin/sh
 if [ "\$1" = --version ]; then echo 'awslabs/automated-security-helper v3.7.0'; exit 0; fi
 out=''
 while [ \$# -gt 0 ]; do case "\$1" in --output-dir) out="\$2"; shift 2;; *) shift;; esac; done
 mkdir -p "\$out/reports"
-cp '$capture/ash.sarif' "\$out/reports/ash.sarif"
+cp '$sarif' "\$out/reports/ash.sarif"
 cp '$capture/ash_aggregated_results.json' "\$out/ash_aggregated_results.json"
 cat '$capture/console-tail.txt' >&2
 exit 1

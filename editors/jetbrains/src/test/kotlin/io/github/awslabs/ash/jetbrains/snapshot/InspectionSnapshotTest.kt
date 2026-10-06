@@ -4,6 +4,8 @@
 package io.github.awslabs.ash.jetbrains.snapshot
 
 import com.intellij.codeInsight.daemon.impl.HighlightInfo
+import com.intellij.codeInspection.InspectionManager
+import com.intellij.codeInspection.ProblemHighlightType
 import com.intellij.openapi.util.TextRange
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.testFramework.fixtures.TempDirTestFixture
@@ -17,8 +19,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * What the editor shows for ASH findings: for every highlight, its range, its severity, the text
- * it underlines, the problem description, and the HTML tooltip the hover shows.
+ * What the editor shows for ASH findings: for every highlight, its range, its severity, how it
+ * is styled (problem type, highlight type, text attributes key), the text it underlines, the
+ * problem description, and the HTML tooltip the hover shows.
  *
  * The highlights come from the real highlighting pass over a real document, as in
  * AshFindingInspectionIdeTest. That class asserts lines and severities; this one pins the whole
@@ -48,11 +51,28 @@ class InspectionSnapshotTest : BasePlatformTestCase() {
 
     private val sourceDir: Path get() = Path.of(myFixture.tempDirPath)
 
+    /**
+     * The inspection's own problems for the open file, keyed by range and description, so each
+     * highlight can be paired with the [ProblemHighlightType] that produced it. The highlight
+     * alone does not say: LIKE_UNUSED_SYMBOL and WARNING both reach the editor at WARNING
+     * severity, and only the type decides whether the code is underlined or greyed out.
+     */
+    private fun highlightTypes(): Map<Pair<TextRange, String>, ProblemHighlightType> {
+        val problems = AshFindingInspection().checkFile(myFixture.file, InspectionManager.getInstance(project), true)
+            ?: return emptyMap()
+        return problems.associate { problem ->
+            val element = problem.psiElement
+            val range = problem.textRangeInElement?.shiftRight(element.textRange.startOffset) ?: element.textRange
+            (range to problem.descriptionTemplate) to problem.highlightType
+        }
+    }
+
     private fun render(): String {
         val document = myFixture.editor.document
         val infos = myFixture.doHighlighting()
             .filter { it.description?.startsWith("ASH") == true }
             .sortedWith(compareBy<HighlightInfo>({ it.startOffset }, { it.endOffset }, { it.description }))
+        val types = highlightTypes()
         return buildString {
             append("file: ").append(myFixture.file.name).append('\n')
             append("highlights: ").append(infos.size).append('\n')
@@ -61,7 +81,14 @@ class InspectionSnapshotTest : BasePlatformTestCase() {
                 val end = document.getLineNumber(info.endOffset)
                 val startCol = info.startOffset - document.getLineStartOffset(start) + 1
                 val endCol = info.endOffset - document.getLineStartOffset(end) + 1
+                val problemType = types[TextRange(info.startOffset, info.endOffset) to info.description]
                 append("\n").append("${start + 1}:$startCol-${end + 1}:$endCol ").append(info.severity.name).append('\n')
+                // How the editor styles the range, which the severity does not determine: the
+                // problem type the inspection chose, the text attributes key of the highlight type
+                // it became, and the forced key, which wins over the type's own when one is set.
+                append("  style: problem type ").append(problemType?.name ?: "<no matching problem>")
+                append(", attributes ").append(info.type.attributesKey.externalName)
+                append(", forced attributes ").append(info.forcedTextAttributesKey?.externalName ?: "none").append('\n')
                 append("  text: ").append(document.getText(TextRange(info.startOffset, info.endOffset)).replace("\n", "\\n")).append('\n')
                 append("  description: ").append(info.description).append('\n')
                 append("  tooltip: ").append(info.toolTip).append('\n')
