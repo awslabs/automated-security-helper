@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import ValidationError
 import yaml
@@ -184,6 +184,7 @@ def resolve_config(
     source_dir: Path | str | None = None,
     fallback_to_default: bool = True,
     config_overrides: List[str] = None,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -193,6 +194,10 @@ def resolve_config(
         source_dir: Source directory to search for configuration files
         fallback_to_default: Whether to fall back to default configuration if no config file is found
         config_overrides: List of configuration overrides in the format 'key.path=value'
+        permit_base: Optional check every ``extends`` base must also pass. The
+            MCP server passes the calling session's; see
+            ``config/config_sources.py``. A refusal is raised, never replaced by
+            the default config.
 
     Returns:
         The resolved AshConfig object
@@ -281,7 +286,9 @@ def resolve_config(
                     config_path, confinement_source_dir
                 )
             config = AshConfig.from_file(
-                config_path=Path(config_path), confine_to=confine_to
+                config_path=Path(config_path),
+                confine_to=confine_to,
+                permit_base=permit_base,
             )
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 

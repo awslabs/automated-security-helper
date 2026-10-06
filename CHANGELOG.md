@@ -437,6 +437,8 @@
 
 ### Fixes
 
+- MCP config tools now confine config paths, including `extends` chains, to the allowed roots.
+
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan

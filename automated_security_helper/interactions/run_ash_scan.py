@@ -10,7 +10,17 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Set, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    cast,
+)
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -100,6 +110,12 @@ class ScanOptions(BaseModel):
     # General scan options
     config: Optional[str] = None
     config_overrides: Optional[List[str]] = Field(default_factory=list)
+    # A check every `extends` base of the config must also pass, applied by every
+    # config read below. The MCP server passes the calling session's allowed
+    # config roots (cli/mcp/sandbox.config_base_gate); None keeps the CLI rule.
+    config_base_gate: Optional[Callable[[Path], bool]] = Field(
+        default=None, exclude=True
+    )
     offline: bool = False
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
@@ -1150,7 +1166,12 @@ def _discovered_config_path(
     return discovery.selected.path.as_posix()
 
 
-def _load_with_confinement(ash_config_cls, config_path_str: str, source_dir: Path):
+def _load_with_confinement(
+    ash_config_cls,
+    config_path_str: str,
+    source_dir: Path,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+):
     """Load a config file with its `extends` bases confined as a scan would."""
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
@@ -1160,6 +1181,7 @@ def _load_with_confinement(ash_config_cls, config_path_str: str, source_dir: Pat
     return ash_config_cls.from_file(
         config_path,
         confine_to=default_confinement_root(config_path, source_dir),
+        permit_base=permit_base,
     )
 
 
@@ -1188,7 +1210,9 @@ def _load_config_file(opts: ScanOptions):
         return None
 
     try:
-        return _load_with_confinement(AshConfig, config_path_str, opts.source_dir)
+        return _load_with_confinement(
+            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
+        )
     except Exception:
         return None
 
@@ -1817,6 +1841,7 @@ def _run_local_mode(
             excluded_scanners=list(opts.excluded_scanners or []),
             config_path=config,
             config_overrides=opts.config_overrides or [],
+            config_base_gate=opts.config_base_gate,
             verbose=opts.verbose or opts.debug,
             debug=opts.debug,
             strategy=(
@@ -1964,7 +1989,7 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
 
     try:
         return _load_with_confinement(
-            AshConfig, config_path_str, opts.source_dir
+            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
         ).workspace
     except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
         logging.getLogger(__name__).warning(
@@ -2799,6 +2824,7 @@ def run_ash_scan(
     container_network: str = "bridge",
     workspace_plan: "WorkspacePlan | None" = None,
     allow_missing_projects: bool = False,
+    config_base_gate: Optional[Callable[[Path], bool]] = None,
     *args,
     **kwargs,
 ):
@@ -2867,6 +2893,7 @@ def run_ash_scan(
         container_network=container_network,
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
+        config_base_gate=config_base_gate,
     )
 
     _apply_log_level_env(opts)

@@ -8,7 +8,7 @@ from pydantic import (
     PrivateAttr,
     model_validator,
 )
-from typing import Annotated, Any, List, Dict, Literal, Optional
+from typing import Annotated, Any, Callable, List, Dict, Literal, Optional
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
@@ -1070,20 +1070,26 @@ class AshConfig(BaseModel):
 
     @classmethod
     def from_file(
-        cls, config_path: Path, confine_to: Optional[Path] = None
+        cls,
+        config_path: Path,
+        confine_to: Optional[Path] = None,
+        permit_base: Optional[Callable[[Path], bool]] = None,
     ) -> "AshConfig":
         """Load configuration from a file, following any ``extends`` chain.
 
         ``config_path`` may be YAML, JSON, an ``ashrc.toml``-style TOML file, or a
         ``pyproject.toml`` (whose ``[tool.ash]`` table is read). ``extends`` and
         ``patch`` are resolved by ``config/config_sources.py``, which documents
-        the merge rules and the confinement of base paths to ``confine_to``.
+        the merge rules and the confinement of base paths to ``confine_to`` and
+        ``permit_base``.
         """
         from automated_security_helper.config.config_sources import (
             load_config_document,
         )
 
-        config_data = load_config_document(Path(config_path), confine_to=confine_to)
+        config_data = load_config_document(
+            Path(config_path), confine_to=confine_to, permit_base=permit_base
+        )
         return cls.model_validate(config_data, strict=True)
 
     def save(self, config_path: Path):

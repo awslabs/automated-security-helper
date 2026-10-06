@@ -980,7 +980,8 @@ async def mcp_scan_workspace(
             entry and no scan id.
         config_overrides: ``--config-overrides`` values, applied per project.
         output_dir: Where the workspace output tree goes. Defaults to
-            ``<workspace root>/.ash/ash_output``.
+            ``<workspace root>/.ash/ash_output``. When given, confined like a
+            scan target, because it is written into.
         scanners: Restrict every project to these scanners.
         excluded_scanners: Exclude these scanners from every project. Takes
             precedence over ``scanners``.
@@ -1026,6 +1027,18 @@ async def mcp_scan_workspace(
             "scan_workspace",
             exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
         )
+
+    # A caller-named output tree is written into, so it gets the scan roots a
+    # scan target gets, checked before anything below creates it. The default,
+    # beneath the workspace root, is not caller-named and is left as it was.
+    if output_dir is not None:
+        output_refusal = validate_scan_target(output_dir, session_id=session_id)
+        if output_refusal is not None:
+            return _error_response(
+                output_refusal,
+                "scan_workspace",
+                exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+            )
 
     try:
         session_config = _resolve_session_config(session_id, profile)

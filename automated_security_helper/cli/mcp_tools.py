@@ -46,6 +46,26 @@ if TYPE_CHECKING:
 # The MCP logging patch will ensure this logger is properly isolated
 _logger = ASH_LOGGER
 
+#: ``error_type`` of every refusal of a config input outside the permitted roots,
+#: whichever tool refused it. The same value ``run_ash_scan`` returns.
+CONFIG_INPUT_NOT_PERMITTED = "config_input_not_permitted"
+
+
+def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
+    """The response for a config input outside the permitted roots.
+
+    No ``context`` key, unlike ``create_error_response``: it would carry the
+    resolved path, and the caller's own spelling in ``error`` already identifies
+    what was refused.
+    """
+    return {
+        "success": False,
+        "operation": operation,
+        "error": str(error),
+        "error_type": CONFIG_INPUT_NOT_PERMITTED,
+        "error_category": error.context["error_category"],
+    }
+
 
 async def mcp_scan_directory(
     directory_path: str,
@@ -151,8 +171,17 @@ async def mcp_scan_directory(
             ],
         )
 
-    # Validate config path if provided
+    # Validate config path if provided. Confinement first, covering every base the
+    # config extends, so a refused path is reported as refused and not as missing.
     if config_path:
+        from automated_security_helper.cli.mcp.sandbox import validate_config_chain
+
+        chain_error = validate_config_chain(
+            config_path, session_id=session_id, source_dir=resolved_target
+        )
+        if chain_error is not None:
+            return _config_refusal(chain_error, "scan_directory")
+
         config_error = validate_config_path(config_path)
         if config_error:
             return create_error_response(
@@ -279,11 +308,18 @@ async def _run_scan_async(
         run_ash_scan,
     )
 
+    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+
     registry = get_scan_registry()
     entry = registry.get_scan(scan_id)
     if not entry:
         _logger.error(f"Scan {scan_id} not found in registry")
         return
+
+    # Every config read inside the scan checks each `extends` base against this
+    # session's grant. mcp_scan_directory checked the chain before starting; this
+    # is what holds if a base changes between that check and the scan.
+    base_gate = config_base_gate(session_id)
 
     # Resolve the per-session lock if a session_id was supplied. The lock is
     # acquired inside the executor wrapper below — we MUST NOT hold it on the
@@ -327,6 +363,7 @@ async def _run_scan_async(
                     log_level=AshLogLevel.INFO,
                     fail_on_findings=False,
                     show_summary=False,
+                    config_base_gate=base_gate,
                 )
         else:
             return run_ash_scan(
@@ -337,6 +374,7 @@ async def _run_scan_async(
                 log_level=AshLogLevel.INFO,
                 fail_on_findings=False,
                 show_summary=False,
+                config_base_gate=base_gate,
             )
 
     try:
@@ -807,6 +845,7 @@ def _load_flat_vulns_for_explain(results_path: Optional[str]) -> list:
 def mcp_explain_finding(
     finding_id: str,
     results_path: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return structured details for a single finding by ID.
 
@@ -817,6 +856,7 @@ def mcp_explain_finding(
         results_path: Optional path to the output directory (or file inside it)
                       containing ash_aggregated_results.json. Defaults to
                       <cwd>/.ash/ash_output.
+        session_id: The MCP session this call acts for.
 
     Returns:
         Dict with ``success`` and ``finding`` keys on success, or
@@ -833,24 +873,25 @@ def mcp_explain_finding(
     # ash_aggregated_results.json out of a caller-named output directory. The
     # directory is derived from results_path exactly as
     # _load_flat_vulns_for_explain derives it, so the path checked is the path
-    # read.
-    if results_path is not None:
+    # read -- including the cwd default when results_path is omitted.
+    if results_path is None:
+        _results_dir = Path.cwd() / ".ash" / "ash_output"
+    else:
         _candidate = Path(results_path)
-        target_error = validate_scan_target(
-            _candidate if _candidate.is_dir() else _candidate.parent
+        _results_dir = _candidate if _candidate.is_dir() else _candidate.parent
+    target_error = validate_scan_target(_results_dir, session_id=session_id)
+    if target_error:
+        return create_error_response(
+            error=target_error,
+            operation="explain_finding",
+            suggestions=[
+                (
+                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it"
+                ),
+                "Verify that the path is correct",
+            ],
         )
-        if target_error:
-            return create_error_response(
-                error=target_error,
-                operation="explain_finding",
-                suggestions=[
-                    (
-                        f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
-                        "MCP server should be able to read results from it"
-                    ),
-                    "Verify that the path is correct",
-                ],
-            )
 
     try:
         flat_vulns = _load_flat_vulns_for_explain(results_path)
@@ -907,12 +948,44 @@ def mcp_explain_finding(
     }
 
 
-def mcp_diff_scan_results(before_path: str, after_path: str) -> Dict[str, Any]:
+def _refuse_results_file(
+    path: Path, operation: str, session_id: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """Check a caller-named results file against the scan roots, as a results dir is.
+
+    Before the existence check, so a refused path is reported as refused rather
+    than as missing.
+    """
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
+
+    target_error = validate_scan_target(path, session_id=session_id)
+    if target_error is None:
+        return None
+    return create_error_response(
+        error=target_error,
+        operation=operation,
+        suggestions=[
+            (
+                f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the MCP "
+                "server should be able to read results from it"
+            ),
+            "Verify that the path is correct",
+        ],
+    )
+
+
+def mcp_diff_scan_results(
+    before_path: str, after_path: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
     """Compare two ash_aggregated_results.json files and return a structured diff.
 
     Args:
         before_path: Path to the baseline ash_aggregated_results.json file.
         after_path: Path to the comparison ash_aggregated_results.json file.
+        session_id: The MCP session this call acts for.
 
     Returns:
         Dict with keys:
@@ -926,6 +999,11 @@ def mcp_diff_scan_results(before_path: str, after_path: str) -> Dict[str, Any]:
 
     before_file = Path(before_path)
     after_file = Path(after_path)
+
+    for candidate in (before_file, after_file):
+        refusal = _refuse_results_file(candidate, "diff_scan_results", session_id)
+        if refusal is not None:
+            return refusal
 
     if not before_file.exists():
         return {
@@ -1035,6 +1113,7 @@ def mcp_get_config(
     config_path: Optional[str] = None,
     raw: bool = False,
     search_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return the resolved ASH config (or raw file contents if raw=True).
 
@@ -1043,11 +1122,22 @@ def mcp_get_config(
         raw: If True, returns the user file contents without merging defaults.
         search_dir: Directory to search for config file when config_path is None.
                     Defaults to cwd.
+        session_id: The MCP session this call acts for. The named or discovered
+            file, and every base it extends, must be readable as a config input
+            for it; see ``cli/mcp/sandbox.validate_config_input``.
 
     Returns:
         Dict representation of the resolved AshConfig, or raw YAML dict if raw=True.
+        A refused path returns ``success`` False with ``error_type``
+        ``config_input_not_permitted``.
     """
     import yaml as _yaml
+    from automated_security_helper.cli.mcp.sandbox import (
+        caller_is_remote,
+        config_base_gate,
+        config_chain_refusal,
+        validate_config_input,
+    )
     from automated_security_helper.config.resolve_config import (
         resolve_config,
         find_config_file,
@@ -1057,14 +1147,37 @@ def mcp_get_config(
         read_config_file,
     )
     from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+    )
 
     if config_path is not None:
+        # Before the existence check: the default config for an absent path and
+        # the file for a present one would otherwise answer whether it exists.
+        refusal = validate_config_input(config_path, session_id=session_id)
+        if refusal is not None:
+            return _config_refusal(refusal, "get_config")
         path: Optional[Path] = Path(config_path)
         if not path.exists():
             return get_default_config().model_dump()
     else:
-        search = Path(search_dir) if search_dir else None
-        path = find_config_file(search_dir=search)
+        search = Path(search_dir) if search_dir else Path.cwd()
+        # For a remote caller the directory is checked first, so a refusal names
+        # it rather than a file found in it, which would say the file exists. A
+        # local caller keeps discovery from any directory, the filesystem root
+        # included. The file is checked either way: it may be a link out.
+        refusal = (
+            validate_config_input(search, session_id=session_id)
+            if caller_is_remote(session_id)
+            else None
+        )
+        path = None
+        if refusal is None:
+            path = find_config_file(search_dir=search)
+            if path is not None:
+                refusal = validate_config_input(path, session_id=session_id)
+        if refusal is not None:
+            return _config_refusal(refusal, "get_config")
 
     if path is None:
         return get_default_config().model_dump()
@@ -1084,19 +1197,29 @@ def mcp_get_config(
         source_dir = Path(search_dir) if search_dir else Path.cwd()
     else:
         source_dir = default_confinement_root(path)
-    resolved = resolve_config(config_path=path, source_dir=source_dir)
+    try:
+        resolved = resolve_config(
+            config_path=path,
+            source_dir=source_dir,
+            permit_base=config_base_gate(session_id),
+        )
+    except ASHConfigInputNotPermittedError as exc:
+        return _config_refusal(config_chain_refusal(path, exc), "get_config")
     return resolved.model_dump()
 
 
 def mcp_validate_config(
     config_content: Optional[str] = None,
     config_path: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Validate an ASH config supplied as a content string or file path.
 
     Args:
         config_content: YAML/JSON string to validate. Mutually exclusive with config_path.
         config_path: Path to the config file to validate.
+        session_id: The MCP session this call acts for. ``config_path`` and every
+            base either input extends must be readable as a config input for it.
 
     Returns:
         Dict with keys:
@@ -1106,9 +1229,19 @@ def mcp_validate_config(
     import re
     import tempfile
 
+    from automated_security_helper.cli.mcp.sandbox import (
+        config_base_gate,
+        validate_config_input,
+    )
     from automated_security_helper.config.config_validator import ConfigValidator
 
+    permit_base = config_base_gate(session_id)
+
     def _classify(raw: str) -> Dict[str, Any]:
+        # First: a refused base's message names its file, and a file name such as
+        # "base.yaml" would otherwise match the YAML branch below.
+        if raw.startswith(ConfigValidator.NOT_PERMITTED_ERROR_PREFIX):
+            return {"field": "", "message": raw, "type": CONFIG_INPUT_NOT_PERMITTED}
         if "YAML parsing error" in raw or "yaml" in raw.lower():
             return {"field": "", "message": raw, "type": "yaml_parse_error"}
         if "JSON parsing error" in raw:
@@ -1142,8 +1275,24 @@ def mcp_validate_config(
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir) / "config.yaml"
             tmp_path.write_text(config_content, encoding="utf-8")
-            valid, raw_errors = ConfigValidator.validate_config_file(tmp_path)
+            valid, raw_errors = ConfigValidator.validate_config_file(
+                tmp_path, permit_base=permit_base
+            )
     elif config_path is not None:
+        # Before the existence check, so a refused path is reported as refused
+        # and not as missing.
+        refusal = validate_config_input(config_path, session_id=session_id)
+        if refusal is not None:
+            return {
+                "valid": False,
+                "errors": [
+                    {
+                        "field": "config_path",
+                        "message": str(refusal),
+                        "type": CONFIG_INPUT_NOT_PERMITTED,
+                    }
+                ],
+            }
         path = Path(config_path)
         if not path.exists():
             return {
@@ -1156,7 +1305,9 @@ def mcp_validate_config(
                     }
                 ],
             }
-        valid, raw_errors = ConfigValidator.validate_config_file(path)
+        valid, raw_errors = ConfigValidator.validate_config_file(
+            path, permit_base=permit_base
+        )
     else:
         return {
             "valid": False,
@@ -1180,6 +1331,7 @@ def mcp_suggest_suppression(
     results_path: Optional[str] = None,
     expiration: Optional[str] = None,
     justification: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build a paste-ready AshSuppression entry for a specific finding.
 
@@ -1189,6 +1341,8 @@ def mcp_suggest_suppression(
                       .ash/ash_output/ash_aggregated_results.json in cwd.
         expiration: Expiration date in YYYY-MM-DD format. Defaults to 90 days from today.
         justification: Human-readable reason for the suppression.
+        session_id: The MCP session this call acts for. The results file must be
+            inside its scan roots, as for the other results readers.
 
     Returns:
         Dict with keys:
@@ -1208,6 +1362,10 @@ def mcp_suggest_suppression(
         )
     else:
         results_file = Path(results_path)
+
+    refusal = _refuse_results_file(results_file, "suggest_suppression", session_id)
+    if refusal is not None:
+        return refusal
 
     if not results_file.exists():
         return {
@@ -1508,7 +1666,8 @@ def mcp_set_source_git(
     """Clone ``url`` at ``ref`` into the per-session workspace.
 
     Args:
-        url: Remote URL to clone (https or ssh).
+        url: Remote URL to clone (https or ssh). A local path or ``file://`` URL
+            must be inside the session's scan roots.
         ref: Optional branch/tag/commit. ``None`` uses the remote default.
         ssh_key_id: Opaque, server-side keyring identifier. Raw private keys
             are not accepted over the wire.
@@ -1519,7 +1678,24 @@ def mcp_set_source_git(
         ``{"success": True, "source_dir": str}`` on success;
         ``{"success": False, "error": str}`` on git failure.
     """
-    from automated_security_helper.cli.mcp.source_delivery import set_source_git
+    from automated_security_helper.cli.mcp.scan_target import validate_scan_target
+    from automated_security_helper.cli.mcp.source_delivery import (
+        local_clone_path,
+        set_source_git,
+    )
+
+    # A local clone source reads the server's filesystem, so it gets the scan
+    # roots a scan target gets. Checked before anything is created or cloned.
+    local_source = local_clone_path(url)
+    if local_source is not None:
+        target_error = validate_scan_target(local_source, session_id=session_id)
+        if target_error is not None:
+            return {
+                "success": False,
+                "error": str(target_error),
+                "error_type": "scan_target_not_permitted",
+                "error_category": target_error.context["error_category"],
+            }
 
     try:
         source_dir = set_source_git(

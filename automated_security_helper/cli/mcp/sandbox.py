@@ -92,6 +92,12 @@ Failure modes and known limitations
   does mean a new MCP tool that forgets to resolve and pass its session id
   silently evaluates as local. ``_with_session`` echoing the id back is the
   cheapest way to notice from outside.
+* A config input is more than the file named. Each base its ``extends`` chain
+  names is checked with the same rule (:func:`config_base_gate`), passed into
+  resolution by every MCP tool that resolves a config. ``config_sources`` on its
+  own confines a chain to the parent of ``.ash/`` for a file in ``.ash/``, which
+  is wider than a grant naming that ``.ash/`` directory. A new tool that resolves
+  a config without passing the gate gets that wider rule.
 * A path is compared after ``resolve()``, so a symlink is followed before
   containment is tested. A link inside a granted root pointing outside it is
   therefore refused, which is the intent. It also means a granted root that is
@@ -103,7 +109,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
@@ -656,6 +662,96 @@ def validate_config_input(
     )
 
 
+def config_base_gate(session_id: Optional[str] = None) -> Callable[[Path], bool]:
+    """The check every ``extends`` base must pass for this session.
+
+    The same rule as a config path the caller names directly, so a base is
+    readable exactly when naming it as ``config_path`` would be. ``config_sources``
+    still applies its own confinement root on top; this only narrows it. Without
+    it, a grant naming a ``.ash/`` directory would confine the chain to that
+    directory's parent, which is the CLI rule and not the grant.
+
+    Passed into resolution explicitly rather than recomputed there, because
+    resolution sees a path and not the session the grant belongs to.
+    """
+
+    def permit(path: Path) -> bool:
+        return validate_config_input(path, session_id=session_id) is None
+
+    return permit
+
+
+def validate_config_chain(
+    config_path: str | Path,
+    session_id: Optional[str] = None,
+    source_dir: Optional[str | Path] = None,
+) -> Optional[MCPResourceError]:
+    """Check a config input and every base its ``extends`` chain names.
+
+    The file itself goes through :func:`validate_config_input`. The chain is then
+    resolved under :func:`config_base_gate`, with the confinement root a scan of
+    ``source_dir`` would use, so a refusal is reported before a scan starts rather
+    than as a failed scan. Any other chain error (a cycle, a missing base, a
+    malformed ``patch``) is left to the caller's own resolution, which reports it
+    as it always has.
+
+    Args:
+        config_path: Caller-supplied path to a config file.
+        session_id: The session this call acts for.
+        source_dir: The scan target the config will be resolved against, if any.
+
+    Returns:
+        None if permitted, otherwise an :class:`MCPResourceError`.
+    """
+
+    refusal = validate_config_input(config_path, session_id=session_id)
+    if refusal is not None:
+        return refusal
+
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        resolve_config_document,
+    )
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+    )
+
+    path = Path(config_path)
+    if not path.is_file():
+        return None
+    try:
+        resolve_config_document(
+            path,
+            confine_to=default_confinement_root(
+                path, Path(source_dir) if source_dir is not None else None
+            ),
+            permit_base=config_base_gate(session_id),
+        )
+    except ASHConfigInputNotPermittedError as exc:
+        return config_chain_refusal(config_path, exc)
+    except Exception as exc:  # noqa: BLE001 -- reported by the caller's own read
+        _logger.debug("MCP sandbox: config chain not resolved here (%s)", exc)
+    return None
+
+
+def config_chain_refusal(config_path: object, exc: Exception) -> MCPResourceError:
+    """The refusal for a config whose ``extends`` chain leaves the permitted roots.
+
+    Carries the chain error's text, which names the ``extends`` entry as written
+    and never what it resolved to.
+    """
+
+    return MCPResourceError(
+        f"Config input is outside the permitted roots: {exc} Set "
+        f"{ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV} to the directories the MCP server may "
+        f"read config from, or keep every base inside a directory already granted.",
+        context={
+            "directory_path": str(config_path),
+            "error_category": ErrorCategory.INVALID_PATH.value,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # The legacy net, for a local transport with no grant
 # ---------------------------------------------------------------------------
@@ -718,6 +814,8 @@ __all__ = [
     "CONFIG_DIR_NAME",
     "SOURCE_DIR_NAME",
     "SessionSandbox",
+    "config_base_gate",
+    "config_chain_refusal",
     "get_server_transport",
     "operator_config_roots",
     "operator_scan_roots",
@@ -725,6 +823,7 @@ __all__ = [
     "set_server_transport",
     "shared_workspace_root",
     "transport_is_networked",
+    "validate_config_chain",
     "validate_config_input",
     "validate_scan_target_in_sandbox",
 ]
