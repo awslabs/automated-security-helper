@@ -9,6 +9,16 @@ from typing import List, Optional, Tuple
 
 import yaml
 
+from automated_security_helper.config.config_sources import (
+    EXTENDS_KEY,
+    PATCH_KEY,
+    default_confinement_root,
+    describe_config_path,
+    read_config_file,
+    resolve_config_document,
+)
+from automated_security_helper.core.exceptions import ASHConfigSourceError
+
 
 class ConfigValidationError(Exception):
     """Raised when configuration validation fails."""
@@ -63,7 +73,14 @@ class ConfigValidator:
         # internal-only, because an operator scanning a multi-project workspace
         # sets max_parallel_projects and project_timeout by hand.
         "workspace",
+        # Loader directives (#289), resolved before the config is validated.
+        EXTENDS_KEY,
+        PATCH_KEY,
     }
+
+    # Prefix of every error about a config's `extends` chain or `patch`, which
+    # ConfigLinter maps to its own category.
+    EXTENDS_ERROR_PREFIX = "Config extends error: "
 
     @classmethod
     def validate_config_file(
@@ -80,14 +97,25 @@ class ConfigValidator:
             Tuple of (is_valid, list_of_errors)
         """
         errors = []
+        config_path = Path(config_path)
+        is_toml = config_path.name.endswith(".toml")
 
         try:
-            # Load the config file
-            with open(config_path, "r", encoding="utf-8") as f:
-                if str(config_path).endswith(".json"):
-                    config_data = json.load(f)
-                else:
-                    config_data = yaml.safe_load(f)
+            # Load the config file. YAML and JSON are parsed exactly as before;
+            # TOML (an ashrc.toml, or pyproject.toml's [tool.ash] table) goes
+            # through the loader's reader, which is the only TOML reader ASH has.
+            if is_toml:
+                try:
+                    config_data = read_config_file(config_path)
+                except ASHConfigSourceError as e:
+                    errors.append(f"TOML error: {e}")
+                    return False, errors
+            else:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    if str(config_path).endswith(".json"):
+                        config_data = json.load(f)
+                    else:
+                        config_data = yaml.safe_load(f)
 
             if not isinstance(config_data, dict):
                 errors.append(
@@ -95,10 +123,29 @@ class ConfigValidator:
                 )
                 return False, errors
 
+            # The file's own keys are what the field checks below look at, since
+            # that is the file a fix would edit. Required fields and path
+            # patterns are checked on the merged result, because a base may
+            # supply them.
+            resolved_data = config_data
+            chain_resolved = True
+            if EXTENDS_KEY in config_data or PATCH_KEY in config_data:
+                try:
+                    resolved_data = resolve_config_document(
+                        config_path,
+                        confine_to=default_confinement_root(config_path, source_dir),
+                    ).data
+                except ASHConfigSourceError as e:
+                    errors.append(f"{cls.EXTENDS_ERROR_PREFIX}{e}")
+                    chain_resolved = False
+                if not isinstance(resolved_data, dict):
+                    resolved_data = config_data
+
             # Check for required fields
-            for field in cls.REQUIRED_TOP_LEVEL_FIELDS:
-                if field not in config_data:
-                    errors.append(f"Missing required top-level field: '{field}'")
+            if chain_resolved:
+                for field in cls.REQUIRED_TOP_LEVEL_FIELDS:
+                    if field not in resolved_data:
+                        errors.append(f"Missing required top-level field: '{field}'")
 
             # Check for invalid top-level fields
             for field in config_data.keys():
@@ -111,8 +158,10 @@ class ConfigValidator:
                         f"Unknown top-level field '{field}' - may cause parsing issues"
                     )
 
-            # Check for duplicate field definitions (YAML allows this but causes issues)
-            raw_content = config_path.read_text()
+            # Check for duplicate field definitions (YAML allows this but causes
+            # issues). TOML rejects a duplicate key when it parses, and its
+            # `key = value` lines would not be recognized here anyway.
+            raw_content = "" if is_toml else config_path.read_text()
             top_level_fields = {}
             for line in raw_content.split("\n"):
                 stripped = line.strip()
@@ -171,7 +220,7 @@ class ConfigValidator:
                                 )
 
             # Validate ignore_paths and suppression paths for directory-without-glob issues
-            warnings = cls._check_path_patterns(config_path, config_data, source_dir)
+            warnings = cls._check_path_patterns(config_path, resolved_data, source_dir)
             errors.extend(warnings)
 
             return len(errors) == 0, errors
@@ -185,6 +234,20 @@ class ConfigValidator:
         except Exception as e:
             errors.append(f"Unexpected error during validation: {str(e)}")
             return False, errors
+
+    @classmethod
+    def resolve_source_chain(
+        cls, config_path: Path, source_dir: Optional[Path] = None
+    ) -> List[str]:
+        """Describe every file `config_path` is built from, lowest precedence first.
+
+        Raises ``ASHConfigSourceError`` when the chain does not resolve.
+        """
+        config_path = Path(config_path)
+        document = resolve_config_document(
+            config_path, confine_to=default_confinement_root(config_path, source_dir)
+        )
+        return [describe_config_path(p) for p in document.chain]
 
     @classmethod
     def _check_path_patterns(

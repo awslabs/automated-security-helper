@@ -4,7 +4,10 @@ ASH v3 uses a YAML configuration file to control its behavior. This guide explai
 
 ## Configuration File Location
 
-By default, ASH looks for a configuration file in the following locations (in order):
+ASH reads its configuration from one source. When `--config` (or the
+`ASH_CONFIG` environment variable) names a file, that file is used. Otherwise
+ASH looks in the source directory in this order and uses the first source it
+finds:
 
 1. `.ash.yml`
 2. `.ash/.ash.yml`
@@ -18,17 +21,74 @@ By default, ASH looks for a configuration file in the following locations (in or
 10. `.ash/ash.yaml`
 11. `ash.json`
 12. `.ash/ash.json`
+13. `.ashrc.toml`
+14. `.ashrc.yaml`
+15. `.ashrc.yml`
+16. `.ashrc.json`
+17. `ashrc.toml`
+18. `ashrc.yaml`
+19. `ashrc.yml`
+20. `ashrc.json`
+21. `pyproject.toml`
 
-The first match wins. The order is per-filename, not per-directory: for each name
-in turn ASH checks the source directory and then its `.ash/` subdirectory, so
-`.ash.yml` in the source directory beats `.ash/.ash.yaml`. The list comes from
-`ASH_CONFIG_FILE_NAMES` in `automated_security_helper/core/constants.py`.
+Items 1-12 are checked per filename, not per directory: for each name ASH checks
+the source directory and then its `.ash/` subdirectory, so `.ash.yml` in the
+source directory beats `.ash/.ash.yaml`. Items 13-21 are checked in the source
+directory only. A `pyproject.toml` counts only when it has a `[tool.ash]` table;
+one without that table is not a config source. The lists come from
+`ASH_CONFIG_FILE_NAMES`, `ASH_RC_FILE_NAMES` and `ASH_PYPROJECT_FILE_NAME` in
+`automated_security_helper/core/constants.py`.
+
+Sources are never merged. If more than one exists, ASH logs which one it used
+and logs a warning naming each one it ignored. The names in items 1-12 are
+deprecated in favor of an `ashrc` file or `[tool.ash]`, and the warning says so
+when one of them shadows a newer source. They still take precedence, so adding a
+`[tool.ash]` table to a repository that already has `.ash/.ash.yaml` does not
+change which settings a scan uses until the older file is removed.
+
+Scan results are written to `.ash/ash_output` whichever source is used.
 
 You can also specify a custom configuration file path using the `--config` option:
 
 ```bash
 ashx --config /path/to/my-config.yaml
 ```
+
+### Configuring ASH in pyproject.toml
+
+`[tool.ash]` holds the same settings as `.ash.yaml`, written as TOML, and is
+validated by the same schema:
+
+```toml
+[tool.ash]
+project_name = "my-service"
+fail_on_findings = true
+
+[tool.ash.global_settings]
+severity_threshold = "MEDIUM"
+ignore_paths = [{ path = "tests/fixtures/**", reason = "Test fixtures" }]
+
+[[tool.ash.global_settings.suppressions]]
+rule_id = "B101"
+path = "tests/**"
+reason = "assert is expected in tests"
+
+[tool.ash.scanners.bandit]
+enabled = true
+```
+
+A validation error names the table and its line, for example
+`pyproject.toml [tool.ash] (line 12)`. String values beginning with `${` are
+resolved from the environment by the same rule as in YAML, including the limit
+on which variable names may be read; see the `!ENV` notes in
+[Configuration Overrides](config-overrides.md).
+`ash config update`, `ash config wizard`, `ash config lint --fix` and the
+suppression dialog in `ash inspect` edit YAML, so they refuse a TOML file rather
+than rewrite it; edit `[tool.ash]` by hand.
+
+A `pyproject.toml` that is not valid TOML is skipped, unless its text declares a
+`[tool.ash]` table, in which case the scan fails instead of running with the
+default configuration.
 
 ## Creating a Configuration File
 
@@ -400,6 +460,78 @@ ashx --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 # Add a complex value
 ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
+
+## Extending another configuration
+
+A config can build on one or more base configs with `extends`, and adjust the
+result with RFC 6902 JSON-Patch operations under `patch`:
+
+```yaml
+# .ash/.ash.yaml
+extends: ../shared/ash-base.yaml     # or a list: [org.yaml, team.yaml]
+project_name: my-service
+global_settings:
+  severity_threshold: HIGH
+patch:
+  - op: add
+    path: /global_settings/suppressions/-
+    value:
+      rule_id: B101
+      path: "tests/**"
+      reason: "assert is expected in tests"
+```
+
+The same keys work in `[tool.ash]` (`extends = "ash-base.yaml"`,
+`patch = [{op = "add", path = "/fail_on_findings", value = false}]`) and in an
+`ashrc` file. A base can be YAML, JSON, TOML, or a `pyproject.toml`, whose
+`[tool.ash]` table is used.
+
+How a config is resolved:
+
+1. Each base is resolved the same way, so bases can extend other bases.
+2. The bases are merged in the order listed, a later base winning over an
+   earlier one.
+3. The file's own settings are merged over the bases. The file always wins.
+4. The file's `patch` operations run, in order, on the result.
+5. `--config-overrides` apply last, on top of everything above.
+
+Merge rules:
+
+- Mappings merge key by key, at every level. A base's `scanners.bandit.options`
+  and a child's `scanners.bandit.enabled` both survive.
+- Lists, scalars and `null` replace. A child that sets
+  `global_settings.suppressions` replaces the base's list. To keep the base's
+  entries and add more, use `patch` with `op: add` and a path ending in `/-`.
+- To delete something a base set, use `patch` with `op: remove`.
+- A key spelled with `-` and the same key spelled with `_` (`cdk-nag` and
+  `cdk_nag`) are one key, in merges and in `patch` paths.
+- `patch` accepts `add`, `remove`, `replace` and `test`. `move` and `copy` are
+  refused. A failing operation, including a failing `test`, fails the load.
+
+Where a base may live:
+
+- A relative path is relative to the file that names it. An absolute path is
+  also accepted.
+- Every base must be inside the scan's source directory (or, for a `--config`
+  file kept outside it, inside that file's own directory, or the parent of
+  `.ash/` for a file in `.ash/`). `..` is fine while it stays inside. A path, or
+  a symlink, that resolves outside is an error. In workspace mode each project
+  is scanned with its own directory as the source directory, so a project's
+  bases must be inside that project.
+- URLs are refused. ASH never downloads a base config; copy the file into the
+  repository instead.
+
+Errors stop the scan rather than falling back to the default configuration: a
+missing or unreadable base, a cycle (the error prints the chain, for example
+`.ash.yaml -> b.yaml -> c.yaml -> b.yaml`), a chain more than 10 levels deep,
+or more than 50 files read in total. `${VAR}` references in every file of the
+chain are resolved under the same allowlist as a single file.
+
+`ash config validate` and `ash config lint` follow the chain, report extends
+errors, and print the files the config was built from, lowest precedence first.
+`ash config update`, `ash config wizard` and the `ash inspect` suppression dialog
+refuse to rewrite a file in a way that would copy its bases into it or drop their
+suppressions.
 
 ## Scanner-Specific Configuration
 

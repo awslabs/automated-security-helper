@@ -98,6 +98,38 @@ ASH_CONFIG_FILE_NAMES = [
     "ash.json",
 ]
 
+# Config sources discovered after ASH_CONFIG_FILE_NAMES, in this order. Both are
+# read from the scan root only, never from ``.ash/``. The full precedence, and why
+# the older names above still win when several sources exist, is documented in
+# ``config/config_sources.py`` and docs/content/docs/configuration-guide.md.
+ASH_RC_FILE_NAMES = [
+    ".ashrc.toml",
+    ".ashrc.yaml",
+    ".ashrc.yml",
+    ".ashrc.json",
+    "ashrc.toml",
+    "ashrc.yaml",
+    "ashrc.yml",
+    "ashrc.json",
+]
+
+# A pyproject.toml is a config source only when it has a [tool.ash] table.
+ASH_PYPROJECT_FILE_NAME = "pyproject.toml"
+
+# The discovery order in one sentence, for CLI help text.
+ASH_CONFIG_SOURCES_DESCRIPTION = (
+    f"{ASH_CONFIG_FILE_NAMES} (each at the root, then in .ash/), then "
+    f"{ASH_RC_FILE_NAMES} at the root, then a [tool.ash] table in "
+    f"{ASH_PYPROJECT_FILE_NAME} at the root; the first found is used"
+)
+
+# Bounds on a config's `extends` chain. Depth counts the extending file as 0, so
+# 10 allows ten levels of bases above it. The file count caps the total number of
+# reads, which bounds a chain that fans out (every file extending several bases)
+# where depth alone would not.
+ASH_CONFIG_EXTENDS_MAX_DEPTH = 10
+ASH_CONFIG_EXTENDS_MAX_FILES = 50
+
 # The environment variable names an ASH config file may interpolate.
 #
 # Why there is a bound at all

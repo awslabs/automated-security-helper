@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 import re
@@ -142,6 +141,83 @@ def config_env_var_is_interpolatable(var_name: str) -> bool:
         var_name.startswith(ASH_CONFIG_ENV_VAR_PREFIX)
         or var_name in ASH_CONFIG_ENV_VAR_ALLOWLIST
     )
+
+
+ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+):?(.*)?}")
+
+
+def resolve_env_references(value: str) -> Optional[str]:
+    """Resolve the ``${VAR:default}`` reference a config scalar starts with.
+
+    This is the body of the YAML ``!ENV`` constructor, shared so that a TOML
+    config source resolves references by exactly the same rule. Only names
+    ``config_env_var_is_interpolatable`` admits are read; any other reference is
+    left as written.
+    """
+    pattern = ENV_REFERENCE_PATTERN
+    match = pattern.findall(value)  # to find all env variables in line
+    if match:
+        full_value = value
+        for g in match:
+            ASH_LOGGER.debug(f"Evaluating env var match: {g}")
+            var_name = g[0] if isinstance(g, tuple) else g
+            if not config_env_var_is_interpolatable(var_name):
+                # Left exactly as written rather than replaced
+                # with its default. A literal that still reads
+                # as a reference is visible in the artifact and
+                # refused by any typed field, whereas the
+                # default is indistinguishable from the variable
+                # simply not being set. See
+                # ASH_CONFIG_ENV_VAR_ALLOWLIST in
+                # core/constants.py for which names resolve.
+                ASH_LOGGER.warning(
+                    f"Not reading environment variable {var_name} "
+                    "into the configuration. A configuration file "
+                    "may reference names beginning with "
+                    f"{ASH_CONFIG_ENV_VAR_PREFIX} and these names: "
+                    f"{', '.join(ASH_CONFIG_ENV_VAR_ALLOWLIST)}. "
+                    "The reference is left as written."
+                )
+                continue
+            default_val = g[1] if isinstance(g, tuple) else None
+            if default_val == "None":
+                default_val = None
+            resolved_var = os.environ.get(var_name, None)
+            if resolved_var is None:
+                ASH_LOGGER.warning(
+                    f"Environment variable {var_name} not set"
+                    + (
+                        f", using default value of {default_val}"
+                        if isinstance(g, tuple)
+                        else ""
+                    )
+                )
+                if default_val is None:
+                    resolved_var = ""
+                else:
+                    resolved_var = default_val
+            rep_val = ":".join(g) if isinstance(g, tuple) else g
+            full_value = full_value.replace(f"${{{rep_val}}}", resolved_var)
+        if full_value.strip() == "":
+            return None
+        return full_value.strip()
+    return value
+
+
+def load_yaml_config(stream: Any) -> Any:
+    """Parse an ASH YAML config, resolving ``!ENV`` references as it goes."""
+
+    # Use a local subclass to avoid mutating the global SafeLoader
+    class _AshConfigLoader(yaml.SafeLoader):
+        pass
+
+    _AshConfigLoader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
+
+    def constructor_env_variables(loader, node):
+        return resolve_env_references(loader.construct_scalar(node))
+
+    _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
+    return yaml.load(stream, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation, bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by resolve_env_references above
 
 
 # Define BuildConfig class
@@ -950,75 +1026,64 @@ class AshConfig(BaseModel):
         ),
     ] = WorkspaceExecutionConfig()
 
+    # `extends` and `patch` are read by the config loader (config/config_sources.py)
+    # and removed before validation, so a loaded config always has both as None.
+    # They are declared here so the JSON schema documents them, and excluded from
+    # every dump so that saving a resolved config never writes them back.
+    extends: Annotated[
+        str | List[str] | None,
+        Field(
+            exclude=True,
+            description=(
+                "Base config file(s) this config extends: a path, or a list of "
+                "paths applied in order, relative to this file. Mappings merge key "
+                "by key; lists and scalars from this file replace the base's. Paths "
+                "must stay inside the repository being scanned; URLs are refused."
+            ),
+        ),
+    ] = None
+
+    patch: Annotated[
+        List[Dict[str, Any]] | None,
+        Field(
+            exclude=True,
+            description=(
+                "RFC 6902 JSON-Patch operations (add, remove, replace, test) applied "
+                "after this file is merged over its bases. Use 'add' at "
+                "'/global_settings/suppressions/-' to append to a base's list."
+            ),
+        ),
+    ] = None
+
+    @model_validator(mode="after")
+    def _extends_must_be_resolved(self) -> "AshConfig":
+        # Reached only when a dict carrying these keys is validated directly,
+        # bypassing the loader. Ignoring them would run with the child alone and
+        # none of its bases' settings, so it fails instead.
+        if self.extends is not None or self.patch is not None:
+            raise ValueError(
+                "'extends' and 'patch' are resolved when a config file is loaded; "
+                "load the file with AshConfig.from_file or resolve_config instead of "
+                "validating its contents directly"
+            )
+        return self
+
     @classmethod
-    def from_file(cls, config_path: Path) -> "AshConfig":
-        """Load configuration from a file."""
-        with open(config_path, mode="r", encoding="utf-8") as f:
-            if str(config_path).endswith(".json"):
-                config_data = json.load(f)
-            else:
-                pattern = re.compile(r"^\${(\w+):?(.*)?}")
+    def from_file(
+        cls, config_path: Path, confine_to: Optional[Path] = None
+    ) -> "AshConfig":
+        """Load configuration from a file, following any ``extends`` chain.
 
-                # Use a local subclass to avoid mutating the global SafeLoader
-                class _AshConfigLoader(yaml.SafeLoader):
-                    pass
+        ``config_path`` may be YAML, JSON, an ``ashrc.toml``-style TOML file, or a
+        ``pyproject.toml`` (whose ``[tool.ash]`` table is read). ``extends`` and
+        ``patch`` are resolved by ``config/config_sources.py``, which documents
+        the merge rules and the confinement of base paths to ``confine_to``.
+        """
+        from automated_security_helper.config.config_sources import (
+            load_config_document,
+        )
 
-                _AshConfigLoader.add_implicit_resolver("!ENV", pattern, None)
-
-                def constructor_env_variables(loader, node):
-                    value = loader.construct_scalar(node)
-                    match = pattern.findall(value)  # to find all env variables in line
-                    if match:
-                        full_value = value
-                        for g in match:
-                            ASH_LOGGER.debug(f"Evaluating env var match: {g}")
-                            var_name = g[0] if isinstance(g, tuple) else g
-                            if not config_env_var_is_interpolatable(var_name):
-                                # Left exactly as written rather than replaced
-                                # with its default. A literal that still reads
-                                # as a reference is visible in the artifact and
-                                # refused by any typed field, whereas the
-                                # default is indistinguishable from the variable
-                                # simply not being set. See
-                                # ASH_CONFIG_ENV_VAR_ALLOWLIST in
-                                # core/constants.py for which names resolve.
-                                ASH_LOGGER.warning(
-                                    f"Not reading environment variable {var_name} "
-                                    "into the configuration. A configuration file "
-                                    "may reference names beginning with "
-                                    f"{ASH_CONFIG_ENV_VAR_PREFIX} and these names: "
-                                    f"{', '.join(ASH_CONFIG_ENV_VAR_ALLOWLIST)}. "
-                                    "The reference is left as written."
-                                )
-                                continue
-                            default_val = g[1] if isinstance(g, tuple) else None
-                            if default_val == "None":
-                                default_val = None
-                            resolved_var = os.environ.get(var_name, None)
-                            if resolved_var is None:
-                                ASH_LOGGER.warning(
-                                    f"Environment variable {var_name} not set"
-                                    + (
-                                        f", using default value of {default_val}"
-                                        if isinstance(g, tuple)
-                                        else ""
-                                    )
-                                )
-                                if default_val is None:
-                                    resolved_var = ""
-                                else:
-                                    resolved_var = default_val
-                            rep_val = ":".join(g) if isinstance(g, tuple) else g
-                            full_value = full_value.replace(
-                                f"${{{rep_val}}}", resolved_var
-                            )
-                        if full_value.strip() == "":
-                            return None
-                        return full_value.strip()
-                    return value
-
-                _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
-                config_data = yaml.load(f, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation, bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by constructor_env_variables above
+        config_data = load_config_document(Path(config_path), confine_to=confine_to)
         return cls.model_validate(config_data, strict=True)
 
     def save(self, config_path: Path):
@@ -1150,6 +1215,11 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     occurs in practice.
     """
     entry = suppression.model_dump(exclude_none=True)
+    if config_path.name.endswith(".toml"):
+        raise ValueError(
+            f"Suppressions are saved by editing YAML; {config_path} is TOML. Add "
+            "the suppression to its global_settings.suppressions by hand."
+        )
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     # A brand-new file has no comments to lose, so a fresh dump is fine.
@@ -1159,6 +1229,24 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
 
     text = config_path.read_text(encoding="utf-8")
     data = yaml.safe_load(text) or {}
+
+    # A file that extends a base and has no suppressions list of its own gets
+    # its suppressions from the base. Writing a list here would replace that
+    # list (lists from the extending file win; see config/config_sources.py) and
+    # silently drop the base's suppressions.
+    if (
+        isinstance(data, dict)
+        and "extends" in data
+        and not isinstance(
+            (data.get("global_settings") or {}).get("suppressions"), list
+        )
+    ):
+        raise ValueError(
+            f"{config_path} extends another config and has no suppressions list "
+            "of its own, so writing one would replace the base's suppressions. "
+            "Add it as a patch instead: patch: [{op: add, path: "
+            "/global_settings/suppressions/-, value: {...}}]"
+        )
 
     # Duplicate detection: skip if this rule_id+path is already suppressed.
     if isinstance(data, dict):

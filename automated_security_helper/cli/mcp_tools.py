@@ -1052,6 +1052,10 @@ def mcp_get_config(
         resolve_config,
         find_config_file,
     )
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        read_config_file,
+    )
     from automated_security_helper.config.default_config import get_default_config
 
     if config_path is not None:
@@ -1066,11 +1070,21 @@ def mcp_get_config(
         return get_default_config().model_dump()
 
     if raw:
+        if path.name.endswith(".toml"):
+            # pyproject.toml yields its [tool.ash] table, as when it is loaded.
+            return read_config_file(path) or {}
         return _yaml.safe_load(path.read_text()) or {}
 
-    # resolve_config short-circuits to default when source_dir is None,
-    # so supply source_dir to force it to read the specified file.
-    resolved = resolve_config(config_path=path, source_dir=path.parent)
+    # resolve_config short-circuits to default when source_dir is None, so
+    # supply one to force it to read the specified file. It is also where
+    # `extends` bases must stay, so it is the searched directory when the file
+    # was discovered, and otherwise the file's own project directory (the
+    # parent of .ash/ for a file in .ash/), never .ash/ itself.
+    if config_path is None:
+        source_dir = Path(search_dir) if search_dir else Path.cwd()
+    else:
+        source_dir = default_confinement_root(path)
+    resolved = resolve_config(config_path=path, source_dir=source_dir)
     return resolved.model_dump()
 
 
@@ -1122,13 +1136,13 @@ def mcp_validate_config(
         return {"field": "", "message": raw, "type": "validation_error"}
 
     if config_content is not None:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
-            tmp.write(config_content)
-            tmp_path = Path(tmp.name)
-        try:
+        # A private, otherwise empty directory rather than the shared temp dir:
+        # the file's directory is where an `extends` in the content may look
+        # for bases, and nothing a client did not send should be found there.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / "config.yaml"
+            tmp_path.write_text(config_content, encoding="utf-8")
             valid, raw_errors = ConfigValidator.validate_config_file(tmp_path)
-        finally:
-            tmp_path.unlink(missing_ok=True)
     elif config_path is not None:
         path = Path(config_path)
         if not path.exists():

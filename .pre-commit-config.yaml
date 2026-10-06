@@ -47,7 +47,14 @@ repos:
         # (single-line JSON crashes trivy -- see the header of
         # deploy/cdk/test/ash-template-size.test.ts), and the exclusion is still
         # needed without it.
-        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json'
+        #
+        # The deploy/ npm manifests are excluded for the same reason: npm owns them.
+        # This hook sorts keys (it is not passed --no-sort-keys), so on any commit
+        # touching package.json or package-lock.json it rewrote the whole file into
+        # an order `npm install` immediately undoes -- several thousand lines per
+        # lockfile, which is why lockfile commits used to be made with this hook
+        # skipped.
+        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^deploy/[^/]+/package(-lock)?\.json$'
         args:
           - "--autofix"
           - "--indent=2"

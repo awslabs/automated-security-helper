@@ -934,3 +934,59 @@ class TestConfigLintCLI:
             config_app, ["lint", "--config", str(valid_config), "--verbose"]
         )
         assert result.exit_code == 0
+
+    def test_lint_fix_names_the_legacy_rename(self, cli_runner, tmp_path):
+        """--fix must say what it is about to change for a legacy name.
+
+        LEGACY_NAME_VARIANT issues were created with fixable=True and no
+        fix_description, so the "Fixing N issue(s)" list printed a bare bullet
+        for each one.
+        """
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\nscanners:\n  cdk_nag:\n    enabled: true\n"
+        )
+
+        result = cli_runner.invoke(
+            config_app,
+            ["lint", "--config", str(config_path), "--fix", "--non-interactive"],
+        )
+
+        assert result.exit_code == 0
+        bullets = [ln for ln in result.output.splitlines() if "•" in ln]
+        assert bullets == [
+            "  • Rename scanners.'cdk_nag' to the canonical form 'cdk-nag'"
+        ]
+
+
+class TestEveryFixableIssueDescribesItsFix:
+    """Each fixable LintIssue the linter builds must carry a fix_description.
+
+    The CLI prints fix_description as the bullet for each pending fix. Reading the
+    source rather than linting fixtures covers every construction site, including
+    ones no fixture here reaches.
+    """
+
+    def test_no_fixable_issue_is_built_without_a_description(self):
+        import ast
+
+        import automated_security_helper.config.config_linter as linter_module
+
+        tree = ast.parse(Path(linter_module.__file__).read_text(encoding="utf-8"))
+        undescribed = []
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "LintIssue"
+            ):
+                continue
+            kwargs = {kw.arg: kw.value for kw in node.keywords}
+            fixable = kwargs.get("fixable")
+            if isinstance(fixable, ast.Constant) and fixable.value is True:
+                if "fix_description" not in kwargs:
+                    undescribed.append(node.lineno)
+        assert undescribed == [], (
+            f"LintIssue(fixable=True) without fix_description at lines {undescribed}"
+        )

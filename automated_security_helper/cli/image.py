@@ -9,7 +9,7 @@ import platform
 from automated_security_helper.cli.deprecations import (
     warn_deprecated_option_spellings,
 )
-from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
@@ -149,7 +149,7 @@ def build_ash_image_cli_command(
         typer.Option(
             "--config",
             "-c",
-            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
             envvar="ASH_CONFIG",
         ),
     ] = None,

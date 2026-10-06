@@ -604,7 +604,7 @@ def check_version_consistency() -> list[str]:
 # inventory.
 _CONFIG_LIST_ITEM = re.compile(
     r"^\s*(?:[-*+]|\d+[.)])\s+`(?:\./)?(?:\.ash/)?"
-    r"([A-Za-z0-9_.-]+\.(?:ya?ml|json))`\s*$"
+    r"([A-Za-z0-9_.-]+\.(?:ya?ml|json|toml))`\s*$"
 )
 
 
@@ -631,11 +631,21 @@ def check_config_path() -> list[str]:
     This was a live defect when the check was written, not a hypothetical:
     configuration-guide.md and faq.md both published four of the six names,
     omitting the .json variants and the non-dotted `ash.*` forms entirely.
+
+    The ashrc names and pyproject.toml (#313) are discovered after
+    ASH_CONFIG_FILE_NAMES. A list may publish the older names alone, as the
+    docs did before those existed, but a list that names any of the newer
+    sources is the full inventory and must name all of them.
     """
-    from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+    from automated_security_helper.core.constants import (
+        ASH_CONFIG_FILE_NAMES,
+        ASH_PYPROJECT_FILE_NAME,
+        ASH_RC_FILE_NAMES,
+    )
 
     failures: list[str] = []
     supported = set(ASH_CONFIG_FILE_NAMES)
+    newer = set(ASH_RC_FILE_NAMES) | {ASH_PYPROJECT_FILE_NAME}
     lists_found = 0
 
     for md_file in collect_md_files():
@@ -657,19 +667,23 @@ def check_config_path() -> list[str]:
                 start = run[0][0]
 
                 missing = sorted(supported - names)
+                if names & newer:
+                    missing += sorted(newer - names)
                 if missing:
                     failures.append(
                         f"{rel_path}:{start} publishes a config-discovery list of "
                         f"{len(names)} name(s) but omits {missing}, which ASH does "
-                        f"search for (ASH_CONFIG_FILE_NAMES). A reader cannot "
+                        f"search for (ASH_CONFIG_FILE_NAMES, or ASH_RC_FILE_NAMES and "
+                        f"pyproject.toml). A reader cannot "
                         f"discover a working config filename from this list."
                     )
-                unknown = sorted(names - supported)
+                unknown = sorted(names - supported - newer)
                 if unknown:
                     failures.append(
                         f"{rel_path}:{start} publishes a config-discovery list "
                         f"naming {unknown}, which ASH does NOT search for "
-                        f"(ASH_CONFIG_FILE_NAMES). A file with that name is "
+                        f"(ASH_CONFIG_FILE_NAMES, ASH_RC_FILE_NAMES, pyproject.toml). "
+                        f"A file with that name is "
                         f"silently ignored unless --config points at it."
                     )
             run = []
