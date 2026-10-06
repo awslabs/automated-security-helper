@@ -29,7 +29,8 @@ two versions.
 It only ever edits the tree it is pointed at, which must not be the checkout this
 script lives in: a lowered checkout is a release bump in the wrong direction.
 
-Prints the new version on stdout. Standard library only (Python 3.11+ for tomllib).
+Prints the new version on stdout. Standard library only on Python 3.11+; on 3.10, the
+project's floor, it reads TOML with tomli, which the dev environment carries.
 """
 
 from __future__ import annotations
@@ -37,9 +38,13 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import tomllib
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - the unit tests run this on 3.10
+    import tomli as tomllib
 
 THIS_CHECKOUT = Path(__file__).resolve().parents[2]
 

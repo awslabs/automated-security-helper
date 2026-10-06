@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.11"
-# dependencies = ["jsonschema>=4.26,<5", "PyYAML>=6,<7", "requests>=2.34,<3"]
+# requires-python = ">=3.10"
+# dependencies = ["jsonschema>=4.26,<5", "PyYAML>=6,<7", "requests>=2.34,<3", "tomli>=2; python_version < '3.11'"]
 # ///
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -67,13 +67,17 @@ import argparse
 import json
 import re
 import sys
-import tomllib
 from pathlib import Path
 from typing import Any
 
 import jsonschema
 import requests
 import yaml
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - the unit tests run this on 3.10
+    import tomli as tomllib
 
 PACKAGE_IDENTIFIER = "Amazon.AutomatedSecurityHelper"
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import sys
 import urllib.parse
 from pathlib import Path
@@ -187,7 +188,13 @@ class TestEachDefectIsRejected:
 class TestTheCommandLine:
     def test_lint_failure_fails_the_assertion(self, tmp_path, capsys):
         config, doc = _render(tmp_path, UNDOTTED)
-        fake = f"{sys.executable} -c \"import sys; sys.exit(2 if 'AshFargate' in sys.argv[1] else 0)\""
+        fake = shlex.join(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.exit(2 if 'AshFargate' in sys.argv[1] else 0)",
+            ]
+        )
         rc = aq.main(
             [
                 "--doc",
@@ -207,7 +214,13 @@ class TestTheCommandLine:
     def test_lint_receives_the_launch_regions(self, tmp_path, capsys):
         config, doc = _render(tmp_path, DOTTED)
         record = tmp_path / "argv.txt"
-        fake = f"{sys.executable} -c \"import sys; open({str(record)!r}, 'a').write(' '.join(sys.argv[1:]) + chr(10))\""
+        fake = shlex.join(
+            [
+                sys.executable,
+                "-c",
+                f"import sys; open({str(record)!r}, 'a').write(' '.join(sys.argv[1:]) + chr(10))",
+            ]
+        )
         rc = aq.main(
             [
                 "--doc",
@@ -226,6 +239,29 @@ class TestTheCommandLine:
         assert all(line.endswith("--regions us-east-1 eu-west-2") for line in lines), (
             lines
         )
+
+    def test_a_linter_that_cannot_start_is_a_usage_error(self, tmp_path, capsys):
+        # --lint-cmd is POSIX-quoted on every platform, so shlex.join is how a caller
+        # builds it. The program here is a native path, which on Windows is full of
+        # backslashes; the message must name it intact, which an unquoted path split
+        # with POSIX rules would not.
+        config, doc = _render(tmp_path, UNDOTTED)
+        absent = tmp_path / "no such dir" / "cfn-lint"
+        rc = aq.main(
+            [
+                "--doc",
+                str(doc),
+                "--hosting",
+                str(config),
+                "--addressing",
+                "virtual",
+                "--lint-cmd",
+                shlex.join([str(absent), "--non-zero-exit-code", "error"]),
+            ]
+        )
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "cannot run the linter" in err and repr(str(absent)) in err, err
 
     def test_an_empty_bucket_is_a_usage_error(self, tmp_path):
         config = tmp_path / "hosting.json"
