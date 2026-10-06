@@ -339,3 +339,83 @@ val assertDistributionContents = tasks.register<Exec>("assertDistributionContent
 tasks.buildPlugin {
     finalizedBy(assertDistributionContents)
 }
+
+// THE REAL-CLI SUITE, IN ITS OWN SOURCE SET AND ITS OWN TASK
+//
+// AshScanRealCliTest drives an installed ASH CLI built from this commit (see its header). It
+// needs that CLI, so it cannot be part of `test`: `check` has to stay runnable on a machine
+// with no ASH installed, and a test that returned early there would report a pass that
+// verified nothing. A separate source set keeps it out of `test`'s compiled classes, so the
+// assertTestsRan census of that suite is unchanged, and assertRealCliTestsRan below is its
+// own census. e2e-real-cli.sh builds the head wheel, installs it, and runs both;
+// .github/workflows/ash-jetbrains-ci.yml runs that script in the headless-real job.
+sourceSets {
+    create("realCliTest") {
+        // The test source set's compile classpath, which the IntelliJ Platform Gradle plugin has
+        // already populated with the platform, its test framework, JUnit and main's output.
+        compileClasspath += sourceSets.test.get().compileClasspath
+    }
+}
+
+// JUnit, as for `test`, and the platform test framework registered on this source set too.
+configurations.named("realCliTestImplementation") { extendsFrom(configurations.testImplementation.get()) }
+
+dependencies {
+    intellijPlatform {
+        testFramework(TestFrameworkType.Platform, configurationName = "realCliTestImplementation")
+    }
+}
+
+// Where the resolved IDE distribution is unpacked. e2e-ide-cycle.sh installs the built plugin
+// zip into this IDE, so the IDE it tests against is the one the build compiled against.
+tasks.register("printIdePath") {
+    group = "help"
+    description = "Prints the path of the resolved IntelliJ Platform distribution."
+    val idePath = provider { intellijPlatform.platformPath.toString() }
+    doLast { println(idePath.get()) }
+}
+
+val realCliTest by intellijPlatformTesting.testIde.registering {
+    task {
+        group = "verification"
+        description = "Runs the plugin against a real ASH CLI; needs ASH_JB_REAL_CLI_BIN."
+        val realCliSources = sourceSets["realCliTest"]
+        testClassesDirs = realCliSources.output.classesDirs
+        // The source set's runtime classpath ahead of the task's own. The task's own carries
+        // the platform and a sandbox holding this build's plugin jar, and nothing of the test
+        // framework's runtime: on its own, JUnit failed to load the class with
+        // ClassNotFoundException: org.opentest4j.AssertionFailedError. The source set's runtime
+        // classpath brings the test framework (registered on realCliTestImplementation above)
+        // and the compiled suite.
+        classpath = realCliSources.runtimeClasspath + classpath
+        useJUnit()
+        systemProperty("java.awt.headless", "true")
+        // Never up to date and never restored from the build cache. The input that matters is
+        // an installed CLI outside this build, which Gradle cannot fingerprint, so a result
+        // reused from an earlier run would report on a CLI that is no longer the one installed.
+        // gradle.properties turns the build cache on, which makes the second line necessary.
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("the suite runs an installed CLI that Gradle cannot fingerprint") { true }
+        testLogging {
+            events("passed", "failed", "skipped")
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        }
+    }
+}
+
+// The real-CLI suite's census, the same check assertTestsRan applies to `test`: every compiled
+// class in the source set reported, none skipped, nothing failed, and AshScanRealCliTest by
+// name. It reads artifacts rather than trusting the task, for the reason assertTestsRan gives.
+tasks.register<Exec>("assertRealCliTestsRan") {
+    group = "verification"
+    description = "Fails unless the real-CLI suite ran and reported, with none skipped."
+    dependsOn(realCliTest)
+    workingDir = layout.projectDirectory.asFile
+    commandLine(
+        "python3",
+        "assert-tests-ran.py",
+        "--results", "build/test-results/realCliTest",
+        "--test-classes", "build/classes/kotlin/realCliTest",
+        "--require-suite", "io.github.awslabs.ash.jetbrains.AshScanRealCliTest",
+    )
+}
