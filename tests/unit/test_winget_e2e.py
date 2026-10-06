@@ -650,3 +650,62 @@ def test_the_ferret_suppression_covers_exactly_the_winget_digest_lines() -> None
         digests[-1],
     )
     assert digests == list(range(digests[0], digests[-1] + 1)), digests
+
+
+_STRICT_SCRIPTS = sorted(
+    path
+    for path in (REPO / "packaging").rglob("*.ps1")
+    if "Set-StrictMode -Version Latest" in path.read_text(encoding="utf-8")
+)
+
+
+def _array_returning_functions(text: str) -> set[str]:
+    """Functions whose body has `return @(`: PowerShell unrolls that array on return."""
+    names = set()
+    for match in re.finditer(r"(?ms)^function ([\w-]+) \{\n(.*?)^\}", text):
+        if re.search(r"^\s*return @\(", match.group(2), re.MULTILINE):
+            names.add(match.group(1))
+    return names
+
+
+def _unwrapped_calls(text: str) -> list[str]:
+    """Calls of an array-returning function that are not wrapped in @(...)."""
+    found = []
+    for name in sorted(_array_returning_functions(text)):
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            code = line.split("#", 1)[0]
+            for call in re.finditer(rf"(?<![\w-]){re.escape(name)}(?![\w-])", code):
+                if code.lstrip().startswith("function "):
+                    continue
+                if not code[: call.start()].endswith("@("):
+                    found.append(f"{line_no}: {line.strip()}")
+    return found
+
+
+def test_strict_scripts_are_found() -> None:
+    names = {p.relative_to(REPO).as_posix() for p in _STRICT_SCRIPTS}
+    assert "packaging/winget/verify-on-windows.ps1" in names
+    assert "packaging/msix/verify-on-windows.ps1" in names
+
+
+@pytest.mark.parametrize(
+    "script", _STRICT_SCRIPTS, ids=lambda p: p.relative_to(REPO).as_posix()
+)
+def test_array_returning_functions_are_called_inside_an_array(script: Path) -> None:
+    # A function's `return @(...)` reaches the caller as $null for zero items and as the
+    # bare item for one. Under Set-StrictMode -Version Latest, .Count on either throws
+    # "The property 'Count' cannot be found on this object", which is how the winget leg
+    # died at its first Assert-NothingInstalled. Each call must be wrapped in @(...).
+    assert _unwrapped_calls(script.read_text(encoding="utf-8")) == []
+
+
+def test_unwrapped_call_detection_catches_the_winget_regression() -> None:
+    text = (
+        "function Get-AshPackage {\n"
+        "    return @(Get-AppxPackage -Name $n)\n"
+        "}\n"
+        "$packages = Get-AshPackage\n"
+        "$wrapped = @(Get-AshPackage)\n"
+        "# Get-AshPackage in a comment is not a call\n"
+    )
+    assert _unwrapped_calls(text) == ["4: $packages = Get-AshPackage"]

@@ -280,12 +280,15 @@ function Invoke-Winget {
 }
 
 function Get-AshPackage {
+    # PowerShell unrolls an array a function returns: zero packages reach the caller as
+    # $null and one as a bare object, and under StrictMode Latest .Count on either throws.
+    # Callers wrap the call in @() to get an array back.
     return @(Get-AppxPackage -Name $PackageIdentityName -ErrorAction SilentlyContinue)
 }
 
 function Assert-Installed {
     param([string] $Version)
-    $packages = Get-AshPackage
+    $packages = @(Get-AshPackage)
     if ($packages.Count -ne 1) {
         Fail "expected exactly 1 installed $PackageIdentityName, found $($packages.Count): $(($packages | ForEach-Object { $_.PackageFullName }) -join ', ')"
     }
@@ -317,7 +320,7 @@ function Assert-FamilyName {
 
 function Assert-NothingInstalled {
     param([string] $After)
-    $packages = Get-AshPackage
+    $packages = @(Get-AshPackage)
     if ($packages.Count -ne 0) {
         Fail "after $After, $PackageIdentityName is still installed: $(($packages | ForEach-Object { $_.PackageFullName }) -join ', ')"
     }
