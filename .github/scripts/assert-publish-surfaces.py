@@ -193,7 +193,14 @@ _UV_CACHE_REASON = (
 _NPM_CACHE_REASON = (
     "npm's download cache, keyed on a committed lockfile. Holds third-party "
     "packages already published on the npm registry, so it redistributes nothing "
-    "this project builds."
+    "this project builds. Restored everywhere and saved from a push to main only, "
+    "so a pull request never writes an entry another run reads."
+)
+_OPENGREP_CACHE_REASON = (
+    "The OpenGrep release binary, downloaded from the upstream GitHub release. A "
+    "third-party binary that is already publicly downloadable, not one this project "
+    "produced. Keyed on the ISO week so a cache cannot pin the scanner to one build, "
+    "and saved from a push to the default branch only."
 )
 _BASE_IMAGE_CACHE_REASON = (
     "Third-party public image, byte-identical to docker.io at the pinned digest, "
@@ -414,16 +421,42 @@ ALLOWLIST: tuple[Entry, ...] = (
     Entry(
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_CACHE,
-        action="actions/cache",
+        action="actions/cache/restore",
         publishes=(
             "path=~/.opengrep/cli/latest "
             "key=opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}"
         ),
-        reason=(
-            "The OpenGrep release binary, downloaded from upstream with its digest "
-            "verified before install. A third-party binary that is already "
-            "publicly downloadable, not one this project produced."
+        reason=_OPENGREP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/run-ash-security-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.opengrep/cli/latest "
+            "key=opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}"
         ),
+        reason=_OPENGREP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.opengrep/cli/latest "
+            "key=opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}"
+        ),
+        reason=_OPENGREP_CACHE_REASON + " A lookup-only probe; it downloads nothing.",
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.opengrep/cli/latest "
+            "key=opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}"
+        ),
+        reason=_OPENGREP_CACHE_REASON,
     ),
     # The build base image, as a verified OCI layout. The only cache the maintainer has
     # approved for image bytes, and deliberately not ASH's own image or layers. Restore runs
@@ -531,26 +564,63 @@ ALLOWLIST: tuple[Entry, ...] = (
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_NODE,
-        publishes="cache=npm cache-dependency-path=deploy/cdk/package-lock.json",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/cdk/package-lock.json') }}"
+        ),
         count=2,
         reason=_NPM_CACHE_REASON + " Twice: the synth job and the cdk-nag job.",
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_NODE,
-        publishes="cache=npm cache-dependency-path=deploy/cdk-constructs/package-lock.json",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/cdk-constructs/package-lock.json') }}"
+        ),
         reason=_NPM_CACHE_REASON,
     ),
     Entry(
         file=".github/workflows/ash-typescript-ci.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_NODE,
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
         publishes=(
-            "cache=npm "
-            "cache-dependency-path=deploy/${{ matrix.package }}/package-lock.json"
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('deploy/{0}/package-lock.json', matrix.package)) }}"
+        ),
+        reason=_NPM_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-iac-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/cdk/package-lock.json') }}"
+        ),
+        count=2,
+        reason=_NPM_CACHE_REASON + " Twice: the synth job and the cdk-nag job.",
+    ),
+    Entry(
+        file=".github/workflows/ash-iac-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/cdk-constructs/package-lock.json') }}"
+        ),
+        reason=_NPM_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-typescript-ci.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('deploy/{0}/package-lock.json', matrix.package)) }}"
         ),
         reason=_NPM_CACHE_REASON,
     ),
