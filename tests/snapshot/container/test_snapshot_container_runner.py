@@ -19,8 +19,12 @@ SCAN = ["scan", "--mode", "container", "--no-progress", "--source-dir", "src"]
 
 
 @pytest.fixture(autouse=True)
-def _src(in_tmp, local_checkout):
+def _src(in_tmp, local_checkout, monkeypatch):
     (in_tmp / "src").mkdir()
+    # "Container Error Output" reprints the runner's stderr through rich, and a
+    # refusal's stderr can be an absolute path whose length is the machine's: at 100
+    # columns it folded at a different place on Windows and macOS than on Linux.
+    monkeypatch.setenv("COLUMNS", "1000")
 
 
 class TestRunnerSelection:

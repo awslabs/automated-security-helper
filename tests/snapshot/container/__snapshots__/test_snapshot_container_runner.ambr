@@ -74,8 +74,7 @@
                             Dockerfile not found at <TMP>/Dockerfile
       
       Container Error Output:
-      Dockerfile not found at
-      <TMP>/Dockerfile
+      Dockerfile not found at <TMP>/Dockerfile
                    ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
   
     ''',
