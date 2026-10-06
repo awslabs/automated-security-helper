@@ -598,7 +598,7 @@ def test_a_loopback_set_without_a_package_family_name_is_refused(
 
 def test_the_family_name_is_checked_before_the_first_uninstall_or_upgrade() -> None:
     text = VERIFY_PS1.read_text(encoding="utf-8")
-    first_uninstall = text.index("@('uninstall', '--manifest'")
+    first_uninstall = text.index("'uninstall', '--manifest'")
     first_upgrade = text.index("'upgrade', '--manifest'")
     checks = [m.start() for m in re.finditer(r"Assert-FamilyName -Package", text)]
     # One after the N install, one after the N-1 install.
@@ -709,3 +709,92 @@ def test_unwrapped_call_detection_catches_the_winget_regression() -> None:
         "# Get-AshPackage in a comment is not a call\n"
     )
     assert _unwrapped_calls(text) == ["4: $packages = Get-AshPackage"]
+
+
+# The flags each winget subcommand needs to run unattended, from the v1.29.380 sources
+# (src/AppInstallerCLICore/Commands/*Command.cpp). --disable-interactivity is a common
+# argument every command takes. Without --accept-source-agreements, a command that opens
+# the default sources stops in PromptFlow.cpp at the msstore agreement and exits
+# APPINSTALLER_CLI_ERROR_SOURCE_AGREEMENTS_NOT_ACCEPTED (0x8A150046); that is how the
+# first `winget uninstall --manifest` of the leg failed. UninstallCommand.cpp declares
+# AcceptSourceAgreements but not AcceptPackageAgreements, so uninstall must not carry
+# --accept-package-agreements: winget refuses an argument the command does not declare.
+_UNATTENDED_FLAGS = {
+    "install": {
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+        "--disable-interactivity",
+    },
+    "upgrade": {
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+        "--disable-interactivity",
+    },
+    "uninstall": {"--accept-source-agreements", "--disable-interactivity"},
+}
+_UNDECLARED_FLAGS = {"uninstall": {"--accept-package-agreements"}}
+
+
+def _winget_calls(text: str) -> list[tuple[int, list[str]]]:
+    """Each Invoke-Winget call as (line number, its quoted argument strings)."""
+    calls = []
+    for match in re.finditer(
+        r"Invoke-Winget\s+-Arguments\s+@\((.*?)\)\s+-LogName", text, re.DOTALL
+    ):
+        line_no = text.count("\n", 0, match.start()) + 1
+        calls.append((line_no, re.findall(r"'([^']*)'", match.group(1))))
+    return calls
+
+
+def _unattended_problems(text: str) -> list[str]:
+    problems = []
+    for line_no, args in _winget_calls(text):
+        if not args:
+            problems.append(f"{line_no}: no quoted subcommand")
+            continue
+        subcommand, flags = args[0], set(args[1:])
+        for missing in sorted(_UNATTENDED_FLAGS.get(subcommand, set()) - flags):
+            problems.append(f"{line_no}: winget {subcommand} lacks {missing}")
+        for extra in sorted(_UNDECLARED_FLAGS.get(subcommand, set()) & flags):
+            problems.append(f"{line_no}: winget {subcommand} does not take {extra}")
+    return problems
+
+
+def test_every_winget_call_goes_through_invoke_winget() -> None:
+    # The flag check below reads Invoke-Winget calls only, so a direct `& $script:winget`
+    # anywhere but inside Invoke-Winget would escape it.
+    text = VERIFY_PS1.read_text(encoding="utf-8")
+    assert text.count("& $script:winget") == 1
+    body = re.search(r"(?ms)^function Invoke-Winget \{\n(.*?)^\}", text)
+    assert body and "& $script:winget" in body.group(1)
+
+
+def test_every_winget_install_upgrade_uninstall_runs_unattended() -> None:
+    text = VERIFY_PS1.read_text(encoding="utf-8")
+    subcommands = [args[0] for _, args in _winget_calls(text) if args]
+    # The leg installs three times, upgrades once and uninstalls twice; finding fewer
+    # means the call parser stopped matching and the check below would pass on nothing.
+    assert sorted(subcommands) == sorted(
+        ["settings", "validate", "install", "install", "install", "upgrade"]
+        + ["uninstall", "uninstall"]
+    ), subcommands
+    assert _unattended_problems(text) == []
+
+
+def test_unattended_check_catches_the_uninstall_regression() -> None:
+    text = (
+        "$r = Invoke-Winget -Arguments @('uninstall', '--manifest', $m,"
+        " '--disable-interactivity', '--silent') -LogName 'uninstall-N'\n"
+        "$r = Invoke-Winget -Arguments @(\n"
+        "    'install', '--manifest', $m, '--accept-source-agreements',\n"
+        "    '--disable-interactivity'\n"
+        ") -LogName 'install-N'\n"
+        "$r = Invoke-Winget -Arguments @('uninstall', '--manifest', $m,"
+        " '--accept-source-agreements', '--accept-package-agreements',"
+        " '--disable-interactivity') -LogName 'uninstall-x'\n"
+    )
+    assert _unattended_problems(text) == [
+        "1: winget uninstall lacks --accept-source-agreements",
+        "2: winget install lacks --accept-package-agreements",
+        "6: winget uninstall does not take --accept-package-agreements",
+    ]
