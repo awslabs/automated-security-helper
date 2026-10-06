@@ -44,8 +44,8 @@ scanners:
   cfn-lint:
     enabled: true
     options:
-      # A .cfnlintrc to use, relative to the source directory. When unset, cfn-lint
-      # reads a .cfnlintrc in the source directory if one exists.
+      # A .cfnlintrc to use, relative to the source directory. When unset, ASH
+      # gives cfn-lint an empty configuration (see "Configuration files" below).
       config_file: .cfnlintrc
       # Regions to validate against. Defaults to cfn-lint's own default (us-east-1).
       regions: [us-east-1, eu-west-1]
@@ -60,6 +60,12 @@ scanners:
 ```
 
 Region names, rule ids and prefixes are validated when the config is loaded, so a value cannot be passed through to cfn-lint as an option of its own.
+
+### Configuration files
+
+Left to itself, cfn-lint reads a `.cfnlintrc` from the directory it runs in (the scanned repository) and from your home directory. ASH does not let it: unless `config_file` names a file, ASH passes cfn-lint an empty configuration of its own, which stops both lookups. A `.cfnlintrc` is not passive settings. Its `append_rules` key loads Python files as rules, which runs them during the scan, and `ignore_checks: [E, W]` turns every finding off without anything showing up in ASH's suppression reporting. In a repository whose changes you scan before trusting them, such as a pull request in CI, that is code execution and a silent bypass.
+
+Naming a file in `config_file` uses it, with the same trust you give the ASH config that names it, `append_rules` included.
 
 ## Severity mapping
 
@@ -89,7 +95,7 @@ global_settings:
       reason: The function is pinned to this runtime until it is retired.
 ```
 
-Package-scoped suppressions do not apply (cfn-lint reports on templates, not packages), and neither do symbol-scoped ones, which target functions and classes in source code. cfn-lint's own template-level controls also work, for example `Metadata: cfn-lint: config: ignore_checks: [W2001]` on a resource; ASH does not see findings that cfn-lint suppressed itself.
+Package-scoped suppressions do not apply (cfn-lint reports on templates, not packages), and neither do symbol-scoped ones, which target functions and classes in source code. cfn-lint's own template-level controls also work, for example `Metadata: cfn-lint: config: ignore_checks: [W2001]` on a resource. ASH does not see findings that cfn-lint suppressed itself, so these do not appear in ASH's suppressed counts or its unused-suppressions report; treat them like inline `nosec` comments when reviewing changes.
 
 ## Offline use
 
@@ -103,7 +109,7 @@ cfn-lint --format sarif --output-file=<results> [options] -- <template> ...
 
 from the source directory, with template paths relative to it, so the SARIF locations are repository-relative. Template paths are escaped before they are passed, because cfn-lint expands each filename argument as a glob pattern: a template named `a[1].yaml` would otherwise not be linted at all. Long template lists are split across several invocations to stay within command-line length limits.
 
-cfn-lint's exit status is a bitmask of the levels it reported (2 error, 4 warning, 8 informational); any combination of those is a completed run. Other exit statuses, a timeout, or missing output mark that invocation's templates as not evaluated.
+cfn-lint's exit status is a bitmask of the levels it reported (2 error, 4 warning, 8 informational); any combination of those is a completed run. Other exit statuses, a timeout, missing output, or an `E0003` result mark every template in that invocation as not evaluated, so one such template costs the findings of the others in its batch. The scan then reports partial coverage and exits 1 by default, so nothing is lost silently.
 
 ## License
 

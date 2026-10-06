@@ -177,6 +177,17 @@ def test_both_scanners_report_the_known_positives_and_nothing_else(tmp_path):
     assert statuses["cfn-guard"]["status"] == "FAILED", statuses["cfn-guard"]
 
 
+def test_a_repository_cfnlintrc_cannot_switch_cfn_lint_off(tmp_path):
+    """Unless the ASH config names it, the scanned tree's .cfnlintrc is not read."""
+    _require_tools()
+    shutil.copytree(FIXTURE_REPO, tmp_path / "repo")
+    (tmp_path / "repo" / ".cfnlintrc").write_text("ignore_checks: [E, W]\n")
+    proc, output, log = _scan(tmp_path, "cfn-lint")
+    assert proc.returncode == 0, log
+    lint = _results(output, "cfn-lint")
+    assert {(r["ruleId"], _where(r)[1]) for r in lint} == CFN_LINT_EXPECTED, log
+
+
 def test_ash_suppressions_apply_by_rule_path_and_line(tmp_path):
     _require_tools()
     suppressions = [

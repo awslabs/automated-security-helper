@@ -315,7 +315,7 @@ def install(tool: str, bin_dir: Path, package_root: Path) -> Path:
 
 # Must match automated_security_helper/utils/rules_bundles.py: the image installs a
 # bundle with this script, and `ash dependencies install` later reads what it wrote
-# to decide the bundle is already in place. tests/unit/assets/test_install_pinned_tool.py
+# to decide the bundle is already in place. tests/unit/utils/test_rules_bundles.py
 # installs one fake bundle both ways and asserts the two manifests are identical.
 _RULES_MANIFEST_NAME = ".ash-rules-manifest.json"
 _SAFE_MEMBER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")

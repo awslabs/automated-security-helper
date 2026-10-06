@@ -295,6 +295,51 @@ class TestTheTwoInstallersAgree:
         assert list((tmp_path / "sh").iterdir()) == []
 
 
+def _script():
+    spec = importlib.util.spec_from_file_location("_ipt_members", SCRIPT)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    return script
+
+
+class TestHostileArchivesAgainstBothInstallers:
+    """The same refusals in rules_bundles.extract_bundle and the image's script."""
+
+    def test_a_rule_file_named_like_a_directory_is_not_flattened(self, tmp_path):
+        # parts[1] ends in .guard, so only the depth check keeps it out.
+        archive = _zip(
+            tmp_path / "b.zip",
+            {
+                "output/ok.guard": "rule A { }\n",
+                "output/x.guard/inner.guard": "rule X { }\n",
+            },
+        )
+        staging = tmp_path / "s"
+        staging.mkdir()
+        assert list(extract_bundle(archive, REAL, staging)) == ["ok.guard"]
+        with zipfile.ZipFile(archive) as z:
+            assert [name for _, name in _script()._bundle_members(z, REAL)] == [
+                "ok.guard"
+            ]
+
+    def test_the_script_refuses_an_unsafe_member_name(self, tmp_path):
+        archive = _zip(tmp_path / "b.zip", {"output/bad name.guard": "x"})
+        with zipfile.ZipFile(archive) as z, pytest.raises(SystemExit, match="unsafe"):
+            _script()._bundle_members(z, REAL)
+
+    def test_the_total_size_cap_is_enforced_on_bytes_read(self, tmp_path, monkeypatch):
+        # Each member is under the per-member cap; together they exceed the total.
+        monkeypatch.setattr(rules_bundles, "_MAX_TOTAL_BYTES", 100)
+        archive = _zip(
+            tmp_path / "b.zip",
+            {"output/a.guard": "x" * 60, "output/b.guard": "y" * 60},
+        )
+        staging = tmp_path / "s"
+        staging.mkdir()
+        with pytest.raises(ToolDownloadIntegrityError, match="size cap"):
+            extract_bundle(archive, REAL, staging)
+
+
 def test_the_real_pin_is_well_formed():
     assert REAL.url.startswith(
         "https://github.com/aws-cloudformation/aws-guard-rules-registry/"

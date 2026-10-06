@@ -82,8 +82,9 @@ def _observed(results, uri="templates/insecure.yaml") -> collections.Counter:
     for result in results:
         physical = result.locations[0].physicalLocation.root
         assert physical.artifactLocation.uri == uri
-        assert getattr(result.level, "value", result.level) == VIOLATION_LEVEL
-        assert result.properties.issue_severity == VIOLATION_SEVERITY
+        # Literals, not the module's constants: a changed mapping must fail here.
+        assert getattr(result.level, "value", result.level) == "warning"
+        assert result.properties.issue_severity == "MEDIUM"
         counts[(result.ruleId, physical.region.startLine)] += 1
     return counts
 
@@ -309,6 +310,10 @@ class TestDependencies:
                 assert "cfn-guard" in steps[0].args
                 assert "install_rules_bundle" in " ".join(steps[1].args)
                 assert steps[1].args[-1] == "aws-guard-rules-registry"
+
+
+def test_the_documented_mapping_is_medium_warning():
+    assert (VIOLATION_SEVERITY, VIOLATION_LEVEL) == ("MEDIUM", "warning")
 
 
 class TestOptIn:

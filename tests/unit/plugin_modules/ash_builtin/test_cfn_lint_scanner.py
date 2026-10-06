@@ -194,10 +194,16 @@ class TestSeverityMapping:
 
     def test_driver_rules_are_sorted_for_reproducible_reports(self, repo):
         raw = json.loads(CAPTURED_INSECURE.read_text())
-        raw["runs"][0]["tool"]["driver"]["rules"].reverse()
+        rules = {r["id"]: r for r in raw["runs"][0]["tool"]["driver"]["rules"]}
+        # Neither sorted nor reverse-sorted, so no accident of input order passes.
+        raw["runs"][0]["tool"]["driver"]["rules"] = [
+            rules["E3002"],
+            rules["W2001"],
+            rules["E2533"],
+        ]
         report = _scanner(repo).normalize_report(SarifReport.model_validate(raw))
         ids = [r.id for r in report.runs[0].tool.driver.rules]
-        assert ids == sorted(ids)
+        assert ids == ["E2533", "E3002", "W2001"]
 
 
 class TestExitCodes:
@@ -239,7 +245,33 @@ class TestOptions:
     def test_missing_config_file_is_an_error_not_a_silent_default(self, repo):
         scanner = _scanner(repo, config_file="nope/.cfnlintrc")
         with pytest.raises(Exception, match="does not exist"):
-            scanner._option_args()
+            scanner._option_args(repo)
+
+    def test_without_config_file_the_repository_cfnlintrc_is_not_read(self, repo):
+        """A scanned repo's .cfnlintrc can load Python rules and disable checks."""
+        (repo / ".cfnlintrc").write_text("ignore_checks: [E, W]\n")
+        results = repo / "out"
+        results.mkdir()
+        args = _scanner(repo)._option_args(results)
+        config_args = [a for a in args if a.startswith("--config-file=")]
+        assert len(config_args) == 1
+        named = Path(config_args[0].split("=", 1)[1])
+        assert named == (results / "ash-empty.cfnlintrc").resolve()
+        assert named.read_text() == "{}\n"
+
+    @pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="symlink creation needs privileges",
+    )
+    def test_the_empty_config_replaces_a_planted_symlink(self, repo):
+        victim = repo / "victim.txt"
+        victim.write_text("keep me\n")
+        results = repo / "out"
+        results.mkdir()
+        (results / "ash-empty.cfnlintrc").symlink_to(victim)
+        _scanner(repo)._option_args(results)
+        assert victim.read_text() == "keep me\n"
+        assert not (results / "ash-empty.cfnlintrc").is_symlink()
 
 
 class TestOptIn:

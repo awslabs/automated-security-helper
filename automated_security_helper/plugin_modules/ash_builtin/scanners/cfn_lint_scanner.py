@@ -154,8 +154,10 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "Path to a cfn-lint configuration file (.cfnlintrc), relative to the "
-                "source directory. When unset, cfn-lint reads a .cfnlintrc in the "
-                "source directory if there is one."
+                "source directory. When unset, ASH gives cfn-lint an empty "
+                "configuration, so a .cfnlintrc in the scanned repository or the "
+                "home directory is NOT read: such a file can load Python rules "
+                "(append_rules) and switch checks off. Name one here to use it."
             ),
         ),
     ] = None
@@ -291,14 +293,36 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             )
         return get_uv_tool_command(self.command) is not None
 
-    def _option_args(self) -> List[str]:
+    def _option_args(self, results_dir: Path) -> List[str]:
         """Arguments from config, each as one ``--flag=value`` token.
 
         The ``=`` form keeps a value from ever being parsed as a flag of its own.
+
+        A ``--config-file`` is always passed. Without one, cfn-lint reads
+        ``.cfnlintrc`` from the working directory (the scanned repository) and from
+        the home directory (cfnlint/config.py, ``_find_config``), and reads neither
+        once a config file is named. A repository's ``.cfnlintrc`` is not inert
+        configuration: ``append_rules`` loads Python files as rules, which runs them
+        in the scan's environment (measured: a ``rules/evil.py`` beside a
+        ``.cfnlintrc`` naming it ran on a plain ``cfn-lint -- t.yaml``), and
+        ``ignore_checks: [E, W]`` turns every finding off without anything reaching
+        ASH's suppression accounting. So the default is an empty configuration ASH
+        writes itself, and a ``.cfnlintrc`` is used only when the ASH config names
+        it in ``config_file``.
         """
         options = self.config.options
         args: List[str] = []
-        if options.config_file:
+        if not options.config_file:
+            empty = Path(results_dir).joinpath("ash-empty.cfnlintrc")
+            # Unlinked and recreated exclusively rather than overwritten, so a
+            # symlink left at this path (the output directory usually sits inside
+            # the scanned tree) is replaced instead of written through.
+            if empty.is_symlink() or empty.exists():
+                empty.unlink()
+            with open(empty, "x", encoding="utf-8") as handle:
+                handle.write("{}\n")
+            args.append(f"--config-file={empty.resolve().as_posix()}")
+        else:
             candidate = Path(options.config_file)
             if not candidate.is_absolute():
                 candidate = Path(self.context.source_dir) / candidate
@@ -432,9 +456,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 return report
 
             source_dir = Path(self.context.source_dir)
-            option_args = self._option_args()
             results_dir = self.results_dir.joinpath(target_type)
             results_dir.mkdir(parents=True, exist_ok=True)
+            option_args = self._option_args(results_dir)
             displayed = [display_path(p, source_dir) for p in discovery.templates]
             merged: List = []
             rules: Dict[str, object] = {}

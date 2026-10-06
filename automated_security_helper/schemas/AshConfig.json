@@ -1219,7 +1219,7 @@
             }
           ],
           "default": null,
-          "description": "Path to a cfn-lint configuration file (.cfnlintrc), relative to the source directory. When unset, cfn-lint reads a .cfnlintrc in the source directory if there is one.",
+          "description": "Path to a cfn-lint configuration file (.cfnlintrc), relative to the source directory. When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Name one here to use it.",
           "title": "Config File"
         },
         "ignore_checks": {
