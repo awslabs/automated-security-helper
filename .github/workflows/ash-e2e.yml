@@ -49,7 +49,7 @@ concurrency:
 
 env:
   # Channels whose job below is a placeholder. See PENDING CHANNELS above.
-  E2E_PENDING: container homebrew mcpb
+  E2E_PENDING: homebrew mcpb
 
 jobs:
   contract:
@@ -77,6 +77,7 @@ jobs:
       - name: Unit tests for the e2e contract
         run: >-
           uv run --group dev pytest tests/unit/test_e2e_assert_outcome.py
+          tests/unit/test_e2e_container_guards.py
           -p no:cacheprovider -o addopts="" -v
 
   wheel:
@@ -120,18 +121,52 @@ jobs:
           if command -v cygpath >/dev/null 2>&1; then work="$(cygpath -u "$work")"; fi
           bash scripts/e2e/wheel.sh "$work"
 
-  # Placeholder for WP2: build the image from head (never pushed), scan the three cases
-  # with --mode container, rebuild over N-1, `docker rmi`, negative control.
+  # The container image, built from this commit with `ashx build-image` and driven by a
+  # host `ashx scan --mode container`, exactly as a user runs it. Never pushed: the image
+  # exists only in this runner's docker, under a tag unique to this run, and
+  # scripts/e2e/container.sh removes it at the end. assert-no-image-publish fails the job
+  # if anything CI runs could log in to a registry or push. docker only; podman, finch
+  # and nerdctl keep their build-and-scan legs in .github/actions/validate-container.
   container:
-    name: "e2e: container image"
+    name: "e2e: container image (docker, never pushed)"
     needs: contract
-    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
-      - run: echo "placeholder; see E2E_PENDING"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two
+      # commits, not one: on a push to v4-capabilities HEAD is that ref, and
+      # container.sh then builds N-1 from HEAD's first parent instead.
+      - name: Fetch the N-1 ref
+        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+
+      # No uv cache, for the reason given in the contract job.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Nothing CI runs may push an image
+        run: |
+          python3 .github/scripts/assert-no-image-publish.py --self-test
+          python3 .github/scripts/assert-no-image-publish.py
+
+      # The Dockerfile's base image, pulled once and held to BASE_IMAGE_DIGEST before
+      # anything builds, so the build is digest-pinned. container.sh pins N-1's base by
+      # its own digest when it differs from head's.
+      - name: Pre-pull the base image
+        uses: ./.github/actions/prepull-base-image
+        with:
+          oci-runner: docker
+
+      - name: Build, install, scan, upgrade, uninstall
+        env:
+          E2E_PREV_REF: origin/v4-capabilities
+          E2E_IMAGE_TAG: ash-e2e-container:${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash scripts/e2e/container.sh "$RUNNER_TEMP/e2e-container"
 
   # Placeholder for WP4: Homebrew from a local tap whose formula points at this commit.
   homebrew:
