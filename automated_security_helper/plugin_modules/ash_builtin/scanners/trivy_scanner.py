@@ -1,0 +1,350 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The builtin, opt-in trivy scanner.
+
+What it runs
+------------
+``trivy fs`` over each scan target, SARIF out. ``fs`` rather than the community
+plugin's ``repository``: ASH hands every scanner a directory, and ``fs`` is trivy's
+command for a local directory (the converted target, for one, is never a git
+checkout).
+
+Which trivy scanners, and why only ``vuln`` by default
+------------------------------------------------------
+trivy can run four scanners. ASH already runs a default scanner for three of the
+four questions, so the builtin runs only the one whose answer comes from trivy's
+own data:
+
+* ``vuln`` (on): known vulnerabilities in dependency manifests and lockfiles,
+  matched against trivy's vulnerability database. grype answers the same question
+  from a different database, and the two disagree often enough (different
+  advisory sources and matchers) that a second opinion is the reason to enable
+  trivy at all.
+* ``secret`` (off): detect-secrets is a default ASH scanner. Running trivy's
+  secret rules as well reports the same credential twice under two rule ids, and
+  a suppression written for one does not cover the other.
+* ``misconfig`` (off): checkov, cfn-nag and cdk-nag already cover IaC, with ASH's
+  suppressions and policy tooling built around their rule ids.
+* ``license`` (off): a license is a compliance question, not a vulnerability, and
+  its verdicts depend on a license policy ASH does not hold. ``license_full``
+  (scan source headers too) is off with it, since it slows a scan for findings
+  nobody asked for.
+
+Any of the four can be turned on with ``scanners.trivy.options.scanners``.
+
+``ignore_unfixed`` defaults to False, unlike ``trivy-repo``: a vulnerability with
+no fixed version is still a vulnerability, and grype reports them by default. ASH
+already warns when a grype config withholds unfixed matches; setting
+``ignore_unfixed: true`` here gets the same warning.
+
+Vulnerability database and staleness
+------------------------------------
+The database is ``trivy-db`` in ``utils/content_databases.py`` and is held to its
+bound exactly the way grype's is: after the scan, the executor reads the
+database's own ``UpdatedAt`` through ``utils/content_db_staleness.py`` and fails
+the scan (or warns, under ``content_db_staleness: warn``) when it is past the
+declared 24h.
+
+* Online, trivy applies its own rule: a database past its ``NextUpdate`` is
+  replaced before the scan, and the scan fails if the download does. ASH passes
+  nothing to change that, because trivy has no max-age control to pass; the
+  registry's bound IS trivy's rule, so the post-scan check agrees with it.
+* Offline, ASH passes ``--skip-db-update`` (with ``--skip-java-db-update``,
+  ``--offline-scan`` and ``--skip-check-update``), which makes trivy use any
+  database it has. The post-scan check is what holds that database to the bound.
+  With no database at all trivy cannot scan offline, so the scanner reports
+  MISSING with the reason before trivy runs.
+
+The database is only read by ``vuln``. With ``vuln`` turned off nothing is
+measured and the offline database check is skipped.
+
+Severity
+--------
+Each result's ASH severity is trivy's own severity for it (CRITICAL, HIGH, MEDIUM,
+LOW), read from the severity tag trivy writes on the result's rule. It is the
+value trivy's ``--severity`` filter uses, which is how ASH's
+``severity_threshold`` is passed to trivy, so the threshold and the reported
+severity cannot disagree. Without this, ASH would bucket the rule's
+``security-severity`` (a CVSS base score), and a finding trivy rates HIGH with a
+6.5 CVSS score would pass trivy's HIGH filter and be reported MEDIUM. A result
+whose severity is UNKNOWN keeps ASH's generic SARIF mapping (the CVSS score, then
+the SARIF level).
+
+Exit codes
+----------
+trivy exits 0 whether or not it finds anything (ASH does not pass
+``--exit-code``) and 1 on any fatal error, so 0 is the only success code.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
+
+from pydantic import Field
+
+from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.core.constants import is_offline_mode
+from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+    TrivyScannerBase,
+)
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.schemas.sarif_schema_model import (
+    PropertyBag,
+    SarifReport,
+)
+
+#: trivy's severities that ASH reports as the same name. trivy's fifth, UNKNOWN,
+#: is left to ASH's generic SARIF mapping.
+TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+
+
+class TrivyScannerConfigOptions(ScannerOptionsBase):
+    scanners: Annotated[
+        List[Literal["vuln", "misconfig", "secret", "license"]],
+        Field(
+            description=(
+                "Which trivy scanners to run. Defaults to vuln only: ASH's default "
+                "scanners already cover secrets (detect-secrets) and IaC "
+                "misconfigurations (checkov, cfn-nag, cdk-nag), and license findings "
+                "are a compliance question. Add secret, misconfig or license to run "
+                "trivy's checks for them as well."
+            ),
+            min_length=1,
+        ),
+    ] = ["vuln"]
+    license_full: Annotated[
+        bool,
+        Field(
+            description=(
+                "Look for licenses in source file headers and license files too "
+                "(trivy --license-full). Only used when scanners includes license."
+            ),
+        ),
+    ] = False
+    ignore_unfixed: Annotated[
+        bool,
+        Field(
+            description=(
+                "Report only vulnerabilities that have a fixed version (trivy "
+                "--ignore-unfixed). Off by default: an unfixed vulnerability is still "
+                "one, and turning this on withholds it from the report."
+            ),
+        ),
+    ] = False
+    disable_telemetry: Annotated[
+        bool,
+        Field(
+            description="Disable sending anonymous usage data to Aqua",
+        ),
+    ] = True
+    offline: Annotated[
+        bool,
+        Field(
+            description=(
+                "Run in offline mode: skip database and check updates and use the "
+                "vulnerability database already in trivy's cache. ASH still fails the "
+                "scan when that database is past its 24h bound."
+            ),
+            default_factory=is_offline_mode,
+        ),
+    ]
+
+
+class TrivyScannerConfig(ScannerPluginConfigBase):
+    name: Literal["trivy"] = "trivy"
+    # Opt-in: off unless the config enables it or --scanners names it. See
+    # ScannerPluginBase.OPT_IN.
+    enabled: bool = False
+    options: Annotated[
+        TrivyScannerConfigOptions,
+        Field(description="Configure the trivy scanner"),
+        # call-arg: mypy's pydantic plugin does not see the default_factory inside
+        # the Annotated `offline` field, and reports it as a required argument.
+    ] = TrivyScannerConfigOptions()  # type: ignore[call-arg]
+
+
+@ash_scanner_plugin
+class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
+    """Dependency vulnerability scanning with trivy. Opt-in."""
+
+    OPT_IN: ClassVar[bool] = True
+    success_exit_codes: ClassVar[Set[int]] = {0}
+
+    def model_post_init(self, context: Any) -> None:
+        if self.config is None:
+            self.config = TrivyScannerConfig()
+        self.command = "trivy"
+        self.subcommands = ["fs"]
+        self.tool_type = ScannerToolType.SCA
+        self.args = ToolArgs(
+            format_arg="--format",
+            format_arg_value="sarif",
+            output_arg="--output",
+            scan_path_arg=None,
+            extra_args=[],
+        )
+        super().model_post_init(context)
+
+    def _options(self) -> TrivyScannerConfigOptions:
+        """The options, typed. ``config`` is a union on the base class."""
+        options = getattr(self.config, "options", None)
+        if isinstance(options, TrivyScannerConfigOptions):
+            return options
+        return TrivyScannerConfigOptions.model_validate(
+            options.model_dump() if options is not None else {}
+        )
+
+    def _offline(self) -> bool:
+        """The option, or ASH's offline mode as it stands when the scanner is built.
+
+        The ``offline`` option's default is read from ``ASH_OFFLINE`` when the config
+        model is created, and the builtin scanners' default config is created when
+        ASH's config module is imported, which is before ``ash scan --offline`` sets
+        ``ASH_OFFLINE``. Reading the mode again here keeps ``--offline`` from
+        running trivy online with an option that says otherwise.
+        """
+        return bool(self._options().offline) or is_offline_mode()
+
+    def _reads_vulnerability_db(self) -> bool:
+        return "vuln" in self._options().scanners
+
+    def _process_config_options(self) -> None:
+        self._append_trivy_options()
+        if self._options().ignore_unfixed:
+            self._plugin_log(
+                "scanners.trivy.options.ignore_unfixed is true, which restricts which "
+                "vulnerabilities reach the report: those with no fixed version are "
+                "withheld, and the scan can pass with them present.",
+                level=logging.WARNING,
+            )
+        return super()._process_config_options()
+
+    def validate_plugin_dependencies(self) -> bool:
+        """The binary, and offline, a vulnerability database for it to read.
+
+        trivy refuses ``--skip-db-update`` when its cache holds no database ("cannot
+        be specified on the first run"), so an offline scan without one is reported
+        MISSING with the reason before trivy runs, rather than as a tool error.
+        """
+        if not super().validate_plugin_dependencies():
+            return False
+        if not (self._offline() and self._reads_vulnerability_db()):
+            return True
+        from automated_security_helper.utils.content_db_staleness import (
+            _built_from_trivy,
+        )
+
+        try:
+            _built_from_trivy(self.content_database_probe_context())
+        except Exception as exc:  # noqa: BLE001 - every failure means "no usable database"
+            self.dependency_unavailable_reason = (
+                "trivy is in offline mode and has no vulnerability database to read "
+                f"({exc}). Download one with network access (`trivy image "
+                "--download-db-only`, with TRIVY_CACHE_DIR set to the cache this scan "
+                "uses), or turn offline mode off."
+            )
+            self._plugin_log(self.dependency_unavailable_reason, level=logging.WARNING)
+            return False
+        return True
+
+    def content_databases_in_use(self) -> List[Any]:
+        """trivy's vulnerability database, when the ``vuln`` scanner ran."""
+        if not self._reads_vulnerability_db():
+            return []
+        return super().content_databases_in_use()
+
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
+        """Resolve the argv, results path and environment for one trivy run.
+
+        ``global_ignore_paths`` is applied to every scanner's SARIF by ASH's
+        suppression pass, so it is not translated into trivy flags.
+        """
+        if self.results_dir is None:
+            raise ScannerError("TrivyScanner has no results directory")
+        results_file = self.results_dir.joinpath(target_type, "results_sarif.sarif")
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+        # A report left by an earlier run must not be read as this run's: trivy
+        # writes none when it fails, and the template reads whatever is here.
+        results_file.unlink(missing_ok=True)
+
+        final_args = self._resolve_arguments(target=target, results_file=results_file)
+        # Each flag and its value as one token, so no path can be read as a flag.
+        extra: List[str] = []
+        timeout = self._effective_scan_timeout()
+        if timeout is not None:
+            # trivy's own deadline is 5 minutes and fails the scan when it passes.
+            # Matched to ASH's, so the bound the operator set is the one that applies.
+            extra.append(f"--timeout={int(timeout)}s")
+        output_inside = self._output_dir_inside(target)
+        if output_inside is not None:
+            # ASH's own output under the target holds the converted copies of
+            # archives and notebooks, which the converted target scans already.
+            extra.append(f"--skip-dirs={output_inside.as_posix()}")
+        # Before the target, which _resolve_arguments places after the options.
+        target_index = final_args.index(Path(target).as_posix())
+        final_args[target_index:target_index] = extra
+
+        subprocess_env = {**os.environ, **self.extra_env} if self.extra_env else None
+        return final_args, results_file, subprocess_env
+
+    def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
+        """Refuse the report of a run trivy did not finish (any exit but 0)."""
+        if self.exit_code not in self.success_exit_codes:
+            raise ScannerError(
+                f"trivy exited {self.exit_code}; it exits 0 whether or not it finds "
+                "anything, so this run failed"
+            )
+        return super()._read_results_file(results_file)
+
+    def _post_process_sarif(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: Path,
+    ) -> SarifReport:
+        """Tie each dependency result to one package copy and set trivy's severity."""
+        sarif_report = self._attach_package_identity(sarif_report, target)
+        for run in sarif_report.runs or []:
+            rules = (
+                (run.tool.driver.rules or []) if run.tool and run.tool.driver else []
+            )
+            by_id = {rule.id: rule for rule in rules}
+            for result in run.results or []:
+                severity = self._trivy_severity(result, rules, by_id)
+                if severity is None:
+                    continue
+                if result.properties is None:
+                    result.properties = PropertyBag()
+                setattr(result.properties, "issue_severity", severity)  # noqa: B010
+        return sarif_report
+
+    @staticmethod
+    def _trivy_severity(
+        result: Any, rules: List[Any], by_id: Dict[str, Any]
+    ) -> Optional[str]:
+        """trivy's severity for *result*, from its rule's tags; see "Severity" above."""
+        rule = None
+        if result.ruleIndex is not None and 0 <= result.ruleIndex < len(rules):
+            rule = rules[result.ruleIndex]
+        if rule is None or (result.ruleId and rule.id != result.ruleId):
+            rule = by_id.get(result.ruleId)
+        if rule is None or rule.properties is None:
+            return None
+        tags = getattr(rule.properties, "tags", None) or []
+        found = [tag for tag in tags if tag in TRIVY_SEVERITIES]
+        # Exactly one, or no verdict: two severity tags would be a shape trivy
+        # does not write, and guessing between them could under-rate a finding.
+        return found[0] if len(found) == 1 else None

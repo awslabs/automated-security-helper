@@ -482,6 +482,22 @@
   `enabled: false`; for other scanners `--scanners` only narrows the run. No
   scanner shipped today is opt-in, so default scan output is unchanged.
 
+- **trivy, as an opt-in builtin scanner.** `scanners.trivy.enabled: true`, or
+  `--scanners trivy`, runs `trivy fs` (v0.69.3, the version already pinned and
+  in the image) over each target. A default scan neither runs nor lists it. It
+  runs trivy's `vuln` scanner only by default, because detect-secrets and
+  checkov already cover secrets and IaC by default; `options.scanners` adds
+  `secret`, `misconfig` or `license`. Unfixed vulnerabilities are reported
+  (`ignore_unfixed: false`, with a warning when set). Each finding carries
+  trivy's own severity, the one its `--severity` filter uses. Its
+  vulnerability database is held to the same 24h bound, by the same scan-time
+  check, as before: offline it runs with `--skip-db-update` and fails the scan
+  when the database is stale; offline with no database at all it is `MISSING`
+  with the reason. The community `trivy-repo` plugin is unchanged and still
+  supported: same config, same findings and outputs. The two now share one
+  implementation. Enabling both runs trivy twice, and each finding is reported
+  once per scanner; see the trivy scanner page.
+
 ### Fixes
 
 - **A scanner whose constructor raises is recorded under its scanner name.** The

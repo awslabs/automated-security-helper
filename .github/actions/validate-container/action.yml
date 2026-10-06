@@ -479,6 +479,7 @@ runs:
           --output-dir /tmp/ash-selftest/output \
           --simple \
           --fail-on-incomplete-scanners \
+          --config-overrides 'scanners.trivy.enabled=true' \
           --phases scan \
           --phases report
         rc=$?
@@ -560,6 +561,10 @@ runs:
         # the flake, so its status says nothing about the flake. In container mode
         # ASH's own environment IS the image, so its status is exactly as much a
         # statement about the image as any other scanner's.
+        #
+        # trivy is opt-in, so a default scan leaves it out entirely. The scan above
+        # enables it with --config-overrides so the image's trivy is exercised, and it
+        # is listed here so a missing binary fails this check.
         image_supplied = [
             "bandit",
             "cdk-nag",
@@ -571,6 +576,7 @@ runs:
             "opengrep",
             "semgrep",
             "syft",
+            "trivy",
         ]
 
         for name in sorted(statuses):

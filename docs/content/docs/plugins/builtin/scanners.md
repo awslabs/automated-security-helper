@@ -1,6 +1,6 @@
 # Built-in Security Scanners
 
-ASH includes 10 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
+ASH includes 11 built-in security scanners, one of which (trivy) is opt-in, that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
 
 > For detailed visual diagrams of the built-in scanner architecture and workflows, see [Built-in Scanner Diagrams](scanners-diagrams.md).
 
@@ -18,6 +18,7 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[Opengrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
 | **[Semgrep](#semgrep)**               | Static analysis scanner         | 30+ languages                   | Community and custom rules                 |
 | **[Syft](#syft)**                     | SBOM generator                  | Container images, filesystems   | Software inventory generation              |
+| **[Trivy](#trivy-opt-in)** (opt-in)   | Dependency vulnerability scanner | Lockfiles, manifests           | trivy vulnerability database               |
 
 ## Opt-in scanners
 
@@ -328,6 +329,30 @@ scanners:
 - License identification
 
 **Dependencies**: `syft` binary
+
+---
+
+### Trivy (opt-in)
+
+**Purpose**: Matches dependency manifests and lockfiles against trivy's vulnerability database, a second database next to grype's. Off by default; a default scan does not run or list it. See [Trivy scanner](trivy.md).
+
+**Configuration**:
+```yaml
+scanners:
+  trivy:
+    enabled: true
+    options:
+      scanners: ["vuln"]          # Add secret, misconfig or license to run those too
+      ignore_unfixed: false       # Report vulnerabilities with no fixed version
+      offline: false              # Use the cached database; ASH still enforces its 24h bound
+```
+
+**Key Features**:
+- trivy's own severity on every finding
+- Package-scoped suppressions, one result per npm package copy
+- Vulnerability database held to its 24h bound online and offline
+
+**Dependencies**: `trivy` binary, and offline, a vulnerability database in its cache
 
 ## Best Practices
 

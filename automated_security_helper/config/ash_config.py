@@ -106,6 +106,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScannerConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScannerConfig,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -385,6 +388,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
     syft: Annotated[
         SyftScannerConfig, Field(description="Configure the options for Syft")
     ] = SyftScannerConfig()
+    trivy: Annotated[
+        TrivyScannerConfig,
+        Field(description="Configure the options for Trivy"),
+    ] = TrivyScannerConfig()
 
 
 class ReporterConfigSegment(_PluginConfigSegment):

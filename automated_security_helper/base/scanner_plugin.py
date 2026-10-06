@@ -253,8 +253,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def content_databases_in_use(self) -> list:
         """The declared content databases this scanner's last scan read.
 
-        Defaults to every entry in ``utils/content_databases.py`` whose ``scanner`` is this
-        scanner's config name. A scanner that reads its database only in some modes -- the
+        Defaults to every entry in ``utils/content_databases.py`` that this scanner's config
+        name reads: the entry's ``scanner``, or one of its ``also_read_by``. A scanner that reads its database only in some modes -- the
         semgrep and opengrep offline rulesets -- overrides this to say so. The executor
         holds each one to its declared age bound after the scan; see
         ``utils/content_db_staleness.py``.
@@ -262,7 +262,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         from automated_security_helper.utils.content_databases import CONTENT_DATABASES
 
         name = str(getattr(self.config, "name", "") or "")
-        return [entry for entry in CONTENT_DATABASES if entry.scanner == name]
+        return [entry for entry in CONTENT_DATABASES if name in entry.readers]
 
     def content_database_probe_context(self):
         """How to read this scanner's database: its binary, and the env its scan ran with.

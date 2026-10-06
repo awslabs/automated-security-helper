@@ -135,6 +135,7 @@ SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(
         "semgrep",
         "snyk-code",
         "syft",
+        "trivy",
         "trivy-repo",
     }
 )

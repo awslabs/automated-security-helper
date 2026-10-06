@@ -32,6 +32,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScanner,
+)
 
 __all__ = [
     "BanditScanner",
@@ -44,4 +47,5 @@ __all__ = [
     "OpengrepScanner",
     "SemgrepScanner",
     "SyftScanner",
+    "TrivyScanner",
 ]

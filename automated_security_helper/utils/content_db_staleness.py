@@ -357,8 +357,15 @@ def measure(
     ctx: ProbeContext,
     policy: str,
     now: Optional[datetime] = None,
+    scanner: Optional[str] = None,
 ) -> ContentDbAgeRecord:
-    """Read one database's build time. Never raises: a failure is a record of unknown age."""
+    """Read one database's build time. Never raises: a failure is a record of unknown age.
+
+    ``scanner`` is the scanner that read the database. It is recorded in place of the
+    entry's own ``scanner`` when it is one of the entry's ``readers``, so a database two
+    scanners read is reported under the one that used it.
+    """
+    reader = scanner if scanner in entry.readers else entry.scanner
     now = now or datetime.now(timezone.utc)
     built: Optional[datetime] = None
     measured_by = entry.age_source
@@ -370,7 +377,7 @@ def measure(
         error = f"{type(exc).__name__}: {exc}"
     return ContentDbAgeRecord(
         name=entry.name,
-        scanner=entry.scanner,
+        scanner=reader,
         built=built,
         measured_by=measured_by,
         max_age=entry.max_age,
@@ -472,7 +479,7 @@ def assess_scanner(
         entries = list(scanner_plugin.content_databases_in_use())
         ctx = scanner_plugin.content_database_probe_context()
     except Exception as exc:  # noqa: BLE001
-        entries = [e for e in CONTENT_DATABASES if e.scanner == scanner_name]
+        entries = [e for e in CONTENT_DATABASES if scanner_name in e.readers]
         ctx = None
         failure = f"{type(exc).__name__}: {exc}"
     if not entries:
@@ -481,11 +488,11 @@ def assess_scanner(
     records: List[ContentDbAgeRecord] = []
     for entry in entries:
         if ctx is None:
-            record = measure(entry, ProbeContext(env={}), policy, now)
+            record = measure(entry, ProbeContext(env={}), policy, now, scanner_name)
             record.error = f"the scanner could not describe its database: {failure}"
             record.built = None
         else:
-            record = measure(entry, ctx, policy, now)
+            record = measure(entry, ctx, policy, now, scanner_name)
         records.append(record)
         if record.stale:
             level = (

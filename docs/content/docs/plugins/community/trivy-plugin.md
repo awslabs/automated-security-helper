@@ -1,5 +1,11 @@
 # Trivy Plugin
 
+> ASH also ships trivy as an opt-in builtin scanner, `trivy`, which runs `trivy fs`
+> with only the `vuln` scanner by default. See [Trivy scanner](../builtin/trivy.md).
+> This `trivy-repo` plugin is unchanged and still supported; the two share their
+> implementation. Enabling both runs trivy twice and reports each finding once per
+> scanner.
+
 **Description**: The Trivy plugin integrates Aquasec's Trivy CLI tool to provide comprehensive repository scanning for vulnerabilities, misconfigurations, secrets, and license issues. This plugin extends ASH's security scanning capabilities with Trivy's advanced detection algorithms and extensive vulnerability database.
 
 **Repository**: Built-in ASH plugin (part of core distribution)

@@ -23,6 +23,7 @@ nav:
       - Overview: docs/plugins/builtin/index.md
       - Scanners: docs/plugins/builtin/scanners.md
       - Scanner Diagrams: docs/plugins/builtin/scanners-diagrams.md
+      - Trivy (opt-in): docs/plugins/builtin/trivy.md
       - Reporters: docs/plugins/builtin/reporters.md
       - Reporter Diagrams: docs/plugins/builtin/reporters-diagrams.md
       - Converters: docs/plugins/builtin/converters.md

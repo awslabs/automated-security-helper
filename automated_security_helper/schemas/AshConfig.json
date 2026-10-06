@@ -470,6 +470,21 @@
                 "scan_timeout": 1800,
                 "severity_threshold": null
               }
+            },
+            "trivy": {
+              "enabled": false,
+              "name": "trivy",
+              "options": {
+                "disable_telemetry": true,
+                "ignore_unfixed": false,
+                "license_full": false,
+                "offline": false,
+                "scan_timeout": 1800,
+                "scanners": [
+                  "vuln"
+                ],
+                "severity_threshold": null
+              }
             }
           },
           "description": "Scanner configurations by name."
@@ -3325,6 +3340,25 @@
             }
           },
           "description": "Configure the options for Syft"
+        },
+        "trivy": {
+          "$ref": "#/$defs/TrivyScannerConfig",
+          "default": {
+            "enabled": false,
+            "name": "trivy",
+            "options": {
+              "disable_telemetry": true,
+              "ignore_unfixed": false,
+              "license_full": false,
+              "offline": false,
+              "scan_timeout": 1800,
+              "scanners": [
+                "vuln"
+              ],
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Trivy"
         }
       },
       "title": "ScannerConfigSegment",
@@ -4098,6 +4132,121 @@
         "key"
       ],
       "title": "ToolExtraArg",
+      "type": "object"
+    },
+    "TrivyScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "trivy",
+          "default": "trivy",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/TrivyScannerConfigOptions",
+          "default": {
+            "disable_telemetry": true,
+            "ignore_unfixed": false,
+            "license_full": false,
+            "offline": false,
+            "scan_timeout": 1800,
+            "scanners": [
+              "vuln"
+            ],
+            "severity_threshold": null
+          },
+          "description": "Configure the trivy scanner"
+        }
+      },
+      "title": "TrivyScannerConfig",
+      "type": "object"
+    },
+    "TrivyScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "disable_telemetry": {
+          "default": true,
+          "description": "Disable sending anonymous usage data to Aqua",
+          "title": "Disable Telemetry",
+          "type": "boolean"
+        },
+        "ignore_unfixed": {
+          "default": false,
+          "description": "Report only vulnerabilities that have a fixed version (trivy --ignore-unfixed). Off by default: an unfixed vulnerability is still one, and turning this on withholds it from the report.",
+          "title": "Ignore Unfixed",
+          "type": "boolean"
+        },
+        "license_full": {
+          "default": false,
+          "description": "Look for licenses in source file headers and license files too (trivy --license-full). Only used when scanners includes license.",
+          "title": "License Full",
+          "type": "boolean"
+        },
+        "offline": {
+          "description": "Run in offline mode: skip database and check updates and use the vulnerability database already in trivy's cache. ASH still fails the scan when that database is past its 24h bound.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "scanners": {
+          "default": [
+            "vuln"
+          ],
+          "description": "Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well.",
+          "items": {
+            "enum": [
+              "vuln",
+              "misconfig",
+              "secret",
+              "license"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Scanners",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "TrivyScannerConfigOptions",
       "type": "object"
     },
     "UnusedSuppressionsReporterConfig": {
