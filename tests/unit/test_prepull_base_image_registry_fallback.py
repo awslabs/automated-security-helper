@@ -497,6 +497,9 @@ def _run(
     env = {
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "HOME": str(work),
+        # The env is built from scratch, so without this mktemp in the step falls back to
+        # the host's /tmp, and the frozen control script below never removes its log.
+        "TMPDIR": str(work),
         "ATTEMPTS": str(attempts),
         "RUNTIME": "docker",
         "WRAPPER": "",

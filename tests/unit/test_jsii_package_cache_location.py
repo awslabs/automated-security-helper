@@ -228,3 +228,55 @@ def test_prune_keeps_the_newest_entries_per_package(tmp_path, ash_conftest):
 
 def test_prune_of_a_missing_root_is_a_no_op(tmp_path, ash_conftest):
     assert ash_conftest._prune_jsii_package_cache(tmp_path / "absent", keep=2) == []
+
+
+def test_live_session_runs_in_its_own_temp_directory():
+    session = os.environ.get("ASH_TEST_SESSION_TMPDIR")
+    assert session, "conftest did not set up a session temp directory"
+    assert Path(session).is_dir()
+    assert Path(session).name.startswith("ash-pytest-")
+    assert tempfile.gettempdir() == session
+    for var in ("TMPDIR", "TEMP", "TMP"):
+        assert os.environ[var] == session
+
+
+def _isolate_session_state(monkeypatch, ash_conftest, tmp_path):
+    for var in ("ASH_TEST_SESSION_TMPDIR", "TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(var, os.environ.get(var, ""))
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(ash_conftest, "_created_session_tmpdir", None)
+
+
+def test_session_tmpdir_is_created_owned_and_removed(
+    monkeypatch, tmp_path, ash_conftest
+):
+    _isolate_session_state(monkeypatch, ash_conftest, tmp_path)
+    monkeypatch.delenv("ASH_TEST_SESSION_TMPDIR")
+
+    path = ash_conftest._enter_session_tmpdir()
+
+    assert path.parent == tmp_path and path.is_dir()
+    assert os.environ["ASH_TEST_SESSION_TMPDIR"] == str(path)
+    assert tempfile.gettempdir() == str(path)
+    (path / "left-behind").mkdir()
+    (path / "left-behind" / "f").write_text("x")
+    os.chmod(path / "left-behind" / "f", 0o400)
+
+    ash_conftest._remove_session_tmpdir()
+    assert not path.exists()
+
+
+def test_inherited_session_tmpdir_is_reused_and_not_removed(
+    monkeypatch, tmp_path, ash_conftest
+):
+    """A worker, or a pytest run started by a test, must not delete its parent's."""
+    _isolate_session_state(monkeypatch, ash_conftest, tmp_path)
+    parent = tmp_path / "parent-session"
+    parent.mkdir()
+    monkeypatch.setenv("ASH_TEST_SESSION_TMPDIR", str(parent))
+
+    assert ash_conftest._enter_session_tmpdir() == parent
+    ash_conftest._remove_session_tmpdir()
+
+    assert parent.is_dir()
+    assert list(tmp_path.iterdir()) == [parent], "a second directory was created"

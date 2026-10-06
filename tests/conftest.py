@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
 import pytest
 from importlib.machinery import ModuleSpec
 from pathlib import Path
@@ -232,15 +233,82 @@ def _prune_jsii_package_cache(root: Path, keep: int = _JSII_CACHE_KEEP) -> List[
     return removed
 
 
+# The session temp directory.
+#
+# Measured with a private, empty /tmp and TMPDIR unset, a full unit run left about 270
+# inodes behind even with the jsii cache moved out: tools the tests drive (Node's
+# compile cache, semgrep rule files, a lark grammar cache, the MCP session workspace,
+# mktemp in shell scripts under test) all write to the default temp directory and
+# nothing removes what they write. None of them is a literal /tmp that could be fixed
+# where it is written, so the session points TMPDIR (and TEMP/TMP, which Windows
+# tools read) at a directory of its own and removes it at the end.
+#
+# The directory comes from tempfile.mkdtemp in the original temp directory rather
+# than from the pytest basetemp: basetemp paths are long, and macOS caps AF_UNIX
+# socket paths at 104 bytes, which multiprocessing and other socket users under
+# TMPDIR would hit. The controller creates it before xdist starts workers, the workers
+# inherit it through ASH_TEST_SESSION_TMPDIR, and only the creating process removes
+# it, so a pytest run started from inside a test does not delete its parent's.
+
+_SESSION_TMP_ENV = "ASH_TEST_SESSION_TMPDIR"
+_TEMP_VARS = ("TMPDIR", "TEMP", "TMP")
+_created_session_tmpdir: Optional[Path] = None
+
+
+def _enter_session_tmpdir() -> Path:
+    """Point this process's temp directory at the session one. Returns it."""
+    global _created_session_tmpdir
+    inherited = (os.environ.get(_SESSION_TMP_ENV) or "").strip()
+    if inherited and Path(inherited).is_dir():
+        path = Path(inherited)
+    else:
+        # pytest's own basetemp (tmp_path and friends) keeps its usual home and its
+        # keep-the-last-three retention, rather than being deleted with this directory
+        # at session end. PYTEST_DEBUG_TEMPROOT is pytest's documented knob for that
+        # root; an explicit --basetemp overrides both.
+        os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", tempfile.gettempdir())
+        path = Path(tempfile.mkdtemp(prefix="ash-pytest-"))
+        os.environ[_SESSION_TMP_ENV] = str(path)
+        _created_session_tmpdir = path
+    for var in _TEMP_VARS:
+        os.environ[var] = str(path)
+    tempfile.tempdir = str(path)
+    return path
+
+
+def _make_writable_and_retry(func: Any, path: str, _exc: BaseException) -> None:
+    """rmtree error hook: read-only files (git objects on Windows) block removal."""
+    try:
+        os.chmod(path, 0o700)
+        func(path)
+    except OSError:
+        pass
+
+
+def _remove_session_tmpdir() -> None:
+    global _created_session_tmpdir
+    path = _created_session_tmpdir
+    if path is None:
+        return
+    _created_session_tmpdir = None
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_make_writable_and_retry)
+    else:
+        shutil.rmtree(
+            path, onerror=lambda f, p, e: _make_writable_and_retry(f, p, e[1])
+        )
+
+
 def pytest_unconfigure(config):
-    """Bound the shared jsii cache once, from the process that owns the session."""
+    """Tidy up from the process that owns the session: bound the jsii cache, then
+    remove the session temp directory."""
     if hasattr(config, "workerinput"):
         return
     root = _jsii_package_cache_root()
-    if not root.is_dir():
-        return
-    with _exclusive_file_lock(root / _JSII_LOAD_LOCK_NAME):
-        _prune_jsii_package_cache(root)
+    if root.is_dir():
+        with _exclusive_file_lock(root / _JSII_LOAD_LOCK_NAME):
+            _prune_jsii_package_cache(root)
+    _remove_session_tmpdir()
 
 
 def pytest_configure(config):
@@ -248,6 +316,7 @@ def pytest_configure(config):
     # Must happen before anything imports a jsii-backed package. pytest_configure is
     # the earliest per-worker hook, and collection -- which imports test modules --
     # runs after it.
+    _enter_session_tmpdir()
     _configure_jsii_package_cache()
 
     # Register custom markers
