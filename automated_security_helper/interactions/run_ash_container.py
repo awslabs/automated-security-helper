@@ -1179,15 +1179,6 @@ def run_ash_container(
                 )
             )
 
-    # Resolve Dockerfile path
-    try:
-        dockerfile_path = _find_dockerfile(resolved_revision)
-    except FileNotFoundError as e:
-        typer.secho(str(e), fg=typer.colors.RED)
-        return _not_started(
-            create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
-        )
-
     # Resolve build target
     resolved_build_target = (
         "ci"
@@ -1216,6 +1207,20 @@ def run_ash_container(
 
     # Build phase
     if build:
+        # Only a build reads the Dockerfile. --no-build runs an image that is already
+        # present, so looking one up first refused a scan outside an ASH checkout
+        # (revision LOCAL, no Dockerfile in or above the working directory) although
+        # nothing was going to be built.
+        try:
+            dockerfile_path = _find_dockerfile(resolved_revision)
+        except FileNotFoundError as e:
+            typer.secho(str(e), fg=typer.colors.RED)
+            return _not_started(
+                create_completed_process(
+                    args=[], returncode=1, stdout="", stderr=str(e)
+                )
+            )
+
         try:
             _build_image(
                 oci_command_prefix=oci_command_prefix,
