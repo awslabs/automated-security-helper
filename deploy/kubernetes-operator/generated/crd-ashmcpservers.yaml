@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: 7bdbe2fdad9bfe40
+    ash.awslabs.github.io/ash-config-schema-sha256: 4a13960f5b420f76
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -219,6 +219,15 @@ spec:
                                 at this path, relative to the scan root (glob, supports **), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'.
                                 Separates two copies with the same name and version. Findings that do
                                 not report an install path never match.
+                              nullable: true
+                            symbol:
+                              type: string
+                              description: (Optional) Only suppress findings whose lines lie inside the
+                                definition with this qualified name, e.g. 'MyClass.my_method', in the
+                                finding's file. Names are dotted from the top of the file, exact and case-sensitive.
+                                Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript,
+                                Java), which needs the 'symbols' extra; a finding whose file cannot be
+                                parsed never matches.
                               nullable: true
                           required:
                           - path
@@ -972,6 +981,12 @@ spec:
                                   - 3d_policy
                                   type: string
                                 type: array
+                              skip_ash_output_dir:
+                                description: Skip ASH's own output directory when it sits inside the scanned
+                                  directory, so Checkov does not parse ASH's previous reports. Defaults
+                                  to true; set to false to scan it anyway. Has no effect on Windows, where
+                                  Checkov's --skip-path matching is unreliable.
+                                type: boolean
                               tool_version:
                                 type: string
                                 description: Version constraint for checkov installation, in pip requirement
