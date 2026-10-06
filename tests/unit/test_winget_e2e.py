@@ -21,13 +21,17 @@ import re
 import shutil
 import subprocess
 import sys
-import tomllib
 import zipfile
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 import yaml
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - exercised only on 3.10
+    import tomli as tomllib
 
 REPO = Path(__file__).resolve().parents[2]
 WINGET = REPO / "packaging" / "winget"

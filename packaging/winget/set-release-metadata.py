@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.11"
-# dependencies = ["jsonschema>=4.26,<5", "PyYAML>=6,<7", "defusedxml>=0.7,<0.8", "requests>=2.34,<3"]
+# requires-python = ">=3.10"
+# dependencies = ["jsonschema>=4.26,<5", "PyYAML>=6,<7", "defusedxml>=0.7,<0.8", "requests>=2.34,<3", "tomli>=2; python_version < '3.11'"]
 # ///
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
