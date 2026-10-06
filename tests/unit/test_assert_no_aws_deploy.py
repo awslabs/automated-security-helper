@@ -109,6 +109,13 @@ def test_a_background_job_ends_a_command(guard: ModuleType) -> None:
         "run: terraform 2>&1 apply -auto-approve",
         "run: cdk >&2 deploy",
         "run: cdk &>out.log deploy",
+        # A redirection glued to the verb is not part of the verb.
+        "run: cdk deploy&>log",
+        "run: cdk deploy&>>log",
+        "run: terraform apply&>/dev/null",
+        "run: cdk deploy>log",
+        "run: cdk deploy>&2",
+        "run: cdk deploy<&3",
     ],
 )
 def test_a_redirection_does_not_end_a_command(guard: ModuleType, line: str) -> None:

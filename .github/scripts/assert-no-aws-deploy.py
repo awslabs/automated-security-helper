@@ -16,7 +16,9 @@ WHAT IT LOOKS FOR
 
 Every `*.yml` / `*.yaml` under .github/workflows and .github/actions. Each file is
 read as text, comment lines are dropped, backslash-continued lines are joined,
-and each line is split into commands at `&&`, `||`, `;`, `|` and `&`. Each
+and each line is split into commands at `&&`, `||`, `;`, `|` and `&`.
+Redirections (`2>&1`, `>log`, `&>/dev/null`) are removed from each command,
+including one glued to the verb, so `cdk deploy&>log` still ends in `deploy`. Each
 whitespace-separated token is normalized to the tool it names before matching:
 the part after the last `/` (so `./node_modules/.bin/cdk` is `cdk`), without an
 `@version` or `@tag` suffix (so `aws-cdk@2.150.0` and `cdk@latest` are `aws-cdk`
@@ -92,6 +94,13 @@ DEPLOY_ACTIONS = ("aws-actions/aws-cloudformation-github-deploy",)
 # redirection (`2>&1`, `>&2`, `&>file`) is not a separator, so the command goes on.
 SEPARATORS = re.compile(r"&&|\|\||;|\||(?<![<>])&(?!>)")
 
+# A redirection with its target, removed from each command before it is split into
+# tokens. Without this, a redirection glued to the verb (`cdk deploy&>log`,
+# `cdk deploy>&2`, `terraform apply>out`) makes the verb token `deploy&>log`, which
+# matches no verb. Covers `>`, `>>`, `<`, `<<`, `>&`, `<&`, `&>`, `&>>`, each with an
+# optional file-descriptor number and the target that follows without a space.
+REDIRECTION = re.compile(r"\d*(?:&>>?|[<>]{1,2}&?)\S*")
+
 # Other names the same tool runs under, after normalize_tool().
 TOOL_ALIASES = {
     "aws-cdk": "cdk",  # the npm package: `npx aws-cdk deploy`
@@ -140,7 +149,7 @@ def normalize_tool(token: str) -> str:
 
 def deploy_reason(command: str) -> str | None:
     """Why `command` is a deploy, or None."""
-    tokens = [t.strip("'\"") for t in command.split()]
+    tokens = [t.strip("'\"") for t in REDIRECTION.sub(" ", command).split()]
     for index, token in enumerate(tokens):
         verbs = DEPLOY_VERBS.get(normalize_tool(token))
         if verbs is None:
@@ -211,6 +220,13 @@ PLANTED_DEPLOYS = (
     "run: cdk 2>&1 deploy",
     "run: terraform 2>&1 apply -auto-approve",
     "run: cdk >&2 deploy",
+    # A redirection glued to the verb is not part of the verb.
+    "run: cdk deploy&>log",
+    "run: cdk deploy&>>log",
+    "run: terraform apply&>/dev/null",
+    "run: cdk deploy>log",
+    "run: cdk deploy>&2",
+    "run: cdk deploy<&3",
     # OpenTofu is a drop-in for terraform.
     "run: tofu apply",
     "run: tofu -chdir=deploy/terraform destroy -auto-approve",
