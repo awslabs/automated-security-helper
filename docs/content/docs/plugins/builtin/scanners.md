@@ -41,8 +41,10 @@ scanners:
 ash --scanners bandit,<scanner-name>
 ```
 
-The MCP `scanners` argument and the `scanners` argument of the Python
-`run_ash_scan` API work the same way as `--scanners`. A workspace policy's
+The `scanners` argument of the MCP `run_ash_workspace_scan` tool and of the
+Python `run_ash_scan` API work the same way as `--scanners`. The single-project
+MCP `run_ash_scan` tool has no scanner selection; enable the scanner in the
+config it is given. A workspace policy's
 `additional_scanners` enables it the same way as the config file.
 
 Once enabled, an opt-in scanner behaves like any other built-in scanner. If its
@@ -50,10 +52,11 @@ tool is not installed it is reported as MISSING, and the scan exits 1 while
 `fail_on_incomplete_scanners` is on.
 
 Naming an opt-in scanner in `--scanners` runs it even if the config says
-`enabled: false`, because `false` is its default and ASH cannot tell that
-default from a value you wrote. For the other built-in scanners `--scanners`
-only narrows the run, and a scanner disabled in config stays SKIPPED. To keep an
-opt-in scanner off, leave it out of `--scanners`. `--exclude-scanners` takes
+`enabled: false`. This is deliberate: `false` is the opt-in default, so naming
+a scanner always runs it. For the other built-in scanners `--scanners` only
+narrows the run, and a scanner disabled in config stays SKIPPED. A config file
+cannot forbid an opt-in scanner that someone names in `--scanners`; to keep one
+off, leave it out of `--scanners`. `--exclude-scanners` takes
 precedence over both.
 
 `ash dependencies install` installs the tools for opt-in scanners as well, and

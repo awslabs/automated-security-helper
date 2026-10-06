@@ -13,9 +13,11 @@ The rule
 --------
 An opt-in scanner is enabled when either of these holds:
 
-1. Its name is in the scanner selection -- ``--scanners``, the MCP ``scanners``
-   argument, or ``run_ash_scan(scanners=...)``. All three arrive in the scan
-   phase as the same ``enabled_scanners`` list.
+1. Its name is in the scanner selection -- ``--scanners``, the ``scanners``
+   argument of the MCP ``run_ash_workspace_scan`` tool, or the Python
+   ``run_ash_scan(scanners=...)``. All three arrive in the scan phase as the same
+   ``enabled_scanners`` list. (The single-project MCP ``run_ash_scan`` tool takes
+   no scanner selection; enable through its ``config_path`` instead.)
 2. Its resolved config says ``enabled: true``. That covers the project config
    file, ``--config-overrides 'scanners.<name>.enabled=true'`` and a workspace
    policy's ``additional_scanners``, which all write the same field.
@@ -29,13 +31,17 @@ Naming an opt-in scanner in the selection runs it even when its config says
 others, where the selection only narrows and a config-disabled scanner named in
 ``--scanners`` is recorded SKIPPED.
 
-The difference is forced, not chosen. ``enabled: false`` is an opt-in scanner's
-default, and by the time the scan phase sees the config it has been through
-``model_dump``, so an ``enabled: false`` the operator wrote and the one the
-class supplied are the same value. Making the config win would mean
-``--scanners gitleaks`` never runs gitleaks unless the config also enables it,
-which defeats the point of naming it. To keep an opt-in scanner off, do not name
-it.
+This is a choice, made so that ``--scanners gitleaks`` always runs gitleaks.
+``enabled: false`` is an opt-in scanner's default, so letting the config win
+would mean naming a scanner did nothing unless the config also enabled it.
+The alternative -- honoring only an ``enabled: false`` the operator wrote -- was
+rejected: the typed ``AshConfig`` does record which fields were set
+(``model_fields_set``), but the scan phase receives the config through
+``get_plugin_config``, which returns a ``model_dump`` dict where the written
+value and the default are the same, and config merging and overrides would
+each have to preserve the distinction for it to be reliable. A config cannot
+forbid an opt-in scanner that someone names on the command line; to keep one
+off, do not name it.
 
 ``--exclude-scanners`` still wins over both, as it does for every scanner: the
 execution engine removes excluded names from the selection before the scan

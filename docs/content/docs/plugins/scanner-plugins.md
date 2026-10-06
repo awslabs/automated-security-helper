@@ -103,6 +103,12 @@ plugin class and defaults its config to disabled:
 ```python
 from typing import ClassVar, Literal
 
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
+
 
 class MyScannerConfig(ScannerPluginConfigBase):
     name: Literal["my-scanner"] = "my-scanner"
@@ -120,6 +126,10 @@ result row, no summary count, no report entry, no SARIF run, no shard
 assignment) until the user enables it with `enabled: true` in config or by
 naming it in `--scanners`. Once enabled it runs like any other scanner, and a
 missing tool is reported as MISSING.
+
+A third-party opt-in scanner is loaded like any plugin, through
+`ash_plugin_modules`. Name its top-level package so it ends in `ash_plugins`,
+which is the namespace ASH's plugin loader accepts.
 
 Use this for any built-in scanner added after a release, so that existing users'
 default output does not change. The rule is implemented in

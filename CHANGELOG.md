@@ -440,7 +440,8 @@
 - **Opt-in builtin scanners.** A scanner plugin can set `OPT_IN = True`
   (`ScannerPluginBase.OPT_IN`, default `False`). An opt-in scanner is left out of
   a scan entirely until it is enabled with `enabled: true` in its config or by
-  naming it in `--scanners` (or the MCP / `run_ash_scan` `scanners` argument). It
+  naming it in `--scanners` (or the `scanners` argument of the MCP
+  `run_ash_workspace_scan` tool or the Python `run_ash_scan`). It
   has no result row, summary count, report entry, SARIF run or shard
   assignment, and is not on the expected-scanner roster. Once enabled it behaves
   like any builtin, so a missing tool is `MISSING` and the scan exits 1. This
