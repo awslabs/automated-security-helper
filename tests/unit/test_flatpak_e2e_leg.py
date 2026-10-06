@@ -93,7 +93,9 @@ def test_exit_code_control_matches_what_run_case_prints(
         # three detect-secrets results, and exit 0.
         out = Path(command[command.index("--output-dir") + 1])
         ao._write_output(
-            out, [ao._sarif_result("detect-secrets")] * 3, {"detect-secrets": "FAILED"}
+            out,
+            [ao._sarif_result("detect-secrets")] * 3,
+            {"detect-secrets": "FAILED"},  # pragma: allowlist secret
         )
         return _Done()
 

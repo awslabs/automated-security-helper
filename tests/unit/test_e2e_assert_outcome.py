@@ -48,7 +48,9 @@ def test_self_test_passes(capsys):
 
 def test_cli_findings_case_accepts_a_matching_output(tmp_path):
     out = _write(
-        tmp_path, [ao._sarif_result("detect-secrets")] * 3, {"detect-secrets": "FAILED"}
+        tmp_path,
+        [ao._sarif_result("detect-secrets")] * 3,
+        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
     )
     assert ao.main(["--case", "findings", "--output-dir", str(out), "--rc", "2"]) == 0
 
@@ -205,7 +207,8 @@ def test_run_case_passes_the_case_args_to_the_scan(tmp_path, monkeypatch):
 
 def test_findings_fixture_plants_the_published_example_key():
     text = (CASES.parent / "findings" / "leak.py").read_text(encoding="utf-8")
-    assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" in text
+    planted = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
+    assert planted in text
 
 
 def test_cli_name_sources_agree():

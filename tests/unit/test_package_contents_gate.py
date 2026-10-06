@@ -235,8 +235,8 @@ class TestMsix:
         members["assets/pinned.png"] = pinned
         entry = (
             '<File Name="assets\\pinned.png" Size="100000">'
-            '<Block Hash="Zp/oZY/Bg0s1NYhoYx0LJJ2uwhx59ORWNAdHkPeDz7o="/>'
-            '<Block Hash="QDBGn7Jgr12+O9K1X0GXhxkciTn3RZwCtE5T+aZyyDM="/>'
+            '<Block Hash="Zp/oZY/Bg0s1NYhoYx0LJJ2uwhx59ORWNAdHkPeDz7o="/>'  # pragma: allowlist secret
+            '<Block Hash="QDBGn7Jgr12+O9K1X0GXhxkciTn3RZwCtE5T+aZyyDM="/>'  # pragma: allowlist secret
             "</File>"
         ).encode()
         members["AppxBlockMap.xml"] = members["AppxBlockMap.xml"].replace(

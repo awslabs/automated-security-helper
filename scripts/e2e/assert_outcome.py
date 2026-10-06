@@ -391,7 +391,10 @@ def self_test() -> int:
         selected=["detect-secrets", "opengrep"],
         incomplete_scanner="opengrep",
     )
-    ok_findings = {"detect-secrets": "FAILED", "bandit": "SKIPPED"}
+    ok_findings = {
+        "detect-secrets": "FAILED",  # pragma: allowlist secret
+        "bandit": "SKIPPED",
+    }
     ok_incomplete = {"detect-secrets": "FAILED", "opengrep": "MISSING"}
 
     # (name, results, statuses, rc, expectation, extra writer kwargs, problem substring or None)
@@ -400,7 +403,7 @@ def self_test() -> int:
         (
             "clean outcome accepted",
             [],
-            {"detect-secrets": "PASSED"},
+            {"detect-secrets": "PASSED"},  # pragma: allowlist secret
             0,
             clean,
             {},
@@ -546,7 +549,7 @@ def self_test() -> int:
         (
             "nothing executed",
             [],
-            {"detect-secrets": "SKIPPED"},
+            {"detect-secrets": "SKIPPED"},  # pragma: allowlist secret
             0,
             clean,
             {},

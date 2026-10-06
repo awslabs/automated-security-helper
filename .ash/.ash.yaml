@@ -341,6 +341,29 @@ global_settings:
         assert that a scan exited 0. Three rules fire on it, the same three the
         .deb and .rpm verifications see. The fixture is the assertion; removing
         it would make the suite vacuous. See editors/vscode/README.md.
+    # === the shared e2e findings fixture ===
+    #
+    # tests/e2e/fixtures/findings/leak.py plants the same documented example key. The
+    # e2e "findings" case expects exactly three detect-secrets results on it
+    # (tests/e2e/README.md), and the packaging verifications and both editors'
+    # real-CLI suites scan copies of it, so a `# pragma: allowlist secret` marker is
+    # not an option here: detect-secrets would skip the line in every one of those
+    # scans and each assertion would fail. Those scans run from a scratch copy with
+    # no repository config, so this entry reaches only the repository's own scan.
+    # Until #724 that scan skipped the file through SECRET-* over tests/**.
+    #
+    # One line, not the whole file, so anything added to the fixture is reported.
+    # tests/unit/config/test_e2e_findings_fixture_secret_pin.py ties the range to
+    # the assignment's text.
+    - rule_id: "SECRET-*"
+      path: tests/e2e/fixtures/findings/leak.py
+      line_start: 3
+      line_end: 3
+      reason: >-
+        AWS's published example secret access key, planted so every e2e scan of this
+        fixture has three detect-secrets findings to assert. Three rules fire on the
+        one assignment: SECRET-AWS-ACCESS-KEY and SECRET-BASE64-HIGH-ENTROPY-STRING on
+        the value, SECRET-SECRET-KEYWORD on the name.
     # === the Kubernetes operator under deploy/kubernetes-operator ===
     #
     # Twenty findings arrived with the operator. Five were fixed at the source and are
