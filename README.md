@@ -100,7 +100,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"
 ```
 
 ```powershell
@@ -108,10 +108,10 @@ alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ashx { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 $args }
+function ashx { uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 $args }
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.7.0` to stay up to date automatically. Pin a specific version (e.g., `@v3.7.0`) when you need reproducible builds.
+> **Floating tag `v4`**: We also maintain a `v4` floating tag that always points to the latest stable v4.x release. You can use `@v4` instead of `@v4.0.0` to stay up to date automatically. Pin a specific version (e.g., `@v4.0.0`) when you need reproducible builds.
 
 ### Other Installation Methods
 
@@ -132,7 +132,7 @@ ashx --version
 
 ```bash
 # Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
 # Use as normal
 ashx --help
@@ -141,13 +141,13 @@ ashx --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.7.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v4.0.0
 cd automated-security-helper
 pip install .
 ```
@@ -236,7 +236,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v4.0.0",
         "ashx",
         "mcp"
       ],
@@ -254,7 +254,7 @@ The ASH MCP server provides:
     "ash-security": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v4.0.0",
         "ashx",
         "mcp"
       ]
@@ -270,7 +270,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v4.0.0",
         "ashx",
         "mcp"
       ],
@@ -457,7 +457,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v4.0.0
     hooks:
       - id: ash-simple-scan
 ```

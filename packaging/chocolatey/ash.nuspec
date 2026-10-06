@@ -29,7 +29,7 @@
          are shimmed too; the wheel's deprecated `ash` script is deliberately not.
          See chocolateyinstall.ps1. Renaming the id would strand existing installs. -->
     <id>ash</id>
-    <version>3.7.0</version>
+    <version>4.0.0</version>
     <title>ASH - Automated Security Helper</title>
     <authors>Amazon Web Services</authors>
     <owners>awslabs</owners>

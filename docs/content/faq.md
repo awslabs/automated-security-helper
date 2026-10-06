@@ -23,25 +23,25 @@ No. ASH is designed to help identify common security issues early in the develop
 You have several options:
 ```bash
 # Using uvx (recommended)
-alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"
 
 # Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
 # Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
 ### What are the prerequisites for ASH v3?
 
-### What is the `v3` floating tag?
-We maintain a `v3` Git tag that always points to the latest stable v3.x release. This means you can use `@v3` in your installation commands instead of a specific version like `@v3.7.0`:
+### What is the `v4` floating tag?
+We maintain a `v4` Git tag that always points to the latest stable v4.x release. This means you can use `@v4` in your installation commands instead of a specific version like `@v4.0.0`:
 
 ```bash
-alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v4"
 ```
 
-This is convenient for local development where you always want the latest version. For CI/CD pipelines or environments where reproducibility matters, we recommend pinning to a specific release tag (e.g., `@v3.7.0`).
+This is convenient for local development where you always want the latest version. For CI/CD pipelines or environments where reproducibility matters, we recommend pinning to a specific release tag (e.g., `@v4.0.0`).
 
 ### What are the prerequisites for ASH v3?
 - For local mode: Python 3.10 or later, UV package manager
@@ -177,7 +177,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v4.0.0
     hooks:
       - id: ash-simple-scan
 ```
@@ -270,7 +270,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
        "ash": {
          "command": "uvx",
          "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+           "--from=git+https://github.com/awslabs/automated-security-helper@v4.0.0",
            "ashx",
            "mcp"
          ],
@@ -288,7 +288,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
        "ash-security": {
          "command": "uvx",
          "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+           "--from=git+https://github.com/awslabs/automated-security-helper@v4.0.0",
            "ashx",
            "mcp"
          ]
@@ -304,7 +304,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
        "ash": {
          "command": "uvx",
          "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+           "--from=git+https://github.com/awslabs/automated-security-helper@v4.0.0",
            "ashx",
            "mcp"
          ],
@@ -365,16 +365,16 @@ MCP dependencies are included by default in ASH v3. If you're still getting erro
 2. **Check Python version**: Ensure Python 3.10+ is available: `uv python list`
 3. **Test the MCP server**: Try running the server directly:
    ```bash
-   uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx mcp --help
+   uvx --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ashx mcp --help
    ```
 
 ### How do I test the ASH MCP server?
 ```bash
 # Test MCP server startup
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx mcp --debug
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ashx mcp --debug
 
 # Check ASH version
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ashx --version
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ashx --version
 ```
 
 ### How do I monitor MCP server performance?

@@ -246,7 +246,7 @@ distribution name, and that is deliberate:
 So the install is what this repository documents for CI:
 
 ```console
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
 If ASH is ever published to PyPI under a name the project controls, installing by

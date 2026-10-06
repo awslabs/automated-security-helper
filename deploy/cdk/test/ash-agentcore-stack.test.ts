@@ -10,7 +10,25 @@ import { App, Stack } from 'aws-cdk-lib';
 import { Capture, Match, Template } from 'aws-cdk-lib/assertions';
 
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
-import { ASH_PARAMETER_NAMES, DEFAULT_REBUILD_SCHEDULE } from '../lib/ash-config';
+import {
+  ASH_PARAMETER_NAMES,
+  DEFAULT_ASH_VERSION,
+  DEFAULT_REBUILD_SCHEDULE,
+} from '../lib/ash-config';
+
+/** The first ASH release whose `ashx mcp` accepts `--stateless-http`. */
+const FIRST_RELEASE_WITH_STATELESS_HTTP: [number, number, number] = [4, 0, 0];
+
+/** True when `ref` is a vX.Y.Z tag at or above `floor`; false for anything else. */
+function isAtLeast(ref: string, floor: [number, number, number]): boolean {
+  const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(ref);
+  if (!match) return false;
+  const parts = match.slice(1).map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if (parts[i] !== floor[i]) return parts[i] > floor[i];
+  }
+  return true;
+}
 
 function synth(): Template {
   const app = new App({ analyticsReporting: false });
@@ -127,34 +145,39 @@ describe('AgentCore runtime contract', () => {
     expect(buildSpec).toContain('--no-stateless-http');
   });
 
-  test('the runtime resolves the contradiction between its own two defaults', () => {
+  test('the default AshVersion is a release whose ashx mcp has --stateless-http', () => {
     /*
-     * AshVersion defaults to a release whose `ashx mcp` has no --stateless-http,
-     * and McpStatelessHttp defaults to true. The entrypoint refuses that pair and
-     * exits 65, so this template could not deploy with the values it ships --
-     * the symptom being a health-check timeout that names no cause.
+     * McpStatelessHttp defaults to true, and the entrypoint refuses to start
+     * stateless on an ASH without the option (exit 65). So the shipped AshVersion
+     * default must name a release that has it, or the one-click template cannot
+     * deploy with its own defaults.
      *
-     * Both defaults are individually correct, so the resolution is a third value.
-     * Asserted here rather than in the entrypoint's own default because only this
-     * target has measured evidence that stateful works: see the header of
-     * ash-agentcore-stack.ts. The behavioral proof that the pair now starts is in
-     * ash-container-scripts.test.ts, which runs the real entrypoint against a fake
-     * ash with v3.7.0's option set.
+     * v4.0.0 is the first such release: `git grep stateless v3.7.0 v3.7.1 --
+     * automated_security_helper` finds nothing. Until v4.0.0 this stack set
+     * ASH_MCP_STATELESS_FALLBACK=warn to start stateful instead; that fallback was
+     * removed when the default reached v4.0.0, and this test is what keeps the
+     * default from moving back below it.
+     *
+     * Compared as a version, not as a string, so the next bump passes without an
+     * edit. A default that is not a vX.Y.Z tag (a branch, a commit) fails
+     * outright: it cannot be shown to have the option.
      */
-    template.hasResourceProperties('AWS::BedrockAgentCore::Runtime', {
-      EnvironmentVariables: Match.objectLike({
-        ASH_MCP_STATELESS_FALLBACK: 'warn',
-      }),
-    });
+    const parameters = template.toJSON().Parameters;
+    expect(parameters[ASH_PARAMETER_NAMES.mcpStatelessHttp].Default).toBe('true');
+    const shipped = parameters[ASH_PARAMETER_NAMES.ashVersion].Default;
+    expect(shipped).toBe(DEFAULT_ASH_VERSION);
+    expect(isAtLeast(shipped, FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
   });
 
-  test('the parameter defaults this stack ships are the ones that needed resolving', () => {
-    // Pinned so the fallback above cannot become decorative without anyone
-    // noticing: if either default moves, this fails and whoever moved it has to
-    // decide whether the fallback is still needed.
-    const parameters = template.toJSON().Parameters;
-    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe('v3.7.0');
-    expect(parameters[ASH_PARAMETER_NAMES.mcpStatelessHttp].Default).toBe('true');
+  test('the version comparison above rejects the refs it has to reject', () => {
+    // The control for the test above: a comparison that returned true for
+    // everything would make it decorative.
+    expect(isAtLeast('v3.7.0', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(false);
+    expect(isAtLeast('v3.99.99', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(false);
+    expect(isAtLeast('main', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(false);
+    expect(isAtLeast('v4.0.0', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
+    expect(isAtLeast('v4.0.1', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
+    expect(isAtLeast('v10.0.0', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
   });
 
   test('the runtime name contains no hyphens', () => {

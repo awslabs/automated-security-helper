@@ -253,7 +253,7 @@ uvx --version
 If `ashx` still can't be found after UV is installed, reinstall it:
 
 ```bash
-uv tool install --force git+https://github.com/awslabs/automated-security-helper.git@v3
+uv tool install --force git+https://github.com/awslabs/automated-security-helper.git@v4
 ```
 
 For deeper diagnostics, see [Troubleshooting UV Tool Installation](troubleshooting-uv-installation.md).

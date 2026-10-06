@@ -20,7 +20,7 @@ env:
   variables:
     ASH_SOURCE_DIR: '.'
     ASH_OUTPUT_DIR: '.ash/ash_output'
-    ASH_VERSION: v3.7.0
+    ASH_VERSION: v4.0.0
     ASH_SHARD_INDEX: '0'
     ASH_SHARD_COUNT: '1'
 phases:

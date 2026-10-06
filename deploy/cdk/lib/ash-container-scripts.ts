@@ -223,7 +223,7 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * `--stateless-http` and `--allowed-host` exist on neither v3.5.x, v3.6.0,
  * v3.7.0, `main` nor `beta` — the word `stateless` appears nowhere under
  * `automated_security_helper/cli` at v3.7.0. Emitting them unconditionally made
- * the shipped default (`AshVersion=v3.7.0`) undeployable: Typer rejects the
+ * the then-shipped default (`AshVersion=v3.7.0`) undeployable: Typer rejects the
  * unknown option, the server never binds, and CloudFormation reports a
  * health-check timeout rather than the flag that caused it.
  *
@@ -231,10 +231,10 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  *
  * WHAT WAS TRIED AND REJECTED
  * ---------------------------
- * - Pointing `DEFAULT_ASH_VERSION` at a ref that has the flags: rejected. The
- *   only such ref is a feature branch. A moving branch is not a reproducible
- *   default, and pinning adopters to someone's in-flight work is worse than
- *   pinning them to a release.
+ * - Relying on `DEFAULT_ASH_VERSION` alone: rejected. The default is v4.0.0,
+ *   the first release whose `ashx mcp` has the flags, but `AshVersion` is a
+ *   deploy-time parameter and an adopter can still point it at a v3 tag. The
+ *   probe is what keeps that choice from failing silently.
  * - Emitting the flags conditionally with NO refusal path: rejected outright.
  *   Dropping `--stateless-http` yields a stateful server, which is the exact
  *   failure the flag prevents. A quiet downgrade there produces a container that
@@ -251,40 +251,17 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  *   success for a flag that does not exist — the one error direction that must
  *   not happen.
  *
- * `ASH_MCP_STATELESS_FALLBACK`, AND WHY THE SHIPPED DEFAULTS NEEDED IT
- * -------------------------------------------------------------------
- * The refusal above is correct and it made the one-click templates undeployable
- * with their own defaults. `AshVersion` defaults to `v3.7.0`, whose `ash mcp` has
- * no `--stateless-http`, and `McpStatelessHttp` defaults to `true`, so the
- * entrypoint took the refusal branch and exited 65 before the server ever bound.
- * An adopter who changed nothing got a container that never started and a
- * CloudFormation health-check timeout naming no cause.
- *
- * Both defaults are individually right. `v3.7.0` is the newest release, and
- * pinning adopters to a feature branch is worse; `true` is what AWS documents as
- * the AgentCore default and what is correct behind any multi-replica load
- * balancer. The defect is the COMBINATION, so the fix is a third value that lets a
- * deployment say which way to resolve it.
- *
- * `refuse` is the default when the variable is unset, so nothing an existing
- * deployment does changes. `warn` starts stateful and says so loudly. Only the
- * AgentCore stack sets `warn`, and only because that is where stateful was
- * MEASURED to work — a live runtime completed initialize, tools/list and
- * tools/call, with controls proving sessions were genuinely enforced. The residual
- * hazard there is narrower than the old refusal message claimed: not "rejects
- * every session id the platform injects", which was measured false, but a client
- * that follows AgentCore's own guidance to adopt the rotating id it returns, which
- * is refused on its third call. That message has been corrected to say so.
- *
- * Two fixes were possible, and this is the interim one. The other — moving
- * `DEFAULT_ASH_VERSION` to a ref whose `ashx mcp` accepts the flag — is the right
- * end state and needs a release cut from `main`, which no change here can make.
- * When that release exists, delete this fallback rather than keeping both.
- *
- * The Fargate stack deliberately does NOT set it. Its hazard is a load balancer
- * routing consecutive requests to different replicas, which no measurement here
- * excuses, so that target keeps exiting 65 until its `AshVersion` can serve
- * stateless.
+ * WHY THERE IS NO STATELESS FALLBACK
+ * ----------------------------------
+ * Until v4.0.0 the one-click templates defaulted `AshVersion` to v3.7.0, whose
+ * `ash mcp` has no `--stateless-http`, while `McpStatelessHttp` defaulted to
+ * `true`. The refusal above made that pair exit 65, so an
+ * `ASH_MCP_STATELESS_FALLBACK=warn` setting existed to start stateful with a
+ * warning, and only the AgentCore stack set it, because AgentCore is where
+ * stateful was measured to work. It was the interim fix, kept only until a release with the flag became the default. That release is
+ * v4.0.0, so the fallback was deleted rather than kept beside it. An adopter
+ * who pins a v3 tag now gets the refusal, which names the two fixes: a newer
+ * `AshVersion`, or `McpStatelessHttp=false` to run stateful on purpose.
  *
  * KNOWN LIMITATION: ASH takes the shared-secret value as `--auth-header-value`,
  * a command-line argument, and exposes no environment-variable equivalent for
@@ -322,11 +299,11 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  *
  * WHY THE SCRIPT FALLS BACK FROM `ashx` TO `ash`
  * ---------------------------------------------
- * `ashx` is the canonical command. `AshVersion` still defaults to a v3 tag, and a
+ * `ashx` is the canonical command. `AshVersion` can still name a v3 tag, and a
  * v3 image ships only `ash`, so the entrypoint and the gate handler run `ashx`
  * when the image has it and `ash` otherwise. On a v4 image `ash` is a deprecated
  * alias that warns on every run, which is why it is the fallback and not the
- * default. Drop the fallback once `DEFAULT_ASH_VERSION` is a v4 tag.
+ * default. Drop the fallback together with the `ash` alias.
  *
  * KNOWN LIMITATION: the probe costs one `ashx mcp --help` — a Python import of
  * ASH's CLI — at every container start. That is well inside the five-minute
@@ -408,10 +385,8 @@ set -- "$ASH_CLI" mcp --transport streamable-http \\
 if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
   if ash_mcp_supports '--stateless-http'; then
     set -- "$@" --stateless-http
-  elif [ "\${ASH_MCP_STATELESS_FALLBACK:-refuse}" = "warn" ]; then
-    echo "ash-mcp-entrypoint: WARNING: stateless was asked for, but the ASH in this image has no --stateless-http option, so this server runs STATEFUL. It honors only the session id it issued at initialize, so a client that adopts the id returned on each response is refused on its third call. Deploy an AshVersion whose 'ashx mcp' accepts --stateless-http to remove this." >&2
   else
-    echo "ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and honor only the session id it issued at initialize. Deploy an AshVersion whose 'ashx mcp' accepts --stateless-http, set McpStatelessHttp=false to run stateful deliberately, or set ASH_MCP_STATELESS_FALLBACK=warn to start stateful with a warning." >&2
+    echo "ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and honor only the session id it issued at initialize. Deploy an AshVersion whose 'ashx mcp' accepts --stateless-http, or set McpStatelessHttp=false to run stateful deliberately." >&2
     exit 65
   fi
 elif ash_mcp_supports '--no-stateless-http'; then

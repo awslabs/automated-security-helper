@@ -7,7 +7,7 @@ name = "ash-kubernetes-operator"
 # Released with ASH and versioned with it: the operator speaks ASH's CLI contract
 # rather than a public API of its own, and is listed in the root pyproject's
 # [tool.commitizen] version_files so a release rewrites this line.
-version = "3.7.0"
+version = "4.0.0"
 description = "Kubernetes operator for the Automated Security Helper: sharded scans and ASH's MCP server"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

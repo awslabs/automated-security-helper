@@ -16,7 +16,6 @@ import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
-import { ASH_PARAMETER_NAMES } from '../lib/ash-config';
 import {
   ASH_CLI,
   ASH_CLI_V3,
@@ -532,62 +531,21 @@ exit 1
   });
 
   test('REFUSES to start stateless-by-default on an ASH without the option', () => {
-    // AshVersion=v3.7.0 with the shipped McpStatelessHttp default. Starting
-    // anyway serves a STATEFUL server, which honors only the session id it issued
-    // at initialize -- so a client that adopts the id AgentCore returns on each
-    // response is refused on its third call.
-    //
-    // The refusal stays the default when no deployment says otherwise, which is
-    // what keeps every target that has NOT measured stateful -- Fargate, behind a
-    // load balancer that may route to different replicas -- failing closed.
+    // An AshVersion pinned to a v3 tag with the shipped McpStatelessHttp
+    // default. Starting anyway serves a STATEFUL server, which honors only the
+    // session id it issued at initialize -- so a client that adopts the id
+    // AgentCore returns on each response is refused on its third call, and behind
+    // a load balancer routing to different replicas it fails sooner.
     const { status, stderr, argv } = runEntrypoint({});
     expect(status).toBe(65);
     expect(stderr).toContain('--stateless-http');
     expect(argv).toEqual([]);
   });
 
-  test('an explicit fallback starts stateful with a warning instead of exiting 65', () => {
-    /*
-     * The interim fix. The lasting one -- pointing
-     * DEFAULT_ASH_VERSION at a ref whose `ashx mcp` accepts the flag -- needs a
-     * release cut from main, which no change here can make, so the shipped
-     * one-click AgentCore template was undeployable with its own defaults.
-     *
-     * The assertions are on the RESOLVED argv, not on the message: a warning that
-     * printed and then exited anyway, or one that printed and passed the unknown
-     * flag regardless, would both satisfy a stderr-only check.
-     */
-    const { status, stderr, argv } = runEntrypoint({
-      ASH_MCP_STATELESS_FALLBACK: 'warn',
-    });
-    expect(status).toBe(0);
-    expect(argv).toContain('mcp');
-    expect(argv).not.toContain('--stateless-http');
-    expect(argv).not.toContain('--no-stateless-http');
-    expect(stderr).toContain('WARNING');
-    expect(stderr).toContain('runs STATEFUL');
-  });
-
-  test('an unrecognized fallback value refuses rather than guessing', () => {
-    // Fail closed on a value this does not understand. A typo in a deployment
-    // parameter must not be read as permission to downgrade.
-    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS_FALLBACK: 'yes' });
-    expect(status).toBe(65);
-    expect(argv).toEqual([]);
-  });
-
-  test('the fallback is inert where the option exists, so it cannot mask an upgrade', () => {
-    // On an ASH that has --stateless-http the flag is passed and nothing warns,
-    // whatever the fallback says. Otherwise a fallback left behind after an
-    // AshVersion bump would keep reporting a downgrade that is no longer
-    // happening.
-    const { status, stderr, argv } = runEntrypoint({
-      FAKE_ASH_MODERN: '1',
-      ASH_MCP_STATELESS_FALLBACK: 'warn',
-    });
-    expect(status).toBe(0);
-    expect(argv).toContain('--stateless-http');
-    expect(stderr).not.toContain('runs STATEFUL');
+  test('ignores a leftover ASH_MCP_STATELESS_FALLBACK=warn and still refuses', () => {
+    // A deployment that kept the removed fallback variable must not get the old
+    // stateful downgrade back.
+    expect(runEntrypoint({ ASH_MCP_STATELESS_FALLBACK: 'warn' }).status).toBe(65);
   });
 
   /**
@@ -598,10 +556,7 @@ exit 1
    * that parameter's declared `Default`. A hand-written fixture would keep
    * agreeing with itself after the stack stopped agreeing with it.
    */
-  function agentCoreDefaultEnvironment(): {
-    env: Record<string, string>;
-    parameters: Record<string, { Default?: unknown }>;
-  } {
+  function agentCoreDefaultEnvironment(): { env: Record<string, string> } {
     const app = new App({ analyticsReporting: false });
     const json = Template.fromStack(new AshAgentCoreStack(app, 'AshAgentCore')).toJSON();
 
@@ -630,45 +585,36 @@ exit 1
         env[name] = parameter && typeof parameter.Default === 'string' ? parameter.Default : '';
       }
     }
-    return { env, parameters };
+    return { env };
   }
 
-  test('the AgentCore stack ships a default combination that starts', () => {
+  test('the AgentCore stack ships a default combination that starts stateless', () => {
     /*
-     * The end-to-end control for D6, and the one that cannot skip.
-     *
-     * Before the fallback this exited 65 with the server never bound, and the only
-     * symptom an adopter saw was a CloudFormation health-check timeout.
-     *
-     * A git-resolving test -- checking that DEFAULT_ASH_VERSION's tree really lacks
-     * the flag -- was considered and not added: the TypeScript CI job checks out at
-     * the default depth with no tags, so it could only skip, and a control that
-     * skips in CI is not a control. This measures the property that matters
-     * instead, without depending on the checkout.
+     * The end-to-end control for the shipped defaults. Until v4.0.0 the default
+     * AshVersion named a release without --stateless-http, and this stack set
+     * ASH_MCP_STATELESS_FALLBACK=warn so the pair could start at all. That
+     * fallback is gone: the default release has the option, so the default
+     * environment has to start STATELESS against an ASH that advertises it, with
+     * nothing to warn about. ash-agentcore-stack.test.ts holds the default
+     * AshVersion at or above the first release that has the option.
      */
-    const { env, parameters } = agentCoreDefaultEnvironment();
-
-    // The two defaults whose combination was the defect, so a reader can see the
-    // fixture really is the poisoned pair rather than something neutral.
+    const { env } = agentCoreDefaultEnvironment();
     expect(env.ASH_MCP_STATELESS).toBe('true');
-    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe('v3.7.0');
+    expect(Object.keys(env)).not.toContain('ASH_MCP_STATELESS_FALLBACK');
 
-    const { status, stderr, argv } = runEntrypoint(env);
+    const { status, stderr, argv } = runEntrypoint({ ...env, FAKE_ASH_MODERN: '1' });
     expect(status).toBe(0);
     expect(argv).toContain('mcp');
-    expect(stderr).toContain('WARNING');
+    expect(argv).toContain('--stateless-http');
+    expect(stderr).not.toContain('WARNING');
   });
 
-  test('taking the fallback back out of that environment restores exit 65', () => {
-    // The mutation control for the test above. Without it, that test would still
-    // pass if the entrypoint had simply stopped refusing -- which is the one
-    // regression that would make every other target unsafe too, since the refusal
-    // is what Fargate relies on.
+  test('the same environment on an ASH without the option refuses with 65', () => {
+    // The mutation control for the test above. It shows the default starts
+    // because the ASH it names has the option, not because something downgrades
+    // quietly: on a v3-era option set the identical environment must refuse.
     const { env } = agentCoreDefaultEnvironment();
-    expect(env.ASH_MCP_STATELESS_FALLBACK).toBe('warn');
-
-    const { ASH_MCP_STATELESS_FALLBACK: _removed, ...withoutFallback } = env;
-    const { status, argv } = runEntrypoint(withoutFallback);
+    const { status, argv } = runEntrypoint(env);
     expect(status).toBe(65);
     expect(argv).toEqual([]);
   });

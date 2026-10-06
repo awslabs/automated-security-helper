@@ -96,7 +96,7 @@ change for adopters and desynchronizes the two implementations.
 
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `AshVersion` | `v3.7.0` | Git ref cloned and built. Not a PyPI version. |
+| `AshVersion` | `v4.0.0` | Git ref cloned and built. Not a PyPI version. |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |

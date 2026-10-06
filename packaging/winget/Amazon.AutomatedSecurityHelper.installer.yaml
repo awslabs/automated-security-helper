@@ -59,7 +59,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 PackageIdentifier: Amazon.AutomatedSecurityHelper
-PackageVersion: 3.7.0
+PackageVersion: 4.0.0
 InstallerType: msix
 # An MSIX install has no interactive mode to suppress; it is silent by construction.
 InstallModes:
@@ -84,7 +84,7 @@ Platform:
 MinimumOSVersion: 10.0.17763.0
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/awslabs/automated-security-helper/releases/download/v3.7.0/automated-security-helper-3.7.0.msix
+  InstallerUrl: https://github.com/awslabs/automated-security-helper/releases/download/v4.0.0/automated-security-helper-4.0.0.msix
   InstallerSha256: '0000000000000000000000000000000000000000000000000000000000000000'
 ManifestType: installer
 ManifestVersion: 1.12.0

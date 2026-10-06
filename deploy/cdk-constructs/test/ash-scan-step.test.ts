@@ -287,7 +287,7 @@ describe('install modes', () => {
 
     expect(spec.phases.install.commands.join('\n')).toContain(
       'pip install --no-cache-dir --disable-pip-version-check ' +
-        '"git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"',
+        '"git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"',
     );
   });
 
@@ -362,7 +362,7 @@ describe('install modes', () => {
     // `v4.0.0rc1`) keeps the two in step. The rule itself is pinned by the
     // explicit cases below.
     const requirement =
-      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"';
+      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"';
     const ref = /@([^"]+)"$/.exec(requirement)![1];
     const cli = refProvidesAshx(ref) ? 'ashx' : 'ash';
     expect(spec.phases.build.commands.join('\n')).toContain(`${requirement} ${cli} scan `);

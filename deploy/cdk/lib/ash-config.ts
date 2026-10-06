@@ -94,7 +94,7 @@ export const ASH_PARAMETER_NAMES = {
  * publishes no container image to any public registry. Keep the `v` prefix —
  * ASH tags releases as `v3.7.0`.
  */
-export const DEFAULT_ASH_VERSION = 'v3.7.0';
+export const DEFAULT_ASH_VERSION = 'v4.0.0';
 
 /**
  * Default cadence for the scheduled rebuild that keeps the image patched.

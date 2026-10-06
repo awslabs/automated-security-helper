@@ -15,7 +15,7 @@ env:
   variables:
     ASH_SOURCE_DIR: '.'
     ASH_OUTPUT_DIR: '.ash/ash_output'
-    ASH_VERSION: v3.7.0
+    ASH_VERSION: v4.0.0
 phases:
   install:
     runtime-versions:

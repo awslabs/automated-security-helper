@@ -57,15 +57,20 @@ def _case(name):
     return json.loads(CASES.read_text(encoding="utf-8"))["cases"][name]
 
 
+def _committed_args():
+    """The committed bundle's own launch args.
+
+    Read from the bundle rather than written out, because a literal install ref here
+    names one release: `cz bump` does not rewrite test files, so after the next bump
+    it would be the one stale pin in the tree.
+    """
+    return list(mi.mcp_config_of(mi.read_bundle(COMMITTED_BUNDLE))["args"])
+
+
 def _config(args=None, command="uvx"):
     return {
         "command": command,
-        "args": args
-        or [
-            "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-            "ashx",
-            "mcp",
-        ],
+        "args": args or _committed_args(),
         "env": {"FASTMCP_LOG_LEVEL": "ERROR"},
     }
 

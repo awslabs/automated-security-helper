@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shlex
 import sys
 import urllib.parse
@@ -149,10 +150,6 @@ class TestEachDefectIsRejected:
     @pytest.mark.parametrize(
         "edit, needle",
         [
-            (
-                ("param_AshVersion=v3.7.0", "param_AshVersion=v9.9.9"),
-                "declares Default",
-            ),
             (("param_AshVersion=", "param_AshVerison="), "not declared"),
             (("stackName=AshAgentCore", "stackName=Other"), "stackName is"),
             (("?region=us-east-1#", "?region=eu-west-2#"), "same region"),
@@ -169,6 +166,19 @@ class TestEachDefectIsRejected:
         _fails(
             _judge(text.replace(edit[0], edit[1], 1), UNDOTTED, "virtual")[2], needle
         )
+
+    def test_a_link_whose_ash_version_disagrees_with_the_template(self, tmp_path):
+        # The planted value is derived from the rendered link, never a literal. `cz
+        # bump` rewrites the template default, so a case naming one release would
+        # plant nothing after the next bump and fail on a correct document.
+        _, doc = _render(tmp_path, UNDOTTED)
+        text = doc.read_text(encoding="utf-8")
+        match = re.search(r"param_AshVersion=([^&)\s]+)", text)
+        assert match, "the rendered document carries no param_AshVersion"
+        stale = "v0.0.0" if match.group(1) != "v0.0.0" else "v0.0.1"
+        edited = text.replace(match.group(0), f"param_AshVersion={stale}", 1)
+        assert edited != text
+        _fails(_judge(edited, UNDOTTED, "virtual")[2], "declares Default")
 
     def test_a_noecho_parameter(self, tmp_path):
         _, doc = _render(tmp_path, UNDOTTED)

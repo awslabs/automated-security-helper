@@ -3,7 +3,7 @@
   "name": "ash-vscode",
   "displayName": "Automated Security Helper",
   "description": "Runs the ASH CLI over the open workspace and reports its SARIF findings as editor diagnostics. Ships no scanners and no copy of ASH.",
-  "version": "3.7.0",
+  "version": "4.0.0",
   "license": "Apache-2.0",
   "publisher": "awslabs",
   "private": true,

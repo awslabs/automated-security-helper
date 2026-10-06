@@ -54,16 +54,16 @@ export PATH="${PATH}:/path/to/automated-security-helper"
 
 ```bash
 # Option 1: Using uvx (recommended) -- add to shell profile
-alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"
 
 # Option 2: Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
 # Option 3: Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
-> **Tip**: You can also use the `v3` floating tag (`@v3`) instead of a specific version to always get the latest stable v3.x release. Pin a specific version for CI/CD or reproducible environments.
+> **Tip**: You can also use the `v4` floating tag (`@v4`) instead of a specific version to always get the latest stable v4.x release. Pin a specific version for CI/CD or reproducible environments.
 
 ## Tool Management Changes
 
@@ -242,7 +242,7 @@ reporters:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v4.0.0
     hooks:
       - id: ash
 ```
@@ -254,7 +254,7 @@ repos:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v4.0.0
     hooks:
       - id: ash-simple-scan
 ```

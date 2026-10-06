@@ -93,7 +93,7 @@ export interface InstallOptions {
  * buildspec drift gate will fail until the generated files are regenerated,
  * which is the reminder.
  */
-export const DEFAULT_ASH_REF = 'v3.7.0';
+export const DEFAULT_ASH_REF = 'v4.0.0';
 
 /** The canonical ASH command. */
 export const ASH_CLI = 'ashx';
@@ -101,12 +101,12 @@ export const ASH_CLI = 'ashx';
 /**
  * ASH's deprecated alias, and the only name a v3 release provides.
  *
- * `DEFAULT_ASH_REF` is still a v3 tag, so the unsharded scan, which v3 can run,
+ * A caller can still pin a v3 ref, so the unsharded scan, which v3 can run,
  * falls back to this name rather than fail on an `ashx` the release never had.
  * Shard and merge need a v4 ref anyway (v3 has neither `--shard-index` nor
  * `merge`), so they use `ASH_CLI` directly. Under `UVX` the fallback applies
  * only to refs that are not a v4-or-later release tag (see `ashInvocation`), so
- * once `DEFAULT_ASH_REF` is a v4 tag the default command is `ashx`.
+ * with `DEFAULT_ASH_REF` at a v4 tag the default command is `ashx`.
  */
 export const ASH_CLI_V3 = 'ash';
 

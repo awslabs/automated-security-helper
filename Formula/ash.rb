@@ -15,7 +15,7 @@ class Ash < Formula
   # this line at a `git archive` tarball of the commit and changes nothing else
   # (tests/unit/test_e2e_brew_formula.py holds it to that). Edit the formula
   # here, never in the copy.
-  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.0"
+  url "https://github.com/awslabs/automated-security-helper.git", tag: "v4.0.0"
   license "Apache-2.0"
 
   # Rust is a build dependency because five of the resources below are Rust

@@ -59,12 +59,12 @@ request, so a value here cannot disagree with the template it launches.
 
 | Stack | Parameters the link sets |
 | --- | --- |
-| `AshAgentCore` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
-| `AshCodeCommitGate` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
-| `AshDistributedPipeline` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
+| `AshAgentCore` | `AshVersion`=`v4.0.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
+| `AshCodeCommitGate` | `AshVersion`=`v4.0.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
+| `AshDistributedPipeline` | `AshVersion`=`v4.0.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
 | `AshEksOperator` | — |
-| `AshFargate` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
-| `AshImagePipeline` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
+| `AshFargate` | `AshVersion`=`v4.0.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
+| `AshImagePipeline` | `AshVersion`=`v4.0.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
 
 Anything not listed keeps the template's default, which you can change in the console
 before creating the stack.
