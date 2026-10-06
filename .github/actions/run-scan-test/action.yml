@@ -802,9 +802,11 @@ runs:
     # exit status differs from docker's fails here by name. `--no-cov`: coverage is the
     # unit-test legs' gate. `-n 0`: four containers at once on a podman or finch runner buys
     # nothing and costs memory. OCI_RUNNER and OCI_RUNNER_WRAPPER come from the job env.
-    # Last, so a snapshot diff never hides one of the scan's own diagnostics above.
+    # Last, so a snapshot diff never hides one of the scan's own diagnostics above. Runs
+    # even when the self-scan failed: that verdict is about this repository's findings, and
+    # these snapshots only need the image, which a failed build would fail here too.
     - name: Snapshot the container-runtime output
-      if: inputs.method != 'python-local'
+      if: ${{ !cancelled() && inputs.method != 'python-local' }}
       shell: bash
       run: |
         uv run --extra cdk pytest \
