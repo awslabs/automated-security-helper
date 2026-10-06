@@ -619,17 +619,29 @@ class TestScanValidationValuesAreDerived:
         # rather than as a total: there were five such lines, one per scan method, and
         # the `bash` method's went with the root ./ash script the Python CLI absorbed,
         # so a fixed count would be stale the next time a method is added or removed.
-        log_lines = [line for line in text.splitlines() if "Testing ASH using" in line]
+        #
+        # #724 moved every `${{ ... }}` out of these `run:` scripts and into the step's
+        # `env:`, so a line reads the derived value either directly or through an
+        # environment variable whose step maps it from steps.platform.outputs.platform.
+        derived = "${{ steps.platform.outputs.platform }}"
+        log_lines = []
+        unreferenced = []
+        for step in action["runs"]["steps"]:
+            env = step.get("env") or {}
+            via_env = [name for name, value in env.items() if value == derived]
+            for line in str(step.get("run", "")).splitlines():
+                if "Testing ASH using" not in line:
+                    continue
+                log_lines.append(line)
+                if "steps.platform.outputs.platform" in line:
+                    continue
+                if not any(name in line for name in via_env):
+                    unreferenced.append(line.strip())
         assert len(log_lines) >= 4, (
             f"only {len(log_lines)} 'Testing ASH using' log line(s) were found; one per "
             "scan method (python-container, python-local on each os family, powershell) "
             "is expected, so the census below would be checking too little."
         )
-        unreferenced = [
-            line.strip()
-            for line in log_lines
-            if "steps.platform.outputs.platform" not in line
-        ]
         assert not unreferenced, (
             "these log lines do not read the derived platform: " + repr(unreferenced)
         )
