@@ -570,6 +570,14 @@ class TestDeployment:
         assert selector.items() <= spec["template"]["metadata"]["labels"].items()
 
 
+# The only container fields the two install paths may disagree on.
+IMAGE_FIELDS = ("image", "imagePullPolicy")
+
+
+def _without(mapping: dict, *keys: str) -> dict:
+    return {k: v for k, v in mapping.items() if k not in keys}
+
+
 class TestParityWithOperatorYaml:
     """The CloudFormation install and `kubectl apply` of operator.yaml must agree.
 
@@ -578,9 +586,10 @@ class TestParityWithOperatorYaml:
     NetworkPolicy while the applier's Deployment changed only its uid. checkov scans
     the YAML and cannot see Python inside a template's ZipFile, so nothing flagged it.
 
-    These compare the fields that decide what the pod may do and how it is supervised.
-    The image, the namespace and the labels legitimately differ (the stack takes the
-    first two as parameters and adds a managed-by label), so they are not compared.
+    These compare the Deployment spec, the pod spec and the container whole, so a field
+    added to either side fails until the other has it. The image, the namespace and the
+    labels legitimately differ (the stack takes the first two as parameters and adds a
+    managed-by label), so object metadata and the container's image fields are left out.
     """
 
     @staticmethod
@@ -599,33 +608,27 @@ class TestParityWithOperatorYaml:
         shipped = self._one(self._yaml_docs(), "Deployment")
         return cdk["spec"]["template"]["spec"], shipped["spec"]["template"]["spec"]
 
-    @pytest.mark.parametrize("field", ["serviceAccountName", "securityContext"])
-    def test_pod_field_matches(self, pods: tuple[dict, dict], field: str) -> None:
-        cdk, shipped = pods
-        assert cdk.get(field) == shipped.get(field), field
+    def test_deployment_spec_matches_outside_the_pod_template(self, docs: list) -> None:
+        cdk = self._one([m for _, m, _ in docs], "Deployment")["spec"]
+        shipped = self._one(self._yaml_docs(), "Deployment")["spec"]
+        assert _without(cdk, "template") == _without(shipped, "template")
 
-    @pytest.mark.parametrize(
-        "field",
-        [
-            "args",
-            "env",
-            "ports",
-            "livenessProbe",
-            "readinessProbe",
-            "resources",
-            "securityContext",
-            "volumeMounts",
-        ],
-    )
-    def test_container_field_matches(self, pods: tuple[dict, dict], field: str) -> None:
+    def test_pod_spec_matches_outside_the_containers(
+        self, pods: tuple[dict, dict]
+    ) -> None:
+        cdk, shipped = pods
+        assert _without(cdk, "containers") == _without(shipped, "containers")
+
+    def test_container_matches_except_the_image(self, pods: tuple[dict, dict]) -> None:
+        """Whole, so a field added to operator.yaml fails here until the applier has it.
+
+        Only the image reference and its pull policy may differ: the stack takes the
+        image as a parameter, and operator.yaml carries a local development tag.
+        """
         (cdk,) = pods[0]["containers"]
         (shipped,) = pods[1]["containers"]
-        assert cdk.get(field) == shipped.get(field), field
-
-    def test_replicas_match(self, docs: list) -> None:
-        cdk = self._one([m for _, m, _ in docs], "Deployment")
-        shipped = self._one(self._yaml_docs(), "Deployment")
-        assert cdk["spec"]["replicas"] == shipped["spec"]["replicas"]
+        assert cdk["image"] == "example.dkr.ecr.us-east-1.amazonaws.com/op:v1"
+        assert _without(cdk, *IMAGE_FIELDS) == _without(shipped, *IMAGE_FIELDS)
 
     def test_network_policy_matches(self, applier: dict, docs: list) -> None:
         shipped = self._one(self._yaml_docs(), "NetworkPolicy")
