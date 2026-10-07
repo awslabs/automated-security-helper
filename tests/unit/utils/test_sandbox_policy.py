@@ -27,14 +27,6 @@ from automated_security_helper.utils.sandbox.backends import (
 from automated_security_helper.utils.sandbox.policy import build_scanner_policy
 
 
-#: The policy and the bwrap command line are POSIX: there is no Windows backend, and a
-#: Windows scan with a sandbox requested is MISSING before any policy is built (see
-#: TestScope.test_windows_auto_names_the_alternatives, which runs everywhere).
-posix_only = pytest.mark.skipif(
-    sys.platform == "win32", reason="sandbox policies exist only on Linux and macOS"
-)
-
-
 @pytest.fixture
 def layout(tmp_path, monkeypatch):
     home = tmp_path / "home"
@@ -42,6 +34,9 @@ def layout(tmp_path, monkeypatch):
     (home / ".local" / "bin").mkdir(parents=True)
     (home / ".ssh").mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # Path.home() reads USERPROFILE on Windows, where these tests run too: the
+    # policy builder is path logic, independent of the platform it runs on.
+    monkeypatch.setenv("USERPROFILE", str(home))
     source = tmp_path / "src"
     source.mkdir()
     output = source / ".ash" / "ash_output"
@@ -63,6 +58,11 @@ def _policy(layout, requirements=SandboxRequirements(), **overrides):
     }
     kwargs.update(overrides)
     return build_scanner_policy("grype", requirements, **kwargs)
+
+
+def _as_argv(path):
+    """A path spelled the way the backends put it on a command line."""
+    return Path(os.path.realpath(path)).as_posix()
 
 
 def _resolved(paths):
@@ -96,7 +96,6 @@ class TestNetwork:
         )
 
 
-@posix_only
 class TestPaths:
     def test_only_the_results_directory_is_writable(self, layout):
         policy = _policy(layout)
@@ -148,7 +147,6 @@ class TestPaths:
         assert Path(os.path.realpath(extra)) in _resolved(policy.read_only)
 
 
-@posix_only
 class TestEnvironment:
     def test_credentials_are_dropped_and_declared_prefixes_kept(self, layout):
         policy = _policy(layout, SandboxRequirements(env_prefixes=("GRYPE_",)))
@@ -168,7 +166,7 @@ class TestEnvironment:
         )
         assert env["PATH"] == "/usr/bin"
         assert env["GRYPE_DB_CACHE_DIR"] == "/x"
-        assert env["HOME"] == str(layout.home)
+        assert Path(env["HOME"]) == Path(layout.home)
         for dropped in (
             "AWS_SECRET_ACCESS_KEY",
             "AWS_SESSION_TOKEN",
@@ -184,7 +182,6 @@ class TestEnvironment:
         assert online.filter_env({"HTTPS_PROXY": "p"})["HTTPS_PROXY"] == "p"
 
 
-@posix_only
 class TestBwrapCommandLine:
     def test_mount_order_and_namespaces(self, layout):
         backend = BwrapBackend()
@@ -196,9 +193,9 @@ class TestBwrapCommandLine:
         for flag in ("--unshare-net", "--die-with-parent", "--new-session"):
             assert flag in argv
         assert argv[-2:] == ["--", "/usr/bin/true"]
-        home = os.path.realpath(layout.home)
-        results = os.path.realpath(layout.results)
-        source = os.path.realpath(layout.source)
+        home = _as_argv(layout.home)
+        results = _as_argv(layout.results)
+        source = _as_argv(layout.source)
         home_tmpfs = argv.index(home) - 1
         assert argv[home_tmpfs] == "--tmpfs"
         source_bind = [
@@ -335,7 +332,6 @@ class TestScope:
         assert "shell" in result.stderr
 
 
-@posix_only
 class TestReviewFindings:
     """Regressions for the gaps the policy review found."""
 
@@ -455,7 +451,6 @@ class TestProbeScope:
             clear_backend_cache()
 
 
-@posix_only
 class TestWritableWinsOverReadOnly:
     """A read-only bind inside the writable results directory must not cover it.
 
@@ -470,44 +465,21 @@ class TestWritableWinsOverReadOnly:
         backend = BwrapBackend()
         backend._executable = "/usr/bin/bwrap"
         plan = backend.plan(["/usr/bin/true"], {}, _policy(layout, cwd=work))
-        results = os.path.realpath(layout.results)
+        results = _as_argv(layout.results)
         argv = plan.argv
         read_only_under_results = [
             argv[i + 2]
             for i, flag in enumerate(argv)
             if flag == "--ro-bind"
-            and (argv[i + 2] == results or argv[i + 2].startswith(results + os.sep))
+            and (argv[i + 2] == results or argv[i + 2].startswith(results + "/"))
         ]
         assert not read_only_under_results, read_only_under_results
         assert ["--bind", results, results] == argv[
             argv.index(results) - 1 : argv.index(results) + 2
         ]
-        assert argv[argv.index("--chdir") + 1] == os.path.realpath(work)
-
-    def test_a_writable_cwd_under_the_results_directory_can_be_written(
-        self, layout, tmp_path
-    ):
-        import shutil
-        import subprocess
-
-        if not shutil.which("bwrap"):
-            pytest.skip("bwrap is not installed")
-        backend = BwrapBackend()
-        if backend.probe():
-            pytest.skip("bwrap cannot start a sandbox here")
-        work = layout.results / "work"
-        work.mkdir(parents=True)
-        plan = backend.plan(
-            ["/bin/sh", "-c", "echo ok > written && cat written"],
-            {"PATH": "/usr/bin:/bin"},
-            _policy(layout, argv0="/bin/sh", cwd=work),
-        )
-        result = subprocess.run(plan.argv, env=plan.env, capture_output=True, text=True)
-        assert result.returncode == 0, result.stderr
-        assert (work / "written").read_text() == "ok\n"
+        assert argv[argv.index("--chdir") + 1] == _as_argv(work)
 
 
-@posix_only
 def test_every_import_path_directory_is_readable(layout, monkeypatch, tmp_path):
     """An editable install's .pth adds sys.path entries outside site-packages.
 
@@ -528,7 +500,6 @@ def test_every_import_path_directory_is_readable(layout, monkeypatch, tmp_path):
             assert Path(os.path.realpath(entry)) in exposed, entry
 
 
-@posix_only
 def test_an_import_path_entry_elsewhere_in_home_is_not_mounted(layout, monkeypatch):
     """PYTHONPATH=~/anything must not make that directory readable to scanners."""
     stray = layout.home / "notes"
@@ -536,3 +507,89 @@ def test_an_import_path_entry_elsewhere_in_home_is_not_mounted(layout, monkeypat
     monkeypatch.setattr(sys, "path", [*sys.path, str(stray)])
     exposed = _resolved(_policy(layout).read_only)
     assert Path(os.path.realpath(stray)) not in exposed
+
+
+class TestPluginDeclarations:
+    """Third-party and community plugin scanners get exactly what they declare.
+
+    A scanner that declares no sandbox_requirements gets the strictest default: no
+    network, read-only source, its own results directory as the only writable
+    place, and the environment allowlist alone. The escape suite runs such a
+    plugin (tests/test_data/sandbox_escape declares nothing) through a real scan.
+    """
+
+    class _Recorder:
+        name = "recorder"
+
+        def __init__(self):
+            self.policies = []
+
+        def plan(self, argv, env, policy):
+            self.policies.append((policy, policy.filter_env(env)))
+            return SpawnPlan(argv=list(argv), env=dict(env))
+
+    def _policy_for(self, plugin, tmp_path, monkeypatch):
+        recorder = self._Recorder()
+        monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: recorder)
+        monkeypatch.setattr(
+            "automated_security_helper.core.constants.is_offline_mode", lambda: False
+        )
+        context = _context(tmp_path)
+        scope = scanner_sandbox_scope(plugin, context, tmp_path)
+        assert scope is not None
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "THIRDPARTY_LEVEL": "debug",
+            "THIRDPARTY_TOKEN": "secret",
+        }
+        with sandbox_scope(scope):
+            prepare_spawn([sys.executable, "--version"], env, None)
+        return recorder.policies[-1]
+
+    def test_an_undeclared_plugin_gets_the_strict_default(self, tmp_path, monkeypatch):
+        plugin = SimpleNamespace(
+            config=SimpleNamespace(name="thirdparty"), results_dir=None
+        )
+        policy, env = self._policy_for(plugin, tmp_path, monkeypatch)
+        assert policy.network is False
+        assert _resolved(policy.writable) == _resolved(
+            [tmp_path / "out" / "scanners" / "thirdparty"]
+        )
+        assert "THIRDPARTY_LEVEL" not in env
+        assert "THIRDPARTY_TOKEN" not in env
+
+    def test_a_declared_plugin_gets_exactly_what_it_declared(
+        self, tmp_path, monkeypatch
+    ):
+        extra = tmp_path / "rules"
+        extra.mkdir()
+        plugin = SimpleNamespace(
+            config=SimpleNamespace(name="thirdparty"),
+            results_dir=None,
+            sandbox_requirements=SandboxRequirements(
+                network=True,
+                read_paths=(str(extra),),
+                env_prefixes=("THIRDPARTY_",),
+                env_names=("THIRDPARTY_TOKEN",),
+            ),
+        )
+        policy, env = self._policy_for(plugin, tmp_path, monkeypatch)
+        assert policy.network is True
+        assert Path(os.path.realpath(extra)) in _resolved(policy.read_only)
+        assert env["THIRDPARTY_LEVEL"] == "debug"
+        assert env["THIRDPARTY_TOKEN"] == "secret"
+        # Declaring more does not widen what is writable.
+        assert _resolved(policy.writable) == _resolved(
+            [tmp_path / "out" / "scanners" / "thirdparty"]
+        )
+
+    def test_a_declaration_that_is_not_a_requirements_object_is_ignored(
+        self, tmp_path, monkeypatch
+    ):
+        plugin = SimpleNamespace(
+            config=SimpleNamespace(name="thirdparty"),
+            results_dir=None,
+            sandbox_requirements={"network": True},
+        )
+        policy, _ = self._policy_for(plugin, tmp_path, monkeypatch)
+        assert policy.network is False

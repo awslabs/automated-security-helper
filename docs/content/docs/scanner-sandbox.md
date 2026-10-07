@@ -94,6 +94,39 @@ it needs.
 | detect-secrets | only when its verification filter is configured | none | ASH's Python, in a worker subprocess |
 | cdk-nag | no | jsii's runtime cache | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
 
+### Community and third-party plugin scanners
+
+The sandbox applies to every scanner, whatever module it comes from. A scanner from a
+community module (snyk-code, ferret-scan, trivy-repo) or your own plugin package gets
+its policy from its `sandbox_requirements` class attribute. A scanner that declares
+none gets the strictest default: no network, the source tree read-only, its own
+results directory as the only writable place, a private empty `$HOME` and `/tmp`, and
+the baseline environment allowlist with nothing added. It still runs; it is never
+skipped for lacking a declaration, and never run unsandboxed.
+
+A plugin that needs more declares it:
+
+```python
+from typing import ClassVar
+
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+
+
+class MyScanner(ScannerPluginBase[MyScannerConfig]):
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        network=True,                       # online only; never under --offline
+        read_paths=("~/.my-tool/rules",),   # extra read-only paths
+        cache_paths=("~/.cache/my-tool",),  # writable, through an overlay where possible
+        env_prefixes=("MYTOOL_",),          # variables passed through
+        env_names=("MYTOOL_TOKEN",),        # credential-shaped names it needs
+    )
+```
+
+The community scanners declare theirs: snyk-code asks for a network, its `SNYK_`
+variables and `SNYK_TOKEN`, and read access to its token file; trivy-repo asks for a
+network and its database cache; ferret-scan asks only for its `FERRET_` variables.
+
 detect-secrets' network grant follows its configuration, and that configuration can
 come from a `.secrets.baseline` committed to the scanned repository. A repository can
 therefore give detect-secrets a network by listing the verification filter in its
