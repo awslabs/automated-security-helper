@@ -1,0 +1,17 @@
+{
+  "summary": {
+    "total_suppressions": 2,
+    "used_suppressions": 1,
+    "unused_suppressions": 1
+  },
+  "unused_suppressions": [
+    {
+      "path": "infra/main.tf",
+      "rule_id": "CKV_AWS_999",
+      "line_start": null,
+      "line_end": null,
+      "reason": "Stale suppression for a check that no longer exists",
+      "expiration": "2099-12-31"
+    }
+  ]
+}

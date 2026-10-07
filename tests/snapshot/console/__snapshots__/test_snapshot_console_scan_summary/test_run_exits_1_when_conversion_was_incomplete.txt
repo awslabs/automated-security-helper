@@ -1,0 +1,13 @@
+
+=== ASH Scan Completed in 42.5s: Next Steps ===
+View detailed findings...
+  - SARIF: '.ash/ash_output/reports/ash.sarif'
+  - JUnit: '.ash/ash_output/reports/ash.junit.xml'
+  - ASH aggregated results JSON available at: '.ash/ash_output/ash_aggregated_results.json'
+
+ERROR (1) Exiting because conversion was incomplete: 2 converter(s) did not process the files they were given
+  jupyter: RuntimeError: nbconvert exited 1
+  archive: dependencies unavailable, so it never ran
+A converter that did not run leaves its inputs unscanned, so the scanners saw fewer files than this repository holds.
+Install the converter's tool, disable the converter if its inputs are not wanted, or drop --fail-on-incomplete-scanners
+to accept a partial scan. A converter with nothing to convert never reports here.

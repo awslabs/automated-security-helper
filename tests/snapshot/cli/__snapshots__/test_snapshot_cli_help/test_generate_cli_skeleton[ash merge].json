@@ -1,0 +1,13 @@
+{
+  "results": null,
+  "output_dir": null,
+  "output_formats": null,
+  "min_severity": "low",
+  "ignore_suppressions": false,
+  "fail_on_findings": null,
+  "fail_on_incomplete_scanners": null,
+  "log_level": "INFO",
+  "verbose": false,
+  "debug": false,
+  "color": true
+}

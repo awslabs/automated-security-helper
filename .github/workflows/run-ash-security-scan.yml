@@ -203,6 +203,11 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
+          # Save only from a push; a pull request restores its base branch's entry.
+          # The same unpruned key as the lint job in ash-unified-ci.yml, which
+          # carries the measurement: one ~254 MB copy per open pull request,
+          # readable by no other pull request, was 3.62 GB of a 10 GB quota.
+          save-cache: ${{ github.event_name == 'push' }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -257,9 +262,15 @@ jobs:
           path: ~/.cache/grype/db
           key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
-      - name: Cache the OpenGrep binary
+      # Restore here, save after the install below from a push to the default branch
+      # only -- the same split as the grype database. The combined actions/cache saved
+      # from every ref, so each pull request kept a weekly copy no other pull request
+      # can read: 42 entries and 1.95 GB in this repository on 2026-10-06, over its
+      # 10 GB quota. Neither step needs a permission, so no caller has to grant one.
+      - name: Restore the OpenGrep binary
+        id: opengrep-cache
         if: inputs.install-opengrep
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opengrep/cli/latest
           key: opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}
@@ -350,6 +361,17 @@ jobs:
           fi
           ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
           echo "$INSTALL_DIR" >> $GITHUB_PATH
+
+      - name: Save the OpenGrep binary (default branch only)
+        if: >-
+          inputs.install-opengrep
+          && steps.opengrep-cache.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opengrep/cli/latest
+          key: opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}
 
       # This used to say there was no need for a ruby/setup-ruby step, because
       # ubuntu-latest installed Ruby from apt's `ruby-full`. That stopped being true.

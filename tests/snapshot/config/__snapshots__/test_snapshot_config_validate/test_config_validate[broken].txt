@@ -1,0 +1,16 @@
+$ ash config validate --config broken.yaml
+Validating configuration file: broken.yaml
+
+❌ Configuration validation failed with 1 error(s):
+  1. YAML parsing error: while parsing a flow sequence
+  in "broken.yaml", line 1, column 15
+expected ',' or ']', but got '<stream end>'
+  in "broken.yaml", line 2, column 1
+
+💡 Common fixes:
+  - Remove internal-only fields like 'name', 'extension', 'tool_version' from scanner/reporter configs
+  - Remove invalid top-level sections like 'build' or 'mcp-resource-management'
+  - Check for duplicate field definitions in your YAML file
+
+📖 See the ASH configuration documentation for the correct format.
+[exit code: 1]

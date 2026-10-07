@@ -82,6 +82,7 @@ def _deliver(workspace_root: Path, session_id: str) -> Path:
     """
     tree = _session_workspace(workspace_root, session_id) / "source"
     tree.mkdir(parents=True, exist_ok=True)
+    # pragma: allowlist nextline secret
     (tree / "app.py").write_text("SECRET = 'tenant data'\n", encoding="utf-8")
     return tree
 

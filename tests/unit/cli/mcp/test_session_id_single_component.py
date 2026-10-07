@@ -59,8 +59,9 @@ from automated_security_helper.cli.mcp.session_identity import (
 ACCEPTED = [
     "abc123",
     "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    # pragma: allowlist nextline secret
     "0123456789abcdef0123456789abcdef",
-    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1",  # pragma: allowlist secret
     "tenant-a",
     "session_test",
     DEFAULT_SESSION_ID,

@@ -1,0 +1,3 @@
+$ ash config validate-plugin-dependencies valid.yaml
+Config file '<TMP>/demo-project/valid.yaml' is valid
+[exit code: 0]

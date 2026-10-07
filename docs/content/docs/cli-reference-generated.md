@@ -39,7 +39,7 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--show-summary` | bool | True |  | Show metrics table and results summary |
 | `--quiet` | bool | False |  | Hide all log output |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
-| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a [tool.ash] table in pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | `--verbose`, `-v` | bool | False | ASH_VERBOSE | Enable verbose logging. Any log flag on the command line overrides ASH_VERBOSE. |
 | `--debug`, `-d` | bool | False | ASH_DEBUG | Enable debug logging. Any log flag on the command line overrides ASH_DEBUG. |
 | `--color` | bool | True |  | Enable/disable colorized output |
@@ -93,7 +93,7 @@ Builds the ASH container image then runs a scan with it.
 | `--offline` | bool | False |  | Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage. |
 | `--quiet` | bool | False |  | Hide all log output |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
-| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a [tool.ash] table in pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
@@ -109,7 +109,7 @@ Generate a report from ASH scan results using the specified reporter plugin.
 | `--format` | str | `markdown` |  | Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom |
 | `--output-dir` | str |  | ASH_OUTPUT_DIR | The directory to output results to |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
-| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a [tool.ash] table in pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | `--config-overrides` | List[str] |  |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2') |
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
@@ -173,7 +173,7 @@ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
-| `--config`, `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a [tool.ash] table in pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| `--config`, `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
@@ -185,7 +185,7 @@ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 
 | Argument | Type | Default | Env Var | Description |
 |----------|------|---------|---------|-------------|
-| `CONFIG_PATH` | str |  |  | The name of the config file to get. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a [tool.ash] table in pyproject.toml at the root; the first found is used. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable. |
+| `CONFIG_PATH` | str |  |  | The name of the config file to get. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable. |
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
@@ -202,7 +202,7 @@ Update an existing configuration file with the specified modifications.
 
 | Argument | Type | Default | Env Var | Description |
 |----------|------|---------|---------|-------------|
-| `CONFIG_PATH` | str |  |  | The path to the configuration file to update. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a [tool.ash] table in pyproject.toml at the root; the first found is used. |
+| `CONFIG_PATH` | str |  |  | The path to the configuration file to update. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. |
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
@@ -218,7 +218,7 @@ Update an existing configuration file with the specified modifications.
 
 | Argument | Type | Default | Env Var | Description |
 |----------|------|---------|---------|-------------|
-| `CONFIG_PATH` | str |  |  | The name of the config file to create. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a [tool.ash] table in pyproject.toml at the root; the first found is used. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable. |
+| `CONFIG_PATH` | str |  |  | The name of the config file to create. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable. |
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
@@ -273,7 +273,7 @@ Interactively explore security findings.
 |------|------|---------|---------|-------------|
 | `--output-dir` | Path |  |  | Path to the output directory containing an ASH Aggregated Results JSON report file to analyze. |
 | `--report-file` | str | `ash_aggregated_results.json` |  | Name of the report file to analyze. Defaults to 'ash_aggregated_results.json'. |
-| `--config`, `-c` | Path |  | ASH_CONFIG | Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then a [tool.ash] table in pyproject.toml at the root; the first found is used. |
+| `--config`, `-c` | Path |  | ASH_CONFIG | Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. |
 
 ### `ash inspect sarif-fields`
 
