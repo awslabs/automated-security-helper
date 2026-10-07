@@ -145,6 +145,15 @@ runs:
       shell: bash
       run: mkdir -p .ash/ash_output
 
+    # The python-local legs run `ash dependencies install`, which downloads the pinned
+    # scanner release assets. Restored here, re-verified by ASH on every use, saved
+    # after the scan from a push to main only. See the action for what it holds.
+    - name: Restore the tool download cache
+      if: inputs.method == 'python-local'
+      uses: ./.github/actions/tool-download-cache
+      with:
+        mode: restore
+
     # Ahead of any build, so the twenty-odd container cells that start together do not all
     # fetch the base image from ECR Public at once and cross its anonymous-pull data limit.
     # Skipped for python-local, which builds no image. See the action for what it will and
@@ -662,6 +671,12 @@ runs:
         ./ash report --format text
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
+
+    - name: Save the tool download cache
+      if: success() && inputs.method == 'python-local'
+      uses: ./.github/actions/tool-download-cache
+      with:
+        mode: save
 
     # Companion to "Expose the Actions cache credentials to ASH's build". The build
     # is done by now, so clear the credentials back out rather than leaving them in

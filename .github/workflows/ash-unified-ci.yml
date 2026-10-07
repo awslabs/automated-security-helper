@@ -675,9 +675,15 @@ jobs:
       # log rather than surfacing as "none of the scanners this gate asserts on
       # ran". On the Windows runner only bandit and checkov are available at all, so
       # a single failed install is the difference between green and a confusing red.
+      - uses: ./.github/actions/tool-download-cache
+        with:
+          mode: restore
       - name: Install scanner dependencies
         shell: bash
         run: ash dependencies install
+      - uses: ./.github/actions/tool-download-cache
+        with:
+          mode: save
       # One shell for both platforms, so there is one command to reason about.
       # The path is relative, so Git Bash on Windows does not rewrite it.
       # --timeout is passed explicitly so it sits next to timeout-minutes above.
@@ -754,9 +760,15 @@ jobs:
       # bandit is the only producer this gate asserts on. Installing it here means
       # an install flake fails as a failed install step with its own log, rather
       # than surfacing as "the fixture produced zero findings".
+      - uses: ./.github/actions/tool-download-cache
+        with:
+          mode: restore
       - name: Install scanner dependencies
         shell: bash
         run: ash dependencies install
+      - uses: ./.github/actions/tool-download-cache
+        with:
+          mode: save
       - name: Verify a workspace scan keeps its projects apart
         shell: bash
         # The gate builds its workspace with tempfile.mkdtemp(). Pointing the temp

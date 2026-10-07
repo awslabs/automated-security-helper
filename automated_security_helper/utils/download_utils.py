@@ -931,6 +931,75 @@ def _require_one_match(matches: list, member_name: str, archive_path: Path) -> N
     )
 
 
+# Directory of release assets kept between runs, set by CI (ASH_TOOL_DOWNLOAD_CACHE).
+#
+# It holds the downloaded release ASSETS, never extracted binaries and never install
+# receipts. That choice is what lets a restored copy be re-verified against a trust
+# anchor the cache cannot touch: the pinned digest in tool_downloads covers the asset
+# itself, and it lives in the repository. Caching the extracted executables would
+# need their digests from somewhere, and the only record of those is the install
+# receipt -- which receipt_root keeps out of every bin directory precisely so that
+# whatever can write binaries cannot also rewrite the digests they are checked
+# against. A cache holding both would be exactly that.
+#
+# So a cached asset is used only if it hashes to the pinned digest, every time it is
+# read. Anything else -- a tampered file, a truncated one, a stale version under the
+# same name -- is deleted and the asset is downloaded and verified as if the cache
+# were empty. The operator approved caching these public, digest-pinned upstream
+# release assets in the Actions cache; ASH's own wheel and image never go here.
+_TOOL_DOWNLOAD_CACHE_ENV = "ASH_TOOL_DOWNLOAD_CACHE"
+
+
+def _tool_download_cache() -> Optional[Path]:
+    value = os.environ.get(_TOOL_DOWNLOAD_CACHE_ENV, "").strip()
+    return Path(value) if value else None
+
+
+def _restore_cached_asset(
+    asset_name: str, expected_sha256: str, staging_dir: Path
+) -> Optional[Path]:
+    """A verified copy of a cached release asset in ``staging_dir``, or None.
+
+    The copy is hashed after it lands in the private staging directory, so the bytes
+    that get extracted are the bytes that were verified, whatever happens to the
+    cache directory in between.
+    """
+    cache_dir = _tool_download_cache()
+    if cache_dir is None:
+        return None
+    cached = cache_dir.joinpath(asset_name)
+    if not cached.is_file() or cached.is_symlink():
+        return None
+    staged = staging_dir.joinpath(asset_name)
+    try:
+        shutil.copyfile(cached, staged)
+        verify_sha256(staged, expected_sha256, f"cached asset {cached}")
+    except (OSError, ToolDownloadIntegrityError) as e:
+        ASH_LOGGER.warning(
+            f"Discarding cached {asset_name}: {e}. Downloading it again."
+        )
+        staged.unlink(missing_ok=True)
+        try:
+            cached.unlink()
+        except OSError:
+            pass
+        return None
+    ASH_LOGGER.info(f"Using cached {asset_name}, verified against its pinned digest")
+    return staged
+
+
+def _store_cached_asset(archive: Path, asset_name: str) -> None:
+    """Keep a verified download for the next run. Best effort: a failure costs a download."""
+    cache_dir = _tool_download_cache()
+    if cache_dir is None:
+        return
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(archive, cache_dir.joinpath(asset_name))
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not cache {asset_name} in {cache_dir}: {e}")
+
+
 def install_pinned_tool(
     tool: str,
     target_platform: str,
@@ -977,12 +1046,16 @@ def install_pinned_tool(
 
     with tempfile.TemporaryDirectory(prefix="ash-tool-download-") as staging:
         staging_dir = Path(staging)
-        archive = download_file(
-            asset.url,
-            staging_dir,
-            rename_to=asset.url.split("/")[-1],
-            expected_sha256=asset.sha256,
-        )
+        asset_name = asset.url.split("/")[-1]
+        archive = _restore_cached_asset(asset_name, asset.sha256, staging_dir)
+        if archive is None:
+            archive = download_file(
+                asset.url,
+                staging_dir,
+                rename_to=asset_name,
+                expected_sha256=asset.sha256,
+            )
+            _store_cached_asset(archive, asset_name)
         installed_digest = _extract_single_member(archive, asset.member_name, target)
 
     # _extract_single_member already set the mode on the staged file before renaming

@@ -230,6 +230,16 @@ _LAYER_CACHE_REASON = (
     "never write. Pushing the image to any registry, and uploading the image or a "
     "tarball of it as an artifact, remain forbidden."
 )
+_TOOL_ASSET_CACHE_REASON = (
+    "Release assets of the scanner tools pinned by sha256 in "
+    "automated_security_helper/utils/tool_downloads.py: public upstream releases, "
+    "downloaded and verified by install_pinned_tool. MAINTAINER DECISION "
+    "(2026-10-07): the operator approved caching these digest-pinned public "
+    "binaries. Assets only -- never extracted binaries, install receipts, ASH's own "
+    "wheel or its image. Re-verified against the pin on every use, and deleted and "
+    "re-downloaded on a mismatch. Keyed on the pin table's hash; saved from a push "
+    "to main only."
+)
 _OPENGREP_CACHE_REASON = (
     "The OpenGrep release binary, downloaded from the upstream GitHub release. A "
     "third-party binary that is already publicly downloadable, not one this project "
@@ -253,6 +263,27 @@ _GRYPE_DB_CACHE_REASON = (
 )
 
 ALLOWLIST: tuple[Entry, ...] = (
+    # -- Digest-pinned scanner release assets (maintainer decision) ----------
+    Entry(
+        file=".github/actions/tool-download-cache/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ runner.temp }}/ash-tool-downloads key=ash-tool-asse"
+            "ts-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('automated_security_helper/utils/tool_downloads.py') }}"
+        ),
+        reason=_TOOL_ASSET_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/tool-download-cache/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ runner.temp }}/ash-tool-downloads key=ash-tool-asse"
+            "ts-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('automated_security_helper/utils/tool_downloads.py') }}"
+        ),
+        reason=_TOOL_ASSET_CACHE_REASON,
+    ),
     # -- ASH image build layers in the Actions cache (maintainer decision) ------
     Entry(
         file=".github/actions/run-scan-test/action.yml",

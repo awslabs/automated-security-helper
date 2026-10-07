@@ -1239,3 +1239,73 @@ class TestAssetResolution:
             assert len(digest) == 64, f"{filename} digest is not 64 hex chars"
             assert digest == digest.lower(), f"{filename} digest is not lowercase"
             int(digest, 16)
+
+
+class TestReleaseAssetCache:
+    """ASH_TOOL_DOWNLOAD_CACHE: verified release assets kept between CI runs.
+
+    A cached asset is trusted only if it hashes to the pin in tool_downloads, every
+    time it is read. The cache holds assets, not binaries or receipts, so the trust
+    anchor stays in the repository where the cache cannot reach it.
+    """
+
+    @pytest.fixture
+    def cache_dir(self, tmp_path, monkeypatch):
+        directory = tmp_path / "asset-cache"
+        monkeypatch.setenv("ASH_TOOL_DOWNLOAD_CACHE", str(directory))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        return directory
+
+    def test_a_download_is_stored_and_a_verified_copy_is_reused(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        asset_name = get_tool_asset("grype", "linux", "amd64").url.split("/")[-1]
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin-a")
+        assert (cache_dir / asset_name).read_bytes() == payload
+
+        exploding = patch(
+            "automated_security_helper.utils.download_utils.download_file",
+            side_effect=AssertionError(
+                "downloaded although a verified copy was cached"
+            ),
+        )
+        with _pin(_grype_asset_filename(), real_digest), exploding:
+            installed = install_pinned_tool(
+                "grype", "linux", "amd64", tmp_path / "bin-b"
+            )
+        assert installed.read_bytes() == PAYLOAD
+
+    def test_a_tampered_cached_asset_is_rejected_deleted_and_redownloaded(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        asset_name = get_tool_asset("grype", "linux", "amd64").url.split("/")[-1]
+        cache_dir.mkdir(parents=True)
+        # A well-formed archive whose `grype` is someone else's binary.
+        evil = b"#!/bin/sh\necho evil\n"
+        with tarfile.open(cache_dir / asset_name, "w:gz") as archive:
+            info = tarfile.TarInfo(name="grype")
+            info.size = len(evil)
+            archive.addfile(info, io.BytesIO(evil))
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            installed = install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert served.called, "the tampered asset was used instead of re-downloaded"
+        assert installed.read_bytes() == PAYLOAD
+        assert b"evil" not in installed.read_bytes()
+        # The cache now holds the verified download, not the tampered file.
+        assert (cache_dir / asset_name).read_bytes() == payload
+
+    def test_without_the_variable_nothing_is_cached(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        monkeypatch.delenv("ASH_TOOL_DOWNLOAD_CACHE", raising=False)
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        payload, real_digest = fake_grype_release
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+        assert not (tmp_path / "asset-cache").exists()
