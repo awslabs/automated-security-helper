@@ -210,9 +210,16 @@ async function main(): Promise<void> {
         // re-rasters partially depends on what changed in it and when, so without
         // this flag 4 of 10 runs drew one edge pixel (the Problems toolbar
         // separator's top, a part's rounded corner) one level off. With it, every
-        // tile is rastered whole and 20 of 20 runs were identical. See README.md,
-        // "Threshold and determinism".
+        // tile is rastered whole. See README.md, "Threshold and determinism".
         '--disable-partial-raster',
+        // The same rounding has a second way in. By default the compositor swaps only
+        // the damaged rectangle of the frame onto the X window, so a pixel on the edge
+        // of that rectangle can keep the value an earlier frame gave it. Under CPU
+        // starvation which frames get drawn, and so which rectangles get swapped,
+        // varies: 9 of 30 runs on two loaded CPUs drew (1267,503), the Problems
+        // panel's edge, one level off (30 against 31). With every frame swapped whole,
+        // 0 of 45 did.
+        '--ui-disable-partial-swap',
         '--no-sandbox',
         '--disable-dev-shm-usage',
         '--disable-workspace-trust',

@@ -14,13 +14,13 @@
  *
  * WHY THE THRESHOLD IS ZERO
  *
- * `compare -metric AE` counts pixels that differ at all (no `-fuzz`). The one
- * variance ever measured, a single anti-aliased edge pixel one level off in 4 of 10
- * runs, came from Chromium's partial raster and is gone with
- * `--disable-partial-raster` (run.ts): 32 runs since, every capture identical to
- * the pixel. There is no remaining variance to allow for, and any tolerance would
- * only be room for a styling change to pass. See README.md beside this file,
- * "Threshold and determinism".
+ * `compare -metric AE` counts pixels that differ at all (no `-fuzz`). The variance
+ * ever measured, a single anti-aliased edge pixel one level off, came from Chromium
+ * redrawing only the changed part of the screen, and is gone with
+ * `--disable-partial-raster` and `--ui-disable-partial-swap` (run.ts). There is no
+ * remaining variance to allow for, and any tolerance would only be room for a
+ * styling change to pass. See README.md beside this file, "Threshold and
+ * determinism".
  *
  * WHY THE PNG IS WRITTEN WITHOUT ITS TIME CHUNKS
  *
