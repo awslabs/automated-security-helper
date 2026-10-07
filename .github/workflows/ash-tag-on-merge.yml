@@ -253,11 +253,14 @@ jobs:
             echo "::warning::CHANGELOG.md has no entry for ${TAG}, so the release body is GitHub's generated notes only."
           fi
 
+          # ${A[@]+"${A[@]}"} rather than "${A[@]}": bash before 4.4, which is
+          # macOS's /bin/bash, treats an empty array as unset under `set -u`.
+          # The test runs this step on macOS runners as well as ubuntu.
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --target main \
             --generate-notes \
-            "${NOTES_ARGS[@]}" \
+            ${NOTES_ARGS[@]+"${NOTES_ARGS[@]}"} \
             --title "$TAG" \
             dist/*.whl dist/*.tar.gz dist/*.mcpb
 
