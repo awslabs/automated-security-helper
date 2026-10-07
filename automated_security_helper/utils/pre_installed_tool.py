@@ -382,7 +382,7 @@ def _verify(
                 "uv is not on PATH",
                 from_nix=True,
             )
-        interpreter, site_dirs = nix_environment
+        nix_interpreter, site_dirs = nix_environment
         with tempfile.TemporaryDirectory(prefix="ash-nix-metadata-") as target:
             if _stage_nix_metadata(site_dirs, Path(target)) == 0:
                 return PreInstalledToolVerdict(
@@ -400,9 +400,9 @@ def _verify(
                 version_constraint,
                 requirement,
                 uv,
-                interpreter,
+                nix_interpreter,
                 target,
-                f"its Nix environment ({interpreter}, {len(site_dirs)} store paths)",
+                f"its Nix environment ({nix_interpreter}, {len(site_dirs)} store paths)",
             )
 
     interpreter = find_tool_interpreter(executable)

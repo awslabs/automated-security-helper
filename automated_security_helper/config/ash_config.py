@@ -6,6 +6,9 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
     model_validator,
 )
 from typing import Annotated, Any, List, Dict, Literal, Optional
@@ -18,6 +21,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.core.scanner_opt_in import is_opt_in_scanner_config
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverterConfig,
 )
@@ -344,6 +348,13 @@ class ConverterConfigSegment(_PluginConfigSegment):
     ] = JupyterConverterConfig()
 
 
+#: Serialization context key that keeps untouched opt-in scanner entries in a
+#: dump. Set by lookups that need every entry (``AshConfig.get_plugin_config``);
+#: every other dump -- the config embedded in ash_aggregated_results.json, the
+#: YAML report, the AWS reporter payloads, ``ash config init`` -- leaves them out.
+KEEP_OPT_IN_CONTEXT = "ash_keep_untouched_opt_in_scanners"
+
+
 class ScannerConfigSegment(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
@@ -353,6 +364,62 @@ class ScannerConfigSegment(_PluginConfigSegment):
     )
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
+
+    def untouched_opt_in_fields(self) -> set[str]:
+        """Field names of opt-in scanners whose entry here is disabled and default.
+
+        An opt-in scanner (``ScannerPluginBase.OPT_IN``) declares a field on this
+        segment like any builtin, so the JSON schema, validation and editor
+        completion cover it. But ASH writes this segment into every scan's output
+        -- the config embedded in ``ash_aggregated_results.json``, the YAML
+        report, the S3 and CloudWatch payloads (one embeds the repr) -- so the
+        entry alone changed the default output of every user who never enabled
+        the scanner, which is what opt-in exists to prevent.
+
+        Only an entry that is disabled AND equal to its class default is left
+        out, so the omission is lossless: loading the dump back gives the same
+        default. An enabled entry, or a disabled one with any option set, is
+        written like any other scanner's. The default is compared both as the
+        field's import-time value and freshly constructed, because some option
+        defaults read the environment (offline mode) when they are built.
+        Extras are never omitted; an extra entry exists only because something
+        configured it.
+        """
+        names = set()
+        for name, field in type(self).model_fields.items():
+            value = getattr(self, name, None)
+            if value is None or getattr(value, "enabled", None) is not False:
+                continue
+            if not is_opt_in_scanner_config(type(value)):
+                continue
+            defaults = [field.default]
+            try:
+                defaults.append(type(value)())
+            except Exception:  # nosec B110 - the import-time default still applies
+                pass
+            if any(value == default for default in defaults):
+                names.add(name)
+        return names
+
+    @model_serializer(mode="wrap")
+    def _omit_untouched_opt_in_scanners(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ):
+        data = handler(self)
+        if not isinstance(data, dict):
+            return data
+        if isinstance(info.context, dict) and info.context.get(KEEP_OPT_IN_CONTEXT):
+            return data
+        fields = type(self).model_fields
+        for name in self.untouched_opt_in_fields():
+            data.pop(name, None)
+            if fields[name].alias:
+                data.pop(fields[name].alias, None)
+        return data
+
+    def __repr_args__(self):
+        hidden = self.untouched_opt_in_fields()
+        return [(k, v) for k, v in super().__repr_args__() if k not in hidden]
 
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
@@ -1143,7 +1210,11 @@ class AshConfig(BaseModel):
         ).lower()
         match plugin_type:
             case "scanner":
-                item_dict = self.scanners.model_dump(by_alias=True)
+                # Every entry, including an untouched opt-in scanner's, so a
+                # lookup finds what the config says rather than what a dump shows.
+                item_dict = self.scanners.model_dump(
+                    by_alias=True, context={KEEP_OPT_IN_CONTEXT: True}
+                )
             case "reporter":
                 item_dict = self.reporters.model_dump(by_alias=True)
             case "converter":

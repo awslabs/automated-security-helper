@@ -110,8 +110,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
     True means the scanner is not part of a run at all unless it is enabled --
     its config says ``enabled: true``, or its name is passed in the scanner
-    selection (``--scanners``, the MCP ``scanners`` argument, ``run_ash_scan``'s
-    ``scanners``). An opt-in scanner nobody enabled leaves no trace in the
+    selection (``--scanners``, the MCP ``run_ash_workspace_scan`` ``scanners``
+    argument, the Python ``run_ash_scan``'s ``scanners``). An opt-in scanner nobody enabled leaves no trace in the
     results: no ``scanner_results`` row, no summary count, no reporter row, no
     SARIF run, and no entry in the expected-scanner roster or the shard
     partition. Once enabled it is an ordinary scanner, so a missing tool is

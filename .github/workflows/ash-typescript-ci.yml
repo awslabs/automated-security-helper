@@ -248,11 +248,31 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: deploy/${{ matrix.package }}/package-lock.json
+
+      # npm's download cache, split into a restore here and a main-only save after
+      # `npm ci`. setup-node's `cache: npm` saved from every ref, so each pull request
+      # kept its own copy that no other pull request can read: 36 entries and 2.54 GB
+      # on 2026-10-06, with the repository over its 10 GB cache quota. A pull request
+      # reads its base branch's entry, so saving from main is what it restores anyway.
+      - name: Restore the npm cache
+        id: npm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('deploy/{0}/package-lock.json', matrix.package)) }}
 
       - name: Install dependencies
         run: npm ci --prefix "deploy/${{ matrix.package }}"
+
+      - name: Save the npm cache (main only)
+        if: >-
+          steps.npm-cache.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('deploy/{0}/package-lock.json', matrix.package)) }}
 
       - name: Run tests with coverage thresholds
         run: |

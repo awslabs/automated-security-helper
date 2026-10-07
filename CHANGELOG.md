@@ -466,7 +466,32 @@
   the scanner. Reverting to the previous behavior means accepting a report that
   states coverage it does not have.
 
+### Features
+
+- **Opt-in builtin scanners.** A scanner plugin can set `OPT_IN = True`
+  (`ScannerPluginBase.OPT_IN`, default `False`). An opt-in scanner is left out of
+  a scan entirely until it is enabled with `enabled: true` in its config or by
+  naming it in `--scanners` (or the `scanners` argument of the MCP
+  `run_ash_workspace_scan` tool or the Python `run_ash_scan`). It
+  has no result row, summary count, report entry, SARIF run or shard
+  assignment, and is not on the expected-scanner roster. Once enabled it behaves
+  like any builtin, so a missing tool is `MISSING` and the scan exits 1. This
+  lets new builtin scanners ship without changing existing scans: a scanner
+  that is only `enabled: false` still appears as a `SKIPPED` row in every scan.
+  Naming an opt-in scanner in `--scanners` runs it even if its config says
+  `enabled: false`; for other scanners `--scanners` only narrows the run. Its
+  config entry is also left out of written configs (the config recorded in the
+  results and reports, `ash config init`, `ash config get`) while it is disabled
+  and has no options set; the JSON schema still documents it. No
+  scanner shipped today is opt-in, so default scan output is unchanged.
+
 ### Fixes
+
+- **A scanner whose constructor raises is recorded under its scanner name.** The
+  ERROR row for a scanner that could not be constructed was keyed by its class
+  name (`banditscanner`) because the configured name was read off a dict with
+  `getattr`. It is now keyed by the scanner name (`bandit`), which is the name
+  the expected-scanner roster, the shard partition and `--exclude-scanners` use.
 
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.

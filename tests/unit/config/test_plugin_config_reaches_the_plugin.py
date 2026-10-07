@@ -44,6 +44,7 @@ from automated_security_helper.config.ash_config import (
     ScannerConfigSegment,
 )
 from automated_security_helper.core.progress import LiveProgressDisplay
+from automated_security_helper.core.scanner_opt_in import is_opt_in
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 
@@ -103,13 +104,27 @@ def _probe_config(plugin_type) -> AshConfig:
             "project_name": "probe",
             segment_key: {
                 _documented_key(plugin_type, cls): {
-                    "enabled": False,
+                    # An opt-in scanner left disabled is dropped before it is
+                    # built, so it is probed enabled; see _expected_enabled.
+                    "enabled": _expected_enabled(cls),
                     "options": {"probe_marker": MARKER},
                 }
                 for cls in _shipped(plugin_type)
             },
         }
     )
+
+
+def _expected_enabled(plugin_class) -> bool:
+    """The ``enabled`` value the probe config writes for *plugin_class*.
+
+    False for every plugin, so a plugin that ran with its own default (True)
+    shows the config never reached it -- except an opt-in scanner, whose default
+    is already False and which the scan phase does not build at all while
+    disabled. Probing one enabled is the only way to see it built, and True is
+    then the value that proves the config reached it.
+    """
+    return is_opt_in(plugin_class)
 
 
 def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
@@ -124,7 +139,7 @@ def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
 
 
 def _assert_reached(instance):
-    assert instance.config.enabled is False, (
+    assert instance.config.enabled is _expected_enabled(type(instance)), (
         f"{type(instance).__name__} runs with enabled={instance.config.enabled}; "
         "its configuration never reached it"
     )
