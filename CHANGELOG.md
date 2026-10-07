@@ -59,6 +59,11 @@
   now reports that scanner MISSING with the cache guidance and exits 1 as an incomplete
   scan, where it used to pass by going online. See
   [Which scanners run offline](docs/content/docs/advanced-usage.md#which-scanners-run-offline).
+  To seed the cache, build the image with `ash build-image --offline`, or for a local
+  scan download the rulesets from `https://semgrep.dev/c/<ruleset>` into the
+  directories named by `SEMGREP_RULES_CACHE_DIR` and `OPENGREP_RULES_CACHE_DIR` and
+  record the download time in `.ash-rules-fetched-at`; see
+  [Seeding the semgrep and opengrep rule cache](docs/content/docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
 - **`fail_on_incomplete_scanners` now defaults to `true`.** A scan in which a
   selected scanner did not complete — status `ERROR` (it ran and failed) or `MISSING`
   (its dependencies were unavailable, so it never ran) — exits 1 without anyone

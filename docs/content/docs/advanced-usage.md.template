@@ -135,6 +135,44 @@ not put a scanner back online during an `--offline` scan; `ash config init` writ
 `offline: false` for every scanner that has the option, so a generated config would
 otherwise undo the flag.
 
+#### Seeding the semgrep and opengrep rule cache
+
+Offline, semgrep and opengrep read their rules only from a local cache: the directory
+named by `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR`, which must contain
+at least one `.yaml` or `.yml` rule file. If the variable is unset or the directory
+has no rule files, that scanner is reported MISSING and the scan exits 1. ASH does not
+fall back to downloading the rules.
+
+For the container, build the image with `--offline`. The build downloads each ruleset
+in `--offline-semgrep-rulesets` (space-separated, default `p/ci`) into
+`/deps/.semgrep` and `/deps/.opengrep` and sets both variables:
+
+```bash
+ash build-image --offline --offline-semgrep-rulesets "p/ci p/python"
+```
+
+For a local scan, download the rulesets yourself while online, using the same URL the
+image build uses, and record the download time in `.ash-rules-fetched-at` next to
+them. ASH reads that file to hold the rules to their 30-day bound; without it, it
+falls back to the oldest rule file's modification time, which a copy resets.
+
+```bash
+export SEMGREP_RULES_CACHE_DIR="$HOME/.cache/ash/semgrep"
+export OPENGREP_RULES_CACHE_DIR="$HOME/.cache/ash/opengrep"
+mkdir -p "$SEMGREP_RULES_CACHE_DIR" "$OPENGREP_RULES_CACHE_DIR"
+for ruleset in p/ci; do
+  curl -sSf "https://semgrep.dev/c/${ruleset}" -o "$SEMGREP_RULES_CACHE_DIR/$(basename "$ruleset").yml"
+done
+cp "$SEMGREP_RULES_CACHE_DIR"/*.yml "$OPENGREP_RULES_CACHE_DIR/"
+date -u +%Y-%m-%dT%H:%M:%SZ | tee "$SEMGREP_RULES_CACHE_DIR/.ash-rules-fetched-at" \
+  > "$OPENGREP_RULES_CACHE_DIR/.ash-rules-fetched-at"
+
+ash --mode local --offline
+```
+
+Copy the cache directories to the air-gapped host and export the same two variables
+there. Repeat the download at least every 30 days, or the scan fails as stale.
+
 ## Customizing Scan Phases
 
 ASH v3 executes scans in phases:
