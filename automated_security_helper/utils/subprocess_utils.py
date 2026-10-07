@@ -1,14 +1,12 @@
 """Centralized subprocess execution utilities for ASH."""
 
-import errno
 import logging
 import os
 import platform
 import shutil
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
-import time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union, Any, Literal
+from typing import Dict, List, Optional, Tuple, Union, Any, Literal
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -47,14 +45,6 @@ class TimedOutProcess(subprocess.CompletedProcess):
 # on, and the only error anyone saw was the SARIF file the tool never wrote.
 SPAWN_FAILURE_RETURNCODE = 127
 
-# errnos from exec that a second attempt can clear: ETXTBSY while another process
-# still holds the binary open for writing, EFAULT seen intermittently from exec
-# under emulation. Retried once; anything else fails on the first attempt.
-_SPAWN_RETRY_ERRNOS = frozenset({errno.EFAULT, errno.ETXTBSY})
-_SPAWN_RETRY_DELAY_SECONDS = 0.2
-
-_T = TypeVar("_T")
-
 
 class SpawnFailedProcess(subprocess.CompletedProcess):
     """A CompletedProcess for a command the OS could not start.
@@ -73,25 +63,6 @@ def spawn_failure_message(cmd_str: str, exc: OSError) -> str:
         f"Could not start {cmd_str}: {exc}. The command never ran "
         f"(exit code {SPAWN_FAILURE_RETURNCODE})."
     )
-
-
-def _retry_transient_spawn_failure(spawn: Callable[[], _T], cmd_str: str) -> _T:
-    """Call ``spawn``; if exec failed with a transient errno, call it once more.
-
-    ``spawn`` wraps ``subprocess.run`` or ``subprocess.Popen``. Both raise OSError
-    only when the child could not be started (exec failures are passed back from
-    the child before it runs anything), so retrying cannot run the tool twice.
-    """
-    try:
-        return spawn()
-    except OSError as e:
-        if e.errno not in _SPAWN_RETRY_ERRNOS:
-            raise
-        ASH_LOGGER.warning(
-            f"Could not start {cmd_str} ({e}); retrying once", extra=NO_MARKUP
-        )
-        time.sleep(_SPAWN_RETRY_DELAY_SECONDS)
-        return spawn()
 
 
 def clear_find_executable_cache() -> None:
@@ -266,20 +237,17 @@ def run_command(
         encoding = "utf-8"
 
     try:
-        result = _retry_transient_spawn_failure(
-            lambda: subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                args,
-                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                env=env,
-                capture_output=capture_output,
-                text=text,
-                check=check,
-                shell=shell,
-                timeout=timeout,
-                encoding=encoding,
-                errors=errors,
-            ),
-            cmd_str,
+        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+            args,
+            cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+            env=env,
+            capture_output=capture_output,
+            text=text,
+            check=check,
+            shell=shell,
+            timeout=timeout,
+            encoding=encoding,
+            errors=errors,
         )
 
         # Log command result
@@ -448,20 +416,17 @@ def run_command_with_output_handling(
 
     try:
         try:
-            result = _retry_transient_spawn_failure(
-                lambda: subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                    command,
-                    capture_output=True,
-                    text=True,
-                    shell=shell,
-                    check=False,
-                    cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                    env=env,
-                    encoding=encoding,
-                    errors=errors,
-                    timeout=timeout,
-                ),
-                cmd_str,
+            result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+                command,
+                capture_output=True,
+                text=True,
+                shell=shell,
+                check=False,
+                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+                env=env,
+                encoding=encoding,
+                errors=errors,
+                timeout=timeout,
             )
         except OSError as e:
             # Caught here, around the spawn alone, so an OSError from writing the
@@ -600,19 +565,16 @@ def run_command_stream_output(
         encoding = "utf-8"
 
     try:
-        process = _retry_transient_spawn_failure(
-            lambda: subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                args,
-                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                shell=shell,
-                encoding=encoding,
-                errors=errors,
-            ),
-            cmd_str,
+        process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+            args,
+            cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            shell=shell,
+            encoding=encoding,
+            errors=errors,
         )
 
         try:
