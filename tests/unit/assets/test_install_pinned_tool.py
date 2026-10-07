@@ -403,8 +403,18 @@ class TestTheExecutableDigestIsChecked:
         bin_dir.mkdir()
         (bin_dir / "syft").symlink_to(elsewhere / "syft")
 
+        fetched = []
+        real_download = installer.download
+        monkeypatch.setattr(
+            installer,
+            "download",
+            lambda url, target: fetched.append(url) or real_download(url, target),
+        )
         installed = installer.install("syft", bin_dir, pins)
-        assert not installed.is_symlink()
+        # Asserted as "it was fetched and installed", not as "the result is no longer
+        # a link": what the final move does to a link is platform behavior (Windows
+        # writes through it), while refusing the link as proof is this script's.
+        assert len(fetched) == 1, "a symlink was accepted as the installed binary"
         assert installed.read_bytes() == payload
 
     def test_a_different_binary_at_the_destination_is_replaced(

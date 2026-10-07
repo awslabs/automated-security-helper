@@ -627,9 +627,9 @@ class TestDependenciesInstall:
 
         printed = self.panels.getvalue()
         assert self.ran == [
-            create_pinned_tool_install_command(
-                "grype", "linux", "amd64", str(self.bin_dir)
-            ).args
+            # No destination: built the way the plugin builds it, from ASH_BIN_PATH,
+            # so the path spelling matches on Windows too.
+            create_pinned_tool_install_command("grype", "linux", "amd64").args
         ], printed
         assert "Already present" not in printed
         assert "VERIFIED" not in printed
