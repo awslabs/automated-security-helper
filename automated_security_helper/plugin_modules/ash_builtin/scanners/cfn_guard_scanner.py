@@ -159,9 +159,7 @@ class CfnGuardScannerConfigOptions(ScannerOptionsBase):
 class CfnGuardScannerConfig(ScannerPluginConfigBase):
     name: Literal["cfn-guard"] = "cfn-guard"
     # Opt-in: off until enabled here or named in --scanners. See
-    # ScannerPluginBase.OPT_IN. The ClassVar lets a serialized config leave the
-    # untouched default out (ScannerConfigSegment).
-    OPT_IN: ClassVar[bool] = True
+    # ScannerPluginBase.OPT_IN.
     enabled: bool = False
     options: Annotated[
         CfnGuardScannerConfigOptions,

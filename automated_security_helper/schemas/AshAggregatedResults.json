@@ -1592,6 +1592,32 @@
                 "severity_threshold": null
               }
             },
+            "cfn-guard": {
+              "enabled": false,
+              "name": "cfn-guard",
+              "options": {
+                "rule_sets": [
+                  "wa-Security-Pillar"
+                ],
+                "rules_paths": [],
+                "scan_timeout": 1800,
+                "severity_threshold": null
+              }
+            },
+            "cfn-lint": {
+              "enabled": false,
+              "name": "cfn-lint",
+              "options": {
+                "config_file": null,
+                "ignore_checks": [],
+                "include_checks": [],
+                "install_timeout": 300,
+                "regions": [],
+                "scan_timeout": 1800,
+                "severity_threshold": null,
+                "tool_version": ">=1.43.3,<2.0.0"
+              }
+            },
             "cfn-nag": {
               "enabled": true,
               "name": "cfn-nag",

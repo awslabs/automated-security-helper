@@ -6,9 +6,6 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
-    SerializationInfo,
-    SerializerFunctionWrapHandler,
-    model_serializer,
     model_validator,
 )
 from typing import Annotated, Any, List, Dict, Literal, Optional
@@ -347,10 +344,6 @@ class ConverterConfigSegment(_PluginConfigSegment):
     ] = JupyterConverterConfig()
 
 
-#: Serialization context key that keeps untouched opt-in scanner entries in a dump.
-KEEP_OPT_IN_CONTEXT = "ash_keep_opt_in_scanners"
-
-
 class ScannerConfigSegment(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
@@ -360,50 +353,6 @@ class ScannerConfigSegment(_PluginConfigSegment):
     )
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
-
-    @model_serializer(mode="wrap")
-    def _omit_untouched_opt_in_scanners(
-        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
-    ):
-        """Leave an opt-in scanner out of a dump while its config is the default.
-
-        An opt-in scanner (``ScannerPluginConfigBase.OPT_IN``) that nobody enabled is
-        not part of a run, and its default entry would otherwise appear in every
-        serialized config -- including the one embedded in
-        ``ash_aggregated_results.json`` -- so adding one changed a default scan's
-        output. Only an entry equal to its class default is omitted: one the
-        operator enabled or configured is kept, so a dumped config still round-trips
-        to the same behavior.
-        """
-        data = handler(self)
-        if not isinstance(data, dict):
-            return data
-        # Internal lookups (get_plugin_config) need every entry, including a default
-        # one the operator wrote out explicitly; only output dumps omit them.
-        if isinstance(info.context, dict) and info.context.get(KEEP_OPT_IN_CONTEXT):
-            return data
-        for name in self._untouched_opt_in_fields():
-            field = type(self).model_fields[name]
-            data.pop(field.alias if info.by_alias and field.alias else name, None)
-        return data
-
-    def _untouched_opt_in_fields(self) -> List[str]:
-        """Field names of opt-in scanner configs still equal to their class default."""
-        names = []
-        for name in type(self).model_fields:
-            value = getattr(self, name, None)
-            config_class = type(value)
-            if (
-                getattr(config_class, "OPT_IN", False) is True
-                and value == config_class()
-            ):
-                names.append(name)
-        return names
-
-    def __repr_args__(self):
-        # The same omission for repr(), which some reporter payloads embed.
-        hidden = set(self._untouched_opt_in_fields())
-        return [(k, v) for k, v in super().__repr_args__() if k not in hidden]
 
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
@@ -1194,9 +1143,7 @@ class AshConfig(BaseModel):
         ).lower()
         match plugin_type:
             case "scanner":
-                item_dict = self.scanners.model_dump(
-                    by_alias=True, context={KEEP_OPT_IN_CONTEXT: True}
-                )
+                item_dict = self.scanners.model_dump(by_alias=True)
             case "reporter":
                 item_dict = self.reporters.model_dump(by_alias=True)
             case "converter":
