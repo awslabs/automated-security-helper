@@ -1,0 +1,41 @@
+# Throwaway: runs Unified CI's actionlint job unchanged on a tree that holds a
+# workflow with an unquoted $VAR. The lint step must fail. Not for main.
+name: zz actionlint negative control
+'on':
+  push:
+    branches:
+    - ci-test/actionlint-negative-control
+permissions:
+  contents: read
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      SHELLCHECK_VERSION: 0.11.0
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    - name: Install actionlint and shellcheck, verified against their pinned digests
+      shell: bash
+      run: "set -euo pipefail\nbin=\"${RUNNER_TEMP}/lint-bin\"\nmkdir -p \"${bin}\"\ncd \"${RUNNER_TEMP}\"\ncurl -fsSL --retry 3 -o actionlint.tar.gz \\\n  \"https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\"\
+        \necho \"${ACTIONLINT_SHA256}  actionlint.tar.gz\" | sha256sum -c -\ntar -xzf actionlint.tar.gz -C \"${bin}\" actionlint\ncurl -fsSL --retry 3 -o shellcheck.tar.xz \\\n  \"https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz\"\
+        \necho \"${SHELLCHECK_SHA256}  shellcheck.tar.xz\" | sha256sum -c -\ntar -xJf shellcheck.tar.xz -C \"${bin}\" --strip-components=1 \"shellcheck-v${SHELLCHECK_VERSION}/shellcheck\"\n\"${bin}/actionlint\"\
+        \ -version\n\"${bin}/shellcheck\" --version\necho \"${bin}\" >> \"$GITHUB_PATH\"\n"
+    - name: Self-test -- an unquoted expansion must be reported
+      shell: bash
+      run: "set -uo pipefail\nfixture=\"${RUNNER_TEMP}/actionlint-selftest.yml\"\ncat > \"${fixture}\" <<'YAML'\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo $UNQUOTED\
+        \ >> $GITHUB_ENV\nYAML\nout=\"$(actionlint -no-color -shellcheck=\"$(command -v shellcheck)\" \"${fixture}\" 2>&1)\"\nrc=$?\nprintf '%s\\n' \"${out}\"\nif [ \"${rc}\" -eq 0 ] || ! grep -q 'SC2086'\
+        \ <<< \"${out}\"; then\n  echo \"::error::actionlint did not report SC2086 for an unquoted \\$UNQUOTED (exit ${rc}). It skips the shellcheck rule silently when it cannot run shellcheck, so the lint\
+        \ below would pass without checking any script.\"\n  exit 1\nfi\necho \"self-test ok: the unquoted expansion was reported and actionlint exited ${rc}\"\n"
+    - name: Lint every workflow
+      shell: bash
+      run: "set -uo pipefail\nshopt -s nullglob\nfiles=(.github/workflows/*.yml .github/workflows/*.yaml)\nif [ \"${#files[@]}\" -eq 0 ]; then\n  echo \"::error::no workflow files found; the lint would\
+        \ pass over nothing\"\n  exit 1\nfi\nfailed=0\nfor f in \"${files[@]}\"; do\n  timeout 120 actionlint -color -shellcheck=\"$(command -v shellcheck)\" \"${f}\"\n  rc=$?\n  if [ \"${rc}\" -eq 124\
+        \ ]; then\n    echo \"::error file=${f}::actionlint timed out on ${f}. See the note on this job about scripts larger than a pipe's capacity.\"\n    failed=1\n  elif [ \"${rc}\" -ne 0 ]; then\n \
+        \   failed=1\n  fi\ndone\necho \"linted ${#files[@]} workflow file(s)\"\nexit \"${failed}\"\n"

@@ -1,0 +1,10 @@
+# Throwaway fixture for the actionlint negative control. Never triggered.
+name: zz bad unquoted
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  bad:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo $UNQUOTED_VAR >> $GITHUB_ENV
