@@ -34,6 +34,7 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
+from automated_security_helper.utils.process_env import set_environ
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
     find_executable,
@@ -207,9 +208,6 @@ def install_dependencies(
 
     Binary tools will be installed to the specified bin path (defaults to ~/.ash/bin).
     """
-    # Set the ASH_BIN_PATH environment variable to override the default
-    import os
-
     # Set up logging
     get_logger(
         level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
@@ -221,7 +219,8 @@ def install_dependencies(
     target_bin_path = bin_path or ASH_BIN_PATH
     # Create target_bin_path directory if it doesn't exist
     target_bin_path.mkdir(parents=True, exist_ok=True)
-    os.environ["ASH_BIN_PATH"] = str(target_bin_path)
+    # Set the ASH_BIN_PATH environment variable to override the default
+    set_environ("ASH_BIN_PATH", str(target_bin_path))
 
     console.print(
         Panel(
