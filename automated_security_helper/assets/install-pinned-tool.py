@@ -57,9 +57,12 @@ What was rejected
 Known limitations
 -----------------
 * No install receipt is written. ``read_receipt``/``write_receipt`` live in
-  ``download_utils``, unavailable here for the reason above. A container layer is
-  immutable, so the skip-if-already-installed path a receipt enables has nothing
-  to skip.
+  ``download_utils``, unavailable here for the reason above. None is needed: the
+  extracted executable is checked against its own pinned digest
+  (``ToolAsset.executable_digest``) before it is moved into place, so anything
+  that later finds this binary -- ``ash dependencies install`` does, and then
+  leaves it alone rather than installing a second copy -- can verify it from the
+  table alone, with no on-disk record to trust.
 * Retries are the caller's job. ``with-retry`` wraps the invocation in the
   Dockerfile, which is why nothing here loops. A transient failure must therefore
   leave no partial file behind, which is why the extract goes to a temporary
@@ -229,6 +232,14 @@ def download(url: str, target: Path) -> str:
     return digest.hexdigest()
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 256), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def extract_member(archive: Path, member_name: str, destination: Path) -> None:
     """Extract the single archive member called ``member_name`` to ``destination``.
 
@@ -282,6 +293,23 @@ def install(tool: str, bin_dir: Path, package_root: Path) -> Path:
 
     bin_dir.mkdir(parents=True, exist_ok=True)
     final = bin_dir / asset.install_as
+    # getattr: an older table has no executable digests, and then there is nothing
+    # to check the extracted member against.
+    executable_digest = getattr(asset, "executable_digest", None)
+
+    if (
+        executable_digest
+        and not final.is_symlink()
+        and final.is_file()
+        and os.access(final, os.X_OK)
+    ):
+        if _sha256_file(final) == executable_digest.lower():
+            print(
+                f"{asset.tool} {asset.version} is already at {final} and matches "
+                f"the pinned SHA256 {executable_digest.lower()}; not reinstalling",
+                flush=True,
+            )
+            return final
 
     with tempfile.TemporaryDirectory(prefix="ash-pinned-tool-") as staging_name:
         staging = Path(staging_name)
@@ -305,9 +333,25 @@ def install(tool: str, bin_dir: Path, package_root: Path) -> Path:
         # ToolAsset has no `archive` field is all archives.
         if getattr(asset, "archive", True):
             extract_member(archive, asset.member_name, staged)
+            if executable_digest:
+                extracted = _sha256_file(staged)
+                if extracted != executable_digest.lower():
+                    # The archive matched its pin, so this is a wrong executable digest
+                    # in the table or an archive holding a different binary. Fatal for
+                    # the same reason as the archive check: nothing could later prove
+                    # the installed file is the pinned one.
+                    print(
+                        f"SHA256 mismatch for {asset.member_name} extracted from "
+                        f"{asset.url}: expected {executable_digest.lower()}, "
+                        f"got {extracted}",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(_EXIT_INTEGRITY)
+                print(f"Verified executable SHA256 {extracted}", flush=True)
         else:
             # The asset is the executable itself (opengrep), so the digest just
-            # verified covers the exact bytes being installed.
+            # verified covers the exact bytes being installed, and it is also the
+            # executable digest (ToolAsset.executable_digest falls back to it).
             archive.rename(staged)
         staged.chmod(0o755)
         # Replaced via the staging path so an interrupted run cannot leave a

@@ -59,6 +59,7 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.utils.tool_downloads import (
     _ASSET_TABLES,
     _DIGESTS,
+    _EXECUTABLE_DIGESTS,
     TOOL_VERSIONS,
     downloadable_tools,
     get_tool_asset,
@@ -107,6 +108,25 @@ def _serve(payload: bytes):
         "automated_security_helper.utils.download_utils.urllib.request.urlopen",
         side_effect=lambda *_a, **_k: _FakeResponse(payload),
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_executable_pins():
+    """Run this module's install tests with no executable digests pinned.
+
+    Every fixture here stands a few bytes of shell in for the real grype, and the
+    real ``_EXECUTABLE_DIGESTS`` entry names the real grype's SHA256, so with it in
+    place the extraction check refuses every fixture install -- correctly. It also
+    makes ``find_verified_pinned_executable`` return None before it looks anywhere,
+    so a grype that happens to be installed on the test machine cannot satisfy an
+    install these tests expect to perform.
+
+    What is given up is only coverage this module never claimed: the executable
+    digest check and the skip it enables are tested in
+    tests/unit/utils/test_verified_present_pinned_tool.py, which pins its own.
+    """
+    with patch.object(tool_downloads, "_EXECUTABLE_DIGESTS", {}):
+        yield
 
 
 @pytest.fixture
@@ -1247,8 +1267,24 @@ class TestAssetResolution:
         opens = next(
             i + 1 for i, line in enumerate(source) if line.startswith("_DIGESTS")
         )
-        closes = next(
+        # The range covers _DIGESTS and _EXECUTABLE_DIGESTS, which sits directly
+        # after it so one suppression can cover both tables.
+        executable_opens = next(
+            i + 1
+            for i, line in enumerate(source)
+            if line.startswith("_EXECUTABLE_DIGESTS")
+        )
+        digests_close = next(
             i + 1 for i, line in enumerate(source[opens:], opens) if line == "}"
+        )
+        assert executable_opens - digests_close <= 3, (
+            "_EXECUTABLE_DIGESTS no longer follows _DIGESTS directly; the lines "
+            "between them are inside the suppression and would hide a real secret"
+        )
+        closes = next(
+            i + 1
+            for i, line in enumerate(source[executable_opens:], executable_opens)
+            if line == "}"
         )
 
         config = yaml.safe_load(
@@ -1267,11 +1303,12 @@ class TestAssetResolution:
             f"suppression starts at {entry['line_start']} but _DIGESTS opens at {opens}"
         )
         assert entry["line_end"] == closes, (
-            f"suppression ends at {entry['line_end']} but _DIGESTS closes at {closes}"
+            f"suppression ends at {entry['line_end']} but _EXECUTABLE_DIGESTS "
+            f"closes at {closes}"
         )
 
     def test_digests_are_well_formed_sha256(self):
-        for filename, digest in _DIGESTS.items():
+        for filename, digest in {**_DIGESTS, **_EXECUTABLE_DIGESTS}.items():
             assert len(digest) == 64, f"{filename} digest is not 64 hex chars"
             assert digest == digest.lower(), f"{filename} digest is not lowercase"
             int(digest, 16)
