@@ -1382,6 +1382,8 @@
                   "/fail_on_incomplete_scanners",
                   "/content_db_staleness",
                   "/content_db_staleness_overrides",
+                  "/sandbox",
+                  "/sandbox/**",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1567,6 +1569,15 @@
             }
           },
           "description": "Reporter configurations by name."
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxConfig",
+          "default": {
+            "extra_read_paths": [],
+            "mode": "off",
+            "network_scanners": null
+          },
+          "description": "OS-level sandboxing of scanner subprocesses."
         },
         "scanners": {
           "$ref": "#/$defs/ScannerConfigSegment",
@@ -1757,6 +1768,8 @@
                 "/fail_on_incomplete_scanners",
                 "/content_db_staleness",
                 "/content_db_staleness_overrides",
+                "/sandbox",
+                "/sandbox/**",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1807,6 +1820,8 @@
               "/fail_on_incomplete_scanners",
               "/content_db_staleness",
               "/content_db_staleness_overrides",
+              "/sandbox",
+              "/sandbox/**",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
               "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -15968,6 +15983,8 @@
             "/fail_on_incomplete_scanners",
             "/content_db_staleness",
             "/content_db_staleness_overrides",
+            "/sandbox",
+            "/sandbox/**",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -16063,6 +16080,53 @@
       "additionalProperties": true,
       "properties": {},
       "title": "SPDXReporterConfigOptions",
+      "type": "object"
+    },
+    "SandboxConfig": {
+      "additionalProperties": false,
+      "description": "OS-level sandboxing of scanner subprocesses. Off by default.\n\nSee docs/content/docs/scanner-sandbox.md for the policy each scanner gets.",
+      "properties": {
+        "extra_read_paths": {
+          "default": [],
+          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Extra Read Paths",
+          "type": "array"
+        },
+        "mode": {
+          "default": "off",
+          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. Ignored in container mode, where the container is the boundary.",
+          "enum": [
+            "off",
+            "auto",
+            "bwrap",
+            "firejail",
+            "landlock",
+            "sandbox-exec"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "network_scanners": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network.",
+          "title": "Network Scanners"
+        }
+      },
+      "title": "SandboxConfig",
       "type": "object"
     },
     "SarifReport": {

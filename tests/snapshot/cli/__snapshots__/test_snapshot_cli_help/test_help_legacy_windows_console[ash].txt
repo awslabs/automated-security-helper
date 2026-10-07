@@ -70,6 +70,31 @@
 │                                                                           publishing for scan   │
 │                                                                           usage.                │
 │                                                                           [default: no-offline] │
+│ --sandbox                                            <off|auto|bwrap|fir  Run every scanner     │
+│                                                      ejail|landlock|sand  subprocess in an      │
+│                                                      box-exec>            OS-level sandbox:     │
+│                                                                           read-only source,     │
+│                                                                           writable results      │
+│                                                                           directory only,       │
+│                                                                           private home and      │
+│                                                                           <SYSTEM_TMP>, no network │
+│                                                                           unless the scanner    │
+│                                                                           needs one (never      │
+│                                                                           under --offline).     │
+│                                                                           'auto' picks the best │
+│                                                                           available (Linux:     │
+│                                                                           bwrap, firejail,      │
+│                                                                           landlock; macOS:      │
+│                                                                           sandbox-exec). A      │
+│                                                                           scanner that cannot   │
+│                                                                           be sandboxed as       │
+│                                                                           requested is reported │
+│                                                                           MISSING. Overrides    │
+│                                                                           the config file's     │
+│                                                                           sandbox.mode; default │
+│                                                                           off. Ignored in       │
+│                                                                           container mode. See   │
+│                                                                           docs/content/docs/sc… │
 │ --offline-semgrep-ru…                                <str>                Specify Semgrep       │
 │                                                                           rulesets for use in   │
 │                                                                           ASH offline mode      │
