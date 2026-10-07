@@ -157,6 +157,34 @@ def test_self_test_passes(trailers, tmp_path: Path, monkeypatch) -> None:
     assert trailers.self_test() == 0
 
 
+# Characters a Windows file name cannot hold, plus the separators. ``\`` is a separator
+# there, so a name holding one silently becomes a directory, then fails on the ``"``.
+_NTFS_FORBIDDEN = re.compile(r'[<>:"|?*\\\x00-\x1f]')
+
+
+def test_self_test_writes_only_names_a_windows_checkout_can_hold(
+    trailers, tmp_path: Path, monkeypatch
+) -> None:
+    """The self-test runs on the Windows unit-test legs too.
+
+    A case that needs a path NTFS refuses (``"``, ``\\``, a trailing dot or space)
+    must build that commit from git objects rather than write the name to the working
+    tree. This makes every working-tree write behave as NTFS does, so the Linux and
+    macOS legs catch such a case before it fails only on Windows.
+    """
+    real_write = trailers._Repo.write
+
+    def ntfs_write(self, rel: str, text: str) -> None:
+        for part in PurePosixPath(rel).parts:
+            if _NTFS_FORBIDDEN.search(part) or part.endswith((" ", ".")):
+                raise OSError(f"NTFS cannot hold the name {part!r} in {rel!r}")
+        real_write(self, rel, text)
+
+    monkeypatch.setattr(trailers._Repo, "write", ntfs_write)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    assert trailers.self_test() == 0
+
+
 def test_golden_change_without_trailer_fails(trailers, repo, capsys) -> None:
     # NEGATIVE CONTROL: the check exists to produce this failure.
     path = "tests/snapshot/__snapshots__/test_cli/summary.md"

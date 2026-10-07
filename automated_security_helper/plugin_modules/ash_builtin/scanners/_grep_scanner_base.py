@@ -31,6 +31,7 @@ from automated_security_helper.models.core import (
     ToolExtraArg,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import snapshot_environ
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
 
@@ -131,7 +132,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         Online, the rules come from the registry at scan time and no local copy is read,
         so there is nothing whose age could make the result stale.
         """
-        if not getattr(self.config.options, "offline", False):  # type: ignore[union-attr]
+        if not self._scanner_offline():
             return []
         return super().content_databases_in_use()
 
@@ -167,7 +168,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 ]
             )
 
-        if getattr(opts, "offline", False):
+        if self._scanner_offline():
             self._configure_offline_mode()
         else:
             self._configure_online_mode()
@@ -234,9 +235,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             self.dependency_unavailable_reason = (
                 f"{scanner_label} is running in offline mode but no rule cache was found. "
                 f"Set ${cache_env} to a directory containing .yaml/.yml rule files. "
-                "Run `ash build-image --offline` to pre-warm the cache via Dockerfile, "
-                "or download rulesets manually with `semgrep --config p/ci --dryrun` "
-                "while online and copy to cache."
+                "Run `ash build-image --offline` to pre-warm the cache in the image, "
+                "or, while online, download each ruleset from "
+                "https://semgrep.dev/c/<ruleset> into that directory and record the "
+                "time in .ash-rules-fetched-at. See 'Seeding the semgrep and opengrep "
+                "rule cache' in docs/content/docs/advanced-usage.md."
             )
             ASH_LOGGER.warning(self.dependency_unavailable_reason)
             # No cache `--config` to append, so nothing further to configure. The
@@ -322,5 +325,5 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         final_args = self._resolve_arguments(target=target, results_file=results_file)
 
         env_vars = self.extra_subprocess_env()
-        subprocess_env = {**os.environ, **env_vars} if env_vars else None
+        subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None
         return final_args, results_file, subprocess_env

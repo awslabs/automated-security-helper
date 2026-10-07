@@ -10,9 +10,26 @@ from typing import Dict, List, Optional, Tuple, Union, Any, Literal
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 _find_executable_cache: dict[str, str | None] = {}
+
+
+def _spawn_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """The environment to hand a child: the caller's, or a copy of ours.
+
+    Never None. On Linux, CPython 3.10+ spawns with vfork, and with ``env=None``
+    the child execs against the parent's live ``environ`` array. Scanners run in
+    parallel threads and some of them change the environment while they work
+    (cdk_nag_wrapper's JSII variables), which can free that array under a child
+    that has not reached ``execve`` yet; the spawn then fails with
+    ``[Errno 14] Bad address``. A copy is built into a fresh ``envp`` that no other
+    thread can touch, and the child sees the same variables. See
+    ``utils/process_env.py``.
+    """
+    return env if env is not None else snapshot_environ()
+
 
 # Exit code reported for a command killed at its timeout, matching coreutils
 # ``timeout(1)``. run_command keeps its own -1 for compatibility; see there.
@@ -33,6 +50,36 @@ class TimedOutProcess(subprocess.CompletedProcess):
     """
 
     timed_out = True
+
+
+# Exit code reported for a command that never started: the OS refused to spawn it
+# (missing or non-executable binary, a bad cwd, EFAULT/ETXTBSY from exec). Shells
+# use 127 for "command not found or not runnable" and no scanner accepts it, so a
+# spawn failure is never read as a tool that ran and signalled findings.
+#
+# It used to be 1, the generic failure code. bandit and semgrep both accept 1, so
+# a uv binary that failed to exec with [Errno 14] Bad address let the scan carry
+# on, and the only error anyone saw was the SARIF file the tool never wrote.
+SPAWN_FAILURE_RETURNCODE = 127
+
+
+class SpawnFailedProcess(subprocess.CompletedProcess):
+    """A CompletedProcess for a command the OS could not start.
+
+    The counterpart of ``TimedOutProcess``: ``run_command_with_output_handling``
+    reports the fact as ``spawn_failed: True`` in its dict, and this type keeps it
+    when a caller (``UVToolRunner.run_tool``) converts that dict back.
+    """
+
+    spawn_failed = True
+
+
+def spawn_failure_message(cmd_str: str, exc: OSError) -> str:
+    """The stderr text for a command that never ran."""
+    return (
+        f"Could not start {cmd_str}: {exc}. The command never ran "
+        f"(exit code {SPAWN_FAILURE_RETURNCODE})."
+    )
 
 
 def clear_find_executable_cache() -> None:
@@ -58,6 +105,23 @@ def _bin_path() -> Path:
     """
     from_env = os.environ.get("ASH_BIN_PATH")
     return Path(from_env) if from_env else ASH_BIN_PATH
+
+
+def path_independent_dirs() -> List[Path]:
+    """The directories ``find_executable`` searches whatever PATH says, in order.
+
+    These are the fallbacks after ``shutil.which``: ASH's bin directory, then
+    /usr/local/bin except on Windows. A tool in one of them is found by every
+    later lookup in any environment, which is not true of a tool found only
+    through PATH -- a different shell, a CI job or a cron entry may not have the
+    same PATH. ``download_utils.find_verified_pinned_executable`` relies on that
+    difference, so the list lives here, where ``find_executable`` reads it too,
+    rather than being restated there.
+    """
+    dirs = [_bin_path()]
+    if platform.system().lower() != "windows":
+        dirs.append(Path("/usr/local/bin"))
+    return dirs
 
 
 def _executable_candidate_names(command: str) -> List[str]:
@@ -132,16 +196,7 @@ def find_executable(command: str) -> Optional[str]:
                 _find_executable_cache[command] = found
                 return found
             possibles = [
-                item
-                for item in [
-                    _bin_path().joinpath(cmd),
-                    (
-                        Path("/usr/local/bin").joinpath(cmd)
-                        if platform.system().lower() != "windows"
-                        else None
-                    ),
-                ]
-                if item is not None
+                directory.joinpath(cmd) for directory in path_independent_dirs()
             ]
             for poss in possibles:
                 ASH_LOGGER.debug(f"Checking for executable: {poss}", extra=NO_MARKUP)
@@ -210,7 +265,7 @@ def run_command(
         result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
+            env=_spawn_env(env),
             capture_output=capture_output,
             text=text,
             check=check,
@@ -258,6 +313,19 @@ def run_command(
             stdout=e.stdout or "",
             stderr=e.stderr or f"Command timed out after {e.timeout}s",
         )
+    except OSError as e:
+        # Ahead of the generic branch, whose returncode 1 reads as "ran and
+        # failed" and is an accepted exit code for most scanners.
+        error_msg = spawn_failure_message(cmd_str, e)
+        ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
+        if check:
+            raise
+        return SpawnFailedProcess(
+            args=args,
+            returncode=SPAWN_FAILURE_RETURNCODE,
+            stdout="",
+            stderr=error_msg,
+        )
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}", extra=NO_MARKUP)
         if check:
@@ -293,6 +361,35 @@ def _write_stream_log(
         log_file.write(text)
 
 
+def _spawn_failure_response(
+    cmd_str: str,
+    exc: OSError,
+    results_dir: Optional[Union[str, Path]],
+    class_name: Optional[str],
+    stderr_preference: str,
+) -> Dict[str, Any]:
+    """The ``run_command_with_output_handling`` result for a command that never ran.
+
+    There is no tool output, so the reason is the whole stderr. It is written to
+    the stderr log as a completed run's would be, because scanners default to
+    "write" and read that file to explain a failure.
+    """
+    error_msg = spawn_failure_message(cmd_str, exc)
+    ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
+    try:
+        _write_stream_log(
+            results_dir, class_name, "stderr", stderr_preference, error_msg
+        )
+    except OSError as log_error:
+        ASH_LOGGER.debug(f"Could not write the stderr log: {log_error}")
+    return {
+        "error": str(exc),
+        "returncode": SPAWN_FAILURE_RETURNCODE,
+        "spawn_failed": True,
+        "stderr": error_msg,
+    }
+
+
 def run_command_with_output_handling(
     command: List[str],
     results_dir: Optional[Union[str, Path]] = None,
@@ -325,6 +422,8 @@ def run_command_with_output_handling(
         Dictionary with stdout, stderr, and returncode if requested. A timed-out
         command returns returncode 124 (matching coreutils ``timeout(1)``) and
         ``timed_out: True``, so callers can tell it from the generic failure path.
+        A command the OS could not start returns returncode 127 and
+        ``spawn_failed: True``, with the reason as its stderr.
     """
     # Resolve the full path to the executable if possible
     if command and not shell:
@@ -341,18 +440,25 @@ def run_command_with_output_handling(
         encoding = "utf-8"
 
     try:
-        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-            command,
-            capture_output=True,
-            text=True,
-            shell=shell,
-            check=False,
-            cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
-            encoding=encoding,
-            errors=errors,
-            timeout=timeout,
-        )
+        try:
+            result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+                command,
+                capture_output=True,
+                text=True,
+                shell=shell,
+                check=False,
+                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+                env=_spawn_env(env),
+                encoding=encoding,
+                errors=errors,
+                timeout=timeout,
+            )
+        except OSError as e:
+            # Caught here, around the spawn alone, so an OSError from writing the
+            # stream logs below is not reported as a command that never ran.
+            return _spawn_failure_response(
+                cmd_str, e, results_dir, class_name, stderr_preference
+            )
 
         # Use the actual returncode from the result
         returncode = result.returncode
@@ -487,7 +593,7 @@ def run_command_stream_output(
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
+            env=_spawn_env(env),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -512,6 +618,9 @@ def run_command_stream_output(
                 process.kill()
                 process.wait()
 
+    except OSError as e:
+        ASH_LOGGER.error(spawn_failure_message(cmd_str, e), extra=NO_MARKUP)
+        return SPAWN_FAILURE_RETURNCODE
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
         return 1
@@ -632,7 +741,7 @@ def create_process_with_pipes(
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
+            env=_spawn_env(env),
             stdout=subprocess.PIPE,
             stderr=stderr,
             text=text,

@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import tempfile
 import time
 import warnings
 from datetime import date
@@ -616,3 +617,45 @@ class TestLogTimeColumn:
         assert [line.rstrip() for line in console.file.getvalue().splitlines()] == [
             "[<LOG_TIME>] INFO     expires [10/05/31 17:22:49]"
         ]
+
+
+class TestTempRootsDoNotDependOnTmpdir:
+    """``/tmp`` and the real temp dir mask the same way whatever TMPDIR is.
+
+    The system temp dir used to be registered only as ``tempfile.gettempdir()``. With
+    TMPDIR=/tmp, a quoted ``/tmp/stage2`` masked as ``<SYSTEM_TMP>/stage2``; with any
+    other TMPDIR (a RAM disk, macOS's /var/folders, Windows) it stayed literal, so one
+    snapshot could not match both hosts.
+    """
+
+    @pytest.fixture
+    def elsewhere(self, tmp_path, monkeypatch):
+        temp = tmp_path / "not-tmp"
+        temp.mkdir()
+        monkeypatch.setenv("TMPDIR", str(temp))
+        monkeypatch.setenv("TEMP", str(temp))
+        monkeypatch.setenv("TMP", str(temp))
+        # tempfile caches its answer; clear it so gettempdir() reads the new TMPDIR.
+        monkeypatch.setattr(tempfile, "tempdir", None)
+        assert Path(tempfile.gettempdir()) == temp
+        return temp
+
+    def test_a_literal_tmp_path_masks_with_tmpdir_elsewhere(self, elsewhere):
+        out = default_normalizer().text('wget http://x/stage2 -O /tmp/stage2"')
+        assert out == 'wget http://x/stage2 -O <SYSTEM_TMP>/stage2"'
+
+    def test_the_real_temp_dir_masks_as_the_same_token(self, elsewhere):
+        out = default_normalizer().text(str(elsewhere / "scratch" / "a.txt"))
+        assert out == "<SYSTEM_TMP>/scratch/a.txt"
+
+    def test_macos_private_tmp_masks_too(self, elsewhere):
+        out = default_normalizer().text("/private/tmp/stage2")
+        assert out == "<SYSTEM_TMP>/stage2"
+
+    def test_tmp_inside_a_longer_path_still_survives(self, elsewhere):
+        text = "/var/tmp/a /home/u/tmp/b /tmpfile"
+        assert default_normalizer().text(text) == text
+
+    def test_tmp_path_still_wins_over_the_temp_root(self, elsewhere, tmp_path):
+        out = default_normalizer(tmp_paths=[tmp_path]).text(str(tmp_path / "x"))
+        assert out == "<TMP>/x"

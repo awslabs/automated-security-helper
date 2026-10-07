@@ -385,6 +385,7 @@ ash_config:
         scan_timeout: 1800
         severity: []
         severity_threshold: null
+        sha256: {}
         version: v1.15.1
     semgrep:
       enabled: true

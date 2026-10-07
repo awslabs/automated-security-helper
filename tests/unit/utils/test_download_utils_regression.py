@@ -19,7 +19,9 @@ class TestDownloadUtilsCodeInjection:
         evil_url = "https://example.com/bin'injection"
         dest = tempfile.mkdtemp()
         try:
-            cmd = create_url_download_command(url=evil_url, destination=dest)
+            cmd = create_url_download_command(
+                url=evil_url, destination=dest, expected_sha256="a" * 64
+            )
             # After the fix, the command should use --url/--dest flags or
             # env vars instead of interpolating into a python -c string.
             # No arg should contain the raw URL inside a python source string.
@@ -46,7 +48,9 @@ class TestDownloadUtilsCodeInjection:
         url = "https://example.com/binary"
         dest = tempfile.mkdtemp()
         try:
-            cmd = create_url_download_command(url=url, destination=dest)
+            cmd = create_url_download_command(
+                url=url, destination=dest, expected_sha256="a" * 64
+            )
             # After fix: url and dest should be passed as separate args, not
             # interpolated into a python -c source string
             if "-c" in cmd.args:
@@ -74,7 +78,7 @@ class TestBug60RenameToNone:
         )
 
         cmd = create_url_download_command(
-            url="https://example.com/tool", rename_to=None
+            url="https://example.com/tool", rename_to=None, expected_sha256="a" * 64
         )
         # The last arg should be the Python string "None" that the script
         # checks with `if sys.argv[3] != 'None'`. The bug was that
@@ -89,6 +93,8 @@ class TestBug60RenameToNone:
         )
 
         cmd = create_url_download_command(
-            url="https://example.com/tool", rename_to="my-tool"
+            url="https://example.com/tool",
+            rename_to="my-tool",
+            expected_sha256="a" * 64,
         )
         assert cmd.args[-1] == "my-tool"

@@ -17,7 +17,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    SPAWN_FAILURE_RETURNCODE,
+    find_executable,
+)
 
 from pydantic import Field
 from typing import (
@@ -163,6 +166,40 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             f"Scanner {self.config.name} initialized with source_dir={self.context.source_dir}, output_dir={self.context.output_dir}"
         )
         return super().model_post_init(context)
+
+    def _scanner_offline(self) -> bool:
+        """Whether this scanner runs offline, resolved at the moment it is asked.
+
+        Precedence, highest first:
+
+        1. ASH's offline mode -- ``--offline`` (which sets ``ASH_OFFLINE`` before any
+           scanner is built), ``ASH_OFFLINE`` in the environment, or an image built
+           with ``--offline``. It applies to every scanner and cannot be switched off
+           for one of them.
+        2. The scanner's own ``options.offline: true``, which forces that scanner
+           offline while the rest of the run stays online.
+
+        ``options.offline: false``, the default, means "follow ASH". It does not
+        re-enable the network under ``--offline``: ``ash config init`` and the
+        documented examples write ``offline: false`` for every scanner that has the
+        option, so letting it win would put those configurations online during an
+        air-gapped run.
+
+        Why the global mode is read here and not baked into the option: the option
+        used to default to ``is_offline_mode()``, evaluated when the config object
+        was built. ``ScannerConfigSegment`` builds its default scanner configs when
+        ``ash_config`` is imported, which in local mode is before ``--offline`` sets
+        ``ASH_OFFLINE``, so ``ash scan --offline`` left checkov, grype, syft and the
+        rest with ``offline=False`` and they went to the network. Config round-trips
+        through ``model_dump`` and ``model_validate`` carry that stale value forward,
+        so the only reliable reading is one taken when the scanner uses it.
+        """
+        from automated_security_helper.core.constants import is_offline_mode
+
+        if is_offline_mode():
+            return True
+        options = getattr(self.config, "options", None)
+        return getattr(options, "offline", False) is True
 
     def unsupported_platform_reason(self) -> str | None:
         """Why this scanner cannot run on the current platform, or None if it can.
@@ -413,6 +450,19 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     # has a different convention.
     success_exit_codes: ClassVar[Set[int]] = {0, 1}
 
+    def _exit_code_accepted(self, success_codes: Optional[Set[int]] = None) -> bool:
+        """Whether ``self.exit_code`` says the tool ran to completion.
+
+        ``SPAWN_FAILURE_RETURNCODE`` (127) never does, even for a scanner that
+        lists it: it is what ASH reports for a command the OS could not start,
+        and a tool that never ran found nothing.
+        """
+        if success_codes is None:
+            success_codes = self.success_exit_codes
+        if self.exit_code == SPAWN_FAILURE_RETURNCODE:
+            return False
+        return self.exit_code in success_codes
+
     # Log level used for the empty-target preamble message. Defaults to INFO;
     # bandit overrides to VERBOSE since python-only repos commonly trip it.
     empty_target_log_level: ClassVar[int] = logging.INFO
@@ -463,7 +513,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 arguments=final_args[1:],
                 startTimeUtc=self.start_time,
                 endTimeUtc=self.end_time,
-                executionSuccessful=(self.exit_code in success_codes),
+                executionSuccessful=self._exit_code_accepted(success_codes),
                 exitCode=self.exit_code,
                 exitCodeDescription="\n".join(self.errors) if self.errors else "",
                 workingDirectory=working_dir,
@@ -719,6 +769,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     "longer, or set it to null to leave this scanner unbounded."
                 )
 
+            # Likewise "could not start" rather than the missing results file. The
+            # exit code is 127, which no scanner accepts, so this is reported as
+            # an error either way; this check only makes the message name it.
+            if isinstance(response, dict) and response.get("spawn_failed"):
+                raise ScannerError(
+                    f"{self.__class__.__name__} could not start its tool, so it "
+                    f"produced no results file: {response.get('stderr') or response.get('error')}"
+                )
+
             raw = self._read_results_file(results_file)
             if raw is None:
                 # Empty result file: defer to _handle_empty_results so
@@ -797,7 +856,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         detail = f"{self.__class__.__name__} scan failed: {exc}"
 
-        accepted = self.exit_code in self.success_exit_codes
+        accepted = self._exit_code_accepted()
         verdict = (
             "an accepted exit code for this scanner"
             if accepted

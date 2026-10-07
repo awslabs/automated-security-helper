@@ -1,0 +1,71 @@
+# Weekly check that every tool pinned in tool_downloads.py is at its upstream's
+# latest release.
+#
+# automated_security_helper/utils/tool_downloads.py pins the release binaries ASH
+# downloads (TOOL_VERSIONS), the Python scanners the container image installs with
+# `uv tool install` (the THIRD_PARTY_LICENSES entries with a distribution), the
+# license files fetched at each tool's release commit, and the cfn-nag gem. Dependabot
+# cannot see any of them: they live in a Python dict, not a manifest. Before this
+# workflow nothing reported a pin falling behind, so each stayed where it was set.
+#
+# scripts/check_pinned_tool_versions.py reads the pins from the module, asks GitHub,
+# PyPI and RubyGems for each upstream's latest release, writes the comparison to the
+# job summary, and fails the run when a pin is behind. For each outdated pin the
+# summary lists every value a bump has to change. It opens no issue and no pull
+# request: a bump means re-taking every digest, the license files and the source
+# commit, and that is a person's job, not a bot's.
+#
+# Not a pull_request check, deliberately. Whether a pin is current depends on what
+# upstream released this week, not on the diff under review, so a pull request check
+# would go red on unrelated changes the day a scanner ships a release.
+name: ASH - Pinned Tool Versions
+
+on:
+  schedule:
+    # Mondays 06:17 UTC. Off the hour so it does not queue behind every other
+    # scheduled workflow on GitHub.
+    - cron: "17 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  check-pinned-tool-versions:
+    name: Pinned tools are at their latest upstream release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    # THIRD-PARTY ACTIONS ARE PINNED BY COMMIT SHA, NOT BY TAG. A tag can be moved
+    # to any commit by whoever controls the action's repository; a SHA cannot. The
+    # trailing comment is what Dependabot reads to keep the pin current.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No cache input: the script is standard library only and installs nothing.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Compare pinned versions with upstream
+        env:
+          # Read-only job token, used only to lift the GitHub API's anonymous rate
+          # limit of 60 requests an hour per runner address.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          report="${RUNNER_TEMP}/pinned-tool-versions.md"
+          status=0
+          python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown \
+            > "$report" || status=$?
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+          exit "$status"

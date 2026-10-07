@@ -19,7 +19,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     MultiformatMessageString,
@@ -56,8 +55,8 @@ class NpmAuditScannerConfigOptions(ScannerOptionsBase):
     offline: Annotated[
         bool,
         Field(
-            description="Run in offline mode, using locally cached data",
-            default_factory=is_offline_mode,
+            description="Run in offline mode, using locally cached data. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+            default=False,
         ),
     ]
 
@@ -697,7 +696,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         cmd = [binary, "audit", "--json"]
 
                         # Add offline mode if enabled
-                        if self.config.options.offline:
+                        if self._scanner_offline():
                             cmd.append("--offline")
                             ASH_LOGGER.info(
                                 f"🔄 Running {binary} audit in offline mode"
@@ -730,7 +729,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # image. COREPACK_ENABLE_NETWORK=0 makes corepack fall back
                         # to the cached version rather than reach out.
                         subprocess_env = None
-                        if self.config.options.offline:
+                        if self._scanner_offline():
                             subprocess_env = {
                                 **os.environ,
                                 "COREPACK_ENABLE_NETWORK": "0",

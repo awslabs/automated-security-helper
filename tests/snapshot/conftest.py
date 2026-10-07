@@ -339,6 +339,60 @@ def _merge_new_registrations(
                 real_handlers.setdefault(event, []).append(callback)
 
 
+#: The version each uv-managed tool's probe reports in a snapshot test.
+#:
+#: Distinct per tool and version-shaped, as on a real host. The inventory reduces a
+#: reported version to its version token, and the MCP list_scanners snapshot masks
+#: each scanner's token as its own ``<NAME_VERSION>`` literal, so two tools sharing
+#: a token collapse into one placeholder. Never rendered as itself: no golden records
+#: a probed version (scan goldens carry the fixture's, from
+#: tests/test_data/snapshot_fixture). No value is a substring of another, or of the
+#: ``0.0.0-snapshot`` other fakes in this suite use.
+_PINNED_UV_TOOL_VERSIONS = {
+    "bandit": "9.0.1",
+    "checkov": "9.0.2",
+    "semgrep": "9.0.3",
+}
+_PINNED_UV_TOOL_VERSION_DEFAULT = "9.0.9"
+
+
+def pinned_uv_tool_version(tool_name: str) -> str:
+    """What a uv-managed tool's construction-time version probe reports here."""
+    return _PINNED_UV_TOOL_VERSIONS.get(tool_name, _PINNED_UV_TOOL_VERSION_DEFAULT)
+
+
+@pytest.fixture(autouse=True)
+def _pinned_uv_tool_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer the uv version probe the same way on every host, at once.
+
+    bandit, checkov, semgrep and the jupyter converter run ``uv tool run <tool>
+    --version`` while they are constructed, which every command that loads the
+    plugin registry does. Whether that answers within its 15 s timeout is a fact
+    about the runner: a semgrep probe on a cold uv cache downloads semgrep first.
+    When it does not answer, the scanner logs ``Could not determine UV tool semgrep
+    version`` at WARNING, and that line lands in the snapshot. It did on
+    unit-test (windows-latest, py3.14) in run 37632600207, where
+    test_unknown_tool[linux-amd64] took 25.22 s against well under a second when it
+    passes, and failed test_unknown_tool on all three platforms plus a
+    test_snapshot_errors_scan case. The same probe had already been pinned by hand
+    in tests/snapshot/dependencies/test_snapshot_dependencies_install.py; this makes
+    it the floor for every snapshot instead.
+
+    A test that wants the probe's failure path patches these again through its own
+    ``monkeypatch``, which runs after this fixture and wins.
+    """
+    from automated_security_helper.utils.uv_tool_runner import UVToolRunner
+
+    monkeypatch.setattr(UVToolRunner, "is_uv_available", lambda self: True)
+    monkeypatch.setattr(
+        UVToolRunner,
+        "get_tool_version",
+        lambda self, tool_name, package_name=None, *args, **kwargs: (
+            pinned_uv_tool_version(tool_name)
+        ),
+    )
+
+
 @pytest.fixture(autouse=True)
 def _no_real_aws(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No snapshot may reach AWS with the machine's credentials.

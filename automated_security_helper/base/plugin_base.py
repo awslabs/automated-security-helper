@@ -209,6 +209,10 @@ class PluginBase(UVToolMixin, BaseModel):
     # killed, or None. See scan_timed_out_after.
     _scan_timed_out_after: float | None = PrivateAttr(default=None)
 
+    # Why this plugin's most recent tool could not be started, or None. See
+    # scan_spawn_failure.
+    _scan_spawn_failure: str | None = PrivateAttr(default=None)
+
     # Installation-related properties
     dependencies: Annotated[
         Dict[str, Dict[str, List[PluginDependency]]],
@@ -343,6 +347,34 @@ class PluginBase(UVToolMixin, BaseModel):
         next. ``ScannerExecutor`` calls this before each ``scan()``."""
         self._scan_timed_out_after = None
 
+    @property
+    def scan_spawn_failure(self) -> str | None:
+        """Why this plugin's tool could not be started, or None.
+
+        Set by ``_run_subprocess`` when the OS refused to start the command (exit
+        code 127, ``spawn_failed`` in the response). A tool that never ran
+        produced no results, so ``ScannerExecutor`` reports the scan as ERROR
+        from this, whatever the scanner's ``scan()`` made of the missing output
+        and whichever exit codes it accepts.
+        """
+        return self._scan_spawn_failure
+
+    def clear_scan_spawn_failure(self) -> None:
+        """Forget a recorded spawn failure. ``ScannerExecutor`` calls this before
+        each ``scan()``, as it does ``clear_scan_timeout``."""
+        self._scan_spawn_failure = None
+
+    def _record_spawn_failure(self, response: Dict) -> None:
+        if not isinstance(response, dict) or response.get("spawn_failed") is not True:
+            return
+        self._scan_spawn_failure = str(
+            response.get("stderr") or response.get("error") or "the command never ran"
+        )
+        self._plugin_log(
+            f"could not start its tool: {self._scan_spawn_failure}",
+            level=logging.ERROR,
+        )
+
     def _record_timeout(self, response: Dict, timeout: float | None) -> None:
         """Name the scanner and the limit when its tool was killed at the timeout.
 
@@ -424,6 +456,7 @@ class PluginBase(UVToolMixin, BaseModel):
                     )
                     if uv_result is not None:
                         self._record_timeout(uv_result, timeout)
+                        self._record_spawn_failure(uv_result)
                         return uv_result
                     # If UV execution failed, continue with direct execution fallback
 
@@ -444,6 +477,7 @@ class PluginBase(UVToolMixin, BaseModel):
 
             self._process_command_response(response)
             self._record_timeout(response, timeout)
+            self._record_spawn_failure(response)
 
             return response
 

@@ -2,14 +2,12 @@
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
@@ -26,6 +24,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
@@ -62,8 +61,8 @@ class SyftScannerConfigOptions(ScannerOptionsBase):
     offline: Annotated[
         bool,
         Field(
-            description="Run in offline mode, disabling update checks",
-            default_factory=is_offline_mode,
+            description="Run in offline mode, disabling update checks. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+            default=False,
         ),
     ]
 
@@ -93,8 +92,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self.command = "syft"
         self.tool_type = ScannerToolType.SBOM
 
-        syft_config: SyftScannerConfig = self.config  # type: ignore[assignment]
-        if syft_config.options.offline:
+        if self._scanner_offline():
             self.extra_env.update(
                 {
                     "SYFT_CHECK_FOR_APP_UPDATE": "false",
@@ -268,7 +266,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 target=target,
             )
             subprocess_env = (
-                {**os.environ, **self.extra_env} if self.extra_env else None
+                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
             self._run_subprocess(
                 command=final_args,

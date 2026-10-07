@@ -17,7 +17,9 @@ def syft_scanner_offline(test_plugin_context):
 
 
 @pytest.fixture
-def syft_scanner_online(test_plugin_context):
+def syft_scanner_online(test_plugin_context, monkeypatch):
+    # ASH's offline mode outranks offline=False, so "online" needs ASH online too.
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     config = SyftScannerConfig(options=SyftScannerConfigOptions(offline=False))
     return SyftScanner(context=test_plugin_context, config=config)
 

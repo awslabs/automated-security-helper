@@ -118,6 +118,7 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import set_environ
 
 _logger = ASH_LOGGER
 
@@ -176,7 +177,7 @@ def set_server_transport(name: str) -> None:
     Called once from ``mcp_command`` before the server starts serving.
     """
 
-    os.environ[ASH_MCP_TRANSPORT_ENV] = name
+    set_environ(ASH_MCP_TRANSPORT_ENV, name)
 
 
 def get_server_transport() -> str:

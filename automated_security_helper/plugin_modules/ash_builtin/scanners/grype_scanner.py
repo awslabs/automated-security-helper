@@ -20,7 +20,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Run,
@@ -38,6 +37,7 @@ from automated_security_helper.utils.package_identity import (
     install_path,
 )
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.process_env import snapshot_environ
 
 #: grype configuration keys that remove matches from the report.
 #:
@@ -95,8 +95,8 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
     offline: Annotated[
         bool,
         Field(
-            description="Run in offline mode, disabling database updates and validation",
-            default_factory=is_offline_mode,
+            description="Run in offline mode, disabling database updates and validation. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+            default=False,
         ),
     ]
 
@@ -317,7 +317,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # ASH passes above, asked for that bound; grype puts the environment
         # above the config file, so setting the variable here regardless would
         # silently override their file.
-        if not self.config.options.offline:
+        offline = self._scanner_offline()
+        if not offline:
             self.extra_env.update(_declared_grype_db_bound(os.environ, resolved_config))
 
         # Handle offline mode. Stash offline-mode env vars on the instance
@@ -330,7 +331,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # (utils/content_db_staleness.py), which reads `built` from
         # `grype db status` the same way online and offline, and fails the scan
         # by default once the database is past the registry's bound.
-        if self.config.options.offline:
+        if offline:
             self.extra_env.update(
                 {
                     "GRYPE_DB_VALIDATE_AGE": "false",
@@ -374,7 +375,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             target=f"dir:{target.as_posix()}",
             results_file=results_file,
         )
-        subprocess_env = {**os.environ, **self.extra_env} if self.extra_env else None
+        subprocess_env = (
+            {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+        )
         return final_args, results_file, subprocess_env
 
     def _ensure_runs(self, sarif_report: SarifReport) -> None:

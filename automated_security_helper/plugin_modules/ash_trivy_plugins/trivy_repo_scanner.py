@@ -4,14 +4,12 @@
 import json
 import shlex
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, List
 from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     ToolExtraArg,
@@ -40,6 +38,7 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
@@ -75,8 +74,8 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
     offline: Annotated[
         bool,
         Field(
-            description="Run in offline mode, skipping DB updates and check-update calls",
-            default_factory=is_offline_mode,
+            description="Run in offline mode, skipping DB updates and check-update calls. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+            default=False,
         ),
     ]
 
@@ -188,7 +187,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 )
             )
 
-        if self.config.options.offline:
+        if self._scanner_offline():
             for flag in (
                 "--skip-db-update",
                 "--skip-java-db-update",
@@ -377,7 +376,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
 
             subprocess_env = (
-                {**os.environ, **self.extra_env} if self.extra_env else None
+                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
             self._run_subprocess(
                 command=final_args,
