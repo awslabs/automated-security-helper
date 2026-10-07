@@ -165,6 +165,34 @@ def test_self_test_passes(trailers, tmp_path: Path, monkeypatch) -> None:
     assert trailers.self_test() == 0
 
 
+# Characters a Windows file name cannot hold, plus the separators. ``\`` is a separator
+# there, so a name holding one silently becomes a directory, then fails on the ``"``.
+_NTFS_FORBIDDEN = re.compile(r'[<>:"|?*\\\x00-\x1f]')
+
+
+def test_self_test_writes_only_names_a_windows_checkout_can_hold(
+    trailers, tmp_path: Path, monkeypatch
+) -> None:
+    """The self-test runs on the Windows unit-test legs too.
+
+    The cases for a name git would quote need ``"`` and ``\\`` in a path, which NTFS
+    refuses, so they must build those commits from git objects and never write such a
+    name to the working tree. This makes every working-tree write behave as NTFS does,
+    so the Linux and macOS legs catch a case that would only fail on Windows.
+    """
+    real_write = trailers._Repo.write
+
+    def ntfs_write(self, rel: str, text: str) -> None:
+        for part in PurePosixPath(rel).parts:
+            if _NTFS_FORBIDDEN.search(part) or part.endswith((" ", ".")):
+                raise OSError(f"NTFS cannot hold the name {part!r} in {rel!r}")
+        real_write(self, rel, text)
+
+    monkeypatch.setattr(trailers._Repo, "write", ntfs_write)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    assert trailers.self_test() == 0
+
+
 # A frozen copy of PRE_RULE_EXEMPTIONS' keys and the cutoff. The table may only shrink:
 # a commit made after #717 takes a trailer, not an entry. Removing an entry here and in
 # the script is fine; adding one, or moving the cutoff, fails below.

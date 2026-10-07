@@ -1028,7 +1028,9 @@ class _Repo:
         self.write("README.md", "x\n")
         self.base = self.commit("chore: initial")
 
-    def _git(self, *args: str, env: dict[str, str] | None = None) -> str:
+    def _git(
+        self, *args: str, env: dict[str, str] | None = None, stdin: str | None = None
+    ) -> str:
         # Isolated from the caller's config: no signing prompt, no hooks, a fixed identity.
         return git(
             self.path,
@@ -1042,6 +1044,7 @@ class _Repo:
             "core.hooksPath=/dev/null",
             *args,
             env=env,
+            stdin=stdin,
         )
 
     def write(self, rel: str, text: str) -> None:
@@ -1065,6 +1068,45 @@ class _Repo:
         )
         self._git("commit", "-q", *extra, "-m", message, env=env)
         return self._git("rev-parse", "HEAD").strip()
+
+    def commit_objects(
+        self, files: dict[str, str], message: str, *, parents: list[str] | None = None
+    ) -> str:
+        """Commit ``files`` over the first parent's tree, from git objects alone.
+
+        Neither the index nor the working tree sees these paths, so a name may hold
+        what a Windows file system refuses but git stores and other platforms check
+        out: ``"`` and ``\\``. The current branch moves to the new commit and the
+        working tree stays behind, so do not ``write``/``commit`` in this repo after.
+        """
+        if parents is None:
+            parents = [self._git("rev-parse", "HEAD").strip()]
+        tree = self._git("rev-parse", f"{parents[0]}^{{tree}}").strip()
+        for rel, text in files.items():
+            blob = self._git("hash-object", "-w", "--stdin", stdin=text).strip()
+            tree = self._tree_with(tree, PurePosixPath(rel).parts, blob)
+        parent_args = [arg for p in parents for arg in ("-p", p)]
+        sha = self._git("commit-tree", tree, *parent_args, "-m", message).strip()
+        self._git("update-ref", "HEAD", sha)
+        return sha
+
+    def _tree_with(self, tree: str | None, parts: tuple[str, ...], blob: str) -> str:
+        """``tree`` with the blob at ``parts``, as a new tree object's id."""
+        entries: dict[str, str] = {}  # name -> "<mode> <type> <id>"
+        if tree:
+            for line in self._git("ls-tree", "-z", tree).split("\0"):
+                if line:
+                    meta, name = line.split("\t", 1)
+                    entries[name] = meta
+        name, rest = parts[0], parts[1:]
+        if rest:
+            mode, kind, sub = entries.get(name, "- - -").split()
+            child = self._tree_with(sub if kind == "tree" else None, rest, blob)
+            entries[name] = f"040000 tree {child}"
+        else:
+            entries[name] = f"100644 blob {blob}"
+        listing = "".join(f"{meta}\t{n}\0" for n, meta in entries.items())
+        return self._git("mktree", "-z", stdin=listing).strip()
 
     def violations(self) -> list[str]:
         commits = commits_in_range(self.path, self.base, "HEAD")
@@ -1221,31 +1263,34 @@ def _case_png_and_other_editor(r: _Repo, f: _Fixture) -> list[str]:
 
 
 def _quoted_name(f: _Fixture) -> str:
-    """A golden path git would quote: a non-ASCII letter, a double quote, a backslash."""
+    """A golden path git would quote: a non-ASCII letter, a double quote, a backslash.
+
+    NTFS refuses ``"`` and ``\\``, so the cases below commit it with
+    ``commit_objects`` and never put it in the working tree: the self-test also runs on
+    Windows, and the history the real check reads can hold such a name regardless.
+    """
     return str(PurePosixPath(f.snap).parent / 'caf\u00e9 "q" \\.test.ts.snap')
 
 
 def _case_non_ascii_golden(r: _Repo, f: _Fixture) -> list[str]:
-    r.write(_quoted_name(f), "x\n")
-    r.commit("test: a snapshot whose name git quotes")
+    r.commit_objects({_quoted_name(f): "x\n"}, "test: a snapshot whose name git quotes")
     return [_quoted_name(f)]
 
 
 def _case_non_ascii_golden_in_merge(r: _Repo, f: _Fixture) -> list[str]:
     # An evil merge: the merge commit itself edits a golden file git quotes, so only
-    # the merge (-c) branch of touched_files can see it.
-    r.write(_quoted_name(f), "base\n")
-    r.commit(f"test: seed the quoted name\n\n{GOOD}")
-    r._git("checkout", "-q", "-b", "side")
-    r.write("side.txt", "1\n")
-    r.commit("chore: side")
-    r._git("checkout", "-q", "main")
-    r.write("main.txt", "1\n")
-    r.commit("chore: main")
-    r._git("merge", "-q", "--no-commit", "side")
-    r.write(_quoted_name(f), "edited in the merge\n")
-    r.commit("Merge branch 'side'")
-    return [_quoted_name(f)]
+    # the merge (-c) branch of touched_files can see it. The merge's tree is the clean
+    # merge of both sides (main.txt from main, side.txt from side) plus that edit.
+    name = _quoted_name(f)
+    seed = r.commit_objects({name: "base\n"}, f"test: seed the quoted name\n\n{GOOD}")
+    side = r.commit_objects({"side.txt": "1\n"}, "chore: side", parents=[seed])
+    main = r.commit_objects({"main.txt": "1\n"}, "chore: main", parents=[seed])
+    r.commit_objects(
+        {"side.txt": "1\n", name: "edited in the merge\n"},
+        "Merge branch 'side'",
+        parents=[main, side],
+    )
+    return [name]
 
 
 # Core ASH's own golden files, which the editor fixtures above do not reach.
