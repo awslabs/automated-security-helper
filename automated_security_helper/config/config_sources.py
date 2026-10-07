@@ -510,6 +510,14 @@ def _extends_refs(value: Any, path: Path) -> List[str]:
     return [r.strip() for r in refs]
 
 
+def _base_not_permitted(ref: str, extending: Path) -> ASHConfigInputNotPermittedError:
+    # Names the ref as written, never what it resolves to; see "Base paths".
+    return ASHConfigInputNotPermittedError(
+        f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names a "
+        "file outside the directories this caller may read config from."
+    )
+
+
 def _resolve_base_path(
     ref: str,
     extending: Path,
@@ -538,6 +546,12 @@ def _resolve_base_path(
     # connection to the host it names. A POSIX absolute ref is resolved first,
     # since it may name a location inside the root through a symlinked prefix.
     if not lexical.is_relative_to(root) and (relative or os.name == "nt"):
+        if permit_base is not None:
+            # Under a caller's gate every refused base is reported one way, so
+            # the refusal does not depend on which check caught it -- or on the
+            # platform, since on Windows this check runs before resolve() for
+            # an absolute ref too.
+            raise _base_not_permitted(ref, extending)
         raise ASHConfigSourceError(
             f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names "
             f"{lexical.as_posix()}, which is outside the directory config bases "
@@ -547,10 +561,7 @@ def _resolve_base_path(
     # Ahead of the root check, whose message names the resolved target: this
     # refusal must read the same whether or not that target exists.
     if permit_base is not None and not permit_base(resolved):
-        raise ASHConfigInputNotPermittedError(
-            f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names a "
-            "file outside the directories this caller may read config from."
-        )
+        raise _base_not_permitted(ref, extending)
     if not resolved.is_relative_to(root):
         # `extending` is already resolved, so a lexically normalized candidate
         # that is inside the root got out only by following a symlink.

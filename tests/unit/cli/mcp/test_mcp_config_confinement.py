@@ -144,12 +144,16 @@ class TestExtendsChainUnderAnMcpGrant:
 
     @pytest.mark.parametrize(
         "spelling",
-        ["sibling", "parent", "absolute"],
+        ["sibling", "parent", "beyond_cli_root", "absolute"],
     )
     def test_a_base_outside_the_grant_is_refused(self, layout, spelling):
+        # "beyond_cli_root" leaves #712's root as well as the grant, so it is
+        # caught by the lexical check before resolve(). That is also the path an
+        # absolute ref takes on Windows; both must report the same refusal.
         extends = {
             "sibling": "../outside.yaml",
             "parent": "../../policies/outside.yaml",
+            "beyond_cli_root": "../../elsewhere/far.yaml",
             "absolute": str(layout.far),
         }[spelling]
         cfg = layout.write_config(extends)
