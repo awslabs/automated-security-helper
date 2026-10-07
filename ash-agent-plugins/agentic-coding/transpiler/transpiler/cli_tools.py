@@ -55,28 +55,47 @@ CLI_MCPB = CliTool(
     validate_argv_template=("mcpb", "validate", "{archive}"),
 )
 
+# Amazon Q Developer CLI was renamed Kiro CLI. The last q build is 1.19.7. Since
+# then the release bucket's manifest names only kiro-cli, and kiro-cli ships a
+# `q` script that prints "Q CLI is now Kiro CLI" and runs kiro-cli. So q and
+# kiro-cli install the same pinned archive, and cli_versions.json has a single
+# "kiro-cli" entry that both read.
+#
+# These commands used to fetch `latest/<name>.zip` and run its install.sh with
+# nothing checked, at whatever version `latest/` held that day. Now they fetch
+# the versioned 2.28.0 archive and check it with sha256sum before unzipping.
+# The digest is the one the release manifest (latest/manifest.json) and the
+# archive's .sha256 file both list, and it matches the download.
+# KIRO_CLI_SKIP_SETUP=1 skips install.sh's final `kiro-cli setup`, which exits
+# 1 unattended ("You must run with --no-confirm if unattended") and so failed
+# the install step before any validation could run.
+_KIRO_CLI_INSTALL = (
+    "curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/kirocli.zip "
+    "'https://desktop-release.q.us-east-1.amazonaws.com/2.28.0/kirocli-x86_64-linux.zip' "
+    "&& echo '4d6d20c3ffed99904081a062678b3c1978dc7d68c9f6c530f3f28f163011c8ee  /tmp/kirocli.zip' "
+    "| sha256sum -c - "
+    "&& unzip -q /tmp/kirocli.zip -d /tmp/ "
+    "&& KIRO_CLI_SKIP_SETUP=1 /tmp/kirocli/install.sh"
+)
+
 CLI_Q = CliTool(
     name="q",
     role="both",
+    # install.sh installs kiro-cli but not the archive's `q` script, so that is
+    # copied in from the same verified archive.
     install_cmd=(
-        "curl --proto '=https' --tlsv1.2 -sSf "
-        "'https://desktop-release.q.us-east-1.amazonaws.com/latest/q-x86_64-linux.zip' "
-        "-o /tmp/q.zip && unzip -q /tmp/q.zip -d /tmp/ && /tmp/q/install.sh"
+        _KIRO_CLI_INSTALL + ' && install -m 755 /tmp/kirocli/bin/q "$HOME/.local/bin/q"'
     ),
     # `q agent validate` always exits 0; the smoke_test must grep stderr
     # for `WARNING ` / `Error: `. Helper handles this.
     validate_argv_template=("q", "agent", "validate", "--path", "{agent_json}"),
+    pin_key="kiro-cli",
 )
 
 CLI_KIRO_CLI = CliTool(
     name="kiro-cli",
     role="both",
-    install_cmd=(
-        "curl --proto '=https' --tlsv1.2 -sSf "
-        "'https://desktop-release.q.us-east-1.amazonaws.com/latest/kirocli-x86_64-linux.zip' "
-        "-o /tmp/kirocli.zip && unzip -q /tmp/kirocli.zip -d /tmp/ "
-        "&& /tmp/kirocli/install.sh"
-    ),
+    install_cmd=_KIRO_CLI_INSTALL,
     validate_argv_template=("kiro-cli", "agent", "validate", "{agent_json}"),
 )
 

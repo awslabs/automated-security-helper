@@ -53,8 +53,10 @@ class AmazonqBackend(BaseBackend):
             return {"ok": False, "reason": "agent.json missing `mcpServers` block"}
 
         pins = self._load_cli_pins(ctx.base_dir)
-        if "q" in pins:
-            ver = self._assert_version_pin("q", ["q", "--version"], pins["q"])
+        # q was renamed kiro-cli and reads kiro-cli's pin (CLI_Q.pin_key).
+        pin_key = CLI_Q.resolved_pin_key()
+        if pin_key in pins:
+            ver = self._assert_version_pin("q", ["q", "--version"], pins[pin_key])
             if ver and ver.get("ok") is False:
                 # Don't hard-fail on q version mismatch — Q is in maintenance
                 # mode and Kiro is the active path; just record the mismatch.
