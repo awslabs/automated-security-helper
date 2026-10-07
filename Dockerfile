@@ -290,6 +290,12 @@ COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/inst
 COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
+# Every `install-pinned-tool <tool>` from here on also installs that tool's license and
+# notice files under this directory, read from the release archive it has just
+# verified, and refuses a tool with no license entry. THIRD_PARTY_LICENSES in
+# automated_security_helper/utils/tool_downloads.py says what goes there and why. An
+# ARG, not an ENV: only this stage's build steps read it.
+ARG ASH_THIRD_PARTY_DIR="/usr/share/doc/ash/third-party"
 ENV ASH_PINS_DIR="/ash-pins"
 
 ARG SYFT_VERSION="v1.42.4"
@@ -380,6 +386,12 @@ ARG TRIVY_VERSION="v0.69.3"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
+# opengrep is installed by `ash dependencies install` below and uv by its own
+# installer, so neither passes through install-pinned-tool with an archive to read.
+# Their license files are fetched on their own, each pinned by SHA256 and by the
+# upstream commit of the release the image carries.
+RUN with-retry 'install-pinned-tool --licenses-only opengrep uv'
+
 #
 # Setting default WORKDIR to /src
 #
@@ -419,6 +431,14 @@ ENV _ASH_EXEC_MODE="local"
 #
 RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
 ENV PATH="${ASH_BIN_PATH}:$PATH"
+
+#
+# Every bundled third-party tool has its license files, they match their pins, and
+# they describe the release actually on PATH (each tool's --version is checked).
+# After `ash dependencies install`, which is what puts opengrep in place. Writes
+# ${ASH_THIRD_PARTY_DIR}/index.json, the list of what the image bundles.
+#
+RUN install-pinned-tool --verify-third-party
 
 #
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)

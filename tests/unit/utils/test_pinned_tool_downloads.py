@@ -1225,6 +1225,9 @@ class TestAssetResolution:
             s
             for s in config["global_settings"]["suppressions"]
             if s.get("path", "").endswith("utils/tool_downloads.py")
+            # The license-hash block has its own entry, checked in
+            # tests/unit/utils/test_third_party_licenses.py.
+            and "_THIRD_PARTY_HASHES" not in s.get("reason", "")
         ]
         assert len(entries) == 1, "expected exactly one suppression for tool_downloads"
         entry = entries[0]

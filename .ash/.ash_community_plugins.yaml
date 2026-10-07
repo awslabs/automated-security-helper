@@ -150,6 +150,18 @@ global_settings:
         purpose. A range that drifts after a version bump fails loudly -- the
         findings come back and the scan goes red -- whereas a whole-file suppression
         would silently swallow a real secret added here later.
+    - path: automated_security_helper/utils/tool_downloads.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 421
+      line_end: 432
+      reason: >-
+        False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
+        the commit SHA each bundled tool's release tag points to, and the SHA256 of
+        each license or notice file fetched from that commit. Both are public by
+        construction -- anyone can read them off the upstream repository -- and hex
+        is what an entropy detector is built to flag. Pinned to that block's lines,
+        which hold nothing but those values; tests/unit/utils/test_third_party_licenses.py
+        fails when the block moves and this range does not.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
       line_start: 501
