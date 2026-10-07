@@ -64,6 +64,54 @@
   directories named by `SEMGREP_RULES_CACHE_DIR` and `OPENGREP_RULES_CACHE_DIR` and
   record the download time in `.ash-rules-fetched-at`; see
   [Seeding the semgrep and opengrep rule cache](docs/content/docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
+
+- **OpenGrep is pinned and digest-verified, and nothing installs it unverified.**
+  ASH now pins OpenGrep v1.15.1 with a SHA256 per platform (linux and macOS on
+  amd64 and arm64, Windows on amd64) in `utils/tool_downloads.py`, and
+  `ash dependencies install` verifies the download before it is put on disk,
+  the same way grype, syft and trivy already were. It used to fetch the release
+  asset by URL with no digest, so the binary a scan then trusted was whatever
+  that URL served.
+
+  **A custom `version` now needs its own `sha256`.** ASH carries digests only for
+  the version it pins. To use another one, add the release asset's digest for
+  each platform you install on:
+
+  ```yaml
+  scanners:
+    opengrep:
+      options:
+        version: v1.14.0
+        sha256:
+          linux/amd64: "<64 hex characters>"
+  ```
+
+  GitHub lists a digest for every release asset (`gh api
+  repos/opengrep/opengrep/releases/tags/<version> --jq '.assets[] | [.name,
+  .digest]'`), or run `sha256sum` on the downloaded asset. A custom version with
+  no digest for the platform is refused at install time with a message naming
+  the key; it used to install unverified. A digest that does not match fails
+  the install. The configuration still loads either way, so a host that already
+  has opengrep on PATH can scan with it.
+
+  **`run-ash-security-scan.yml` verifies OpenGrep too, and fails closed.** With
+  `install-opengrep: true` the workflow installs OpenGrep through ASH at the
+  pinned version, and hashes a binary restored from the Actions cache against the
+  pin before putting it on PATH; a copy that does not match is deleted and
+  re-installed. It used to run `gh release download` with no tag and no digest,
+  and trusted a restored copy as long as it was executable. **A caller whose
+  `ash-version` predates this change now fails the Install OpenGrep step**,
+  because that revision has no pin to verify against. Set `ash-version` to a
+  revision that pins OpenGrep (main, or the first release after v3.7.1), or set
+  `install-opengrep: false`.
+
+  **The container image pins uv and no longer runs `get-pip.py`.** uv is
+  installed from its pinned release asset (0.12.23), verified against its SHA256,
+  in both build stages, replacing `curl -LsSf https://astral.sh/uv/install.sh |
+  sh`. The unpinned `get-pip.py` download is gone: it installed a pip the base
+  image already ships, and the image still upgrades pip with `pip install
+  --upgrade pip`.
+
 - **`fail_on_incomplete_scanners` now defaults to `true`.** A scan in which a
   selected scanner did not complete — status `ERROR` (it ran and failed) or `MISSING`
   (its dependencies were unavailable, so it never ran) — exits 1 without anyone

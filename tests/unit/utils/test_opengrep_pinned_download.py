@@ -26,6 +26,10 @@ What is pinned here
   run different opengrep binaries while both claim to be pinned.
 * A version bump that leaves the digests behind is refused by name, not left to
   surface as a SHA256 mismatch that reads like a supply-chain substitution.
+* A configured version other than the pin installs only on a platform whose digest
+  the configuration supplies (``scanners.opengrep.options.sha256``), through the
+  same verified download; without one the install command refuses, and the
+  refusal names the key and how to get the value. No path installs unverified.
 
 Nothing here reaches the network: bytes are served through a patched ``urlopen``.
 """
@@ -35,6 +39,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -44,10 +49,13 @@ from automated_security_helper.core.exceptions import (
     ToolDownloadIntegrityError,
     ToolNotProvisionableError,
 )
+from pydantic import ValidationError
+
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
+    unverified_version_refusal,
 )
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.download_utils import (
@@ -170,24 +178,151 @@ class TestThePluginInstallsThroughThePin:
                 for command in commands:
                     assert "install_binary_from_url" not in " ".join(command.args)
 
-    def test_a_version_configured_away_from_the_pin_keeps_the_url_download(
+
+CUSTOM = "v1.14.0"
+
+
+def _custom_scanner(test_plugin_context, sha256=None):
+    return OpengrepScanner(
+        context=test_plugin_context,
+        config=OpengrepScannerConfig(
+            options=OpengrepScannerConfigOptions(version=CUSTOM, sha256=sha256 or {})
+        ),
+    )
+
+
+def _run_inline(command, tmp_path_dest: Path):
+    """Execute a declared ``python -c`` install command in-process.
+
+    The exact ``-c`` source the installer would run, with its exact argv, so what is
+    tested is the command and not a re-implementation of it; only the subprocess and
+    the socket are absent. The destination argument is replaced with a test path.
+    """
+    args = list(command.args)
+    assert args[1] == "-c"
+    argv = ["-c", *args[3:]]
+    if len(argv) > 2:
+        argv[2] = str(tmp_path_dest)
+    with patch.object(sys, "argv", argv):
+        exec(compile(args[2], "<install-command>", "exec"), {})  # nosec B102
+
+
+class TestACustomVersionNeedsItsOwnDigest:
+    """A version other than the pin installs only with a configured sha256."""
+
+    def test_without_a_digest_every_platform_is_refused(self, test_plugin_context):
+        scanner = _custom_scanner(test_plugin_context)
+        for target_platform, arch in DECLARED_PLATFORMS:
+            argv = scanner.custom_install_commands[target_platform][arch][0].args
+            joined = " ".join(argv)
+            assert "install_binary_from_url" not in joined
+            assert "install_pinned_tool" not in joined
+            assert argv[2] == "import sys; sys.exit(sys.argv[1])"
+
+    def test_the_refusal_names_the_key_and_how_to_get_the_digest(
         self, test_plugin_context
     ):
-        """Documented trade-off, pinned so it cannot change silently.
+        scanner = _custom_scanner(test_plugin_context)
+        message = scanner.custom_install_commands["linux"]["amd64"][0].args[3]
+        assert message == unverified_version_refusal(
+            CUSTOM, "linux", "amd64", "opengrep_manylinux_x86"
+        )
+        assert message == (
+            f"Refusing to install opengrep {CUSTOM} on linux/amd64: ASH pins opengrep "
+            f"{TOOL_VERSIONS['opengrep']}, and the configuration supplies no SHA256 for "
+            "linux/amd64, so the download could not be verified. Either drop "
+            "scanners.opengrep.options.version to use the pinned "
+            f"{TOOL_VERSIONS['opengrep']}, or add the digest of the release asset "
+            "opengrep_manylinux_x86 under scanners.opengrep.options.sha256 as "
+            '"linux/amd64": "<sha256>". Get it from the digest GitHub lists for that '
+            f"asset (gh api repos/opengrep/opengrep/releases/tags/{CUSTOM} --jq "
+            "'.assets[] | select(.name == \"opengrep_manylinux_x86\") | .digest'), or by "
+            "running sha256sum opengrep_manylinux_x86 on the downloaded asset."
+        )
 
-        There is no digest for a version the table does not pin. That path logs
-        that integrity was not verified; refusing it would break configurations
-        that name a version today.
-        """
+    def test_the_refusal_command_exits_non_zero_with_the_message(
+        self, test_plugin_context
+    ):
+        """Run for real: the installer must count it as a failed command."""
+        import subprocess
+
+        scanner = _custom_scanner(test_plugin_context)
+        command = scanner.custom_install_commands["darwin"]["arm64"][0]
+        result = subprocess.run(  # nosec B603 - argv built by the plugin, no shell
+            command.args, capture_output=True, text=True, timeout=60, check=False
+        )
+        assert result.returncode == 1
+        assert "scanners.opengrep.options.sha256" in result.stderr
+        assert "opengrep_osx_arm64" in result.stderr
+
+    def test_a_digest_for_one_platform_does_not_unlock_another(
+        self, test_plugin_context
+    ):
+        scanner = _custom_scanner(test_plugin_context, {"linux/amd64": "a" * 64})
+        linux = scanner.custom_install_commands["linux"]["amd64"][0].args
+        arm = scanner.custom_install_commands["linux"]["arm64"][0].args
+        assert "install_binary_from_url" in linux[2]
+        assert arm[2] == "import sys; sys.exit(sys.argv[1])"
+
+    def test_with_a_digest_it_goes_through_the_verified_download(
+        self, test_plugin_context
+    ):
+        scanner = _custom_scanner(test_plugin_context, {"linux/amd64": "A" * 64})
+        argv = scanner.custom_install_commands["linux"]["amd64"][0].args
+        assert "install_binary_from_url" in argv[2]
+        assert "expected_sha256=sys.argv[3]" in argv[2]
+        assert argv[3].endswith(f"/{CUSTOM}/opengrep_manylinux_x86")
+        assert argv[5] == "a" * 64
+        assert argv[6] == "opengrep"
+
+    def test_a_matching_custom_digest_installs(self, test_plugin_context, tmp_path):
+        digest = hashlib.sha256(PAYLOAD).hexdigest()
+        scanner = _custom_scanner(test_plugin_context, {"linux/amd64": digest})
+        command = scanner.custom_install_commands["linux"]["amd64"][0]
+        bin_dir = tmp_path / "bin"
+        with _serve(PAYLOAD):
+            _run_inline(command, bin_dir)
+        assert (bin_dir / "opengrep").read_bytes() == PAYLOAD
+        assert read_receipt(bin_dir, "opengrep")["sha256"] == digest
+
+    def test_a_mismatched_custom_digest_installs_nothing(
+        self, test_plugin_context, tmp_path
+    ):
+        scanner = _custom_scanner(test_plugin_context, {"linux/amd64": "0" * 64})
+        command = scanner.custom_install_commands["linux"]["amd64"][0]
+        bin_dir = tmp_path / "bin"
+        with (
+            _serve(PAYLOAD),
+            pytest.raises(ToolDownloadIntegrityError, match="SHA256 mismatch"),
+        ):
+            _run_inline(command, bin_dir)
+        assert not (bin_dir / "opengrep").exists()
+        assert read_receipt(bin_dir, "opengrep") is None
+
+    @pytest.mark.parametrize(
+        "sha256",
+        [
+            {"linux/amd64": "not-a-digest"},
+            {"linux/amd64": "a" * 63},
+            {"linux-amd64": "a" * 64},
+            {"windows/arm64": "a" * 64},
+        ],
+    )
+    def test_a_malformed_digest_or_platform_is_a_config_error(self, sha256):
+        with pytest.raises(ValidationError):
+            OpengrepScannerConfigOptions(version=CUSTOM, sha256=sha256)
+
+    def test_the_pinned_version_ignores_a_configured_digest(self, test_plugin_context):
+        """The pin's digests ship with ASH and cannot be overridden from config."""
         scanner = OpengrepScanner(
             context=test_plugin_context,
             config=OpengrepScannerConfig(
-                options=OpengrepScannerConfigOptions(version="v1.14.0")
+                options=OpengrepScannerConfigOptions(sha256={"linux/amd64": "0" * 64})
             ),
         )
         argv = scanner.custom_install_commands["linux"]["amd64"][0].args
-        assert "install_binary_from_url" in argv[2]
-        assert "/v1.14.0/" in argv[3]
+        assert "install_pinned_tool" in argv[2]
+        assert "0" * 64 not in argv
 
 
 class TestTheDigestCheckCanFail:

@@ -310,26 +310,25 @@ class TestIdempotence:
         assert served.called, "a replaced binary was trusted instead of reinstalled"
         assert installed.read_bytes() == PAYLOAD
 
-    def test_an_unpinned_download_is_never_cached(self, tmp_path):
-        """Without a pinned digest there is nothing to be idempotent against.
+    def test_an_unpinned_install_is_refused_before_anything_is_fetched(self, tmp_path):
+        """Without a pinned digest there is nothing to verify, so nothing installs.
 
-        opengrep is in this state: create_url_download_command passes no digest, so
-        its receipt records `sha256: null`. Comparing null to null matches, so a
-        substituted opengrep -- fetched behind only a `startswith("https://")` check
-        -- would be cached and skipped on every later install. Re-downloading is the
-        conservative answer until opengrep gets a pin.
+        This test used to assert that an unpinned install was merely never cached:
+        opengrep had no pin, its receipt recorded `sha256: null`, and re-downloading
+        on every install was the conservative answer. opengrep is pinned now and the
+        unpinned path is refused outright, so the stronger property is the one held.
         """
         bin_dir = tmp_path / "bin"
         url = "https://example.invalid/opengrep"
 
-        with _serve(PAYLOAD):
+        with (
+            _serve(PAYLOAD) as served,
+            pytest.raises(ToolDownloadIntegrityError, match="without a pinned SHA256"),
+        ):
             install_binary_from_url(url, bin_dir, "opengrep")
-        receipt = read_receipt(bin_dir, "opengrep")
-        assert receipt["sha256"] is None, "fixture assumes an unpinned install"
-
-        with _serve(PAYLOAD) as served:
-            install_binary_from_url(url, bin_dir, "opengrep")
-        assert served.called, "an unverified download was cached"
+        assert not served.called, "an unpinned install still reached the network"
+        assert not (bin_dir / "opengrep").exists()
+        assert read_receipt(bin_dir, "opengrep") is None
 
     def test_a_tampered_receipt_does_not_vouch_for_a_tampered_binary(
         self, tmp_path, monkeypatch, fake_grype_release
@@ -585,11 +584,10 @@ class TestArchiveExtraction:
 
 
 class TestUnarchivedDownloadPath:
-    """download_file / install_binary_from_url -- the opengrep path.
+    """download_file / install_binary_from_url -- the unarchived path.
 
-    A separate code path from the archive extraction, and the one that runs
-    unconditionally: opengrep passes no pinned digest, so idempotence never applies
-    and every install re-downloads. It needed the same symlink treatment and did not
+    A separate code path from the archive extraction, taken by an opengrep version
+    the configuration pins itself. It needed the same symlink treatment and did not
     have it.
     """
 
@@ -630,7 +628,10 @@ class TestUnarchivedDownloadPath:
 
         with _serve(PAYLOAD), patch("os.rename", side_effect=_cross_device):
             install_binary_from_url(
-                "https://example.invalid/opengrep", bin_dir, "opengrep"
+                "https://example.invalid/opengrep",
+                bin_dir,
+                "opengrep",
+                expected_sha256=hashlib.sha256(PAYLOAD).hexdigest(),
             )
 
         assert victim.read_bytes() == b"do not touch me", (
@@ -686,7 +687,11 @@ class TestStagingCannotBeRacedOrGuessed:
         for _ in range(2):
             with _serve(PAYLOAD), patch("os.replace", side_effect=capture):
                 install_binary_from_url(
-                    "https://example.invalid/opengrep", bin_dir, "opengrep", force=True
+                    "https://example.invalid/opengrep",
+                    bin_dir,
+                    "opengrep",
+                    force=True,
+                    expected_sha256=hashlib.sha256(PAYLOAD).hexdigest(),
                 )
 
         assert len(names) == 2
@@ -759,7 +764,10 @@ class TestStagingCannotBeRacedOrGuessed:
             pytest.raises(ToolDownloadIntegrityError, match="does not match the bytes"),
         ):
             install_binary_from_url(
-                "https://example.invalid/opengrep", bin_dir, "opengrep"
+                "https://example.invalid/opengrep",
+                bin_dir,
+                "opengrep",
+                expected_sha256=hashlib.sha256(PAYLOAD).hexdigest(),
             )
 
         assert not (bin_dir / "opengrep").exists(), (
@@ -881,7 +889,7 @@ class TestTheVerifiedDigestIsTheOneRecorded:
         """install_binary_from_url writes its own receipt, from its own call site.
 
         Two separate lines re-hashed the target, so fixing one proves nothing about the
-        other. A pin is passed here -- unlike opengrep, which has none -- because without
+        other. A pin is passed here, as every caller now must, because without
         one there is no verified digest for the receipt to disagree with.
         """
         home = tmp_path / "home"

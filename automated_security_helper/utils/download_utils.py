@@ -274,9 +274,7 @@ def _download_verified(
     # follows a link at the destination. The source is a NamedTemporaryFile in
     # TMPDIR and the destination is ASH_BIN_PATH, so a relocated TMPDIR or a
     # `--tmpfs /tmp` container puts that fallback on the normal path rather than an
-    # exotic one. It matters most for an unpinned download -- an opengrep version the
-    # user configured away from the pin, through create_url_download_command -- which
-    # passes no digest and therefore re-downloads on every single install.
+    # exotic one.
     #
     # The pin goes with it. The bytes verified above and the bytes copied below are two
     # separate reads of a file in TMPDIR, so the copy has to be checked against the pin
@@ -663,8 +661,8 @@ def _already_installed(
        not an install.
     2. There is a pinned digest at all. An unpinned download has nothing to be
        idempotent against, so ``sha256: null`` in a receipt would match every later
-       unpinned install and cache a substituted binary forever. An opengrep version
-       configured away from the pin is in that state, so it re-downloads.
+       unpinned install and cache a substituted binary forever. install_binary_from_url
+       now refuses an unpinned install outright; this stays as the second guard.
     3. A receipt exists. A file with no receipt came from somewhere else -- a
        package manager, a nix profile, an ASH that predates receipts -- and must not
        be assumed to be the pinned version.
@@ -734,12 +732,26 @@ def install_binary_from_url(
         url: The URL to download from
         destination: The directory to install the binary to
         rename_to: Optional name to rename the binary to
-        expected_sha256: Pinned SHA256 to verify the download against
+        expected_sha256: Pinned SHA256 to verify the download against. Required:
+            ``None`` is refused before anything is fetched.
         force: Re-download even when a matching receipt exists
 
     Returns:
         Path to the installed binary
+
+    Raises:
+        ToolDownloadIntegrityError: if no digest is given, or the download does not
+            match it.
     """
+    if not expected_sha256:
+        # This used to download, log "integrity was not verified", chmod +x and
+        # install. It was opengrep's only install path, so every opengrep ASH
+        # provisioned was an unverified binary. There is no caller left that has a
+        # reason to want that, so the parameter stays optional only in its type.
+        raise ToolDownloadIntegrityError(
+            f"Refusing to install {url} without a pinned SHA256: ASH installs no "
+            "binary it cannot verify."
+        )
     installed_as = rename_to if rename_to is not None else url.split("/")[-1]
     target = destination.joinpath(installed_as)
 
@@ -1181,9 +1193,9 @@ def create_pinned_tool_install_command(
 ) -> CustomCommand:
     """Build the CustomCommand that installs a pinned tool in a subprocess.
 
-    Mirrors ``create_url_download_command``, which is how an unpinned opengrep
-    version is still provisioned, so the installer keeps one execution model for
-    every tool: plugins declare commands, the CLI runs them and counts them.
+    Mirrors ``create_url_download_command``, which installs an opengrep version the
+    configuration pins itself, so the installer keeps one execution model for every
+    tool: plugins declare commands, the CLI runs them and counts them.
     """
     if destination is None:
         destination = str(current_bin_path()).replace("\\", "/")
@@ -1203,6 +1215,7 @@ def create_url_download_command(
     url: str,
     destination: str | None = None,
     rename_to: str | None = None,
+    expected_sha256: str | None = None,
 ) -> CustomCommand:
     """Create a CustomCommand to download and install a binary from a URL.
 
@@ -1210,10 +1223,29 @@ def create_url_download_command(
         url: The URL to download from
         destination: The directory to install the binary to (defaults to ASH_BIN_PATH)
         rename_to: Optional name to rename the binary to
+        expected_sha256: SHA256 the download must match. Required; the default of
+            ``None`` exists only so a caller that omits it gets this error instead
+            of a TypeError that does not say why.
 
     Returns:
         CustomCommand object
+
+    Raises:
+        ValueError: if ``expected_sha256`` is missing or not 64 hex characters. The
+            command would be refused when it ran anyway; refusing here names the
+            caller that built it.
     """
+    if not expected_sha256 or len(expected_sha256) != 64:
+        raise ValueError(
+            f"create_url_download_command({url!r}) needs expected_sha256, a 64-character "
+            "hex SHA256: ASH installs no binary it cannot verify."
+        )
+    try:
+        int(expected_sha256, 16)
+    except ValueError:
+        raise ValueError(
+            f"expected_sha256 for {url!r} is not hex: {expected_sha256!r}"
+        ) from None
     # Use the provided destination or get the current ASH_BIN_PATH.
     #
     # Resolved from the environment rather than from the imported constant. The
@@ -1233,7 +1265,7 @@ def create_url_download_command(
     script = (
         "import sys; from pathlib import Path; "
         "from automated_security_helper.utils.download_utils import install_binary_from_url; "
-        "install_binary_from_url(sys.argv[1], Path(sys.argv[2]), sys.argv[3] if sys.argv[3] != 'None' else None)"
+        "install_binary_from_url(sys.argv[1], Path(sys.argv[2]), sys.argv[4] if sys.argv[4] != 'None' else None, expected_sha256=sys.argv[3])"
     )
     return CustomCommand(
         args=[
@@ -1242,6 +1274,7 @@ def create_url_download_command(
             script,
             url,
             str(destination),
+            expected_sha256.lower(),
             str(rename_to) if rename_to is not None else "None",
         ],
         shell=False,

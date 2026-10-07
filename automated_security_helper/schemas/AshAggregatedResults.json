@@ -1673,6 +1673,7 @@
                 "scan_timeout": 1800,
                 "severity": [],
                 "severity_threshold": null,
+                "sha256": {},
                 "version": "v1.15.1"
               }
             },
@@ -11381,6 +11382,7 @@
             "scan_timeout": 1800,
             "severity": [],
             "severity_threshold": null,
+            "sha256": {},
             "version": "v1.15.1"
           },
           "description": "Configure Opengrep scanner"
@@ -11492,6 +11494,25 @@
           "default": null,
           "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
+        },
+        "sha256": {
+          "additionalProperties": {
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "type": "string"
+          },
+          "default": {},
+          "description": "SHA256 of the OpenGrep release asset for a custom `version`, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset.",
+          "propertyNames": {
+            "enum": [
+              "linux/amd64",
+              "linux/arm64",
+              "darwin/amd64",
+              "darwin/arm64",
+              "windows/amd64"
+            ]
+          },
+          "title": "Sha256",
+          "type": "object"
         },
         "version": {
           "default": "v1.15.1",
@@ -16200,6 +16221,7 @@
               "scan_timeout": 1800,
               "severity": [],
               "severity_threshold": null,
+              "sha256": {},
               "version": "v1.15.1"
             }
           },

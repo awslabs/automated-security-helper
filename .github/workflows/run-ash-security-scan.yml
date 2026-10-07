@@ -436,7 +436,7 @@ jobs:
           if ! PINNED="$(uv run --no-project --with "${ASH_UVX_SOURCE}" -- python -I -c \
               'import sys; from automated_security_helper.utils.tool_downloads import get_tool_asset; print(get_tool_asset("opengrep", "linux", sys.argv[1]).sha256)' \
               "${ARCH}")" || [ -z "${PINNED}" ]; then
-            echo "::error::this ASH revision (${ASH_UVX_SOURCE}) pins no SHA256 for OpenGrep, so there is nothing to verify the binary against. Refusing to install it unverified; use an ash-version that pins it, or set install-opengrep: false."
+            echo "::error::this ASH revision (${ASH_UVX_SOURCE}) pins no SHA256 for OpenGrep, so there is nothing to verify the binary against, and it will not be installed unverified. To fix: set the ash-version input to a revision that pins OpenGrep (main, or the first release after v3.7.1), or set install-opengrep: false."
             exit 1
           fi
           matches_pin() {
@@ -451,9 +451,14 @@ jobs:
             fi
             rm -rf "$INSTALL_DIR"
             mkdir -p "$INSTALL_DIR"
-            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-              --tool opengrep \
-              --bin-path "$INSTALL_DIR"
+            # From RUNNER_TEMP and without ASH_CONFIG, so the scanned repository's own
+            # .ash.yaml is not loaded. This step installs the version ASH pins and
+            # checks it against that pin below; a config naming another opengrep
+            # version would install that one instead and fail the check.
+            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+              uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+                --tool opengrep \
+                --bin-path "$INSTALL_DIR")
           fi
           if ! matches_pin; then
             rm -rf "$INSTALL_DIR"

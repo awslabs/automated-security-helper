@@ -56,11 +56,11 @@ Known limitations
 * opengrep is pinned for manylinux only. The scanner has always installed the
   manylinux build (``opengrep_scanner`` hardcodes it, with a TODO to detect musl),
   and pinning musllinux too would be two digests for a path nothing takes.
-* opengrep's version is a user-facing scanner option. A configuration naming a
-  version other than the one pinned here has no digest to be checked against, so
-  ``opengrep_scanner`` installs that version through the old unverified download,
-  which logs that integrity was not verified. Refusing it outright would break
-  every configuration that pins opengrep today.
+* opengrep's version is a user-facing scanner option, and this table has digests
+  only for the version it pins. A configuration naming another version must also
+  supply that release's digest per platform in ``scanners.opengrep.options.sha256``;
+  ``opengrep_scanner`` refuses to install a platform it has no digest for, and
+  installs one it does have through the same verified download.
 * opengrep also publishes a cosign signature and certificate beside each asset.
   They are not checked: that needs cosign at install time, and the digest pin
   already fixes the exact bytes, which is a stronger statement than "signed by
