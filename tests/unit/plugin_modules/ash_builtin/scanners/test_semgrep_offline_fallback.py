@@ -79,6 +79,27 @@ def test_semgrep_offline_empty_cache_records_actionable_reason(
     assert "ash build-image --offline" in msg
 
 
+def test_semgrep_offline_missing_cache_guidance_is_a_command_that_seeds_it(
+    test_plugin_context, monkeypatch
+):
+    """The guidance must name a way to fill the cache that actually writes rules.
+
+    It used to suggest ``semgrep --config p/ci --dryrun``, which fetches the ruleset
+    and prints a plan but writes no rule file, so following it left the cache empty
+    and the scanner MISSING on the next run.
+    """
+    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+
+    scanner = _make_scanner(test_plugin_context)
+    scanner.validate_plugin_dependencies()
+    msg = scanner.dependency_unavailable_reason or ""
+
+    assert "--dryrun" not in msg
+    assert "https://semgrep.dev/c/" in msg
+    assert ".ash-rules-fetched-at" in msg
+    assert "advanced-usage.md" in msg
+
+
 def test_semgrep_offline_with_cache_does_not_decline(
     test_plugin_context, monkeypatch, tmp_path
 ):

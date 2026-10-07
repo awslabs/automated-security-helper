@@ -235,9 +235,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             self.dependency_unavailable_reason = (
                 f"{scanner_label} is running in offline mode but no rule cache was found. "
                 f"Set ${cache_env} to a directory containing .yaml/.yml rule files. "
-                "Run `ash build-image --offline` to pre-warm the cache via Dockerfile, "
-                "or download rulesets manually with `semgrep --config p/ci --dryrun` "
-                "while online and copy to cache."
+                "Run `ash build-image --offline` to pre-warm the cache in the image, "
+                "or, while online, download each ruleset from "
+                "https://semgrep.dev/c/<ruleset> into that directory and record the "
+                "time in .ash-rules-fetched-at. See 'Seeding the semgrep and opengrep "
+                "rule cache' in docs/content/docs/advanced-usage.md."
             )
             ASH_LOGGER.warning(self.dependency_unavailable_reason)
             # No cache `--config` to append, so nothing further to configure. The
