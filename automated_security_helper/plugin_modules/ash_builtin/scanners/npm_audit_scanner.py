@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Annotated, ClassVar, Dict, List, Literal, Any
 
@@ -49,6 +50,14 @@ from automated_security_helper.utils.package_identity import (
     install_path,
 )
 from automated_security_helper.utils.subprocess_utils import find_executable
+
+# The top-level key each package manager's audit report always carries, clean or
+# not. An exit status other than 0 without it means the audit did not run to a
+# report. yarn is absent: `yarn audit --json` writes one JSON object per line,
+# which this scanner does not parse, so there is no report key to look for.
+_REPORT_KEY = {"npm": "vulnerabilities", "pnpm": "advisories"}
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 class NpmAuditScannerConfigOptions(ScannerOptionsBase):
@@ -185,6 +194,55 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             entry.version if entry is not None else None,
             install_path(lock_rel, str(node_path)),
         )
+
+    @staticmethod
+    def _audit_failure(
+        binary: str, result: Dict[str, Any], audit_results: Any
+    ) -> str | None:
+        """Why one audit produced no report, or None when it produced one.
+
+        npm exits 1 both for "vulnerabilities found" and for "could not reach
+        the audit endpoint", so the exit code alone cannot tell them apart. When
+        the endpoint fails (connection refused, a 5xx, a 404, a body that is not
+        JSON), `npm audit --json` writes a document with ``message`` and an
+        ``error`` object and no ``vulnerabilities`` key. Other npm errors, such
+        as ENOLOCK, write ``{"error": {"code": ..., "summary": ...}}``. pnpm
+        writes nothing to stdout and its error to stderr. Each of those used to
+        convert to zero findings and report PASSED.
+        """
+        report_key = _REPORT_KEY.get(binary)
+        if isinstance(audit_results, dict) and "error" in audit_results:
+            if report_key is None or report_key not in audit_results:
+                error = audit_results.get("error")
+                parts = [str(audit_results.get("message") or "")]
+                if isinstance(error, dict):
+                    parts += [
+                        str(error.get("code") or ""),
+                        str(error.get("summary") or ""),
+                    ]
+                elif error:
+                    parts.append(str(error))
+                reason = "; ".join(p for p in parts if p) or "no detail given"
+                return f"{binary} audit reported an error: {reason}"
+
+        if report_key is None:
+            return None
+        returncode = result.get("returncode")
+        if returncode is None and "error" in result:
+            return f"{binary} audit did not run: {result['error']}"
+        if returncode in (None, 0):
+            return None
+        if isinstance(audit_results, dict) and report_key in audit_results:
+            return None
+        stderr_lines = [
+            line.strip()
+            for line in _ANSI_ESCAPE.sub(
+                "", str(result.get("stderr") or "")
+            ).splitlines()
+            if line.strip() and "complete log of this run" not in line
+        ]
+        detail = f": {' / '.join(stderr_lines[:3])[:300]}" if stderr_lines else ""
+        return f"{binary} audit exited {returncode} without an audit report{detail}"
 
     @staticmethod
     def _advisory_id(pkg_name: str, via: Dict[str, Any]) -> str:
@@ -656,6 +714,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             # each lockfile's output whole for the SARIF conversion.
             all_results = {}
             per_lock_results: List[tuple[Path, Dict[str, Any]]] = []
+            # Lockfiles whose audit produced no report, with the reason. Any
+            # entry makes the scan an error: those dependencies were not
+            # checked, and reporting the rest as clean would say they were.
+            audit_failures: List[str] = []
             lock_files = [
                 "yarn.lock",
                 "pnpm-lock.yaml",
@@ -751,49 +813,54 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
                         # npm audit returns non-zero exit code when vulnerabilities are found
                         # but we still want to process the output
+                        audit_results: Any = None
                         if result.get("stdout", None):
                             try:
                                 audit_results = json.loads(result.get("stdout", None))
-                                if isinstance(audit_results, dict):
-                                    # A copy: the first document becomes
-                                    # all_results below and is merged into.
-                                    per_lock_results.append(
-                                        (lock_file, copy.deepcopy(audit_results))
-                                    )
-                                # Merge results
-                                if not all_results:
-                                    all_results = audit_results
-                                else:
-                                    # Merge vulnerabilities
-                                    if "vulnerabilities" in audit_results:
-                                        all_results.setdefault(
-                                            "vulnerabilities", {}
-                                        ).update(audit_results["vulnerabilities"])
-                                    # Update metadata
-                                    if "metadata" in audit_results:
-                                        for key, value in audit_results[
-                                            "metadata"
-                                        ].items():
-                                            if key in all_results.get("metadata", {}):
-                                                if isinstance(value, dict):
-                                                    all_results["metadata"][key].update(
-                                                        value
-                                                    )
-                                                elif isinstance(value, (int, float)):
-                                                    all_results["metadata"][key] += (
-                                                        value
-                                                    )
-                                            else:
-                                                all_results.setdefault("metadata", {})[
-                                                    key
-                                                ] = value
                             except json.JSONDecodeError:
                                 ASH_LOGGER.warning(
                                     f"Failed to parse npm audit output for {package_dir}"
                                 )
+                        failure = self._audit_failure(binary, result, audit_results)
+                        if failure is not None:
+                            audit_failures.append(f"{lock_file}: {failure}")
+                            continue
+                        if audit_results is not None:
+                            if isinstance(audit_results, dict):
+                                # A copy: the first document becomes
+                                # all_results below and is merged into.
+                                per_lock_results.append(
+                                    (lock_file, copy.deepcopy(audit_results))
+                                )
+                            # Merge results
+                            if not all_results:
+                                all_results = audit_results
+                            else:
+                                # Merge vulnerabilities
+                                if "vulnerabilities" in audit_results:
+                                    all_results.setdefault(
+                                        "vulnerabilities", {}
+                                    ).update(audit_results["vulnerabilities"])
+                                # Update metadata
+                                if "metadata" in audit_results:
+                                    for key, value in audit_results["metadata"].items():
+                                        if key in all_results.get("metadata", {}):
+                                            if isinstance(value, dict):
+                                                all_results["metadata"][key].update(
+                                                    value
+                                                )
+                                            elif isinstance(value, (int, float)):
+                                                all_results["metadata"][key] += value
+                                        else:
+                                            all_results.setdefault("metadata", {})[
+                                                key
+                                            ] = value
                     except Exception as e:
                         ASH_LOGGER.warning(
                             f"Failed to run npm audit in {package_dir}: {str(e)}"
+                        )
+                        audit_failures.append(
+                            f"{lock_file}: the audit raised {type(e).__name__}: {e}"
                         )
 
             # Save the combined results
@@ -805,6 +872,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
+
+            if audit_failures:
+                summary = (
+                    f"could not audit {len(audit_failures)} lockfile(s), so "
+                    "their dependencies were not checked: " + " | ".join(audit_failures)
+                )
+                if self._scanner_offline():
+                    # Offline, an audit that cannot reach its advisory source is
+                    # the expected outcome, and offline scans have always gone on
+                    # without it. Kept as it was; the warning names what was lost.
+                    ASH_LOGGER.warning(f"npm-audit (offline) {summary}")
+                else:
+                    raise ScannerError(summary)
 
             # Convert npm audit results to SARIF
             if all_results:
