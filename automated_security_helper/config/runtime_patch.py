@@ -39,6 +39,7 @@ import jsonpatch
 from pydantic import ValidationError
 
 from automated_security_helper.config.ash_config import (
+    KEEP_OPT_IN_CONTEXT,
     AshConfig,
     RuntimeOverridesConfig,
 )
@@ -345,7 +346,11 @@ def apply_runtime_patch(
         _check_op_paths(op, allowlist=allowlist)
         _check_value_pattern(op, allowlist=allowlist)
 
-    base_dict = base.model_dump(mode="python", by_alias=False)
+    # Every scanner entry, including an untouched opt-in scanner's, which output
+    # dumps leave out: a patch that enables one has to find it to point into it.
+    base_dict = base.model_dump(
+        mode="python", by_alias=False, context={KEEP_OPT_IN_CONTEXT: True}
+    )
     try:
         patched = jsonpatch.apply_patch(base_dict, patch_ops, in_place=False)
     except jsonpatch.JsonPatchException as exc:

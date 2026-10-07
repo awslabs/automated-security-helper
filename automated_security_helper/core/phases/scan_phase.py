@@ -1185,8 +1185,11 @@ class ScanPhase(EnginePhase):
 
             # Add comprehensive debugging for scanner filtering
             ASH_LOGGER.info("Scanner Filtering Summary:")
+            # Less the opt-in scanners left out above, so an unenabled one does not
+            # change this line in every default scan.
             ASH_LOGGER.info(
-                f"   Total scanner classes found: {len(scanner_classes) if scanner_classes else 0}"
+                "   Total scanner classes found: "
+                f"{len(scanner_classes or []) - len(self._omitted_opt_in_scanners)}"
             )
             ASH_LOGGER.info(
                 f"   Enabled scanners after filtering: {len(enabled_scanner_names)}"

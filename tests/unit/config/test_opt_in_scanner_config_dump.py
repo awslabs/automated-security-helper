@@ -252,3 +252,84 @@ def test_workspace_pins_leave_out_an_untouched_opt_in_scanner():
     assert pins.get(TWIN_KEY) == "9.9"
     enabled, _ = _scanner_state(_config({KEY: {"enabled": True}}))
     assert KEY in enabled
+
+
+def test_a_runtime_patch_can_enable_an_untouched_opt_in_scanner():
+    """MCP inherit-and-patch must be able to point into the hidden entry."""
+    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+    from automated_security_helper.config.runtime_patch import apply_runtime_patch
+
+    patched = apply_runtime_patch(
+        _config(),
+        [{"op": "replace", "path": "/scanners/dummy_optin/enabled", "value": True}],
+        allowlist=RuntimeOverridesConfig(enabled=True, allowed_paths=["/scanners/**"]),
+    )
+    entry = patched.scanners.model_extra["dummy_optin"]
+    enabled = entry["enabled"] if isinstance(entry, dict) else entry.enabled
+    assert enabled is True
+
+
+class EnvOptions(ScannerOptionsBase):
+    mode: Annotated[
+        str,
+        Field(
+            description="A default read from the environment when built",
+            default_factory=lambda: __import__("os").environ.get(
+                "ASH_TEST_OPTIN_MODE", "a"
+            ),
+        ),
+    ]
+
+
+class EnvOptInConfig(ScannerPluginConfigBase):
+    name: Literal["dummy-env"] = "dummy-env"
+    enabled: bool = False
+    options: Annotated[EnvOptions, Field(default_factory=EnvOptions)]
+
+
+class EnvOptInScanner(ScannerPluginBase[EnvOptInConfig]):
+    OPT_IN: ClassVar[bool] = True
+
+    def _execute_scan(self, target, target_type, global_ignore_paths):
+        raise NotImplementedError
+
+
+class SegmentWithEnvDummy(ScannerConfigSegment):
+    dummy_env: Annotated[EnvOptInConfig, Field(alias="dummy-env")] = EnvOptInConfig()
+
+
+def test_a_default_that_reads_the_environment_is_still_recognized(monkeypatch):
+    """The field default was built at import; the entry was built later.
+
+    With the environment changed in between (as offline mode does once the CLI
+    has parsed --offline), the entry equals a freshly built default but not the
+    import-time one, and it must still be left out.
+    """
+    monkeypatch.setenv("ASH_TEST_OPTIN_MODE", "b")
+    segment = SegmentWithEnvDummy.model_validate({"dummy-env": {"enabled": False}})
+    assert segment.dummy_env.options.mode == "b"
+    assert segment.dummy_env != SegmentWithEnvDummy.model_fields["dummy_env"].default
+    assert "dummy-env" not in segment.model_dump(by_alias=True)
+
+
+def test_every_shipped_opt_in_scanner_is_found_from_its_config_class():
+    """The config dump finds an opt-in scanner through its config class's module.
+
+    A shipped opt-in scanner whose config class moved to another module would
+    reappear in every default config dump, so the pairing is pinned here.
+    """
+    from automated_security_helper.core.scanner_inventory import (
+        _loaded_scanner_classes,
+    )
+    from automated_security_helper.core.scanner_opt_in import (
+        _declared_config_class,
+        is_opt_in,
+        is_opt_in_scanner_config,
+    )
+
+    for cls in _loaded_scanner_classes():
+        if is_opt_in(cls):
+            assert is_opt_in_scanner_config(_declared_config_class(cls)), cls
+    # What it would catch: the dummy here is found, the twin is not.
+    assert is_opt_in_scanner_config(_declared_config_class(DummyOptInScanner))
+    assert not is_opt_in_scanner_config(_declared_config_class(NotOptInScanner))

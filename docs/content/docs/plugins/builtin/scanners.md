@@ -64,6 +64,9 @@ disabled and has no options set: the config recorded in
 `ash_aggregated_results.json` and the reports, and the files `ash config init`
 and `ash config get` produce. The JSON schema still documents it, so editors
 complete and validate it. Add the entry yourself to enable or configure it.
+A scanner enabled only through `--scanners` therefore has no entry in the
+recorded config; it ran with its defaults. The "Loaded N scanners" log line
+counts the scanners that are not opt-in.
 
 `ash dependencies install` installs the tools for opt-in scanners as well, and
 labels them as opt-in, so an image or CI runner provisioned with it can run them
