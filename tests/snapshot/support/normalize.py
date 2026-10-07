@@ -13,8 +13,10 @@ What is masked, and why each is safe to mask
 --------------------------------------------
 - ANSI escape sequences and carriage returns. Color is decided by the terminal, not
   by ASH's output, and CRLF is how Windows writes a newline.
-- Absolute paths the run chose: the test's tmp dirs, the system temp dir, the repo
-  checkout, the home directory and the current directory. Each is replaced by a token
+- Absolute paths the run chose: the test's tmp dirs, the system temp dir (whatever
+  TMPDIR says, plus ``/tmp`` and ``/private/tmp`` on every host, so a quoted
+  ``/tmp/...`` masks the same with TMPDIR elsewhere), the repo checkout, the home
+  directory and the current directory. Each is replaced by a token
   (``<TMP>``, ``<REPO>`` ...) in every spelling ASH can emit: native, POSIX,
   JSON-escaped and ``file://`` URI. After the token, backslashes become ``/``, so a
   Windows path and a POSIX path snapshot identically.
@@ -466,6 +468,19 @@ def _host_names() -> frozenset[str]:
 ASH_DEFAULT_CONFIG = ".ash/.ash.yaml"
 
 
+def _system_temp_roots() -> list[PurePath]:
+    """The temp dir this process uses, plus the POSIX defaults output can quote.
+
+    /tmp and macOS's /private/tmp are listed as pure POSIX paths so they mask on every
+    host, including Windows, where code under test may still print them.
+    """
+    return [
+        Path(tempfile.gettempdir()),
+        PurePosixPath("/tmp"),
+        PurePosixPath("/private/tmp"),
+    ]
+
+
 def default_normalizer(
     *, tmp_paths: list[Path] | tuple[Path, ...] = ()
 ) -> SnapshotNormalizer:
@@ -475,7 +490,13 @@ def default_normalizer(
     normalizer = SnapshotNormalizer()
     for tmp in tmp_paths:
         normalizer.add_root(tmp, "TMP")
-    normalizer.add_root(Path(tempfile.gettempdir()), "SYSTEM_TMP")
+    # Every system temp root, not only the one this process happens to use. /tmp was
+    # masked only when TMPDIR pointed there, so a quoted "/tmp/stage2" snapshotted as
+    # <SYSTEM_TMP>/stage2 on one host and stayed literal on a host whose TMPDIR is a RAM
+    # disk, macOS's /var/folders, or Windows' %TEMP%. Longest-first ordering in
+    # _replacements keeps tmp_path (<TMP>) ahead of any of these.
+    for system_temp in _system_temp_roots():
+        normalizer.add_root(system_temp, "SYSTEM_TMP")
     normalizer.add_root(REPO_ROOT, "REPO")
     # pytest run from a subdirectory of the checkout would otherwise mask every repo
     # path under it as <CWD>/..., and run from a parent of the checkout it would mask
@@ -486,7 +507,7 @@ def default_normalizer(
     cwd = Path.cwd().resolve()
     repo = REPO_ROOT.resolve()
     temp_roots = [Path(p).resolve() for p in tmp_paths] + [
-        Path(tempfile.gettempdir()).resolve()
+        Path(p).resolve() for p in _system_temp_roots()
     ]
     if not (
         cwd.is_relative_to(repo)
