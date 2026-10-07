@@ -366,14 +366,14 @@ def run_and_reap(command: List[str]) -> int:
         # Die of the same signal, so ASH sees -N exactly as it would for the
         # scanner run unwrapped. 128+N is the fallback for a signal that cannot be
         # re-raised that way.
-        signum = os.WTERMSIG(status)
+        died_of = os.WTERMSIG(status)
         try:
-            signal.signal(signum, signal.SIG_DFL)
-            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signum})
-            os.kill(os.getpid(), signum)
+            signal.signal(died_of, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, {died_of})
+            os.kill(os.getpid(), died_of)
         except (OSError, ValueError):
             pass
-        return 128 + signum
+        return 128 + died_of
     return os.WEXITSTATUS(status)
 
 
