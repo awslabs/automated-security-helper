@@ -105,6 +105,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 #: is left to ASH's generic SARIF mapping.
 TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 
+#: Characters trivy reads specially in a ``--skip-dirs`` value: the comma separates
+#: list items, and the rest are glob syntax.
+SKIP_DIRS_UNSAFE = frozenset(',"*?[]{}\\')
+
 
 class TrivyScannerConfigOptions(ScannerOptionsBase):
     scanners: Annotated[
@@ -292,7 +296,20 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         if output_inside is not None:
             # ASH's own output under the target holds the converted copies of
             # archives and notebooks, which the converted target scans already.
-            extra.append(f"--skip-dirs={output_inside.as_posix()}")
+            skip = output_inside.as_posix()
+            if any(ch in skip for ch in SKIP_DIRS_UNSAFE):
+                # trivy splits the value on commas and matches it as a glob, so a
+                # name like this would skip the wrong directory or none. Left to
+                # ASH's suppression pass, which drops every finding under the
+                # output directory for every scanner.
+                self._plugin_log(
+                    f"Not passing --skip-dirs for the output directory {skip!r}: "
+                    "trivy would read its name as a list or a glob. Findings under "
+                    "it are still dropped from the results.",
+                    level=logging.DEBUG,
+                )
+            else:
+                extra.append(f"--skip-dirs={skip}")
         # Before the target, which _resolve_arguments places after the options.
         target_index = final_args.index(Path(target).as_posix())
         final_args[target_index:target_index] = extra

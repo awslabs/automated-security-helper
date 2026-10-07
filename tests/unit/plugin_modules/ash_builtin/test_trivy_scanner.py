@@ -605,3 +605,168 @@ def test_a_package_scoped_suppression_matches_only_that_copy(tmp_path):
         ],
     )
     assert miss == set()
+
+
+# --------------------------------------------------------------------------- #
+# trivy-repo through the shared base: what must not change
+# --------------------------------------------------------------------------- #
+
+
+def _repo_scanner(tmp_path: Path, **options) -> TrivyRepoScanner:
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScannerConfigOptions,
+    )
+
+    return TrivyRepoScanner(
+        context=_context(tmp_path),
+        config=TrivyRepoScannerConfig(options=TrivyRepoScannerConfigOptions(**options)),
+    )
+
+
+def test_the_community_plugin_offline_command_line_is_unchanged(tmp_path):
+    """Every flag trivy-repo can emit, in the order it always emitted them."""
+    scanner = _repo_scanner(tmp_path, offline=True, severity_threshold="MEDIUM")
+    args = scanner._resolve_arguments(target="/t", results_file="/r.sarif")
+    assert args == [
+        "trivy",
+        "repository",
+        "--format",
+        "sarif",
+        "--scanners",
+        "vuln,secret,misconfig,license",
+        "--license-full",
+        "--ignore-unfixed",
+        "--disable-telemetry",
+        "--severity",
+        "MEDIUM,HIGH,CRITICAL",
+        "--skip-db-update",
+        "--skip-java-db-update",
+        "--offline-scan",
+        "--skip-check-update",
+        "/t",
+        "--output",
+        "/r.sarif",
+    ]
+
+
+def test_the_community_plugin_reads_only_its_own_offline_option(tmp_path, monkeypatch):
+    """trivy-repo never consulted ASH_OFFLINE after construction; it still does not."""
+    monkeypatch.setenv("ASH_OFFLINE", "YES")
+    scanner = _repo_scanner(tmp_path, offline=False)
+    args = scanner._resolve_arguments(target="/t", results_file="/r.sarif")
+    assert "--skip-db-update" not in args
+
+
+def test_the_community_plugin_still_reads_the_trivy_database(tmp_path):
+    scanner = _repo_scanner(tmp_path)
+    assert [e.name for e in scanner.content_databases_in_use()] == ["trivy-db"]
+
+
+def test_the_community_plugin_scan_still_ties_results_to_package_copies(
+    tmp_path, monkeypatch
+):
+    """trivy-repo's own scan() path, with trivy replaced by the captured report."""
+    from automated_security_helper.base import scanner_plugin
+
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: f"/bin/{name}")
+    scanner = _repo_scanner(tmp_path, offline=False)
+    scanner.dependencies_satisfied = True
+    source = scanner.context.source_dir
+
+    def fake_run(command, results_dir, env=None, timeout=None, **kwargs):
+        out = Path(command[command.index("--output") + 1])
+        out.write_text(VULN_SARIF.read_text(encoding="utf-8"), encoding="utf-8")
+        scanner.exit_code = 0
+        return {"returncode": 0}
+
+    monkeypatch.setattr(scanner, "_pre_scan", lambda **kw: True)
+    monkeypatch.setattr(scanner, "_run_subprocess", fake_run)
+    report = scanner.scan(target=source, target_type="source")
+    lodash = [
+        r for r in report.get_all_results() if r.properties.package_name == "lodash"
+    ]
+    assert len(lodash) == 5
+    assert {r.properties.package_path for r in lodash} == {"node_modules/lodash"}
+    assert {r.properties.scanner_name for r in report.get_all_results()} == {
+        "trivy-repo"
+    }
+
+
+def test_an_assessment_that_cannot_ask_trivy_repo_still_records_trivy_db():
+    """The fallback path names trivy-repo's database too, under trivy-repo."""
+
+    class Broken:
+        config = type("Config", (), {"name": "trivy-repo"})()
+
+        def content_databases_in_use(self):
+            raise RuntimeError("boom")
+
+        def content_database_probe_context(self):  # pragma: no cover
+            raise AssertionError("not reached")
+
+    records = staleness.assess_scanner(
+        Broken(), SarifReport(version="2.1.0", runs=[]), cdb.STALENESS_FAIL
+    )
+    assert [(r.name, r.scanner, r.stale) for r in records] == [
+        ("trivy-db", "trivy-repo", True)
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# Defensive branches
+# --------------------------------------------------------------------------- #
+
+
+# Only names Windows allows: `*` and `?` are refused there, and are covered by
+# SKIP_DIRS_UNSAFE all the same.
+@pytest.mark.parametrize("name", ["out,put", "out[1]", "o{a}"])
+def test_an_output_dir_trivy_would_misread_is_not_passed_as_skip_dirs(tmp_path, name):
+    source = tmp_path / "src"
+    shutil.copytree(DATA / "fixture_repo", source)
+    output = source / name
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(),
+    )
+    scanner = TrivyScanner(
+        context=context,
+        config=TrivyScannerConfig(
+            enabled=True, options=TrivyScannerConfigOptions(offline=False)
+        ),
+    )
+    assert not any(a.startswith("--skip-dirs") for a in _argv(scanner, source))
+
+
+def test_a_rule_index_that_points_at_another_rule_falls_back_to_the_rule_id(
+    tmp_path,
+):
+    raw = _raw()
+    result = next(
+        r for r in raw["runs"][0]["results"] if r["ruleId"] == "CVE-2018-18074"
+    )
+    rules = raw["runs"][0]["tool"]["driver"]["rules"]
+    medium = next(i for i, r in enumerate(rules) if "MEDIUM" in r["properties"]["tags"])
+    result["ruleIndex"] = medium
+    report = _parse(_scanner(tmp_path), raw)
+    found = next(r for r in report.get_all_results() if r.ruleId == "CVE-2018-18074")
+    assert found.properties.issue_severity == "HIGH"
+
+
+def test_two_severity_tags_give_no_verdict(tmp_path):
+    raw = _raw()
+    for rule in raw["runs"][0]["tool"]["driver"]["rules"]:
+        if rule["id"] == "CVE-2018-18074":
+            rule["properties"]["tags"] = ["vulnerability", "LOW", "HIGH"]
+    report = _parse(_scanner(tmp_path), raw)
+    found = next(r for r in report.get_all_results() if r.ruleId == "CVE-2018-18074")
+    assert getattr(found.properties, "issue_severity", None) is None
+
+
+def test_glob_characters_windows_cannot_name_a_directory_with_are_refused_too():
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        SKIP_DIRS_UNSAFE,
+    )
+
+    assert {"*", "?", ","} <= SKIP_DIRS_UNSAFE
