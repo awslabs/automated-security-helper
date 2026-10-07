@@ -1,0 +1,291 @@
+# Scanner sandboxing
+
+ASH runs third-party scanners against code you may not trust. In local mode those
+scanners run as ordinary child processes with your user's full access: they can read
+`~/.ssh`, write anywhere you can, and open network connections. `--sandbox` runs every
+scanner subprocess inside an OS-level sandbox instead. It is off by default.
+
+```bash
+ash scan --sandbox auto            # best sandbox this machine has
+ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
+```
+
+or in `.ash/.ash.yaml`:
+
+```yaml
+sandbox:
+  mode: auto
+```
+
+If you ask for a sandbox and ASH cannot provide one, the affected scanners are recorded
+`MISSING` with the reason, and the scan exits 1 like any other incomplete scan. ASH
+never falls back to running a scanner unsandboxed after you asked for a sandbox.
+
+## Modes
+
+| Mode | Platform | Needs | Notes |
+|------|----------|-------|-------|
+| `off` | any | nothing | Default. Scanners run as plain subprocesses. |
+| `auto` | any | one of the below | Linux: `bwrap`, then `firejail`, then `landlock`. macOS: `sandbox-exec`. Windows: none. |
+| `bwrap` | Linux | `bubblewrap`, unprivileged user namespaces | Recommended. |
+| `firejail` | Linux | `firejail` | Fallback. Weaker filesystem hiding, see below. |
+| `landlock` | Linux 5.13+ | nothing (kernel LSM) | No package to install. Needs Landlock enabled in the kernel's LSM list. |
+| `sandbox-exec` | macOS | ships with macOS | Apple marks `sandbox-exec` deprecated. See risks. |
+
+Container mode (`--mode container`) ignores the setting: the container is the boundary,
+and the image does not need bubblewrap. Nix mode composes with it: the inner scan that
+runs inside `nix develop` applies the sandbox to each scanner.
+
+## What a sandboxed scanner can do
+
+Every scanner subprocess gets the same baseline policy, plus what that scanner declares
+it needs.
+
+- The source directory, and the converted-files directory, are read-only.
+- The scanner's own results directory (`<output>/scanners/<name>/`) is the only
+  persistent location it can write. The rest of the output directory is read-only.
+- `/tmp` and `$HOME` are private and empty. Your real home directory is not visible.
+  The tool locations a scanner needs (ASH's bin directory, uv's tool and Python
+  directories, the scanner's declared caches) are mounted at their usual paths.
+- Tool caches a scanner writes to (uv's cache, grype's and trivy's databases, semgrep's
+  settings) are writable through a throwaway overlay where the backend supports it:
+  writes succeed but are discarded when the scanner exits, so a scanner cannot poison
+  the cache another scanner or a later run reads.
+- System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
+  are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
+  are mounted, and a tool's install prefix only when it is deeper than a directory
+  directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no).
+- The environment is filtered to an allowlist: locale, `PATH`, TLS and proxy settings,
+  ASH's and uv's own variables, and the prefixes the scanner declares (`GRYPE_`,
+  `SEMGREP_`, ...). Within those, a name containing `TOKEN`, `PASSWORD`, `SECRET`,
+  `AUTH`, `CREDENTIAL`, `API_KEY` or `SESSION`, and any value carrying
+  `user:password@` in a URL, is dropped unless the scanner names that exact variable
+  (snyk-code names `SNYK_TOKEN`). Cloud credentials and tokens are not passed in.
+- No local IPC endpoint is reachable: not the Docker or Podman socket, the session
+  bus, `$SSH_AUTH_SOCK`, nor anything else under `/run`.
+- A results directory that is, or is reached through, a symlink is refused (the
+  scanner is recorded `MISSING`). The default output directory is inside the source
+  tree, so the scanned repository could otherwise plant one pointing anywhere.
+- Network: under `--offline` no scanner gets a network. Online, only scanners that
+  declare a network need get one (to fetch a vulnerability database, a rule pack, or
+  audit data from a package registry); everything else runs with no network.
+
+### Per-scanner needs
+
+| Scanner | Network when online | Writable caches | Runtime |
+|---------|--------------------|-----------------|---------|
+| bandit | no | uv cache | uv-managed Python |
+| checkov | no | uv cache | uv-managed Python |
+| semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
+| opengrep | yes (registry rules) | `~/.opengrep` | single binary |
+| grype | yes (database update) | grype database cache | single binary |
+| syft | no | syft cache | single binary |
+| trivy | yes (database update) | trivy cache | single binary |
+| npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
+| cfn-nag | no | none | Ruby and its gem paths |
+| detect-secrets | only when its verification filter is configured | none | ASH's Python, in a worker subprocess |
+| cdk-nag | no | jsii's runtime cache | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
+
+detect-secrets and cdk-nag are Python libraries. They used to run inside the ASH
+process, where no OS sandbox can reach them; they now run in worker subprocesses that
+use the same interpreter and the same library calls, so their findings are unchanged
+and the sandbox wraps them like any other scanner. detect-secrets gets a network only
+if your baseline enables its secret-verification filter, which calls the issuers'
+APIs; under `--offline` it gets none.
+
+To give an extra scanner network access, or take it away:
+
+```yaml
+sandbox:
+  mode: bwrap
+  network_scanners: [grype, trivy]   # replaces the per-scanner defaults
+  extra_read_paths: [/opt/company-ca]
+```
+
+A sandboxed scan does not install tools: installing runs a package's build code and
+writes uv's tool directory, which a sandboxed scanner may only read. Run
+`ash dependencies install` first; a scanner whose tool is missing is recorded
+`MISSING`.
+
+## Threat model
+
+The sandbox is for three cases.
+
+1. A malicious or compromised scanner, plugin, or rule pack. A typosquatted or
+   hijacked package on PyPI or npm, a scanner binary replaced on disk, a community
+   rule pack that runs code.
+2. Scanned content that exploits a scanner. Scanners parse untrusted input and some
+   execute it on purpose: tool configuration files committed to the repository
+   (`trivy.yaml`, `.semgrep.yml`, `.checkov.yaml`, `.npmrc`, `.bandit`) change what a
+   scanner does, plugin systems `eval` code found in the tree, and parser bugs give
+   code execution or path traversal on write.
+3. Exfiltration. Code running in any of the above reading credentials (`~/.ssh`,
+   `~/.aws`, tokens in the environment) and sending them out over the network.
+
+Inside the sandbox such code can read the source tree (it is scanning it), write its
+own results, and, if the scanner is allowed a network, talk to the network. It cannot
+read the rest of your home directory, write outside its results directory, modify the
+source tree, or see environment variables outside the allowlist.
+
+Out of scope:
+
+- ASH itself, its converters, and `git`, which run unsandboxed. ASH is the trusted
+  base. Converters unpack archives and notebooks into the work directory; they are
+  ASH code, not third-party tools. `git` runs only for `--changed-files-only` and
+  workspace planning, never inside a scanner.
+- Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
+  fork until a limit stops it; the existing per-scanner `scan_timeout` bounds how long.
+- A scanner allowed a network under bwrap shares the host's network namespace, which
+  includes abstract Unix sockets bound by host processes.
+- A scanner allowed a network can still send what it can read (the source tree)
+  wherever it likes. The online allowlist is per scanner, not per host. Host-level
+  filtering would need a proxy inside the sandbox, which tools can bypass unless the
+  network namespace forces all traffic through it; that is future work.
+- Results integrity. A compromised scanner can still lie in its own results file.
+- Kernel exploits. All backends share the host kernel.
+
+## Design
+
+### One choke point
+
+Every scanner subprocess is started through one function,
+`utils/subprocess_utils.py:_prepare_spawn`, whether the scanner is run directly, through
+`uv tool run`, or as a version or availability probe. A sandbox scope (a context
+variable holding the policy for that scanner) is active around each scanner's
+construction and dependency check, which is when scanners probe their tools, around
+its scan, and around the content-database check that runs `grype db status`.
+`_prepare_spawn` rewrites the command line for the active backend when a scope is
+active. Probes get a throwaway results directory. A scanner that cannot be sandboxed
+as requested gets a refusing scope, so its probes fail instead of running unsandboxed.
+Spawns made outside any scanner scope (ASH's own `git` calls, converters, the
+container runtime) are unaffected. A sandboxed scan never installs a tool.
+
+`tests/unit/utils/test_sandbox_choke_point.py` fails the build if any module in the
+package outside a short, reasoned exemption list calls `subprocess.run`,
+`subprocess.Popen`, `os.system`, `os.exec*` or the like directly, so a new spawn site
+cannot bypass the choke point. The scope is per thread: a scanner that started a
+process from a thread it created itself would not inherit it. No builtin scanner does.
+
+### Linux: bubblewrap (preferred)
+
+bubblewrap builds an empty root from a tmpfs and mounts into it only what the policy
+lists, in new user, mount, PID, IPC, UTS, cgroup and (when the scanner gets no network)
+network namespaces. It needs no setuid binary on distributions that allow unprivileged
+user namespaces. ASH passes `--die-with-parent` and `--new-session`, so a scanner
+cannot outlive ASH or inject keystrokes into the terminal through `TIOCSTI`.
+
+Ubuntu 23.10 and later restrict unprivileged user namespaces through AppArmor
+(`kernel.apparmor_restrict_unprivileged_userns=1`). Install bubblewrap from the
+distribution (`apt install bubblewrap`); if `bwrap --unshare-all --ro-bind / / true`
+still fails with "setting up uid map: Permission denied", the restriction applies to
+it, and either an AppArmor profile that grants `userns` to `/usr/bin/bwrap` or
+`sysctl kernel.apparmor_restrict_unprivileged_userns=0` lifts it. ASH probes by
+running `bwrap ... true` once per process, so a `bwrap` that is installed but cannot
+start is reported as unavailable with the error it printed, not used and found broken
+mid-scan.
+
+The throwaway cache overlay uses `--overlay-src`/`--tmp-overlay`, which needs
+bubblewrap 0.8 and Linux 5.11. On older systems those caches are mounted read-write
+instead, and the log says so.
+
+### Linux: firejail (fallback)
+
+firejail is a setuid-root binary, which is attack surface of its own (it has had
+privilege-escalation CVEs), and its filesystem model is "everything visible, then
+restrict" rather than "nothing visible, then allow". ASH uses
+`--noprofile --private-dev --nonewprivs --caps.drop=all --seccomp --nogroups`,
+`--dbus-user=none --dbus-system=none`, `--net=none` when the scanner gets no network,
+makes `/` read-only, blacklists the container runtime sockets, `/run/user/<uid>` and
+`$SSH_AUTH_SOCK`, whitelists inside `$HOME` (and `/tmp`) only the paths the policy
+lists, uses `--private-tmp` when the policy lists nothing under `/tmp`, and makes the
+results directory read-write. Paths outside `$HOME` that your user can read remain readable, and scanner
+caches are mounted read-write because firejail has no throwaway overlay. Use bwrap
+when you can.
+
+### Linux: Landlock
+
+Landlock is an unprivileged kernel LSM (Linux 5.13+), so this mode needs nothing
+installed. ASH starts a small wrapper (`utils/sandbox/landlock_exec.py`, standard
+library only) that restricts itself and then `exec`s the scanner:
+
+- Landlock filesystem rules: read and execute beneath the read-only paths, full access
+  beneath the results directory and a fresh private temporary directory (`TMPDIR`).
+  Nothing else, including `$HOME` and `/tmp`, is reachable.
+- Sockets: Landlock does not mediate `connect()` on a Unix socket path, so a scanner
+  that could create a Unix socket could talk to the Docker socket or the session bus
+  whatever the filesystem rules say. A seccomp filter therefore refuses
+  `socket(AF_UNIX)` always (`socketpair`, used for pipes, still works), refuses
+  `socket()` for every family when the scanner has no network, which blocks UDP and
+  DNS too, and refuses `io_uring_setup`, because io_uring can create sockets without
+  the `socket` syscall. Landlock's own network rules (ABI 4, Linux 6.7) cover only TCP
+  and are added as a second layer.
+- The wrapper starts a new session before it execs the scanner, so the scanner has no
+  controlling terminal to inject keystrokes into.
+- `/dev/shm` is the host's and is writable, because POSIX semaphores live there and
+  multiprocessing needs them (detect-secrets scans in a process pool). Landlock cannot
+  make it private. A scanner can therefore leave files in, or read other processes'
+  shared memory objects of your user from, `/dev/shm`. bwrap gives each scanner its
+  own.
+- `io_uring_setup` fails with ENOSYS rather than EACCES, so runtimes that use io_uring
+  when it exists (semgrep-core) fall back to ordinary syscalls instead of aborting.
+- ABI 6 (Linux 6.12) scoping blocks abstract Unix sockets and signals to processes
+  outside the sandbox. Below ABI 6 those are not restricted, and the log says so.
+- `/proc` is readable, but Landlock denies `ptrace`-mode access from a sandboxed
+  process to processes outside its domain, so `/proc/<ASH's pid>/environ` cannot be
+  read.
+
+Landlock cannot mount an empty `/tmp` or `$HOME` over the real ones; it denies them
+instead. `TMPDIR` and `HOME` point at a fresh private directory, and each path the
+policy grants under the real home appears in the private one as a symlink to the real
+path, so tools that write settings under `~` keep working. Granted caches are writable
+in place rather than through an overlay. A tool that hard-codes `/tmp` fails rather
+than escaping.
+
+### macOS: sandbox-exec
+
+`sandbox-exec` applies a Seatbelt (SBPL) profile. ASH generates one per scanner:
+deny by default, allow process creation and Mach service lookup, read everywhere
+except the home directory and the shared temporary directories, read the policy's
+tool paths inside home, write only to the results directory and a private `TMPDIR`.
+With no network, no socket of any kind is allowed. With a network, IP sockets are
+allowed and Unix sockets are not, except the resolver's (`mDNSResponder`), so Docker
+Desktop's socket and the launchd SSH agent stay out of reach. The scanner starts in a
+new session, with no controlling terminal.
+
+Mach service lookup is allowed without a filter, because system libraries look up a
+long and version-dependent list of services and a missing one fails in ways that are
+hard to diagnose. A scanner can therefore talk to launchd services the user's session
+exposes (the pasteboard, for example). That is a known gap of this backend.
+
+Risk to record: Apple has marked `sandbox-exec` deprecated since macOS 10.13 and
+documents SBPL as private. It still works on current macOS and is what Apple's own
+tools and several other developer tools use, but a future macOS could remove or change
+it without notice. ASH probes it at startup like every other backend, so removal would
+show up as "sandbox-exec unavailable" and `MISSING` scanners, not as an unsandboxed
+scan.
+
+### Windows
+
+There is no Windows backend. `--sandbox auto` on Windows finds nothing and the
+scanners are recorded `MISSING`. Run ASH under WSL2 and use `bwrap` there, or use
+container mode. A native backend would use an AppContainer or a restricted token plus
+a job object; that is a larger piece of work and is not in this release.
+
+### Why not gVisor or nsjail by default
+
+gVisor (`runsc`) gives the strongest isolation here because scanner syscalls go to a
+user-space kernel, but it is a container runtime: it wants an OCI bundle and root or a
+rootless setup, which is what container mode already provides. nsjail is close to
+bubblewrap in capability but is not packaged on most distributions and is configured
+through protobuf files; bubblewrap is packaged everywhere (Flatpak depends on it) and
+its command line maps one to one onto the policy above.
+
+## Verifying it
+
+`tests/integration/sandbox/` holds a malicious fixture scanner that tries to read a
+file outside the source tree (a planted `~/.ssh/id_rsa`), write outside its results
+directory, open a network socket under `--offline`, and modify the source tree. CI runs
+it under each backend available on the runner. Each attempt must fail with the sandbox
+on, and succeed with `--sandbox off`, which is the negative control that proves the
+attempts are real. CI also runs every builtin scanner under bubblewrap against the
+snapshot fixture and asserts the findings match the unsandboxed run.

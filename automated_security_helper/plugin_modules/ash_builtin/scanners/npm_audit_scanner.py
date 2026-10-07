@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated, ClassVar, Dict, List, Literal, Any
 
 from pydantic import Field, model_validator
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -101,6 +102,12 @@ class NpmAuditScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     """NpmAuditScanner implements IaC scanning using `npm/yarn/pnpm audit` based on the lock files discovered in the source directory."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        network=True,
+        cache_paths=("~/.npm",),
+        env_prefixes=("npm_config_", "NPM_CONFIG_"),
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 

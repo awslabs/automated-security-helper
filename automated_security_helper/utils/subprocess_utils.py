@@ -5,12 +5,16 @@ import os
 import platform
 import shutil
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
+import weakref
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any, Literal
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union, Any, Literal
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.process_env import snapshot_environ
+
+if TYPE_CHECKING:
+    from automated_security_helper.utils.sandbox.backends import SpawnPlan
 
 
 _find_executable_cache: dict[str, str | None] = {}
@@ -211,6 +215,56 @@ def find_executable(command: str) -> Optional[str]:
     return None
 
 
+def _prepare_spawn(
+    args: Union[List[str], str],
+    env: Optional[Dict[str, str]],
+    cwd: Optional[Union[str, Path]],
+    shell: bool,
+) -> "Optional[SpawnPlan]":
+    """The scanner sandbox's rewrite of this spawn, or None when none applies.
+
+    Every helper in this module calls this immediately before starting a process, which
+    makes it the one place a scanner subprocess is sandboxed (see
+    ``utils/sandbox/scope.py``). Outside a scanner's sandbox scope it returns None and
+    the spawn is exactly what it was.
+    """
+    from automated_security_helper.utils.sandbox.scope import (
+        SandboxUnavailable,
+        active_scope,
+        prepare_spawn,
+    )
+
+    if active_scope() is None:
+        return None
+    if shell or isinstance(args, str):
+        # No builtin scanner spawns through a shell. Refused rather than wrapped as
+        # `sh -c`, so that a string command cannot reach the sandbox unparsed.
+        raise SandboxUnavailable(
+            "a scanner tried to start a shell command, which the sandbox does not wrap"
+        )
+    return prepare_spawn(args, env, cwd)
+
+
+def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
+    """``subprocess.run`` through the scanner sandbox choke point.
+
+    Same arguments, same return value, same exceptions as ``subprocess.run``, for the
+    call sites that rely on its exact semantics (``check=True`` raising,
+    ``TimeoutExpired`` propagating) and so cannot move to :func:`run_command`.
+    """
+    plan = _prepare_spawn(
+        args, kwargs.get("env"), kwargs.get("cwd"), bool(kwargs.get("shell", False))
+    )
+    if plan is None:
+        kwargs["env"] = _spawn_env(kwargs.get("env"))
+        return subprocess.run(args, **kwargs)  # nosec B603 - callers pass list argv
+    kwargs["env"] = _spawn_env(plan.env)
+    try:
+        return subprocess.run(plan.argv, **kwargs)  # nosec B603 - sandbox-built argv
+    finally:
+        plan.run_cleanup()
+
+
 def run_command(
     args: List[str],
     cwd: Optional[Union[str, Path]] = None,
@@ -261,7 +315,11 @@ def run_command(
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    sandbox_plan = None
     try:
+        sandbox_plan = _prepare_spawn(args, env, cwd, shell)
+        if sandbox_plan is not None:
+            args, env = sandbox_plan.argv, sandbox_plan.env
         result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
@@ -337,6 +395,9 @@ def run_command(
             stdout="",
             stderr=f"Error: {str(e)}",
         )
+    finally:
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
 
 
 def _write_stream_log(
@@ -439,16 +500,24 @@ def run_command_with_output_handling(
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    sandbox_plan = None
     try:
         try:
+            # Inside the spawn's own try: a sandbox that cannot be provided raises
+            # SandboxUnavailable, an OSError, which is reported like any command
+            # that could not start, and never falls through to an unsandboxed run.
+            spawn_command, spawn_env = command, env
+            sandbox_plan = _prepare_spawn(command, env, cwd, shell)
+            if sandbox_plan is not None:
+                spawn_command, spawn_env = sandbox_plan.argv, sandbox_plan.env
             result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                command,
+                spawn_command,
                 capture_output=True,
                 text=True,
                 shell=shell,
                 check=False,
                 cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                env=_spawn_env(env),
+                env=_spawn_env(spawn_env),
                 encoding=encoding,
                 errors=errors,
                 timeout=timeout,
@@ -519,6 +588,9 @@ def run_command_with_output_handling(
         error_msg = f"Error running {cmd_str}: {e}"
         ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
         return {"error": str(e), "returncode": 1, "stderr": error_msg}
+    finally:
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
 
 
 def run_command_get_output(
@@ -589,7 +661,11 @@ def run_command_stream_output(
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    sandbox_plan = None
     try:
+        sandbox_plan = _prepare_spawn(args, env, cwd, shell)
+        if sandbox_plan is not None:
+            args, env = sandbox_plan.argv, sandbox_plan.env
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
@@ -624,6 +700,9 @@ def run_command_stream_output(
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
         return 1
+    finally:
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
 
 
 def get_host_uid() -> int:
@@ -738,6 +817,9 @@ def create_process_with_pipes(
         encoding = "utf-8"
 
     try:
+        sandbox_plan = _prepare_spawn(args, env, cwd, shell)
+        if sandbox_plan is not None:
+            args, env = sandbox_plan.argv, sandbox_plan.env
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
@@ -749,6 +831,9 @@ def create_process_with_pipes(
             encoding=encoding,
             errors=errors,
         )
+        if sandbox_plan is not None:
+            # The caller owns the process, so the plan's temporary files go when it does.
+            weakref.finalize(process, sandbox_plan.run_cleanup)
         return process
     except Exception as e:
         ASH_LOGGER.error(f"Error creating process with pipes: {e}", extra=NO_MARKUP)

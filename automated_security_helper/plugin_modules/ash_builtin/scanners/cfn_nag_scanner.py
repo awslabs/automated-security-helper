@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field, model_validator
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -60,6 +61,10 @@ class CfnNagScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     """CfnNagScanner implements SECRET scanning using CFN Nag."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        read_paths=("~/.local/share/gem", "~/.gem", "$GEM_HOME"),
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 

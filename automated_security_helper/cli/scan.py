@@ -22,6 +22,7 @@ from automated_security_helper.core.enums import (
     ExecutionPhase,
     ExecutionStrategy,
     RunMode,
+    SandboxMode,
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
@@ -250,6 +251,14 @@ def run_ash_scan_cli_command(
             help="Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage."
         ),
     ] = False,
+    sandbox: Annotated[
+        Optional[SandboxMode],
+        typer.Option(
+            "--sandbox",
+            help="Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and /tmp, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the config file's sandbox.mode; default off. Ignored in container mode. See docs/content/docs/scanner-sandbox.md",
+            case_sensitive=False,
+        ),
+    ] = None,
     offline_semgrep_rulesets: Annotated[
         str,
         typer.Option(
@@ -648,6 +657,11 @@ def run_ash_scan_cli_command(
         config_overrides.extend(
             content_db_staleness_flag_overrides(allow_stale=allow_stale_content_db)
         )
+
+    # A config override for the same reasons as the two above: it reaches local, nix
+    # and workspace runs unchanged and wins over the config file's sandbox.mode.
+    if sandbox is not None:
+        config_overrides.append(f"sandbox.mode={SandboxMode(sandbox).value}")
 
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:

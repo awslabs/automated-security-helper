@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
@@ -158,6 +159,10 @@ class CheckovScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     """CheckovScanner implements IaC scanning using Checkov."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        env_prefixes=("CHECKOV_",)
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
     check_conf: str = "NOT_PROVIDED"

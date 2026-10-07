@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, List
 from pydantic import Field, model_validator
 
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
@@ -94,6 +95,12 @@ class TrivyRepoScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
     """Trivy repo scanner plugin."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        network=True,
+        cache_paths=("~/.cache/trivy", "$TRIVY_CACHE_DIR"),
+        env_prefixes=("TRIVY_",),
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 

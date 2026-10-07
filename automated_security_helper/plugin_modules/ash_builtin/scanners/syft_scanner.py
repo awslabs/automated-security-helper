@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field, model_validator
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -78,6 +79,11 @@ class SyftScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     """SyftScanner implements IaC scanning using Syft."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        cache_paths=("~/.cache/syft",),
+        env_prefixes=("SYFT_",),
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
