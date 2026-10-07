@@ -747,3 +747,16 @@ def test_dependencies_install_labels_opt_in_scanners(tmp_path, monkeypatch, opt_
     )
     assert ran == [["echo", "install"]]
     assert ("opt-in: runs only when" in result.output) is opt_in, result.output
+
+
+def test_the_scanner_class_count_leaves_out_omitted_opt_in_scanners(tmp_path, caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        _scan(_context(tmp_path), [DummyControlScanner, DummyOptInScanner])
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if "Total scanner classes found" in r.getMessage()
+    ]
+    assert lines and lines[-1].strip().endswith(": 1"), lines

@@ -470,24 +470,6 @@
                 "scan_timeout": 1800,
                 "severity_threshold": null
               }
-            },
-            "trivy": {
-              "enabled": false,
-              "name": "trivy",
-              "options": {
-                "config_file": null,
-                "disable_telemetry": true,
-                "ignore_file": null,
-                "ignore_unfixed": false,
-                "license_full": false,
-                "offline": false,
-                "scan_timeout": 1800,
-                "scanners": [
-                  "vuln"
-                ],
-                "secret_config_file": null,
-                "severity_threshold": null
-              }
             }
           },
           "description": "Scanner configurations by name."

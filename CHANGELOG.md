@@ -479,7 +479,10 @@
   lets new builtin scanners ship without changing existing scans: a scanner
   that is only `enabled: false` still appears as a `SKIPPED` row in every scan.
   Naming an opt-in scanner in `--scanners` runs it even if its config says
-  `enabled: false`; for other scanners `--scanners` only narrows the run. No
+  `enabled: false`; for other scanners `--scanners` only narrows the run. Its
+  config entry is also left out of written configs (the config recorded in the
+  results and reports, `ash config init`, `ash config get`) while it is disabled
+  and has no options set; the JSON schema still documents it. No
   scanner shipped today is opt-in, so default scan output is unchanged.
 
 - **trivy, as an opt-in builtin scanner.** `scanners.trivy.enabled: true`, or

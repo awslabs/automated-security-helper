@@ -233,6 +233,12 @@ ASH Scanners
 │                │         │                      │                       │ false,                 │
 │                │         │                      │                       │     "disable_telemetr… │
 │                │         │                      │                       │ true,                  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "ignore_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "secret_config_fi… │
+│                │         │                      │                       │ null,                  │
 │                │         │                      │                       │     "offline": false   │
 │                │         │                      │                       │   }                    │
 │                │         │                      │                       │ }                      │
