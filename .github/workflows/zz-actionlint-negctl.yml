@@ -30,12 +30,15 @@ jobs:
     - name: Self-test -- an unquoted expansion must be reported
       shell: bash
       run: "set -uo pipefail\nfixture=\"${RUNNER_TEMP}/actionlint-selftest.yml\"\ncat > \"${fixture}\" <<'YAML'\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo $UNQUOTED\
-        \ >> $GITHUB_ENV\nYAML\nout=\"$(actionlint -no-color -shellcheck=\"$(command -v shellcheck)\" \"${fixture}\" 2>&1)\"\nrc=$?\nprintf '%s\\n' \"${out}\"\nif [ \"${rc}\" -eq 0 ] || ! grep -q 'SC2086'\
-        \ <<< \"${out}\"; then\n  echo \"::error::actionlint did not report SC2086 for an unquoted \\$UNQUOTED (exit ${rc}). It skips the shellcheck rule silently when it cannot run shellcheck, so the lint\
-        \ below would pass without checking any script.\"\n  exit 1\nfi\necho \"self-test ok: the unquoted expansion was reported and actionlint exited ${rc}\"\n"
+        \ >> $GITHUB_ENV\nYAML\n# GitHub runs `shell: bash` as `bash -e -o pipefail`, and `set -uo pipefail`\n# does not turn -e off, so a bare assignment from a command that exits 1 --\n# which this one\
+        \ must -- ends the step before rc is read. Capture it instead.\nrc=0\nout=\"$(actionlint -no-color -shellcheck=\"$(command -v shellcheck)\" \"${fixture}\" 2>&1)\" || rc=$?\nprintf '%s\\n' \"${out}\"\
+        \nif [ \"${rc}\" -eq 0 ] || ! grep -q 'SC2086' <<< \"${out}\"; then\n  echo \"::error::actionlint did not report SC2086 for an unquoted \\$UNQUOTED (exit ${rc}). It skips the shellcheck rule silently\
+        \ when it cannot run shellcheck, so the lint below would pass without checking any script.\"\n  exit 1\nfi\necho \"self-test ok: the unquoted expansion was reported and actionlint exited ${rc}\"\
+        \n"
     - name: Lint every workflow
       shell: bash
       run: "set -uo pipefail\nshopt -s nullglob\nfiles=(.github/workflows/*.yml .github/workflows/*.yaml)\nif [ \"${#files[@]}\" -eq 0 ]; then\n  echo \"::error::no workflow files found; the lint would\
-        \ pass over nothing\"\n  exit 1\nfi\nfailed=0\nfor f in \"${files[@]}\"; do\n  timeout 120 actionlint -color -shellcheck=\"$(command -v shellcheck)\" \"${f}\"\n  rc=$?\n  if [ \"${rc}\" -eq 124\
-        \ ]; then\n    echo \"::error file=${f}::actionlint timed out on ${f}. See the note on this job about scripts larger than a pipe's capacity.\"\n    failed=1\n  elif [ \"${rc}\" -ne 0 ]; then\n \
-        \   failed=1\n  fi\ndone\necho \"linted ${#files[@]} workflow file(s)\"\nexit \"${failed}\"\n"
+        \ pass over nothing\"\n  exit 1\nfi\nfailed=0\nfor f in \"${files[@]}\"; do\n  # `|| rc=$?`, not a bare command then rc=$?: under the runner's -e the first\n  # file with a finding would end the\
+        \ loop, and every file after it would go\n  # unlinted while the job still reported only that one.\n  rc=0\n  timeout 120 actionlint -color -shellcheck=\"$(command -v shellcheck)\" \"${f}\" || rc=$?\n\
+        \  if [ \"${rc}\" -eq 124 ]; then\n    echo \"::error file=${f}::actionlint timed out on ${f}. See the note on this job about scripts larger than a pipe's capacity.\"\n    failed=1\n  elif [ \"\
+        ${rc}\" -ne 0 ]; then\n    failed=1\n  fi\ndone\necho \"linted ${#files[@]} workflow file(s)\"\nexit \"${failed}\"\n"
