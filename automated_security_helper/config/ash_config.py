@@ -1,5 +1,4 @@
 import os
-import sys
 from pathlib import Path
 import re
 from pydantic import (
@@ -7,9 +6,6 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
-    SerializationInfo,
-    SerializerFunctionWrapHandler,
-    model_serializer,
     model_validator,
 )
 from typing import Annotated, Any, List, Dict, Literal, Optional
@@ -284,35 +280,6 @@ def field_name_spellings(segment_cls: type[BaseModel]) -> Dict[str, str]:
     }
 
 
-def _is_opt_in_scanner_config(config_class: type) -> bool:
-    """Whether *config_class* is the config class of an opt-in scanner.
-
-    Read from the module that defines the config class: a scanner and its config
-    class live in one module, so the scanner class is found there without the
-    plugin registry. Reading the registry instead is wrong in a way that does
-    not show: ``ash_plugin_manager.plugin_modules`` caches its first answer, so a
-    config dump taken before ``ash_plugin_modules`` loaded froze the scanner list
-    at the builtins and the external scanners (trivy-repo, ferret-scan) dropped
-    out of the run with no error.
-    """
-    if not isinstance(config_class, type) or not issubclass(
-        config_class, ScannerPluginConfigBase
-    ):
-        return False
-    from automated_security_helper.core.scanner_opt_in import (
-        _declared_config_class,
-        is_opt_in,
-    )
-
-    module = sys.modules.get(config_class.__module__)
-    return any(
-        isinstance(obj, type)
-        and is_opt_in(obj)
-        and _declared_config_class(obj) is config_class
-        for obj in vars(module or object()).values()
-    )
-
-
 class _PluginConfigSegment(BaseModel):
     """Base for the scanner, reporter and converter config segments.
 
@@ -383,46 +350,6 @@ class ScannerConfigSegment(_PluginConfigSegment):
     )
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
-
-    def _untouched_opt_in_fields(self) -> set[str]:
-        """Field names of opt-in scanners whose config here is still the default.
-
-        An opt-in scanner (``ScannerPluginBase.OPT_IN``) declares a field on this
-        segment so the JSON schema documents it. Every dump or repr of the
-        segment would otherwise carry it, and ASH writes those into
-        ``ash_aggregated_results.json``, the YAML report and the AWS reporter
-        payloads -- so shipping an opt-in scanner changed the default output of
-        every user who never enabled it, which is what opt-in exists to avoid.
-        A consequence: ``ash config init`` and ``ash config get`` do not list an
-        opt-in scanner until it is configured.
-
-        Only a value equal to the field's default is left out, so the omission is
-        lossless: loading the dump back gives the same default. An enabled or
-        option-carrying opt-in scanner is written like any other.
-        """
-        return {
-            name
-            for name, field in type(self).model_fields.items()
-            if _is_opt_in_scanner_config(type(field.default))
-            and getattr(self, name, None) == field.default
-        }
-
-    @model_serializer(mode="wrap")
-    def _omit_untouched_opt_in_scanners(
-        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
-    ) -> Any:
-        data = handler(self)
-        if not isinstance(data, dict):
-            return data
-        fields = type(self).model_fields
-        for name in self._untouched_opt_in_fields():
-            data.pop((fields[name].alias or name) if info.by_alias else name, None)
-        return data
-
-    def __repr_args__(self) -> Any:
-        """The repr, which the workspace AWS payloads embed, skips them too."""
-        omitted = self._untouched_opt_in_fields()
-        return [(k, v) for k, v in super().__repr_args__() if k not in omitted]
 
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")

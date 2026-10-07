@@ -60,11 +60,7 @@ scanners:
 3. Otherwise `.gitleaks.toml`, then `.ash/.gitleaks.toml`, in the source directory.
 4. Otherwise gitleaks' built-in rules.
 
-ASH passes the file it finds in step 3 explicitly, so archives and notebooks that ASH extracts into its work directory are scanned with the same rules as the source tree. Path-based allowlists and `.gitleaksignore` fingerprints are matched against relative paths, so they do not match findings in that extracted content, which gitleaks reports by absolute path.
-
-`config_file` and `baseline_path` may also be absolute paths or point outside the source directory. They are read from your ASH config, which ASH treats as trusted input.
-
-`ash config init` and `ash config get` do not list gitleaks until you configure it, because ASH leaves an opt-in scanner at its defaults out of every config it writes. The JSON schema (`automated_security_helper/schemas/AshConfig.json`) lists all of its options.
+ASH passes the file it finds in step 3 explicitly, so archives and notebooks that ASH extracts into its work directory are scanned with the same rules as the source tree.
 
 ## Severity
 

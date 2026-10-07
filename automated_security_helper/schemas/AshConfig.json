@@ -400,6 +400,17 @@
                 "skip_generated_lockfiles": true
               }
             },
+            "gitleaks": {
+              "enabled": false,
+              "name": "gitleaks",
+              "options": {
+                "baseline_path": null,
+                "config_file": null,
+                "max_target_megabytes": null,
+                "scan_timeout": 1800,
+                "severity_threshold": null
+              }
+            },
             "grype": {
               "enabled": true,
               "name": "grype",
