@@ -38,8 +38,22 @@ def evicted_zip_on_sys_path(tmp_path, monkeypatch):
     importer = zipimport.zipimporter(str(launcher))
     monkeypatch.setitem(sys.path_importer_cache, str(launcher), importer)
     importer.invalidate_caches()
-    assert str(launcher) not in zipimport._zip_directory_cache
+    _evict(monkeypatch, launcher)
     return launcher
+
+
+def _evict(monkeypatch, launcher: Path) -> None:
+    """Leave ``launcher`` out of zipimport's directory cache, on every Python.
+
+    From 3.13, ``zipimporter.invalidate_caches()`` pops the archive's entry, which is
+    the state the Windows leg hit. On 3.12 and earlier it rereads the archive instead,
+    so the entry is back after every ``importlib.invalidate_caches()``. Removing it by
+    hand gives every version in the matrix the 3.13+ state, and pkgutil's zip walker
+    indexes the dict directly on all of them. Call this after the last invalidation
+    a test makes.
+    """
+    monkeypatch.delitem(zipimport._zip_directory_cache, str(launcher), raising=False)
+    assert str(launcher) not in zipimport._zip_directory_cache
 
 
 def _plant_package(root: Path, name: str, *, init: bool = True) -> None:
@@ -73,10 +87,11 @@ def test_the_hazard_is_real_on_this_python(evicted_zip_on_sys_path):
 
 
 def test_discovery_survives_an_evicted_zip_on_sys_path(
-    evicted_zip_on_sys_path, plugin_root
+    evicted_zip_on_sys_path, plugin_root, monkeypatch
 ):
     _plant_package(plugin_root, "zz_test_ash_plugins")
     importlib.invalidate_caches()
+    _evict(monkeypatch, evicted_zip_on_sys_path)
     found = discover_plugins(plugin_modules=["zz_test_ash_plugins"])
     assert found["scanners"] == ["planted"]
 
