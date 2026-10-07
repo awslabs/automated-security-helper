@@ -219,10 +219,12 @@ GOLDEN_ROOTS: list[str] = []
 #
 # The trailer rule landed on main in #717
 # (https://github.com/awslabs/automated-security-helper/pull/717), merge commit
-# TRAILER_RULE_COMMIT below. Four commits that reach v4 branches changed a golden file
-# before that, so nobody could have known to trailer them, and none can be amended now:
-# three are main's own squash commits, and b9a782f5 is already in the history that v4
-# branches build on. Without this table every push of such a branch fails on them.
+# TRAILER_RULE_COMMIT below. Thirteen commits that reach v4 branches changed a golden
+# file before that, so nobody could have known to trailer them, and none can be amended
+# now: five are main's own squash commits and the other eight are already in the
+# history that v4 branches build on. Without this table every push of such a branch
+# fails on them. Every one is listed, including those whose files a later trailered
+# commit happens to cover, so the result does not depend on which range is checked.
 #
 # A listed commit is skipped, as if it had not touched any golden file, and only when
 # BOTH hold:
@@ -244,17 +246,50 @@ PRE_RULE_EXEMPTIONS: dict[str, str] = {
         "pre-rule squash of #707 on main: the config and results schemas gained the "
         "suppression's symbol field"
     ),
+    "0695ce962e4909e0032168ef3e8f8cefc271be89": (
+        "pre-rule squash of #710 on main: the CLI reference gained --cli-json-input and "
+        "--generate-cli-skeleton"
+    ),
     "19cfbc5aa0a81447b2d960b5dc1294f346aba633": (
         "pre-rule squash of #711 on main: the config and results schemas gained "
         "skip_ash_output_dir"
     ),
+    "215c48542afa2aed88c6b085915e45d9d54af0ce": (
+        "pre-rule v4 commit: the MCP tool surface and the results schema name ashx as "
+        "the command"
+    ),
+    "5de8897fd27e80913b2ccfb5fd47bbcb39f82f33": (
+        "pre-rule v4 commit: the CLI reference documents ashx as the command"
+    ),
+    "ab82c950008d6bbbb4c9b2f51b326859b01aed6a": (
+        "pre-rule v4 commit: the CLI reference's OCI_RUNNER_WRAPPER example uses ashx"
+    ),
+    "25ca8f6f8fad028ccab7760715c7da37beb3e2ba": (
+        "pre-rule v4 merge of main at 19cfbc5a: brought #707, #710 and #711's schema and "
+        "CLI reference changes"
+    ),
+    "d9e2e9571d25726c97808f1c5af9045834ab21c1": (
+        "pre-rule v4 merge of the ashx rename: brought its tool surface, results schema "
+        "and CLI reference changes"
+    ),
+    "e6099d50d3bf34ac33944959fdfd0014b6d8f4a7": (
+        "pre-rule v4 commit: the results schema's version default moved to 4.0.0"
+    ),
     "19fd417e028f973b65e4f520ad7f71492e49b260": (
-        "pre-rule squash of #712 on main: the config and results schemas gained "
-        "extends and patch"
+        "pre-rule squash of #712 on main: the config and results schemas gained extends "
+        "and patch"
+    ),
+    "10b4fe01b5f6793d1fcac75ba6532e7adc7c230e": (
+        "pre-rule v4 merge of main at 3495905a: brought #712's schema and CLI reference "
+        "changes"
     ),
     "b9a782f5c694f2a788909f49ab1a60fd22c7a055": (
         "pre-rule v4 commit: the VS Code untrusted-workspace reason names .ashrc and "
         "[tool.ash] as config sources"
+    ),
+    "6efd0d20da424a95d5ebd30f94429dac75596390": (
+        "pre-rule squash of #726 on main: the CLI reference's --config help keeps "
+        "[tool.ash]"
     ),
 }
 
