@@ -55,12 +55,15 @@ MAX_SUPPORTED_VERSION = "2.6.0"
 # Default version constraint for installation (if using uv tool)
 DEFAULT_VERSION_CONSTRAINT = f">={MIN_SUPPORTED_VERSION},<{MAX_SUPPORTED_VERSION}"
 
-# Recommended version for best compatibility. 2.4.5 and 2.5.2 were both run
-# through ASH against the same fixtures; 2.5.2 reports a subset of 2.4.5's
+# Recommended version for best compatibility. 2.4.5, 2.5.2 and 2.5.3 were run
+# through ASH against the same fixtures; 2.5.x reports a subset of 2.4.5's
 # findings on them (it drops PHONE false positives on card numbers and IBANs)
 # and applies ASH's ignore paths as written (see _resolve_sarif_uri_base_ids
-# and DEVELOPMENT.md section 9 for the two shape changes 2.5.x brought).
-RECOMMENDED_VERSION = "2.5.2"
+# and DEVELOPMENT.md section 9 for the two shape changes 2.5.x brought). 2.5.3
+# also fixes two secrets-detector defects: the API_KEY_OR_SECRET type-annotation
+# false positive (ferret-scan #742 via PR #745) and the list/collection matcher
+# false negatives (#749).
+RECOMMENDED_VERSION = "2.5.3"
 
 # ferret-scan switches into pre-commit mode from the environment alone
 # (PRE_COMMIT, PRE_COMMIT_HOOK, GIT_HOOK_TYPE, ...; before 2.5.2 also PRE_COMMIT_HOME).
