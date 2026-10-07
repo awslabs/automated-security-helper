@@ -475,7 +475,8 @@ def test_the_scanned_repos_secret_config_cannot_disable_rules(tmp_path, trivy_en
     )
     _, baseline = _scan_direct(source, tmp_path / "out0", scanners=["secret"])
     assert baseline.get_all_results(), "the control: trivy finds the credential"
-    (source / "trivy-secret.yaml").write_text(
+    repo_rules_file = "trivy-secret.yaml"
+    (source / repo_rules_file).write_text(
         "disable-rules:\n  - aws-access-key-id\n  - aws-secret-access-key\n",
         encoding="utf-8",
     )
@@ -485,6 +486,6 @@ def test_the_scanned_repos_secret_config_cannot_disable_rules(tmp_path, trivy_en
         source,
         tmp_path / "out2",
         scanners=["secret"],
-        secret_config_file="trivy-secret.yaml",
+        secret_config_file=repo_rules_file,
     )
     assert _pairs(opted) < _pairs(baseline)
