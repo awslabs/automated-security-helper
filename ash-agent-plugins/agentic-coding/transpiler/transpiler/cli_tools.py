@@ -96,7 +96,9 @@ CLI_KIRO_CLI = CliTool(
     name="kiro-cli",
     role="both",
     install_cmd=_KIRO_CLI_INSTALL,
-    validate_argv_template=("kiro-cli", "agent", "validate", "{agent_json}"),
+    # kiro-cli 2.28's usage is `agent validate [OPTIONS] --path <PATH>`; a bare
+    # positional path is rejected.
+    validate_argv_template=("kiro-cli", "agent", "validate", "--path", "{agent_json}"),
 )
 
 CLI_AIDER = CliTool(

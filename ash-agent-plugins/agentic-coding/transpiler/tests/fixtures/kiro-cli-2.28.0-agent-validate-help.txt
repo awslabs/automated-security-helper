@@ -1,0 +1,8 @@
+Validate a config with the given path
+
+Usage: kiro-cli-chat agent validate [OPTIONS] --path <PATH>
+
+Options:
+  -p, --path <PATH>
+  -v, --verbose...   Increase logging verbosity
+  -h, --help         Print help
