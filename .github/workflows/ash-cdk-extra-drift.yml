@@ -123,13 +123,54 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # uv's cache, split into a restore here and a main-only save after the last
+      # uv step, the same split setup-ash uses for pip and ash-typescript-ci uses for
+      # npm. setup-uv's own `enable-cache: true` restored on every event and saved
+      # from every ref. This workflow also runs on tag pushes, and a tag run read
+      # whatever entry the default branch held: the cache-poisoning shape zizmor
+      # reports. The restore is skipped on a tag push, and only a push to main
+      # writes an entry. With setup-uv's cache off, UV_CACHE_DIR is left unset and
+      # uv uses its default, ~/.cache/uv on Linux, which is the path cached here.
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          enable-cache: true
+          enable-cache: false
+
+      - name: Restore the uv cache
+        id: uv-cache
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}
+
+      - name: "Cache report: uv"
+        if: ${{ !cancelled() && steps.uv-cache.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: uv-cdk-extra
+          CACHE_HIT: ${{ steps.uv-cache.outputs.cache-hit }}
+          CACHE_MATCHED: ${{ steps.uv-cache.outputs.cache-matched-key }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # No --fix here. CI reporting drift and silently repairing it would hide the
       # very pairing the constant needs, and would leave the pushed commit still
       # drifted. The script prints the exact command to run locally.
       - name: Check the fallback constant against pyproject
         run: uv run --python 3.13 python scripts/sync_cdk_extra_fallback.py
+
+      - name: Save the uv cache (main only)
+        if: >-
+          steps.uv-cache.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}

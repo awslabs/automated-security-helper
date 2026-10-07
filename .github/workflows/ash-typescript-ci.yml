@@ -245,17 +245,30 @@ jobs:
       # The version comes from .nvmrc so there is one source of truth rather than a
       # fifth copy of the literal "22". nvm, `node --version` checks and setup-node
       # all read that file, and ash-iac-drift.yml now reads it too.
+      #
+      # `package-manager-cache: false` because the npm cache below is the only one
+      # this job may use. setup-node v5+ turns its own cache on whenever the
+      # package.json it finds names npm as packageManager, and that cache restores
+      # on every event, tag pushes included, and saves from every ref. No root
+      # package.json exists today, so this changes nothing now; it keeps a future
+      # one from quietly bypassing the main-only save below.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false
 
       # npm's download cache, split into a restore here and a main-only save after
       # `npm ci`. setup-node's `cache: npm` saved from every ref, so each pull request
       # kept its own copy that no other pull request can read: 36 entries and 2.54 GB
       # on 2026-10-06, with the repository over its 10 GB cache quota. A pull request
       # reads its base branch's entry, so saving from main is what it restores anyway.
+      #
+      # Not restored on a tag push: this workflow runs on tags too, and a tag run
+      # reads no cache entry, the same rule as the uv caches in the drift and docs
+      # workflows.
       - name: Restore the npm cache
         id: npm-cache
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.npm
@@ -351,6 +364,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          # As in the matrix job above: no setup-node cache on any event.
+          package-manager-cache: false
 
       # --package must name the same packages as the matrix above. The check
       # itself fails when a deploy/<pkg>/package.json exists that this list does

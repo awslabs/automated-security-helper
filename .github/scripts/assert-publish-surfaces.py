@@ -204,6 +204,12 @@ _UV_CACHE_REASON = (
     "so it redistributes nothing this project builds -- anyone who can read the "
     "cache could already have fetched the same wheels from the index."
 )
+_UV_SPLIT_CACHE_REASON = (
+    _UV_CACHE_REASON + " Restored with actions/cache/restore except on a tag push, "
+    "and saved from a push to main only, in place of setup-uv's own cache, which "
+    "restored on every event and saved from every ref. The workflows that use it "
+    "run on tag pushes, and a tag run reads no cache entry."
+)
 _NPM_CACHE_REASON = (
     "npm's download cache, keyed on a committed lockfile. Holds third-party "
     "packages already published on the npm registry, so it redistributes nothing "
@@ -643,43 +649,7 @@ ALLOWLIST: tuple[Entry, ...] = (
         reason=_UV_CACHE_REASON,
     ),
     Entry(
-        file=".github/workflows/ash-agent-plugins-drift.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-cdk-extra-drift.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-create-release.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
-    ),
-    Entry(
         file=".github/workflows/ash-package.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-repo-docs.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        count=2,
-        reason=_UV_CACHE_REASON + " Twice: this workflow has two jobs.",
-    ),
-    Entry(
-        file=".github/workflows/ash-tag-on-merge.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
         publishes="enable-cache=true",
@@ -771,6 +741,73 @@ ALLOWLIST: tuple[Entry, ...] = (
             "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('deploy/{0}/package-lock.json', matrix.package)) }}"
         ),
         reason=_NPM_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-agent-plugins-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-agent-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ash-agent-plugins/agentic-coding/transpiler/uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-agent-plugins-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-agent-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ash-agent-plugins/agentic-coding/transpiler/uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-cdk-extra-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-cdk-extra-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-docs.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
+        ),
+        count=2,
+        reason=_UV_SPLIT_CACHE_REASON
+        + (
+            " Twice: build-docs restores it, and deploy-docs only looks the key up"
+            " (lookup-only: true, nothing downloaded) so its save can skip an entry"
+            " main already wrote. deploy-docs publishes the site and restores nothing."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-docs.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON
+        + " Saved by deploy-docs, the only job here that runs on main.",
     ),
 )
 
