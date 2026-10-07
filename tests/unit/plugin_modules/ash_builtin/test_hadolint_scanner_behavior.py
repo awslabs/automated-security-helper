@@ -744,7 +744,7 @@ class TestRedistributionNotices:
         dockerfile = (self.REPO / "Dockerfile").read_text(encoding="utf-8")
         assert (
             "COPY automated_security_helper/assets/third_party/hadolint/ "
-            "/usr/share/doc/hadolint/"
+            "/usr/share/doc/ash/third-party/hadolint/"
         ) in dockerfile
 
     def test_the_repository_notice_lists_it(self):
@@ -752,4 +752,4 @@ class TestRedistributionNotices:
 
         notice = (self.REPO / "NOTICE").read_text(encoding="utf-8")
         assert f"hadolint {TOOL_VERSIONS['hadolint']}" in notice
-        assert "/usr/share/doc/hadolint/" in notice
+        assert "/usr/share/doc/ash/third-party/hadolint/" in notice

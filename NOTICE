@@ -7,5 +7,5 @@ release binaries. Those whose licenses require notice are listed here.
 hadolint v2.15.1 (https://github.com/hadolint/hadolint)
   License: GPL-3.0. Installed at /usr/local/bin/hadolint. Its license text, its
   upstream third-party notices and the location of its corresponding source are
-  in the image at /usr/share/doc/hadolint/. ASH invokes it as a separate process
-  and does not link to it.
+  in the image at /usr/share/doc/ash/third-party/hadolint/. ASH invokes it as a
+  separate process and does not link to it.

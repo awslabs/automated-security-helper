@@ -168,4 +168,4 @@ already has it).
 hadolint is licensed under GPL-3.0. ASH runs it as a separate program and does
 not link to it. The ASH container image includes the unmodified hadolint
 binary; its license, upstream third-party notices and the location of its
-corresponding source are in the image at `/usr/share/doc/hadolint/`.
+corresponding source are in the image at `/usr/share/doc/ash/third-party/hadolint/`.
