@@ -475,7 +475,9 @@
               "enabled": false,
               "name": "trivy",
               "options": {
+                "config_file": null,
                 "disable_telemetry": true,
+                "ignore_file": null,
                 "ignore_unfixed": false,
                 "license_full": false,
                 "offline": false,
@@ -3347,7 +3349,9 @@
             "enabled": false,
             "name": "trivy",
             "options": {
+              "config_file": null,
               "disable_telemetry": true,
+              "ignore_file": null,
               "ignore_unfixed": false,
               "license_full": false,
               "offline": false,
@@ -4151,7 +4155,9 @@
         "options": {
           "$ref": "#/$defs/TrivyScannerConfigOptions",
           "default": {
+            "config_file": null,
             "disable_telemetry": true,
+            "ignore_file": null,
             "ignore_unfixed": false,
             "license_full": false,
             "offline": false,
@@ -4170,11 +4176,45 @@
     "TrivyScannerConfigOptions": {
       "additionalProperties": true,
       "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A trivy config file (trivy.yaml), relative to the source directory, passed as --config. Unset, ASH passes an empty one, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so. A path that does not exist fails the scan.",
+          "title": "Config File"
+        },
         "disable_telemetry": {
           "default": true,
           "description": "Disable sending anonymous usage data to Aqua",
           "title": "Disable Telemetry",
           "type": "boolean"
+        },
+        "ignore_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A trivy ignore file (.trivyignore or .trivyignore.yaml), relative to the source directory, passed as --ignorefile. Unset, ASH passes an empty one, so a .trivyignore in the scanned repository does not hide findings; use ASH suppressions, which are reported. A path that does not exist fails the scan.",
+          "title": "Ignore File"
         },
         "ignore_unfixed": {
           "default": false,

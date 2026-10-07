@@ -240,6 +240,8 @@ def test_default_argv(tmp_path):
         "--disable-telemetry",
         "--timeout=1800s",
         "--skip-dirs=.ash/ash_output",
+        f"--config={(scanner.results_dir / 'trivy-config.yaml').resolve().as_posix()}",
+        f"--ignorefile={(scanner.results_dir / 'trivyignore.txt').resolve().as_posix()}",
         source.as_posix(),
         "--output",
         results.as_posix(),
@@ -253,10 +255,60 @@ def test_output_dir_outside_the_target_is_not_skipped(tmp_path):
     assert not any(a.startswith("--skip-dirs") for a in _argv(scanner, elsewhere))
 
 
-def test_an_unbounded_scan_timeout_leaves_trivys_own(tmp_path):
+def test_an_unbounded_scan_timeout_is_unbounded_in_trivy_too(tmp_path):
+    """null means unbounded in ASH; trivy's 0s means no deadline (its default is 5m)."""
     scanner = _scanner(tmp_path, scan_timeout=None)
     argv = _argv(scanner, scanner.context.source_dir)
-    assert not any(a.startswith("--timeout") for a in argv)
+    assert [a for a in argv if a.startswith("--timeout")] == ["--timeout=0s"]
+
+
+def test_the_ash_config_and_ignore_files_are_empty(tmp_path):
+    """The files ASH passes hold nothing, so the repository's own are simply unread."""
+    scanner = _scanner(tmp_path)
+    source = scanner.context.source_dir
+    (source / "trivy.yaml").write_text("severity: [CRITICAL]\n", encoding="utf-8")
+    (source / ".trivyignore").write_text("CVE-2018-18074\n", encoding="utf-8")
+    argv = _argv(scanner, source)
+    for flag in ("--config=", "--ignorefile="):
+        value = next(a for a in argv if a.startswith(flag))[len(flag) :]
+        assert Path(value).is_file() and Path(value).read_text() == ""
+        assert Path(value).is_relative_to(scanner.results_dir.resolve())
+
+
+@pytest.mark.parametrize(
+    "option, flag, name",
+    [
+        ("config_file", "--config", "trivy.yaml"),
+        ("ignore_file", "--ignorefile", ".trivyignore"),
+    ],
+)
+def test_an_operator_chosen_trivy_file_is_passed(tmp_path, option, flag, name):
+    probe = _scanner(tmp_path)
+    (probe.context.source_dir / name).write_text("", encoding="utf-8")
+    scanner = _scanner(tmp_path, **{option: name})
+    argv = _argv(scanner, scanner.context.source_dir)
+    expected = (scanner.context.source_dir / name).resolve().as_posix()
+    assert f"{flag}={expected}" in argv
+
+
+@pytest.mark.parametrize("option", ["config_file", "ignore_file"])
+def test_a_configured_trivy_file_that_does_not_exist_fails_the_scan(tmp_path, option):
+    scanner = _scanner(tmp_path, **{option: "nope.yaml"})
+    with pytest.raises(ScannerError, match=option):
+        _argv(scanner, scanner.context.source_dir)
+
+
+@pytest.mark.parametrize("cls", [TrivyScanner, TrivyRepoScanner])
+def test_both_scanners_install_the_pinned_trivy(tmp_path, cls):
+    from automated_security_helper.utils.download_utils import (
+        pinned_tool_install_commands,
+    )
+
+    expected = pinned_tool_install_commands("trivy")
+    assert expected
+    scanner = cls(context=_context(tmp_path))
+    for key, value in expected.items():
+        assert scanner.custom_install_commands[key] == value
 
 
 def test_options_become_flags(tmp_path):
@@ -717,26 +769,23 @@ def test_an_assessment_that_cannot_ask_trivy_repo_still_records_trivy_db():
 # --------------------------------------------------------------------------- #
 
 
-# Only names Windows allows: `*` and `?` are refused there, and are covered by
-# SKIP_DIRS_UNSAFE all the same.
-@pytest.mark.parametrize("name", ["out,put", "out[1]", "o{a}"])
-def test_an_output_dir_trivy_would_misread_is_not_passed_as_skip_dirs(tmp_path, name):
-    source = tmp_path / "src"
-    shutil.copytree(DATA / "fixture_repo", source)
-    output = source / name
-    context = PluginContext(
-        source_dir=source,
-        output_dir=output,
-        work_dir=output / "converted",
-        config=AshConfig(),
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        (".ash/ash_output", ".ash/ash_output"),
+        ("c,[d]", '"c,\\[d\\]"'),
+        ('e"f', '"e""f"'),
+        ("g\\h", "g\\\\h"),
+        ("q{z}", "q\\{z\\}"),
+    ],
+)
+def test_skip_dirs_values_are_escaped_as_trivy_reads_them(name, expected):
+    """Each expected value was checked against trivy 0.69.3: it skips that directory."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        skip_dirs_value,
     )
-    scanner = TrivyScanner(
-        context=context,
-        config=TrivyScannerConfig(
-            enabled=True, options=TrivyScannerConfigOptions(offline=False)
-        ),
-    )
-    assert not any(a.startswith("--skip-dirs") for a in _argv(scanner, source))
+
+    assert skip_dirs_value(name) == expected
 
 
 def test_a_rule_index_that_points_at_another_rule_falls_back_to_the_rule_id(
@@ -762,11 +811,3 @@ def test_two_severity_tags_give_no_verdict(tmp_path):
     report = _parse(_scanner(tmp_path), raw)
     found = next(r for r in report.get_all_results() if r.ruleId == "CVE-2018-18074")
     assert getattr(found.properties, "issue_severity", None) is None
-
-
-def test_glob_characters_windows_cannot_name_a_directory_with_are_refused_too():
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
-        SKIP_DIRS_UNSAFE,
-    )
-
-    assert {"*", "?", ","} <= SKIP_DIRS_UNSAFE

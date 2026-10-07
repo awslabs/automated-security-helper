@@ -58,13 +58,32 @@ scanners:
       # Look for licenses in source headers too. Only used with `license`.
       license_full: false
       disable_telemetry: true
+      # A trivy.yaml and a .trivyignore, relative to the source directory. Unset,
+      # the ones in the scanned repository are NOT read; see below.
+      config_file: null
+      ignore_file: null
       # Defaults to ASH's offline mode (ASH_OFFLINE / --offline).
       offline: false
       # Passed to trivy as --severity (this level and above).
       severity_threshold: null
       # Seconds before the trivy process is killed; also passed as trivy --timeout.
+      # null leaves both unbounded (trivy --timeout=0s; trivy's own default is 5m).
       scan_timeout: 1800
 ```
+
+## trivy configuration in the scanned repository
+
+trivy reads `trivy.yaml` and `.trivyignore` from its working directory, which is the repository being scanned. Either file can remove findings without the report saying so: a `severity: [CRITICAL]` or `scan.skip-files` entry in `trivy.yaml` removes every lower-rated or skipped finding, and each `.trivyignore` line removes an advisory. So the builtin scanner passes `--config` and `--ignorefile` pointing at empty files of its own, and a repository's own files are not read. To use them, name them:
+
+```yaml
+scanners:
+  trivy:
+    options:
+      config_file: trivy.yaml
+      ignore_file: .trivyignore
+```
+
+To accept a finding, prefer an ASH suppression, which is recorded in the reports. The community `trivy-repo` plugin still reads the repository's files, as it always has.
 
 ## Severity
 

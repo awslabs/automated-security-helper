@@ -71,6 +71,18 @@ severity cannot disagree. Without this, ASH would bucket the rule's
 whose severity is UNKNOWN keeps ASH's generic SARIF mapping (the CVSS score, then
 the SARIF level).
 
+trivy configuration in the scanned repository
+---------------------------------------------
+trivy runs with the scanned repository as its working directory, where it reads
+``trivy.yaml`` and ``.trivyignore`` by default. Measured on v0.69.3 against the
+fixture repository (10 findings): a ``.trivyignore`` line dropped its finding,
+``severity: [CRITICAL]`` in ``trivy.yaml`` dropped all 10, and
+``scan.skip-files`` dropped all 10 with exit 0. A scanned repository should not be
+able to quietly shape its own report, so ASH passes ``--config`` and
+``--ignorefile`` pointing at empty files of its own. ``config_file`` and
+``ignore_file`` opt in to a real one. ``trivy-repo`` is unchanged and still reads
+them.
+
 Exit codes
 ----------
 trivy exits 0 whether or not it finds anything (ASH does not pass
@@ -105,9 +117,22 @@ from automated_security_helper.schemas.sarif_schema_model import (
 #: is left to ASH's generic SARIF mapping.
 TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 
-#: Characters trivy reads specially in a ``--skip-dirs`` value: the comma separates
-#: list items, and the rest are glob syntax.
-SKIP_DIRS_UNSAFE = frozenset(',"*?[]{}\\')
+#: Characters trivy's ``--skip-dirs`` reads as glob syntax.
+_GLOB_SPECIAL = frozenset("*?[]{}\\")
+
+
+def skip_dirs_value(path: str) -> str:
+    """*path* as a ``--skip-dirs`` value trivy matches literally.
+
+    trivy reads the value as a comma-separated list (CSV, so quotes group) of
+    globs. Measured on 0.69.3: an unescaped ``a,b`` or ``x[1]`` left that directory
+    scanned. Glob characters are backslash-escaped, then the value is CSV-quoted
+    when it holds a comma, a quote or edge whitespace.
+    """
+    escaped = "".join("\\" + ch if ch in _GLOB_SPECIAL else ch for ch in path)
+    if any(ch in escaped for ch in ',"') or escaped != escaped.strip():
+        escaped = '"' + escaped.replace('"', '""') + '"'
+    return escaped
 
 
 class TrivyScannerConfigOptions(ScannerOptionsBase):
@@ -149,6 +174,30 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
             description="Disable sending anonymous usage data to Aqua",
         ),
     ] = True
+    config_file: Annotated[
+        Path | str | None,
+        Field(
+            description=(
+                "A trivy config file (trivy.yaml), relative to the source directory, "
+                "passed as --config. Unset, ASH passes an empty one, so a trivy.yaml "
+                "in the scanned repository is not read: its settings (severity, "
+                "scan.skip-files, db.repository, ...) can drop findings with nothing "
+                "in the report saying so. A path that does not exist fails the scan."
+            ),
+        ),
+    ] = None
+    ignore_file: Annotated[
+        Path | str | None,
+        Field(
+            description=(
+                "A trivy ignore file (.trivyignore or .trivyignore.yaml), relative to "
+                "the source directory, passed as --ignorefile. Unset, ASH passes an "
+                "empty one, so a .trivyignore in the scanned repository does not hide "
+                "findings; use ASH suppressions, which are reported. A path that does "
+                "not exist fails the scan."
+            ),
+        ),
+    ] = None
     offline: Annotated[
         bool,
         Field(
@@ -288,34 +337,57 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # Each flag and its value as one token, so no path can be read as a flag.
         extra: List[str] = []
         timeout = self._effective_scan_timeout()
-        if timeout is not None:
-            # trivy's own deadline is 5 minutes and fails the scan when it passes.
-            # Matched to ASH's, so the bound the operator set is the one that applies.
-            extra.append(f"--timeout={int(timeout)}s")
+        # trivy's own deadline is 5 minutes and fails the scan when it passes.
+        # Matched to ASH's, so the bound the operator set is the one that applies;
+        # an unbounded ASH timeout is trivy's 0s, which trivy reads as no deadline.
+        extra.append(f"--timeout={int(timeout) if timeout is not None else 0}s")
         output_inside = self._output_dir_inside(target)
         if output_inside is not None:
             # ASH's own output under the target holds the converted copies of
             # archives and notebooks, which the converted target scans already.
-            skip = output_inside.as_posix()
-            if any(ch in skip for ch in SKIP_DIRS_UNSAFE):
-                # trivy splits the value on commas and matches it as a glob, so a
-                # name like this would skip the wrong directory or none. Left to
-                # ASH's suppression pass, which drops every finding under the
-                # output directory for every scanner.
-                self._plugin_log(
-                    f"Not passing --skip-dirs for the output directory {skip!r}: "
-                    "trivy would read its name as a list or a glob. Findings under "
-                    "it are still dropped from the results.",
-                    level=logging.DEBUG,
-                )
-            else:
-                extra.append(f"--skip-dirs={skip}")
+            extra.append(f"--skip-dirs={skip_dirs_value(output_inside.as_posix())}")
+        # trivy reads trivy.yaml and .trivyignore from its working directory, which
+        # is the scanned repository. Either can drop findings with nothing in the
+        # report saying so, so ASH passes its own unless the operator chose one.
+        extra.append(f"--config={self._trivy_file('config_file', 'trivy-config.yaml')}")
+        extra.append(
+            f"--ignorefile={self._trivy_file('ignore_file', 'trivyignore.txt')}"
+        )
         # Before the target, which _resolve_arguments places after the options.
         target_index = final_args.index(Path(target).as_posix())
         final_args[target_index:target_index] = extra
 
         subprocess_env = {**os.environ, **self.extra_env} if self.extra_env else None
         return final_args, results_file, subprocess_env
+
+    def _trivy_file(self, option: str, ash_name: str) -> str:
+        """The trivy config or ignore file to pass, as an absolute POSIX path.
+
+        The configured one, anchored on the source directory, which must exist: a
+        missing file would otherwise mean scanning without the rules the operator
+        asked for. Unset, an empty file ASH writes next to its results, so nothing
+        in the scanned repository is read as trivy configuration.
+        """
+        value = getattr(self._options(), option)
+        if value:
+            candidate = Path(value)
+            if not candidate.is_absolute():
+                if self.context is None:
+                    raise ScannerError("TrivyScanner has no plugin context")
+                candidate = Path(self.context.source_dir) / candidate
+            if not candidate.is_file():
+                raise ScannerError(
+                    f"scanners.trivy.options.{option} is {str(value)!r}, which is not "
+                    f"a file (resolved to {candidate.as_posix()}). Fix the path or "
+                    "unset the option; trivy is not run without it."
+                )
+            return candidate.resolve().as_posix()
+        if self.results_dir is None:
+            raise ScannerError("TrivyScanner has no results directory")
+        empty = self.results_dir.joinpath(ash_name)
+        empty.parent.mkdir(parents=True, exist_ok=True)
+        empty.write_text("", encoding="utf-8")
+        return empty.resolve().as_posix()
 
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
         """Refuse the report of a run trivy did not finish (any exit but 0)."""

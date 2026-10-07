@@ -422,3 +422,34 @@ def test_trivy_and_trivy_repo_together_report_each_under_its_own_name(
         r["scanner"] for r in _content_db_records(data) if r["name"] == "trivy-db"
     }
     assert readers == {"trivy", "trivy-repo"}
+
+
+def test_the_scanned_repos_own_trivy_config_cannot_shrink_the_report(
+    tmp_path, trivy_env
+):
+    """trivy.yaml and .trivyignore in the target are not read unless opted in."""
+    source = _copy_fixture(tmp_path)
+    _, baseline = _scan_direct(source, tmp_path / "out0")
+    (source / "trivy.yaml").write_text("severity:\n  - CRITICAL\n", encoding="utf-8")
+    (source / ".trivyignore").write_text("CVE-2018-18074\n", encoding="utf-8")
+    _, report = _scan_direct(source, tmp_path / "out1")
+    assert _pairs(report) == _pairs(baseline)
+    # Opted in, each file does what trivy says it does.
+    _, ignored = _scan_direct(source, tmp_path / "out2", ignore_file=".trivyignore")
+    assert _pairs(ignored) == _pairs(baseline) - {
+        ("CVE-2018-18074", "requirements.txt")
+    }
+    _, critical = _scan_direct(source, tmp_path / "out3", config_file="trivy.yaml")
+    assert _pairs(critical) < _pairs(baseline)
+
+
+def test_an_output_dir_name_trivy_reads_as_a_list_and_glob_is_still_skipped(
+    tmp_path, trivy_env
+):
+    source = _copy_fixture(tmp_path)
+    output = source / "out,[1]"
+    planted = output / "previous"
+    planted.mkdir(parents=True)
+    (planted / "requirements.txt").write_text("urllib3==1.24.1\n", encoding="utf-8")
+    _, report = _scan_direct(source, output)
+    assert not [uri for _, uri in _pairs(report) if uri.startswith("out,[1]")]

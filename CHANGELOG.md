@@ -495,7 +495,9 @@
   when the database is stale; offline with no database at all it is `MISSING`
   with the reason. The community `trivy-repo` plugin is unchanged and still
   supported: same config, same findings and outputs. The two now share one
-  implementation. Enabling both runs trivy twice, and each finding is reported
+  implementation. Unlike trivy-repo, the builtin does not read a `trivy.yaml` or
+  `.trivyignore` in the scanned repository, either of which can drop findings
+  silently; `options.config_file` and `options.ignore_file` opt in to one. Enabling both runs trivy twice, and each finding is reported
   once per scanner; see the trivy scanner page.
 
 ### Fixes
