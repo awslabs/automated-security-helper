@@ -401,7 +401,7 @@ class ThirdPartyLicense:
             ]
         return "\n".join(lines) + "\n"
 
-    def index_record(self) -> dict:
+    def index_record(self) -> "dict[str, object]":
         """This entry as it appears in the image's ``index.json``."""
         return {
             "tool": self.tool,

@@ -338,7 +338,7 @@ def install(
             raise SystemExit(_EXIT_INTEGRITY)
         print(f"Verified SHA256 {asset.sha256.lower()}", flush=True)
 
-        if entry is not None:
+        if entry is not None and third_party_dir is not None:
             # From the archive just verified, so license files ride on the same
             # digest as the executable. getattr: a table from before
             # ToolAsset.archive existed holds archives only.
