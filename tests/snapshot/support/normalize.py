@@ -476,7 +476,7 @@ def _system_temp_roots() -> list[PurePath]:
     """
     return [
         Path(tempfile.gettempdir()),
-        PurePosixPath("/tmp"),
+        PurePosixPath("/tmp"),  # nosec B108 - a spelling to mask, never written to
         PurePosixPath("/private/tmp"),
     ]
 
