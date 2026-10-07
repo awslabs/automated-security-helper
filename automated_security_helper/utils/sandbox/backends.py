@@ -423,8 +423,7 @@ class LandlockBackend(SandboxBackend):
             # make it private, so this is the host's: a documented gap of this
             # backend that bwrap does not have. Not /dev/tty or /dev/pts: the
             # wrapper starts a new session, so there is no terminal to reach.
-            # nosec B108 - a Landlock grant, not a file ASH creates
-            + [private_root.as_posix(), "/dev/null", "/dev/shm"],  # nosec B108
+            + [private_root.as_posix(), "/dev/null", "/dev/shm"],  # nosec B108 - a Landlock grant, not a file ASH creates
             "network": policy.network,
         }
         cmd = [

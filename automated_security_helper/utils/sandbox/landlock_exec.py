@@ -261,24 +261,33 @@ def main(argv: List[str]) -> int:
 
 
 def _children() -> List[int]:
-    """Processes whose parent is this one, read from every /proc/<pid>/stat.
+    """Processes whose parent is this one.
 
-    /proc/<pid>/stat rather than /proc/self/task/*/children, which needs
-    CONFIG_PROC_CHILDREN.
+    /proc/self/task/*/children when the kernel provides it (CONFIG_PROC_CHILDREN),
+    which costs one read per thread; otherwise every /proc/<pid>/stat, which on a
+    host with thousands of processes costs a few hundred milliseconds. Read as
+    bytes: a text open may need to import a codec, and after Landlock the
+    interpreter's own library is not necessarily readable.
     """
-    me = os.getpid()
     found: List[int] = []
+    try:
+        tasks = os.listdir("/proc/self/task")
+        for tid in tasks:
+            with open(f"/proc/self/task/{tid}/children", "rb") as f:
+                found += [int(pid) for pid in f.read().split()]
+        return found
+    except OSError:
+        pass
+    me = str(os.getpid()).encode()
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
         try:
-            # Bytes: a text open may need to import a codec, and after Landlock the
-            # interpreter's own library is not necessarily readable.
             with open(f"/proc/{entry}/stat", "rb") as f:
                 fields = f.read().rsplit(b")", 1)[1].split()
         except (OSError, IndexError):
             continue
-        if len(fields) > 1 and fields[1] == str(me).encode():
+        if len(fields) > 1 and fields[1] == me:
             found.append(int(entry))
     return found
 
@@ -354,7 +363,17 @@ def run_and_reap(command: List[str]) -> int:
             if reaped == 0:
                 break
     if os.WIFSIGNALED(status):
-        return 128 + os.WTERMSIG(status)
+        # Die of the same signal, so ASH sees -N exactly as it would for the
+        # scanner run unwrapped. 128+N is the fallback for a signal that cannot be
+        # re-raised that way.
+        signum = os.WTERMSIG(status)
+        try:
+            signal.signal(signum, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signum})
+            os.kill(os.getpid(), signum)
+        except (OSError, ValueError):
+            pass
+        return 128 + signum
     return os.WEXITSTATUS(status)
 
 

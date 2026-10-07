@@ -197,9 +197,8 @@ def _scan(
             "SandboxEscapeScanner.stdout.log": str(outside / "victim-log.txt"),
         },
         "shm_file": (
-            # nosec B108 - the probe's target; the test asserts it never appears
-            f"/dev/shm/ash-sandbox-probe-{os.getpid()}-{mode}"  # nosec B108
-            if Path("/dev/shm").is_dir()  # nosec B108
+            f"/dev/shm/ash-sandbox-probe-{os.getpid()}-{mode}"  # nosec B108 - the probe's target; asserted never to appear
+            if Path("/dev/shm").is_dir()  # nosec B108 - existence check only
             else ""
         ),
     }

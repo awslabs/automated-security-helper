@@ -324,8 +324,7 @@ class TestScope:
             offline=True,
         )
         with sandbox_scope(scope):
-            # nosec B604 - asserts the sandbox refuses to start a shell command
-            result = run_command(["echo hi"], shell=True)  # nosec B604
+            result = run_command(["echo hi"], shell=True)  # nosec B604 - asserts the sandbox refuses a shell command
         # Reported as a command that could not start (SandboxUnavailable is an
         # OSError), never run unwrapped.
         assert result.returncode == SPAWN_FAILURE_RETURNCODE

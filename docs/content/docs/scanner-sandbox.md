@@ -73,7 +73,9 @@ it needs.
   without following a symlink. A process the scanner leaves running cannot keep
   planting links afterwards: bwrap and firejail end the whole process tree with the
   scanner, and the Landlock wrapper is a child subreaper that kills any process its
-  scanner left behind before it exits.
+  scanner left behind before it exits. On a timeout ASH sends a sandboxed process
+  SIGTERM first (SIGKILL after 10 seconds), so the Landlock wrapper gets to end its
+  whole tree rather than being killed outright.
 - Network: under `--offline` no scanner gets a network. Online, only scanners that
   declare a network need get one (to fetch a vulnerability database, a rule pack, or
   audit data from a package registry); everything else runs with no network.
