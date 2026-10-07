@@ -132,7 +132,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         Online, the rules come from the registry at scan time and no local copy is read,
         so there is nothing whose age could make the result stale.
         """
-        if not getattr(self.config.options, "offline", False):  # type: ignore[union-attr]
+        if not self._scanner_offline():
             return []
         return super().content_databases_in_use()
 
@@ -168,7 +168,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 ]
             )
 
-        if getattr(opts, "offline", False):
+        if self._scanner_offline():
             self._configure_offline_mode()
         else:
             self._configure_online_mode()

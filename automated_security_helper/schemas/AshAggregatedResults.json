@@ -2831,7 +2831,8 @@
           "type": "integer"
         },
         "offline": {
-          "description": "Run in offline mode, disabling policy downloads",
+          "default": false,
+          "description": "Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
           "title": "Offline",
           "type": "boolean"
         },
@@ -8304,7 +8305,8 @@
           "title": "Config File"
         },
         "offline": {
-          "description": "Run in offline mode, disabling database updates and validation",
+          "default": false,
+          "description": "Run in offline mode, disabling database updates and validation. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
           "title": "Offline",
           "type": "boolean"
         },
@@ -11192,7 +11194,8 @@
       "additionalProperties": true,
       "properties": {
         "offline": {
-          "description": "Run in offline mode, using locally cached data",
+          "default": false,
+          "description": "Run in offline mode, using locally cached data. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
           "title": "Offline",
           "type": "boolean"
         },
@@ -11428,7 +11431,8 @@
           "type": "string"
         },
         "offline": {
-          "description": "Run in offline mode, using locally cached rules.",
+          "default": false,
+          "description": "Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
           "title": "Offline",
           "type": "boolean"
         },
@@ -16864,7 +16868,8 @@
           "type": "string"
         },
         "offline": {
-          "description": "Run in offline mode, using locally cached rules.",
+          "default": false,
+          "description": "Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
           "title": "Offline",
           "type": "boolean"
         },
@@ -18369,7 +18374,8 @@
           "type": "array"
         },
         "offline": {
-          "description": "Run in offline mode, disabling update checks",
+          "default": false,
+          "description": "Run in offline mode, disabling update checks. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
           "title": "Offline",
           "type": "boolean"
         },
