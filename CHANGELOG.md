@@ -61,6 +61,15 @@
   license files and the cfn-nag gem) with its upstream's latest release and fails
   when one is behind, listing what the bump has to change.
 
+- **npm-audit reports ERROR, and the scan exits 1, when the audit itself fails.** A
+  scan whose `npm audit` could not get advisories (registry unreachable, a 5xx or 404
+  from the audit endpoint, a response that is not JSON, or any npm `--json` error such
+  as ENOLOCK) used to report npm-audit PASSED with 0 findings and exit 0. It now reports
+  ERROR, naming each lockfile that was not audited and npm's reason, and the scan exits 1
+  as incomplete. The same applies to a `pnpm audit` that exits non-zero without a report.
+  Other lockfiles are still audited. Offline scans keep their previous behavior and log a
+  warning instead. Pass `--no-fail-on-incomplete-scanners` to accept the partial scan.
+
 - **A scanner's `offline: false` no longer overrides ASH's offline mode.** ASH's
   offline mode (`--offline`, `ASH_OFFLINE`, or an image built with `--offline`) now
   applies to every scanner, and `options.offline: false` means "follow ASH". It used
@@ -545,6 +554,14 @@
   states coverage it does not have.
 
 ### Fixes
+
+- npm-audit no longer reads a failed audit as a clean one. npm exits 1 both for
+  "vulnerabilities found" and for "audit endpoint returned an error", and the scanner
+  accepted exit 1, found no `vulnerabilities` key in npm's error document and converted it
+  to zero findings. A document carrying npm's `error` object, or a non-zero npm or pnpm
+  exit without that tool's report, is now an audit failure reported as ERROR. A clean
+  audit (exit 0, empty `vulnerabilities`) still passes, and findings on exit 1 are still
+  findings.
 
 - MCP config tools now confine config paths, including `extends` chains, to the allowed roots.
   The `get_config`, `validate_config`, `explain_finding`, `suggest_suppression` and
