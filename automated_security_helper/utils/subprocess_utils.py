@@ -60,6 +60,23 @@ def _bin_path() -> Path:
     return Path(from_env) if from_env else ASH_BIN_PATH
 
 
+def path_independent_dirs() -> List[Path]:
+    """The directories ``find_executable`` searches whatever PATH says, in order.
+
+    These are the fallbacks after ``shutil.which``: ASH's bin directory, then
+    /usr/local/bin except on Windows. A tool in one of them is found by every
+    later lookup in any environment, which is not true of a tool found only
+    through PATH -- a different shell, a CI job or a cron entry may not have the
+    same PATH. ``download_utils.find_verified_pinned_executable`` relies on that
+    difference, so the list lives here, where ``find_executable`` reads it too,
+    rather than being restated there.
+    """
+    dirs = [_bin_path()]
+    if platform.system().lower() != "windows":
+        dirs.append(Path("/usr/local/bin"))
+    return dirs
+
+
 def _executable_candidate_names(command: str) -> List[str]:
     """The filenames to try for ``command``, in the order to try them.
 
@@ -132,16 +149,7 @@ def find_executable(command: str) -> Optional[str]:
                 _find_executable_cache[command] = found
                 return found
             possibles = [
-                item
-                for item in [
-                    _bin_path().joinpath(cmd),
-                    (
-                        Path("/usr/local/bin").joinpath(cmd)
-                        if platform.system().lower() != "windows"
-                        else None
-                    ),
-                ]
-                if item is not None
+                directory.joinpath(cmd) for directory in path_independent_dirs()
             ]
             for poss in possibles:
                 ASH_LOGGER.debug(f"Checking for executable: {poss}", extra=NO_MARKUP)

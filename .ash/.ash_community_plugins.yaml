@@ -136,13 +136,16 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 151
-      line_end: 171
+      line_start: 196
+      line_end: 239
       reason: >-
         False positive — every string in this range is a published SHA256 release
-        checksum, transcribed from the vendor's own *_checksums.txt. A 64-character
-        hex string is what an entropy detector is built to find, so all 16 are
-        reported at 95% confidence, but a release checksum is public by construction
+        checksum, transcribed from the vendor's own *_checksums.txt, or (in
+        _EXECUTABLE_DIGESTS, the second table in the range) the SHA256 of the
+        executable inside one of those verified archives. A 64-character
+        hex string is what an entropy detector is built to find, so the 16 archive
+        digests were reported at 95% confidence and the 16 executable digests have
+        the same shape, but a release checksum is public by construction
         and is the opposite of a credential: it exists so anyone can compare against
         it. detect-secrets is handled by an inline `# pragma: allowlist secret` on
         each line; ferret-scan does not honour that marker, hence this entry.

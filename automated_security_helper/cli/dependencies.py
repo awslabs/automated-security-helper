@@ -33,6 +33,9 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.utils.download_utils import (
+    pinned_install_already_satisfied,
+)
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
@@ -72,6 +75,9 @@ class PluginInstallOutcome:
     commands_succeeded: int = 0
     commands_failed: int = 0
     commands_skipped_empty: int = 0
+    # Pinned installs not run because a byte-identical copy of the pinned binary was
+    # already present; see download_utils.find_verified_pinned_executable.
+    commands_satisfied: int = 0
     errors: List[str] = field(default_factory=list)
     executable: Optional[str] = None
 
@@ -84,7 +90,11 @@ class PluginInstallOutcome:
         "no install path on this platform" is the wrong diagnosis in the one
         function whose whole purpose is to report accurately.
         """
-        return self.commands_attempted == 0 and not self.errors
+        return (
+            self.commands_attempted == 0
+            and self.commands_satisfied == 0
+            and not self.errors
+        )
 
     @property
     def needs_external_tool(self) -> bool:
@@ -102,6 +112,8 @@ class PluginInstallOutcome:
             return "FAILED"
         if self.commands_succeeded:
             return "INSTALLED" if self.executable else "INSTALLED (not on PATH)"
+        if self.commands_satisfied:
+            return "VERIFIED PRESENT" if self.executable else "VERIFIED (not on PATH)"
         if not self.needs_external_tool:
             return "PYTHON-ONLY"
         if self.executable:
@@ -416,6 +428,22 @@ def install_dependencies(
                 # Fix the Python command by properly importing Path
                 cmd = [sys.executable, "-c", "from pathlib import Path; " + cmd[2]]
 
+            # A pinned binary that is already on disk, byte for byte, is not
+            # installed a second time. The image installs syft, grype and trivy into
+            # /usr/local/bin before this runs, and this used to write another copy of
+            # each into the bin path -- twice, once per image stage. Decided by the
+            # bytes, never the name: a same-named binary that does not hash to the
+            # pinned executable digest is installed over as before.
+            present = pinned_install_already_satisfied(cmd)
+            if present is not None:
+                print(
+                    f"Already present: {escape(present.tool)} "
+                    f"{escape(present.version)} at {escape(str(present.path))} matches "
+                    f"the pinned SHA256 {present.sha256}; not installing a second copy"
+                )
+                outcome.commands_satisfied += 1
+                continue
+
             # An argv routinely carries brackets -- `pip install ash[sarif,toml]` --
             # and rich would read `[sarif,toml]` as a tag and drop it from the line.
             print(f"Running command: {escape(' '.join(cmd))}")
@@ -506,8 +534,11 @@ def _report_and_exit(
     missing_after_install = sorted(
         o.name
         for o in outcomes
-        if o.needs_external_tool and not o.executable and o.commands_attempted
+        if o.needs_external_tool
+        and not o.executable
+        and (o.commands_attempted or o.commands_satisfied)
     )
+    already_verified = sorted(o.name for o in outcomes if o.commands_satisfied)
 
     # An external tool that is needed, has no install path here, and is not present.
     # This is what makes "nothing was installed" a failure rather than a no-op: the
@@ -556,6 +587,13 @@ def _report_and_exit(
         f"[cyan]Commands run:[/cyan] {commands_attempted} ({commands_failed} failed)",
         f"[cyan]Tools verified on PATH:[/cyan] {len(verified)}{verified_names}",
     ]
+    # Only printed when it happened, so a run with nothing pre-installed reads
+    # exactly as it did before verified-present tools were recognized.
+    if already_verified:
+        summary.append(
+            f"[cyan]Already present, verified against the pinned digest:[/cyan] "
+            f"{len(already_verified)} -- {escape(', '.join(already_verified))}"
+        )
     if unprovisionable:
         summary.append(
             f"[yellow]No install path on this platform:[/yellow] "
