@@ -16,6 +16,8 @@ ASH Scanners
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ grype          │ True    │ GrypeScanner         │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
+│ guarddog       │ False   │ GuardDogScanner      │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ npm-audit      │ True    │ NpmAuditScanner      │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ opengrep       │ False   │ OpengrepScanner      │ automated_security_helper.plu… │               │

@@ -14,7 +14,7 @@ Installing dependencies for platform: windows, architecture: arm64
 ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
 │ Unknown tool(s): gryp                                                                            │
 │ Available: ArchiveConverter, bandit, cdk-nag, cfn-nag, checkov, csv, cyclonedx, detect-secrets,  │
-│ flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, grype, html, junitxml, jupyter, markdown, │
-│ npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, text, unused-suppressions, yaml           │
+│ flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, grype, guarddog, html, junitxml, jupyter, │
+│ markdown, npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, text, unused-suppressions, yaml │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 2]

@@ -1648,32 +1648,6 @@
                 "severity_threshold": null
               }
             },
-            "guarddog": {
-              "enabled": false,
-              "name": "guarddog",
-              "options": {
-                "ecosystems": [
-                  "pypi",
-                  "npm",
-                  "go",
-                  "github_action",
-                  "rubygems",
-                  "crates"
-                ],
-                "exclude_rules": [],
-                "excluded_paths": [],
-                "include_capabilities": false,
-                "install_timeout": 300,
-                "rules": [],
-                "sandbox": "auto",
-                "scan_timeout": 1800,
-                "severity_threshold": null,
-                "tool_version": null,
-                "verify": false,
-                "verify_parallelism": 8,
-                "verify_timeout": 600
-              }
-            },
             "npm-audit": {
               "enabled": true,
               "name": "npm-audit",

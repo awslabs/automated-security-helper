@@ -2067,6 +2067,199 @@
       "title": "GrypeScannerConfigOptions",
       "type": "object"
     },
+    "GuardDogScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "guarddog",
+          "default": "guarddog",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/GuardDogScannerConfigOptions",
+          "default": {
+            "ecosystems": [
+              "pypi",
+              "npm",
+              "go",
+              "github_action",
+              "rubygems",
+              "crates"
+            ],
+            "exclude_rules": [],
+            "excluded_paths": [],
+            "include_capabilities": false,
+            "install_timeout": 300,
+            "rules": [],
+            "sandbox": "auto",
+            "scan_timeout": 1800,
+            "severity_threshold": null,
+            "tool_version": null,
+            "verify": false,
+            "verify_parallelism": 8,
+            "verify_timeout": 600
+          },
+          "description": "Configure GuardDog scanner"
+        }
+      },
+      "title": "GuardDogScannerConfig",
+      "type": "object"
+    },
+    "GuardDogScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "ecosystems": {
+          "default": [
+            "pypi",
+            "npm",
+            "go",
+            "github_action",
+            "rubygems",
+            "crates"
+          ],
+          "description": "GuardDog ecosystems to scan. ASH scans every package root of each ecosystem it finds: pypi (setup.py, setup.cfg, pyproject.toml), npm (package.json), go (go.mod), github_action (action.yml, action.yaml), rubygems (*.gemspec) and crates (Cargo.toml).",
+          "items": {
+            "enum": [
+              "pypi",
+              "npm",
+              "go",
+              "github_action",
+              "rubygems",
+              "crates"
+            ],
+            "type": "string"
+          },
+          "title": "Ecosystems",
+          "type": "array"
+        },
+        "exclude_rules": {
+          "default": [],
+          "description": "GuardDog rules to skip (`--exclude-rules`).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Rules",
+          "type": "array"
+        },
+        "excluded_paths": {
+          "default": [],
+          "description": "Paths (globs relative to the source directory) to leave out of the files GuardDog is given.",
+          "items": {
+            "$ref": "#/$defs/IgnorePathWithReason"
+          },
+          "title": "Excluded Paths",
+          "type": "array"
+        },
+        "include_capabilities": {
+          "default": false,
+          "description": "Also report GuardDog capability matches (capability-* rules, e.g. 'spawns a process') that GuardDog did not correlate into a risk, at INFO severity. They are context rather than findings: ordinary code matches them.",
+          "title": "Include Capabilities",
+          "type": "boolean"
+        },
+        "install_timeout": {
+          "default": 300,
+          "description": "Timeout in seconds for tool installation",
+          "title": "Install Timeout",
+          "type": "integer"
+        },
+        "rules": {
+          "default": [],
+          "description": "Run only these GuardDog rules (`--rules`). Cannot be combined with exclude_rules. Empty runs every rule.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Rules",
+          "type": "array"
+        },
+        "sandbox": {
+          "default": "auto",
+          "description": "GuardDog's kernel sandbox for `scan` (nono: Landlock on Linux, Seatbelt on macOS), which blocks network access and limits reads to the scanned directory. `auto` uses it where the platform supports it and otherwise scans without it, logging a warning; `required` reports ERROR where it is unavailable; `disabled` never uses it.",
+          "enum": [
+            "auto",
+            "required",
+            "disabled"
+          ],
+          "title": "Sandbox",
+          "type": "string"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Version constraint for guarddog installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint, which is the GuardDog release the result parser is tested against.",
+          "title": "Tool Version"
+        },
+        "verify": {
+          "default": false,
+          "description": "Also run `guarddog <ecosystem> verify` on dependency manifests (requirements.txt, package.json, go.mod, Gemfile.lock, Cargo.lock, GitHub workflow files). This downloads every dependency from its registry and needs network access; with ASH_OFFLINE set the scanner reports ERROR instead of attempting it.",
+          "title": "Verify",
+          "type": "boolean"
+        },
+        "verify_parallelism": {
+          "default": 8,
+          "description": "Dependencies `guarddog verify` downloads concurrently (GUARDDOG_PARALLELISM). GuardDog's own default is the CPU count.",
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Verify Parallelism",
+          "type": "integer"
+        },
+        "verify_timeout": {
+          "default": 600,
+          "description": "Seconds to allow one `guarddog verify` invocation (one manifest) before it is killed and reported as a failed target.",
+          "minimum": 1,
+          "title": "Verify Timeout",
+          "type": "integer"
+        }
+      },
+      "title": "GuardDogScannerConfigOptions",
+      "type": "object"
+    },
     "HTMLReporterConfig": {
       "additionalProperties": true,
       "properties": {
@@ -3248,6 +3441,36 @@
             }
           },
           "description": "Configure the options for Grype"
+        },
+        "guarddog": {
+          "$ref": "#/$defs/GuardDogScannerConfig",
+          "default": {
+            "enabled": false,
+            "name": "guarddog",
+            "options": {
+              "ecosystems": [
+                "pypi",
+                "npm",
+                "go",
+                "github_action",
+                "rubygems",
+                "crates"
+              ],
+              "exclude_rules": [],
+              "excluded_paths": [],
+              "include_capabilities": false,
+              "install_timeout": 300,
+              "rules": [],
+              "sandbox": "auto",
+              "scan_timeout": 1800,
+              "severity_threshold": null,
+              "tool_version": null,
+              "verify": false,
+              "verify_parallelism": 8,
+              "verify_timeout": 600
+            }
+          },
+          "description": "Configure the options for GuardDog (opt-in)"
         },
         "npm-audit": {
           "$ref": "#/$defs/NpmAuditScannerConfig",

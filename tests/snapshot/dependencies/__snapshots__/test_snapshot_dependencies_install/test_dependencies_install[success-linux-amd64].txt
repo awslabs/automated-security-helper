@@ -30,6 +30,10 @@ Running command: python3 -c import sys; from pathlib import Path; from
 automated_security_helper.utils.download_utils import install_pinned_tool;
 install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])) grype linux amd64 bin
 Command succeeded with exit code: 0
+Installing dependencies for scanner plugin: guarddog (opt-in: runs only when enabled in config or
+named with --scanners)
+Running command: uv tool install --python >=3.10,<3.14 guarddog==3.2.0
+Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: npm-audit
 Installing dependencies for scanner plugin: opengrep
 Running command: python3 -c import sys; from pathlib import Path; from
@@ -72,15 +76,16 @@ Installing dependencies for reporter plugin: yaml
 │ checkov        │ scanner   │ checkov         │    1 │      0 │ INSTALLED       │ bin/checkov     │
 │ detect-secrets │ scanner   │ detect-secrets  │    0 │      0 │ ALREADY PRESENT │ bin/detect-sec… │
 │ grype          │ scanner   │ grype           │    1 │      0 │ INSTALLED       │ bin/grype       │
+│ guarddog       │ scanner   │ guarddog        │    1 │      0 │ INSTALLED       │ bin/guarddog    │
 │ npm-audit      │ scanner   │ npm             │    0 │      0 │ ALREADY PRESENT │ bin/npm         │
 │ opengrep       │ scanner   │ opengrep        │    1 │      0 │ INSTALLED       │ bin/opengrep    │
 │ semgrep        │ scanner   │ semgrep         │    1 │      0 │ INSTALLED       │ bin/semgrep     │
 │ syft           │ scanner   │ syft            │    1 │      0 │ INSTALLED       │ bin/syft        │
 └────────────────┴───────────┴─────────────────┴──────┴────────┴─────────────────┴─────────────────┘
 ╭───────────────────────────────────── Installation Complete ──────────────────────────────────────╮
-│ Commands run: 9 (0 failed)                                                                       │
-│ Tools verified on PATH: 11 -- bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, jupyter, │
-│ npm-audit, opengrep, semgrep, syft                                                               │
+│ Commands run: 10 (0 failed)                                                                      │
+│ Tools verified on PATH: 12 -- bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype,          │
+│ guarddog, jupyter, npm-audit, opengrep, semgrep, syft                                            │
 │ No install path on this platform: detect-secrets, npm-audit                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 0]

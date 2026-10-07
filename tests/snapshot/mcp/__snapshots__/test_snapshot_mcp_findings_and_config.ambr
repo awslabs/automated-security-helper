@@ -1625,6 +1625,13 @@
         'offline_strategy': 'cache_flags',
         'version': None,
       }),
+      'guarddog': dict({
+        'dependencies_satisfied': True,
+        'enabled': False,
+        'name': 'guarddog',
+        'offline_strategy': 'bundled',
+        'version': '<GUARDDOG_VERSION>',
+      }),
       'npm_audit': dict({
         'dependencies_satisfied': True,
         'enabled': True,

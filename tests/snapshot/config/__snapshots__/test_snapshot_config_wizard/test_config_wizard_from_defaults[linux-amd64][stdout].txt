@@ -15,6 +15,7 @@ Scanner configuration
 │ checkov        │        yes        │
 │ detect-secrets │        yes        │
 │ grype          │        yes        │
+│ guarddog       │        no         │
 │ npm-audit      │        yes        │
 │ opengrep       │        yes        │
 │ semgrep        │        yes        │
@@ -26,6 +27,7 @@ Scanner configuration
   Enable checkov? [Y/n]: n
   Enable detect-secrets? [Y/n]:
   Enable grype? [Y/n]: n
+  Enable guarddog? [y/N]:
   Enable npm-audit? [Y/n]:
   Enable opengrep? [Y/n]:
   Enable semgrep? [Y/n]:
