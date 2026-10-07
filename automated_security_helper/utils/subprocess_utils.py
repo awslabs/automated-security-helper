@@ -529,6 +529,11 @@ def run_command_with_output_handling(
                 cmd_str, e, results_dir, class_name, stderr_preference
             )
 
+        # Before ASH writes the stream logs into the scanner's results directory:
+        # the sandbox's cleanup removes any link the scanner left there.
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
+
         # Use the actual returncode from the result
         returncode = result.returncode
 
@@ -554,6 +559,8 @@ def run_command_with_output_handling(
         # Handled ahead of the generic branch below so a timeout is reported as
         # such. That branch returns returncode 1 for everything, which cannot be
         # told apart from a tool that simply exited 1.
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
         error_msg = f"Command timed out after {timeout}s: {cmd_str}"
         # NO_MARKUP rather than escaping error_msg: it is also returned to the
         # caller below and lands in the scanner's stderr, which must stay verbatim.

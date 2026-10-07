@@ -31,7 +31,10 @@ from automated_security_helper.utils.sandbox.backends import (
     SandboxBackend,
     SpawnPlan,
 )
-from automated_security_helper.utils.sandbox.fs_guard import sweep_writable
+from automated_security_helper.utils.sandbox.fs_guard import (
+    register_writable_root,
+    sweep_writable,
+)
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     SandboxUnavailable as SandboxUnavailable,
@@ -291,6 +294,8 @@ def prepare_spawn(
     # First in line once the process has exited: nothing ASH writes into the
     # results directory afterwards may follow a link the scanner left there.
     writable = list(policy.writable)
+    for path in writable:
+        register_writable_root(path)
 
     def sweep() -> None:
         sweep_writable(writable)

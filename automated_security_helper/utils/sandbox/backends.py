@@ -41,7 +41,9 @@ class SpawnPlan:
     cleanup: List[Callable[[], None]] = field(default_factory=list)
 
     def run_cleanup(self) -> None:
-        for fn in self.cleanup:
+        """Run each cleanup once; later calls do nothing."""
+        pending, self.cleanup = self.cleanup, []
+        for fn in pending:
             try:
                 fn()
             except Exception as e:  # pragma: no cover - best effort
