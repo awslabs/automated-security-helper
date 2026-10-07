@@ -711,45 +711,46 @@ class TestInstall:
 
 
 class TestRedistributionNotices:
-    """The image ships hadolint (GPL-3.0); its notices must ship with it, current."""
+    """The image ships hadolint (GPL-3.0); its notices must ship with it, current.
+
+    The notice files are fetched during the image build from the exact upstream
+    commit and checked against their SHA256, not carried in the wheel (the
+    artifact-contents gate keeps third-party files out of it). These tests pin
+    that the Dockerfile does that, for the version tool_downloads.py pins.
+    """
 
     REPO = Path(__file__).resolve().parents[4]
-    DOC_DIR = REPO / "automated_security_helper" / "assets" / "third_party" / "hadolint"
+    DOC = "/usr/share/doc/ash/third-party/hadolint"
+    # Tag v2.15.1 of github.com/hadolint/hadolint, and the SHA256 of LICENSE and
+    # ThirdPartyNotices.txt at it.
+    COMMIT = "2eece55955ced00200be9729e9728cb7dacca505"  # pragma: allowlist secret
+    LICENSE_SHA256 = "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2"  # pragma: allowlist secret
+    NOTICES_SHA256 = "424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27"  # pragma: allowlist secret
 
-    def test_the_license_is_upstreams_verbatim(self):
-        import hashlib
+    def _dockerfile(self) -> str:
+        return (self.REPO / "Dockerfile").read_text(encoding="utf-8")
 
-        # sha256 of LICENSE at github.com/hadolint/hadolint tag v2.15.1.
-        digest = hashlib.sha256((self.DOC_DIR / "LICENSE").read_bytes()).hexdigest()
+    def test_the_notices_are_fetched_from_the_pinned_commit_and_verified(self):
+        dockerfile = self._dockerfile()
         assert (
-            digest
-            == (
-                "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2"  # pragma: allowlist secret
-            )
+            f"raw.githubusercontent.com/hadolint/hadolint/{self.COMMIT}" in dockerfile
         )
+        assert f'{self.LICENSE_SHA256} "${{doc}}/LICENSE"' in dockerfile
+        assert f'{self.NOTICES_SHA256} "${{doc}}/ThirdPartyNotices.txt"' in dockerfile
+        assert "sha256sum -c -" in dockerfile
+        assert f"doc={self.DOC};" in dockerfile
+        assert '> "${doc}/SOURCE.txt"' in dockerfile
 
-    def test_the_source_notice_names_the_pinned_version(self):
+    def test_the_dockerfile_pins_the_same_version_as_the_tool_table(self):
         from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
-        text = (self.DOC_DIR / "SOURCE.txt").read_text(encoding="utf-8")
-        version = TOOL_VERSIONS["hadolint"]
-        assert f"hadolint {version}" in text
-        assert f"/releases/tag/{version}" in text
-        assert f"/archive/refs/tags/{version}.tar.gz" in text
-        assert "hadolint" in (self.DOC_DIR / "ThirdPartyNotices.txt").read_text(
-            encoding="utf-8"
-        )
-
-    def test_the_dockerfile_installs_the_notices_with_the_binary(self):
-        dockerfile = (self.REPO / "Dockerfile").read_text(encoding="utf-8")
         assert (
-            "COPY automated_security_helper/assets/third_party/hadolint/ "
-            "/usr/share/doc/ash/third-party/hadolint/"
-        ) in dockerfile
+            f'ARG HADOLINT_VERSION="{TOOL_VERSIONS["hadolint"]}"' in self._dockerfile()
+        )
 
     def test_the_repository_notice_lists_it(self):
         from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
         notice = (self.REPO / "NOTICE").read_text(encoding="utf-8")
         assert f"hadolint {TOOL_VERSIONS['hadolint']}" in notice
-        assert "/usr/share/doc/ash/third-party/hadolint/" in notice
+        assert f"{self.DOC}/" in notice

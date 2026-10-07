@@ -382,15 +382,48 @@ RUN trivy --version
 
 # hadolint, the opt-in Dockerfile linter, from its pinned release asset like the three
 # above. Its asset is the executable itself rather than an archive; install-pinned-tool
-# handles that through ToolAsset.archived. hadolint is GPL-3.0 and this image
-# redistributes the binary, so its license text, its upstream third-party notices and
-# the exact source tag go in alongside it, at /usr/share/doc/ash/third-party/hadolint
-# (the location every bundled tool's notices use). ASH runs it as a separate process
-# and never links to it.
+# handles that through ToolAsset.archived. ASH runs it as a separate process and never
+# links to it.
+#
+# hadolint is GPL-3.0 and this image redistributes the binary, so its license text and
+# its upstream third-party notices go in alongside it, at
+# /usr/share/doc/ash/third-party/hadolint (where every bundled tool's notices live),
+# with a SOURCE.txt naming the exact source tag and commit. They are fetched from that
+# commit and checked against their SHA256 here rather than shipped in the ASH wheel:
+# the wheel carries no third-party files (.github/scripts/assert-artifact-contents.py).
 ARG HADOLINT_VERSION="v2.15.1"
-COPY automated_security_helper/assets/third_party/hadolint/ /usr/share/doc/ash/third-party/hadolint/
 RUN with-retry 'install-pinned-tool hadolint -b /usr/local/bin'
 RUN hadolint --version
+RUN set -eu; \
+    doc=/usr/share/doc/ash/third-party/hadolint; \
+    src=https://raw.githubusercontent.com/hadolint/hadolint/2eece55955ced00200be9729e9728cb7dacca505; \
+    mkdir -p "${doc}"; \
+    with-retry "curl -sSfL ${src}/LICENSE -o ${doc}/LICENSE"; \
+    with-retry "curl -sSfL ${src}/ThirdPartyNotices.txt -o ${doc}/ThirdPartyNotices.txt"; \
+    printf '%s  %s\n' \
+        589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2 "${doc}/LICENSE" \
+        424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27 "${doc}/ThirdPartyNotices.txt" \
+        | sha256sum -c -; \
+    printf '%s\n' \
+        "hadolint ${HADOLINT_VERSION}, as shipped in the ASH container image" \
+        "" \
+        "/usr/local/bin/hadolint is an unmodified hadolint ${HADOLINT_VERSION} release binary from" \
+        "https://github.com/hadolint/hadolint/releases/tag/${HADOLINT_VERSION}, verified against" \
+        "the SHA256 digests published with that release." \
+        "" \
+        "hadolint is licensed under the GNU General Public License, version 3 (LICENSE in this" \
+        "directory, verbatim from upstream). ThirdPartyNotices.txt is upstream's license report" \
+        "for its statically included dependencies, among them ShellCheck (GPL-3.0-only)," \
+        "language-docker (GPL-3.0-or-later) and HsYAML (GPL-2.0-only); the Linux build also" \
+        "links musl (MIT) and GMP (LGPL-3.0-or-later or GPL-2.0-or-later) statically." \
+        "" \
+        "Corresponding Source: the hadolint Source tree at tag ${HADOLINT_VERSION}, commit" \
+        "2eece55955ced00200be9729e9728cb7dacca505:" \
+        "  https://github.com/hadolint/hadolint/tree/${HADOLINT_VERSION}" \
+        "  https://github.com/hadolint/hadolint/archive/refs/tags/${HADOLINT_VERSION}.tar.gz" \
+        "together with the Source of the dependency versions in ThirdPartyNotices.txt." \
+        "ASH runs hadolint only as a separate process and does not link to it." \
+        > "${doc}/SOURCE.txt"
 
 #
 # Setting default WORKDIR to /src
