@@ -48,6 +48,17 @@
 
 ### Behavior changes
 
+- **A scanner's `offline: false` no longer overrides ASH's offline mode.** ASH's
+  offline mode (`--offline`, `ASH_OFFLINE`, or an image built with `--offline`) now
+  applies to every scanner, and `options.offline: false` means "follow ASH". It used
+  to win over `ASH_OFFLINE` in the container, which put a scanner back online during an
+  air-gapped run; `ash config init` writes `offline: false` for every scanner that has
+  the option, so generated configs did that by default. `options.offline: true` still
+  runs one scanner offline while ASH is online. No scanner can now be opted back online
+  under `ASH_OFFLINE`. A local `--offline` scan with no semgrep or opengrep rule cache
+  now reports that scanner MISSING with the cache guidance and exits 1 as an incomplete
+  scan, where it used to pass by going online. See
+  [Which scanners run offline](docs/content/docs/advanced-usage.md#which-scanners-run-offline).
 - **`fail_on_incomplete_scanners` now defaults to `true`.** A scan in which a
   selected scanner did not complete — status `ERROR` (it ran and failed) or `MISSING`
   (its dependencies were unavailable, so it never ran) — exits 1 without anyone
@@ -468,6 +479,17 @@
 
 ### Fixes
 
+- **`ash scan --offline` in local mode runs every scanner offline.** checkov, grype,
+  npm-audit, opengrep, semgrep, syft and the trivy-repo plugin defaulted their
+  `offline` option to `ASH_OFFLINE` as read when their config was built, and ASH builds
+  the default scanner configs at import, before `--offline` sets `ASH_OFFLINE`. Those
+  scanners kept `offline: false` and used the network: checkov ran without
+  `--skip-download` and opened three HTTPS connections, grype and syft kept their
+  database and update checks, and semgrep ran `--config p/ci --metrics auto` against the
+  registry instead of the offline rule cache. Offline mode is now resolved when each
+  scanner runs. The precedence change and the new exit code for a missing rule cache
+  are under Behavior changes. The option's schema default is now a plain `false`
+  instead of the import-time environment value.
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan

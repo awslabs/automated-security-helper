@@ -20,7 +20,6 @@ from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
@@ -72,8 +71,8 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
     offline: Annotated[
         bool,
         Field(
-            description="Run in offline mode, using locally cached rules.",
-            default_factory=is_offline_mode,
+            description="Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+            default=False,
         ),
     ]
 

@@ -119,6 +119,22 @@ anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`; the
 then passes and every report names the stale database. See
 [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database).
 
+### Which scanners run offline
+
+Offline mode is decided when each scanner runs, from these sources in order:
+
+1. ASH's offline mode: `--offline` on `ash scan`, `ASH_OFFLINE=true` in the
+   environment, or an image built with `ash build-image --offline`. It applies to
+   every scanner, and no scanner option turns it off.
+2. A scanner's own `options.offline: true` (checkov, grype, npm-audit, opengrep,
+   semgrep, syft, trivy-repo). It runs that one scanner offline while the rest of the
+   scan stays online.
+
+`options.offline: false` is the default and means "follow ASH's offline mode". It does
+not put a scanner back online during an `--offline` scan; `ash config init` writes
+`offline: false` for every scanner that has the option, so a generated config would
+otherwise undo the flag.
+
 ## Customizing Scan Phases
 
 ASH v3 executes scans in phases:
