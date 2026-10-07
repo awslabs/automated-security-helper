@@ -196,23 +196,24 @@ def test_self_test_writes_only_names_a_windows_checkout_can_hold(
 # A frozen copy of PRE_RULE_EXEMPTIONS' keys and the cutoff. The table may only shrink:
 # a commit made after #717 takes a trailer, not an entry. Removing an entry here and in
 # the script is fine; adding one, or moving the cutoff, fails below.
+# pragma: allowlist nextline secret
 _FROZEN_RULE_COMMIT = "2a09ec3ad071e40718183630ff9899360b74fe3d"
 _FROZEN_CUTOFF = 1791309669  # committer date of the #717 merge on main
 _FROZEN_EXEMPTIONS = frozenset(
     {
-        "7e54dba560cee37bb267f8cb8f78dc3e185ce4e3",
-        "0695ce962e4909e0032168ef3e8f8cefc271be89",
-        "19cfbc5aa0a81447b2d960b5dc1294f346aba633",
-        "215c48542afa2aed88c6b085915e45d9d54af0ce",
-        "5de8897fd27e80913b2ccfb5fd47bbcb39f82f33",
-        "ab82c950008d6bbbb4c9b2f51b326859b01aed6a",
-        "25ca8f6f8fad028ccab7760715c7da37beb3e2ba",
-        "d9e2e9571d25726c97808f1c5af9045834ab21c1",
-        "e6099d50d3bf34ac33944959fdfd0014b6d8f4a7",
-        "19fd417e028f973b65e4f520ad7f71492e49b260",
-        "10b4fe01b5f6793d1fcac75ba6532e7adc7c230e",
-        "b9a782f5c694f2a788909f49ab1a60fd22c7a055",
-        "6efd0d20da424a95d5ebd30f94429dac75596390",
+        "7e54dba560cee37bb267f8cb8f78dc3e185ce4e3",  # pragma: allowlist secret
+        "0695ce962e4909e0032168ef3e8f8cefc271be89",  # pragma: allowlist secret
+        "19cfbc5aa0a81447b2d960b5dc1294f346aba633",  # pragma: allowlist secret
+        "215c48542afa2aed88c6b085915e45d9d54af0ce",  # pragma: allowlist secret
+        "5de8897fd27e80913b2ccfb5fd47bbcb39f82f33",  # pragma: allowlist secret
+        "ab82c950008d6bbbb4c9b2f51b326859b01aed6a",  # pragma: allowlist secret
+        "25ca8f6f8fad028ccab7760715c7da37beb3e2ba",  # pragma: allowlist secret
+        "d9e2e9571d25726c97808f1c5af9045834ab21c1",  # pragma: allowlist secret
+        "e6099d50d3bf34ac33944959fdfd0014b6d8f4a7",  # pragma: allowlist secret
+        "19fd417e028f973b65e4f520ad7f71492e49b260",  # pragma: allowlist secret
+        "10b4fe01b5f6793d1fcac75ba6532e7adc7c230e",  # pragma: allowlist secret
+        "b9a782f5c694f2a788909f49ab1a60fd22c7a055",  # pragma: allowlist secret
+        "6efd0d20da424a95d5ebd30f94429dac75596390",  # pragma: allowlist secret
     }
 )
 
