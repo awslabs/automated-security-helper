@@ -453,3 +453,38 @@ def test_an_output_dir_name_trivy_reads_as_a_list_and_glob_is_still_skipped(
     (planted / "requirements.txt").write_text("urllib3==1.24.1\n", encoding="utf-8")
     _, report = _scan_direct(source, output)
     assert not [uri for _, uri in _pairs(report) if uri.startswith("out,[1]")]
+
+
+def test_the_scanned_repos_secret_config_cannot_disable_rules(tmp_path, trivy_env):
+    """trivy-secret.yaml in the target is not read unless opted in."""
+    import secrets
+    import string
+
+    source = tmp_path / "src"
+    source.mkdir()
+    # Generated per run so no credential-shaped string is committed.
+    key_id = "AKIA" + "".join(
+        secrets.choice(string.ascii_uppercase + "234567") for _ in range(16)
+    )
+    secret = "".join(
+        secrets.choice(string.ascii_letters + string.digits) for _ in range(40)
+    )
+    (source / "creds.env").write_text(
+        f"AWS_ACCESS_KEY_ID={key_id}\nAWS_SECRET_ACCESS_KEY={secret}\n",
+        encoding="utf-8",
+    )
+    _, baseline = _scan_direct(source, tmp_path / "out0", scanners=["secret"])
+    assert baseline.get_all_results(), "the control: trivy finds the credential"
+    (source / "trivy-secret.yaml").write_text(
+        "disable-rules:\n  - aws-access-key-id\n  - aws-secret-access-key\n",
+        encoding="utf-8",
+    )
+    _, report = _scan_direct(source, tmp_path / "out1", scanners=["secret"])
+    assert _pairs(report) == _pairs(baseline)
+    _, opted = _scan_direct(
+        source,
+        tmp_path / "out2",
+        scanners=["secret"],
+        secret_config_file="trivy-secret.yaml",
+    )
+    assert _pairs(opted) < _pairs(baseline)

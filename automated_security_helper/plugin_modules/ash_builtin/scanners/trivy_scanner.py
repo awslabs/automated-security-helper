@@ -74,14 +74,24 @@ the SARIF level).
 trivy configuration in the scanned repository
 ---------------------------------------------
 trivy runs with the scanned repository as its working directory, where it reads
-``trivy.yaml`` and ``.trivyignore`` by default. Measured on v0.69.3 against the
-fixture repository (10 findings): a ``.trivyignore`` line dropped its finding,
-``severity: [CRITICAL]`` in ``trivy.yaml`` dropped all 10, and
-``scan.skip-files`` dropped all 10 with exit 0. A scanned repository should not be
-able to quietly shape its own report, so ASH passes ``--config`` and
-``--ignorefile`` pointing at empty files of its own. ``config_file`` and
-``ignore_file`` opt in to a real one. ``trivy-repo`` is unchanged and still reads
-them.
+``trivy.yaml``, ``.trivyignore`` and (for ``secret``) ``trivy-secret.yaml`` by
+default. Measured on v0.69.3 against the fixture repository (10 findings): a
+``.trivyignore`` line dropped its finding, ``severity: [CRITICAL]`` in
+``trivy.yaml`` dropped all 10, and ``scan.skip-files`` dropped all 10 with exit 0.
+A scanned repository should not be able to quietly shape its own report, so ASH
+passes ``--config``, ``--ignorefile`` and ``--secret-config`` pointing at files of
+its own that set nothing. ``config_file``, ``ignore_file`` and
+``secret_config_file`` opt in to real ones. ``trivy-repo`` is unchanged and still
+reads them.
+
+Skipping ASH's output directory
+-------------------------------
+ASH's output directory, when it sits inside the target, is passed as
+``--skip-dirs``. trivy reads that value as a comma-separated list of globs, so
+glob characters are backslash-escaped and commas or quotes CSV-quoted (each form
+checked on Linux with 0.69.3). Not verified on Windows, where the default output
+directory name needs no escaping; ASH's suppression pass drops findings under the
+output directory, apart from the converted work directory, whatever trivy does.
 
 Exit codes
 ----------
@@ -195,6 +205,18 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
                 "empty one, so a .trivyignore in the scanned repository does not hide "
                 "findings; use ASH suppressions, which are reported. A path that does "
                 "not exist fails the scan."
+            ),
+        ),
+    ] = None
+    secret_config_file: Annotated[
+        Path | str | None,
+        Field(
+            description=(
+                "A trivy secret-scanning config (trivy-secret.yaml), relative to the "
+                "source directory, passed as --secret-config. Only read when scanners "
+                "includes secret. Unset, ASH passes its own empty one, so a "
+                "trivy-secret.yaml in the scanned repository cannot disable rules. A "
+                "path that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -353,6 +375,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         extra.append(
             f"--ignorefile={self._trivy_file('ignore_file', 'trivyignore.txt')}"
         )
+        # trivy-secret.yaml in the working directory can disable secret rules. An
+        # empty file is a decode error in trivy, so ASH's holds an empty mapping.
+        extra.append(
+            "--secret-config="
+            + self._trivy_file("secret_config_file", "trivy-secret.yaml", "{}\n")
+        )
         # Before the target, which _resolve_arguments places after the options.
         target_index = final_args.index(Path(target).as_posix())
         final_args[target_index:target_index] = extra
@@ -360,13 +388,13 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         subprocess_env = {**os.environ, **self.extra_env} if self.extra_env else None
         return final_args, results_file, subprocess_env
 
-    def _trivy_file(self, option: str, ash_name: str) -> str:
+    def _trivy_file(self, option: str, ash_name: str, ash_content: str = "") -> str:
         """The trivy config or ignore file to pass, as an absolute POSIX path.
 
-        The configured one, anchored on the source directory, which must exist: a
-        missing file would otherwise mean scanning without the rules the operator
-        asked for. Unset, an empty file ASH writes next to its results, so nothing
-        in the scanned repository is read as trivy configuration.
+        The configured one, a relative path anchored on the source directory, which
+        must exist: a missing file would otherwise mean scanning without the rules
+        the operator asked for. Unset, an empty one ASH writes next to its results,
+        so nothing in the scanned repository is read as trivy configuration.
         """
         value = getattr(self._options(), option)
         if value:
@@ -386,7 +414,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             raise ScannerError("TrivyScanner has no results directory")
         empty = self.results_dir.joinpath(ash_name)
         empty.parent.mkdir(parents=True, exist_ok=True)
-        empty.write_text("", encoding="utf-8")
+        empty.write_text(ash_content, encoding="utf-8")
         return empty.resolve().as_posix()
 
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:

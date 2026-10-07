@@ -485,6 +485,7 @@
                 "scanners": [
                   "vuln"
                 ],
+                "secret_config_file": null,
                 "severity_threshold": null
               }
             }
@@ -3359,6 +3360,7 @@
               "scanners": [
                 "vuln"
               ],
+              "secret_config_file": null,
               "severity_threshold": null
             }
           },
@@ -4165,6 +4167,7 @@
             "scanners": [
               "vuln"
             ],
+            "secret_config_file": null,
             "severity_threshold": null
           },
           "description": "Configure the trivy scanner"
@@ -4264,6 +4267,23 @@
           "minItems": 1,
           "title": "Scanners",
           "type": "array"
+        },
+        "secret_config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A trivy secret-scanning config (trivy-secret.yaml), relative to the source directory, passed as --secret-config. Only read when scanners includes secret. Unset, ASH passes its own empty one, so a trivy-secret.yaml in the scanned repository cannot disable rules. A path that does not exist fails the scan.",
+          "title": "Secret Config File"
         },
         "severity_threshold": {
           "anyOf": [

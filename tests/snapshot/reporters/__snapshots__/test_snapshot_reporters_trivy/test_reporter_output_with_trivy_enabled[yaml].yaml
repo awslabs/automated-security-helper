@@ -293,13 +293,16 @@ ash_config:
       enabled: true
       name: trivy
       options:
+        config_file: null
         disable_telemetry: true
+        ignore_file: null
         ignore_unfixed: false
         license_full: false
         offline: false
         scan_timeout: 1800
         scanners:
         - vuln
+        secret_config_file: null
         severity_threshold: null
   workspace:
     max_parallel_projects: null

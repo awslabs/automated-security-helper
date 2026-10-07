@@ -58,10 +58,12 @@ scanners:
       # Look for licenses in source headers too. Only used with `license`.
       license_full: false
       disable_telemetry: true
-      # A trivy.yaml and a .trivyignore, relative to the source directory. Unset,
-      # the ones in the scanned repository are NOT read; see below.
+      # A trivy.yaml, a .trivyignore and a trivy-secret.yaml, relative to the
+      # source directory. Unset, the ones in the scanned repository are NOT read;
+      # see below.
       config_file: null
       ignore_file: null
+      secret_config_file: null
       # Defaults to ASH's offline mode (ASH_OFFLINE / --offline).
       offline: false
       # Passed to trivy as --severity (this level and above).
@@ -73,7 +75,7 @@ scanners:
 
 ## trivy configuration in the scanned repository
 
-trivy reads `trivy.yaml` and `.trivyignore` from its working directory, which is the repository being scanned. Either file can remove findings without the report saying so: a `severity: [CRITICAL]` or `scan.skip-files` entry in `trivy.yaml` removes every lower-rated or skipped finding, and each `.trivyignore` line removes an advisory. So the builtin scanner passes `--config` and `--ignorefile` pointing at empty files of its own, and a repository's own files are not read. To use them, name them:
+trivy reads `trivy.yaml`, `.trivyignore` and, for the `secret` scanner, `trivy-secret.yaml` from its working directory, which is the repository being scanned. Any of them can remove findings without the report saying so: a `severity: [CRITICAL]` or `scan.skip-files` entry in `trivy.yaml` removes every lower-rated or skipped finding, each `.trivyignore` line removes an advisory, and `trivy-secret.yaml` can disable secret rules. So the builtin scanner passes `--config`, `--ignorefile` and `--secret-config` pointing at files of its own that set nothing, and a repository's own files are not read. To use them, name them:
 
 ```yaml
 scanners:
@@ -81,7 +83,10 @@ scanners:
     options:
       config_file: trivy.yaml
       ignore_file: .trivyignore
+      secret_config_file: trivy-secret.yaml
 ```
+
+A relative path is anchored on the source directory. A configured file that does not exist fails the scan rather than running without it.
 
 To accept a finding, prefer an ASH suppression, which is recorded in the reports. The community `trivy-repo` plugin still reads the repository's files, as it always has.
 

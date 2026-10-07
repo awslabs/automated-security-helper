@@ -242,6 +242,7 @@ def test_default_argv(tmp_path):
         "--skip-dirs=.ash/ash_output",
         f"--config={(scanner.results_dir / 'trivy-config.yaml').resolve().as_posix()}",
         f"--ignorefile={(scanner.results_dir / 'trivyignore.txt').resolve().as_posix()}",
+        f"--secret-config={(scanner.results_dir / 'trivy-secret.yaml').resolve().as_posix()}",
         source.as_posix(),
         "--output",
         results.as_posix(),
@@ -269,9 +270,14 @@ def test_the_ash_config_and_ignore_files_are_empty(tmp_path):
     (source / "trivy.yaml").write_text("severity: [CRITICAL]\n", encoding="utf-8")
     (source / ".trivyignore").write_text("CVE-2018-18074\n", encoding="utf-8")
     argv = _argv(scanner, source)
-    for flag in ("--config=", "--ignorefile="):
+    for flag, content in (
+        ("--config=", ""),
+        ("--ignorefile=", ""),
+        # An empty secret config is a decode error in trivy; an empty mapping is not.
+        ("--secret-config=", "{}\n"),
+    ):
         value = next(a for a in argv if a.startswith(flag))[len(flag) :]
-        assert Path(value).is_file() and Path(value).read_text() == ""
+        assert Path(value).is_file() and Path(value).read_text() == content
         assert Path(value).is_relative_to(scanner.results_dir.resolve())
 
 
@@ -280,6 +286,7 @@ def test_the_ash_config_and_ignore_files_are_empty(tmp_path):
     [
         ("config_file", "--config", "trivy.yaml"),
         ("ignore_file", "--ignorefile", ".trivyignore"),
+        ("secret_config_file", "--secret-config", "trivy-secret.yaml"),
     ],
 )
 def test_an_operator_chosen_trivy_file_is_passed(tmp_path, option, flag, name):
@@ -291,7 +298,7 @@ def test_an_operator_chosen_trivy_file_is_passed(tmp_path, option, flag, name):
     assert f"{flag}={expected}" in argv
 
 
-@pytest.mark.parametrize("option", ["config_file", "ignore_file"])
+@pytest.mark.parametrize("option", ["config_file", "ignore_file", "secret_config_file"])
 def test_a_configured_trivy_file_that_does_not_exist_fails_the_scan(tmp_path, option):
     scanner = _scanner(tmp_path, **{option: "nope.yaml"})
     with pytest.raises(ScannerError, match=option):
