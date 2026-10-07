@@ -882,6 +882,16 @@ class TestVerifyThirdParty:
         (Path(path) / "uv").write_text('#!/bin/sh\necho "uv 0.1.0"\n')
         self._fails(pins, third_party, searched, "does not report 0.12.23", site_dirs)
 
+    def test_every_release_copy_is_checked_not_only_the_first(self, tmp_path):
+        """grype is in both /usr/local/bin and /.ash/bin in the image."""
+        pins, third_party, path = self._tree(tmp_path)
+        second = tmp_path / "second-bin"
+        second.mkdir()
+        (second / "grype").write_text('#!/bin/sh\necho "grype 0.110.0"\n')
+        (second / "grype").chmod(0o755)
+        searched = os.pathsep.join([path, str(second)])
+        self._fails(pins, third_party, searched, "second-bin/grype --version")
+
     def test_only_a_python_package_copy_of_the_primary_fails(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
         (Path(path) / "uv").unlink()

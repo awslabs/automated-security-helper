@@ -197,6 +197,21 @@ def test_a_directory_other_users_cannot_list_fails(tmp_path):
         (Path(spec["doc_dir"]) / "demo").chmod(0o755)
 
 
+@pytest.mark.parametrize("mode", [0o700, 0o754])
+def test_a_doc_root_other_users_cannot_traverse_fails(tmp_path, mode):
+    """0o754 is readable but not searchable by others: listing works, opening
+    the files inside does not."""
+    spec = _tree(tmp_path)
+    Path(spec["doc_dir"]).chmod(mode)
+    try:
+        assert any(
+            p.startswith(spec["doc_dir"]) and "cannot be listed" in p
+            for p in _problems(spec)
+        )
+    finally:
+        Path(spec["doc_dir"]).chmod(0o755)
+
+
 def test_only_the_first_executable_is_required(tmp_path):
     spec = _tree(tmp_path)
     spec["tools"][0]["executables"] = ["demo", "demo-helper"]
