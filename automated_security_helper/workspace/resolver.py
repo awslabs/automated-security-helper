@@ -223,14 +223,7 @@ def _scanner_state(config: AshConfig) -> Tuple[List[str], Dict[str, str]]:
     enabled: List[str] = []
     pins: Dict[str, str] = {}
 
-    # An opt-in scanner nobody enabled or configured is not part of the project's
-    # scan, so it contributes neither a name nor a pin.
-    untouched = getattr(segment, "_untouched_opt_in_fields", None)
-    hidden = set(untouched()) if callable(untouched) else set()
-
     for field_name in declared + [name for name in extra if name not in declared]:
-        if field_name in hidden:
-            continue
         entry = _field(segment, field_name)
         if entry is None:
             continue
