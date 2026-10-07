@@ -328,11 +328,15 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    # The digests are release checksums, which detect-secrets reads as high-entropy
+    # hex. Marked with the trailing pragma, not the `nextline` form: detect-secrets
+    # parses YAML into values and drops comment lines, so in a .yml file a pragma on
+    # the line above is never seen (measured with detect-secrets 1.5.0).
     env:
       ACTIONLINT_VERSION: "1.7.12"
-      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  # pragma: allowlist secret
       SHELLCHECK_VERSION: "0.11.0"
-      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  # pragma: allowlist secret
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install actionlint and shellcheck, verified against their pinned digests
@@ -366,8 +370,11 @@ jobs:
               steps:
                 - run: echo $UNQUOTED >> $GITHUB_ENV
           YAML
-          out="$(actionlint -no-color -shellcheck="$(command -v shellcheck)" "${fixture}" 2>&1)"
-          rc=$?
+          # GitHub runs `shell: bash` as `bash -e -o pipefail`, and `set -uo pipefail`
+          # does not turn -e off, so a bare assignment from a command that exits 1 --
+          # which this one must -- ends the step before rc is read. Capture it instead.
+          rc=0
+          out="$(actionlint -no-color -shellcheck="$(command -v shellcheck)" "${fixture}" 2>&1)" || rc=$?
           printf '%s\n' "${out}"
           if [ "${rc}" -eq 0 ] || ! grep -q 'SC2086' <<< "${out}"; then
             echo "::error::actionlint did not report SC2086 for an unquoted \$UNQUOTED (exit ${rc}). It skips the shellcheck rule silently when it cannot run shellcheck, so the lint below would pass without checking any script."
@@ -386,8 +393,11 @@ jobs:
           fi
           failed=0
           for f in "${files[@]}"; do
-            timeout 120 actionlint -color -shellcheck="$(command -v shellcheck)" "${f}"
-            rc=$?
+            # `|| rc=$?`, not a bare command then rc=$?: under the runner's -e the first
+            # file with a finding would end the loop, and every file after it would go
+            # unlinted while the job still reported only that one.
+            rc=0
+            timeout 120 actionlint -color -shellcheck="$(command -v shellcheck)" "${f}" || rc=$?
             if [ "${rc}" -eq 124 ]; then
               echo "::error file=${f}::actionlint timed out on ${f}. See the note on this job about scripts larger than a pipe's capacity."
               failed=1
