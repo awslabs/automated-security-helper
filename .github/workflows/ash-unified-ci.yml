@@ -293,6 +293,111 @@ jobs:
           uv run --group dev --with 'ty==0.0.84' ty --version
           uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/
 
+  # ---------------------------------------------------------------------------
+  # actionlint over every workflow, with shellcheck on every `run:` script
+  # ---------------------------------------------------------------------------
+  #
+  # Nothing in CI linted the workflows, and on 2026-10-06 main carried eight
+  # findings: two empty `needs:` in ash-repo-docs.yml, and six unquoted
+  # expansions in run-ash-security-scan.yml -- the published reusable workflow,
+  # where an unquoted `ash-args` was glob-expanded against the caller's checkout.
+  #
+  # Both binaries are pinned by version and sha256 and verified before they run.
+  # shellcheck is pinned too, not taken from the runner image, because actionlint
+  # reports whatever the shellcheck it finds reports and an image update would
+  # otherwise change this gate's verdict with no diff here.
+  #
+  # The self-test step is the reason this job can be trusted. actionlint SKIPS the
+  # shellcheck rule silently when it cannot find shellcheck, and reports nothing
+  # for a script it did not check, so a wrong path would turn this job green over
+  # no shell checking at all. The step lints a fixture with an unquoted `$VAR` and
+  # fails the job unless SC2086 is reported.
+  #
+  # One file per invocation, each under its own timeout. actionlint 1.7.12 writes a
+  # script into shellcheck's stdin pipe before starting shellcheck
+  # (process.go, cmdExecution.run), so a script larger than the pipe's capacity
+  # blocks forever. A hosted runner's pipes hold 64 KiB and the largest `run:`
+  # block in these workflows is about 9 KiB, so it should not happen here -- but on
+  # a host whose user has exceeded fs.pipe-user-pages-soft, new pipes hold a page or
+  # two and ash-iac-drift.yml's 8.9 KiB cdk-nag script hangs (measured: scripts of
+  # 8 KB pass, 9.6 KB hang). Per file, a hang names its file and fails instead of
+  # stalling the job.
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      ACTIONLINT_VERSION: "1.7.12"
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      SHELLCHECK_VERSION: "0.11.0"
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install actionlint and shellcheck, verified against their pinned digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="${RUNNER_TEMP}/lint-bin"
+          mkdir -p "${bin}"
+          cd "${RUNNER_TEMP}"
+          curl -fsSL --retry 3 -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz -C "${bin}" actionlint
+          curl -fsSL --retry 3 -o shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz -C "${bin}" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          "${bin}/actionlint" -version
+          "${bin}/shellcheck" --version
+          echo "${bin}" >> "$GITHUB_PATH"
+      - name: Self-test -- an unquoted expansion must be reported
+        shell: bash
+        run: |
+          set -uo pipefail
+          fixture="${RUNNER_TEMP}/actionlint-selftest.yml"
+          cat > "${fixture}" <<'YAML'
+          on: push
+          jobs:
+            j:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo $UNQUOTED >> $GITHUB_ENV
+          YAML
+          out="$(actionlint -no-color -shellcheck="$(command -v shellcheck)" "${fixture}" 2>&1)"
+          rc=$?
+          printf '%s\n' "${out}"
+          if [ "${rc}" -eq 0 ] || ! grep -q 'SC2086' <<< "${out}"; then
+            echo "::error::actionlint did not report SC2086 for an unquoted \$UNQUOTED (exit ${rc}). It skips the shellcheck rule silently when it cannot run shellcheck, so the lint below would pass without checking any script."
+            exit 1
+          fi
+          echo "self-test ok: the unquoted expansion was reported and actionlint exited ${rc}"
+      - name: Lint every workflow
+        shell: bash
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          files=(.github/workflows/*.yml .github/workflows/*.yaml)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no workflow files found; the lint would pass over nothing"
+            exit 1
+          fi
+          failed=0
+          for f in "${files[@]}"; do
+            timeout 120 actionlint -color -shellcheck="$(command -v shellcheck)" "${f}"
+            rc=$?
+            if [ "${rc}" -eq 124 ]; then
+              echo "::error file=${f}::actionlint timed out on ${f}. See the note on this job about scripts larger than a pipe's capacity."
+              failed=1
+            elif [ "${rc}" -ne 0 ]; then
+              failed=1
+            fi
+          done
+          echo "linted ${#files[@]} workflow file(s)"
+          exit "${failed}"
+
   # A changed snapshot or other golden file must arrive in a commit whose
   # `Snapshot-Update:` trailer says why the output changed; see DEVELOPMENT.md
   # "Snapshot tests" and the docstring of the script below.
@@ -1329,6 +1434,7 @@ jobs:
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')) }}
     needs:
       - lint
+      - actionlint
       - snapshot-trailers
       - unit-test
       - scan-validation
