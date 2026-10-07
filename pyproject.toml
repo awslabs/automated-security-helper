@@ -186,7 +186,7 @@ dev = [
  # writes, and a snapshot no test asserts any more fails the session as unused. It
  # also merges its report across pytest-xdist workers, which this suite runs under.
  # Its only runtime dependency is pytest.
- "syrupy>=5.0,<6.0.0",
+ "syrupy>=6.1.1,<7.0.0",
 ]
 
 [build-system]
