@@ -57,8 +57,8 @@
   and is refused in offline mode with an `ERROR` naming the reason. Severities come
   from GuardDog's own risk correlation; see
   [the scanner page](docs/content/docs/plugins/builtin/guarddog.md). Not enabled, the
-  scanner adds no row, count or finding to a scan; like every scanner, its section
-  appears in the resolved config that `ash_aggregated_results.json` embeds. Installed through `uv tool` with an
+  scanner leaves no trace in a default scan's output, including the config written
+  into its reports. Installed through `uv tool` with an
   explicit version and a Python interpreter below 3.14, and included in the container
   image.
 
