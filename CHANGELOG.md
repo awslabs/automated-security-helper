@@ -83,7 +83,8 @@
       options:
         version: v1.14.0
         sha256:
-          linux/amd64: "<64 hex characters>"
+          # Replace with the release asset's real SHA256 (64 hex characters).
+          linux/amd64: "0000000000000000000000000000000000000000000000000000000000000000"
   ```
 
   GitHub lists a digest for every release asset (`gh api
