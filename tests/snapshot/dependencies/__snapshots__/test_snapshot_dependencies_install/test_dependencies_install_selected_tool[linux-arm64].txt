@@ -6,7 +6,7 @@ $ ash dependencies install --bin-path bin -t scanner --tool grype --tool semgrep
 ╰─────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: linux, architecture: arm64
-[<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
 Installing dependencies for scanner plugin: grype
 Running command: python3 -c import sys; from pathlib import Path; from
 automated_security_helper.utils.download_utils import install_pinned_tool;

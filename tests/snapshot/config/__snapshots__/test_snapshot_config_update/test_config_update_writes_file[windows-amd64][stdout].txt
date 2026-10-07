@@ -164,17 +164,6 @@ scanners:
       additional_outputs:
       - syft-table
       offline: false
-  zizmor:
-    name: zizmor
-    enabled: false
-    options:
-      severity_threshold: null
-      scan_timeout: 1800
-      config_file: null
-      persona: regular
-      online_audits: false
-      tool_version: '>=1.29.0,<2.0.0'
-      install_timeout: 300
 reporters:
   csv:
     name: csv

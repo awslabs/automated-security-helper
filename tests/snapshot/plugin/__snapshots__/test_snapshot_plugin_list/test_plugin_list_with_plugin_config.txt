@@ -1,6 +1,6 @@
 $ ash plugin list -c custom.yaml --include-plugin-config
 [<LOG_TIME>] INFO     Using config file specified at: custom.yaml
-             INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+             INFO     Loaded 2 converters, 10 scanners, and 15 reporters
 ASH Scanners
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Enabled ┃ Class                ┃ Module                 ┃ Plugin Config         ┃

@@ -23,7 +23,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+      [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
       Error loading results file: expected str, bytes or os.PathLike object, not NoneType
   
     ''',
@@ -34,7 +34,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+      [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
                    INFO     Found reporter plugin TextReporter
       Error generating report: simulated reporter failure
   
@@ -46,7 +46,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+      [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
                    INFO     Found reporter plugin TextReporter
       Error: reporter 'text' produced no report. See the log above for the reason.
   
@@ -58,7 +58,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+      [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
       Error loading results file: 1 validation error for AshAggregatedResults
       scanner_results
         Input should be an object
@@ -72,7 +72,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+      [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
       Error: Reporter plugin 'pdf' not found.
       Available reporter formats:
         - csv
