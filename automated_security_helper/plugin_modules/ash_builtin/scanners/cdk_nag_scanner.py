@@ -49,6 +49,7 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.subprocess_utils import find_executable
 
@@ -1436,12 +1437,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         )
         out_path = outdir.joinpath("ash-cdk-nag.sarif")
         outdir.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(
-            report.model_dump_json(
-                exclude_none=True,
-                exclude_unset=True,
+        # encoding=None: the locale's, as Path.write_text used.
+        with open_for_write(out_path, encoding=None, errors=None) as handle:
+            handle.write(
+                report.model_dump_json(
+                    exclude_none=True,
+                    exclude_unset=True,
+                )
             )
-        )
 
         return report
 

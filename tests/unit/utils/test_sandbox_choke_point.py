@@ -143,3 +143,66 @@ def test_the_detector_sees_a_direct_spawn(tmp_path):
     finally:
         PACKAGE = saved
     assert len(found) == 7, found
+
+
+SCANNER_MODULES = sorted(
+    {
+        *PACKAGE.glob("plugin_modules/*/scanners/*.py"),
+        *PACKAGE.glob("plugin_modules/*/*scanner*.py"),
+    }
+)
+
+
+def _unguarded_writes(path: Path):
+    """open(..., "w"/"a"...) and Path.write_text/write_bytes calls in ``path``."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in (
+            "write_text",
+            "write_bytes",
+        ):
+            yield f"{path.relative_to(PACKAGE)}:{node.lineno} .{func.attr}()"
+        elif isinstance(func, ast.Name) and func.id == "open":
+            mode = None
+            if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+                mode = node.args[1].value
+            for kw in node.keywords:
+                if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                    mode = kw.value.value
+            if isinstance(mode, str) and any(c in mode for c in "wax+"):
+                yield f"{path.relative_to(PACKAGE)}:{node.lineno} open(mode={mode!r})"
+
+
+@pytest.mark.parametrize(
+    "path", SCANNER_MODULES, ids=lambda p: str(p.relative_to(PACKAGE))
+)
+def test_scanners_write_through_the_guarded_opener(path):
+    """A scanner writes into a results directory a sandboxed tool could also write,
+    so its writes go through fs_guard.open_for_write, which follows no link."""
+    found = list(_unguarded_writes(path))
+    assert not found, (
+        "write through utils/sandbox/fs_guard.open_for_write, not open() or "
+        f"Path.write_text: {found}"
+    )
+
+
+def test_the_write_detector_sees_each_spelling(tmp_path):
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "from pathlib import Path\n"
+        "open('a', 'w')\n"
+        "open('a', mode='a')\n"
+        "open('a')\n"
+        "Path('a').write_text('x')\n"
+    )
+    global PACKAGE
+    saved = PACKAGE
+    PACKAGE = tmp_path
+    try:
+        found = list(_unguarded_writes(sample))
+    finally:
+        PACKAGE = saved
+    assert len(found) == 3, found

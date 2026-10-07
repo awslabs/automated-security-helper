@@ -39,6 +39,7 @@ from automated_security_helper.utils.cfn_template_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.download_utils import current_bin_path
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.subprocess_utils import find_executable
@@ -652,7 +653,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             )
             if sarif_report.runs:
                 sarif_report.runs[0].invocations = [sarif_invocation]
-            with open(sarif_output_file, mode="w", encoding="utf-8") as fp:
+            with open_for_write(sarif_output_file) as fp:
                 report_str = sarif_report.model_dump_json(
                     exclude_none=True,
                     exclude_unset=True,
@@ -701,7 +702,9 @@ if __name__ == "__main__":
         by_alias=True,
         exclude_unset=True,
     )
-    with open(
-        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"), "w"
+    with open_for_write(
+        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"),
+        encoding=None,
+        errors=None,
     ) as f:
         f.write(report_json)

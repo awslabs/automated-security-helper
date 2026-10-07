@@ -25,6 +25,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
 
 
@@ -316,7 +317,9 @@ if __name__ == "__main__":
         by_alias=True,
         exclude_unset=True,
     )
-    with open(
-        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"), "w"
+    with open_for_write(
+        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"),
+        encoding=None,
+        errors=None,
     ) as f:
         f.write(report_json)

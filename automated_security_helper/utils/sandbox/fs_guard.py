@@ -168,7 +168,9 @@ def _open_regular(name: str, dir_fd: Optional[int]) -> int:
 
 
 def open_for_write(
-    path: Union[str, Path], encoding: str = "utf-8", errors: str = "strict"
+    path: Union[str, Path],
+    encoding: Optional[str] = "utf-8",
+    errors: Optional[str] = "strict",
 ) -> IO[str]:
     """Open ``path`` for writing text without following a symlink anywhere below
     the writable root it is in (or, outside any, at the file itself).

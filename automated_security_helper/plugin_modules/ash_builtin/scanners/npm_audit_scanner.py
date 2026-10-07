@@ -40,6 +40,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.package_identity import (
     NPM_LOCKFILE_NAMES,
@@ -1296,7 +1297,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             # Save the combined results
             if all_results:
                 Path(results_file).parent.mkdir(exist_ok=True, parents=True)
-                Path(results_file).write_text(json.dumps(all_results, default=str))
+                # encoding=None: the locale's, as Path.write_text used.
+                with open_for_write(results_file, encoding=None, errors=None) as f:
+                    f.write(json.dumps(all_results, default=str))
 
             self._post_scan(
                 target=target,
@@ -1324,7 +1327,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
                 # Save SARIF report
                 sarif_file = target_results_dir.joinpath("results_sarif.sarif")
-                with open(sarif_file, mode="w", encoding="utf-8") as f:
+                with open_for_write(sarif_file) as f:
                     f.write(
                         sarif_report.model_dump_json(
                             exclude_none=True,
