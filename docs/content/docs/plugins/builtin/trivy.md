@@ -31,7 +31,7 @@ Once enabled it behaves like every other scanner. If the `trivy` binary is not i
 
 - Container image: included. The image installs the pinned release (currently v0.69.3).
 - Local mode: `ash dependencies install` downloads the pinned release asset from GitHub and checks it against the SHA256 recorded in `automated_security_helper/utils/tool_downloads.py` before installing it.
-- Nix mode: the flake supplies nixpkgs' `trivy`. Nix mode runs offline, so see [Offline and air-gapped use](#offline-and-air-gapped-use).
+- Nix mode: the flake supplies nixpkgs' `trivy`, but not its vulnerability database. Nix mode always runs offline, and the nix shell does not download the database (it is about 120 MB to fetch and 1.4 GB on disk, and trivy is opt-in). So an enabled trivy under `--mode nix` is reported `MISSING`, with a reason saying it has no vulnerability database, until you provide one; see [Offline and air-gapped use](#offline-and-air-gapped-use).
 - A `trivy` already on `PATH` is used as is. ASH is tested against the pinned version.
 
 ## What it scans by default, and why
@@ -121,7 +121,7 @@ trivy needs a database in its cache to scan offline. With none, ASH reports triv
 TRIVY_CACHE_DIR=/path/to/cache trivy image --download-db-only
 ```
 
-and point the offline scan at the same `TRIVY_CACHE_DIR`. The container image built with `--offline` does not bake a trivy database in; set `TRIVY_CACHE_DIR` to a mounted cache, or run trivy online.
+and point the offline scan at the same `TRIVY_CACHE_DIR`. In nix mode, export `TRIVY_CACHE_DIR` before running `ash scan --mode nix`; the variable is passed through to the scan. The container image built with `--offline` does not bake a trivy database in; set `TRIVY_CACHE_DIR` to a mounted cache, or run trivy online.
 
 ## Running it alongside the trivy-repo community plugin
 
