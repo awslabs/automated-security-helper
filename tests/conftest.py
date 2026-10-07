@@ -8,6 +8,8 @@ import pytest
 from pathlib import Path
 from typing import List, Literal
 
+from typing_extensions import Self
+
 from tests.utils.helpers import get_ash_temp_path
 
 # Add the project root to the Python path
@@ -293,6 +295,42 @@ def _keep_live_logging_off_the_ash_logger(request):
     yield
 
 
+_ASH_LOGGER_NAMESPACES = ("ash", "automated_security_helper")
+
+
+def _is_ash_logger_name(name: str) -> bool:
+    return any(name == ns or name.startswith(ns + ".") for ns in _ASH_LOGGER_NAMESPACES)
+
+
+def _ash_loggers() -> "dict[str, logging.Logger]":
+    """Every real logger (not placeholder) in ASH's namespaces that exists now."""
+    loggers = {
+        name: logger
+        for name, logger in logging.root.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger) and _is_ash_logger_name(name)
+    }
+    loggers.setdefault("ash", logging.getLogger("ash"))
+    return loggers
+
+
+class _AshLoggerSwitches:
+    """Snapshot and restore ``level``/``propagate``/``disabled`` on ASH's loggers."""
+
+    def __enter__(self) -> "Self":
+        self._saved = {
+            name: (logger.level, logger.propagate, logger.disabled)
+            for name, logger in _ash_loggers().items()
+        }
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        for name, logger in _ash_loggers().items():
+            if name in self._saved:
+                logger.level, logger.propagate, logger.disabled = self._saved[name]
+            else:
+                logger.disabled = False
+
+
 @pytest.fixture(autouse=True)
 def _restore_ash_logger_switches():
     """Stop one test's logging side effects from blinding another's ``caplog``.
@@ -319,23 +357,27 @@ def _restore_ash_logger_switches():
     tests share a process. The failing tests were not at fault, the added file did
     not touch logging, and nothing in either was near cdk-nag.
 
-    Snapshotting the three switches per test keeps the blast radius of any such
-    import inside the test that caused it. Handlers are deliberately left alone:
+    It is not only the ``ash`` logger. ``dictConfig`` disables every logger that
+    exists at the time, and ASH's modules also log through their own
+    ``logging.getLogger(__name__)`` loggers -- ``run_ash_scan`` reports "Scan
+    incomplete: ..." on one. The second instance of this bug: with
+    ``run_ash_scan`` already imported on a worker, ``test_release_line_workflow``'s
+    ``from commitizen import changelog`` disabled
+    ``automated_security_helper.interactions.run_ash_scan``, and the container
+    exit-code snapshots that ran later on the same worker captured an empty
+    stderr. Two of five full local runs failed that way; replaying the failing
+    worker's test order with ``-n0`` failed every time.
+
+    So the switches are snapshotted for every logger in ASH's two namespaces
+    (``ash`` and ``automated_security_helper``) and restored after each test, and
+    an ASH logger first created during the test is re-enabled, because nothing in
+    ASH disables its own loggers on purpose. That keeps the blast radius of any
+    such import inside the test that caused it. Handlers are deliberately left alone:
     the session fixture above manages those, and rebuilding the handler list here
     would fight it.
     """
-    ash_logger = logging.getLogger("ash")
-    level, propagate, disabled = (
-        ash_logger.level,
-        ash_logger.propagate,
-        ash_logger.disabled,
-    )
-    try:
+    with _AshLoggerSwitches():
         yield
-    finally:
-        ash_logger.level = level
-        ash_logger.propagate = propagate
-        ash_logger.disabled = disabled
 
 
 @pytest.fixture
