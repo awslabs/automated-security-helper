@@ -66,6 +66,10 @@ def _load_script():
 installer = _load_script()
 
 
+# The pinned SHA256 of the syft executable inside syft_1.42.4_linux_amd64.tar.gz.
+_SYFT_LINUX_AMD64_EXECUTABLE = "04db0f882928929381ab5503bcb25ea0a062e487481483b8a8a60c9f6c4af353"  # pragma: allowlist secret
+
+
 def _pins_dir(tmp_path: Path, digest_overrides: dict | None = None) -> Path:
     """A standalone copy of the pinned table, optionally with digests rewritten.
 
@@ -306,10 +310,15 @@ class TestTheDigestCheckCanFail:
         # the installer is a real one rather than a value both sides were handed.
         download, real_digest = self._fake_download(payload)
 
+        import hashlib
+
         pins = _pins_dir(
             tmp_path,
             {
-                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": real_digest  # pragma: allowlist secret
+                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": real_digest,  # pragma: allowlist secret
+                # The executable digest too: the fixture's member is not the real
+                # syft, and the installer checks the member against its own pin.
+                _SYFT_LINUX_AMD64_EXECUTABLE: hashlib.sha256(payload).hexdigest(),
             },
         )
         monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
@@ -325,6 +334,106 @@ class TestTheDigestCheckCanFail:
             "the installed file must be executable, or the next Dockerfile layer's "
             "`RUN syft --version` fails with a permission error"
         )
+
+
+class TestTheExecutableDigestIsChecked:
+    """The extracted executable is checked against its own pin, not only the archive.
+
+    That second check is what lets ``ash dependencies install`` later recognize the
+    binary this script put in /usr/local/bin and leave it alone instead of writing
+    another copy into ASH_BIN_PATH. If the check could not fail, a wrong entry in
+    ``_EXECUTABLE_DIGESTS`` would ship unnoticed and the dedupe would silently never
+    happen.
+    """
+
+    def _setup(self, tmp_path, monkeypatch, payload, executable_digest):
+        import hashlib
+
+        download, archive_digest = TestTheDigestCheckCanFail._fake_download(payload)
+        pins = _pins_dir(
+            tmp_path,
+            {
+                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": archive_digest,  # pragma: allowlist secret
+                _SYFT_LINUX_AMD64_EXECUTABLE: executable_digest
+                or hashlib.sha256(payload).hexdigest(),
+            },
+        )
+        monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
+        monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(installer, "download", download)
+        return pins
+
+    def test_a_member_that_misses_its_pin_exits_three_and_installs_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        pins = self._setup(tmp_path, monkeypatch, b"#!/bin/sh\n", "0" * 64)
+        bin_dir = tmp_path / "bin"
+        with pytest.raises(SystemExit) as raised:
+            installer.install("syft", bin_dir, pins)
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not bin_dir.exists() or list(bin_dir.iterdir()) == []
+
+    def test_an_identical_binary_at_the_destination_is_not_fetched_again(
+        self, tmp_path, monkeypatch
+    ):
+        payload = b"#!/bin/sh\necho pinned\n"
+        pins = self._setup(tmp_path, monkeypatch, payload, None)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "syft").write_bytes(payload)
+        (bin_dir / "syft").chmod(0o755)
+
+        def no_download(url, target):
+            raise AssertionError("downloaded a binary that was already in place")
+
+        monkeypatch.setattr(installer, "download", no_download)
+        assert installer.install("syft", bin_dir, pins) == bin_dir / "syft"
+
+    def test_a_symlink_to_identical_bytes_is_replaced_with_a_file(
+        self, tmp_path, monkeypatch
+    ):
+        """A link's target can change after the check, so only a real file counts."""
+        payload = b"#!/bin/sh\necho pinned\n"
+        pins = self._setup(tmp_path, monkeypatch, payload, None)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "syft").write_bytes(payload)
+        (elsewhere / "syft").chmod(0o755)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "syft").symlink_to(elsewhere / "syft")
+
+        installed = installer.install("syft", bin_dir, pins)
+        assert not installed.is_symlink()
+        assert installed.read_bytes() == payload
+
+    def test_a_different_binary_at_the_destination_is_replaced(
+        self, tmp_path, monkeypatch
+    ):
+        payload = b"#!/bin/sh\necho pinned\n"
+        pins = self._setup(tmp_path, monkeypatch, payload, None)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "syft").write_bytes(b"#!/bin/sh\necho something else\n")
+        # Executable, so only the digest comparison can be what turns it away.
+        (bin_dir / "syft").chmod(0o755)
+
+        installed = installer.install("syft", bin_dir, pins)
+        assert installed.read_bytes() == payload
+
+    def test_identical_bytes_that_cannot_execute_are_reinstalled(
+        self, tmp_path, monkeypatch
+    ):
+        """At mode 0644 the next layer's `RUN syft --version` would fail."""
+        payload = b"#!/bin/sh\necho pinned\n"
+        pins = self._setup(tmp_path, monkeypatch, payload, None)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "syft").write_bytes(payload)
+        (bin_dir / "syft").chmod(0o644)
+
+        installed = installer.install("syft", bin_dir, pins)
+        assert os.access(installed, os.X_OK)
 
 
 class TestLoadPinsLeavesSysModulesAlone:

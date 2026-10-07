@@ -529,6 +529,21 @@
   `sys.path` entries. It matches the same packages as before, with one addition: a
   plugin package installed in editable mode through an import hook is now found.
 
+- **`ash dependencies install` no longer installs a second copy of a pinned tool
+  that is already present.** The container image installs syft, grype and trivy into
+  `/usr/local/bin` from their pinned release assets, and then ran
+  `ash dependencies install` twice (once per image stage), each writing grype and
+  syft into `ASH_BIN_PATH` again; trivy would have followed once a builtin scanner
+  installs it. The installer now checks the executable a scan would resolve: if its bytes
+  hash to the pinned SHA256 of that release's executable, the install is skipped and
+  the row reads `VERIFIED PRESENT`. A same-named binary with any other bytes,
+  whatever version it reports, does not count, and the pinned build is installed
+  exactly as before. The image is 334.6 MB smaller (5,598.7 MB to 5,264.1 MB
+  uncompressed). To make the check possible, `tool_downloads.py` now pins the SHA256
+  of the executable inside each release archive as well as the archive's, and every
+  install, including the image's `install-pinned-tool`, refuses an extracted
+  executable that does not match it.
+
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan

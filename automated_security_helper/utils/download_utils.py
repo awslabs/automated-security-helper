@@ -12,16 +12,21 @@ import tarfile
 import tempfile
 import time
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 import urllib.error
 import urllib.request
 
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import run_command
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.core.constants import ASH_BIN_PATH
-from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
+from automated_security_helper.core.exceptions import (
+    ToolDownloadIntegrityError,
+    ToolNotProvisionableError,
+)
 
 # Name of the directory holding install receipts. See receipt_root() for why it is
 # NOT under the bin directory a tool is installed into: a receipt records the digest
@@ -808,7 +813,12 @@ def _unreadable_archive(
     )
 
 
-def _extract_single_member(archive_path: Path, member_name: str, target: Path) -> str:
+def _extract_single_member(
+    archive_path: Path,
+    member_name: str,
+    target: Path,
+    expected_member_sha256: Optional[str] = None,
+) -> str:
     """Extract the one archive member named ``member_name`` to ``target``.
 
     ``member_name`` is matched against each entry's *basename*, and the archive is
@@ -841,6 +851,14 @@ def _extract_single_member(archive_path: Path, member_name: str, target: Path) -
 
     The mode is set explicitly on the staging file rather than left to
     ``make_executable``'s read-modify-write of whatever the umask produced.
+
+    ``expected_member_sha256``, when given, is the pinned digest of the member itself
+    (``ToolAsset.executable_digest``). A member that does not hash to it is refused
+    before it is renamed into place. The archive digest has already been checked by
+    then, so this can only fire on a wrong entry in ``_EXECUTABLE_DIGESTS`` or an
+    archive that holds a different executable than the one that was pinned. Either
+    way the pin no longer describes what would be installed, and a binary already on
+    disk could no longer be recognized by it, so the install stops.
 
     Returns:
         The SHA256 of the extracted member, verified after it landed at ``target``.
@@ -904,6 +922,18 @@ def _extract_single_member(archive_path: Path, member_name: str, target: Path) -
                         _stage(source)
         except (tarfile.ReadError, zipfile.BadZipFile) as e:
             raise _unreadable_archive(archive_path, e) from e
+
+        if (
+            expected_member_sha256 is not None
+            and written.hexdigest() != expected_member_sha256.lower()
+        ):
+            raise ToolDownloadIntegrityError(
+                f"{member_name} in {archive_path.name} does not match its pinned "
+                f"executable digest (expected {expected_member_sha256.lower()}, found "
+                f"{written.hexdigest()}). The archive matched its own pin, so the "
+                "executable digest in tool_downloads.py is wrong or the archive holds "
+                "a different executable; refusing to install it."
+            )
 
         # 0o755, and the digest of what was written, are both handled here. See
         # _finalize_staged: the post-rename re-hash is what stops a race on the
@@ -1105,6 +1135,16 @@ def install_pinned_tool(
         )
         return target
 
+    if not force:
+        present = find_verified_pinned_executable(tool, target_platform, arch, bin_dir)
+        if present is not None:
+            ASH_LOGGER.info(
+                f"{present.tool} {present.version} is already present at "
+                f"{present.path} (SHA256 {present.sha256} matches the pin); "
+                "not installing a second copy"
+            )
+            return present.path
+
     with tempfile.TemporaryDirectory(prefix="ash-tool-download-") as staging:
         staging_dir = Path(staging)
         asset_name = asset.url.split("/")[-1]
@@ -1117,7 +1157,12 @@ def install_pinned_tool(
                 expected_sha256=asset.sha256,
             )
             _store_cached_asset(archive, asset_name)
-        installed_digest = _extract_single_member(archive, asset.member_name, target)
+        installed_digest = _extract_single_member(
+            archive,
+            asset.member_name,
+            target,
+            expected_member_sha256=asset.executable_digest,
+        )
 
     # _extract_single_member already set the mode on the staged file before renaming
     # it into place; this covers the Windows branch, where it does not.
@@ -1149,6 +1194,114 @@ def install_pinned_tool(
     return target
 
 
+@dataclass(frozen=True)
+class VerifiedPresentTool:
+    """A pinned tool found on disk whose bytes hash to its pinned executable digest."""
+
+    tool: str
+    version: str
+    path: Path
+    sha256: str
+
+
+def find_verified_pinned_executable(
+    tool: str, target_platform: str, arch: str, destination: Path
+) -> Optional[VerifiedPresentTool]:
+    """Find a copy of the pinned ``tool`` that is already installed, by its bytes.
+
+    Why this exists: ASH's container image installs syft, grype and trivy into
+    /usr/local/bin from their pinned release assets, and then runs
+    ``ash dependencies install`` twice -- once as root, once as the non-root user
+    -- which installed the pinned grype and syft again into ASH_BIN_PATH each time.
+    Each copy is a separate image layer, 167 MB for the two tools per stage.
+
+    A candidate is accepted only if it is a regular file (not a symlink), is
+    executable, and its bytes hash to ``executable_digest``, the pinned SHA256 of
+    the executable inside the verified release archive. The name proves nothing: a
+    same-named binary from a package manager, another version, or a file someone
+    replaced does not hash to the pin, so it is reported as not present and the
+    verified install runs exactly as it did before this existed. The version is
+    not checked separately because it does not need to be: the digest is pinned
+    per release asset, so a match is that release's binary.
+
+    Where it looks, and why only there:
+
+    1. ``destination``/``install_as``, where the install would write. If anything
+       is at that path -- a file, a symlink, a dangling symlink -- it is the only
+       candidate. A file there that does not verify is what the install is about
+       to replace, and accepting some other copy instead would leave it in place
+       to shadow that copy whenever ``destination`` is on PATH, which in the
+       image it is. A symlink there is never accepted, even to the right bytes:
+       its target can change after this check, and the install replaces the link
+       itself with a real file.
+    2. Otherwise, what ``find_executable(tool)`` resolves -- the lookup a scanner
+       makes at run time -- but only if that file sits in one of
+       ``subprocess_utils.path_independent_dirs()``. Skipping the install is only
+       correct if every later scan finds the verified copy, and a copy found only
+       through this process's PATH may be invisible to a scan run from another
+       shell, a CI job or a cron entry. One in ASH_BIN_PATH or /usr/local/bin is
+       found by ``find_executable`` whatever PATH holds.
+
+    The file is re-hashed on every call. Nothing is cached and no receipt is
+    consulted, so a binary replaced after a previous run is caught on the next one,
+    the same property ``_already_installed`` keeps for receipts.
+
+    Returns:
+        The verified copy, or None when there is no pinned executable digest for
+        this asset, no acceptable candidate, or the candidate's bytes do not match.
+
+    Raises:
+        ToolNotProvisionableError: as ``get_tool_asset`` does.
+    """
+    from automated_security_helper.utils.tool_downloads import get_tool_asset
+
+    asset = get_tool_asset(tool, target_platform, arch)
+    expected = asset.executable_digest
+    if expected is None:
+        return None
+
+    at_destination = Path(destination).joinpath(asset.install_as)
+    if os.path.lexists(at_destination):
+        candidate = at_destination
+    else:
+        found = subprocess_utils.find_executable(asset.tool)
+        if not found:
+            return None
+        candidate = Path(found)
+        try:
+            allowed = {d.resolve() for d in subprocess_utils.path_independent_dirs()}
+            in_allowed = candidate.parent.resolve() in allowed
+        except OSError:
+            in_allowed = False
+        if not in_allowed:
+            ASH_LOGGER.debug(
+                f"{candidate} is outside the directories every scan searches; "
+                f"installing {tool} rather than relying on this PATH"
+            )
+            return None
+
+    if candidate.is_symlink() or not candidate.is_file():
+        return None
+    if platform.system() != "Windows" and not os.access(candidate, os.X_OK):
+        return None
+
+    try:
+        actual = sha256_file(candidate)
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not hash {candidate} ({e}); installing {tool}")
+        return None
+    if actual != expected.lower():
+        ASH_LOGGER.debug(
+            f"{candidate} is named {asset.install_as} but is not the pinned "
+            f"{tool} {asset.version} (SHA256 {actual}, pinned {expected.lower()}); "
+            "installing the pinned build"
+        )
+        return None
+    return VerifiedPresentTool(
+        tool=asset.tool, version=asset.version, path=candidate, sha256=actual
+    )
+
+
 def current_bin_path() -> Path:
     """Resolve ASH_BIN_PATH at call time rather than at import time.
 
@@ -1159,6 +1312,15 @@ def current_bin_path() -> Path:
     """
     from_env = os.environ.get("ASH_BIN_PATH")
     return Path(from_env) if from_env else ASH_BIN_PATH
+
+
+# The script every pinned-tool install command runs. A constant so that
+# pinned_install_already_satisfied can recognize these commands by exact text.
+_PINNED_TOOL_INSTALL_SCRIPT = (
+    "import sys; from pathlib import Path; "
+    "from automated_security_helper.utils.download_utils import install_pinned_tool; "
+    "install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]))"
+)
 
 
 def create_pinned_tool_install_command(
@@ -1176,15 +1338,46 @@ def create_pinned_tool_install_command(
     if destination is None:
         destination = str(current_bin_path()).replace("\\", "/")
 
-    script = (
-        "import sys; from pathlib import Path; "
-        "from automated_security_helper.utils.download_utils import install_pinned_tool; "
-        "install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]))"
-    )
     return CustomCommand(
-        args=[sys.executable, "-c", script, tool, target_platform, arch, destination],
+        args=[
+            sys.executable,
+            "-c",
+            _PINNED_TOOL_INSTALL_SCRIPT,
+            tool,
+            target_platform,
+            arch,
+            destination,
+        ],
         shell=False,
     )
+
+
+def pinned_install_already_satisfied(
+    args: "list[str]",
+) -> "Optional[VerifiedPresentTool]":
+    """For an argv built by ``create_pinned_tool_install_command``: is it a no-op?
+
+    ``ash dependencies install`` runs each plugin's install commands as argv lists
+    and only sees an exit code, so a pinned install that found its tool already
+    present would read as INSTALLED. Calling this first lets the installer skip
+    the subprocess and report the tool as present and verified instead, naming the
+    path and digest it checked.
+
+    Recognized by the exact script text, which only ``create_pinned_tool_install_command``
+    produces, rather than by sniffing tool names out of arbitrary commands. Any other
+    argv, or one whose tool has no pinned executable digest, returns None and is run
+    as before.
+    """
+    if len(args) != 7 or args[1] != "-c" or args[2] != _PINNED_TOOL_INSTALL_SCRIPT:
+        return None
+    tool, target_platform, arch, destination = args[3:7]
+    try:
+        return find_verified_pinned_executable(
+            tool, target_platform, arch, Path(destination)
+        )
+    except ToolNotProvisionableError:
+        # Let the install command itself report it, with its own message.
+        return None
 
 
 def create_url_download_command(
