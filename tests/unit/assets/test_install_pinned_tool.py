@@ -330,9 +330,9 @@ class TestTheDigestCheckCanFail:
 class TestABareBinaryAsset:
     """hadolint's release asset is the executable, with no archive around it."""
 
-    HADOLINT_LINUX_AMD64 = (
-        "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"
-    )
+    # The published release checksum of hadolint-linux-x86_64 v2.15.1, as pinned in
+    # tool_downloads.py; public by construction, not a credential.
+    HADOLINT_LINUX_AMD64 = "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"  # pragma: allowlist secret
 
     @staticmethod
     def _fake_download(payload: bytes):

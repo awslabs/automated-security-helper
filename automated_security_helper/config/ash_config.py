@@ -444,7 +444,9 @@ class ScannerConfigSegment(_PluginConfigSegment):
     ] = GrypeScannerConfig()
     hadolint: Annotated[
         HadolintScannerConfig,
-        Field(description="Configure the options for hadolint (opt-in)"),
+        Field(
+            description="Configure the options for hadolint (opt-in: off unless enabled here or named with --scanners)"
+        ),
     ] = HadolintScannerConfig()
     npm_audit: Annotated[
         NpmAuditScannerConfig,

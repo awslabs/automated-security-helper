@@ -3345,7 +3345,7 @@
               "severity_threshold": null
             }
           },
-          "description": "Configure the options for hadolint (opt-in)"
+          "description": "Configure the options for hadolint (opt-in: off unless enabled here or named with --scanners)"
         },
         "npm-audit": {
           "$ref": "#/$defs/NpmAuditScannerConfig",
