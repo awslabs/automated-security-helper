@@ -90,9 +90,20 @@ CLI_AIDER = CliTool(
 CLI_GOOSE = CliTool(
     name="goose",
     role="both",
+    # The release tarball, checked against its pinned SHA256 before it is
+    # unpacked. This used to pipe goose's download_cli.sh into bash, which ran a
+    # remote script unverified, and that script falls back to the *latest*
+    # release when the pinned one fails to download. It installs to the same
+    # place the script did ($HOME/.local/bin) and, like CONFIGURE=false, runs
+    # nothing afterwards. The digest is the one GitHub lists for the v1.33.1
+    # asset, and it matches the downloaded file.
     install_cmd=(
-        "GOOSE_VERSION=v1.33.1 CONFIGURE=false bash -c "
-        "'curl -fsSL https://github.com/aaif-goose/goose/releases/download/v1.33.1/download_cli.sh | bash'"
+        "curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/goose.tar.gz "
+        "'https://github.com/aaif-goose/goose/releases/download/v1.33.1/goose-x86_64-unknown-linux-gnu.tar.gz' "
+        "&& echo '437a32e2bd304e6544036bec117436712f7847f72ddbe46d6c2c4009e0ffcca8  /tmp/goose.tar.gz' "
+        "| sha256sum -c - "
+        '&& mkdir -p "$HOME/.local/bin" '
+        '&& tar -xzf /tmp/goose.tar.gz -C "$HOME/.local/bin" ./goose'
     ),
     # `goose recipe validate` works on RECIPES; for raw extensions we'd
     # need to wrap as a recipe. Today smoke_test is structural only.
@@ -132,7 +143,23 @@ CLI_VSCODE = CliTool(
 CLI_CURSOR = CliTool(
     name="cursor-agent",
     role="installer",
-    install_cmd="curl https://cursor.com/install -fsS | bash",
+    # The versioned package that https://cursor.com/install fetched on
+    # 2026-10-07, laid out the way that script lays it out, checked against a
+    # pinned SHA256 first. Piping the script into bash ran it unverified and
+    # installed whatever build it named that day. Cursor publishes no checksum
+    # (the .sha256 and SHA256SUMS siblings answer 403), so the digest is the
+    # one measured from the download. A bump replaces the build id and digest.
+    install_cmd=(
+        "curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/cursor-agent.tar.gz "
+        "'https://downloads.cursor.com/lab/2026.10.01-e373342/linux/x64/agent-cli-package.tar.gz' "
+        "&& echo 'a79726c6e644520e993970be4c45775a6889802b67abe461a677a53219ae28e8  /tmp/cursor-agent.tar.gz' "
+        "| sha256sum -c - "
+        '&& D="$HOME/.local/share/cursor-agent/versions/2026.10.01-e373342" '
+        '&& mkdir -p "$D" "$HOME/.local/bin" '
+        '&& tar --strip-components=1 -xzf /tmp/cursor-agent.tar.gz -C "$D" '
+        '&& ln -sf "$D/cursor-agent" "$HOME/.local/bin/cursor-agent" '
+        '&& ln -sf "$D/cursor-agent" "$HOME/.local/bin/agent"'
+    ),
     pin_key="cursor",
     headless=False,
 )
