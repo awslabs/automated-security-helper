@@ -512,6 +512,18 @@
   scanner runs. The precedence change and the new exit code for a missing rule cache
   are under Behavior changes. The option's schema default is now a plain `false`
   instead of the import-time environment value.
+
+- **Plugin discovery no longer crashes on Windows with Python 3.13+.**
+  `discover_plugins` enumerated every `sys.path` entry with `pkgutil.iter_modules()`.
+  On CPython 3.13 and later that raises `KeyError` for a zip archive on `sys.path`
+  after any `importlib.invalidate_caches()` call, because `pkgutil` reads a zipimport
+  cache entry that invalidation now removes. On Windows the console-script launcher
+  (`ash.exe`, `pytest.exe`) is a zip archive and is `sys.path[0]`, so loading
+  `ash_plugin_modules` in a scan or workspace run could fail there. Discovery now looks
+  up each requested top-level package name directly and never reads unrelated
+  `sys.path` entries. It matches the same packages as before, with one addition: a
+  plugin package installed in editable mode through an import hook is now found.
+
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan
