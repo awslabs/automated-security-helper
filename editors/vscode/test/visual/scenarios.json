@@ -3,7 +3,7 @@
   "scenarios": [
     {
       "name": "fallback-notice",
-      "shows": "the one-time notice shown when ashx is not on PATH and ash runs instead"
+      "shows": "the one-time notice shown when ashx is not on PATH and ash runs instead, in the notification center"
     },
     {
       "name": "problems-panel",

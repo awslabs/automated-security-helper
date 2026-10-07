@@ -154,7 +154,8 @@ async function clearNotifications(): Promise<void> {
  * The extension raises its notifications without awaiting them, so a toast can
  * still be on its way when the command that raised it returns. The screen is let
  * settle first, so the toast is there to focus. Once focused, a toast stays: the
- * workbench hides an unfocused toast after a timeout, but not a focused one.
+ * workbench hides an unfocused toast after a timeout (see the fallback-notice
+ * scene) but not a focused one.
  */
 async function expandNewestToast(name: string): Promise<void> {
   const before = await settledCapture(`${name}.before-focus`);
@@ -171,12 +172,16 @@ function installAshx(): void {
   fs.writeFileSync(path.join(ASHX_DIR, 'ashx'), ASHX_WRAPPER, { mode: 0o755 });
 }
 
-/** Closes everything a scene can open: hover, editors, panel and notifications. */
+/**
+ * Closes everything a scene can open: hover, editors, panel, notifications and the
+ * notification center.
+ */
 async function resetWorkbench(): Promise<void> {
   await vscode.commands.executeCommand('editor.action.hideHover');
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   await vscode.commands.executeCommand('workbench.action.closePanel');
   await clearNotifications();
+  await vscode.commands.executeCommand('notifications.hideList');
 }
 
 suite('ASH visual snapshots', () => {
@@ -196,9 +201,19 @@ suite('ASH visual snapshots', () => {
     const report = await scan('clean');
     assert.strictEqual(report.status, 'ok', report.detail);
     assert.strictEqual(report.fallbackNotice, 'shown');
-    // Two toasts: the scan's result, newest and on top, and below it the fallback
-    // notice, which was raised first.
-    await expandNewestToast('fallback-notice');
+    // The notice is pictured in the notification center, not as a toast. The
+    // workbench hides an unfocused information toast 10 seconds after showing it,
+    // and the notice is raised before the scan starts, so on a starved CPU it was
+    // gone from 1 run in 13 before the picture was taken. The center keeps every
+    // notification until it is closed, so nothing in this picture is timed.
+    //
+    // The center lists the newest first: the scan's result, then the notice. The
+    // center opens with the first focused; closing it leaves the notice, alone, to
+    // be expanded. Each step must visibly change the screen (untilScreenChanges).
+    const before = await settledCapture('fallback-notice.before-center');
+    const center = await untilScreenChanges('fallback-notice.center', before, 'notifications.showList');
+    const notice = await untilScreenChanges('fallback-notice.cleared', center, 'notification.clear');
+    await untilScreenChanges('fallback-notice.expanded', notice, 'notification.expand');
     await matchesBaseline('fallback-notice');
   });
 

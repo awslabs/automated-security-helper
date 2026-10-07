@@ -86,7 +86,7 @@ is captured from the X server and compared with its PNG in `__snapshots__/`:
 
 | Baseline | What it shows |
 |---|---|
-| `fallback-notice.png` | the one-time notice when `ashx` is not on PATH and `ash` runs, expanded |
+| `fallback-notice.png` | the one-time notice when `ashx` is not on PATH and `ash` runs, expanded in the notification center |
 | `problems-panel.png` | the Problems panel after a scan with findings, `planted_secret.py` open |
 | `diagnostic-hover.png` | the hover over the finding's line: message, source, rule code |
 | `incomplete-scan-notification.png` | the exit 1 (ScanIncompleteExit) warning, expanded |
@@ -120,35 +120,62 @@ The image is built from the Dockerfile on each run and is never pushed.
 The threshold is zero: `compare -metric AE` with no fuzz, so one changed pixel
 fails. That is justified by measurement, not assumed.
 
-The suite was not always deterministic. Before `--disable-partial-raster`, 4 of
-10 runs in the container failed by exactly one pixel: the top end of the
-Problems toolbar's separator at (1218,518), or a part's rounded corner, one
-level of gray off (#5E5E5E against #606060). By default Chromium re-rasters only
-the damaged part of a tile, and its software rasterizer can round an
-anti-aliased edge pixel differently in a partial raster than in a whole one.
-Which edges get a partial raster depends on what changed in which frame, so the
-same state could be drawn two ways. With partial raster off, every tile is
-rastered whole: 20 runs, then 12 consecutive runs, then 20 more five at a time,
-every capture of every scenario identical. The cause is removed, so there is
-still nothing for a tolerance to absorb.
+Two Chromium switches in `run.ts` each remove one way the same state could be
+drawn two ways. Both are about Chromium's software renderer redrawing only the
+part of the screen that changed, and both showed up as one anti-aliased edge
+pixel one level of gray off:
+
+- `--disable-partial-raster`. By default Chromium re-rasters only the damaged
+  part of a tile, and its software rasterizer can round an edge pixel
+  differently in a partial raster than in a whole one. Before this switch, 4 of
+  10 runs failed by one pixel: the top of the Problems toolbar's separator at
+  (1218,518), or a part's rounded corner (#5E5E5E against #606060).
+- `--ui-disable-partial-swap`. By default the compositor copies only the damaged
+  rectangle of a frame to the X window, so a pixel on that rectangle's edge can
+  keep the value an earlier frame drew. Which frames get drawn depends on how
+  much CPU the renderer gets. On two loaded CPUs, 9 of 30 runs without this
+  switch drew the Problems panel's edge at (1267,503) one level off (30 against
+  31), which is how CI failed; 0 of 45 with it.
+
+So the variance left after the first switch came from CPU starvation, which CI
+runners have and an idle workstation does not, and not from the rasterizer
+picking SIMD code by CPU model: the CI failure reproduced on the same machine as
+the passing runs, under load. The same loaded runs found three timing faults in
+the harness, fixed where they arose rather than absorbed:
+
+- The Explorer's `.ash` row came from the file watcher reporting the directory
+  the first scan created. Under load the watcher could miss it, and every picture
+  of the run lacked the row (5 of 30 runs). `run.ts` creates the scan's output
+  directory before VS Code opens the folder, so the row is in the Explorer's
+  first listing.
+- VS Code reads `~/.vscode/argv.json` at startup and creates it when missing.
+  The container's HOME did not exist yet, so the creation could fail and a
+  "contains errors" warning toast appear (1 of 30). `run.ts` gives VS Code a
+  HOME of its own with the file already written.
+- The workbench hides an unfocused information toast 10 seconds after showing
+  it, and the fallback notice is raised before the scan starts, so on a slow
+  runner it could be gone before the picture (1 of 13). `fallback-notice.png`
+  is therefore taken in the notification center, which keeps a notification
+  until it is closed. The incomplete-scan warning is the only toast in its
+  picture and is focused, and the workbench does not hide a focused toast.
 
 Each scene also starts from the same empty workbench: a mocha `teardown` hides
-the hover and closes the editors, the panel and the notifications after every
-test, pass or fail, and each scene builds the state it shows itself. A failed
-comparison used to leave its hover on screen, and the next scene then failed by
-a whole screen.
+the hover and closes the editors, the panel, the notifications and the
+notification center after every test, pass or fail, and each scene builds the
+state it shows itself. A failed comparison used to leave its hover on screen,
+and the next scene then failed by a whole screen.
 
 Each state is captured repeatedly until four consecutive captures have the same
 pixel signature, rather than after a fixed delay. A fixed delay is a guess that a
 slow runner loses, capturing a half-drawn frame; something that never stops
 changing fails with a timeout instead of producing a baseline that depends on when
-it was taken.
-
-One limit is known. The renderer is Chromium's software rasterizer, which picks
-SIMD code paths from the CPU it runs on. The identical runs were on one
-machine, so they do not show that a runner with a different CPU draws the same
-pixels. CI is the first cross-host check; if it differs, the fix is to measure the
-difference across runners, not to raise the threshold.
+it was taken. A step that drives the workbench (focus a toast, expand it, open
+the notification center, close a notification) must also change the settled
+screen. The notification commands act on the list the workbench last saw take
+focus, and under load that record can lag the focus itself, so the command does
+nothing (1 of 12 runs left the incomplete-scan warning collapsed). A step that
+changed nothing is run again, up to three times; a step that changed something
+is not, so no command is applied twice.
 
 ### Running it
 
