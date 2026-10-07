@@ -214,7 +214,18 @@ class TestTheSourceNotice:
         assert "Corresponding source" in notice
         for needle in (entry.repository, entry.version, entry.commit):
             assert needle in notice
-        assert f"{entry.repository}/archive/{entry.commit}.tar.gz" in notice
+        for command in entry.source_checkout:
+            assert command in notice
+
+    def test_the_source_section_does_not_offer_a_tarball(self):
+        """GitHub's commit tarballs omit submodule contents, and opengrep has 39
+        submodules; a tarball URL would point at something less than its source."""
+        notice = THIRD_PARTY_LICENSES["opengrep"].source_notice()
+        assert "/archive/" not in notice
+        assert "git -C opengrep submodule update --init --recursive" in notice
+        assert "git -C opengrep checkout " + THIRD_PARTY_LICENSES[
+            "opengrep"
+        ].commit in (notice)
 
     @pytest.mark.parametrize(
         "expression,copyleft",

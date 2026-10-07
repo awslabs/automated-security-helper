@@ -83,6 +83,7 @@ A URL-pinned license file that does not match its digest exits 3, like a binary.
 """
 
 import argparse
+import csv
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -93,6 +94,7 @@ import re
 import shutil
 import subprocess  # nosec B404 - runs pinned executables' --version only
 import sys
+import sysconfig
 import tarfile
 import tempfile
 import urllib.request
@@ -513,17 +515,60 @@ def _sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def python_package_files(site_dirs: "list[str] | None" = None) -> "set[str]":
+    """Real paths of every file a Python distribution's RECORD says it installed.
+
+    ``site_dirs`` defaults to this interpreter's site-packages. A console script
+    such as ``/usr/local/bin/uv`` from the uv wheel appears in RECORD as
+    ``../../../bin/uv``, relative to the site-packages directory.
+    """
+    if site_dirs is None:
+        paths = sysconfig.get_paths()
+        site_dirs = sorted({paths["purelib"], paths["platlib"]})
+    owned: "set[str]" = set()
+    for site_dir in site_dirs:
+        for record in Path(site_dir).glob("*.dist-info/RECORD"):
+            with record.open(encoding="utf-8", errors="replace", newline="") as handle:
+                for row in csv.reader(handle):
+                    if row:
+                        owned.add(os.path.realpath(os.path.join(site_dir, row[0])))
+    return owned
+
+
+def _copies_on_path(executable: str, search_path: "str | None") -> "list[str]":
+    """Every executable file named ``executable`` on the path, once per real file."""
+    directories = (search_path or os.environ.get("PATH", "")).split(os.pathsep)
+    copies, seen = [], set()
+    for directory in directories:
+        candidate = os.path.join(directory, executable)
+        real = os.path.realpath(candidate)
+        if directory and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            if real not in seen:
+                seen.add(real)
+                copies.append(candidate)
+    return copies
+
+
 def verify_third_party(
-    package_root: Path, third_party_dir: Path, search_path: "str | None" = None
+    package_root: Path,
+    third_party_dir: Path,
+    search_path: "str | None" = None,
+    site_dirs: "list[str] | None" = None,
 ) -> "list[str]":
     """Check the built image against every license entry; return the problems.
 
     For each entry: its directory exists; every listed file and ``SOURCE`` is
     present, non-empty and world-readable; every URL file still matches its
-    digest; ``SOURCE`` names the entry's commit; every executable is on
-    ``search_path`` (PATH when None) and its ``--version`` output contains the
-    recorded version. A directory with no entry is a problem too: it would be a
-    license claim for something this table no longer describes.
+    digest; ``SOURCE`` names the entry's commit; its first executable is on
+    ``search_path`` (PATH when None) in a copy no Python package installed; and
+    every such copy of any of its executables reports the recorded version. A
+    directory with no entry is a problem too: it would be a license claim for
+    something this table no longer describes.
+
+    Copies a Python package installed are left out because they are not the
+    release binary the entry describes. uv is the case: ASH depends on it from
+    PyPI too, at whatever version pyproject's range resolves to on the day, and
+    that copy ships its license metadata in its own dist-info.
 
     Writes ``index.json`` only when there are no problems, so the index lists
     exactly what was verified to be present.
@@ -531,6 +576,7 @@ def verify_third_party(
     pins = load_pins(package_root)
     problems: "list[str]" = []
     entries = pins.THIRD_PARTY_LICENSES
+    package_files = python_package_files(site_dirs)
 
     if not third_party_dir.is_dir():
         return [f"{third_party_dir} does not exist; no license files were installed"]
@@ -562,22 +608,30 @@ def verify_third_party(
             problems.append(f"{tool}: {source} does not name commit {entry.commit}")
 
         bare_version = entry.version.lstrip("v")
-        for executable in entry.executable_names:
-            found = shutil.which(executable, path=search_path)
-            if found is None:
-                problems.append(f"{tool}: {executable} is not on PATH")
-                continue
-            try:
-                output = version_output(found)
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                problems.append(f"{tool}: `{found} --version` failed: {exc}")
-                continue
-            if not reports_version(output, bare_version):
+        for position, executable in enumerate(entry.executable_names):
+            copies = [
+                c
+                for c in _copies_on_path(executable, search_path)
+                if os.path.realpath(c) not in package_files
+            ]
+            if not copies and position == 0:
                 problems.append(
-                    f"{tool}: `{found} --version` does not report {bare_version}, so "
-                    f"the files under {directory} describe a different release than "
-                    f"the one installed. Output: {output.strip()[:200]!r}"
+                    f"{tool}: {executable} is not on PATH, other than as a "
+                    "Python package's copy"
                 )
+            for found in copies:
+                try:
+                    output = version_output(found)
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    problems.append(f"{tool}: `{found} --version` failed: {exc}")
+                    continue
+                if not reports_version(output, bare_version):
+                    problems.append(
+                        f"{tool}: `{found} --version` does not report {bare_version}, "
+                        f"so the files under {directory} describe a different "
+                        f"release than the one installed. Output: "
+                        f"{output.strip()[:200]!r}"
+                    )
 
     if not problems:
         index = third_party_dir / _INDEX_FILE
