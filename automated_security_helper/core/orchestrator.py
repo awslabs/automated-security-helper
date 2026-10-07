@@ -4,7 +4,7 @@
 import json
 import shutil
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -77,6 +77,19 @@ class ASHScanOrchestrator(BaseModel):
         Optional[List[str]],
         Field(None, description="Configuration overrides as key-value pairs"),
     ]
+    config_base_gate: Annotated[
+        Optional[Callable[[Path], bool]],
+        Field(
+            None,
+            exclude=True,
+            description=(
+                "Check every `extends` base of the config must also pass, on top "
+                "of the confinement config_sources applies. The MCP server passes "
+                "the calling session's allowed config roots; None keeps the CLI "
+                "rule."
+            ),
+        ),
+    ] = None
     color_system: Annotated[
         Optional[str], Field(None, description="Color system to use for console output")
     ] = None
@@ -261,6 +274,7 @@ class ASHScanOrchestrator(BaseModel):
                 config_path=self.config_path,
                 source_dir=self.source_dir,
                 config_overrides=self.config_overrides or [],
+                permit_base=self.config_base_gate,
             )
 
         # Surface config resolution warnings prominently

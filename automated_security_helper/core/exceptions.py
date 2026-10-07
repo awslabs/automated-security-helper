@@ -23,6 +23,19 @@ class ASHConfigSourceError(ASHConfigValidationError):
     """
 
 
+class ASHConfigInputNotPermittedError(ASHConfigSourceError):
+    """A file in an ``extends`` chain is outside what the caller may read.
+
+    Raised only when the caller passed a ``permit_base`` gate, which the MCP server
+    does with the session's allowed config roots. A subclass of
+    ``ASHConfigSourceError`` so every path that already refuses a broken chain
+    refuses this one, and distinct so the MCP tools can report it as a refusal
+    rather than as a malformed config. The message names the ``extends`` entry as
+    written and never the resolved target, so it reads the same whether or not
+    that target exists.
+    """
+
+
 class WorkspacePatternError(ASHValidationError):
     """Exception raised when a glob pattern cannot be rebased between the
     project and workspace path spaces.

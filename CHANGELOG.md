@@ -468,6 +468,12 @@
 
 ### Fixes
 
+- MCP config tools now confine config paths, including `extends` chains, to the allowed roots.
+  The `get_config`, `validate_config`, `explain_finding`, `suggest_suppression` and
+  `diff_scan_results` functions in `cli/mcp_server.py` now take the MCP `Context` as
+  their first argument, as the other tools already did. The MCP tool schemas are
+  unchanged; only direct Python callers need to pass it.
+
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan
