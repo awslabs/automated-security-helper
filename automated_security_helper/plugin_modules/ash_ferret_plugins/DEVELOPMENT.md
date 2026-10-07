@@ -151,7 +151,7 @@ The plugin validates ferret-scan version compatibility during dependency validat
 MIN_SUPPORTED_VERSION = "2.4.5"
 MAX_SUPPORTED_VERSION = "2.6.0"
 DEFAULT_VERSION_CONSTRAINT = f">={MIN_SUPPORTED_VERSION},<{MAX_SUPPORTED_VERSION}"
-RECOMMENDED_VERSION = "2.5.2"
+RECOMMENDED_VERSION = "2.5.3"
 ```
 
 `DEFAULT_VERSION_CONSTRAINT` is derived from the two bounds, so moving the window is
