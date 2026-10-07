@@ -395,3 +395,66 @@ class TestNixPinsTheSameBytes:
         )
         assert match, "nix/opengrep.nix has no version line"
         assert f"v{match.group(1)}" == TOOL_VERSIONS["opengrep"]
+
+
+class TestTheReleaseAssetCacheCoversOpengrep:
+    """ASH_TOOL_DOWNLOAD_CACHE wraps the bare-executable path too, not only archives.
+
+    opengrep's asset is the executable itself, so it takes a different branch of
+    install_pinned_tool from grype or syft. That branch has to restore from and store
+    to the same cache, with the same rule: a cached copy is used only if it hashes to
+    the pin, and anything else is deleted and downloaded again.
+    """
+
+    @pytest.fixture
+    def cache_dir(self, tmp_path, monkeypatch):
+        directory = tmp_path / "asset-cache"
+        monkeypatch.setenv("ASH_TOOL_DOWNLOAD_CACHE", str(directory))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        return directory
+
+    def test_a_download_is_stored_and_a_verified_copy_is_reused(
+        self, tmp_path, cache_dir
+    ):
+        filename = _ASSET_TABLES["opengrep"][("linux", "amd64")]
+        digest = hashlib.sha256(PAYLOAD).hexdigest()
+
+        with _pin(filename, digest), _serve(PAYLOAD):
+            install_pinned_tool("opengrep", "linux", "amd64", tmp_path / "bin-a")
+        assert (cache_dir / filename).read_bytes() == PAYLOAD
+
+        exploding = patch(
+            "automated_security_helper.utils.download_utils.download_file",
+            side_effect=AssertionError(
+                "downloaded opengrep although a verified copy was cached"
+            ),
+        )
+        with _pin(filename, digest), exploding:
+            installed = install_pinned_tool(
+                "opengrep", "linux", "amd64", tmp_path / "bin-b"
+            )
+        assert installed == tmp_path / "bin-b" / "opengrep"
+        assert installed.read_bytes() == PAYLOAD
+        assert read_receipt(tmp_path / "bin-b", "opengrep")["installed_sha256"] == (
+            digest
+        )
+        # Installing moved a copy, not the cached asset itself.
+        assert (cache_dir / filename).read_bytes() == PAYLOAD
+
+    def test_a_tampered_cached_asset_is_discarded_and_redownloaded(
+        self, tmp_path, cache_dir
+    ):
+        filename = _ASSET_TABLES["opengrep"][("linux", "amd64")]
+        digest = hashlib.sha256(PAYLOAD).hexdigest()
+        cache_dir.mkdir(parents=True)
+        (cache_dir / filename).write_bytes(b"#!/bin/sh\necho evil\n")
+
+        with _pin(filename, digest), _serve(PAYLOAD) as served:
+            installed = install_pinned_tool(
+                "opengrep", "linux", "amd64", tmp_path / "bin"
+            )
+
+        assert served.called, "the tampered cached opengrep was used, not re-downloaded"
+        assert installed.read_bytes() == PAYLOAD
+        # The cache now holds the verified download, not the tampered file.
+        assert (cache_dir / filename).read_bytes() == PAYLOAD
