@@ -437,3 +437,57 @@ class TestWorkflow:
             for step in job["steps"]:
                 if "uses" in step:
                     assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"])
+
+
+class TestOnlyAllowlistedHttpsUrlsAreFetched:
+    """_get_json refuses anything but https to the three upstream APIs, before opening."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "file:///etc/passwd",
+            "http://api.github.com/repos/anchore/syft/releases/latest",
+            "http://pypi.org/pypi/bandit/json",
+            "ftp://pypi.org/pypi/bandit/json",
+            "https://example.com/pypi/bandit/json",
+            "https://pypi.org.example.com/pypi/bandit/json",
+            "https://user:secret@pypi.org/pypi/bandit/json",  # pragma: allowlist secret
+            "https://pypi.org:8443/pypi/bandit/json",
+        ],
+    )
+    def test_a_url_outside_the_allowlist_is_refused_unopened(self, url, monkeypatch):
+        opened: list[Any] = []
+        monkeypatch.setattr(
+            urllib.request, "urlopen", lambda *a, **k: opened.append(a) or None
+        )
+        with pytest.raises(ValueError, match="refusing to fetch"):
+            checker._get_json(url)
+        assert opened == [], f"{url} reached urlopen"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://api.github.com/repos/anchore/syft/releases/latest",
+            "https://pypi.org/pypi/bandit/json",
+            "https://rubygems.org/api/v1/versions/cfn-nag/latest.json",
+        ],
+    )
+    def test_positive_control_each_upstream_api_is_opened(self, url, monkeypatch):
+        import io
+
+        opened: list[str] = []
+
+        class _Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+        def fake_urlopen(request, timeout=None):
+            opened.append(request.full_url)
+            return _Response(b'{"ok": true}')
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        assert checker._get_json(url) == {"ok": True}
+        assert opened == [url]

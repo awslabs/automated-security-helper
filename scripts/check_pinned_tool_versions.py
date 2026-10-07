@@ -78,6 +78,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -104,6 +105,13 @@ RUBYGEMS = "rubygems"
 
 _GITHUB_PREFIX = "https://github.com/"
 _TIMEOUT_SECONDS = 30
+
+# The only hosts _get_json may contact: the GitHub releases API, PyPI's JSON API and
+# RubyGems' API, the three upstreams the pins are compared against. Every URL is built
+# from a fixed https prefix today; this check makes that a property of the function
+# rather than of its callers, so a later caller cannot point it at a file:// path, a
+# plain-http mirror or an arbitrary host.
+_ALLOWED_HOSTS = frozenset({"api.github.com", "pypi.org", "rubygems.org"})
 
 EXIT_OK = 0
 EXIT_OUTDATED = 1
@@ -298,11 +306,31 @@ def compare(pinned: str, latest: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _checked_url(url: str) -> str:
+    """``url`` unchanged if it is https to one of ``_ALLOWED_HOSTS``; raises otherwise."""
+    parts = urllib.parse.urlsplit(url)
+    if (
+        parts.scheme != "https"
+        or parts.hostname not in _ALLOWED_HOSTS
+        or parts.username is not None
+        or parts.password is not None
+        or parts.port not in (None, 443)
+    ):
+        raise ValueError(
+            f"refusing to fetch {url!r}: only https URLs on "
+            f"{', '.join(sorted(_ALLOWED_HOSTS))} are looked up"
+        )
+    return url
+
+
 def _get_json(url: str, headers: dict[str, str] | None = None) -> Any:
-    request = urllib.request.Request(url, headers={"User-Agent": "ash-pin-check"})
+    request = urllib.request.Request(
+        _checked_url(url), headers={"User-Agent": "ash-pin-check"}
+    )
     for name, value in (headers or {}).items():
         request.add_header(name, value)
-    with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed https URLs
+    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+    with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # nosec B310 - _checked_url above allows only https to _ALLOWED_HOSTS
         return json.load(response)
 
 
