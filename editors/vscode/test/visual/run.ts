@@ -34,6 +34,19 @@ const PACKAGE_ROOT = path.resolve(__dirname, '..', '..', '..');
 const SCRATCH = '/tmp/ash-visual';
 const WORKSPACE = path.join(SCRATCH, 'sample-project');
 
+/**
+ * The `ash.outputDirectory` default (DEFAULT_OUTPUT_DIRECTORY in src/extension.ts,
+ * which this process cannot import: it loads the vscode module).
+ */
+const OUTPUT_DIRECTORY = path.join('.ash', 'ash_output');
+/** VS Code's home directory, fresh on every run; see where main() fills it. */
+const HOME = path.join(SCRATCH, 'home');
+/**
+ * ~/.vscode/argv.json, with the value VS Code itself records when telemetry is off,
+ * so it has no reason to rewrite the file.
+ */
+const ARGV: Readonly<Record<string, unknown>> = { 'enable-crash-reporter': false };
+
 const DISPLAY = ':99';
 /** The screen, and so the largest the window can be. */
 const SCREEN = { width: 1280, height: 800, depth: 24, dpi: 96 };
@@ -165,10 +178,29 @@ async function main(): Promise<void> {
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.writeFileSync(path.join(userData, 'User', 'settings.json'), JSON.stringify(USER_SETTINGS, null, 2));
+  // VS Code's home, with argv.json already in it. VS Code reads ~/.vscode/argv.json
+  // at startup, creates it when it is missing, and then rewrites it to record whether
+  // the crash reporter is on. The container's HOME does not exist until something
+  // else happens to create it, so when VS Code got there first it could not create
+  // the file, failed to read it, and raised "The runtime arguments file 'argv.json'
+  // contains errors" in a toast, over the notifications in the first picture, if a
+  // window had focus at that moment (1 run in 30 on two loaded CPUs). A home that
+  // exists, holding the file with the value VS Code would write, leaves it nothing to
+  // create or rewrite.
+  fs.mkdirSync(path.join(HOME, '.vscode'), { recursive: true });
+  fs.writeFileSync(path.join(HOME, '.vscode', 'argv.json'), `${JSON.stringify(ARGV, null, '\t')}\n`);
 
   const fixtures = path.join(PACKAGE_ROOT, 'test', 'fixtures');
   const stub = path.join(PACKAGE_ROOT, 'out-integration', 'test', 'integration', 'ash-stub.js');
   fs.copyFileSync(path.join(fixtures, 'planted_secret.py'), path.join(WORKSPACE, 'planted_secret.py'));
+  // The scan's output directory, before VS Code opens the folder. The first scan
+  // would create it, and the Explorer would show it only when the file watcher
+  // reported the new directory. Under CPU starvation the watcher could miss that
+  // event altogether (it was not yet watching when the scan wrote), and the Explorer
+  // then lacked the `.ash` row in every picture of the run: 5 runs in 30 on two loaded
+  // CPUs. Existing before launch, the folder is in the Explorer's first listing, so
+  // no picture depends on the watcher.
+  fs.mkdirSync(path.join(WORKSPACE, OUTPUT_DIRECTORY), { recursive: true });
   // Only `ash` at first: the first scenario is the ashx -> ash fallback notice.
   fs.writeFileSync(path.join(ashDir, 'ash'), wrapper(process.execPath, stub, 'ash'), { mode: 0o755 });
   const scenarioFile = path.join(SCRATCH, 'scenario.json');
@@ -193,6 +225,7 @@ async function main(): Promise<void> {
         ASH_VISUAL_RESULTS_FILE: resultsFile,
         ASH_STUB_SCENARIO_FILE: scenarioFile,
         ASH_STUB_FIXTURES: fixtures,
+        HOME,
         PATH: [ashxDir, ashDir, '/usr/local/bin', '/usr/bin', '/bin'].join(path.delimiter),
       },
       launchArgs: [

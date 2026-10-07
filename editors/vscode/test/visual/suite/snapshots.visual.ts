@@ -45,6 +45,8 @@ const SCENARIO_FILE = process.env.ASH_STUB_SCENARIO_FILE ?? '';
 const STABLE_FRAMES = 4;
 const FRAME_INTERVAL_MS = 250;
 const SETTLE_TIMEOUT_MS = 30_000;
+/** How often untilScreenChanges runs a command that changed nothing. */
+const STEP_ATTEMPTS = 3;
 
 const compared = new Set<string>();
 
@@ -52,8 +54,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Captures until the screen holds still, and returns the last capture's path. */
-async function settledCapture(name: string): Promise<string> {
+/** A settled capture: where it was written, and its pixel signature. */
+interface Settled {
+  readonly file: string;
+  readonly signature: string;
+}
+
+/** Captures until the screen holds still, and returns the last capture. */
+async function settledCapture(name: string): Promise<Settled> {
   const started = Date.now();
   let previous = '';
   let streak = 0;
@@ -67,7 +75,7 @@ async function settledCapture(name: string): Promise<string> {
     if (streak >= STABLE_FRAMES) {
       const settled = path.join(ACTUAL, `${name}.png`);
       fs.copyFileSync(file, settled);
-      return settled;
+      return { file: settled, signature };
     }
     if (Date.now() - started > SETTLE_TIMEOUT_MS) {
       throw new Error(`${name}: the screen was still changing after ${SETTLE_TIMEOUT_MS}ms`);
@@ -77,12 +85,36 @@ async function settledCapture(name: string): Promise<string> {
   }
 }
 
+/**
+ * Runs a workbench command until the settled screen differs from `before`, and
+ * returns the settled screen it changed to.
+ *
+ * The notification commands act on whichever list the workbench last saw take
+ * focus, and that record is updated by a DOM focus event, not by the call that
+ * moves the focus. On a starved CPU the event can arrive after the next command
+ * has run, which then does nothing: 1 run in 12 on two loaded CPUs left the
+ * incomplete-scan warning collapsed, focused, and otherwise exactly as it should
+ * be. A command that changed nothing is safe to run again, and a command that
+ * changed something is not run again, so a step that cannot change the screen
+ * fails here, after STEP_ATTEMPTS tries, with its own name.
+ */
+async function untilScreenChanges(name: string, before: Settled, command: string): Promise<Settled> {
+  for (let attempt = 1; attempt <= STEP_ATTEMPTS; attempt += 1) {
+    await vscode.commands.executeCommand(command);
+    const after = await settledCapture(`${name}.${attempt}`);
+    if (after.signature !== before.signature) {
+      return after;
+    }
+  }
+  throw new Error(`${name}: ${command} did not change the screen in ${STEP_ATTEMPTS} attempts`);
+}
+
 /** Captures the settled screen and holds it to the baseline, or writes the baseline. */
 async function matchesBaseline(name: string): Promise<void> {
   const scenario = VISUAL_SCENARIOS.find((s) => s.name === name);
   assert.ok(scenario !== undefined, `${name} is not in test/visual/scenarios.ts`);
   compared.add(name);
-  const actual = await settledCapture(name);
+  const actual = (await settledCapture(name)).file;
   const baseline = path.join(BASELINES, `${name}.png`);
   if (UPDATE) {
     fs.copyFileSync(actual, baseline);
@@ -114,20 +146,20 @@ async function clearNotifications(): Promise<void> {
 }
 
 /**
- * Expands the toast that `notifications.focusToasts` focuses, the lowest one, so the
- * picture holds its whole message rather than the one line a collapsed toast
- * shows. The message is what these snapshots are about, and a change past its first
- * line would otherwise not move a pixel.
+ * Focuses the newest toast and expands it, so the picture holds its whole message
+ * rather than the one line a collapsed toast shows. The message is what these
+ * snapshots are about, and a change past its first line would otherwise not move a
+ * pixel.
  *
  * The extension raises its notifications without awaiting them, so a toast can
  * still be on its way when the command that raised it returns. The screen is let
- * settle first, so the toast is there to focus.
+ * settle first, so the toast is there to focus. Once focused, a toast stays: the
+ * workbench hides an unfocused toast after a timeout, but not a focused one.
  */
-async function expandLowestToast(name: string): Promise<void> {
-  await settledCapture(`${name}.before-expand`);
-  await vscode.commands.executeCommand('notifications.focusToasts');
-  await settledCapture(`${name}.focused`);
-  await vscode.commands.executeCommand('notification.expand');
+async function expandNewestToast(name: string): Promise<void> {
+  const before = await settledCapture(`${name}.before-focus`);
+  const focused = await untilScreenChanges(`${name}.focused`, before, 'notifications.focusToasts');
+  await untilScreenChanges(`${name}.expanded`, focused, 'notification.expand');
 }
 
 /**
@@ -164,9 +196,9 @@ suite('ASH visual snapshots', () => {
     const report = await scan('clean');
     assert.strictEqual(report.status, 'ok', report.detail);
     assert.strictEqual(report.fallbackNotice, 'shown');
-    // Two toasts: the scan's result above, and below it the fallback notice, which
-    // was raised first.
-    await expandLowestToast('fallback-notice');
+    // Two toasts: the scan's result, newest and on top, and below it the fallback
+    // notice, which was raised first.
+    await expandNewestToast('fallback-notice');
     await matchesBaseline('fallback-notice');
   });
 
@@ -210,7 +242,7 @@ suite('ASH visual snapshots', () => {
     const report = await scan('incomplete');
     assert.strictEqual(report.status, 'incomplete', report.detail);
     assert.strictEqual(report.exitCode, 1);
-    await expandLowestToast('incomplete-scan-notification');
+    await expandNewestToast('incomplete-scan-notification');
     await matchesBaseline('incomplete-scan-notification');
   });
 
