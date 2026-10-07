@@ -290,14 +290,20 @@ def run_and_reap(command: List[str]) -> int:
     with it. A process the scanner left behind could keep writing in the results
     directory after ASH has swept it, so this wrapper stays as a child subreaper
     (orphans are reparented to it, however they detached) and kills them all
-    before it exits with the scanner's status. Signals ASH sends the wrapper, on a
-    timeout for instance, are passed on to the scanner.
+    before it exits with the scanner's status. SIGTERM, SIGINT or SIGHUP to the
+    wrapper (ASH sends SIGTERM on a timeout) kills the scanner and then everything
+    it left, the same way.
     """
     if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
         fail(f"prctl(PR_SET_CHILD_SUBREAPER): {os.strerror(ctypes.get_errno())}")
+    stop_signals = {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
+    # Blocked across the fork, so a signal that arrives before the handler is in
+    # place is held rather than killing the wrapper and orphaning the scanner.
+    signal.pthread_sigmask(signal.SIG_BLOCK, stop_signals)
     pid = os.fork()
     if pid == 0:
         try:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, stop_signals)
             # A new session has no controlling terminal, so the scanner cannot
             # push keystrokes into the user's shell through TIOCSTI.
             os.setsid()
@@ -306,14 +312,17 @@ def run_and_reap(command: List[str]) -> int:
             sys.stderr.write(f"ash-landlock: exec {command[0]}: {e}\n")
         os._exit(126)
 
-    def forward(signum: int, _frame: object) -> None:
+    def stop(_signum: int, _frame: object) -> None:
+        # ASH asks the wrapper to stop (a timeout, Ctrl-C): end the scanner now,
+        # and the loop below ends everything it started.
         try:
-            os.kill(pid, signum)
+            os.kill(pid, signal.SIGKILL)
         except OSError:
             pass
 
-    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-        signal.signal(signum, forward)
+    for signum in stop_signals:
+        signal.signal(signum, stop)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, stop_signals)
     while True:
         try:
             _, status = os.waitpid(pid, 0)

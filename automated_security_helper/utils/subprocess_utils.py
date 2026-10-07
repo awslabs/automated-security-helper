@@ -246,6 +246,52 @@ def _prepare_spawn(
     return prepare_spawn(args, env, cwd)
 
 
+#: How long a sandboxed process gets to stop after SIGTERM on a timeout before it is
+#: killed outright.
+SANDBOX_STOP_GRACE_SECONDS = 10.0
+
+
+def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
+    """``subprocess.run`` that stops a timed-out process with SIGTERM first.
+
+    subprocess.run kills a timed-out child with SIGKILL, which the Landlock
+    wrapper cannot catch; it would then never end the processes its scanner left
+    running. Sending SIGTERM lets the wrapper kill its whole tree. SIGKILL follows
+    if it has not exited within SANDBOX_STOP_GRACE_SECONDS. Raises TimeoutExpired
+    the way subprocess.run does. Used for sandboxed spawns only.
+    """
+    timeout = kwargs.pop("timeout", None)
+    check = kwargs.pop("check", False)
+    input_data = kwargs.pop("input", None)
+    if kwargs.pop("capture_output", False):
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+    with subprocess.Popen(args, **kwargs) as process:  # nosec B603 - sandbox-built argv
+        try:
+            stdout, stderr = process.communicate(input_data, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                stdout, stderr = process.communicate(timeout=SANDBOX_STOP_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(
+                args, timeout, output=stdout, stderr=stderr
+            ) from None
+        except BaseException:
+            process.terminate()
+            try:
+                process.wait(timeout=SANDBOX_STOP_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            raise
+    result = subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+    if check:
+        result.check_returncode()
+    return result
+
+
 def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
     """``subprocess.run`` through the scanner sandbox choke point.
 
@@ -261,7 +307,7 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
         return subprocess.run(args, **kwargs)  # nosec B603 - callers pass list argv
     kwargs["env"] = _spawn_env(plan.env)
     try:
-        return subprocess.run(plan.argv, **kwargs)  # nosec B603 - sandbox-built argv
+        return _run_stoppable(plan.argv, **kwargs)
     finally:
         plan.run_cleanup()
 
@@ -321,7 +367,9 @@ def run_command(
         sandbox_plan = _prepare_spawn(args, env, cwd, shell)
         if sandbox_plan is not None:
             args, env = sandbox_plan.argv, sandbox_plan.env
-        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+        # A sandboxed spawn is stopped with SIGTERM on a timeout; see _run_stoppable.
+        runner = _run_stoppable if sandbox_plan is not None else subprocess.run
+        result = runner(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=_spawn_env(env),
@@ -510,7 +558,10 @@ def run_command_with_output_handling(
             sandbox_plan = _prepare_spawn(command, env, cwd, shell)
             if sandbox_plan is not None:
                 spawn_command, spawn_env = sandbox_plan.argv, sandbox_plan.env
-            result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+            # A sandboxed spawn is stopped with SIGTERM on a timeout; see
+            # _run_stoppable.
+            runner = _run_stoppable if sandbox_plan is not None else subprocess.run
+            result = runner(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
                 spawn_command,
                 capture_output=True,
                 text=True,
