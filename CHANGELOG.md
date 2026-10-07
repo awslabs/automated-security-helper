@@ -484,6 +484,12 @@
   `diff_scan_results` functions in `cli/mcp_server.py` now take the MCP `Context` as
   their first argument, as the other tools already did. The MCP tool schemas are
   unchanged; only direct Python callers need to pass it.
+- **A scanner whose tool could not be started is reported as ERROR.** When the
+  exec itself failed (an `OSError` such as a missing binary or `[Errno 14] Bad address`),
+  the subprocess helpers returned exit code 1. Semgrep and bandit accept 1, so the scan
+  went on and the only error shown was a missing SARIF file. The helpers now return 127
+  with a `Could not start <cmd>: <error>` message, 127 is never an accepted exit code,
+  and the scanner is recorded as ERROR. The spawn is not retried.
 - **Scanner spawns no longer fail intermittently with `[Errno 14] Bad address`.** On
   Linux, Python 3.10+ starts children with vfork, and a spawn with `env=None` hands the
   child the parent's live `environ` array until `execve`. Scanners run in parallel
