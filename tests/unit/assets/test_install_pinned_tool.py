@@ -199,7 +199,7 @@ class TestOpengrepReachesTheImageThroughThePin:
         assert "install_pinned_tool" in argv[2]
 
     def test_the_image_runs_ash_dependencies_install(self):
-        assert 'RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"' in (
+        assert 'ash dependencies install --bin-path "${ASH_BIN_PATH}"' in (
             DOCKERFILE.read_text()
         )
 
@@ -1028,8 +1028,11 @@ class TestVerifyThirdParty:
     @staticmethod
     def _tree(tmp_path: Path):
         """A complete third-party tree, a PATH of fake executables, and the pins."""
+        # Keyed by pin, not by tool: semgrep's LICENSE and COPYRIGHT are
+        # byte-identical to opengrep's and share their digests, so two files
+        # sharing a pin must share bytes here too.
         payloads = {
-            f.url: f"{entry.tool} {f.name}\n".encode()
+            f.url: f"file pinned to {f.sha256}\n".encode()
             for entry in THIRD_PARTY_LICENSES.values()
             for f in entry.files
             if f.url
@@ -1257,3 +1260,305 @@ class TestTheGuardsTheReviewFoundUntested:
 
         assert "is empty" in str(raised.value)
         assert not (tmp_path / "bin" / "syft").exists()
+
+
+# ---------------------------------------------------------------------------
+# The Python tools: bandit, checkov and semgrep
+#
+# `ash dependencies install` installs them with `uv tool install`, so there is no
+# release archive; the archive is the wheel, and what it shipped is in the installed
+# dist-info under `uv tool dir`. These tests stand a fake uv tool directory up in
+# tmp_path and point the installer at it, so nothing touches the real one.
+# ---------------------------------------------------------------------------
+
+
+def _record_hash(payload: bytes) -> str:
+    """A RECORD hash: urlsafe base64 of the SHA256, padding stripped."""
+    import base64
+
+    return (
+        base64.urlsafe_b64encode(hashlib.sha256(payload).digest())
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+
+
+def _uv_tool_env(
+    tool_dir: Path,
+    distribution: str,
+    version: str,
+    files: dict,
+    record_overrides: "dict | None" = None,
+) -> Path:
+    """A uv tool environment holding ``distribution``'s dist-info with ``files``.
+
+    ``files`` maps a path inside the dist-info (``licenses/LICENSE``) to its bytes.
+    RECORD lists each with its real hash unless ``record_overrides`` says otherwise.
+    """
+    site = tool_dir / distribution / "lib" / "python3.12" / "site-packages"
+    dist_info = site / f"{distribution}-{version}.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "METADATA").write_text(
+        f"Metadata-Version: 2.4\nName: {distribution}\nVersion: {version}\n\nbody\n"
+    )
+    rows = []
+    for relative, payload in files.items():
+        (dist_info / relative).parent.mkdir(parents=True, exist_ok=True)
+        (dist_info / relative).write_bytes(payload)
+        digest = (record_overrides or {}).get(relative, _record_hash(payload))
+        rows.append(f"{dist_info.name}/{relative},sha256={digest},{len(payload)}")
+    rows.append(f"{dist_info.name}/RECORD,,")
+    (dist_info / "RECORD").write_text("\n".join(rows) + "\n")
+    return dist_info
+
+
+def _semgrep():
+    """semgrep's entry, its installed version and its URL per file name.
+
+    Looked up per test rather than at import, so a table without the entry fails
+    these tests one by one instead of failing the whole module's collection.
+    """
+    entry = THIRD_PARTY_LICENSES["semgrep"]
+    return entry, entry.version.lstrip("v"), {f.name: f.url for f in entry.files}
+
+
+class TestPythonToolLicenses:
+    @pytest.fixture
+    def tool_dir(self, tmp_path, monkeypatch):
+        directory = tmp_path / "uv-tools"
+        directory.mkdir()
+        monkeypatch.setattr(installer, "uv_tool_dir", lambda: directory)
+        return directory
+
+    def test_semgrep_falls_back_to_the_pinned_files_when_its_wheel_has_none(
+        self, tmp_path, monkeypatch, tool_dir
+    ):
+        """semgrep's real wheel: METADATA and RECORD, no license file at all."""
+        entry, version, urls = _semgrep()
+        _uv_tool_env(tool_dir, "semgrep", version, {})
+        payloads = {url: f"{name} text\n".encode() for name, url in urls.items()}
+        pins = _pins_dir(tmp_path, _url_file_overrides(payloads))
+        server = _Server(payloads)
+        monkeypatch.setattr(installer, "download", server)
+
+        installer.install_licenses_only("semgrep", pins, tmp_path / "tp")
+
+        directory = tmp_path / "tp" / "semgrep"
+        assert (directory / "LICENSE").read_bytes() == b"LICENSE text\n"
+        assert (directory / "COPYRIGHT").read_bytes() == b"COPYRIGHT text\n"
+        assert sorted(server.calls) == sorted(urls.values())
+        source = (directory / "SOURCE").read_text()
+        for needle in (
+            "Corresponding source",
+            "https://github.com/semgrep/semgrep",
+            f"tag:        {entry.version}",
+            entry.commit,
+            f"PyPI semgrep=={version}",
+        ):
+            assert needle in source, needle
+
+    def test_a_fetched_license_that_misses_its_digest_is_refused(
+        self, tmp_path, monkeypatch, tool_dir
+    ):
+        """The pins are the real ones; the server sends other bytes."""
+        _, version, urls = _semgrep()
+        _uv_tool_env(tool_dir, "semgrep", version, {})
+        monkeypatch.setattr(
+            installer,
+            "download",
+            _Server(dict.fromkeys(urls.values(), b"substituted\n")),
+        )
+
+        with pytest.raises(SystemExit) as raised:
+            installer.install_licenses_only(
+                "semgrep", _pins_dir(tmp_path), tmp_path / "tp"
+            )
+
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not (tmp_path / "tp" / "semgrep").exists()
+
+    def test_dist_info_licenses_are_preferred_when_present(
+        self, tmp_path, monkeypatch, tool_dir
+    ):
+        """A wheel that ships the file is read, not re-fetched; the pin still holds."""
+        _, version, urls = _semgrep()
+        shipped = {"LICENSE": b"LGPL text\n", "COPYRIGHT": b"Semgrep copyright\n"}
+        _uv_tool_env(
+            tool_dir,
+            "semgrep",
+            version,
+            {f"licenses/{name}": payload for name, payload in shipped.items()},
+        )
+        pins = _pins_dir(
+            tmp_path,
+            _url_file_overrides(
+                {urls[name]: payload for name, payload in shipped.items()}
+            ),
+        )
+        server = _Server({})
+        monkeypatch.setattr(installer, "download", server)
+
+        installer.install_licenses_only("semgrep", pins, tmp_path / "tp")
+
+        assert server.calls == [], "the wheel shipped the files; nothing to fetch"
+        for name, payload in shipped.items():
+            assert (tmp_path / "tp" / "semgrep" / name).read_bytes() == payload
+
+    def test_a_dist_info_copy_that_misses_the_pin_is_refused(
+        self, tmp_path, monkeypatch, tool_dir
+    ):
+        """Preferred is not unchecked: the image's bytes must not depend on which
+        of the two places they came from."""
+        _, version, _ = _semgrep()
+        _uv_tool_env(
+            tool_dir,
+            "semgrep",
+            version,
+            {"licenses/LICENSE": b"some other text\n", "COPYRIGHT": b"c\n"},
+        )
+        monkeypatch.setattr(installer, "download", _Server({}))
+
+        with pytest.raises(SystemExit) as raised:
+            installer.install_licenses_only(
+                "semgrep", _pins_dir(tmp_path), tmp_path / "tp"
+            )
+
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not (tmp_path / "tp" / "semgrep").exists()
+
+    @pytest.mark.parametrize("tool", ["bandit", "checkov"])
+    def test_a_wheel_license_is_copied_from_its_dist_info(
+        self, tmp_path, monkeypatch, tool_dir, tool
+    ):
+        entry = THIRD_PARTY_LICENSES[tool]
+        _uv_tool_env(
+            tool_dir,
+            tool,
+            entry.version,
+            {"licenses/LICENSE": b"Apache License\n"},
+        )
+        server = _Server({})
+        monkeypatch.setattr(installer, "download", server)
+
+        installer.install_licenses_only(tool, _pins_dir(tmp_path), tmp_path / "tp")
+
+        assert (tmp_path / "tp" / tool / "LICENSE").read_bytes() == b"Apache License\n"
+        assert server.calls == []
+        assert entry.commit in (tmp_path / "tp" / tool / "SOURCE").read_text()
+
+    def test_a_dist_info_file_that_misses_its_record_hash_is_refused(
+        self, tmp_path, tool_dir
+    ):
+        _uv_tool_env(
+            tool_dir,
+            "bandit",
+            THIRD_PARTY_LICENSES["bandit"].version,
+            {"licenses/LICENSE": b"Apache License\n"},
+            record_overrides={"licenses/LICENSE": _record_hash(b"another file")},
+        )
+
+        with pytest.raises(SystemExit) as raised:
+            installer.install_licenses_only(
+                "bandit", _pins_dir(tmp_path), tmp_path / "tp"
+            )
+
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not (tmp_path / "tp" / "bandit").exists()
+
+    def test_a_wheel_without_the_file_its_entry_expects_is_refused(
+        self, tmp_path, tool_dir
+    ):
+        _uv_tool_env(tool_dir, "bandit", THIRD_PARTY_LICENSES["bandit"].version, {})
+
+        with pytest.raises(SystemExit) as raised:
+            installer.install_licenses_only(
+                "bandit", _pins_dir(tmp_path), tmp_path / "tp"
+            )
+
+        assert "is not in" in str(raised.value)
+        assert not (tmp_path / "tp" / "bandit").exists()
+
+    def test_another_installed_version_is_refused(self, tmp_path, tool_dir):
+        """What an unpinned `ash dependencies install` would leave behind."""
+        _uv_tool_env(tool_dir, "semgrep", "1.0.0", {})
+
+        with pytest.raises(SystemExit) as raised:
+            installer.install_licenses_only(
+                "semgrep", _pins_dir(tmp_path), tmp_path / "tp"
+            )
+
+        assert "--uv-tool-pins" in str(raised.value)
+        assert not (tmp_path / "tp" / "semgrep").exists()
+
+    def test_a_tool_that_is_not_installed_is_refused(self, tmp_path, tool_dir):
+        with pytest.raises(SystemExit) as raised:
+            installer.install_licenses_only(
+                "checkov", _pins_dir(tmp_path), tmp_path / "tp"
+            )
+        assert "found 0" in str(raised.value)
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on PATH")
+def test_uv_tool_dir_is_a_plain_path_even_when_color_is_forced(monkeypatch):
+    """Measured: with FORCE_COLOR set, `uv tool dir` wraps the path in ANSI codes
+    even when its stdout is a pipe, and the dist-info lookup then found nothing."""
+    monkeypatch.setenv("FORCE_COLOR", "3")
+    location = str(installer.uv_tool_dir())
+    assert "\x1b" not in location
+    assert Path(location).is_absolute()
+
+
+class TestUvToolPins:
+    def test_every_python_tool_is_pinned_to_its_entry(self, tmp_path):
+        argv = installer.uv_tool_pins(_pins_dir(tmp_path))
+        expected = []
+        for tool in sorted(THIRD_PARTY_LICENSES):
+            entry = THIRD_PARTY_LICENSES[tool]
+            if entry.distribution:
+                expected += [
+                    "--config-overrides",
+                    f"scanners.{tool}.options.tool_version==="
+                    + entry.version.lstrip("v"),
+                ]
+        assert argv == expected
+        assert {"bandit", "checkov", "semgrep"} <= {
+            a.split(".")[1] for a in argv if a.startswith("scanners.")
+        }
+
+    def test_ash_reads_them_as_exact_version_constraints(self, tmp_path):
+        """The overrides go through ASH's own parser in the image; check the value
+        that reaches each scanner is an exact pin, not a range or a string with a
+        stray `=`."""
+        from automated_security_helper.config.resolve_config import (
+            apply_config_overrides,
+        )
+        from automated_security_helper.config.ash_config import AshConfig
+
+        argv = installer.uv_tool_pins(_pins_dir(tmp_path))
+        config = apply_config_overrides(AshConfig(), argv[1::2])
+        for tool in ("bandit", "checkov", "semgrep"):
+            version = THIRD_PARTY_LICENSES[tool].version.lstrip("v")
+            assert getattr(config.scanners, tool).options.tool_version == (
+                f"=={version}"
+            )
+
+    def test_the_mode_prints_them_under_a_bare_interpreter(self, tmp_path):
+        """The Dockerfile word-splits this output into `ash dependencies install`."""
+        pins = _pins_dir(tmp_path)
+        result = subprocess.run(  # nosec B603 - fixed interpreter and script path
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                str(SCRIPT),
+                "--uv-tool-pins",
+                "--pins-dir",
+                str(pins),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.split() == installer.uv_tool_pins(pins)

@@ -79,13 +79,21 @@ tool also installs its license files from ``THIRD_PARTY_LICENSES`` in
 modes serve the same table::
 
     install-pinned-tool --licenses-only opengrep      # binary installed elsewhere
+    install-pinned-tool --uv-tool-pins                # for `ash dependencies install`
     install-pinned-tool --verify-third-party          # last step of the core stage
 
-The second checks the built image against every entry and writes ``index.json``.
-A URL-pinned license file that does not match its digest exits 3, like a binary.
+``--uv-tool-pins`` prints the ``--config-overrides`` that make ``ash dependencies
+install`` install each Python tool with a license entry (bandit, checkov, semgrep)
+at exactly the entry's version. ``--licenses-only`` then reads those tools' license
+files from the wheel's installed dist-info, found under ``uv tool dir``, falling
+back to an entry's URL-pinned copy where the wheel ships none. The last mode checks
+the built image against every entry and writes ``index.json``. A URL-pinned license
+file that does not match its digest exits 3, like a binary, and so does a dist-info
+file that does not match its RECORD.
 """
 
 import argparse
+import base64
 import csv
 import hashlib
 import importlib.machinery
@@ -420,7 +428,7 @@ def install(
 # Set by the Dockerfile's core stage. Unset, `install-pinned-tool <tool>` installs
 # the executable only, which is what the uv-reqs stage and a developer want.
 _THIRD_PARTY_ENV = "ASH_THIRD_PARTY_DIR"
-_THIRD_PARTY_MODES = ("--licenses-only", "--verify-third-party")
+_THIRD_PARTY_MODES = ("--licenses-only", "--uv-tool-pins", "--verify-third-party")
 _SOURCE_FILE = "SOURCE"
 _INDEX_FILE = "index.json"
 _VERSION_TIMEOUT_SECONDS = 120
@@ -448,21 +456,170 @@ def _third_party_entry(pins, tool: str, version: "str | None" = None):
     return entry
 
 
+def uv_tool_dir() -> Path:
+    """Where ``uv tool install`` put each tool's environment: ``uv tool dir``.
+
+    Asked of uv rather than derived from ``$HOME``, because uv also honors
+    ``UV_TOOL_DIR`` and ``XDG_DATA_HOME`` and is the authority on which applies.
+    ``--color never`` because uv colors the path when ``FORCE_COLOR`` is set, even
+    into a pipe, and the escape codes then become part of a path that does not
+    exist.
+    """
+    try:
+        result = subprocess.run(  # nosec B603 B607 - uv is on PATH in every stage that runs this
+            ["uv", "--color", "never", "tool", "dir"],
+            capture_output=True,
+            text=True,
+            timeout=_VERSION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SystemExit(f"`uv tool dir` failed: {exc}")
+    location = result.stdout.strip()
+    if result.returncode != 0 or not location:
+        raise SystemExit(
+            f"`uv tool dir` exited {result.returncode}: {result.stderr.strip()}"
+        )
+    return Path(location)
+
+
+def _metadata_version(dist_info: Path) -> "str | None":
+    """The ``Version:`` header of ``dist_info``'s METADATA."""
+    with (dist_info / "METADATA").open(encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if not line.strip():
+                break
+            if line.startswith("Version:"):
+                return line.split(":", 1)[1].strip()
+    return None
+
+
+def find_dist_info(entry, tool_dir: Path) -> Path:
+    """The installed dist-info of ``entry.distribution`` in its uv tool environment.
+
+    Exactly one, at exactly the entry's version. Another version means ``ash
+    dependencies install`` did not take the pin from ``--uv-tool-pins``, and the
+    files and source commit would describe a release the image does not contain.
+    """
+    distribution = entry.distribution
+    normalized = re.sub(r"[-_.]+", "_", distribution).lower()
+    matches = sorted(
+        (tool_dir / distribution).glob(
+            f"lib/python*/site-packages/{normalized}-*.dist-info"
+        )
+    )
+    matches = [m for m in matches if (m / "METADATA").is_file()]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"expected one installed {distribution} dist-info under "
+            f"{tool_dir / distribution}, found {len(matches)}: "
+            f"{', '.join(str(m) for m in matches) or 'none'}. Is it installed with "
+            "`uv tool install`?"
+        )
+    installed = _metadata_version(matches[0])
+    wanted = entry.version.lstrip("v")
+    if installed != wanted:
+        raise SystemExit(
+            f"{entry.tool}: {matches[0]} is version {installed}, but its license "
+            f"entry records {entry.version}. `ash dependencies install` was run "
+            "without `install-pinned-tool --uv-tool-pins`, or a version bump is "
+            "half-applied."
+        )
+    return matches[0]
+
+
+def _record_hashes(dist_info: Path) -> "dict[str, str]":
+    """RECORD's ``sha256`` for each file, keyed by its path relative to the dist-info."""
+    hashes: "dict[str, str]" = {}
+    prefix = dist_info.name + "/"
+    with (dist_info / "RECORD").open(encoding="utf-8", newline="") as handle:
+        for row in csv.reader(handle):
+            if (
+                len(row) >= 2
+                and row[0].startswith(prefix)
+                and row[1].startswith("sha256=")
+            ):
+                hashes[row[0][len(prefix) :]] = row[1][len("sha256=") :]
+    return hashes
+
+
+def _dist_info_member(
+    dist_info: Path, name: str, record: "dict[str, str]"
+) -> "Path | None":
+    """``name`` as the wheel installed it, or None if the wheel ships no such file.
+
+    PEP 639 wheels keep license files under ``licenses/``; older ones put them at
+    the top of the dist-info. A file RECORD does not list, or lists with another
+    hash, exits ``_EXIT_INTEGRITY``: it is not the file the wheel shipped.
+    """
+    for relative in (f"licenses/{name}", name):
+        path = dist_info / relative
+        if not path.is_file():
+            continue
+        expected = record.get(relative)
+        actual = (
+            base64.urlsafe_b64encode(bytes.fromhex(_sha256_of(path)))
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+        if expected != actual:
+            print(
+                f"{path} does not match the hash its RECORD lists "
+                f"(expected {expected}, got {actual})",
+                file=sys.stderr,
+            )
+            raise SystemExit(_EXIT_INTEGRITY)
+        return path
+    return None
+
+
 def stage_third_party(
-    entry, archive: "Path | None", staging: Path, installed_from: "str | None"
+    entry,
+    archive: "Path | None",
+    staging: Path,
+    installed_from: "str | None",
+    dist_info: "Path | None" = None,
 ) -> Path:
     """Assemble ``entry``'s directory under ``staging`` and return its path.
 
     Archive-member files are read from ``archive``, which the caller has already
-    verified. URL files are fetched and must match their pinned digest; a
-    mismatch exits ``_EXIT_INTEGRITY`` exactly like a binary's. Nothing is
-    written outside ``staging``.
+    verified. With ``dist_info`` (an entry with a ``distribution``), every file
+    the installed wheel ships is read from there instead, checked against the
+    wheel's RECORD, and a URL-pinned one must still match its pin. URL files are
+    otherwise fetched and must match their pinned digest; a mismatch exits
+    ``_EXIT_INTEGRITY`` exactly like a binary's. Nothing is written outside
+    ``staging``.
     """
     target = staging / "third-party" / _plain_name(entry.tool, "tool name")
     target.mkdir(parents=True)
+    record = _record_hashes(dist_info) if dist_info is not None else {}
     for license_file in entry.files:
         destination = target / _plain_name(license_file.name, "license file name")
-        if license_file.from_archive:
+        shipped = (
+            _dist_info_member(dist_info, license_file.name, record)
+            if dist_info is not None
+            else None
+        )
+        if shipped is not None:
+            print(f"Copying {entry.tool} {license_file.name} from {shipped}")
+            shutil.copyfile(shipped, destination)
+            if license_file.sha256 and (
+                _sha256_of(destination) != license_file.sha256.lower()
+            ):
+                print(
+                    f"{shipped} does not match the SHA256 pinned for "
+                    f"{license_file.url}. The wheel now ships this file itself; "
+                    f"make the entry's {license_file.name} a plain "
+                    f'LicenseFile("{license_file.name}") and drop its pin.',
+                    file=sys.stderr,
+                )
+                raise SystemExit(_EXIT_INTEGRITY)
+        elif license_file.from_archive and dist_info is not None:
+            raise SystemExit(
+                f"{entry.tool}'s {license_file.name} is not in {dist_info}. Give it "
+                "a URL pinned at the entry's commit instead."
+            )
+        elif license_file.from_archive:
             if archive is None:
                 raise SystemExit(
                     f"{entry.tool}'s {license_file.name} is read from its release "
@@ -515,14 +672,45 @@ def install_licenses_only(tool: str, package_root: Path, third_party_dir: Path) 
     """Install ``tool``'s license files for a binary installed some other way.
 
     For opengrep, which ``ash dependencies install`` provisions later in the
-    build, and for uv. Every file such an entry lists must be URL-pinned, because
-    there is no archive here to read members from.
+    build, every file must be URL-pinned, because there is no archive here to
+    read members from. For an entry with a ``distribution`` -- bandit, checkov,
+    semgrep, which ``ash dependencies install`` has already installed with ``uv
+    tool install`` -- the installed wheel's dist-info is the archive.
     """
     pins = load_pins(package_root)
     entry = _third_party_entry(pins, tool)
+    dist_info = installed_from = None
+    if entry.distribution:
+        dist_info = find_dist_info(entry, uv_tool_dir())
+        installed_from = (
+            f"PyPI {entry.distribution}=={entry.version.lstrip('v')}, "
+            "by `uv tool install`"
+        )
     with tempfile.TemporaryDirectory(prefix="ash-third-party-") as staging_name:
-        staged = stage_third_party(entry, None, Path(staging_name), None)
+        staged = stage_third_party(
+            entry, None, Path(staging_name), installed_from, dist_info
+        )
         return publish_third_party(staged, third_party_dir)
+
+
+def uv_tool_pins(package_root: Path) -> "list[str]":
+    """``ash dependencies install`` arguments pinning each Python tool to its entry.
+
+    A scanner's own default is a range (semgrep's is ``>=1.125.0,<2.0.0``), so
+    without these the image would carry whatever release PyPI had on the day,
+    and the license entry's tag and commit would describe some other release.
+    """
+    pins = load_pins(package_root)
+    argv: "list[str]" = []
+    for tool in sorted(pins.THIRD_PARTY_LICENSES):
+        entry = pins.THIRD_PARTY_LICENSES[tool]
+        if entry.distribution:
+            argv += [
+                "--config-overrides",
+                f"scanners.{entry.tool}.options.tool_version==="
+                + entry.version.lstrip("v"),
+            ]
+    return argv
 
 
 def reports_version(output: str, bare_version: str) -> bool:
@@ -704,12 +892,15 @@ def third_party_main(argv: "list[str]") -> int:
         prog="install-pinned-tool",
         description=(
             "Install license files for tools installed another way "
-            "(--licenses-only), or verify the image's third-party license "
-            "directory and write its index (--verify-third-party)."
+            "(--licenses-only), print the `ash dependencies install` arguments "
+            "that pin the Python tools to their license entries (--uv-tool-pins), "
+            "or verify the image's third-party license directory and write its "
+            "index (--verify-third-party)."
         ),
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--licenses-only", nargs="+", metavar="TOOL")
+    mode.add_argument("--uv-tool-pins", action="store_true")
     mode.add_argument("--verify-third-party", action="store_true")
     parser.add_argument(
         "--third-party-dir",
@@ -720,6 +911,9 @@ def third_party_main(argv: "list[str]") -> int:
     args = parser.parse_args(argv)
 
     package_root = Path(args.pins_dir) if args.pins_dir else default_package_root()
+    if args.uv_tool_pins:
+        print(" ".join(uv_tool_pins(package_root)))
+        return 0
     chosen = args.third_party_dir or os.environ.get(_THIRD_PARTY_ENV)
     third_party_dir = Path(chosen or load_pins(package_root).THIRD_PARTY_DOC_DIR)
 

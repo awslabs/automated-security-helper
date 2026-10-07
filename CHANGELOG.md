@@ -48,6 +48,19 @@
 
 ### Behavior changes
 
+- **The container image pins bandit 1.9.4, checkov 3.3.26 and semgrep 1.179.0.**
+  The image used to install the newest release each scanner's default version
+  constraint allowed, which was whatever PyPI had on the day of the build. It now
+  installs exactly the versions in their `THIRD_PARTY_LICENSES` entries in
+  `utils/tool_downloads.py`, because the license files and the `SOURCE` file
+  (release tag and commit) the image bundles for each scanner have to describe the
+  release that is actually installed. `ash dependencies install` outside the image
+  is unchanged and still takes the newest version the scanner's default allows. A new weekly workflow, ASH - Pinned Tool Versions, runs
+  `scripts/check_pinned_tool_versions.py`, which compares every pin in
+  `tool_downloads.py` (these three, the release binaries in `TOOL_VERSIONS`, the
+  license files and the cfn-nag gem) with its upstream's latest release and fails
+  when one is behind, listing what the bump has to change.
+
 - **A scanner's `offline: false` no longer overrides ASH's offline mode.** ASH's
   offline mode (`--offline`, `ASH_OFFLINE`, or an image built with `--offline`) now
   applies to every scanner, and `options.offline: false` means "follow ASH". It used
@@ -607,6 +620,17 @@
   there fails the unit tests and the image build, the build checks each tool's
   `--version` against its entry, and the container CI legs fail on any executable on
   the image's PATH that neither a Debian package nor an entry accounts for.
+  The Python scanners bandit, checkov and semgrep, which `ash dependencies install`
+  puts in the image with `uv tool install`, are covered too. semgrep is LGPL-2.1 and
+  its wheel ships no license file at all, only a `License-Expression` line in its
+  metadata, so its LICENSE and COPYRIGHT are fetched at the release commit and checked
+  against pinned SHA256s, and its `SOURCE` says where the corresponding source is.
+  bandit's and checkov's licenses are copied from their installed wheels' dist-info,
+  checked against the wheel's RECORD; a wheel that ships a file is always read before
+  anything is fetched. So that these files describe the release in the image, the
+  image now installs each of the three at exactly its entry's version (bandit 1.9.4,
+  checkov 3.3.26, semgrep 1.179.0) instead of the newest release its scanner's default
+  range allowed on the day of the build. Outside the image the defaults are unchanged.
 
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.

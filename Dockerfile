@@ -451,8 +451,20 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
+# bandit, checkov and semgrep are installed with `uv tool install`, and each scanner's
+# own default is a version range, so on its own this would install whatever release
+# PyPI had on the day. `--uv-tool-pins` prints the --config-overrides that pin each to
+# the version of its THIRD_PARTY_LICENSES entry, so the license files and the source
+# commit below describe the release in the image. Assigned first so a failure stops
+# the build rather than leaving the install unpinned.
+RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
 ENV PATH="${ASH_BIN_PATH}:$PATH"
+
+# The Python tools' license files, read from each installed wheel's dist-info and,
+# for semgrep, whose wheel carries none, fetched from its repository at the pinned
+# commit and checked against their SHA256.
+RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and
@@ -534,7 +546,10 @@ ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
-RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
+# Pinned as in the core stage: this user's uv tool directory starts empty, so the
+# Python tools are installed again here and would otherwise float.
+RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD command -v ash || exit 1

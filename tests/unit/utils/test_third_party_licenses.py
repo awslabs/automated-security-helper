@@ -156,10 +156,12 @@ class TestEntryShape:
 
         A tool not installed that way, or whose asset is a bare executable (as
         opengrep's is), has no archive to read, so every file must be URL-pinned.
+        A Python tool's archive is its wheel, read from the installed dist-info;
+        TestThePythonTools covers those.
         """
         entry = THIRD_PARTY_LICENSES[tool]
         from_archive = [f.name for f in entry.files if f.from_archive]
-        if not from_archive:
+        if not from_archive or entry.distribution:
             return
         assert tool in tool_downloads.downloadable_tools(), (
             f"{tool} lists archive members {from_archive} but is not installed from "
@@ -257,15 +259,21 @@ class TestTheSourceNotice:
         assert record["executables"] == ["trivy"]
 
 
+def _licenses_only_tools(core: str) -> list:
+    """Every tool named on any `install-pinned-tool --licenses-only` line."""
+    return [
+        tool
+        for line in re.findall(r"install-pinned-tool --licenses-only ([^'\n]+)", core)
+        for tool in line.split()
+    ]
+
+
 class TestTheDockerfileInstallsEveryEntry:
     """The table is only a claim until the image build reads every entry."""
 
     def test_every_entry_is_installed_by_some_dockerfile_line(self):
         core = _core_stage(DOCKERFILE.read_text())
-        licenses_only = re.search(
-            r"install-pinned-tool --licenses-only ([^'\n]+)", core
-        )
-        listed = set(licenses_only.group(1).split()) if licenses_only else set()
+        listed = set(_licenses_only_tools(core))
         for tool in ENTRIES:
             assert f"install-pinned-tool {tool} " in core or tool in listed, (
                 f"{tool} has a license entry but no `install-pinned-tool {tool}` and "
@@ -273,20 +281,23 @@ class TestTheDockerfileInstallsEveryEntry:
             )
 
     def test_the_licenses_only_tools_need_no_archive(self):
+        """No release archive is at hand on that line. A Python tool's wheel is,
+        installed: its dist-info is where the url-less files are read from."""
         core = _core_stage(DOCKERFILE.read_text())
-        listed = re.search(r"install-pinned-tool --licenses-only ([^'\n]+)", core)
+        listed = _licenses_only_tools(core)
         assert listed, "the core stage lost its --licenses-only line"
-        for tool in listed.group(1).split():
-            assert all(not f.from_archive for f in THIRD_PARTY_LICENSES[tool].files)
+        for tool in listed:
+            entry = THIRD_PARTY_LICENSES[tool]
+            assert entry.distribution or all(not f.from_archive for f in entry.files)
 
     def test_a_tool_installed_in_the_core_stage_is_not_also_licenses_only(self):
         """`install-pinned-tool <tool>` already stages its licenses; a second pass on
         the --licenses-only line would fetch them again and replace the SOURCE that
         names the asset the binary came from."""
         core = _core_stage(DOCKERFILE.read_text())
-        listed = re.search(r"install-pinned-tool --licenses-only ([^'\n]+)", core)
+        listed = _licenses_only_tools(core)
         assert listed, "the core stage lost its --licenses-only line"
-        for tool in listed.group(1).split():
+        for tool in listed:
             assert f"install-pinned-tool {tool} " not in core, (
                 f"{tool} is installed by `install-pinned-tool {tool}` in the core "
                 "stage; take it off the --licenses-only line"
@@ -307,8 +318,139 @@ class TestTheDockerfileInstallsEveryEntry:
         """opengrep only exists once `ash dependencies install` has run."""
         core = _core_stage(DOCKERFILE.read_text())
         assert core.index("RUN install-pinned-tool --verify-third-party") > core.index(
-            'RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"'
+            'ash dependencies install --bin-path "${ASH_BIN_PATH}"'
         )
+
+
+def _uv_tool_scanners() -> list:
+    """Built-in scanners that install their tool with `uv tool install`.
+
+    Read from the scanner modules rather than listed, so a fourth such scanner is
+    held to the same rule without anyone remembering to add it here.
+    """
+    scanners_dir = (
+        REPO_ROOT / "automated_security_helper" / "plugin_modules" / "ash_builtin"
+    ) / "scanners"
+    found = []
+    for module in sorted(scanners_dir.glob("*_scanner.py")):
+        text = module.read_text(encoding="utf-8")
+        if "self.use_uv_tool = True" not in text:
+            continue
+        name = re.search(r'name: Literal\["([^"]+)"\]', text)
+        assert name, f"{module.name} has no `name: Literal[...]`"
+        found.append(name.group(1))
+    return found
+
+
+class TestThePythonTools:
+    """bandit, checkov and semgrep: installed by `uv tool install`, licensed from
+    their wheels, and pinned so the entry describes the release in the image."""
+
+    def test_the_scanner_list_is_read_from_the_modules(self):
+        """Negative control for the helper the next test depends on."""
+        assert {"bandit", "checkov", "semgrep"} <= set(_uv_tool_scanners())
+
+    def test_every_uv_tool_scanner_has_a_license_entry(self):
+        """semgrep is LGPL and its wheel ships no license file, so without an entry
+        the image carried it with no license text and no pointer to its source."""
+        missing = [
+            tool
+            for tool in _uv_tool_scanners()
+            if tool not in THIRD_PARTY_LICENSES
+            or THIRD_PARTY_LICENSES[tool].distribution != tool
+        ]
+        assert missing == [], (
+            f"{missing}: installed with `uv tool install` and no THIRD_PARTY_LICENSES "
+            "entry naming its distribution"
+        )
+
+    def test_semgrep_is_copyleft_and_points_at_its_source_at_the_pinned_tag(self):
+        entry = THIRD_PARTY_LICENSES["semgrep"]
+        assert entry.copyleft
+        assert entry.repository == "https://github.com/semgrep/semgrep"
+        assert {f.name for f in entry.files} == {"LICENSE", "COPYRIGHT"}
+        assert all(f.url and f.sha256 for f in entry.files), (
+            "semgrep's wheel ships no license file; both must be fetched, pinned"
+        )
+        notice = entry.source_notice()
+        assert "Corresponding source" in notice
+        for needle in (entry.repository, f"tag:        {entry.version}", entry.commit):
+            assert needle in notice
+        assert entry.index_record()["files"] == ["LICENSE", "COPYRIGHT", "SOURCE"]
+
+    @pytest.mark.parametrize("tool", ["bandit", "checkov"])
+    def test_a_wheel_that_ships_its_license_is_read_from_its_dist_info(self, tool):
+        entry = THIRD_PARTY_LICENSES[tool]
+        assert [(f.name, f.url) for f in entry.files] == [("LICENSE", None)]
+
+    @pytest.mark.parametrize(
+        "tool",
+        sorted(
+            t for t in ENTRIES if getattr(THIRD_PARTY_LICENSES[t], "distribution", None)
+        ),
+    )
+    def test_the_pin_satisfies_the_scanners_own_default(self, tool):
+        """At scan time the scanner asks uv for its default range, not the pin. A
+        pin outside it would make that request miss the installed tool."""
+        from types import SimpleNamespace
+
+        from packaging.specifiers import SpecifierSet
+
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            bandit_scanner,
+            checkov_scanner,
+            semgrep_scanner,
+        )
+
+        scanner, config = {
+            "bandit": (
+                bandit_scanner.BanditScanner,
+                bandit_scanner.BanditScannerConfig,
+            ),
+            "checkov": (
+                checkov_scanner.CheckovScanner,
+                checkov_scanner.CheckovScannerConfig,
+            ),
+            "semgrep": (
+                semgrep_scanner.SemgrepScanner,
+                semgrep_scanner.SemgrepScannerConfig,
+            ),
+        }[tool]
+        default = scanner._get_tool_version_constraint(SimpleNamespace(config=config()))
+        assert default, f"{tool} has no default constraint to check the pin against"
+        version = THIRD_PARTY_LICENSES[tool].version.lstrip("v")
+        assert version in SpecifierSet(default), (
+            f"{tool} is pinned to {version}, outside its default {default}"
+        )
+
+    def test_every_ash_dependencies_install_takes_the_pins(self):
+        """Both stages run it, and the non-root one starts from an empty uv tool
+        directory, so an unpinned line there would install whatever is newest."""
+        lines = [
+            line
+            for line in DOCKERFILE.read_text().splitlines()
+            if "ash dependencies install --bin-path" in line
+            and not line.lstrip().startswith("#")
+        ]
+        assert len(lines) == 2, lines
+        text = DOCKERFILE.read_text()
+        for line in lines:
+            assert line.strip() == (
+                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}'
+            ), line
+        assert (
+            text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
+        )
+
+    def test_their_licenses_are_staged_between_install_and_verification(self):
+        core = _core_stage(DOCKERFILE.read_text())
+        staged = core.index(
+            "install-pinned-tool --licenses-only bandit checkov semgrep"
+        )
+        assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
+            staged
+        )
+        assert staged < core.index("RUN install-pinned-tool --verify-third-party")
 
 
 class TestTheHashBlock:

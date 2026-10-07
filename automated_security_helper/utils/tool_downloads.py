@@ -54,6 +54,10 @@ Known limitations
   error, which is the intended direction to fail in. opengrep and uv name their assets without a
   version, so for those two a bump would not even change a filename; see
   ``_DIGESTS_TAKEN_AT`` for what catches it instead.
+  Nothing bumps these pins on its own, and Dependabot cannot see a Python dict.
+  ``scripts/check_pinned_tool_versions.py`` compares every pin here with its
+  upstream's latest release and lists what a bump must change; the weekly ASH -
+  Pinned Tool Versions workflow runs it and fails when a pin is behind.
 * opengrep is pinned for manylinux only. The scanner has always installed the
   manylinux build (``opengrep_scanner`` hardcodes it, with a TODO to detect musl),
   and pinning musllinux too would be two digests for a path nothing takes.
@@ -354,13 +358,14 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 # Why this exists
 # ---------------
 # The image redistributes upstream release binaries -- every tool in TOOL_VERSIONS,
-# plus opengrep and uv -- and every one of those licenses makes redistribution
-# conditional on shipping something with the binary: Apache-2.0 section 4(a) and
-# (d) a copy of the license and the upstream NOTICE, MIT the copyright and
-# permission notice, LGPL and GPL the license and a way to get the corresponding
-# source. Until this table the image shipped the binaries alone. Not even trivy's
-# NOTICE was there, because trivy keeps it in its repository and leaves it out of
-# its release archive.
+# plus opengrep and uv -- and the Python scanners bandit, checkov and semgrep, which
+# ``ash dependencies install`` puts in place with ``uv tool install``. Every one of
+# those licenses makes redistribution conditional on shipping something with the
+# binary: Apache-2.0 section 4(a) and (d) a copy of the license and the upstream
+# NOTICE, MIT the copyright and permission notice, LGPL and GPL the license and a
+# way to get the corresponding source. Until this table the image shipped the
+# binaries alone. Not even trivy's NOTICE was there, because trivy keeps it in its
+# repository and leaves it out of its release archive.
 #
 # What the image gets
 # -------------------
@@ -374,6 +379,21 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 #   its ``sha256``, like a binary. That is for files the release archive lacks:
 #   opengrep publishes a bare executable, uv's archive carries no license, and
 #   trivy's NOTICE is only in its repository.
+#
+#   For an entry with a ``distribution`` -- a Python tool installed with ``uv tool
+#   install`` -- the wheel is the archive: a file with no ``url`` is read from the
+#   installed wheel's dist-info, checked against the hash its RECORD lists, and the
+#   installed version must be the entry's. A file with a ``url`` is the fallback for
+#   a wheel that does not carry it: semgrep's wheel declares
+#   ``License-Expression: LGPL-2.1-or-later`` in its METADATA and ships no license
+#   file at all, so its LICENSE and COPYRIGHT are fetched from its repository. Were
+#   a later wheel to carry the file, the dist-info copy is used instead and must
+#   still hash to the pin, so the image's bytes are the same either way. These
+#   entries are staged by ``install-pinned-tool --licenses-only`` after ``ash
+#   dependencies install``, which ``install-pinned-tool --uv-tool-pins`` tells to
+#   install exactly the entry's version rather than the newest the scanner's
+#   default constraint allows; otherwise the files and the source commit would
+#   describe whichever release PyPI had on the day of the build.
 # * ``SOURCE``: the tool, version, license expression, upstream repository, tag
 #   and commit, and a source archive URL for that commit. Written for every tool.
 #
@@ -417,14 +437,27 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 #    installed by ``install-pinned-tool <tool>`` in the Dockerfile, add it to the
 #    ``install-pinned-tool --licenses-only`` line there.
 #
+# For a Python tool installed with ``uv tool install``, set ``distribution`` to its
+# PyPI name and ``version`` to its release tag, list the wheel's dist-info (``unzip
+# -l``; PEP 639 wheels keep license files under ``licenses/``), and add the tool to
+# the ``--licenses-only`` line that follows ``ash dependencies install``. A license
+# file the wheel lacks is URL-pinned as in step 3. The entry's ``tool`` must be the
+# scanner's name, because it is also the key ``--uv-tool-pins`` overrides.
+#
+# ``scripts/check_pinned_tool_versions.py`` reads new entries from these tables and
+# needs no edit to start reporting the tool's upstream releases.
+#
 # Known limitations
 # -----------------
 # * The Go and Rust binaries here statically link their dependency modules, whose
 #   own licenses are not reproduced. No upstream release ships them either; the
 #   module list is embedded in each Go binary (``go version -m <binary>``).
-# * Python tools installed with ``uv tool`` (bandit, checkov, semgrep) are not
-#   here. Their wheels carry license metadata in their dist-info, which ASH does
-#   not duplicate.
+# * For the Python tools only the tool's own distribution is covered, not the
+#   dependency closure ``uv tool install`` resolves beside it in the tool's
+#   environment. Each of those wheels keeps whatever license files it ships in its
+#   own dist-info there, as installed.
+# * The Jupyter converter's ``nbconvert`` (with ``jupyter``) is also installed with
+#   ``uv tool`` and has no entry; its wheel carries its LICENSE in its dist-info.
 # ---------------------------------------------------------------------------
 
 THIRD_PARTY_DOC_DIR = "/usr/share/doc/ash/third-party"
@@ -465,8 +498,9 @@ class LicenseFile:
 
     ``name`` is the file's name in the image. With no ``url`` it is also the
     basename of the member read from the tool's release archive, matched by the
-    same exactly-one rule as the executable. With a ``url``, the bytes fetched
-    must hash to ``sha256``.
+    same exactly-one rule as the executable; for an entry with a ``distribution``
+    the archive is the wheel, and the file is read from its installed dist-info.
+    With a ``url``, the bytes must hash to ``sha256``.
     """
 
     name: str
@@ -488,6 +522,11 @@ class ThirdPartyLicense:
     that a Python package did not install must report ``version``: uv is also an
     ASH dependency from PyPI, at whatever version pyproject's range resolves to,
     and that copy carries its own license metadata in its dist-info.
+
+    ``distribution`` is set for a tool ``ash dependencies install`` installs with
+    ``uv tool install``: the PyPI name of the distribution, whose installed
+    dist-info the license files are read from. ``version`` is still the upstream
+    release tag; without its leading ``v`` it is the version installed.
     """
 
     tool: str
@@ -497,6 +536,7 @@ class ThirdPartyLicense:
     commit: str
     files: "tuple[LicenseFile, ...]"
     executables: "tuple[str, ...]" = ()
+    distribution: "str | None" = None
 
     @property
     def executable_names(self) -> tuple[str, ...]:
@@ -593,12 +633,18 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 # SHA256 of that file downloaded from its URL in the entry. Archive-member files
 # have no digest here: the archive digest in _DIGESTS covers them. For grype, syft
 # and trivy the archive's LICENSE was also checked byte-identical to the
-# repository's at the same commit.
+# repository's at the same commit. semgrep's two files are byte-identical to
+# opengrep's, which forked it, so they share digests.
 _THIRD_PARTY_HASHES: dict[str, str] = {
+    "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
+    "checkov commit": "e5f995a6e2dd033e99354b6c477d056eb5eaf2d0",  # pragma: allowlist secret
     "grype commit": "1f19355a7ee2d7e2bd58da6255bdeb618eb0c0d1",  # pragma: allowlist secret
     "opengrep commit": "84c6da40995b0e15803401e44d16a745b3656df8",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
+    "semgrep commit": "fed96460fd67f504ea59342eba8f921f4d74fe17",  # pragma: allowlist secret
+    "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
+    "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "syft commit": "f6189175279981a79d8d8c15669c570f15a00568",  # pragma: allowlist secret
     "trivy commit": "6fb20c8edd70745d6b34bff0387b53b03c8a760a",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
@@ -619,6 +665,26 @@ def _from_source(tool: str, repository: str, name: str) -> LicenseFile:
 
 # Alphabetical, one entry per tool.
 THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
+    # The wheel's dist-info carries licenses/LICENSE. The repository has no NOTICE.
+    "bandit": ThirdPartyLicense(
+        tool="bandit",
+        version="1.9.4",
+        license="Apache-2.0",
+        repository="https://github.com/PyCQA/bandit",
+        commit=_THIRD_PARTY_HASHES["bandit commit"],
+        files=(LicenseFile("LICENSE"),),
+        distribution="bandit",
+    ),
+    # The wheel's dist-info carries licenses/LICENSE. The repository has no NOTICE.
+    "checkov": ThirdPartyLicense(
+        tool="checkov",
+        version="3.3.26",
+        license="Apache-2.0",
+        repository="https://github.com/bridgecrewio/checkov",
+        commit=_THIRD_PARTY_HASHES["checkov commit"],
+        files=(LicenseFile("LICENSE"),),
+        distribution="checkov",
+    ),
     "grype": ThirdPartyLicense(
         tool="grype",
         version="v0.111.0",
@@ -643,6 +709,22 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
                 "opengrep", "https://github.com/opengrep/opengrep", "COPYRIGHT"
             ),
         ),
+    ),
+    # The wheel's dist-info holds no license file, only METADATA's
+    # `License-Expression: LGPL-2.1-or-later`, so both files come from the
+    # repository. COPYRIGHT grants "version 2.1" with no "or later", the narrower
+    # of the two readings, and the one opengrep's entry takes from the same text.
+    "semgrep": ThirdPartyLicense(
+        tool="semgrep",
+        version="v1.179.0",
+        license="LGPL-2.1-only",
+        repository="https://github.com/semgrep/semgrep",
+        commit=_THIRD_PARTY_HASHES["semgrep commit"],
+        files=(
+            _from_source("semgrep", "https://github.com/semgrep/semgrep", "LICENSE"),
+            _from_source("semgrep", "https://github.com/semgrep/semgrep", "COPYRIGHT"),
+        ),
+        distribution="semgrep",
     ),
     "syft": ThirdPartyLicense(
         tool="syft",
