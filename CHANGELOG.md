@@ -48,6 +48,20 @@
 
 ### Behavior changes
 
+- **grype, opengrep, syft and trivy are bumped to v0.120.1, v1.30.2, v1.54.1 and
+  v0.75.0** (from v0.111.0, v1.15.1, v1.42.4 and v0.69.3), with every archive and
+  executable digest in `utils/tool_downloads.py` re-taken from the new releases. No
+  flag, environment variable, database schema or `--version` format ASH relies on
+  changed. Output does change in a few ways. syft writes CycloneDX 1.7 rather than 1.6,
+  and names a SHA-pinned GitHub Action by the version in its trailing comment. trivy
+  reports license names it cannot parse at UNKNOWN severity instead of dropping them,
+  adds secret rules (Azure, Maven `settings.xml`, OpenAI, GitHub App tokens), and no
+  longer panics on a single-line CloudFormation template that holds an IAM policy.
+  grype stops matching the Go standard library by CPE and links each SARIF rule's
+  `helpUri` to its advisory. opengrep parses Dockerfiles it used to report as syntax
+  errors. The default `scanners.opengrep.options.version` is now `v1.30.2`; a
+  configuration that names v1.15.1 explicitly has to bring its own `sha256`.
+
 - **The container image pins bandit 1.9.4, checkov 3.3.26 and semgrep 1.179.0.**
   The image used to install the newest release each scanner's default version
   constraint allowed, which was whatever PyPI had on the day of the build. It now
@@ -88,7 +102,7 @@
   [Seeding the semgrep and opengrep rule cache](docs/content/docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
 
 - **OpenGrep is pinned and digest-verified, and nothing installs it unverified.**
-  ASH now pins OpenGrep v1.15.1 with a SHA256 per platform (linux and macOS on
+  ASH now pins OpenGrep v1.30.2 with a SHA256 per platform (linux and macOS on
   amd64 and arm64, Windows on amd64) in `utils/tool_downloads.py`, and
   `ash dependencies install` verifies the download before it is put on disk,
   the same way grype, syft and trivy already were. It used to fetch the release
@@ -436,7 +450,7 @@
 
   | Database | Bound | Source of the bound | Age read from |
   | --- | --- | --- | --- |
-  | grype | 120h | grype's own default (`curator.go:58` at v0.111.0) | `built` in `grype db status -o json` |
+  | grype | 120h | grype's own default (`curator.go:58` at v0.120.1) | `built` in `grype db status -o json` |
   | trivy (trivy-repo plugin) | 24h | trivy's `NextUpdate` rule; the published database sets it 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
   | semgrep / opengrep offline rulesets | 30 days | ASH's own choice; neither tool has a staleness notion for local rules | `.ash-rules-fetched-at`, written by the offline image build, else the oldest rules file's mtime |
 
