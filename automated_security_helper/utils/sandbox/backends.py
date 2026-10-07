@@ -342,7 +342,9 @@ class FirejailBackend(SandboxBackend):
         # often the source tree) opened back up. Without this, CI measured the
         # source tree and the output directory writable whenever they sat in /tmp.
         for p in readable:
-            if p not in writable:
+            # A readable path inside a writable one (a cache, the results dir) is
+            # left to the --read-write below rather than made read-only first.
+            if not any(p == w or _is_within(p, w) for w in writable):
                 cmd.append(f"--read-only={p.as_posix()}")
         for p in writable:
             cmd.append(f"--read-write={p.as_posix()}")
