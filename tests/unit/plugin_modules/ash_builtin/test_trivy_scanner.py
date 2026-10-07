@@ -5,7 +5,8 @@
 
 Parsing is tested against REAL trivy output. ``trivy-0.69.3.vuln.sarif`` and
 ``trivy-0.69.3.all.sarif`` were written by the pinned trivy v0.69.3 scanning
-``tests/test_data/scanners/trivy/fixture_repo`` from inside that directory::
+the fixture repository as ``tests/utils/trivy_fixture.py`` materializes it (the
+committed ``.fixture`` suffixes removed), from inside that directory::
 
     trivy fs --format sarif --scanners vuln --disable-telemetry --skip-db-update . \\
         --output trivy-0.69.3.vuln.sarif
@@ -28,10 +29,11 @@ from __future__ import annotations
 
 import copy
 import json
-import shutil
 from pathlib import Path
 
 import pytest
+
+from tests.utils.trivy_fixture import materialize
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
@@ -118,7 +120,7 @@ def _context(tmp_path: Path, config: AshConfig | None = None) -> PluginContext:
     source = tmp_path / "src"
     if not source.exists():
         # The lockfile is read to tie each npm result to its package copy.
-        shutil.copytree(DATA / "fixture_repo", source)
+        materialize(source)
     output = source / ".ash" / "ash_output"
     return PluginContext(
         source_dir=source,

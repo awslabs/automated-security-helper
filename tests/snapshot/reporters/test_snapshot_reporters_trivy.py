@@ -5,7 +5,7 @@
 
 The default fixture scan never enables trivy, so nothing else in this suite shows a
 trivy finding in a report. The input here is the real report trivy v0.69.3 wrote for
-``tests/test_data/scanners/trivy/fixture_repo`` (committed beside it as
+the fixture repository ``tests/utils/trivy_fixture.py`` materializes (committed as
 ``trivy-0.69.3.vuln.sarif``), put through ``TrivyScanner._post_process_sarif`` -- the
 package identity and severity a real scan applies -- and then through ASH's own
 aggregation, as the canonical fixture is.
@@ -13,10 +13,11 @@ aggregation, as the canonical fixture is.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
+
+from tests.utils.trivy_fixture import materialize
 import yaml
 
 from tests.snapshot.support.fixture_model import _build_model, fixture_plugin_context
@@ -47,7 +48,7 @@ def trivy_scan(pinned_clock, tmp_path: Path):
     )
     # The lockfile is read to tie each npm result to its package copy.
     source = tmp_path / "src"
-    shutil.copytree(TRIVY_DATA / "fixture_repo", source)
+    materialize(source)
     context = fixture_plugin_context(tmp_path, config=config, source_dir=source)
     scanner = TrivyScanner(
         context=context,

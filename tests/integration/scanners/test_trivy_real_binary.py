@@ -39,6 +39,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+
+from tests.utils.trivy_fixture import materialize
 import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -55,7 +57,6 @@ PluginContext.model_rebuild()
 pytestmark = pytest.mark.integration
 
 DATA = Path(__file__).parents[2] / "test_data" / "scanners" / "trivy"
-FIXTURE = DATA / "fixture_repo"
 CAPTURED_SARIF = DATA / "trivy-0.69.3.vuln.sarif"
 PINNED = TOOL_VERSIONS["trivy"].lstrip("v")
 
@@ -141,7 +142,7 @@ def trivy_env(trivy_bin_dir, trivy_cache, monkeypatch):
 
 def _copy_fixture(tmp_path: Path) -> Path:
     source = tmp_path / "src"
-    shutil.copytree(FIXTURE, source)
+    materialize(source)
     return source
 
 
