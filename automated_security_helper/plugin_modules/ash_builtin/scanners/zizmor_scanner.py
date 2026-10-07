@@ -87,26 +87,27 @@ import logging
 import os
 import re
 from pathlib import Path, PurePath
-from typing import Annotated, ClassVar, Dict, List, Literal, Optional, Tuple
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
 from pydantic import Field, PrivateAttr
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
+    Location,
     PropertyBag,
-    Run,
+    Result,
     SarifReport,
-    Tool,
-    ToolComponent,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -193,7 +194,9 @@ def _release(text: str) -> Tuple[int, ...]:
     return tuple(int(part) for part in text.split("."))
 
 
-def _padded(a: Tuple[int, ...], b: Tuple[int, ...]) -> Tuple[tuple, tuple]:
+def _padded(
+    a: Tuple[int, ...], b: Tuple[int, ...]
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
     width = max(len(a), len(b))
     return a + (0,) * (width - len(a)), b + (0,) * (width - len(b))
 
@@ -291,10 +294,12 @@ def is_zizmor_input(relative_path: PurePath) -> bool:
     )
 
 
-def _locations(result) -> List:
+def _locations(result: Result) -> List[Location]:
     """Every location in a result: its locations, related locations and
     code-flow steps (zizmor puts a physical location in each)."""
-    locations = list(result.locations or []) + list(result.relatedLocations or [])
+    locations: List[Location] = list(result.locations or []) + list(
+        result.relatedLocations or []
+    )
     for code_flow in result.codeFlows or []:
         for thread_flow in code_flow.threadFlows or []:
             for step in thread_flow.locations or []:
@@ -303,7 +308,7 @@ def _locations(result) -> List:
     return locations
 
 
-def _verbatim_path(location) -> Optional[str]:
+def _verbatim_path(location: Location) -> Optional[str]:
     """The input path zizmor was given, as zizmor records it for this location.
 
     zizmor 1.29/1.30 put it in each logical location's
@@ -392,7 +397,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     # 3 is "no auditable inputs"; see _read_results_file. Findings never set the
     # exit status because the scan passes --no-exit-codes.
-    success_exit_codes: ClassVar[set] = {0, ZIZMOR_NO_INPUTS_EXIT_CODE}
+    success_exit_codes: ClassVar[Set[int]] = {0, ZIZMOR_NO_INPUTS_EXIT_CODE}
 
     # The inputs scan() collected for the target it is about to hand to the
     # template, consumed (and cleared) by _execute_scan.
@@ -401,7 +406,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # zizmor's URIs back onto.
     _last_inputs: List[Path] = PrivateAttr(default_factory=list)
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = ZizmorScannerConfig()
         self.command = "zizmor"
@@ -418,13 +423,29 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         self.args = ToolArgs()
         super().model_post_init(context)
 
+    @property
+    def _options(self) -> ZizmorScannerConfigOptions:
+        """This scanner's options, typed. model_post_init guarantees a config."""
+        options = getattr(self.config, "options", None)
+        if not isinstance(options, ZizmorScannerConfigOptions):
+            options = ZizmorScannerConfigOptions.model_validate(
+                options.model_dump() if options is not None else {}
+            )
+        return options
+
+    @property
+    def _plugin_context(self) -> PluginContext:
+        if self.context is None:
+            raise ScannerError("ZizmorScanner has no plugin context")
+        return self.context
+
     # ------------------------------------------------------------------
     # Installation and dependency resolution
     # ------------------------------------------------------------------
 
     def _get_tool_version_constraint(self) -> str | None:
         """The configured ``tool_version``; its default is the enforced constraint."""
-        return self.config.options.tool_version
+        return self._options.tool_version
 
     def _probe_executable_version(self, executable: str) -> Optional[str]:
         """``<executable> --version``, parsed. None when it does not run or parse."""
@@ -462,7 +483,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             return False
 
         constraint = self._get_tool_version_constraint()
-        executable = find_executable(self.command)
+        executable = find_executable(self.command or "zizmor")
         rejected_detail = None
         if executable:
             version = self._probe_executable_version(executable)
@@ -518,12 +539,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         self._plugin_log(
             "zizmor not found via UV tool, attempting explicit installation..."
         )
-        timeout = self.config.options.install_timeout if self.config else 300
+        timeout = self._options.install_timeout
         if self._install_uv_tool(timeout=timeout):
             self._plugin_log("Successfully installed zizmor via UV tool")
             self.dependencies_satisfied = True
             return True
-        if get_uv_tool_command(self.command) is not None:
+        if get_uv_tool_command(self.command or "zizmor") is not None:
             self.dependencies_satisfied = True
             return True
         return False
@@ -533,7 +554,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # ------------------------------------------------------------------
 
     def _online(self) -> bool:
-        if not self.config.options.online_audits:
+        if not self._options.online_audits:
             return False
         if self._is_offline_mode():
             self._plugin_log(
@@ -578,12 +599,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             candidates = [
                 Path(item).absolute()
                 for item in scan_set(
-                    source=self.context.source_dir,
-                    output=self.context.output_dir,
+                    source=str(self._plugin_context.source_dir),
+                    output=str(self._plugin_context.output_dir),
                 )
             ]
-        output_abs = Path(self.context.output_dir).absolute()
-        source_abs = Path(self.context.source_dir).absolute()
+        output_abs = Path(self._plugin_context.output_dir).absolute()
+        source_abs = Path(self._plugin_context.source_dir).absolute()
         known_ignored = {item.strip("/") for item in KNOWN_IGNORE_PATHS}
 
         selected = []
@@ -621,18 +642,18 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         and logical-location properties carry the input path verbatim, and ASH's
         path sanitizer only rewrites physical locations).
         """
-        source_abs = Path(self.context.source_dir).absolute()
+        source_abs = Path(self._plugin_context.source_dir).absolute()
         if path.is_relative_to(source_abs):
             return path.relative_to(source_abs).as_posix()
         return path.as_posix()
 
     def _config_file_argument(self) -> Optional[str]:
-        configured = self.config.options.config_file
+        configured = self._options.config_file
         if configured is None or str(configured).strip() == "":
             return None
         candidate = Path(configured)
         if not candidate.is_absolute():
-            candidate = Path(self.context.source_dir) / candidate
+            candidate = Path(self._plugin_context.source_dir) / candidate
         if not candidate.is_file():
             raise FileNotFoundError(
                 f"scanners.zizmor.options.config_file {str(configured)!r} does not "
@@ -649,10 +670,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config=None,
-        *args,
-        **kwargs,
-    ):
+        config: Any = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
         """Skip zizmor entirely when the target holds nothing it audits.
 
         That case reports ``targets_attempted = 0``, which ScanPhase renders as
@@ -684,29 +705,26 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 self._post_scan(target=target, target_type=target_type)
                 return self._empty_report()
         return super().scan(
-            target=target,
-            target_type=target_type,
-            global_ignore_paths=global_ignore_paths,
-            config=config,
-            *args,
-            **kwargs,
+            target, target_type, global_ignore_paths, config, *args, **kwargs
         )
 
     def _empty_report(self) -> SarifReport:
-        return SarifReport(  # type: ignore[call-arg]
-            version="2.1.0",
-            runs=[
-                Run(  # type: ignore[call-arg]
-                    tool=Tool(  # type: ignore[call-arg]
-                        driver=ToolComponent(  # type: ignore[call-arg]
-                            name="zizmor",
-                            version=self.tool_version,
-                            informationUri="https://docs.zizmor.sh",
-                        )
-                    ),
-                    results=[],
-                )
-            ],
+        return SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {
+                            "driver": {
+                                "name": "zizmor",
+                                "version": self.tool_version,
+                                "informationUri": "https://docs.zizmor.sh",
+                            }
+                        },
+                        "results": [],
+                    }
+                ],
+            }
         )
 
     def _execute_scan(
@@ -714,8 +732,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason],
-    ):
+    ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Build zizmor's argv; SARIF arrives on stdout, written to the stdout log."""
+        if self.results_dir is None:
+            raise ScannerError("ZizmorScanner has no results directory")
         target_results_dir = self.results_dir.joinpath(target_type)
         target_results_dir.mkdir(parents=True, exist_ok=True)
         results_file = target_results_dir.joinpath(
@@ -737,8 +757,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             inputs = self._collect_inputs(target, target_type, global_ignore_paths)
 
         online = self._online()
-        final_args = [
-            self.command,
+        final_args: List[str] = [
+            self.command or "zizmor",
             "--format",
             "sarif",
             "--no-exit-codes",
@@ -746,7 +766,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             "--color",
             "never",
             "--persona",
-            self.config.options.persona,
+            self._options.persona,
         ]
         if not online:
             final_args.append("--offline")
@@ -787,7 +807,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         self.targets_failed = min(self.targets_failed, self.targets_attempted)
         return rejected
 
-    def _read_results_file(self, results_file: Path) -> Optional[dict]:
+    def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
         """Account for rejected inputs, then read zizmor's SARIF.
 
         Exit 3 with no stdout means zizmor rejected every input. That is zero
