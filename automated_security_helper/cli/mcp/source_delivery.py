@@ -65,6 +65,7 @@ from automated_security_helper.cli.mcp.session_paths import (
 from automated_security_helper.utils.path_containment import (
     validate_contained_path,
 )
+from automated_security_helper.utils.process_env import snapshot_environ
 
 # ---------------------------------------------------------------------------
 # Hard limits — enforced at finalize time.
@@ -312,7 +313,7 @@ def set_source_git(
         shutil.rmtree(target, ignore_errors=True)
     _ensure_dir(target)
 
-    env = os.environ.copy()
+    env = snapshot_environ()
     key_path = _resolve_ssh_key(ssh_key_id)
     if key_path is not None:
         env["GIT_SSH_COMMAND"] = (

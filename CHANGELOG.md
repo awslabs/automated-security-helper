@@ -468,6 +468,18 @@
 
 ### Fixes
 
+- **Scanner spawns no longer fail intermittently with `[Errno 14] Bad address`.** On
+  Linux, Python 3.10+ starts children with vfork, and a spawn with `env=None` hands the
+  child the parent's live `environ` array until `execve`. Scanners run in parallel
+  threads and cdk-nag sets and removes three JSII variables around every template, so
+  another scanner's child could exec against freed memory. In CI this showed up as
+  cfn-nag recording "returned no stdout" and "1 of 9 targets unevaluated", with a rerun
+  passing. ASH's spawn helpers and the other spawns that run alongside scanners now pass
+  an explicit copy of the environment, and runtime changes to `os.environ` go through
+  one process-wide lock in `utils/process_env.py`. Scanners see the same variables as
+  before. An offline scan also now restores a pre-existing `ASH_OFFLINE` value when it
+  finishes rather than clearing it.
+
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan

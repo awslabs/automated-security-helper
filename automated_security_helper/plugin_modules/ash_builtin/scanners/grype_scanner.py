@@ -38,6 +38,7 @@ from automated_security_helper.utils.package_identity import (
     install_path,
 )
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.process_env import snapshot_environ
 
 #: grype configuration keys that remove matches from the report.
 #:
@@ -374,7 +375,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             target=f"dir:{target.as_posix()}",
             results_file=results_file,
         )
-        subprocess_env = {**os.environ, **self.extra_env} if self.extra_env else None
+        subprocess_env = (
+            {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+        )
         return final_args, results_file, subprocess_env
 
     def _ensure_runs(self, sarif_report: SarifReport) -> None:

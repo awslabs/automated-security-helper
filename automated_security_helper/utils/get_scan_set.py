@@ -12,6 +12,7 @@ import argparse
 import os
 
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import snapshot_environ
 
 ASH_INCLUSIONS = [
     ".git",
@@ -679,6 +680,7 @@ def git_repository_root(path: Path) -> Optional[Path]:
             text=True,
             timeout=30,
             cwd=path,
+            env=snapshot_environ(),
         )
     except (FileNotFoundError, NotADirectoryError, subprocess.TimeoutExpired, OSError):
         return None
@@ -720,6 +722,7 @@ def get_changed_files(
             text=True,
             timeout=30,
             cwd=cwd,
+            env=snapshot_environ(),
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         ASH_LOGGER.warning("git not available or timed out; falling back to full scan")

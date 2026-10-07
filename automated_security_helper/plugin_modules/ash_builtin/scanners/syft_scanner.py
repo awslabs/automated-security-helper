@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
@@ -26,6 +25,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
@@ -268,7 +268,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 target=target,
             )
             subprocess_env = (
-                {**os.environ, **self.extra_env} if self.extra_env else None
+                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
             self._run_subprocess(
                 command=final_args,

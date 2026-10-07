@@ -109,7 +109,6 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import asyncio
-import os
 from contextlib import suppress
 from pathlib import Path
 from typing import (
@@ -162,6 +161,10 @@ from automated_security_helper.models.workspace import (
     WorkspaceResults,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import (
+    apply_environ_overrides,
+    restore_environ,
+)
 from automated_security_helper.workspace.execution import (
     PROJECTS_DIR_NAME,
     ProjectScanSettings,
@@ -805,11 +808,9 @@ async def _execute(
     with full network access while reporting that it had not. The CLI already sets the
     variable around its own invocations; this path bypassed that.
 
-    The value is snapshotted and restored rather than set-and-popped. The CLI pops it
-    unconditionally, which is safe there because the process runs one scan and exits, but
-    a long-lived MCP server started with ``ASH_OFFLINE=YES`` in its own environment would
-    have that deployment-level setting silently cleared by the first offline workspace
-    scan.
+    The value is snapshotted and restored rather than set-and-popped: a long-lived MCP
+    server started with ``ASH_OFFLINE=YES`` in its own environment would otherwise have
+    that deployment-level setting silently cleared by the first offline workspace scan.
 
     Known limitation, stated because it is reachable here and not in the CLI: the variable
     is process-global while this server can run sessions concurrently. Two overlapping
@@ -823,19 +824,18 @@ async def _execute(
         monitor = asyncio.create_task(
             monitor_workspace_progress(progress_reporter, dict(project_outputs))
         )
-    offline_previous = os.environ.get("ASH_OFFLINE")
-    if settings.offline:
-        os.environ["ASH_OFFLINE"] = "YES"
+    # Under the process-wide environment lock, because other sessions' scans may
+    # be copying the environment for a spawn on another thread right now.
+    offline_previous = (
+        apply_environ_overrides({"ASH_OFFLINE": "YES"}) if settings.offline else None
+    )
     try:
         # Resolved from this module's globals at call time, so a test that
         # replaces cli.mcp.workspace.execute_workspace is what runs.
         return await asyncio.to_thread(execute_workspace, plan, settings)
     finally:
-        if settings.offline:
-            if offline_previous is None:
-                os.environ.pop("ASH_OFFLINE", None)
-            else:
-                os.environ["ASH_OFFLINE"] = offline_previous
+        if offline_previous is not None:
+            restore_environ(offline_previous)
         if monitor is not None:
             monitor.cancel()
             with suppress(asyncio.CancelledError):

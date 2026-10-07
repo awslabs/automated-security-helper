@@ -33,6 +33,7 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 class OpengrepScannerConfigOptions(ScannerOptionsBase):
@@ -217,6 +218,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 capture_output=True,
                 text=True,
                 timeout=5,
+                env=snapshot_environ(),
             )
             if result.returncode == 0:
                 version_str = result.stdout.strip().split()[-1].lstrip("v")

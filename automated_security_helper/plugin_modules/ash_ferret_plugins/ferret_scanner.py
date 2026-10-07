@@ -4,7 +4,6 @@
 """Module containing the Ferret Scan sensitive data detection scanner implementation."""
 
 import json
-import os
 import shlex
 import logging
 import re
@@ -32,6 +31,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.process_env import snapshot_environ
 
 # Path to the default ferret-scan config bundled with this plugin
 DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
@@ -634,6 +634,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=snapshot_environ(),
             )
 
             if result.returncode == 0:
@@ -1082,7 +1083,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 results_dir=target_results_dir,
                 stdout_preference="write",
                 stderr_preference="write",
-                env={**os.environ, **FERRET_SUBPROCESS_ENV_OVERRIDES},
+                env={**snapshot_environ(), **FERRET_SUBPROCESS_ENV_OVERRIDES},
                 timeout=self._effective_scan_timeout(),
             )
 
