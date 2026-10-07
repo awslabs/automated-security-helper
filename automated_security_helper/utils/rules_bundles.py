@@ -64,10 +64,14 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 from automated_security_helper.utils.log import ASH_LOGGER
+
+if TYPE_CHECKING:
+    from automated_security_helper.base.plugin_base import CustomCommand
+    from automated_security_helper.utils.tool_downloads import RulesBundle
 
 #: The manifest file written into an installed bundle directory.
 MANIFEST_NAME = ".ash-rules-manifest.json"
@@ -116,7 +120,7 @@ def rules_root() -> Path:
     return current_bin_path().parent.joinpath("share", "cfn-guard-rules")
 
 
-def bundle_dir_name(bundle) -> str:
+def bundle_dir_name(bundle: "RulesBundle") -> str:
     """The directory name one pinned bundle installs as."""
     return f"{bundle.name}-{bundle.version}"
 
@@ -147,7 +151,9 @@ def _member_basename(
     return name
 
 
-def extract_bundle(archive: Path, bundle, staging: Path) -> Dict[str, str]:
+def extract_bundle(
+    archive: Path, bundle: "RulesBundle", staging: Path
+) -> Dict[str, str]:
     """Extract ``bundle``'s rule files from ``archive`` into ``staging``.
 
     Returns the basename -> SHA256 map of what was written.
@@ -212,7 +218,7 @@ def extract_bundle(archive: Path, bundle, staging: Path) -> Dict[str, str]:
     return written
 
 
-def _manifest_for(bundle, files: Dict[str, str]) -> dict:
+def _manifest_for(bundle: "RulesBundle", files: Dict[str, str]) -> Dict[str, object]:
     return {
         "bundle": bundle.name,
         "version": bundle.version,
@@ -223,7 +229,9 @@ def _manifest_for(bundle, files: Dict[str, str]) -> dict:
 
 
 def verify_installed_bundle(
-    bundle, root: Optional[Path] = None, files: Optional[list] = None
+    bundle: "RulesBundle",
+    root: Optional[Path] = None,
+    files: Optional[List[str]] = None,
 ) -> InstalledBundle:
     """Check an installed bundle against its pin, and ``files`` against the manifest.
 
@@ -363,7 +371,7 @@ def install_rules_bundle(
     return final
 
 
-def create_rules_bundle_install_command(name: str):
+def create_rules_bundle_install_command(name: str) -> "CustomCommand":
     """The CustomCommand that installs rules bundle ``name`` in a subprocess.
 
     The same execution model as ``create_pinned_tool_install_command``: plugins

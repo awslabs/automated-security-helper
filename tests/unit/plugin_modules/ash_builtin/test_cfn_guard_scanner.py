@@ -367,6 +367,27 @@ class TestScan:
         assert scanner.targets_attempted == 2 and scanner.targets_failed == 0
         assert _observed(report.runs[0].results) == EXPECTED_INSECURE
 
+    def test_the_recorded_invocation_carries_no_host_path(self, repo, rules_root):
+        _fake_bundle(rules_root)
+        (repo / "policy").mkdir()
+        (repo / "policy" / "mine.guard").write_text("rule mine { }\n")
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 0,
+                "stdout": CAPTURED_COMPLIANT.read_text(),
+                "stderr": "",
+            }
+
+        report = self._run(_scanner(repo, rules_paths=["policy"]), fake)
+        recorded = report.runs[0].invocations[0].arguments
+        assert (
+            "--rules=aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard"
+            in recorded
+        )
+        assert "--rules=policy" in recorded
+        assert not any(str(rules_root) in a or str(repo) in a for a in recorded)
+
     def test_one_failing_template_does_not_cost_the_others(self, repo, rules_root):
         _fake_bundle(rules_root)
 

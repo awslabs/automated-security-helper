@@ -58,9 +58,9 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AnyUrl, Field, field_validator, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import (
@@ -76,6 +76,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     Level,
     PropertyBag,
+    Result,
     Run,
     SarifReport,
     Tool,
@@ -117,6 +118,9 @@ VIOLATION_SEVERITY = "MEDIUM"
 VIOLATION_LEVEL = "warning"
 
 _SUCCESS_EXIT_CODES = frozenset({0, 19})
+
+#: The executable this scanner runs.
+_COMMAND = "cfn-guard"
 _RULE_SET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -174,10 +178,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     OPT_IN: ClassVar[bool] = True
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = CfnGuardScannerConfig()
-        self.command = "cfn-guard"
+        self.command = _COMMAND
         self.tool_type = ScannerToolType.IAC
         super().model_post_init(context)
 
@@ -195,6 +199,21 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 ]
         return self
 
+    def _options(self) -> CfnGuardScannerConfigOptions:
+        """This scanner's options, typed. The config is set in model_post_init."""
+        options = getattr(self.config, "options", None)
+        if not isinstance(options, CfnGuardScannerConfigOptions):
+            raise ScannerError(
+                f"cfn-guard was configured with {type(options).__name__}, not "
+                "CfnGuardScannerConfigOptions"
+            )
+        return options
+
+    def _source_dir(self) -> Path:
+        if self.context is None:
+            raise ScannerError("cfn-guard has no plugin context")
+        return Path(self.context.source_dir)
+
     def rule_files(self) -> List[Path]:
         """The rules files and directories cfn-guard will be given, in order.
 
@@ -203,14 +222,14 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 match the pinned bundle, or a ``rules_paths`` entry does not exist,
                 or nothing is selected at all.
         """
-        options = self.config.options
+        options = self._options()
         selected: List[Path] = []
         if options.rule_sets:
             bundle = get_rules_bundle(RULES_BUNDLE_NAME)
             names = [f"{name}.guard" for name in options.rule_sets]
             installed = verify_installed_bundle(bundle, files=names)
             selected.extend(installed.directory.joinpath(name) for name in names)
-        source_dir = Path(self.context.source_dir)
+        source_dir = self._source_dir()
         for raw in options.rules_paths:
             path = Path(raw)
             if not path.is_absolute():
@@ -232,7 +251,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         """The binary on PATH, and every selected rules file present and verified."""
         if self.dependency_unavailable_reason:
             return False
-        if find_executable(self.command) is None:
+        if find_executable(_COMMAND) is None:
             self._record_unavailable(
                 "cfn-guard is not on PATH. Run `ash dependencies install --tool "
                 "cfn-guard`, or use the ASH container image, which ships it. "
@@ -253,7 +272,12 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             self.errors.append(reason)
         self._plugin_log(reason, level=logging.ERROR)
 
-    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
         """Abstract stub; cfn-guard overrides scan() to run once per template."""
         raise NotImplementedError(
             f"{self.__class__.__name__} overrides scan() directly."
@@ -268,7 +292,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                         driver=ToolComponent(
                             name="cfn-guard",
                             version=self.tool_version,
-                            informationUri="https://github.com/aws-cloudformation/cloudformation-guard",
+                            informationUri=AnyUrl(
+                                "https://github.com/aws-cloudformation/cloudformation-guard"
+                            ),
                         )
                     ),
                     results=[],
@@ -277,9 +303,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         )
 
     @staticmethod
-    def normalize_results(report: SarifReport, uri: str) -> list:
+    def normalize_results(report: SarifReport, uri: str) -> List[Result]:
         """The results of one template's run, located at ``uri`` and severity-mapped."""
-        results = []
+        results: List[Result] = []
         for run in report.runs or []:
             for result in run.results or []:
                 for location in result.locations or []:
@@ -302,8 +328,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: CfnGuardScannerConfig | None = None,
-    ) -> SarifReport | bool:
+        config: ScannerPluginConfigBase | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
         # Reset above every return; see cfn_lint_scanner.
         self.targets_attempted = 0
         self.targets_failed = 0
@@ -329,6 +357,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         try:
             rules = self.rule_files()
             rule_args = [f"--rules={path.as_posix()}" for path in rules]
+            if self.context is None:
+                raise ScannerError("cfn-guard has no plugin context")
             discovery = discover_templates(self.context, target_type)
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
@@ -340,16 +370,18 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     level=logging.ERROR,
                 )
 
-            source_dir = Path(self.context.source_dir)
+            source_dir = self._source_dir()
+            if self.results_dir is None:
+                raise ScannerError("cfn-guard has no results directory")
             results_dir = self.results_dir.joinpath(target_type)
             results_dir.mkdir(parents=True, exist_ok=True)
-            merged: list = []
+            merged: List[Result] = []
             driver = report.runs[0].tool.driver
             for template in discovery.templates:
                 self.targets_attempted += 1
                 shown = display_path(template, source_dir)
                 command = [
-                    self.command,
+                    _COMMAND,
                     "validate",
                     *rule_args,
                     f"--data={Path(template).absolute().as_posix()}",
@@ -365,7 +397,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     timeout=self._effective_scan_timeout(),
                 )
                 failure, template_report = self._parse_response(response)
-                if failure is not None:
+                if failure is not None or template_report is None:
+                    failure = failure or "cfn-guard output could not be read"
                     self.targets_failed += 1
                     self.errors.append(f"{shown}: {failure}")
                     self._plugin_log(
@@ -385,7 +418,11 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             report.runs[0].invocations = [
                 Invocation(
                     commandLine="cfn-guard",
-                    arguments=["validate", *rule_args, "--output-format=sarif"],
+                    arguments=[
+                        "validate",
+                        *self._recorded_rule_args(rules, source_dir),
+                        "--output-format=sarif",
+                    ],
                     startTimeUtc=self.start_time,
                     endTimeUtc=self.end_time,
                     executionSuccessful=self.targets_failed == 0,
@@ -409,7 +446,27 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             raise ScannerError(f"{self.__class__.__name__} failed: {exc}") from exc
 
     @staticmethod
-    def _parse_response(response) -> tuple:
+    def _recorded_rule_args(rules: List[Path], source_dir: Path) -> List[str]:
+        """``--rules`` as recorded in the report, without host-specific paths.
+
+        A bundled rule set is recorded relative to the rules root (its bundle
+        directory and file name), an operator's rules relative to the source
+        directory, so ash_aggregated_results.json carries no machine paths.
+        """
+        recorded = []
+        for path in rules:
+            parent = path.parent.name
+            if parent.startswith(f"{RULES_BUNDLE_NAME}-"):
+                shown = f"{parent}/{path.name}"
+            else:
+                shown = display_path(path, source_dir)
+            recorded.append(f"--rules={shown}")
+        return recorded
+
+    @staticmethod
+    def _parse_response(
+        response: object,
+    ) -> Tuple[Optional[str], Optional[SarifReport]]:
         """(failure reason or None, parsed report or None) for one invocation."""
         if not isinstance(response, dict):
             return "cfn-guard did not run", None

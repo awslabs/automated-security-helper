@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Literal, Tuple
+from typing import TYPE_CHECKING, List, Literal, Tuple
 
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
@@ -39,6 +39,9 @@ from automated_security_helper.utils.cfn_template_model import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+
+if TYPE_CHECKING:
+    from automated_security_helper.base.plugin_context import PluginContext
 
 _TEMPLATE_SUFFIXES = (".json", ".yaml", ".yml")
 
@@ -51,7 +54,9 @@ class TemplateDiscovery:
     unmodelable: List[Tuple[Path, str]] = field(default_factory=list)
 
 
-def candidate_files(context, target_type: Literal["source", "converted"]) -> List[Path]:
+def candidate_files(
+    context: "PluginContext", target_type: Literal["source", "converted"]
+) -> List[Path]:
     """The JSON/YAML files cfn-nag would consider for ``target_type``, sorted.
 
     The same two sources ``CfnNagScanner.scan`` reads: the converted work directory's
@@ -61,7 +66,7 @@ def candidate_files(context, target_type: Literal["source", "converted"]) -> Lis
     if target_type == "converted":
         found = [str(p) for p in Path(context.work_dir).glob("**/*.*")]
     else:
-        found = scan_set(source=context.source_dir, output=context.output_dir)
+        found = scan_set(source=str(context.source_dir), output=str(context.output_dir))
     selected = {
         Path(f) for f in found if any(str(f).endswith(s) for s in _TEMPLATE_SUFFIXES)
     }
@@ -69,7 +74,7 @@ def candidate_files(context, target_type: Literal["source", "converted"]) -> Lis
 
 
 def discover_templates(
-    context, target_type: Literal["source", "converted"]
+    context: "PluginContext", target_type: Literal["source", "converted"]
 ) -> TemplateDiscovery:
     """Classify every candidate file as a template, not-a-template, or unmodelable."""
     result = TemplateDiscovery()

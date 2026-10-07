@@ -62,9 +62,9 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal, Optional
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple
 
-from pydantic import Field, field_validator
+from pydantic import AnyUrl, Field, field_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import (
@@ -80,6 +80,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     Level,
     PropertyBag,
+    ReportingDescriptor,
+    Result,
     Run,
     SarifReport,
     Tool,
@@ -110,7 +112,7 @@ from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 #: level to the one that matches keeps reporters that read only the level (the GitHub
 #: code-scanning output) consistent with the rest. cfn-lint's own letter is never lost:
 #: it is the first character of the rule id.
-SEVERITY_BY_RULE_LETTER: Dict[str, tuple] = {
+SEVERITY_BY_RULE_LETTER: Dict[str, Tuple[str, str]] = {
     "E": ("MEDIUM", "warning"),
     "W": ("LOW", "note"),
     "I": ("INFO", "none"),
@@ -119,6 +121,9 @@ SEVERITY_BY_RULE_LETTER: Dict[str, tuple] = {
 #: Rule id cfn-lint uses for its own configuration errors, which includes a template
 #: path it could not open.
 _CONFIG_ERROR_RULE = "E0003"
+
+#: The executable this scanner runs.
+_COMMAND = "cfn-lint"
 
 # Under Windows' 32767-character CreateProcess limit with room for the interpreter
 # path, uv's own arguments and the options above.
@@ -130,7 +135,7 @@ _REGION_PATTERN = re.compile(r"^(ALL_REGIONS|[a-z]{2}(-[a-z]+)+-\d+)$")
 _CHECK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
 
 
-def severity_for_rule(rule_id: Optional[str]) -> tuple:
+def severity_for_rule(rule_id: Optional[str]) -> Tuple[str, str]:
     """The (ASH severity, SARIF level) for a cfn-lint rule id.
 
     An id that does not start with E, W or I is treated as E: an unknown class is
@@ -140,9 +145,9 @@ def severity_for_rule(rule_id: Optional[str]) -> tuple:
     return SEVERITY_BY_RULE_LETTER.get(letter, SEVERITY_BY_RULE_LETTER["E"])
 
 
-def _successful_exit(code) -> bool:
+def _successful_exit(code: object) -> bool:
     try:
-        value = int(code)
+        value = int(code)  # type: ignore[call-overload]
     except (TypeError, ValueError):
         return False
     return 0 <= value <= 14 and value % 2 == 0
@@ -247,19 +252,29 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     OPT_IN: ClassVar[bool] = True
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = CfnLintScannerConfig()
-        self.command = "cfn-lint"
+        self.command = _COMMAND
         self.tool_type = ScannerToolType.IAC
         self.use_uv_tool = True
         self._setup_uv_tool_install_commands()
         self.tool_version = self._get_uv_tool_version("cfn-lint")
         super().model_post_init(context)
 
+    def _options(self) -> CfnLintScannerConfigOptions:
+        """This scanner's options, typed. The config is set in model_post_init."""
+        options = getattr(self.config, "options", None)
+        if not isinstance(options, CfnLintScannerConfigOptions):
+            raise ScannerError(
+                f"cfn-lint was configured with {type(options).__name__}, not "
+                "CfnLintScannerConfigOptions"
+            )
+        return options
+
     def _get_tool_version_constraint(self) -> str | None:
         """The configured ``tool_version``; its default is the verified range."""
-        return self.config.options.tool_version
+        return self._options().tool_version
 
     def _get_tool_package_extras(self) -> List[str] | None:
         """cfn-lint's SARIF formatter is behind its ``sarif`` extra."""
@@ -270,7 +285,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if self.dependency_unavailable_reason:
             return False
         if not self._validate_uv_tool_availability():
-            if get_uv_tool_command(self.command) is not None:
+            if get_uv_tool_command(_COMMAND) is not None:
                 self.use_uv_tool = False
                 self.dependencies_satisfied = True
                 return True
@@ -282,7 +297,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             self._plugin_log(
                 "cfn-lint not found via UV tool, attempting explicit installation..."
             )
-            timeout = self.config.options.install_timeout if self.config else 300
+            timeout = self._options().install_timeout
             if self._install_uv_tool(timeout=timeout):
                 self.dependencies_satisfied = True
                 return True
@@ -291,7 +306,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 "consolidated resolver",
                 level=logging.WARNING,
             )
-        return get_uv_tool_command(self.command) is not None
+        return get_uv_tool_command(_COMMAND) is not None
 
     def _option_args(self, results_dir: Path) -> List[str]:
         """Arguments from config, each as one ``--flag=value`` token.
@@ -310,7 +325,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         writes itself, and a ``.cfnlintrc`` is used only when the ASH config names
         it in ``config_file``.
         """
-        options = self.config.options
+        options = self._options()
         args: List[str] = []
         if not options.config_file:
             empty = Path(results_dir).joinpath("ash-empty.cfnlintrc")
@@ -325,7 +340,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         else:
             candidate = Path(options.config_file)
             if not candidate.is_absolute():
-                candidate = Path(self.context.source_dir) / candidate
+                candidate = self._source_dir() / candidate
             if not candidate.is_file():
                 raise ScannerError(
                     f"scanners.cfn-lint.options.config_file names {candidate}, which "
@@ -400,7 +415,17 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 driver.rules = sorted(driver.rules, key=lambda r: r.id or "")
         return report
 
-    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+    def _source_dir(self) -> Path:
+        if self.context is None:
+            raise ScannerError("cfn-lint has no plugin context")
+        return Path(self.context.source_dir)
+
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
         """Abstract stub; cfn-lint overrides scan() to batch templates."""
         raise NotImplementedError(
             f"{self.__class__.__name__} overrides scan() directly."
@@ -415,7 +440,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                         driver=ToolComponent(
                             name="cfn-lint",
                             version=self.tool_version,
-                            informationUri="https://github.com/aws-cloudformation/cfn-lint",
+                            informationUri=AnyUrl(
+                                "https://github.com/aws-cloudformation/cfn-lint"
+                            ),
                         )
                     ),
                     results=[],
@@ -428,8 +455,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: CfnLintScannerConfig | None = None,
-    ) -> SarifReport | bool:
+        config: ScannerPluginConfigBase | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
         # Reset first, above every return, for the reason cfn_nag_scanner gives: the
         # executor reads these after scan() returns, and a return placed above the
         # reset would report the previous target's counts.
@@ -455,6 +484,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             return False
 
         try:
+            if self.context is None:
+                raise ScannerError("cfn-lint has no plugin context")
             discovery = discover_templates(self.context, target_type)
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
@@ -476,20 +507,22 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 self._post_scan(target=target, target_type=target_type)
                 return report
 
-            source_dir = Path(self.context.source_dir)
+            source_dir = self._source_dir()
+            if self.results_dir is None:
+                raise ScannerError("cfn-lint has no results directory")
             results_dir = self.results_dir.joinpath(target_type)
             results_dir.mkdir(parents=True, exist_ok=True)
             option_args = self._option_args(results_dir)
             displayed = [display_path(p, source_dir) for p in discovery.templates]
-            merged: List = []
-            rules: Dict[str, object] = {}
+            merged: List[Result] = []
+            rules: Dict[str, ReportingDescriptor] = {}
             driver = report.runs[0].tool.driver
 
             for index, batch in enumerate(self.batches(displayed)):
                 self.targets_attempted += len(batch)
                 batch_file = results_dir.joinpath(f"cfn-lint.{index}.sarif")
                 command = [
-                    self.command,
+                    _COMMAND,
                     "--format",
                     "sarif",
                     f"--output-file={batch_file.as_posix()}",
@@ -525,7 +558,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                             (r.message.root.text or "") for r in config_errors
                         )
                         failure = f"cfn-lint reported a configuration error: {texts}"
-                if failure is not None:
+                if failure is not None or batch_report is None:
+                    failure = failure or "cfn-lint output could not be read"
                     self.targets_failed += len(batch)
                     self.errors.append(f"{', '.join(batch)}: {failure}")
                     self._plugin_log(
@@ -541,7 +575,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                         if run_driver.version:
                             driver.version = run_driver.version
                         for rule in run_driver.rules or []:
-                            rules.setdefault(rule.id, rule)
+                            rules.setdefault(rule.id or "", rule)
 
             report.runs[0].results = merged
             driver.rules = list(rules.values()) or None
@@ -576,7 +610,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             raise ScannerError(f"{self.__class__.__name__} failed: {exc}") from exc
 
     @staticmethod
-    def _batch_failure(response: dict, batch_file: Path) -> Optional[str]:
+    def _batch_failure(response: object, batch_file: Path) -> Optional[str]:
         """Why one cfn-lint invocation produced nothing usable, or None if it did."""
         if not isinstance(response, dict):
             return "cfn-lint did not run"
