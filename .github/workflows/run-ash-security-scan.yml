@@ -360,7 +360,7 @@ jobs:
             echo "Reusing cached OpenGrep binary"
           fi
           ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
-          echo "$INSTALL_DIR" >> $GITHUB_PATH
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
 
       - name: Save the OpenGrep binary (default branch only)
         if: >-
@@ -591,8 +591,17 @@ jobs:
           # `ash-mode: local` and wins. An explicit argument outranking a
           # derived default is the intended precedence, but it does mean the two
           # inputs can disagree with no warning.
+          #
+          # Quoting. Every single value is quoted; the two optional flags expand to
+          # nothing when empty via ${VAR:+"$VAR"}, which an empty quoted "$VAR"
+          # would not (it passes an empty argument). `ash-args` is a caller-supplied
+          # list, so it is still split on whitespace -- callers pass several flags
+          # in one string -- but through `read -a`, which does not glob. Unquoted,
+          # an argument such as `--exclude *.md` was expanded against the checkout
+          # before ASH saw it, and a caller had no way to stop that.
+          read -r -a ASH_ARGS_LIST <<< "${ASH_ARGS}"
           uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
-            --source-dir . --output-dir ${ASH_OUTPUT_DIR} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE} ${CHANGED_FILES_ONLY:+${CHANGED_FILES_ONLY} --base-ref "${BASE_REF}"} ${ASH_ARGS}
+            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}"
 
       # Default branch only, after the scan, so what is saved is the database grype
       # actually scanned with. The save is refused unless that database is at most
