@@ -1,0 +1,13 @@
+{
+  "command": [
+    "yarn",
+    "npm",
+    "audit",
+    "--json",
+    "--recursive"
+  ],
+  "returncode": 1,
+  "stderr": "",
+  "stdout": "\u001b[31m\u001b[1mInternal Error\u001b[22m\u001b[39m: \u001b[38;2;215;135;95mnolock\u001b[39m\u001b[38;2;0;175;175m@\u001b[39m\u001b[38;2;0;175;175mworkspace:.\u001b[39m: This package doesn't seem to be present in your lockfile; run \"yarn install\" to update the lockfile\n    at QO.getCandidates (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:206:4607)\n    at Dy.getCandidates (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:143:1311)\n    at /root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:211:8429\n    at Fw (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:142:45058)\n    at ot (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:211:8409)\n    at async Promise.allSettled (index 0)\n    at async bf (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:142:44386)\n    at async /root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:211:9175\n    at async rs.startProgressPromise (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:142:130224)\n    at async t.resolveEverything (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:211:7147)\n",
+  "yarn_version": "4.18.1"
+}

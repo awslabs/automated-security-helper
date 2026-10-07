@@ -1,0 +1,12 @@
+{
+  "command": [
+    "yarn",
+    "audit",
+    "--json",
+    "--offline"
+  ],
+  "returncode": 1,
+  "stderr": "{\"type\":\"error\",\"data\":\"Can't make a request in offline mode (\\\"https://registry.yarnpkg.com/-/npm/v1/security/audits\\\")\"}\n",
+  "stdout": "{\"type\":\"info\",\"data\":\"Visit \\u001b[1mhttps://yarnpkg.com/en/docs/cli/audit\\u001b[22m for documentation about this command.\"}\n",
+  "yarn_version": "1.22.22"
+}
