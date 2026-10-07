@@ -13,12 +13,14 @@ from __future__ import annotations
 import platform
 import struct
 import subprocess  # nosec B404 — required for opengrep --version detection
+import sys
 from pathlib import Path
-from typing import Annotated, List, Literal, Optional, Tuple
+from typing import Annotated, Dict, List, Literal, Optional, Tuple
 
 from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
@@ -29,7 +31,9 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.download_utils import (
     create_url_download_command,
     get_opengrep_url,
+    pinned_tool_install_commands,
 )
+from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -82,10 +86,39 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         Field(description="Patterns to search for with OpenGrep."),
     ] = []
 
+    # The pinned version, read from the table rather than restated, so the default
+    # and the digests it is verified against cannot name different releases.
     version: Annotated[
         str,
         Field(description="Version of OpenGrep to use."),
-    ] = "v1.15.1"
+    ] = TOOL_VERSIONS["opengrep"]
+
+    # Required for any version other than the pinned one. ASH installs no binary it
+    # cannot verify, and it only carries digests for the version it pins, so a
+    # custom version has to bring its own. Keyed per platform because opengrep
+    # publishes a different executable for each, and a platform left out is refused
+    # rather than installed unverified.
+    sha256: Annotated[
+        Dict[
+            Literal[
+                "linux/amd64",
+                "linux/arm64",
+                "darwin/amd64",
+                "darwin/arm64",
+                "windows/amd64",
+            ],
+            Annotated[str, Field(pattern=r"^[0-9a-fA-F]{64}$")],
+        ],
+        Field(
+            description=(
+                "SHA256 of the OpenGrep release asset for a custom `version`, keyed "
+                "by platform/arch (e.g. linux/amd64). Required for any version other "
+                "than the one ASH pins; ignored for the pinned version, whose digests "
+                "ship with ASH. Get it from GitHub's per-asset digest for the "
+                "release, or by running sha256sum on the downloaded asset."
+            ),
+        ),
+    ] = {}
 
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
@@ -94,6 +127,45 @@ class OpengrepScannerConfig(ScannerPluginConfigBase):
     options: Annotated[
         OpengrepScannerConfigOptions, Field(description="Configure Opengrep scanner")
     ] = OpengrepScannerConfigOptions()
+
+
+def unverified_version_refusal(
+    version: str, target_platform: str, arch: str, asset: str
+) -> str:
+    """The message a custom opengrep version without a digest is refused with."""
+    pinned = TOOL_VERSIONS["opengrep"]
+    return (
+        f"Refusing to install opengrep {version} on {target_platform}/{arch}: ASH pins "
+        f"opengrep {pinned}, and the configuration supplies no SHA256 for "
+        f"{target_platform}/{arch}, so the download could not be verified. Either drop "
+        f"scanners.opengrep.options.version to use the pinned {pinned}, or add the "
+        f"digest of the release asset {asset} under "
+        f'scanners.opengrep.options.sha256 as "{target_platform}/{arch}": '
+        f'"<sha256>". Get it from the digest GitHub lists for that asset '
+        f"(gh api repos/opengrep/opengrep/releases/tags/{version} --jq "
+        f"'.assets[] | select(.name == \"{asset}\") | .digest'), or by running "
+        f"sha256sum {asset} on the downloaded asset."
+    )
+
+
+def _refuse_unverified_install_command(
+    version: str, target_platform: str, arch: str, asset: str
+) -> CustomCommand:
+    """An install command that prints the refusal and exits 1, installing nothing.
+
+    ``sys.exit`` with a string writes it to stderr and exits 1, so the installer
+    counts the command as failed and shows why. The message travels as an argument
+    rather than inside the ``-c`` source, so nothing in it is interpreted as code.
+    """
+    return CustomCommand(
+        args=[
+            sys.executable,
+            "-c",
+            "import sys; sys.exit(sys.argv[1])",
+            unverified_version_refusal(version, target_platform, arch, asset),
+        ],
+        shell=False,
+    )
 
 
 @ash_scanner_plugin
@@ -117,53 +189,60 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "OpengrepScanner":
-        """Set up custom installation commands for opengrep."""
+        """Set up custom installation commands for opengrep.
+
+        No path installs an unverified binary.
+
+        * The pinned version is installed from ``utils/tool_downloads.py``, verified
+          against its SHA256 before it is put on disk, exactly as grype, syft and
+          trivy are.
+        * A custom ``version`` is installed only on a platform for which the
+          configuration supplies ``sha256``, and goes through the same verified
+          download, failing closed on a mismatch.
+        * A custom ``version`` with no digest for a platform gets a command that
+          refuses, naming the key to add and how to obtain the value.
+
+        Before this, every install fetched the release asset by URL with no digest
+        at all, so the binary a SAST scan then trusted was whatever that URL served.
+        The refusal is an install command rather than a validation error on purpose:
+        a config naming a custom version must still load, so a host that already has
+        opengrep can scan with it, and only the install is refused.
+        """
         version = self.config.options.version
+        if version == TOOL_VERSIONS["opengrep"]:
+            self.custom_install_commands.update(
+                pinned_tool_install_commands("opengrep")
+            )
+            return self
+
+        digests = self.config.options.sha256
         # TODO: detect manylinux vs musllinux
-        linux_type = "manylinux"
-
-        if "linux" not in self.custom_install_commands:
-            self.custom_install_commands["linux"] = {}
-        self.custom_install_commands["linux"]["amd64"] = [
-            create_url_download_command(
-                url=get_opengrep_url(
-                    "linux", "amd64", version=version, linux_type=linux_type
-                ),
-                rename_to="opengrep",
+        for target_platform, arch in (
+            ("linux", "amd64"),
+            ("linux", "arm64"),
+            ("darwin", "amd64"),
+            ("darwin", "arm64"),
+            ("windows", "amd64"),
+        ):
+            url = get_opengrep_url(
+                target_platform, arch, version=version, linux_type="manylinux"
             )
-        ]
-        self.custom_install_commands["linux"]["arm64"] = [
-            create_url_download_command(
-                url=get_opengrep_url(
-                    "linux", "arm64", version=version, linux_type=linux_type
-                ),
-                rename_to="opengrep",
-            )
-        ]
-
-        if "darwin" not in self.custom_install_commands:
-            self.custom_install_commands["darwin"] = {}
-        self.custom_install_commands["darwin"]["amd64"] = [
-            create_url_download_command(
-                url=get_opengrep_url("darwin", "amd64", version=version),
-                rename_to="opengrep",
-            )
-        ]
-        self.custom_install_commands["darwin"]["arm64"] = [
-            create_url_download_command(
-                url=get_opengrep_url("darwin", "arm64", version=version),
-                rename_to="opengrep",
-            )
-        ]
-
-        if "windows" not in self.custom_install_commands:
-            self.custom_install_commands["windows"] = {}
-        self.custom_install_commands["windows"]["amd64"] = [
-            create_url_download_command(
-                url=get_opengrep_url("windows", "amd64", version=version),
-                rename_to="opengrep.exe",
-            )
-        ]
+            digest = digests.get(f"{target_platform}/{arch}")
+            if digest is None:
+                command = _refuse_unverified_install_command(
+                    version, target_platform, arch, url.rsplit("/", 1)[-1]
+                )
+            else:
+                command = create_url_download_command(
+                    url=url,
+                    rename_to=(
+                        "opengrep.exe" if target_platform == "windows" else "opengrep"
+                    ),
+                    expected_sha256=digest,
+                )
+            self.custom_install_commands.setdefault(target_platform, {})[arch] = [
+                command
+            ]
         return self
 
     # ---------------------------------------------------------------

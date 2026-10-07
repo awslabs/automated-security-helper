@@ -241,10 +241,12 @@ _TOOL_ASSET_CACHE_REASON = (
     "to main only."
 )
 _OPENGREP_CACHE_REASON = (
-    "The OpenGrep release binary, downloaded from the upstream GitHub release. A "
-    "third-party binary that is already publicly downloadable, not one this project "
-    "produced. Keyed on the ISO week so a cache cannot pin the scanner to one build, "
-    "and saved from a push to the default branch only."
+    "The OpenGrep release binary, downloaded from the upstream GitHub release at the "
+    "version pinned in utils/tool_downloads.py. A third-party binary that is already "
+    "publicly downloadable, not one this project produced. Digest verified against "
+    "that pin before it is cached and again after it is restored, before it reaches "
+    "PATH; a restored copy that does not match is deleted and re-downloaded. Keyed on "
+    "the ISO week, and saved from a push to the default branch only."
 )
 _BASE_IMAGE_CACHE_REASON = (
     "Third-party public image, byte-identical to docker.io at the pinned digest, "

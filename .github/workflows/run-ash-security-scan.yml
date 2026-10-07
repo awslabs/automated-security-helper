@@ -389,22 +389,82 @@ jobs:
             --bin-path "${ASH_TOOL_BIN}"
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
+      # OpenGrep goes through the same verified installer as Grype and Syft above.
+      #
+      # This was a bare `gh release download --repo opengrep/opengrep --pattern
+      # 'opengrep_manylinux_x86'`: no tag, so whatever release was newest that day, and
+      # no digest, so whatever bytes that URL served. A cache hit was trusted on
+      # `[ -x ]` alone, which meant a binary restored from the Actions cache went onto
+      # PATH without anyone having hashed it.
+      #
+      # Now the version and SHA256 come from tool_downloads.py at the pinned
+      # `ash-version` ref, and nothing reaches PATH until it hashes to that pin:
+      #
+      #   1. A restored binary is used only if it is a regular file -- not a symlink,
+      #      which the previous layout of this cache contained -- and hashes to the pin.
+      #      Anything else in the directory is deleted, not left beside the binary.
+      #   2. Otherwise `ash dependencies install --tool opengrep` downloads it, which
+      #      refuses to install on a digest mismatch.
+      #   3. Whatever is there afterwards is hashed against the pin once more before
+      #      the PATH line. That covers an ASH revision whose opengrep plugin still
+      #      downloads unverified: it installs, the hash disagrees, the binary is
+      #      removed and the step fails.
+      #
+      # Fails closed when the ASH revision has no opengrep pin at all -- one that
+      # predates it, or a fork without it. Falling back to an unverified download
+      # there would make the check optional in exactly the case it exists for.
+      #
+      # OpenGrep publishes bare executables rather than archives, so the pinned digest
+      # covers the file that runs, not an archive it came out of. That is what makes
+      # check 1 sound.
       - name: Install OpenGrep
         if: inputs.install-opengrep
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           INSTALL_DIR="$HOME/.opengrep/cli/latest"
-          mkdir -p "$INSTALL_DIR"
-          # Only download on a cache miss. The symlink and PATH export run either
-          # way, so a cache hit still leaves the job fully set up.
-          if [ ! -x "$INSTALL_DIR/opengrep_manylinux_x86" ]; then
-            gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
-            chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
-          else
-            echo "Reusing cached OpenGrep binary"
+          BIN="$INSTALL_DIR/opengrep"
+          case "$(uname -m)" in
+            x86_64) ARCH=amd64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+            *) echo "::error::no pinned OpenGrep for machine $(uname -m)"; exit 1 ;;
+          esac
+          # `python -I`: without it `-c` puts the working directory -- the CALLER's
+          # checkout -- first on sys.path, so an `automated_security_helper/` directory
+          # in the repository being scanned would supply the pin. Measured: run from
+          # an ASH checkout, the pin came from the checkout rather than from
+          # ASH_UVX_SOURCE.
+          if ! PINNED="$(uv run --no-project --with "${ASH_UVX_SOURCE}" -- python -I -c \
+              'import sys; from automated_security_helper.utils.tool_downloads import get_tool_asset; print(get_tool_asset("opengrep", "linux", sys.argv[1]).sha256)' \
+              "${ARCH}")" || [ -z "${PINNED}" ]; then
+            echo "::error::this ASH revision (${ASH_UVX_SOURCE}) pins no SHA256 for OpenGrep, so there is nothing to verify the binary against, and it will not be installed unverified. To fix: set the ash-version input to a revision that pins OpenGrep (main, or the first release after v3.7.1), or set install-opengrep: false."
+            exit 1
           fi
-          ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
+          matches_pin() {
+            [ -f "$BIN" ] && [ ! -L "$BIN" ] \
+              && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "${PINNED}" ]
+          }
+          if matches_pin; then
+            echo "Reusing cached OpenGrep binary; SHA256 ${PINNED} matches the pin"
+          else
+            if [ -e "$INSTALL_DIR" ]; then
+              echo "Discarding the restored OpenGrep cache: it does not hold a binary matching the pinned SHA256 ${PINNED}"
+            fi
+            rm -rf "$INSTALL_DIR"
+            mkdir -p "$INSTALL_DIR"
+            # From RUNNER_TEMP and without ASH_CONFIG, so the scanned repository's own
+            # .ash.yaml is not loaded. This step installs the version ASH pins and
+            # checks it against that pin below; a config naming another opengrep
+            # version would install that one instead and fail the check.
+            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+              uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+                --tool opengrep \
+                --bin-path "$INSTALL_DIR")
+          fi
+          if ! matches_pin; then
+            rm -rf "$INSTALL_DIR"
+            echo "::error::the installed OpenGrep binary does not match the pinned SHA256 ${PINNED}; removed it rather than put it on PATH"
+            exit 1
+          fi
           echo "$INSTALL_DIR" >> "$GITHUB_PATH"
 
       - name: Save the OpenGrep binary (default branch only)

@@ -807,6 +807,8 @@
             'severity': list([
             ]),
             'severity_threshold': None,
+            'sha256': dict({
+            }),
             'version': 'v1.15.1',
           }),
         }),
@@ -1181,6 +1183,8 @@
             'severity': list([
             ]),
             'severity_threshold': None,
+            'sha256': dict({
+            }),
             'version': 'v1.15.1',
           }),
         }),
@@ -1555,6 +1559,8 @@
             'severity': list([
             ]),
             'severity_threshold': None,
+            'sha256': dict({
+            }),
             'version': 'v1.15.1',
           }),
         }),

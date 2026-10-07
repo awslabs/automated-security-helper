@@ -136,13 +136,19 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 151
-      line_end: 171
+      line_start: 261
+      line_end: 316
       reason: >-
         False positive — every string in this range is a published SHA256 release
-        checksum, transcribed from the vendor's own *_checksums.txt. A 64-character
-        hex string is what an entropy detector is built to find, so all 16 are
-        reported at 95% confidence, but a release checksum is public by construction
+        checksum or the SHA256 of the executable inside one of those verified
+        archives. The archive digests in _DIGESTS were transcribed from the vendor's
+        own *_checksums.txt for grype, syft and trivy, and for opengrep and uv taken
+        from the digest GitHub reports for each release asset and confirmed by
+        hashing the asset. _EXECUTABLE_DIGESTS, the second table in the range, holds
+        the SHA256 of the executable extracted from each verified archive. A
+        64-character hex string is what an entropy detector is built to find, so
+        the 23 archive digests were reported at 95% confidence and the 18
+        executable digests have the same shape, but a release checksum is public by construction
         and is the opposite of a credential: it exists so anyone can compare against
         it. detect-secrets is handled by an inline `# pragma: allowlist secret` on
         each line; ferret-scan does not honour that marker, hence this entry.
@@ -150,6 +156,18 @@ global_settings:
         purpose. A range that drifts after a version bump fails loudly -- the
         findings come back and the scan goes red -- whereas a whole-file suppression
         would silently swallow a real secret added here later.
+    - path: automated_security_helper/utils/tool_downloads.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 638
+      line_end: 654
+      reason: >-
+        False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
+        the commit SHA each bundled tool's release tag points to, and the SHA256 of
+        each license or notice file fetched from that commit. Both are public by
+        construction -- anyone can read them off the upstream repository -- and hex
+        is what an entropy detector is built to flag. Pinned to that block's lines,
+        which hold nothing but those values; tests/unit/utils/test_third_party_licenses.py
+        fails when the block moves and this range does not.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
       line_start: 501

@@ -205,17 +205,30 @@ jobs:
           path: ~/.opengrep/cli/latest
           key: opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}
           lookup-only: true
-      - name: Download the OpenGrep release binary
+      # The entry written here is what run-ash-security-scan.yml restores, so it has to
+      # be the same file that workflow would install: `opengrep` at the version and
+      # SHA256 pinned in automated_security_helper/utils/tool_downloads.py. The consumer
+      # re-hashes whatever it restores against that pin and discards a mismatch, so this
+      # is not the only check -- but a seeder that cached an unverified download (which
+      # is what `gh release download --pattern` with no tag was, of whatever release was
+      # newest that day) would turn every pull request's cache hit into a re-download.
+      #
+      # install-pinned-tool.py rather than `ash dependencies install`: it needs only the
+      # runner's python3 and the checkout, so this job still installs no ASH and no uv.
+      # It reads the same table, verifies before anything lands, and exits 3 on a
+      # mismatch.
+      - name: Check out the pinned tool table
         if: steps.lookup.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the pinned OpenGrep release binary
+        if: steps.lookup.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           INSTALL_DIR="$HOME/.opengrep/cli/latest"
-          mkdir -p "$INSTALL_DIR"
-          gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
-          chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
-          "$INSTALL_DIR/opengrep_manylinux_x86" --version
+          python3 automated_security_helper/assets/install-pinned-tool.py opengrep \
+            -b "$INSTALL_DIR" \
+            --pins-dir automated_security_helper
+          "$INSTALL_DIR/opengrep" --version
       - name: Save the OpenGrep binary cache (main only)
         if: >-
           steps.lookup.outputs.cache-hit != 'true'
