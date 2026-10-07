@@ -554,3 +554,209 @@ def test_the_shipped_default_check_catches_a_scanner_that_defaults_on():
         config: _OnConfig | None = None
 
     assert opt_in_scanner_enabled(DefaultsOn, None, None) is True
+
+
+# --------------------------------------------------------------------------- #
+# Construction, exclusion, and the install label
+# --------------------------------------------------------------------------- #
+
+
+class RaisingOptInScanner(DummyOptInScanner):
+    """An opt-in scanner whose constructor always raises."""
+
+    def model_post_init(self, context):
+        raise RuntimeError("constructor exploded")
+
+
+class RecordingOptInScanner(DummyOptInScanner):
+    """Records what config.enabled its constructor saw."""
+
+    seen_enabled: ClassVar[List[bool]] = []
+
+    def model_post_init(self, context):
+        super().model_post_init(context)
+        type(self).seen_enabled.append(self.config.enabled)
+
+
+def test_an_unenabled_opt_in_scanner_is_never_constructed(tmp_path):
+    """Dropped BEFORE construction: a raising constructor leaves no ERROR row.
+
+    If the drop moved below construction, every default scan would carry an ERROR
+    row for an opt-in scanner nobody asked for, and exit 1.
+    """
+    context = _context(tmp_path)
+    results = _scan(context, [DummyControlScanner, RaisingOptInScanner])
+
+    assert OPT_IN_NAME not in results.scanner_results
+    assert not any("optin" in name for name in results.scanner_results)
+    opts = ScanOptions(source_dir=context.source_dir, output_dir=context.output_dir)
+    assert _compute_exit_code(results, opts, config_fail_on_findings=False) == 0
+
+
+def test_an_enabled_opt_in_scanner_that_cannot_be_built_is_an_error_under_its_name(
+    tmp_path,
+):
+    """Enabled, it is an ordinary scanner, including when its constructor raises.
+
+    The row is keyed by the configured name, the name the roster, the shard
+    partition and --exclude-scanners use, not by the class name.
+    """
+    context = _context(tmp_path)
+    setattr(
+        context.config.scanners, OPT_IN_NAME, {"name": OPT_IN_NAME, "enabled": True}
+    )
+    results = _scan(context, [DummyControlScanner, RaisingOptInScanner])
+
+    assert results.scanner_results[OPT_IN_NAME].status.value == "ERROR"
+    assert "raisingoptinscanner" not in results.scanner_results
+    opts = ScanOptions(source_dir=context.source_dir, output_dir=context.output_dir)
+    assert _compute_exit_code(results, opts, config_fail_on_findings=False) == 1
+
+
+def test_with_no_config_entry_a_failed_build_still_uses_the_declared_name(tmp_path):
+    """A third-party scanner has no config entry; its config class names it."""
+    context = _context(tmp_path)
+    results = _scan(
+        context,
+        [DummyControlScanner, RaisingOptInScanner],
+        enabled_scanners=[OPT_IN_NAME, CONTROL_NAME],
+    )
+    assert results.scanner_results[OPT_IN_NAME].status.value == "ERROR"
+    assert "raisingoptinscanner" not in results.scanner_results
+
+
+def test_the_constructor_already_sees_enabled_when_the_selection_names_it(tmp_path):
+    """A scanner that reads config.enabled while it is built must see True.
+
+    With a config entry, which is the dict a real builtin's typed config field
+    always resolves to, and which here says disabled.
+    """
+    RecordingOptInScanner.seen_enabled = []
+    context = _context(tmp_path)
+    setattr(
+        context.config.scanners, OPT_IN_NAME, {"name": OPT_IN_NAME, "enabled": False}
+    )
+    _scan(
+        context,
+        [DummyControlScanner, RecordingOptInScanner],
+        enabled_scanners=[OPT_IN_NAME, CONTROL_NAME],
+    )
+    assert RecordingOptInScanner.seen_enabled == [True]
+
+
+def test_exclusion_of_an_enabled_opt_in_scanner_is_an_ordinary_skip(tmp_path):
+    context = _context(tmp_path)
+    setattr(
+        context.config.scanners, OPT_IN_NAME, {"name": OPT_IN_NAME, "enabled": True}
+    )
+    aggregated = AshAggregatedResults()
+    phase = ScanPhase(
+        plugin_context=context,
+        plugins=[DummyControlScanner, DummyOptInScanner],
+        progress_display=MagicMock(),
+        asharp_model=aggregated,
+    )
+    results = phase._execute_phase(
+        aggregated_results=aggregated,
+        excluded_scanners=[OPT_IN_NAME],
+        parallel=False,
+    )
+    row = results.scanner_results[OPT_IN_NAME]
+    assert row.status.value == "SKIPPED"
+    assert row.excluded is True
+    assert DummyOptInScanner.scan_calls == []
+
+
+def test_excluding_an_opt_in_scanner_nobody_enabled_still_leaves_no_row(tmp_path):
+    context = _context(tmp_path)
+    aggregated = AshAggregatedResults()
+    phase = ScanPhase(
+        plugin_context=context,
+        plugins=[DummyControlScanner, DummyOptInScanner],
+        progress_display=MagicMock(),
+        asharp_model=aggregated,
+    )
+    results = phase._execute_phase(
+        aggregated_results=aggregated,
+        excluded_scanners=[OPT_IN_NAME],
+        parallel=False,
+    )
+    assert OPT_IN_NAME not in results.scanner_results
+
+
+def test_a_typo_in_the_selection_lists_the_opt_in_scanners(tmp_path, caplog):
+    """'Registered scanners: ...' must not read as if an opt-in scanner did not exist."""
+    from automated_security_helper.core.exceptions import ScannerSelectionError
+
+    with pytest.raises(ScannerSelectionError) as exc:
+        _scan(
+            _context(tmp_path),
+            [DummyControlScanner, DummyOptInScanner],
+            enabled_scanners=["dummy-optn"],
+        )
+    assert f"opt-in, not enabled: {OPT_IN_NAME}" in str(exc.value)
+
+
+def test_a_class_without_a_config_class_is_not_enabled():
+    """No config class to read a default from means off, for an opt-in scanner."""
+
+    class Bare:
+        OPT_IN = True
+
+    assert opt_in_scanner_enabled(Bare, None, None) is False
+    assert opt_in_scanner_enabled(Bare, {}, None) is False
+    assert opt_in_scanner_enabled(Bare, None, ["bare"]) is True
+
+
+@pytest.mark.parametrize("opt_in", [True, False])
+def test_dependencies_install_labels_opt_in_scanners(tmp_path, monkeypatch, opt_in):
+    """ash dependencies install still provisions an opt-in scanner, and says so."""
+    from types import SimpleNamespace
+
+    from typer.testing import CliRunner
+
+    from automated_security_helper.cli.dependencies import dependencies_app
+
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+    fake = MagicMock()
+    fake.config = SimpleNamespace(name="fake-scanner")
+    fake.command = "fake-scanner"
+    fake.get_installation_commands.return_value = [["echo", "install"]]
+    if opt_in:
+        fake.OPT_IN = True
+    monkeypatch.setattr(
+        "automated_security_helper.cli.dependencies.load_plugins",
+        lambda *_a, **_k: {},
+    )
+    monkeypatch.setattr(
+        "automated_security_helper.cli.dependencies.ash_plugin_manager",
+        SimpleNamespace(
+            plugin_modules=lambda kind: (
+                [lambda **_kw: fake] if kind == "scanner" else []
+            )
+        ),
+    )
+    ran = []
+    monkeypatch.setattr(
+        "automated_security_helper.cli.dependencies.run_command",
+        lambda cmd, shell=False: ran.append(cmd) or 0,
+    )
+    result = CliRunner().invoke(
+        dependencies_app,
+        ["--plugin-type", "scanner", "--bin-path", str(tmp_path / "bin")],
+    )
+    assert ran == [["echo", "install"]]
+    assert ("opt-in: runs only when" in result.output) is opt_in, result.output
+
+
+def test_the_scanner_class_count_leaves_out_omitted_opt_in_scanners(tmp_path, caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        _scan(_context(tmp_path), [DummyControlScanner, DummyOptInScanner])
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if "Total scanner classes found" in r.getMessage()
+    ]
+    assert lines and lines[-1].strip().endswith(": 1"), lines

@@ -104,13 +104,27 @@ def _probe_config(plugin_type) -> AshConfig:
             "project_name": "probe",
             segment_key: {
                 _documented_key(plugin_type, cls): {
-                    "enabled": False,
+                    # An opt-in scanner left disabled is dropped before it is
+                    # built, so it is probed enabled; see _expected_enabled.
+                    "enabled": _expected_enabled(cls),
                     "options": {"probe_marker": MARKER},
                 }
                 for cls in _shipped(plugin_type)
             },
         }
     )
+
+
+def _expected_enabled(plugin_class) -> bool:
+    """The ``enabled`` value the probe config writes for *plugin_class*.
+
+    False for every plugin, so a plugin that ran with its own default (True)
+    shows the config never reached it -- except an opt-in scanner, whose default
+    is already False and which the scan phase does not build at all while
+    disabled. Probing one enabled is the only way to see it built, and True is
+    then the value that proves the config reached it.
+    """
+    return is_opt_in(plugin_class)
 
 
 def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
@@ -125,7 +139,7 @@ def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
 
 
 def _assert_reached(instance):
-    assert instance.config.enabled is False, (
+    assert instance.config.enabled is _expected_enabled(type(instance)), (
         f"{type(instance).__name__} runs with enabled={instance.config.enabled}; "
         "its configuration never reached it"
     )
@@ -143,10 +157,11 @@ def test_every_shipped_plugin_type_is_represented():
 # --------------------------------------------------------------------------- #
 
 
-def _scan_phase_instances(tmp_path, enabled_scanners=None):
+@pytest.fixture(scope="module")
+def scan_phase_instances(tmp_path_factory):
     from automated_security_helper.core.phases.scan_phase import ScanPhase
 
-    context = _context(tmp_path, _probe_config("scanner"))
+    context = _context(tmp_path_factory.mktemp("scan"), _probe_config("scanner"))
     phase = ScanPhase(
         plugin_context=context,
         plugins=_shipped("scanner"),
@@ -170,49 +185,15 @@ def _scan_phase_instances(tmp_path, enabled_scanners=None):
         executor.run_sequential.return_value = results
         executor_cls.return_value = executor
         phase._execute_phase(
-            aggregated_results=results,
-            enabled_scanners=enabled_scanners,
-            python_based_plugins_only=False,
+            aggregated_results=results, python_based_plugins_only=False
         )
     return captured
 
 
-@pytest.fixture(scope="module")
-def scan_phase_instances(tmp_path_factory):
-    return _scan_phase_instances(tmp_path_factory.mktemp("scan"))
-
-
-@pytest.fixture(scope="module")
-def opt_in_scan_phase_instances(tmp_path_factory):
-    """The phase run with every opt-in scanner named in the selection.
-
-    An opt-in scanner whose config says ``enabled: false`` -- which the probe
-    config writes for every plugin -- is not built at all unless it is named in
-    the selection (``core/scanner_opt_in.py``), so its config can only be observed
-    reaching it on a run that names it.
-    """
-    names = [
-        _documented_key("scanner", cls) for cls in _shipped("scanner") if is_opt_in(cls)
-    ]
-    return _scan_phase_instances(tmp_path_factory.mktemp("scan-opt-in"), names)
-
-
 @pytest.mark.parametrize("plugin_class", _cases("scanner"))
 def test_scan_phase_builds_each_scanner_with_its_config(
-    scan_phase_instances, opt_in_scan_phase_instances, plugin_class
+    scan_phase_instances, plugin_class
 ):
-    if is_opt_in(plugin_class):
-        assert plugin_class not in scan_phase_instances, (
-            "an opt-in scanner nobody enabled was built"
-        )
-        assert plugin_class in opt_in_scan_phase_instances, (
-            "the scan phase never built it"
-        )
-        instance = opt_in_scan_phase_instances[plugin_class]
-        # Naming an opt-in scanner in the selection runs it even though its config
-        # says enabled: false, so only the option marker can show the config arrived.
-        assert getattr(instance.config.options, "probe_marker", None) == MARKER
-        return
     assert plugin_class in scan_phase_instances, "the scan phase never built it"
     _assert_reached(scan_phase_instances[plugin_class])
 
