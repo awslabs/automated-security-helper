@@ -1393,9 +1393,20 @@ jobs:
   #
   # WHY THE GATE ONLY TAKES A RUNNER WHEN SOMETHING DID NOT SUCCEED
   #
-  # The rest of the condition is `contains(needs.*.result, ...)` over failure, cancelled and
-  # skipped, so the job runs -- and fails, in the census step below -- whenever any dependency
-  # reported anything but success, which is every case the census's own result check rejects.
+  # The rest of the condition is `cancelled()` or `contains(needs.*.result, ...)` over failure
+  # and cancelled, so the job runs -- and fails, in the census step below -- whenever the run
+  # was cancelled or any dependency failed or was cancelled. A dependency can be skipped only
+  # when the run is cancelled (scan-validation's `if: ${{ !cancelled() }}` is the one job-level
+  # condition among them, and tests/unit/test_required_checks_census.py requires every gated
+  # job with `needs` to carry `!cancelled()` or `always()`), so `cancelled()` covers skipped too.
+  #
+  # The condition used to name `skipped` directly, and that term had to go. With
+  # warm-image-layers skipped upstream of scan-validation, `contains(needs.*.result, 'skipped')`
+  # evaluated true while `toJSON(needs)` showed every direct dependency as success -- measured
+  # on throwaway probe runs 37631261974 and 37631443473 (a skipped grandparent; a gate with only
+  # the `skipped` term ran, gates without it skipped), and on run 37542075722, where this job
+  # waited 31 minutes for a runner to report nine successes.
+  #
   # It is skipped in exactly one case: every dependency succeeded. That is the one case where
   # running it could only print a pass, and GitHub reports a skipped job as Success and does
   # not let it block a merge even when it is a required check:
@@ -1445,7 +1456,7 @@ jobs:
   # two apart.
   required-checks:
     name: required-checks
-    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')) }}
+    if: ${{ always() && (cancelled() || contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     needs:
       - lint
       - snapshot-trailers
