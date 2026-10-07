@@ -81,7 +81,9 @@ def test_the_hazard_is_real_on_this_python(evicted_zip_on_sys_path):
     try:
         list(pkgutil.iter_modules())
     except KeyError as e:
-        assert str(evicted_zip_on_sys_path) in str(e)
+        # Compare the key itself: str(KeyError) is the key's repr, which doubles
+        # every backslash in a Windows path.
+        assert e.args == (str(evicted_zip_on_sys_path),)
     else:
         pytest.skip("this Python's pkgutil no longer indexes the zip cache directly")
 
