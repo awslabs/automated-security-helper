@@ -250,9 +250,15 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
         + external_plugins.get("reporters", []),
     }
 
+    # Opt-in scanners are left out of the count: this line is in every scan's
+    # console output and ash.log, and an opt-in scanner nobody enabled must not
+    # change what a default scan prints (see ScannerPluginBase.OPT_IN).
+    from automated_security_helper.core.scanner_opt_in import is_opt_in
+
+    default_scanners = [s for s in all_plugins["scanners"] if not is_opt_in(s)]
     ASH_LOGGER.info(
         f"Loaded {len(all_plugins['converters'])} converters, "
-        f"{len(all_plugins['scanners'])} scanners, and "
+        f"{len(default_scanners)} scanners, and "
         f"{len(all_plugins['reporters'])} reporters"
     )
 

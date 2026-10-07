@@ -1708,19 +1708,6 @@
                 "scan_timeout": 1800,
                 "severity_threshold": null
               }
-            },
-            "zizmor": {
-              "enabled": false,
-              "name": "zizmor",
-              "options": {
-                "config_file": null,
-                "install_timeout": 300,
-                "online_audits": false,
-                "persona": "regular",
-                "scan_timeout": 1800,
-                "severity_threshold": null,
-                "tool_version": ">=1.29.0,<2.0.0"
-              }
             }
           },
           "description": "Scanner configurations by name."
