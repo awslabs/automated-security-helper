@@ -6,7 +6,7 @@ $ ash dependencies install --bin-path bin
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: linux, architecture: arm64
-[<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
 Installing dependencies for converter plugin: ArchiveConverter
 Installing dependencies for converter plugin: jupyter
 Running command: uv tool install nbconvert>=7.16.0,<8.0.0

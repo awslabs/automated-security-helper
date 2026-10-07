@@ -6,7 +6,7 @@ $ ash dependencies install --bin-path bin -t scanner --tool grype --tool semgrep
 ╰─────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: unknown, architecture: unknown
-[<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
 Installing dependencies for scanner plugin: grype
 Installing dependencies for scanner plugin: semgrep
 Running command: uv tool install semgrep>=1.125.0,<2.0.0

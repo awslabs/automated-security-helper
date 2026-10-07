@@ -659,17 +659,6 @@
         }),
       }),
       'scanners': dict({
-        'actionlint': dict({
-          'enabled': False,
-          'name': 'actionlint',
-          'options': dict({
-            'config_file': None,
-            'pyflakes': None,
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-            'shellcheck': None,
-          }),
-        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1042,17 +1031,6 @@
         }),
       }),
       'scanners': dict({
-        'actionlint': dict({
-          'enabled': False,
-          'name': 'actionlint',
-          'options': dict({
-            'config_file': None,
-            'pyflakes': None,
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-            'shellcheck': None,
-          }),
-        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1425,17 +1403,6 @@
         }),
       }),
       'scanners': dict({
-        'actionlint': dict({
-          'enabled': False,
-          'name': 'actionlint',
-          'options': dict({
-            'config_file': None,
-            'pyflakes': None,
-            'scan_timeout': 1800,
-            'severity_threshold': None,
-            'shellcheck': None,
-          }),
-        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',

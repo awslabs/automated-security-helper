@@ -11,7 +11,7 @@
       ╰────────────────────────────────────────────╯
       Getting platform and architecture
       Installing dependencies for platform: darwin, architecture: arm64
-      [<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+      [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
       ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
       │ Unknown tool(s): gryp                                                                            │
       │ Available: ArchiveConverter, actionlint, bandit, cdk-nag, cfn-nag, checkov, csv, cyclonedx,      │
@@ -35,7 +35,7 @@
       ╰────────────────────────────────────────────╯
       Getting platform and architecture
       Installing dependencies for platform: linux, architecture: amd64
-      [<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+      [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
       ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
       │ Unknown tool(s): gryp                                                                            │
       │ Available: ArchiveConverter, actionlint, bandit, cdk-nag, cfn-nag, checkov, csv, cyclonedx,      │
@@ -59,7 +59,7 @@
       ╰────────────────────────────────────────────╯
       Getting platform and architecture
       Installing dependencies for platform: windows, architecture: amd64
-      [<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+      [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
       ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
       │ Unknown tool(s): gryp                                                                            │
       │ Available: ArchiveConverter, actionlint, bandit, cdk-nag, cfn-nag, checkov, csv, cyclonedx,      │

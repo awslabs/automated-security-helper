@@ -6,7 +6,7 @@ $ ash dependencies install --bin-path bin --tool grype --tool gryp
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: windows, architecture: amd64
-[<LOG_TIME>] INFO     Loaded 2 converters, 11 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
              WARNING  cfn-nag cannot be installed here: no Ruby DevKit (RI_DEVKIT is unset), and
                       cfn-nag's `psych` dependency publishes no precompiled gem for this Ruby ABI,
                       so it has to build from source. It will be reported as having no install path

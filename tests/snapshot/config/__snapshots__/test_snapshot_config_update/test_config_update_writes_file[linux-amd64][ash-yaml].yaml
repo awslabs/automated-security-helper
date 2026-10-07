@@ -38,15 +38,6 @@ converters:
       tool_version: '>=7.16.0,<8.0.0'
       install_timeout: 300
 scanners:
-  actionlint:
-    name: actionlint
-    enabled: false
-    options:
-      severity_threshold: null
-      scan_timeout: 1800
-      config_file: null
-      shellcheck: null
-      pyflakes: null
   bandit:
     name: bandit
     enabled: false

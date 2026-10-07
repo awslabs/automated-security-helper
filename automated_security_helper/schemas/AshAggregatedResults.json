@@ -1670,17 +1670,6 @@
         "scanners": {
           "$ref": "#/$defs/ScannerConfigSegment",
           "default": {
-            "actionlint": {
-              "enabled": false,
-              "name": "actionlint",
-              "options": {
-                "config_file": null,
-                "pyflakes": null,
-                "scan_timeout": 1800,
-                "severity_threshold": null,
-                "shellcheck": null
-              }
-            },
             "bandit": {
               "enabled": true,
               "name": "bandit",
