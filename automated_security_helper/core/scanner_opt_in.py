@@ -51,6 +51,7 @@ recorded SKIPPED like any other excluded scanner.
 
 from __future__ import annotations
 
+import sys
 import typing
 from typing import Any, Iterable, Optional
 
@@ -98,10 +99,10 @@ def opt_in_scanner_name(plugin_class: type, plugin_config: Any = None) -> str:
     if isinstance(name, str) and name:
         return name
     config_class = _declared_config_class(plugin_class)
-    if config_class is not None:
-        default = config_class.model_fields["name"].default
-        if default:
-            return default
+    name_field = (getattr(config_class, "model_fields", None) or {}).get("name")
+    default = getattr(name_field, "default", None)
+    if isinstance(default, str) and default:
+        return default
     return getattr(plugin_class, "__name__", "unknown").lower()
 
 
@@ -153,3 +154,30 @@ def opt_in_scanner_enabled(
     ):
         return True
     return _config_enabled(plugin_class, plugin_config)
+
+
+def is_opt_in_scanner_config(config_class: Any) -> bool:
+    """Whether *config_class* is the config class of an opt-in scanner.
+
+    Used by the config segment to leave an untouched opt-in scanner out of a
+    serialized config (see ``ScannerConfigSegment``). Config classes carry no
+    marker of their own, so this finds the scanner class in the module that
+    defines the config class -- a builtin scanner and its config class live in
+    one module -- and asks it. The plugin registry is deliberately not used:
+    ``ash_plugin_manager.plugin_modules`` caches its first answer, and asking it
+    from a config dump taken before ``ash_plugin_modules`` loaded froze the
+    scanner list at the builtins, dropping trivy-repo and ferret-scan from a
+    community-config scan with no error (found and reproduced while building the
+    gitleaks scanner).
+    """
+    if not isinstance(config_class, type):
+        return False
+    module = sys.modules.get(getattr(config_class, "__module__", ""))
+    if module is None:
+        return False
+    return any(
+        isinstance(obj, type)
+        and is_opt_in(obj)
+        and _declared_config_class(obj) is config_class
+        for obj in list(vars(module).values())
+    )
