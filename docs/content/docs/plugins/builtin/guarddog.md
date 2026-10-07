@@ -165,6 +165,10 @@ yourself:
 uv tool install --python '>=3.10,<3.14' 'guarddog==3.2.0'
 ```
 
+GuardDog 3.2.0 cannot be installed on Windows: its dependency nono-py publishes no
+Windows build and does not compile there. On Windows, `ash dependencies install` does not
+try, and an enabled GuardDog is reported `SKIPPED` with that reason.
+
 `options.tool_version` overrides the version constraint. A GuardDog release other
 than 3.2.0 may print JSON the parser does not expect; if it does, the invocation is a
 failed target rather than a silently empty result.
