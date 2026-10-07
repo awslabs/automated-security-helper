@@ -84,6 +84,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
+from automated_security_helper.utils.process_env import snapshot_environ
 
 Status = Literal["satisfied", "unsatisfied", "unverifiable"]
 
@@ -253,6 +254,7 @@ def _run(
             timeout=timeout,
             encoding="utf-8",
             errors="replace",
+            env=snapshot_environ(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

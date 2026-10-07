@@ -10,9 +10,26 @@ from typing import Dict, List, Optional, Tuple, Union, Any, Literal
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 _find_executable_cache: dict[str, str | None] = {}
+
+
+def _spawn_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """The environment to hand a child: the caller's, or a copy of ours.
+
+    Never None. On Linux, CPython 3.10+ spawns with vfork, and with ``env=None``
+    the child execs against the parent's live ``environ`` array. Scanners run in
+    parallel threads and some of them change the environment while they work
+    (cdk_nag_wrapper's JSII variables), which can free that array under a child
+    that has not reached ``execve`` yet; the spawn then fails with
+    ``[Errno 14] Bad address``. A copy is built into a fresh ``envp`` that no other
+    thread can touch, and the child sees the same variables. See
+    ``utils/process_env.py``.
+    """
+    return env if env is not None else snapshot_environ()
+
 
 # Exit code reported for a command killed at its timeout, matching coreutils
 # ``timeout(1)``. run_command keeps its own -1 for compatibility; see there.
@@ -240,7 +257,7 @@ def run_command(
         result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
+            env=_spawn_env(env),
             capture_output=capture_output,
             text=text,
             check=check,
@@ -423,7 +440,7 @@ def run_command_with_output_handling(
                 shell=shell,
                 check=False,
                 cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                env=env,
+                env=_spawn_env(env),
                 encoding=encoding,
                 errors=errors,
                 timeout=timeout,
@@ -568,7 +585,7 @@ def run_command_stream_output(
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
+            env=_spawn_env(env),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -716,7 +733,7 @@ def create_process_with_pipes(
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
+            env=_spawn_env(env),
             stdout=subprocess.PIPE,
             stderr=stderr,
             text=text,

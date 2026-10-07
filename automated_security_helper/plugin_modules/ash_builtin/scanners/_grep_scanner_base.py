@@ -31,6 +31,7 @@ from automated_security_helper.models.core import (
     ToolExtraArg,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import snapshot_environ
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
 
@@ -322,5 +323,5 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         final_args = self._resolve_arguments(target=target, results_file=results_file)
 
         env_vars = self.extra_subprocess_env()
-        subprocess_env = {**os.environ, **env_vars} if env_vars else None
+        subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None
         return final_args, results_file, subprocess_env

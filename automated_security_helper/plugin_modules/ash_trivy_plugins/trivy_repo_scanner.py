@@ -4,7 +4,6 @@
 import json
 import shlex
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, List
 from pydantic import Field, model_validator
@@ -40,6 +39,7 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
@@ -377,7 +377,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
 
             subprocess_env = (
-                {**os.environ, **self.extra_env} if self.extra_env else None
+                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
             self._run_subprocess(
                 command=final_args,

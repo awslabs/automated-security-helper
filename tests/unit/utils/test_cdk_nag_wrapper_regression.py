@@ -177,10 +177,13 @@ class TestBug131EnvVarNodeNoWarningsNotRestored:
         assert "os.environ.get(" in source or "_original_jsii_env" in source, (
             "Bug #131: JSII env vars must be saved before mutation"
         )
-        # Verify restoration in finally
-        assert "os.environ.pop(" in source or "os.environ[" in source, (
-            "Bug #131: JSII env vars must be restored in finally block"
-        )
+        # Verify restoration in finally. The writes now go through
+        # utils/process_env.py so they happen under the process-wide env lock.
+        assert (
+            "os.environ.pop(" in source
+            or "os.environ[" in source
+            or "restore_environ(_original_jsii_env)" in source
+        ), "Bug #131: JSII env vars must be restored in finally block"
 
 
 class TestBug132OutdirNoneCausesAttributeError:

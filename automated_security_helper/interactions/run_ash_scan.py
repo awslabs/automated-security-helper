@@ -75,6 +75,10 @@ from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
+from automated_security_helper.utils.process_env import (
+    apply_environ_overrides,
+    restore_environ,
+)
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
@@ -1769,10 +1773,14 @@ def _run_local_mode(
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
-    _offline_was_set = False
+    # Through utils/process_env.py rather than os.environ directly: an MCP server
+    # runs this in an executor thread while other scans may be spawning, and the
+    # helper's lock is what keeps their environment copies consistent. The
+    # previous value is restored rather than popped, so an ASH_OFFLINE=YES the
+    # process started with survives the scan.
+    _offline_previous = None
     if opts.offline:
-        os.environ["ASH_OFFLINE"] = "YES"
-        _offline_was_set = True
+        _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
 
     _changed_file_set = None
     if opts.changed_files_only:
@@ -1974,8 +1982,8 @@ def _run_local_mode(
         )
         sys.exit(1)
     finally:
-        if _offline_was_set:
-            os.environ.pop("ASH_OFFLINE", None)
+        if _offline_previous is not None:
+            restore_environ(_offline_previous)
 
 
 # ---------------------------------------------------------------------------
@@ -2176,10 +2184,10 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     # with the offline flag already in the environment is a different read.
     settings = build_project_scan_settings(opts)
 
-    _offline_was_set = False
+    # Set and restored through utils/process_env.py; see _run_local_mode.
+    _offline_previous = None
     if opts.offline:
-        os.environ["ASH_OFFLINE"] = "YES"
-        _offline_was_set = True
+        _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
 
     try:
         return execute_workspace(opts.workspace_plan, settings)
@@ -2200,8 +2208,8 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         )
         sys.exit(int(WorkspaceExitCode.INTERNAL_ERROR))
     finally:
-        if _offline_was_set:
-            os.environ.pop("ASH_OFFLINE", None)
+        if _offline_previous is not None:
+            restore_environ(_offline_previous)
 
 
 def _print_workspace_summary(
