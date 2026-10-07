@@ -4,9 +4,7 @@
 """Tests for external plugin discovery and loading."""
 
 import pytest
-import sys
-import importlib.util
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.plugins.loader import load_plugins
@@ -14,30 +12,19 @@ from automated_security_helper.plugins.loader import load_plugins
 
 @pytest.fixture
 def mock_plugin_module():
-    """Create a mock plugin module for testing."""
-    # Use a dotted name under the ash_plugins namespace to match the
-    # tightened prefix check: exact match or dotted subpackage only.
-    module_name = "ash_plugins.test"
-    spec = importlib.util.find_spec("builtins")
-    module = importlib.util.module_from_spec(spec)
-    module.__name__ = module_name
-
-    # Add the module to sys.modules
-    sys.modules[module_name] = module
-
-    yield module_name
-
-    # Clean up
-    if module_name in sys.modules:
-        del sys.modules[module_name]
+    """Name of a top-level plugin package in the default ash_plugins namespace."""
+    yield "ash_plugins"
 
 
 def test_discover_plugins(mock_plugin_module):
     """Test that external plugins can be discovered."""
-    with patch("pkgutil.iter_modules") as mock_iter_modules:
-        # Mock the iter_modules function to return our test module
-        mock_iter_modules.return_value = [(None, mock_plugin_module, True)]
-
+    spec = MagicMock()
+    spec.origin = f"/site-packages/{mock_plugin_module}/__init__.py"
+    spec.submodule_search_locations = [f"/site-packages/{mock_plugin_module}"]
+    with patch(
+        "automated_security_helper.plugins.discovery.importlib.util.find_spec",
+        side_effect={mock_plugin_module: spec}.get,
+    ):
         # Mock the import_module function to return our test module
         with patch("importlib.import_module") as mock_import_module:
             mock_module = mock_import_module.return_value
@@ -48,6 +35,7 @@ def test_discover_plugins(mock_plugin_module):
             # Discover plugins
             discovered = discover_plugins()
 
+            mock_import_module.assert_called_once_with(mock_plugin_module)
             # Check that our plugins were discovered
             assert "test_converter" in discovered["converters"]
             assert "test_scanner" in discovered["scanners"]

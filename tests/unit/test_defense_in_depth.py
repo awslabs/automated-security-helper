@@ -228,28 +228,33 @@ class TestPluginLoaderNamespaceValidation:
 # #179 — Plugin discovery: tighten startswith prefix
 # ---------------------------------------------------------------------------
 class TestPluginDiscoveryPrefixTightening:
-    """discover_plugins must use exact prefix matching to prevent
+    """discover_plugins must use exact name matching to prevent
     e.g. 'ash_plugins_evil' from being discovered."""
+
+    @staticmethod
+    def _package_spec(name):
+        spec = MagicMock()
+        spec.name = name
+        spec.origin = f"/site-packages/{name}/__init__.py"
+        spec.submodule_search_locations = [f"/site-packages/{name}"]
+        return spec
 
     def test_rejects_lookalike_package_name(self):
         """A package named 'ash_plugins_evil' should not match
         the 'ash_plugins' namespace."""
         from automated_security_helper.plugins.discovery import discover_plugins
 
-        # Mock pkgutil.iter_modules to return a spoofed package
-        fake_module = MagicMock()
+        installed = {"ash_plugins_evil": self._package_spec("ash_plugins_evil")}
         with patch(
-            "automated_security_helper.plugins.discovery.pkgutil.iter_modules"
-        ) as mock_iter:
-            mock_iter.return_value = [
-                (None, "ash_plugins_evil", True),
-            ]
+            "automated_security_helper.plugins.discovery.importlib.util.find_spec",
+            side_effect=installed.get,
+        ) as mock_find:
             with patch(
                 "automated_security_helper.plugins.discovery.importlib.import_module"
             ) as mock_import:
-                mock_import.return_value = fake_module
                 discover_plugins(["ash_plugins"])
-                # import_module should NOT have been called for the evil package
+                # Only the requested name is ever looked up, and nothing imported
+                mock_find.assert_called_once_with("ash_plugins")
                 mock_import.assert_not_called()
 
     def test_accepts_exact_namespace_package(self):
@@ -261,12 +266,14 @@ class TestPluginDiscoveryPrefixTightening:
         fake_module.ASH_SCANNERS = []
         fake_module.ASH_REPORTERS = []
 
+        installed = {
+            "ash_plugins": self._package_spec("ash_plugins"),
+            "ash_plugins_evil": self._package_spec("ash_plugins_evil"),
+        }
         with patch(
-            "automated_security_helper.plugins.discovery.pkgutil.iter_modules"
-        ) as mock_iter:
-            mock_iter.return_value = [
-                (None, "ash_plugins", True),
-            ]
+            "automated_security_helper.plugins.discovery.importlib.util.find_spec",
+            side_effect=installed.get,
+        ):
             with patch(
                 "automated_security_helper.plugins.discovery.importlib.import_module"
             ) as mock_import:
@@ -274,28 +281,24 @@ class TestPluginDiscoveryPrefixTightening:
                 discover_plugins(["ash_plugins"])
                 mock_import.assert_called_once_with("ash_plugins")
 
-    def test_accepts_dotted_subpackage(self):
-        """A package named 'ash_plugins.my_scanner' should be accepted when
-        using the 'ash_plugins' namespace."""
+    def test_dotted_name_is_left_to_the_allowlisted_loader(self):
+        """A dotted name is never imported by discover_plugins.
+
+        Looking it up would import its parent package, bypassing the namespace
+        allowlist that load_additional_plugin_modules applies to dotted names.
+        The previous sys.path walk never produced dotted names either.
+        """
         from automated_security_helper.plugins.discovery import discover_plugins
 
-        fake_module = MagicMock()
-        fake_module.ASH_CONVERTERS = []
-        fake_module.ASH_SCANNERS = []
-        fake_module.ASH_REPORTERS = []
-
         with patch(
-            "automated_security_helper.plugins.discovery.pkgutil.iter_modules"
-        ) as mock_iter:
-            mock_iter.return_value = [
-                (None, "ash_plugins.my_scanner", True),
-            ]
+            "automated_security_helper.plugins.discovery.importlib.util.find_spec"
+        ) as mock_find:
             with patch(
                 "automated_security_helper.plugins.discovery.importlib.import_module"
             ) as mock_import:
-                mock_import.return_value = fake_module
-                discover_plugins(["ash_plugins"])
-                mock_import.assert_called_once_with("ash_plugins.my_scanner")
+                discover_plugins(["ash_plugins.my_scanner", "evil.backdoor"])
+                mock_find.assert_not_called()
+                mock_import.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
