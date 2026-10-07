@@ -119,6 +119,11 @@ class ReportContentEmitter:
                     "status": metrics.status,
                     "excluded": metrics.excluded,
                     "dependencies_missing": metrics.dependencies_missing,
+                    # Seconds the scanner took, or None when it did not run. The
+                    # text and html reporters render a Duration column from this
+                    # key with format_duration(result.get("duration", 0)); while
+                    # the key was missing that default made every row read "<1ms".
+                    "duration": metrics.duration,
                     # How much of its input the scanner actually evaluated. Every other key here
                     # describes what was found; these two describe how much was looked at, and
                     # without them a report cannot distinguish a clean scan from one that

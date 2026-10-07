@@ -1,0 +1,4 @@
+$ ash config lint -c clean.yaml
+Linting configuration file: clean.yaml
+✅ Configuration is clean! No issues found.
+[exit code: 0]

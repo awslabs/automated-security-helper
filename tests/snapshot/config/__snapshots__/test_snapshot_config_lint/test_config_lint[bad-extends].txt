@@ -1,0 +1,8 @@
+$ ash config lint -c extends.yaml
+Linting configuration file: extends.yaml
+
+Found 1 issue(s):
+  ❌ Config extends error: 'extends: base-that-does-not-exist.yaml' in <TMP>/demo-project/extends.yaml names <TMP>/demo-project/base-that-does-not-exist.yaml, which does not exist or is not a file at 'extends'
+
+  Errors: 1
+[exit code: 1]

@@ -1648,15 +1648,6 @@
                 "severity_threshold": null
               }
             },
-            "hadolint": {
-              "enabled": false,
-              "name": "hadolint",
-              "options": {
-                "config_file": null,
-                "scan_timeout": 1800,
-                "severity_threshold": null
-              }
-            },
             "npm-audit": {
               "enabled": true,
               "name": "npm-audit",

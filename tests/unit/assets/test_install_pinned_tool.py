@@ -271,7 +271,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": "0"
+                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": "0"  # pragma: allowlist secret
                 * 64
             },
         )
@@ -309,7 +309,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": real_digest
+                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": real_digest  # pragma: allowlist secret
             },
         )
         monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")

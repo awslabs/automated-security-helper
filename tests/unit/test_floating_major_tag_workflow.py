@@ -145,7 +145,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-tag-on-merge.yml"
 JOB = "tag-and-release"
 
 # Any sha; the harness only needs to see it arrive at the API call unchanged.
-FAKE_SHA = "0123456789abcdef0123456789abcdef01234567"
+FAKE_SHA = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 FAKE_REPO = "awslabs/automated-security-helper"
 
 # Records argv and answers the existence probe. The workflow distinguishes the probe

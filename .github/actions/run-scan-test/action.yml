@@ -281,8 +281,10 @@ runs:
     - name: Validate ASH config files
       if: contains(inputs.method, 'python')
       shell: bash
+      env:
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
-        if [ "${{ inputs.config-file }}" = "community" ]; then
+        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
           ash config validate --config .ash/.ash_community_plugins.yaml
         else
           ash config validate --config .ash/.ash.yaml
@@ -387,14 +389,18 @@ runs:
       shell: bash
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
+        ASH_TEST_OS: ${{ inputs.os }}
+        ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
+        ASH_TEST_OFFLINE: ${{ inputs.offline }}
       run: |
-        echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
+        echo "Testing ASH using Python (Container) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         ash --version
         OFFLINE_FLAG=""
-        if [ "${{ inputs.offline }}" = "true" ]; then
+        if [ "${ASH_TEST_OFFLINE}" = "true" ]; then
           OFFLINE_FLAG="--offline"
         fi
-        if [ "${{ inputs.config-file }}" = "community" ]; then
+        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
           ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml
         else
           ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG
@@ -424,8 +430,11 @@ runs:
       shell: pwsh
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
+        ASH_TEST_OS: ${{ inputs.os }}
+        ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
-        Write-Host "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
+        Write-Host "Testing ASH using Python (Local) on $env:ASH_TEST_OS ($env:ASH_TEST_PLATFORM) with config: $env:ASH_TEST_CONFIG_FILE"
         # Assert that 'ash' is ASH before using it six times. MSYS2 and Git for
         # Windows each ship an Almquist shell of the same name, and when one
         # shadows the scanner every invocation below fails as "Illegal option --"
@@ -446,7 +455,7 @@ runs:
         ash --help
         ash dependencies install
         ash config get
-        if ("${{ inputs.config-file }}" -eq "community") {
+        if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
           ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml
         } else {
           ash --mode local --build-target ci --verbose --no-progress
@@ -521,13 +530,16 @@ runs:
       shell: bash
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
+        ASH_TEST_OS: ${{ inputs.os }}
+        ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
-        echo "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
+        echo "Testing ASH using Python (Local) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         ash --version
         ash --help
         ash dependencies install
         ash config get
-        if [ "${{ inputs.config-file }}" = "community" ]; then
+        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
           ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml
         else
           ash --mode local --build-target ci --verbose --no-progress
@@ -597,12 +609,15 @@ runs:
       shell: pwsh
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
+        ASH_TEST_OS: ${{ inputs.os }}
+        ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
-        Write-Host "Testing ASH using PowerShell on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
+        Write-Host "Testing ASH using PowerShell on $env:ASH_TEST_OS ($env:ASH_TEST_PLATFORM) with config: $env:ASH_TEST_CONFIG_FILE"
         . ./utils/ash_helpers.ps1
         Get-Help Invoke-ASH -Full
         $runner = if ($env:OCI_RUNNER) { $env:OCI_RUNNER } else { "docker" }
-        if ("${{ inputs.config-file }}" -eq "community") {
+        if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
           Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -ConfigFile ".ash/.ash_community_plugins.yaml"
         } else {
           Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner
@@ -637,10 +652,13 @@ runs:
       shell: bash
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
+        ASH_TEST_OS: ${{ inputs.os }}
+        ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
-        echo "Testing ASH using Bash on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
+        echo "Testing ASH using Bash on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         chmod +x ./ash
-        if [ "${{ inputs.config-file }}" = "community" ]; then
+        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
           ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml
         else
           ./ash --build-target ci --verbose
@@ -692,8 +710,12 @@ runs:
 
     - name: Verify scan completed
       shell: pwsh
+      env:
+        ASH_TEST_OS: ${{ inputs.os }}
+        ASH_TEST_METHOD: ${{ inputs.method }}
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
-        Write-Host "Verifying scan completed on ${{ inputs.os }} using method '${{ inputs.method }}' with config: ${{ inputs.config-file }}"
+        Write-Host "Verifying scan completed on $env:ASH_TEST_OS using method '$env:ASH_TEST_METHOD' with config: $env:ASH_TEST_CONFIG_FILE"
         $PathsToValidate = @(
           ".ash/ash_output/ash_aggregated_results.json"
           ".ash/ash_output/reports/ash.sarif"
@@ -837,3 +859,25 @@ runs:
           PY=python
         fi
         "$PY" .github/scripts/assert_scanners_completed.py
+
+    # Snapshots of what ASH prints when a real runtime runs its image: `ash --version` and
+    # `ash build-image --help` inside it, `ash --mode container` and both wrappers scanning
+    # the snapshot fixture, and the exit status each one ends with. The unit-test legs have
+    # no runtime, so tests/conftest.py deselects these there; the image the scan above just
+    # built is what makes them runnable here, which is why this is a step and not a job.
+    #
+    # Every container leg compares against the same snapshots, so a runtime whose output or
+    # exit status differs from docker's fails here by name. `--no-cov`: coverage is the
+    # unit-test legs' gate. `-n 0`: four containers at once on a podman or finch runner buys
+    # nothing and costs memory. OCI_RUNNER and OCI_RUNNER_WRAPPER come from the job env.
+    # Last, so a snapshot diff never hides one of the scan's own diagnostics above. Runs
+    # even when the self-scan failed: that verdict is about this repository's findings, and
+    # these snapshots only need the image, which a failed build would fail here too.
+    - name: Snapshot the container-runtime output
+      if: ${{ !cancelled() && inputs.method != 'python-local' }}
+      shell: bash
+      run: |
+        uv run --extra cdk pytest \
+          tests/snapshot/container/runtime/test_snapshot_container_runtime.py \
+          tests/snapshot/container/runtime/test_snapshot_container_bash_wrapper.py \
+          --run-container-snapshots --no-cov -n 0

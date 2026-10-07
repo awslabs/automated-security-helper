@@ -1,0 +1,257 @@
+# serializer version: 1
+# name: test_init_refuses_to_overwrite
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Config file already exists at <TMP>/.ash/.ash.yaml. Include --force to overwrite.
+  
+    ''',
+  })
+# ---
+# name: test_missing_file[get]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Config file does not exist at missing.yaml
+  
+    ''',
+  })
+# ---
+# name: test_missing_file[lint]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      ❌ Config file not found: missing.yaml
+  
+    ''',
+  })
+# ---
+# name: test_missing_file[update]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Config file not found. Use 'ash config init' to create one.
+  
+    ''',
+  })
+# ---
+# name: test_missing_file[validate-plugin-dependencies]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Config file does not exist at missing.yaml
+  
+    ''',
+  })
+# ---
+# name: test_missing_file[validate]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      ❌ Config file not found: missing.yaml
+  
+    ''',
+  })
+# ---
+# name: test_not_yaml[get]
+  dict({
+    'exit_code': 3,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] ERROR    Failed to load configuration file: while parsing a flow sequence
+                              in "ash.yaml", line 2, column 11
+                            expected ',' or ']', but got '<stream end>'
+                              in "ash.yaml", line 3, column 1
+      Invalid configuration: could not parse ash.yaml: while parsing a flow sequence
+        in "ash.yaml", line 2, column 11
+      expected ',' or ']', but got '<stream end>'
+        in "ash.yaml", line 3, column 1
+  
+    ''',
+  })
+# ---
+# name: test_not_yaml[lint]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Linting configuration file: ash.yaml
+      
+      Found 1 issue(s):
+        ❌ Failed to parse config file: while parsing a flow sequence
+        in "ash.yaml", line 2, column 11
+      expected ',' or ']', but got '<stream end>'
+        in "ash.yaml", line 3, column 1
+      
+        Errors: 1
+  
+    ''',
+  })
+# ---
+# name: test_not_yaml[update]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Error loading config file: while parsing a flow sequence
+        in "ash.yaml", line 2, column 11
+      expected ',' or ']', but got '<stream end>'
+        in "ash.yaml", line 3, column 1
+  
+    ''',
+  })
+# ---
+# name: test_not_yaml[validate-plugin-dependencies]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] ERROR    Failed to load configuration file: while parsing a flow sequence
+                              in "ash.yaml", line 2, column 11
+                            expected ',' or ']', but got '<stream end>'
+                              in "ash.yaml", line 3, column 1
+      Config file '<TMP>/ash.yaml' is not valid: while parsing a flow sequence
+        in "ash.yaml", line 2, column 11
+      expected ',' or ']', but got '<stream end>'
+        in "ash.yaml", line 3, column 1
+  
+    ''',
+  })
+# ---
+# name: test_not_yaml[validate]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Validating configuration file: ash.yaml
+      
+      ❌ Configuration validation failed with 1 error(s):
+        1. YAML parsing error: while parsing a flow sequence
+        in "ash.yaml", line 2, column 11
+      expected ',' or ']', but got '<stream end>'
+        in "ash.yaml", line 3, column 1
+      
+      💡 Common fixes:
+        - Remove internal-only fields like 'name', 'extension', 'tool_version' from scanner/reporter configs
+        - Remove invalid top-level sections like 'build' or 'mcp-resource-management'
+        - Check for duplicate field definitions in your YAML file
+      
+      📖 See the ASH configuration documentation for the correct format.
+  
+    ''',
+  })
+# ---
+# name: test_schema_invalid[get]
+  dict({
+    'exit_code': 3,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] ERROR    Configuration validation failed: 1 validation error for AshConfig
+                            fail_on_findings
+                              Input should be a valid boolean
+                                For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
+      Invalid configuration: Configuration validation failed for 'ash.yaml': 1 validation error for AshConfig
+      fail_on_findings
+        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
+  
+    ''',
+  })
+# ---
+# name: test_schema_invalid[lint]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Linting configuration file: ash.yaml
+      
+      Found 1 issue(s):
+        ❌ Scanner 'bandit' contains internal-only field 'tool_version' at 'scanners.bandit.tool_version' [auto-fixable]
+      
+        Errors: 1
+      
+      💡 1 issue(s) can be auto-fixed. Run with --fix to apply fixes.
+  
+    ''',
+  })
+# ---
+# name: test_schema_invalid[update]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Error loading config file: 1 validation error for AshConfig
+      fail_on_findings
+        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
+  
+    ''',
+  })
+# ---
+# name: test_schema_invalid[validate-plugin-dependencies]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] ERROR    Configuration validation failed: 1 validation error for AshConfig
+                            fail_on_findings
+                              Input should be a valid boolean
+                                For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
+      Config file '<TMP>/ash.yaml' is not valid: Configuration validation failed for 'ash.yaml': 1 validation error for AshConfig
+      fail_on_findings
+        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
+  
+    ''',
+  })
+# ---
+# name: test_schema_invalid[validate]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Validating configuration file: ash.yaml
+      
+      ❌ Configuration validation failed with 1 error(s):
+        1. Scanner 'bandit' contains internal-only field 'tool_version' - this should not be in user configs
+      
+      💡 Common fixes:
+        - Remove internal-only fields like 'name', 'extension', 'tool_version' from scanner/reporter configs
+        - Remove invalid top-level sections like 'build' or 'mcp-resource-management'
+        - Check for duplicate field definitions in your YAML file
+      
+      📖 See the ASH configuration documentation for the correct format.
+  
+    ''',
+  })
+# ---
+# name: test_update_finds_no_config
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      Config file not found. Use 'ash config init' to create one.
+  
+    ''',
+  })
+# ---
+# name: test_update_to_an_invalid_value
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Applied modification: fail_on_findings=sometimes
+      Failed to validate config after applying modifications: 1 validation error for AshConfig
+      fail_on_findings
+        Input should be a valid boolean, unable to interpret input [type=bool_parsing, input_value='sometimes', input_type=str]
+          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_parsing
+  
+    ''',
+  })
+# ---

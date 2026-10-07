@@ -1,0 +1,13 @@
+$ ash config lint -c unused.yaml -o out --fix-unused --non-interactive
+Linting configuration file: unused.yaml
+
+Found 1 issue(s):
+  ℹ️  Unused suppression: path='src/old.py', rule_id='B105' [auto-fixable]
+
+  Info: 1
+
+💬 Commenting out 1 unused suppression(s):
+  • Commented out unused suppression: path='src/old.py', rule_id='B105'
+
+✅ Commented out 1 unused suppression(s) in unused.yaml
+[exit code: 0]
