@@ -118,7 +118,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple
 
 import yaml
 from pydantic import Field, model_validator
@@ -243,7 +243,7 @@ def config_ignore_patterns(config_path: Path) -> List[str]:
     paths = document.get("paths") if isinstance(document, dict) else None
     if not isinstance(paths, dict):
         return []
-    found = set()
+    found: set[str] = set()
     for section in paths.values():
         ignore = section.get("ignore") if isinstance(section, dict) else None
         if isinstance(ignore, list):
@@ -444,12 +444,31 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     OPT_IN: ClassVar[bool] = True
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
-    def model_post_init(self, context):
+    def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = ActionlintScannerConfig()
         self.command = "actionlint"
         self.tool_type = ScannerToolType.IAC
         super().model_post_init(context)
+
+    def _options(self) -> ActionlintScannerConfigOptions:
+        """The scanner's options, typed. ``model_post_init`` guarantees a config."""
+        options = getattr(self.config, "options", None)
+        if isinstance(options, ActionlintScannerConfigOptions):
+            return options
+        return ActionlintScannerConfigOptions.model_validate(
+            options.model_dump() if options is not None else {}
+        )
+
+    def _source_dir(self) -> Path:
+        if self.context is None:
+            raise ScannerError("ActionlintScanner has no plugin context")
+        return Path(self.context.source_dir)
+
+    def _output_dir(self) -> Path:
+        if self.context is None:
+            raise ScannerError("ActionlintScanner has no plugin context")
+        return Path(self.context.output_dir)
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "ActionlintScanner":
@@ -461,7 +480,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
         A configured integration that cannot be found maps to None.
         """
-        options = self.config.options
+        options = self._options()
         resolved: Dict[str, Optional[str]] = {}
         for flag in ("shellcheck", "pyflakes"):
             configured = getattr(options, flag, None)
@@ -475,7 +494,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 # its working directory. A file that is not executable counts as
                 # absent: actionlint would otherwise drop the integration silently.
                 if not candidate.is_absolute():
-                    candidate = Path(self.context.source_dir) / candidate
+                    candidate = self._source_dir() / candidate
                 candidate = candidate.absolute()
                 usable = candidate.is_file() and os.access(candidate, os.X_OK)
                 resolved[flag] = candidate.as_posix() if usable else None
@@ -486,7 +505,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def validate_plugin_dependencies(self) -> bool:
         self.dependency_unavailable_reason = None
         missing = [
-            f"{flag} ({getattr(self.config.options, flag)!s})"
+            f"{flag} ({getattr(self._options(), flag)!s})"
             for flag, path in self._integration_executables().items()
             if path is None
         ]
@@ -498,7 +517,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             )
             self._plugin_log(self.dependency_unavailable_reason, level=logging.WARNING)
             return False
-        found = find_executable(self.command)
+        found = find_executable(self.command or "actionlint")
         if not found:
             ASH_LOGGER.warning(
                 "actionlint executable not found. Install it with "
@@ -517,13 +536,13 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             candidates = [str(p) for p in target.rglob("*") if p.is_file()]
         else:
             candidates = scan_set(
-                source=str(self.context.source_dir),
-                output=str(self.context.output_dir),
+                source=str(self._source_dir()),
+                output=str(self._output_dir()),
             )
 
         target_abs = Path(target).absolute()
         target_real = Path(target).resolve()
-        output_abs = Path(self.context.output_dir).absolute()
+        output_abs = self._output_dir().absolute()
         relative: List[str] = []
         for item in candidates:
             path = Path(item)
@@ -565,11 +584,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
     def _resolve_config_file(self, target: Path, results_dir: Path) -> Path:
         """The config file actionlint is given, always explicitly. See decision 3."""
-        configured = self.config.options.config_file
+        configured = self._options().config_file
         if configured:
             candidate = Path(configured)
             if not candidate.is_absolute():
-                candidate = Path(self.context.source_dir) / candidate
+                candidate = self._source_dir() / candidate
             if not candidate.is_file():
                 raise ScannerError(
                     f"scanners.actionlint.options.config_file is {configured!r}, "
@@ -588,7 +607,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         )
         return empty.absolute()
 
-    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Abstract stub: ActionlintScanner overrides scan() directly."""
         raise NotImplementedError(
             f"{self.__class__.__name__} overrides scan() directly."
@@ -599,9 +623,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: ActionlintScannerConfig | None = None,
-        *args,
-        **kwargs,
+        config: ActionlintScannerConfig | ScannerPluginConfigBase | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> SarifReport | bool:
         if global_ignore_paths is None:
             global_ignore_paths = []
@@ -634,9 +658,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 level=logging.INFO,
             )
             self._post_scan(target=target, target_type=target_type)
-            return SarifReport(version="2.1.0", runs=[])  # type: ignore[call-arg]
+            return SarifReport(version="2.1.0", runs=[])
 
         self.targets_attempted = len(workflows)
+        if self.results_dir is None:
+            raise ScannerError("ActionlintScanner has no results directory")
         results_dir = Path(self.results_dir).joinpath(target_type)
         results_dir.mkdir(parents=True, exist_ok=True)
         post_scanned = False
@@ -655,8 +681,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 )
 
             integrations = self._integration_executables()
-            final_args = [
-                self.command,
+            final_args: List[str] = [
+                self.command or "actionlint",
                 "-no-color",
                 f"-shellcheck={integrations.get('shellcheck') or ''}",
                 f"-pyflakes={integrations.get('pyflakes') or ''}",
