@@ -407,18 +407,21 @@ def _run_child(
     request_path = work_dir.joinpath("request.json")
     response_path = work_dir.joinpath("response.jsonl")
     try:
-        request_path.write_text(
-            json.dumps(
-                {
-                    "protocol": PROTOCOL_VERSION,
-                    "cwd": cwd.as_posix(),
-                    "log_level": _lowest_kept_log_level(),
-                    "options": options,
-                    "templates": templates,
-                }
-            ),
-            encoding="utf-8",
-        )
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+        # Guarded: under a sandbox this directory is one the scanner can write.
+        with open_for_write(request_path) as handle:
+            handle.write(
+                json.dumps(
+                    {
+                        "protocol": PROTOCOL_VERSION,
+                        "cwd": cwd.as_posix(),
+                        "log_level": _lowest_kept_log_level(),
+                        "options": options,
+                        "templates": templates,
+                    }
+                )
+            )
         outcome = run_command_with_output_handling(
             command=[
                 sys.executable,

@@ -137,8 +137,8 @@ def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...]) -> int:
             except FileNotFoundError:
                 os.mkdir(part, 0o777, dir_fd=fd)
                 child = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = child
+            previous, fd = fd, child
+            os.close(previous)
         return fd
     except BaseException:
         os.close(fd)
@@ -172,17 +172,18 @@ def open_for_write(
     encoding: Optional[str] = "utf-8",
     errors: Optional[str] = "strict",
 ) -> IO[str]:
-    """Open ``path`` for writing text without following a symlink anywhere below
-    the writable root it is in (or, outside any, at the file itself).
+    """Open ``path`` for writing text.
 
-    Permissions are the same as open(): 0o666 less the umask.
+    Below a root a sandboxed scanner could write (register_writable_root), no
+    symlink is followed at any component and the target must be a regular file.
+    Anywhere else, which is every write when no sandbox is in use, it is exactly
+    open(path, "w"): the guard changes nothing for a scan that did not ask for a
+    sandbox. Permissions are the same as open(): 0o666 less the umask.
     """
     path = Path(os.path.abspath(path))
     root = _writable_root_for(path) if hasattr(os, "fwalk") else None
     if root is None:
-        if path.is_symlink():
-            path.unlink()
-        fd = _open_regular(str(path), None)
+        return open(path, "w", encoding=encoding, errors=errors)
     else:
         relative = path.relative_to(root).parts
         dir_fd = _open_dir_beneath(root, relative[:-1])

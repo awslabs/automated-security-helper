@@ -102,3 +102,15 @@ def test_the_sweep_removes_links_and_does_not_enter_them(tree):
     assert (root / "source" / "regular.txt").exists()
     # The sweep did not walk into the linked directory and remove links there.
     assert keep.is_symlink()
+
+
+def test_outside_a_registered_root_it_is_plain_open(tmp_path):
+    """No sandbox, no change: the write follows a link exactly as open() does."""
+    victim = tmp_path / "victim.txt"
+    victim.write_text("original\n")
+    target = tmp_path / "unregistered" / "out.log"
+    target.parent.mkdir()
+    target.symlink_to(victim)
+    with fs_guard.open_for_write(target) as f:
+        f.write("written\n")
+    assert victim.read_text() == "written\n"

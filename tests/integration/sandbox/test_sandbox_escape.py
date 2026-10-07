@@ -310,13 +310,10 @@ BLOCKED_BY = (
 )
 
 
-#: Attempts the negative control is not expected to make succeed, and why.
-CONTROL_EXEMPT = {
-    # ASH writes its own files without following symlinks in every mode, so the
-    # attack fails unsandboxed too; and an unsandboxed scanner could simply write
-    # the victim itself.
-    "_parent_writes_contained": "ASH never follows a link at its own output names",
-}
+#: Attempts the negative control is not expected to make succeed, and why. Empty:
+#: unsandboxed, ASH's writes behave exactly as open() and follow a planted link,
+#: which is what makes _parent_writes_contained a real control.
+CONTROL_EXEMPT: dict = {}
 
 #: Attempts a backend is documented not to block (docs/content/docs/scanner-sandbox.md).
 #: Listed here rather than skipped, so each one is asserted to be exactly the known

@@ -28,7 +28,7 @@ import stat
 import struct
 import time
 import sys
-from typing import Any, Dict, List, NoReturn
+from typing import Any, Callable, Dict, List, NoReturn
 
 SYS_LANDLOCK_CREATE_RULESET = 444
 SYS_LANDLOCK_ADD_RULE = 445
@@ -253,11 +253,17 @@ def main(argv: List[str]) -> int:
     abi = abi_version()
     if abi <= 0:
         fail("Landlock is not supported or not enabled on this kernel")
-    if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
-        fail(f"prctl(PR_SET_NO_NEW_PRIVS): {os.strerror(ctypes.get_errno())}")
-    apply_landlock(policy, abi)
-    apply_socket_seccomp(bool(policy["network"]))
-    return run_and_reap(command)
+
+    def restrict() -> None:
+        # In the child only. The wrapper stays outside the scanner's Landlock
+        # domain, so on ABI 6+ the scanner cannot signal it (LANDLOCK_SCOPE_SIGNAL)
+        # and cannot stop it from reaping what it leaves behind.
+        if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+            fail(f"prctl(PR_SET_NO_NEW_PRIVS): {os.strerror(ctypes.get_errno())}")
+        apply_landlock(policy, abi)
+        apply_socket_seccomp(bool(policy["network"]))
+
+    return run_and_reap(command, restrict)
 
 
 def _children() -> List[int]:
@@ -292,7 +298,7 @@ def _children() -> List[int]:
     return found
 
 
-def run_and_reap(command: List[str]) -> int:
+def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     """Run the scanner and, once it exits, kill whatever it left running.
 
     Unlike bwrap's PID namespace, Landlock does not end a process's descendants
@@ -316,9 +322,14 @@ def run_and_reap(command: List[str]) -> int:
             # A new session has no controlling terminal, so the scanner cannot
             # push keystrokes into the user's shell through TIOCSTI.
             os.setsid()
+            restrict()
             os.execve(command[0], command, os.environ)
         except OSError as e:
             sys.stderr.write(f"ash-landlock: exec {command[0]}: {e}\n")
+        except BaseException:  # noqa: BLE001 - fail() raises SystemExit
+            pass
+        # Whatever happened, the child never returns into the wrapper's code; a
+        # restriction that failed leaves it here, unrestricted, so it exits.
         os._exit(126)
 
     def stop(_signum: int, _frame: object) -> None:
@@ -368,8 +379,10 @@ def run_and_reap(command: List[str]) -> int:
         # re-raised that way.
         died_of = os.WTERMSIG(status)
         try:
-            signal.signal(died_of, signal.SIG_DFL)
-            signal.pthread_sigmask(signal.SIG_UNBLOCK, {died_of})
+            if died_of not in (signal.SIGKILL, signal.SIGSTOP):
+                # SIGKILL and SIGSTOP cannot be caught, so need no reset.
+                signal.signal(died_of, signal.SIG_DFL)
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, {died_of})
             os.kill(os.getpid(), died_of)
         except (OSError, ValueError):
             pass

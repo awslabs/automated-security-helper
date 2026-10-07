@@ -182,6 +182,9 @@ def scanner_sandbox_scope(
     # Checked here as well as when each spawn's policy is built, so a planted
     # symlink makes the scanner MISSING with the reason rather than ERROR.
     _refuse_symlinked_results_dir(Path(context.output_dir), Path(results_dir))
+    # Registered before the scanner runs anything, so even ASH's first write
+    # there (a worker's request file) is guarded.
+    register_writable_root(results_dir)
     network_scanners = getattr(settings, "network_scanners", None)
     return SandboxScope(
         backend=backend,

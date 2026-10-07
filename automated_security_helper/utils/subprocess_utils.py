@@ -264,18 +264,29 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
     check = kwargs.pop("check", False)
     input_data = kwargs.pop("input", None)
     if kwargs.pop("capture_output", False):
+        if "stdout" in kwargs or "stderr" in kwargs:
+            raise ValueError(
+                "stdout and stderr arguments may not be used with capture_output."
+            )
         kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.PIPE
     with subprocess.Popen(args, **kwargs) as process:  # nosec B603 - sandbox-built argv
         try:
             stdout, stderr = process.communicate(input_data, timeout=timeout)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as first:
+            stdout, stderr = first.output, first.stderr
             process.terminate()
             try:
                 stdout, stderr = process.communicate(timeout=SANDBOX_STOP_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as second:
+                stdout = second.output or stdout
+                stderr = second.stderr or stderr
                 process.kill()
-                stdout, stderr = process.communicate()
+                # wait(), not communicate(): a process the scanner left holding the
+                # pipes would keep communicate() reading until it chose to exit, and
+                # the timeout would stop being one. subprocess.run waits the same
+                # way after its kill.
+                process.wait()
             raise subprocess.TimeoutExpired(
                 args, timeout, output=stdout, stderr=stderr
             ) from None
