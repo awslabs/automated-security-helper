@@ -101,3 +101,13 @@ def setdefault_environ(key: str, value: str) -> str:
     """``os.environ.setdefault`` under ``ENVIRON_LOCK``."""
     with ENVIRON_LOCK:
         return os.environ.setdefault(key, value)
+
+
+def set_environ(key: str, value: str) -> None:
+    """``os.environ[key] = value`` under ``ENVIRON_LOCK``, left in place.
+
+    For a setting the process keeps for the rest of its life. Use
+    :func:`environ_overrides` when the change should be undone.
+    """
+    with ENVIRON_LOCK:
+        os.environ[key] = value
