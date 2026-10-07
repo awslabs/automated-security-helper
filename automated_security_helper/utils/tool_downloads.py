@@ -347,6 +347,358 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# License and notice files for the third-party executables the container image
+# bundles.
+#
+# Why this exists
+# ---------------
+# The image redistributes upstream release binaries -- every tool in TOOL_VERSIONS,
+# plus opengrep and uv -- and every one of those licenses makes redistribution
+# conditional on shipping something with the binary: Apache-2.0 section 4(a) and
+# (d) a copy of the license and the upstream NOTICE, MIT the copyright and
+# permission notice, LGPL and GPL the license and a way to get the corresponding
+# source. Until this table the image shipped the binaries alone. Not even trivy's
+# NOTICE was there, because trivy keeps it in its repository and leaves it out of
+# its release archive.
+#
+# What the image gets
+# -------------------
+# One directory per entry, ``THIRD_PARTY_DOC_DIR/<tool>/``, holding:
+#
+# * every file in ``files``, under its upstream name. A file with no ``url`` is
+#   read from the release archive the binary itself comes from -- the archive
+#   ``install-pinned-tool`` has already checked against the digest above, so a
+#   license file costs no extra download and no extra trust. A file with a
+#   ``url`` is fetched from the upstream repository AT ``commit`` and must hash to
+#   its ``sha256``, like a binary. That is for files the release archive lacks:
+#   opengrep publishes a bare executable, uv's archive carries no license, and
+#   trivy's NOTICE is only in its repository.
+# * ``SOURCE``: the tool, version, license expression, upstream repository, tag
+#   and commit, and a source archive URL for that commit. Written for every tool.
+#
+# and the image gets ``THIRD_PARTY_DOC_DIR/index.json``, the machine-readable
+# list of everything bundled, which ``install-pinned-tool --verify-third-party``
+# writes only after it has checked every entry against the built image: files
+# present and matching their digests, each executable on PATH, and each
+# executable's ``--version`` reporting the version recorded here.
+#
+# The copyleft source convention
+# ------------------------------
+# A tool whose license expression names a copyleft license (``COPYLEFT_SPDX``;
+# today opengrep, LGPL-2.1, and in future hadolint, GPL-3.0) gets the same
+# directory, and its ``SOURCE`` file additionally carries a "Corresponding source"
+# section: the repository, the tag, the full commit SHA the tag points to, and the
+# git commands that check that commit out with its submodules. Not a GitHub
+# "archive" tarball URL: those omit submodule contents, and opengrep alone has 39
+# submodules, so the tarball is not the corresponding source. Its license text is
+# a ``files`` entry like any other. ``commit`` is mandatory for every entry, so this costs a copyleft
+# entry nothing extra -- it is written from the same fields -- and a tag moved
+# upstream after the fact cannot change what the image points at. The commit is
+# the one ``gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`` returns. ASH
+# ships these binaries unmodified, so upstream's source at that commit IS the
+# corresponding source.
+#
+# Adding a tool
+# -------------
+# Every key of TOOL_VERSIONS must have an entry here with the same version --
+# tests/unit/utils/test_third_party_licenses.py fails otherwise, and the image
+# build refuses to install a pinned tool with no entry. For a new tool:
+#
+# 1. Read its LICENSE (and NOTICE, COPYING, COPYRIGHT if the repository has
+#    them) at the release tag, and write the SPDX expression the text supports,
+#    e.g. ``GPL-3.0-only`` rather than GitHub's ``GPL-3.0`` label.
+# 2. ``gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`` for ``commit``.
+# 3. List the release archive (``tar tzf``/``unzip -l``). Each license or notice
+#    file in it is ``LicenseFile("<basename>")``. Each one only in the
+#    repository is ``LicenseFile("<name>", url=_source_file(...), sha256=...)``
+#    with the digest of the file downloaded from that URL.
+# 4. Insert the entry in alphabetical position below. If the tool is not
+#    installed by ``install-pinned-tool <tool>`` in the Dockerfile, add it to the
+#    ``install-pinned-tool --licenses-only`` line there.
+#
+# Known limitations
+# -----------------
+# * The Go and Rust binaries here statically link their dependency modules, whose
+#   own licenses are not reproduced. No upstream release ships them either; the
+#   module list is embedded in each Go binary (``go version -m <binary>``).
+# * Python tools installed with ``uv tool`` (bandit, checkov, semgrep) are not
+#   here. Their wheels carry license metadata in their dist-info, which ASH does
+#   not duplicate.
+# ---------------------------------------------------------------------------
+
+THIRD_PARTY_DOC_DIR = "/usr/share/doc/ash/third-party"
+
+# SPDX identifiers whose terms ask a redistributor to point at corresponding
+# source. Matched per identifier inside an expression, so "MIT OR GPL-3.0-only"
+# counts as copyleft: the conservative reading of a choice ASH has not made.
+COPYLEFT_SPDX = frozenset(
+    {
+        "AGPL-3.0-only",
+        "AGPL-3.0-or-later",
+        "EPL-2.0",
+        "GPL-2.0-only",
+        "GPL-2.0-or-later",
+        "GPL-3.0-only",
+        "GPL-3.0-or-later",
+        "LGPL-2.1-only",
+        "LGPL-2.1-or-later",
+        "LGPL-3.0-only",
+        "LGPL-3.0-or-later",
+        "MPL-2.0",
+    }
+)
+
+# Identifiers an entry may use without being copyleft. A license outside both sets
+# fails the unit tests, so a new one is classified on purpose rather than by
+# omission.
+PERMISSIVE_SPDX = frozenset(
+    {"0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT", "Unlicense"}
+)
+
+_SPDX_OPERATORS = frozenset({"AND", "OR", "WITH"})
+
+
+@dataclass(frozen=True)
+class LicenseFile:
+    """One license or notice file installed beside a bundled tool.
+
+    ``name`` is the file's name in the image. With no ``url`` it is also the
+    basename of the member read from the tool's release archive, matched by the
+    same exactly-one rule as the executable. With a ``url``, the bytes fetched
+    must hash to ``sha256``.
+    """
+
+    name: str
+    url: "str | None" = None
+    sha256: "str | None" = None
+
+    @property
+    def from_archive(self) -> bool:
+        return self.url is None
+
+
+@dataclass(frozen=True)
+class ThirdPartyLicense:
+    """What the image must carry for one bundled third-party tool.
+
+    ``version`` is the upstream release tag, spelled exactly as TOOL_VERSIONS
+    spells it. ``executables`` are the names the tool puts on PATH; empty means
+    just ``tool``. The first must be present. Every copy of any of them on PATH
+    that a Python package did not install must report ``version``: uv is also an
+    ASH dependency from PyPI, at whatever version pyproject's range resolves to,
+    and that copy carries its own license metadata in its dist-info.
+    """
+
+    tool: str
+    version: str
+    license: str
+    repository: str
+    commit: str
+    files: "tuple[LicenseFile, ...]"
+    executables: "tuple[str, ...]" = ()
+
+    @property
+    def executable_names(self) -> tuple[str, ...]:
+        return self.executables or (self.tool,)
+
+    @property
+    def spdx_identifiers(self) -> list[str]:
+        tokens = self.license.replace("(", " ").replace(")", " ").split()
+        return [t for t in tokens if t not in _SPDX_OPERATORS]
+
+    @property
+    def copyleft(self) -> bool:
+        return any(t in COPYLEFT_SPDX for t in self.spdx_identifiers)
+
+    @property
+    def source_checkout(self) -> list[str]:
+        """Commands that reproduce the source tree at ``commit``, submodules included."""
+        directory = self.repository.rsplit("/", 1)[-1]
+        return [
+            f"git clone {self.repository}",
+            f"git -C {directory} checkout {self.commit}",
+            f"git -C {directory} submodule update --init --recursive",
+        ]
+
+    def source_notice(self, installed_from: "str | None" = None) -> str:
+        """The text of the ``SOURCE`` file written beside the license files."""
+        lines = [
+            f"{self.tool} {self.version}",
+            (
+                f"License: {self.license}"
+                f" (see {', '.join(f.name for f in self.files)} in this directory)"
+            ),
+            "",
+            f"Upstream repository: {self.repository}",
+            f"Release tag:         {self.version}",
+            f"Commit:              {self.commit}",
+        ]
+        if installed_from:
+            lines.append(f"Installed from:      {installed_from}")
+        lines += [
+            "",
+            (
+                "ASH bundles this program unmodified, as published by its upstream "
+                "project."
+            ),
+        ]
+        if self.copyleft:
+            lines += [
+                "",
+                "Corresponding source",
+                "--------------------",
+                (
+                    f"{self.tool} is distributed under {self.license}. Its source is "
+                    "the upstream repository at the commit this release was built "
+                    "from, together with the git submodules that commit records:"
+                ),
+                "",
+                f"  repository: {self.repository}",
+                f"  tag:        {self.version}",
+                f"  commit:     {self.commit}",
+                "",
+                "To check it out:",
+                "",
+                *(f"  {command}" for command in self.source_checkout),
+            ]
+        return "\n".join(lines) + "\n"
+
+    def index_record(self) -> "dict[str, object]":
+        """This entry as it appears in the image's ``index.json``."""
+        return {
+            "tool": self.tool,
+            "version": self.version,
+            "license": self.license,
+            "copyleft": self.copyleft,
+            "repository": self.repository,
+            "commit": self.commit,
+            "executables": list(self.executable_names),
+            "files": [f.name for f in self.files] + ["SOURCE"],
+        }
+
+
+def _source_file(repository: str, commit: str, path: str) -> str:
+    """URL of ``path`` in ``repository`` at exactly ``commit``, never at a tag."""
+    owner_repo = repository.removeprefix("https://github.com/")
+    return f"https://raw.githubusercontent.com/{owner_repo}/{commit}/{path}"
+
+
+# Every hex value the entries below use, and nothing else, in one block: the
+# community config's ferret-scan suppression is pinned to exactly these lines, and
+# tests/unit/utils/test_third_party_licenses.py keeps the two in step.
+#
+# "<tool> commit" is the commit the release tag points to, from
+# `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`. "<tool>/<file>" is the
+# SHA256 of that file downloaded from its URL in the entry. Archive-member files
+# have no digest here: the archive digest in _DIGESTS covers them. For grype, syft
+# and trivy the archive's LICENSE was also checked byte-identical to the
+# repository's at the same commit.
+_THIRD_PARTY_HASHES: dict[str, str] = {
+    "grype commit": "1f19355a7ee2d7e2bd58da6255bdeb618eb0c0d1",  # pragma: allowlist secret
+    "opengrep commit": "84c6da40995b0e15803401e44d16a745b3656df8",  # pragma: allowlist secret
+    "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
+    "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
+    "syft commit": "f6189175279981a79d8d8c15669c570f15a00568",  # pragma: allowlist secret
+    "trivy commit": "6fb20c8edd70745d6b34bff0387b53b03c8a760a",  # pragma: allowlist secret
+    "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
+    "uv commit": "46b84fd0bfec23b72f29e8e2185ba68a65052f48",  # pragma: allowlist secret
+    "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
+    "uv/LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",  # pragma: allowlist secret
+}
+
+
+def _from_source(tool: str, repository: str, name: str) -> LicenseFile:
+    """A license file fetched from ``repository`` at ``tool``'s pinned commit."""
+    return LicenseFile(
+        name,
+        url=_source_file(repository, _THIRD_PARTY_HASHES[f"{tool} commit"], name),
+        sha256=_THIRD_PARTY_HASHES[f"{tool}/{name}"],
+    )
+
+
+# Alphabetical, one entry per tool.
+THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
+    "grype": ThirdPartyLicense(
+        tool="grype",
+        version="v0.111.0",
+        license="Apache-2.0",
+        repository="https://github.com/anchore/grype",
+        commit=_THIRD_PARTY_HASHES["grype commit"],
+        files=(LicenseFile("LICENSE"),),
+    ),
+    # Installed by `ash dependencies install`, which publishes a bare executable
+    # with no archive around it, so both files come from the repository.
+    "opengrep": ThirdPartyLicense(
+        tool="opengrep",
+        version="v1.15.1",
+        # COPYRIGHT: "GNU Lesser General Public License (LGPL) version 2.1", with
+        # no "or later".
+        license="LGPL-2.1-only",
+        repository="https://github.com/opengrep/opengrep",
+        commit=_THIRD_PARTY_HASHES["opengrep commit"],
+        files=(
+            _from_source("opengrep", "https://github.com/opengrep/opengrep", "LICENSE"),
+            _from_source(
+                "opengrep", "https://github.com/opengrep/opengrep", "COPYRIGHT"
+            ),
+        ),
+    ),
+    "syft": ThirdPartyLicense(
+        tool="syft",
+        version="v1.42.4",
+        license="Apache-2.0",
+        repository="https://github.com/anchore/syft",
+        commit=_THIRD_PARTY_HASHES["syft commit"],
+        files=(LicenseFile("LICENSE"),),
+    ),
+    "trivy": ThirdPartyLicense(
+        tool="trivy",
+        version="v0.69.3",
+        license="Apache-2.0",
+        repository="https://github.com/aquasecurity/trivy",
+        commit=_THIRD_PARTY_HASHES["trivy commit"],
+        files=(
+            LicenseFile("LICENSE"),
+            # In the repository and not in the release archive. Apache-2.0 4(d)
+            # requires it to travel with the binary all the same.
+            _from_source("trivy", "https://github.com/aquasecurity/trivy", "NOTICE"),
+        ),
+    ),
+    # The release archive holds uv and uvx and nothing else.
+    "uv": ThirdPartyLicense(
+        tool="uv",
+        version="0.12.23",
+        license="MIT OR Apache-2.0",
+        repository="https://github.com/astral-sh/uv",
+        commit=_THIRD_PARTY_HASHES["uv commit"],
+        files=(
+            _from_source("uv", "https://github.com/astral-sh/uv", "LICENSE-APACHE"),
+            _from_source("uv", "https://github.com/astral-sh/uv", "LICENSE-MIT"),
+        ),
+        executables=("uv", "uvx"),
+    ),
+}
+
+
+def get_third_party_license(tool: str) -> ThirdPartyLicense:
+    """The license entry for ``tool``.
+
+    Raises:
+        ToolNotProvisionableError: if ``tool`` has none. The image build calls
+            this before downloading anything, so a pinned tool added without its
+            license entry fails the build instead of shipping without its license.
+    """
+    entry = THIRD_PARTY_LICENSES.get(tool)
+    if entry is None:
+        raise ToolNotProvisionableError(
+            f"{tool} has no entry in THIRD_PARTY_LICENSES in tool_downloads.py, so "
+            f"the image would ship it without its license and notice files. Add "
+            f"one; the comment above that table says how."
+        )
+    return entry
+
+
 def downloadable_tools() -> list[str]:
     """Tools this module can provision by verified release-asset download."""
     return sorted(_ASSET_TABLES)
