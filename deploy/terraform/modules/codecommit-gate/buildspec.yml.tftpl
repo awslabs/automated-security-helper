@@ -30,6 +30,7 @@ phases:
         export DOCKER_BUILDKIT=1
         printf '%s' '${gate_dockerfile_b64}' | base64 -d > gate.Dockerfile
         printf '%s' '${handler_b64}' | base64 -d > ash_pr_gate.py
+        printf '%s' '${requirements_b64}' | base64 -d > gate-requirements.txt
 
         # Pulled explicitly so a missing base image fails here with a clear
         # message rather than partway through the build.

@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1
 #checkov:skip=CKV_DOCKER_2:Lambda manages the execution environment's lifecycle through the Runtime API and never reads a Docker HEALTHCHECK, so the instruction would have no effect here. Nor could an inherited one be relied on: the base image target is configurable, and only its non-root target declares a HEALTHCHECK.
 #checkov:skip=CKV_DOCKER_7:The base image arrives through the ASH_BASE_IMAGE build argument, which has no default for Checkov to resolve. The buildspec supplies a tagged ECR URI.
-#checkov:skip=CKV_DOCKER_8:The USER root below is not reverted, and reverting it would break the image. ASH's scanners need root to run -- the reason the repository's own Dockerfile carries this same skip -- and this image is a Lambda function, where each invocation gets a single-tenant microVM with a read-only root filesystem outside /tmp, so root confers nothing across a boundary. No fixed UID could be restored in any case: the base image target is configurable, and only its non-root target defines one.
 #
 # Makes the shared ASH image runnable as a Lambda container image.
 #
@@ -27,10 +26,23 @@ FROM ${ASH_BASE_IMAGE}
 # The ASH non-root target sets a USER, and pip needs to write to site-packages.
 USER root
 
-RUN pip install --no-cache-dir awslambdaric git-remote-codecommit
+# Versions and SHA256 digests are in the requirements file; see its header for
+# why botocore is not listed.
+COPY --chmod=0644 gate-requirements.txt /tmp/gate-requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r /tmp/gate-requirements.txt && \
+    rm /tmp/gate-requirements.txt
 
 WORKDIR /var/task
 COPY --chmod=0644 ash_pr_gate.py /var/task/ash_pr_gate.py
+
+# Back to the ASH non-root target's identity (its UID and GID build-arg
+# defaults), so the image does not end on root. Lambda does not use this: it
+# runs a container image as its own least-privileged default user whatever USER
+# says, which is why nothing here may depend on running as root. Numeric, so it
+# resolves on the core and ci targets too, which create no named user.
+ARG ASH_UID=500
+ARG ASH_GID=100
+USER ${ASH_UID}:${ASH_GID}
 
 # The shared entrypoint runs first so the base ASH config from SSM is on disk
 # before the runtime interface client starts accepting invocations, then execs

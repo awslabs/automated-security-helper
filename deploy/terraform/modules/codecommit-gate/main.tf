@@ -31,6 +31,7 @@ locals {
   buildspec = templatefile("${path.module}/buildspec.yml.tftpl", {
     gate_dockerfile_b64 = filebase64("${path.module}/files/gate.Dockerfile")
     handler_b64         = filebase64("${path.module}/files/ash_pr_gate.py")
+    requirements_b64    = filebase64("${path.module}/files/gate-requirements.txt")
   })
 
   build_environment_type = var.lambda_architecture == "arm64" ? "ARM_CONTAINER" : "LINUX_CONTAINER"
