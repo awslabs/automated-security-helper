@@ -1473,3 +1473,21 @@ def test_metadata_only_rules_warn_that_a_local_scan_checks_nothing(
     with caplog.at_level(logging.WARNING, logger="ash"):
         scanner.scan(target=repo, target_type="source")
     assert "only metadata rules" in caplog.text
+
+
+def test_windows_is_an_unsupported_platform_with_no_install_command(
+    tmp_path, monkeypatch
+):
+    """nono-py, a GuardDog 3.2.0 dependency, has no Windows build (seen failing in CI)."""
+    import automated_security_helper.plugin_modules.ash_builtin.scanners.guarddog_scanner as module
+
+    repo = tmp_path / "src"
+    repo.mkdir()
+    scanner = _scanner(repo, tmp_path)
+    assert scanner.get_installation_commands("windows", "amd64") == []
+    assert scanner.get_installation_commands("linux", "amd64") != []
+    monkeypatch.setattr(module.platform, "system", lambda: "Windows")
+    assert "nono-py" in scanner.unsupported_platform_reason()
+    assert scanner.validate_plugin_dependencies() is False
+    monkeypatch.setattr(module.platform, "system", lambda: "Linux")
+    assert scanner.unsupported_platform_reason() is None

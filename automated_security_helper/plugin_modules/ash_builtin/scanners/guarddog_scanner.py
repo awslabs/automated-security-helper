@@ -49,6 +49,7 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import tempfile
@@ -720,9 +721,34 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def _get_tool_python_request(self) -> str | None:
         return GUARDDOG_PYTHON_REQUEST
 
+    def unsupported_platform_reason(self) -> str | None:
+        """Windows, at the pinned version: GuardDog cannot be installed there.
+
+        GuardDog 3.2.0 depends on nono-py, which publishes wheels for Linux and
+        macOS only, and whose source does not build on Windows (its Rust crate
+        uses ``std::os::unix``). Measured on windows-latest in CI: ``uv tool
+        install guarddog==3.2.0`` fails compiling nono. So on Windows an enabled
+        GuardDog is SKIPPED with this reason rather than MISSING, the same
+        treatment semgrep gets, and ``ash dependencies install`` does not try.
+        """
+        if platform.system().lower() == "windows":
+            return (
+                "GuardDog 3.2.0 cannot be installed on Windows: its dependency "
+                "nono-py publishes no Windows build and does not compile there"
+            )
+        return None
+
+    def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
+        """No install command on Windows; see ``unsupported_platform_reason``."""
+        if platform.lower() == "windows":
+            return []
+        return super().get_installation_commands(platform, arch)
+
     def validate_plugin_dependencies(self) -> bool:
         """Same resolution order as bandit and checkov: uv tool, pre-installed, install."""
         if self.dependency_unavailable_reason:
+            return False
+        if self.unsupported_platform_reason() is not None:
             return False
         if not self._validate_uv_tool_availability():
             if get_uv_tool_command(_COMMAND) is not None:
