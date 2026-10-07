@@ -1013,6 +1013,72 @@ global_settings:
         Lambda manages this execution environment's lifecycle through the Runtime
         API and never reads a Docker HEALTHCHECK, so the instruction would have no
         effect. Same reasoning as this file's inline CKV_DOCKER_2 skip.
+    # === GuardDog (#727): false positives, approved by the maintainer 2026-10-07 ===
+    # The same 12 entries as .ash/.ash.yaml. This is the config the self-scan runs
+    # GuardDog under, and it does not read .ash/.ash.yaml.
+    # One entry per finding, pinned to its line, so a new hit anywhere else in these
+    # files is still reported. If a line moves, the finding comes back and the entry
+    # needs its line updated, which is the point of not using a range or a glob.
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 253
+      line_end: 253
+      reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 469
+      line_end: 469
+      reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 738
+      line_end: 738
+      reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+    - rule_id: threat-filesystem-destruction
+      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
+      line_start: 367
+      line_end: 367
+      reason: "'main; rm -rf /' is an input the test asserts is rejected at synth."
+    - rule_id: threat-filesystem-read
+      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
+      line_start: 362
+      line_end: 362
+      reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
+    - rule_id: threat-filesystem-destruction
+      path: tests/snapshot/test_snapshot_normalizer.py
+      line_start: 261
+      line_end: 261
+      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
+    - rule_id: threat-filesystem-destruction
+      path: tests/snapshot/test_snapshot_normalizer.py
+      line_start: 269
+      line_end: 269
+      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_artifact_contents_gate.py
+      line_start: 771
+      line_end: 771
+      reason: "Symlink target in a synthetic archive that the gate under test must reject."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_artifact_contents_gate.py
+      line_start: 1448
+      line_end: 1448
+      reason: "Symlink target in a synthetic archive that the gate under test must reject."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_defense_in_depth.py
+      line_start: 403
+      line_end: 403
+      reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_pinned_tool_version_check.py
+      line_start: 448
+      line_end: 448
+      reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
+    - rule_id: threat-runtime-obfuscation-base64exec
+      path: tests/unit/utils/test_opengrep_pinned_download.py
+      line_start: 380
+      line_end: 380
+      reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     # === trivy license scanner: two expressions the approved list does not match ===
     #
     # The approved-license entries above are keyed on rule ids of the form
