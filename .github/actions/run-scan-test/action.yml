@@ -424,6 +424,20 @@ runs:
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
+    # The image this leg just built must carry the license and notice files of every
+    # third-party executable it bundles, under /usr/share/doc/ash/third-party, and
+    # every non-Debian executable on its PATH must belong to an entry in
+    # THIRD_PARTY_LICENSES (utils/tool_downloads.py). The build verifies the first
+    # half itself; this re-checks the finished image and adds the second, which the
+    # build cannot see. python-container only: it is the method whose image tag is
+    # known to be automated-security-helper:ci.
+    - name: Assert the image ships its bundled tools' license files
+      if: inputs.method == 'python-container'
+      shell: bash
+      env:
+        RUNNER: ${{ inputs.oci-runner }}
+      run: python3 .github/scripts/assert-image-third-party-licenses.py --runner "${RUNNER:-docker}"
+
     # Python Local scan (Windows)
     - name: Validate ASH using Python Local (Windows)
       if: inputs.method == 'python-local' && runner.os == 'Windows'

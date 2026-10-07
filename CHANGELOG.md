@@ -468,6 +468,21 @@
 
 ### Fixes
 
+- **The container image ships the license and notice files of the programs it
+  bundles.** grype, syft, trivy, opengrep and uv were copied into the image without
+  the license texts and notices their licenses require to travel with them; trivy's
+  NOTICE was missing everywhere, because its release archive leaves it out. Each now
+  has `/usr/share/doc/ash/third-party/<tool>/`, holding the files from the exact
+  release the image carries (read from the release archive the binary already comes
+  from where it has them, otherwise fetched at the upstream commit and checked
+  against a pinned SHA256), and a `SOURCE` file with the repository, tag and commit.
+  For opengrep, which is LGPL-2.1, that file also says where the corresponding source
+  is. `index.json` in the same directory lists everything bundled. The list is
+  `THIRD_PARTY_LICENSES` in `utils/tool_downloads.py`: a pinned tool with no entry
+  there fails the unit tests and the image build, the build checks each tool's
+  `--version` against its entry, and the container CI legs fail on any executable on
+  the image's PATH that neither a Debian package nor an entry accounts for.
+
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan
