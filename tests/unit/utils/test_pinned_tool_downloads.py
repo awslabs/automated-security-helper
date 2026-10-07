@@ -30,6 +30,7 @@ import io
 import json
 import os
 import platform
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -1239,3 +1240,152 @@ class TestAssetResolution:
             assert len(digest) == 64, f"{filename} digest is not 64 hex chars"
             assert digest == digest.lower(), f"{filename} digest is not lowercase"
             int(digest, 16)
+
+
+class TestReleaseAssetCache:
+    """ASH_TOOL_DOWNLOAD_CACHE: verified release assets kept between CI runs.
+
+    A cached asset is trusted only if it hashes to the pin in tool_downloads, every
+    time it is read. The cache holds assets, not binaries or receipts, so the trust
+    anchor stays in the repository where the cache cannot reach it.
+    """
+
+    @pytest.fixture
+    def cache_dir(self, tmp_path, monkeypatch):
+        directory = tmp_path / "asset-cache"
+        monkeypatch.setenv("ASH_TOOL_DOWNLOAD_CACHE", str(directory))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        return directory
+
+    def test_a_download_is_stored_and_a_verified_copy_is_reused(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        asset_name = get_tool_asset("grype", "linux", "amd64").url.split("/")[-1]
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin-a")
+        assert (cache_dir / asset_name).read_bytes() == payload
+
+        exploding = patch(
+            "automated_security_helper.utils.download_utils.download_file",
+            side_effect=AssertionError(
+                "downloaded although a verified copy was cached"
+            ),
+        )
+        with _pin(_grype_asset_filename(), real_digest), exploding:
+            installed = install_pinned_tool(
+                "grype", "linux", "amd64", tmp_path / "bin-b"
+            )
+        assert installed.read_bytes() == PAYLOAD
+
+    def test_a_tampered_cached_asset_is_rejected_deleted_and_redownloaded(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        asset_name = get_tool_asset("grype", "linux", "amd64").url.split("/")[-1]
+        cache_dir.mkdir(parents=True)
+        # A well-formed archive whose `grype` is someone else's binary.
+        evil = b"#!/bin/sh\necho evil\n"
+        with tarfile.open(cache_dir / asset_name, "w:gz") as archive:
+            info = tarfile.TarInfo(name="grype")
+            info.size = len(evil)
+            archive.addfile(info, io.BytesIO(evil))
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            installed = install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert served.called, "the tampered asset was used instead of re-downloaded"
+        assert installed.read_bytes() == PAYLOAD
+        assert b"evil" not in installed.read_bytes()
+        # The cache now holds the verified download, not the tampered file.
+        assert (cache_dir / asset_name).read_bytes() == payload
+
+    def test_without_the_variable_nothing_is_cached(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        monkeypatch.delenv("ASH_TOOL_DOWNLOAD_CACHE", raising=False)
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        payload, real_digest = fake_grype_release
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+        assert not (tmp_path / "asset-cache").exists()
+
+
+_needs_symlinks = pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+
+
+class TestReleaseAssetCacheNeverFollowsLinks:
+    """The cache is restored from an untrusted store, so its entries' KIND is untrusted.
+
+    A symlink at an asset's name must be neither read through on restore nor written
+    through on store, and a symlinked cache root is refused outright.
+    """
+
+    @pytest.fixture
+    def cache_dir(self, tmp_path, monkeypatch):
+        directory = tmp_path / "asset-cache"
+        directory.mkdir()
+        monkeypatch.setenv("ASH_TOOL_DOWNLOAD_CACHE", str(directory))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        return directory
+
+    @staticmethod
+    def _asset_name() -> str:
+        return get_tool_asset("grype", "linux", "amd64").url.split("/")[-1]
+
+    @_needs_symlinks
+    def test_a_symlinked_entry_is_not_followed_or_trusted_on_restore(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        # The link points at bytes that WOULD verify, so only refusing to follow it
+        # -- not the digest check -- can keep it from being used.
+        genuine = tmp_path / "elsewhere.tar.gz"
+        genuine.write_bytes(payload)
+        link = cache_dir / self._asset_name()
+        link.symlink_to(genuine)
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert served.called, "a symlinked cache entry was used instead of a download"
+        assert genuine.read_bytes() == payload, "the link's target was modified"
+        assert not (cache_dir / self._asset_name()).is_symlink()
+
+    @_needs_symlinks
+    def test_a_symlinked_entry_is_replaced_not_written_through_on_store(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        victim = tmp_path / "victim.txt"
+        victim.write_bytes(b"must not change")
+        (cache_dir / self._asset_name()).symlink_to(victim)
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert victim.read_bytes() == b"must not change"
+        stored = cache_dir / self._asset_name()
+        assert not stored.is_symlink()
+        assert stored.read_bytes() == payload
+        assert not list(cache_dir.glob(".ash-asset-*")), "a temporary file was left"
+
+    @_needs_symlinks
+    def test_a_symlinked_cache_root_is_refused(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        real_root = tmp_path / "real-root"
+        real_root.mkdir()
+        root_link = tmp_path / "asset-cache-link"
+        root_link.symlink_to(real_root, target_is_directory=True)
+        monkeypatch.setenv("ASH_TOOL_DOWNLOAD_CACHE", str(root_link))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert not any(real_root.iterdir()), "wrote through a symlinked cache root"

@@ -108,3 +108,62 @@ def test_the_reusable_scan_workflow_asks_callers_for_nothing_new():
     }
     for job in data["jobs"].values():
         assert "permissions" not in job, job.get("name")
+
+
+def _jobs_steps() -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    files = sorted(GITHUB_DIR.rglob("*.yml")) + sorted(GITHUB_DIR.rglob("*.yaml"))
+    for path in files:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        rel = str(path.relative_to(REPO_ROOT))
+        for job in (data.get("jobs") or {}).values():
+            yield rel, (job or {}).get("steps") or []
+        steps = (data.get("runs") or {}).get("steps")
+        if steps:
+            yield rel, steps
+
+
+def test_every_cache_restore_reports_its_hit_rate():
+    """Each restore writes one `cache <name>: hit|partial|miss` summary line.
+
+    The line is how a cache's effectiveness is watched over time, so a restore
+    without one is a cache nobody can tell is working. Lookup-only probes restore
+    nothing and are exempt.
+    """
+    restores = 0
+    bad = []
+    for rel, steps in _jobs_steps():
+        reported = {
+            str((s.get("env") or {}).get("CACHE_HIT", ""))
+            for s in steps
+            if str(s.get("name", "")).startswith("Cache report:")
+        }
+        for step in steps:
+            if _action(step) != "actions/cache/restore":
+                continue
+            if str((step.get("with") or {}).get("lookup-only", "")).lower() == "true":
+                continue
+            restores += 1
+            sid = step.get("id")
+            want = f"${{{{ steps.{sid}.outputs.cache-hit }}}}"
+            if not sid or want not in reported:
+                bad.append(f"  {rel}: {step.get('name')!r} (id {sid!r})")
+    assert restores >= 8, f"only {restores} restore step(s) found"
+    assert not bad, "these cache restores write no hit-rate line:\n" + "\n".join(bad)
+
+
+def test_the_pip_cache_never_includes_locally_built_wheels():
+    """pip's wheels/ directory is where ASH's own wheel would land; it must not ship."""
+    found = 0
+    for rel, step in _steps():
+        if not _action(step).startswith("actions/cache"):
+            continue
+        key = str((step.get("with") or {}).get("key", ""))
+        if not key.startswith("pip-"):
+            continue
+        found += 1
+        paths = [p.strip() for p in str(step["with"]["path"]).splitlines() if p.strip()]
+        assert paths and all(p.endswith(("/http", "/http-v2")) for p in paths), (
+            f"{rel}: {step.get('name')!r} caches {paths}; only pip's http "
+            "directories may be cached"
+        )
+    assert found >= 2, "the pip cache restore and save were not found"

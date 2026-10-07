@@ -735,7 +735,10 @@ class TestTheActionWiring:
     def test_the_steps_run_in_the_designed_order(self):
         doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
         ids = [s.get("id") for s in doc["runs"]["steps"]]
-        assert ids == ["key", "restore", "hit", "pull", "write", None], ids
+        # `report` writes the job-summary hit line every cache restore carries
+        # (tests/unit/test_ci_cache_saves_from_main_only.py). It reads the restore's
+        # outputs only and changes nothing the hit or pull steps see.
+        assert ids == ["key", "restore", "report", "hit", "pull", "write", None], ids
 
     def test_the_hit_step_runs_only_on_an_exact_restore(self, steps):
         assert steps["hit"]["if"].strip() == "steps.restore.outputs.cache-hit == 'true'"

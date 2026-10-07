@@ -122,9 +122,10 @@ _ALLOWED_MODULE_PREFIXES = (
 #: skipped it with a warning and every plugin in it went unregistered.
 #:
 #: That divergence was survivable in one path and not in the others.
-#: ``execution_engine`` also calls ``discover_plugins``, which matches
-#: ``name == namespace`` against ``pkgutil.iter_modules()`` and does import the
-#: package -- so the single-project scan path loaded it anyway. The consumers with
+#: ``execution_engine`` also calls ``discover_plugins``, which matches a top-level
+#: package by name (then by walking ``pkgutil.iter_modules()``, now by
+#: ``importlib.util.find_spec``) and does import the package -- so the
+#: single-project scan path loaded it anyway. The consumers with
 #: no such fallback (``workspace.execution``, ``core.scanner_inventory``,
 #: ``load_plugins`` itself) did not, so the documented arrangement worked in a
 #: single-project scan and silently dropped every custom plugin in a workspace run.

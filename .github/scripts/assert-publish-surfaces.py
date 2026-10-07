@@ -85,7 +85,10 @@ KNOWN LIMITATIONS
   * Expressions are compared as source text. Two spellings of the same artifact
     name are two different keys, which costs a false failure on a pure
     refactor -- the cheaper direction to be wrong in.
-  * Only `uses:` steps are read. A third-party action can upload or cache from
+  * Two non-`uses:` shapes are read as well, both for ASH's own image layer
+    cache: a step that exports ACTIONS_RUNTIME_TOKEN to later steps, and any
+    `env:` setting ASH_GHA_BUILD_CACHE_EXPORT to something other than none.
+    Otherwise only `uses:` steps are read. A third-party action can upload or cache from
     inside its own implementation, which is invisible here, and a `run:` step
     holding ACTIONS_RUNTIME_TOKEN can call the artifact API directly. Neither is
     reachable by a static census of this tree; what covers them is that adding a
@@ -100,6 +103,7 @@ KNOWN LIMITATIONS
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -114,6 +118,16 @@ GITHUB_DIR = REPO_ROOT / ".github"
 KIND_UPLOAD = "upload-artifact"
 KIND_CACHE = "cache"
 KIND_BUILTIN_CACHE = "builtin-cache"
+# ASH's own container build writing image layers to the Actions cache (buildx
+# type=gha, in automated_security_helper/interactions/run_ash_container.py). No
+# `uses:` line does that, so two things are censused instead: a step that hands
+# the cache credentials to later steps, which is what makes any layer export
+# possible, and a step that sets ASH_GHA_BUILD_CACHE_EXPORT, which decides how
+# much is exported.
+KIND_CACHE_ACCESS_HANDOFF = "cache-access-handoff"
+KIND_LAYER_CACHE = "layer-cache"
+_LAYER_CACHE_ENV = "ASH_GHA_BUILD_CACHE_EXPORT"
+_LAYER_CACHE_ACTION = "ash build (buildx type=gha)"
 
 # Injected by the line-tracking loader below; never a real workflow key.
 LINE_KEY = "__line__"
@@ -196,6 +210,36 @@ _NPM_CACHE_REASON = (
     "this project builds. Restored everywhere and saved from a push to main only, "
     "so a pull request never writes an entry another run reads."
 )
+_PIP_HTTP_CACHE_REASON = (
+    "pip's HTTP download cache: responses fetched from PyPI, third-party packages "
+    "already published there. Only the http directories are cached, never pip's "
+    "wheels/ directory, which is where a locally built wheel -- ASH's own -- would "
+    "land. Restored everywhere, saved from a push to main only."
+)
+_MCP_INSPECTOR_NPM_REASON = (
+    "npm's download cache for the pinned @modelcontextprotocol/inspector install: "
+    "third-party tarballs from the npm registry, keyed on the pinned version. "
+    "Restored everywhere, saved from a push to main only."
+)
+_LAYER_CACHE_REASON = (
+    "ASH's container image build layers, exported to the Actions cache by buildx "
+    "type=gha. MAINTAINER DECISION (2026-10-06): the operator accepted that these "
+    "layers are restorable by any workflow run in this repository, approved fork "
+    "pull requests included, in exchange for warm image builds -- for build layers "
+    "only. Exported only from pushes to main (mode=max); pull requests read and "
+    "never write. Pushing the image to any registry, and uploading the image or a "
+    "tarball of it as an artifact, remain forbidden."
+)
+_TOOL_ASSET_CACHE_REASON = (
+    "Release assets of the scanner tools pinned by sha256 in "
+    "automated_security_helper/utils/tool_downloads.py: public upstream releases, "
+    "downloaded and verified by install_pinned_tool. MAINTAINER DECISION "
+    "(2026-10-07): the operator approved caching these digest-pinned public "
+    "binaries. Assets only -- never extracted binaries, install receipts, ASH's own "
+    "wheel or its image. Re-verified against the pin on every use, and deleted and "
+    "re-downloaded on a mismatch. Keyed on the pin table's hash; saved from a push "
+    "to main only."
+)
 _OPENGREP_CACHE_REASON = (
     "The OpenGrep release binary, downloaded from the upstream GitHub release. A "
     "third-party binary that is already publicly downloadable, not one this project "
@@ -219,6 +263,108 @@ _GRYPE_DB_CACHE_REASON = (
 )
 
 ALLOWLIST: tuple[Entry, ...] = (
+    # -- Digest-pinned scanner release assets (maintainer decision) ----------
+    Entry(
+        file=".github/actions/tool-download-cache/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ runner.temp }}/ash-tool-downloads key=ash-tool-asse"
+            "ts-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('automated_security_helper/utils/tool_downloads.py') }}"
+        ),
+        reason=_TOOL_ASSET_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/tool-download-cache/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ runner.temp }}/ash-tool-downloads key=ash-tool-asse"
+            "ts-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('automated_security_helper/utils/tool_downloads.py') }}"
+        ),
+        reason=_TOOL_ASSET_CACHE_REASON,
+    ),
+    # -- ASH image build layers in the Actions cache (maintainer decision) ------
+    Entry(
+        file=".github/actions/run-scan-test/action.yml",
+        kind=KIND_CACHE_ACCESS_HANDOFF,
+        action="actions/github-script",
+        publishes=("exports ACTIONS_RUNTIME_TOKEN to later steps"),
+        reason=_LAYER_CACHE_REASON
+        + " The hand-off the python-container docker legs build with; revoked after the scan.",
+    ),
+    Entry(
+        file=".github/actions/run-scan-test/action.yml",
+        kind=KIND_LAYER_CACHE,
+        action="ash build (buildx type=gha)",
+        publishes=(
+            "ASH_GHA_BUILD_CACHE_EXPORT=${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'max' || 'none' }}"
+        ),
+        reason=_LAYER_CACHE_REASON + " max on a push to main, none otherwise.",
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_CACHE_ACCESS_HANDOFF,
+        action="actions/github-script",
+        publishes=("exports ACTIONS_RUNTIME_TOKEN to later steps"),
+        reason=_LAYER_CACHE_REASON
+        + " The warm-image-layers job, which runs on pushes to main only.",
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_LAYER_CACHE,
+        action="ash build (buildx type=gha)",
+        publishes=("ASH_GHA_BUILD_CACHE_EXPORT=max"),
+        reason=_LAYER_CACHE_REASON
+        + " The warm-image-layers job, which runs on pushes to main only.",
+    ),
+    # -- Third-party download caches added by the per-job cache pass ---------
+    Entry(
+        file=".github/actions/setup-ash/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ steps.pip-cache-dir.outputs.dir }}/http-v2|"
+            "${{ steps.pip-cache-dir.outputs.dir }}/http "
+            "key=pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-"
+            "${{ hashFiles('pyproject.toml') }}"
+        ),
+        reason=_PIP_HTTP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/setup-ash/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ steps.pip-cache-dir.outputs.dir }}/http-v2|"
+            "${{ steps.pip-cache-dir.outputs.dir }}/http "
+            "key=pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-"
+            "${{ hashFiles('pyproject.toml') }}"
+        ),
+        reason=_PIP_HTTP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/validate-mcp/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ steps.inspector.outputs.npm-cache }} "
+            "key=npm-mcp-inspector-${{ runner.os }}-${{ runner.arch }}-"
+            "${{ steps.inspector.outputs.version }}"
+        ),
+        reason=_MCP_INSPECTOR_NPM_REASON,
+    ),
+    Entry(
+        file=".github/actions/validate-mcp/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ steps.inspector.outputs.npm-cache }} "
+            "key=npm-mcp-inspector-${{ runner.os }}-${{ runner.arch }}-"
+            "${{ steps.inspector.outputs.version }}"
+        ),
+        reason=_MCP_INSPECTOR_NPM_REASON,
+    ),
     # -- Artifact uploads -----------------------------------------------------
     #
     # The wheel and the sdist are the only entries here that publish something
@@ -745,6 +891,60 @@ def _classify(step: dict) -> tuple[str, str] | None:
     return None
 
 
+def _walk_mappings(node: object):
+    """Yield every mapping in the document, steps and jobs alike."""
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _walk_mappings(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk_mappings(item)
+
+
+def _layer_cache_sites(document: object):
+    """(mapping, kind, action, publishes) for the two layer-cache site shapes.
+
+    A step exporting ACTIONS_RUNTIME_TOKEN to GITHUB_ENV is censused whatever it
+    exports it for: with that token in the environment, ASH's build exports layers
+    at its default (min) without any ASH_GHA_BUILD_CACHE_EXPORT in sight. And a
+    mapping (step, job or workflow) whose `env` sets ASH_GHA_BUILD_CACHE_EXPORT to
+    anything but none is censused with the value, expressions included.
+    """
+    for node in _walk_mappings(document):
+        env = node.get("env")
+        if isinstance(env, dict) and _LAYER_CACHE_ENV in env:
+            value = _flatten(env[_LAYER_CACHE_ENV])
+            if value.strip().lower() != "none":
+                yield (
+                    node,
+                    KIND_LAYER_CACHE,
+                    _LAYER_CACHE_ACTION,
+                    f"{_LAYER_CACHE_ENV}={value}",
+                )
+        texts = [
+            node.get("run"),
+            (node.get("with") or {}).get("script")
+            if isinstance(node.get("with"), dict)
+            else None,
+        ]
+        for text in texts:
+            if (
+                isinstance(text, str)
+                and "ACTIONS_RUNTIME_TOKEN" in text
+                and ("exportVariable" in text or "GITHUB_ENV" in text)
+            ):
+                # The revoke steps write an empty value back; those publish nothing.
+                if re.search(r'echo "\$\{name\}=" >> "\$GITHUB_ENV"', text):
+                    continue
+                yield (
+                    node,
+                    KIND_CACHE_ACCESS_HANDOFF,
+                    _normalize_action(str(node.get("uses", "run"))),
+                    "exports ACTIONS_RUNTIME_TOKEN to later steps",
+                )
+
+
 def _walk_steps(node: object):
     """Yield every mapping that carries a `uses:`, wherever it sits.
 
@@ -785,6 +985,19 @@ def scan_text(rel_path: str, text: str) -> list[Found]:
                     ),
                     step=_step_name(step, action),
                     line=int(step.get(LINE_KEY, 1)),
+                )
+            )
+        for node, kind, action, publishes in _layer_cache_sites(document):
+            name = node.get("name")
+            found.append(
+                Found(
+                    surface=Surface(
+                        file=rel_path, kind=kind, action=action, publishes=publishes
+                    ),
+                    step=name.strip()
+                    if isinstance(name, str) and name.strip()
+                    else "(unnamed)",
+                    line=int(node.get(LINE_KEY, 1)),
                 )
             )
     return found
@@ -859,6 +1072,8 @@ def _report_failures(
             KIND_UPLOAD: "uploads an artifact",
             KIND_CACHE: "writes an Actions cache",
             KIND_BUILTIN_CACHE: "enables an action's built-in cache",
+            KIND_CACHE_ACCESS_HANDOFF: "hands the Actions cache token to later steps",
+            KIND_LAYER_CACHE: "sets ASH's image layer-cache export",
         }[surface.kind]
         print(
             f"::error file={surface.file},line={item.line}::New publicly-downloadable surface: {surface.file} step '{item.step}' {headline} ({surface.publishes}) and is not allowlisted"
@@ -1072,6 +1287,29 @@ def self_test() -> int:
 """
     )
 
+    # (c3) ASH's layer cache: an export mode set where none was decided, and the
+    # credential hand-off that makes an export possible at all.
+    layer_export = dict(baseline)
+    layer_export[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Build the image and export every layer
+        env:
+          ASH_GHA_BUILD_CACHE_EXPORT: max
+        run: ash build-image --no-run
+"""
+    )
+    credentials_export = dict(baseline)
+    credentials_export[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Hand the cache token to the build
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN)
+"""
+    )
+
     # (d) an allowed upload repointed at a different path.
     repointed = dict(baseline)
     repointed[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
@@ -1092,6 +1330,8 @@ def self_test() -> int:
         ("(c) new actions/cache", new_cache, 1, 0),
         ("(c1) new actions/cache/save", new_cache_save, 1, 0),
         ("(c2) built-in cache via cache-to", builtin_cache, 1, 0),
+        ("(c3) layer-cache export mode set", layer_export, 1, 0),
+        ("(c4) cache credentials handed to later steps", credentials_export, 1, 0),
         ("(d) allowed upload repointed", repointed, 1, 1),
         ("(e) allowlisted site deleted", deleted, 0, 2),
     ]
