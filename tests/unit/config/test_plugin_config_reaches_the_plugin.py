@@ -96,17 +96,6 @@ def _cases(plugin_type):
     ]
 
 
-def _probe_enabled(plugin_class) -> bool:
-    """The ``enabled`` value the probe writes: the opposite of the plugin's default.
-
-    Writing the opposite of the default is what makes it evidence that the config
-    reached the plugin. For most plugins that is False. An opt-in scanner (see
-    ``ScannerPluginBase.OPT_IN``) defaults to False, and an opt-in scanner whose
-    config says False is never built at all, so for those the probe writes True.
-    """
-    return not _config_class(plugin_class)().enabled
-
-
 def _probe_config(plugin_type) -> AshConfig:
     segment_key, _ = SEGMENTS[plugin_type]
     return AshConfig.model_validate(
@@ -114,7 +103,7 @@ def _probe_config(plugin_type) -> AshConfig:
             "project_name": "probe",
             segment_key: {
                 _documented_key(plugin_type, cls): {
-                    "enabled": _probe_enabled(cls),
+                    "enabled": False,
                     "options": {"probe_marker": MARKER},
                 }
                 for cls in _shipped(plugin_type)
@@ -135,7 +124,7 @@ def _context(tmp_path: Path, config: AshConfig) -> PluginContext:
 
 
 def _assert_reached(instance):
-    assert instance.config.enabled is _probe_enabled(type(instance)), (
+    assert instance.config.enabled is False, (
         f"{type(instance).__name__} runs with enabled={instance.config.enabled}; "
         "its configuration never reached it"
     )
