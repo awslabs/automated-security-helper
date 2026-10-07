@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
@@ -955,6 +956,43 @@ def _tool_download_cache() -> Optional[Path]:
     return Path(value) if value else None
 
 
+# The cache directory is restored from the Actions cache, so every entry in it is
+# untrusted -- including what KIND of entry it is. A symlink planted at an asset's
+# name would make a read follow it to any file on the runner, and a write follow it
+# to anywhere the job can write. So nothing here follows a link: entries are judged
+# by lstat, opened with O_NOFOLLOW where the platform has it, and written by
+# os.replace of a temporary file, which replaces whatever sits at the name -- link
+# included -- rather than writing through it.
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_BINARY = getattr(os, "O_BINARY", 0)
+
+
+def _usable_cache_dir(cache_dir: Path) -> bool:
+    """The cache root must be a real directory, not a link to one, if it exists."""
+    try:
+        st = os.lstat(cache_dir)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if stat.S_ISDIR(st.st_mode):
+        return True
+    ASH_LOGGER.warning(
+        f"{_TOOL_DOWNLOAD_CACHE_ENV}={cache_dir} is not a plain directory; "
+        "not using the tool download cache"
+    )
+    return False
+
+
+def _discard_cache_entry(path: Path, why: str) -> None:
+    """Remove a cache entry without following it, whatever it is."""
+    ASH_LOGGER.warning(f"Discarding cached {path.name}: {why}. Downloading it again.")
+    try:
+        os.unlink(path)  # removes a symlink itself, never its target
+    except OSError:
+        pass
+
+
 def _restore_cached_asset(
     asset_name: str, expected_sha256: str, staging_dir: Path
 ) -> Optional[Path]:
@@ -962,42 +1000,65 @@ def _restore_cached_asset(
 
     The copy is hashed after it lands in the private staging directory, so the bytes
     that get extracted are the bytes that were verified, whatever happens to the
-    cache directory in between.
+    cache directory in between. A cached entry that is anything but a regular file
+    -- a symlink above all -- is removed unread.
     """
     cache_dir = _tool_download_cache()
-    if cache_dir is None:
+    if cache_dir is None or not _usable_cache_dir(cache_dir):
         return None
     cached = cache_dir.joinpath(asset_name)
-    if not cached.is_file() or cached.is_symlink():
+    try:
+        st = os.lstat(cached)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not stat cached {asset_name}: {e}")
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        _discard_cache_entry(cached, "not a regular file")
         return None
     staged = staging_dir.joinpath(asset_name)
     try:
-        shutil.copyfile(cached, staged)
+        # O_NOFOLLOW closes the gap between the lstat above and this open: a link
+        # swapped in meanwhile makes the open fail instead of being followed.
+        fd = os.open(cached, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+        with os.fdopen(fd, "rb") as source, open(staged, "wb") as target:
+            shutil.copyfileobj(source, target)
         verify_sha256(staged, expected_sha256, f"cached asset {cached}")
     except (OSError, ToolDownloadIntegrityError) as e:
-        ASH_LOGGER.warning(
-            f"Discarding cached {asset_name}: {e}. Downloading it again."
-        )
         staged.unlink(missing_ok=True)
-        try:
-            cached.unlink()
-        except OSError:
-            pass
+        _discard_cache_entry(cached, str(e))
         return None
     ASH_LOGGER.info(f"Using cached {asset_name}, verified against its pinned digest")
     return staged
 
 
 def _store_cached_asset(archive: Path, asset_name: str) -> None:
-    """Keep a verified download for the next run. Best effort: a failure costs a download."""
+    """Keep a verified download for the next run. Best effort: a failure costs a download.
+
+    Written to a temporary file in the cache directory and moved into place with
+    os.replace, which swaps whatever is at the name -- a planted symlink included --
+    for the new file instead of writing through it.
+    """
     cache_dir = _tool_download_cache()
-    if cache_dir is None:
+    if cache_dir is None or not _usable_cache_dir(cache_dir):
         return
+    tmp_path: Optional[str] = None
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(archive, cache_dir.joinpath(asset_name))
+        fd, tmp_path = tempfile.mkstemp(dir=cache_dir, prefix=".ash-asset-")
+        with os.fdopen(fd, "wb") as target, open(archive, "rb") as source:
+            shutil.copyfileobj(source, target)
+        os.replace(tmp_path, cache_dir.joinpath(asset_name))
+        tmp_path = None
     except OSError as e:
         ASH_LOGGER.debug(f"Could not cache {asset_name} in {cache_dir}: {e}")
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def install_pinned_tool(
