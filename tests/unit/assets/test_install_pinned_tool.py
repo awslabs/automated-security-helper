@@ -720,7 +720,8 @@ class TestLicensesOnly:
         assert (directory / "COPYRIGHT").read_bytes() == b"COPYRIGHT text\n"
         source = (directory / "SOURCE").read_text()
         assert "Corresponding source" in source
-        assert entry.source_archive_url in source
+        for command in entry.source_checkout:
+            assert command in source
 
     def test_a_tool_whose_files_are_in_its_archive_is_refused(self, tmp_path):
         """--licenses-only has no archive; it must not invent a second download."""
@@ -801,12 +802,13 @@ class TestVerifyThirdParty:
 
     def test_a_complete_tree_passes_and_gets_an_index(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
-        assert installer.verify_third_party(pins, third_party, path) == []
+        assert installer.verify_third_party(pins, third_party, path, []) == []
         index = json.loads((third_party / "index.json").read_text())
         assert [row["tool"] for row in index["tools"]] == sorted(THIRD_PARTY_LICENSES)
 
-    def _fails(self, pins, third_party, path, needle):
-        problems = installer.verify_third_party(pins, third_party, path)
+    def _fails(self, pins, third_party, path, needle, site_dirs=()):
+        site_dirs = list(site_dirs)
+        problems = installer.verify_third_party(pins, third_party, path, site_dirs)
         assert any(needle in p for p in problems), problems
         assert not (third_party / "index.json").exists(), (
             "the index lists what was verified, so it must not be written on failure"
@@ -840,8 +842,54 @@ class TestVerifyThirdParty:
 
     def test_an_executable_missing_from_path(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
+        (Path(path) / "uv").unlink()
+        self._fails(pins, third_party, path, "uv: uv is not on PATH")
+
+    def test_a_secondary_executable_may_be_absent(self, tmp_path):
+        """After #740 the release archive installs uv alone; uvx then exists only
+        as the PyPI wheel's copy, which this check leaves out."""
+        pins, third_party, path = self._tree(tmp_path)
         (Path(path) / "uvx").unlink()
-        self._fails(pins, third_party, path, "uvx is not on PATH")
+        assert installer.verify_third_party(pins, third_party, path, []) == []
+
+    @staticmethod
+    def _python_owned_copy(
+        tmp_path: Path, name: str, version: str
+    ) -> "tuple[str, list]":
+        """A bin dir whose ``name`` a fake dist-info RECORD claims, as pip's does."""
+        site = tmp_path / "site-packages"
+        dist = site / "uv-0.0.0.dist-info"
+        dist.mkdir(parents=True)
+        bin_dir = tmp_path / "py-bin"
+        bin_dir.mkdir()
+        exe = bin_dir / name
+        exe.write_text(f'#!/bin/sh\necho "{name} {version}"\n')
+        exe.chmod(0o755)
+        (dist / "RECORD").write_text(f"../py-bin/{name},sha256=x,1\n")
+        return str(bin_dir), [str(site)]
+
+    def test_a_python_package_copy_is_not_version_checked(self, tmp_path):
+        """The uv wheel ASH depends on floats within pyproject's range. Its copy
+        first on PATH, at another version, must not fail the build; the release
+        binary behind it is the one the entry describes, and is still checked."""
+        pins, third_party, path = self._tree(tmp_path)
+        py_bin, site_dirs = self._python_owned_copy(tmp_path, "uv", "0.12.99")
+        searched = os.pathsep.join([py_bin, path])
+        assert (
+            installer.verify_third_party(pins, third_party, searched, site_dirs) == []
+        )
+        (third_party / "index.json").unlink()
+        (Path(path) / "uv").write_text('#!/bin/sh\necho "uv 0.1.0"\n')
+        self._fails(pins, third_party, searched, "does not report 0.12.23", site_dirs)
+
+    def test_only_a_python_package_copy_of_the_primary_fails(self, tmp_path):
+        pins, third_party, path = self._tree(tmp_path)
+        (Path(path) / "uv").unlink()
+        py_bin, site_dirs = self._python_owned_copy(tmp_path, "uv", "0.12.23")
+        searched = os.pathsep.join([py_bin, path])
+        self._fails(
+            pins, third_party, searched, "other than as a Python package", site_dirs
+        )
 
     def test_a_directory_with_no_entry(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
@@ -864,5 +912,76 @@ class TestVerifyThirdParty:
         home = tmp_path / "home"
         home.mkdir()
         monkeypatch.setenv("HOME", str(home))
-        assert installer.verify_third_party(pins, third_party, path) == []
+        assert installer.verify_third_party(pins, third_party, path, []) == []
         assert list(home.iterdir()) == []
+
+
+class TestTheGuardsTheReviewFoundUntested:
+    """Each of these guards survived a mutation probe before it had a test."""
+
+    def test_a_non_https_license_url_is_refused(self, tmp_path, monkeypatch):
+        archive = _tarball({"trivy": b"#!/bin/sh\n", "LICENSE": b"trivy license\n"})
+        pins = _pins_dir(
+            tmp_path,
+            {
+                _TRIVY_ARCHIVE_DIGEST: _sha(archive),
+                'return f"https://raw.githubusercontent.com/': (
+                    'return f"http://raw.githubusercontent.com/'
+                ),
+            },
+        )
+        monkeypatch.setattr(installer, "download", _Server({_trivy_url(): archive}))
+        _linux_amd64(monkeypatch)
+
+        with pytest.raises(SystemExit) as raised:
+            installer.install("trivy", tmp_path / "bin", pins, tmp_path / "tp")
+
+        assert "non-https" in str(raised.value)
+        assert not (tmp_path / "bin" / "trivy").exists()
+
+    def test_main_reads_the_dir_from_the_environment(self, tmp_path, monkeypatch):
+        """The Dockerfile sets ASH_THIRD_PARTY_DIR and nothing else; if main()
+        stopped reading it, every pinned install would ship without licenses."""
+        archive = _tarball({"syft": b"#!/bin/sh\n", "LICENSE": b"syft license\n"})
+        pins = _pins_dir(tmp_path, {_SYFT_ARCHIVE_DIGEST: _sha(archive)})
+        monkeypatch.setattr(installer, "download", _Server({_syft_url(): archive}))
+        _linux_amd64(monkeypatch)
+        monkeypatch.setenv("ASH_THIRD_PARTY_DIR", str(tmp_path / "tp"))
+
+        rc = installer.main(
+            ["syft", "-b", str(tmp_path / "bin"), "--pins-dir", str(pins)]
+        )
+
+        assert rc == 0
+        assert (tmp_path / "tp" / "syft" / "LICENSE").read_bytes() == b"syft license\n"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
+    def test_modes_are_set_even_under_a_restrictive_umask(self, tmp_path, monkeypatch):
+        """The final image runs as a non-root user, who must read these."""
+        archive = _tarball({"syft": b"#!/bin/sh\n", "LICENSE": b"syft license\n"})
+        pins = _pins_dir(tmp_path, {_SYFT_ARCHIVE_DIGEST: _sha(archive)})
+        monkeypatch.setattr(installer, "download", _Server({_syft_url(): archive}))
+        _linux_amd64(monkeypatch)
+
+        previous = os.umask(0o077)
+        try:
+            installer.install("syft", tmp_path / "bin", pins, tmp_path / "tp")
+        finally:
+            os.umask(previous)
+
+        directory = tmp_path / "tp" / "syft"
+        assert directory.stat().st_mode & 0o777 == 0o755
+        for name in ("LICENSE", "SOURCE"):
+            assert (directory / name).stat().st_mode & 0o777 == 0o644
+
+    def test_an_empty_license_file_is_refused(self, tmp_path, monkeypatch):
+        archive = _tarball({"syft": b"#!/bin/sh\n", "LICENSE": b""})
+        pins = _pins_dir(tmp_path, {_SYFT_ARCHIVE_DIGEST: _sha(archive)})
+        monkeypatch.setattr(installer, "download", _Server({_syft_url(): archive}))
+        _linux_amd64(monkeypatch)
+
+        with pytest.raises(SystemExit) as raised:
+            installer.install("syft", tmp_path / "bin", pins, tmp_path / "tp")
+
+        assert "is empty" in str(raised.value)
+        assert not (tmp_path / "bin" / "syft").exists()

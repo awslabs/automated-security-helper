@@ -226,8 +226,10 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 # today opengrep, LGPL-2.1, and in future hadolint, GPL-3.0) gets the same
 # directory, and its ``SOURCE`` file additionally carries a "Corresponding source"
 # section: the repository, the tag, the full commit SHA the tag points to, and the
-# URL of that commit's source archive. Its license text is a ``files`` entry like
-# any other. ``commit`` is mandatory for every entry, so this costs a copyleft
+# git commands that check that commit out with its submodules. Not a GitHub
+# "archive" tarball URL: those omit submodule contents, and opengrep alone has 39
+# submodules, so the tarball is not the corresponding source. Its license text is
+# a ``files`` entry like any other. ``commit`` is mandatory for every entry, so this costs a copyleft
 # entry nothing extra -- it is written from the same fields -- and a tag moved
 # upstream after the fact cannot change what the image points at. The commit is
 # the one ``gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`` returns. ASH
@@ -319,7 +321,10 @@ class ThirdPartyLicense:
 
     ``version`` is the upstream release tag, spelled exactly as TOOL_VERSIONS
     spells it. ``executables`` are the names the tool puts on PATH; empty means
-    just ``tool``.
+    just ``tool``. The first must be present. Every copy of any of them on PATH
+    that a Python package did not install must report ``version``: uv is also an
+    ASH dependency from PyPI, at whatever version pyproject's range resolves to,
+    and that copy carries its own license metadata in its dist-info.
     """
 
     tool: str
@@ -344,8 +349,14 @@ class ThirdPartyLicense:
         return any(t in COPYLEFT_SPDX for t in self.spdx_identifiers)
 
     @property
-    def source_archive_url(self) -> str:
-        return f"{self.repository}/archive/{self.commit}.tar.gz"
+    def source_checkout(self) -> list[str]:
+        """Commands that reproduce the source tree at ``commit``, submodules included."""
+        directory = self.repository.rsplit("/", 1)[-1]
+        return [
+            f"git clone {self.repository}",
+            f"git -C {directory} checkout {self.commit}",
+            f"git -C {directory} submodule update --init --recursive",
+        ]
 
     def source_notice(self, installed_from: "str | None" = None) -> str:
         """The text of the ``SOURCE`` file written beside the license files."""
@@ -375,15 +386,18 @@ class ThirdPartyLicense:
                 "Corresponding source",
                 "--------------------",
                 (
-                    f"{self.tool} is distributed under {self.license}. Its complete "
-                    "corresponding source is the upstream repository at the commit "
-                    "this release was built from:"
+                    f"{self.tool} is distributed under {self.license}. Its source is "
+                    "the upstream repository at the commit this release was built "
+                    "from, together with the git submodules that commit records:"
                 ),
                 "",
                 f"  repository: {self.repository}",
                 f"  tag:        {self.version}",
                 f"  commit:     {self.commit}",
-                f"  archive:    {self.source_archive_url}",
+                "",
+                "To check it out:",
+                "",
+                *(f"  {command}" for command in self.source_checkout),
             ]
         return "\n".join(lines) + "\n"
 
@@ -396,7 +410,6 @@ class ThirdPartyLicense:
             "copyleft": self.copyleft,
             "repository": self.repository,
             "commit": self.commit,
-            "source_archive": self.source_archive_url,
             "executables": list(self.executable_names),
             "files": [f.name for f in self.files] + ["SOURCE"],
         }

@@ -16,8 +16,10 @@ own ``install-pinned-tool --verify-third-party``:
    again against the finished image catches a later layer deleting or masking the
    files, and checks them as the image's own user.
 2. Every ELF executable on the image's PATH is accounted for: owned by a Debian
-   package (whose copyright file dpkg installs under /usr/share/doc), owned by a
-   license entry, or named in ``exempt`` with the license file that covers it. A
+   package (whose copyright file dpkg installs under /usr/share/doc), installed by
+   a Python distribution (listed in its dist-info RECORD, beside its license
+   metadata), owned by a license entry, or named in ``exempt`` with the license
+   file that covers it. A
    binary added to the image by some route that never touched the license table --
    a new `RUN curl ...`, a new install path -- fails here by name. The build-time
    check cannot see that, because it only reads the table.
@@ -25,12 +27,15 @@ own ``install-pinned-tool --verify-third-party``:
 
 from __future__ import annotations
 
+import csv
+import glob
 import hashlib
 import json
 import os
 import re
 import stat
 import sys
+import sysconfig
 
 _ELF_MAGIC = b"\x7fELF"
 
@@ -64,6 +69,23 @@ def _dpkg_owned(dpkg_info_dir: str) -> set:
     return owned
 
 
+def _python_owned(site_dirs: list) -> set:
+    """Real paths of every file a Python distribution's RECORD says it installed."""
+    owned = set()
+    for site_dir in site_dirs:
+        for record in glob.glob(os.path.join(site_dir, "*.dist-info", "RECORD")):
+            with open(record, encoding="utf-8", errors="replace", newline="") as handle:
+                for row in csv.reader(handle):
+                    if row:
+                        owned.add(os.path.realpath(os.path.join(site_dir, row[0])))
+    return owned
+
+
+def _world_traversable(path: str) -> bool:
+    mode = os.stat(path).st_mode
+    return bool(mode & stat.S_IROTH and mode & stat.S_IXOTH)
+
+
 def _aliases(path: str) -> set:
     """The spellings dpkg may have recorded ``path`` under on a merged-/usr system."""
     real = os.path.realpath(path)
@@ -92,10 +114,15 @@ def probe(spec: dict) -> dict:
     except (OSError, ValueError, KeyError, TypeError) as exc:
         problems.append(f"{index_path} is missing or unreadable: {exc}")
 
+    if os.path.isdir(doc_dir) and not _world_traversable(doc_dir):
+        problems.append(f"{doc_dir} cannot be listed by every user")
+
     owners = {}
     for tool in spec["tools"]:
         name = tool["tool"]
         directory = os.path.join(doc_dir, name)
+        if os.path.isdir(directory) and not _world_traversable(directory):
+            problems.append(f"{name}: {directory} cannot be listed by every user")
         if indexed is not None and name not in indexed:
             problems.append(f"{name}: not listed in {index_path}")
         for license_file in tool["files"] + [{"name": "SOURCE", "sha256": None}]:
@@ -115,14 +142,20 @@ def probe(spec: dict) -> dict:
                     problems.append(f"{name}: {source} does not name {tool['commit']}")
         for executable in tool["executables"]:
             owners[executable] = name
-            if not any(
-                os.access(os.path.join(d, executable), os.X_OK)
-                for d in search_dirs
-                if d
-            ):
-                problems.append(f"{name}: {executable} is not on PATH")
+        # Only the first is required: the others may come from elsewhere (uvx is
+        # in uv's release archive on one install path and only in its PyPI wheel
+        # on another).
+        primary = tool["executables"][0]
+        if not any(
+            os.access(os.path.join(d, primary), os.X_OK) for d in search_dirs if d
+        ):
+            problems.append(f"{name}: {primary} is not on PATH")
 
     owned = _dpkg_owned(spec.get("dpkg_info_dir", "/var/lib/dpkg/info"))
+    paths = sysconfig.get_paths()
+    python_owned = _python_owned(
+        spec.get("site_dirs") or sorted({paths["purelib"], paths["platlib"]})
+    )
     exempt = spec.get("exempt", {})
     seen = set()
     accounted = []
@@ -136,6 +169,9 @@ def probe(spec: dict) -> dict:
                 continue
             seen.add(real)
             if _aliases(path) & owned:
+                continue
+            if real in python_owned:
+                accounted.append(f"{path}: installed by a Python distribution")
                 continue
             base = os.path.basename(real)
             if entry in owners or base in owners:

@@ -386,10 +386,11 @@ ARG TRIVY_VERSION="v0.69.3"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
-# opengrep is installed by `ash dependencies install` below and uv by its own
-# installer, so neither passes through install-pinned-tool with an archive to read.
-# Their license files are fetched on their own, each pinned by SHA256 and by the
-# upstream commit of the release the image carries.
+# Neither of these has license files in a release archive install-pinned-tool reads:
+# opengrep is a bare executable that `ash dependencies install` puts in place below,
+# and uv's archive holds only uv and uvx. So their license files are fetched on their
+# own, each pinned by SHA256 and by the upstream commit of the release the image
+# carries.
 RUN with-retry 'install-pinned-tool --licenses-only opengrep uv'
 
 #

@@ -80,6 +80,7 @@ def _tree(tmp_path: Path) -> dict:
         "doc_dir": str(doc),
         "search_dirs": [str(local_bin), str(system_bin)],
         "dpkg_info_dir": str(dpkg),
+        "site_dirs": [str(tmp_path / "site-packages")],
         "exempt": {
             r"python3\.[0-9]+": str(tmp_path / "lib" / "{name}" / "LICENSE.txt")
         },
@@ -161,6 +162,58 @@ def test_each_missing_piece_fails(tmp_path, mutate, needle):
     assert any(needle in p for p in problems), problems
 
 
+def test_a_binary_a_python_distribution_installed_is_accepted(tmp_path):
+    """/usr/local/bin/uv in the image comes from the uv wheel, whose dist-info
+    RECORD lists it and whose license files sit beside that RECORD."""
+    spec = _tree(tmp_path)
+    wheel_bin = Path(spec["search_dirs"][0]) / "fromwheel"
+    wheel_bin.write_bytes(ELF)
+    wheel_bin.chmod(0o755)
+    dist = tmp_path / "site-packages" / "fromwheel-1.0.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "RECORD").write_text("../usr-local-bin/fromwheel,sha256=x,64\n")
+    result = probe.probe(spec)
+    assert result["problems"] == []
+    assert any("installed by a Python distribution" in a for a in result["accounted"])
+
+
+def test_a_record_naming_another_file_does_not_cover_this_one(tmp_path):
+    spec = _tree(tmp_path)
+    smuggled = Path(spec["search_dirs"][0]) / "fromwheel"
+    smuggled.write_bytes(ELF)
+    smuggled.chmod(0o755)
+    dist = tmp_path / "site-packages" / "other-1.0.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "RECORD").write_text("../usr-local-bin/somethingelse,sha256=x,64\n")
+    assert any("fromwheel" in p for p in _problems(spec))
+
+
+def test_a_directory_other_users_cannot_list_fails(tmp_path):
+    spec = _tree(tmp_path)
+    (Path(spec["doc_dir"]) / "demo").chmod(0o700)
+    try:
+        assert any("cannot be listed by every user" in p for p in _problems(spec))
+    finally:
+        (Path(spec["doc_dir"]) / "demo").chmod(0o755)
+
+
+def test_only_the_first_executable_is_required(tmp_path):
+    spec = _tree(tmp_path)
+    spec["tools"][0]["executables"] = ["demo", "demo-helper"]
+    assert _problems(spec) == []
+    spec["tools"][0]["executables"] = ["demo-helper", "demo"]
+    assert any("demo-helper is not on PATH" in p for p in _problems(spec))
+
+
+@pytest.mark.parametrize(
+    "path,alias",
+    [("/bin/ls", "/usr/bin/ls"), ("/usr/bin/ls", "/bin/ls")],
+)
+def test_merged_usr_spellings_are_both_tried(path, alias):
+    """dpkg may record /bin/ls for a file reached as /usr/bin/ls, or the reverse."""
+    assert alias in probe._aliases(path)
+
+
 def test_an_executable_missing_from_path_fails(tmp_path):
     spec = _tree(tmp_path)
     (Path(spec["search_dirs"][0]) / "demo").unlink()
@@ -189,3 +242,76 @@ class TestTheHostSpec:
         assert re.fullmatch(pattern, "python3.12")
         assert re.fullmatch(pattern, "python3.13")
         assert not re.fullmatch(pattern, "python3-config")
+
+
+class TestTheHostScript:
+    """main() is the CI verdict; a regression that always returns 0 must fail here."""
+
+    @staticmethod
+    def _run(monkeypatch, *, returncode=0, stdout="", wrapper=""):
+        import subprocess
+
+        seen = {}
+
+        def fake_run(command, **kwargs):
+            seen["command"] = command
+            seen["input"] = kwargs.get("input")
+            return subprocess.CompletedProcess(command, returncode, stdout, "boom")
+
+        monkeypatch.setattr(host.subprocess, "run", fake_run)
+        monkeypatch.setenv("OCI_RUNNER_WRAPPER", wrapper)
+        rc = host.main(["--runner", "podman", "--image", "img:tag"])
+        return rc, seen
+
+    def test_a_clean_verdict_passes(self, monkeypatch):
+        rc, seen = self._run(monkeypatch, stdout='{"problems": [], "accounted": []}')
+        assert rc == 0
+        assert seen["command"][:7] == [
+            "podman",
+            "run",
+            "--rm",
+            "-i",
+            "--entrypoint",
+            "python3",
+            "img:tag",
+        ]
+        assert '"tool": "trivy"' in seen["input"]
+
+    def test_a_problem_fails(self, monkeypatch):
+        rc, _ = self._run(
+            monkeypatch, stdout='{"problems": ["x is missing"], "accounted": []}'
+        )
+        assert rc == 1
+
+    def test_a_probe_that_did_not_run_fails(self, monkeypatch):
+        rc, _ = self._run(monkeypatch, returncode=125)
+        assert rc == 1
+
+    def test_the_wrapper_goes_first(self, monkeypatch):
+        _, seen = self._run(
+            monkeypatch, stdout='{"problems": [], "accounted": []}', wrapper="sudo"
+        )
+        assert seen["command"][:2] == ["sudo", "podman"]
+
+
+class TestTheCheckIsWiredIntoCi:
+    """Deleting the CI step would otherwise fail nothing."""
+
+    @staticmethod
+    def _steps(relative: str) -> list:
+        import yaml
+
+        data = yaml.safe_load((REPO_ROOT / relative).read_text(encoding="utf-8"))
+        return [
+            step
+            for step in data["runs"]["steps"]
+            if "assert-image-third-party-licenses.py" in str(step.get("run", ""))
+        ]
+
+    def test_the_scan_test_action_runs_it_on_the_container_legs(self):
+        (step,) = self._steps(".github/actions/run-scan-test/action.yml")
+        assert step["if"] == "inputs.method == 'python-container'"
+
+    def test_the_container_runtime_action_runs_it(self):
+        (step,) = self._steps(".github/actions/validate-container/action.yml")
+        assert "${RUNTIME}" in step["run"]
