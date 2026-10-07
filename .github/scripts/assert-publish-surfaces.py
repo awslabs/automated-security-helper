@@ -124,7 +124,7 @@ KIND_BUILTIN_CACHE = "builtin-cache"
 # the cache credentials to later steps, which is what makes any layer export
 # possible, and a step that sets ASH_GHA_BUILD_CACHE_EXPORT, which decides how
 # much is exported.
-KIND_CACHE_CREDENTIALS = "cache-credentials"
+KIND_CACHE_ACCESS_HANDOFF = "cache-access-handoff"
 KIND_LAYER_CACHE = "layer-cache"
 _LAYER_CACHE_ENV = "ASH_GHA_BUILD_CACHE_EXPORT"
 _LAYER_CACHE_ACTION = "ash build (buildx type=gha)"
@@ -287,7 +287,7 @@ ALLOWLIST: tuple[Entry, ...] = (
     # -- ASH image build layers in the Actions cache (maintainer decision) ------
     Entry(
         file=".github/actions/run-scan-test/action.yml",
-        kind=KIND_CACHE_CREDENTIALS,
+        kind=KIND_CACHE_ACCESS_HANDOFF,
         action="actions/github-script",
         publishes=("exports ACTIONS_RUNTIME_TOKEN to later steps"),
         reason=_LAYER_CACHE_REASON
@@ -304,7 +304,7 @@ ALLOWLIST: tuple[Entry, ...] = (
     ),
     Entry(
         file=".github/workflows/ash-unified-ci.yml",
-        kind=KIND_CACHE_CREDENTIALS,
+        kind=KIND_CACHE_ACCESS_HANDOFF,
         action="actions/github-script",
         publishes=("exports ACTIONS_RUNTIME_TOKEN to later steps"),
         reason=_LAYER_CACHE_REASON
@@ -939,7 +939,7 @@ def _layer_cache_sites(document: object):
                     continue
                 yield (
                     node,
-                    KIND_CACHE_CREDENTIALS,
+                    KIND_CACHE_ACCESS_HANDOFF,
                     _normalize_action(str(node.get("uses", "run"))),
                     "exports ACTIONS_RUNTIME_TOKEN to later steps",
                 )
@@ -1072,7 +1072,7 @@ def _report_failures(
             KIND_UPLOAD: "uploads an artifact",
             KIND_CACHE: "writes an Actions cache",
             KIND_BUILTIN_CACHE: "enables an action's built-in cache",
-            KIND_CACHE_CREDENTIALS: "hands the Actions cache token to later steps",
+            KIND_CACHE_ACCESS_HANDOFF: "hands the Actions cache token to later steps",
             KIND_LAYER_CACHE: "sets ASH's image layer-cache export",
         }[surface.kind]
         print(
