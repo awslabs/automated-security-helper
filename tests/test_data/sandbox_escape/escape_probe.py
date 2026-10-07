@@ -95,6 +95,16 @@ def main() -> int:
         with open(spec["shm_file"], "w") as f:
             f.write("pwned")
 
+    def plant_symlinks():
+        # Links where ASH, which is not sandboxed, writes after the scanner exits:
+        # if ASH followed them it would overwrite the victims for the scanner.
+        results_dir = os.path.dirname(spec["outcome"])
+        for name, victim in spec["victims"].items():
+            link = os.path.join(results_dir, name)
+            if os.path.lexists(link):
+                os.unlink(link)
+            os.symlink(victim, link)
+
     def env_credentials():
         if os.environ.get("AWS_SECRET_ACCESS_KEY") != spec["secret"]:
             raise RuntimeError("credential not in the environment")
@@ -123,6 +133,7 @@ def main() -> int:
         "udp_send": udp_send,
         "env_credentials": env_credentials,
         "unix_socket_connect": unix_socket_connect,
+        "plant_symlinks": plant_symlinks,
     }
     if os.path.isdir("/proc") and sys.platform.startswith("linux"):
         checks["parent_environ"] = parent_environ
@@ -133,6 +144,9 @@ def main() -> int:
 
     with open(spec["outcome"], "w", encoding="utf-8") as f:
         json.dump(outcomes, f, indent=2)
+    # Something on stdout, so ASH writes its stdout log at the name a link was
+    # planted at.
+    print("escape probe finished")
     return 0
 
 

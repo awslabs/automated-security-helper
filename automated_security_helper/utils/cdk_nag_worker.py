@@ -313,8 +313,11 @@ def _response_from(answer: Dict[str, Any]) -> "CdkNagWrapperResponse":
 #: ``cdk_nag.py`` or ``automated_security_helper/`` at the top of the scanned tree
 #: would be imported and run in place of the real module. ``-P`` would do the same and
 #: needs Python 3.11; ``-I`` would also drop PYTHONPATH, which an install may rely on.
+#: Only an empty first entry is removed: under PYTHONSAFEPATH (or -P) Python does not
+#: add the working directory, and sys.path[0] is then a real entry such as the
+#: stdlib zip.
 _CHILD_BOOTSTRAP = (
-    "import sys; del sys.path[0]; "
+    "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; "
     "from automated_security_helper.utils.cdk_nag_worker import main; "
     "sys.exit(main(sys.argv[1:]))"
 )

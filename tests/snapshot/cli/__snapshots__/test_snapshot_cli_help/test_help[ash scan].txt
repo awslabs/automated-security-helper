@@ -78,11 +78,12 @@
 │                                                                            writable results      │
 │                                                                            directory only,       │
 │                                                                            private home and      │
-│                                                                            <SYSTEM_TMP>, no network │
-│                                                                            unless the scanner    │
-│                                                                            needs one (never      │
-│                                                                            under --offline).     │
-│                                                                            'auto' picks the best │
+│                                                                            temporary directory,  │
+│                                                                            no network unless the │
+│                                                                            scanner needs one     │
+│                                                                            (never under          │
+│                                                                            --offline). 'auto'    │
+│                                                                            picks the best        │
 │                                                                            available (Linux:     │
 │                                                                            bwrap, firejail,      │
 │                                                                            landlock; macOS:      │

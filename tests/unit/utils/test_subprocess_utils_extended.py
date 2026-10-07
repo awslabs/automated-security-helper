@@ -171,7 +171,9 @@ def test_run_command_with_output_handling_return():
 
 
 @patch("pathlib.Path.mkdir")
-@patch("builtins.open")
+# The stream logs are written through open_for_write, which refuses to follow a
+# symlink a sandboxed scanner left at the log's name (utils/sandbox/fs_guard.py).
+@patch("automated_security_helper.utils.subprocess_utils.open_for_write")
 def test_run_command_with_output_handling_write(mock_open, mock_mkdir, ash_temp_path):
     """Test running a command with output handling set to write."""
     mock_process = MagicMock()

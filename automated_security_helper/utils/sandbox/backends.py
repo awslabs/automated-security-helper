@@ -195,8 +195,8 @@ class BwrapBackend(SandboxBackend):
         # same directory, so scanning $HOME itself still shows it, read-only.
         ops: List[Tuple[int, int, List[str]]] = [
             (len(home.parts), 0, ["--tmpfs", home.as_posix()]),
-            (2, 0, ["--tmpfs", "/tmp"]),
-            (3, 0, ["--tmpfs", "/var/tmp"]),
+            (2, 0, ["--tmpfs", "/tmp"]),  # nosec B108 - a fresh tmpfs mounted inside the sandbox
+            (3, 0, ["--tmpfs", "/var/tmp"]),  # nosec B108 - a fresh tmpfs inside the sandbox
         ]
         for real, mode in mounts.items():
             if real == Path("/"):
@@ -284,7 +284,7 @@ class FirejailBackend(SandboxBackend):
         if not self._executable:
             raise RuntimeError(f"{self.name}: probe() must succeed before plan()")
         home = _real(policy.home)
-        tmp_root = _real(Path("/tmp"))
+        tmp_root = _real(Path("/tmp"))  # nosec B108 - compared against, never written
         cmd = [
             self._executable,
             "--quiet",
@@ -334,6 +334,14 @@ class FirejailBackend(SandboxBackend):
             cmd.append("--private-tmp")
         for p in whitelisted:
             cmd.append(f"--whitelist={p.as_posix()}")
+        # A whitelisted path is mounted read-write whatever --read-only=/ said, so
+        # every readable path is made read-only again here, and only then are the
+        # writable ones (the results directory, inside the read-only output and
+        # often the source tree) opened back up. Without this, CI measured the
+        # source tree and the output directory writable whenever they sat in /tmp.
+        for p in readable:
+            if p not in writable:
+                cmd.append(f"--read-only={p.as_posix()}")
         for p in writable:
             cmd.append(f"--read-write={p.as_posix()}")
         cmd.append("--")
@@ -413,7 +421,8 @@ class LandlockBackend(SandboxBackend):
             # make it private, so this is the host's: a documented gap of this
             # backend that bwrap does not have. Not /dev/tty or /dev/pts: the
             # wrapper starts a new session, so there is no terminal to reach.
-            + [private_root.as_posix(), "/dev/null", "/dev/shm"],
+            # nosec B108 - a Landlock grant, not a file ASH creates
+            + [private_root.as_posix(), "/dev/null", "/dev/shm"],  # nosec B108
             "network": policy.network,
         }
         cmd = [

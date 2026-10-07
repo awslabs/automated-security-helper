@@ -255,7 +255,7 @@ def run_ash_scan_cli_command(
         Optional[SandboxMode],
         typer.Option(
             "--sandbox",
-            help="Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and /tmp, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the config file's sandbox.mode; default off. Ignored in container mode. See docs/content/docs/scanner-sandbox.md",
+            help="Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the config file's sandbox.mode; default off. Ignored in container mode. See docs/content/docs/scanner-sandbox.md",
             case_sensitive=False,
         ),
     ] = None,

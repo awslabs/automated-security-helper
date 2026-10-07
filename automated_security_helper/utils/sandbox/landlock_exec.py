@@ -23,8 +23,10 @@ import errno
 import json
 import os
 import platform
+import signal
 import stat
 import struct
+import time
 import sys
 from typing import Any, Dict, List, NoReturn
 
@@ -60,6 +62,7 @@ FILE_ONLY_RIGHTS = (
 )
 
 PR_SET_NO_NEW_PRIVS = 38
+PR_SET_CHILD_SUBREAPER = 36
 # prctl(PR_SET_SECCOMP) rather than seccomp(2): the syscall number differs per arch.
 PR_SET_SECCOMP = 22
 SECCOMP_MODE_FILTER = 2
@@ -254,17 +257,96 @@ def main(argv: List[str]) -> int:
         fail(f"prctl(PR_SET_NO_NEW_PRIVS): {os.strerror(ctypes.get_errno())}")
     apply_landlock(policy, abi)
     apply_socket_seccomp(bool(policy["network"]))
-    try:
-        # A new session has no controlling terminal, so the scanner cannot push
-        # keystrokes into the user's shell through TIOCSTI.
-        os.setsid()
-    except OSError:
-        pass  # already a session leader, which also has no terminal to inject into
-    try:
-        os.execve(command[0], command, os.environ)
-    except OSError as e:
-        fail(f"exec {command[0]}: {e}")
-    return 126
+    return run_and_reap(command)
+
+
+def _children() -> List[int]:
+    """Processes whose parent is this one, read from every /proc/<pid>/stat.
+
+    /proc/<pid>/stat rather than /proc/self/task/*/children, which needs
+    CONFIG_PROC_CHILDREN.
+    """
+    me = os.getpid()
+    found: List[int] = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            # Bytes: a text open may need to import a codec, and after Landlock the
+            # interpreter's own library is not necessarily readable.
+            with open(f"/proc/{entry}/stat", "rb") as f:
+                fields = f.read().rsplit(b")", 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        if len(fields) > 1 and fields[1] == str(me).encode():
+            found.append(int(entry))
+    return found
+
+
+def run_and_reap(command: List[str]) -> int:
+    """Run the scanner and, once it exits, kill whatever it left running.
+
+    Unlike bwrap's PID namespace, Landlock does not end a process's descendants
+    with it. A process the scanner left behind could keep writing in the results
+    directory after ASH has swept it, so this wrapper stays as a child subreaper
+    (orphans are reparented to it, however they detached) and kills them all
+    before it exits with the scanner's status. Signals ASH sends the wrapper, on a
+    timeout for instance, are passed on to the scanner.
+    """
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        fail(f"prctl(PR_SET_CHILD_SUBREAPER): {os.strerror(ctypes.get_errno())}")
+    pid = os.fork()
+    if pid == 0:
+        try:
+            # A new session has no controlling terminal, so the scanner cannot
+            # push keystrokes into the user's shell through TIOCSTI.
+            os.setsid()
+            os.execve(command[0], command, os.environ)
+        except OSError as e:
+            sys.stderr.write(f"ash-landlock: exec {command[0]}: {e}\n")
+        os._exit(126)
+
+    def forward(signum: int, _frame: object) -> None:
+        try:
+            os.kill(pid, signum)
+        except OSError:
+            pass
+
+    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(signum, forward)
+    while True:
+        try:
+            _, status = os.waitpid(pid, 0)
+            break
+        except InterruptedError:
+            continue
+    # An orphan is reparented here only once its own parent has exited, which can
+    # trail the scanner's exit, so "no children" has to hold for a short while.
+    quiet = 0
+    for _ in range(2000):
+        leftovers = _children()
+        if not leftovers:
+            quiet += 1
+            if quiet >= 5:
+                break
+            time.sleep(0.01)
+            continue
+        quiet = 0
+        for child in leftovers:
+            try:
+                os.kill(child, signal.SIGKILL)
+            except OSError:
+                pass
+        while True:
+            try:
+                reaped, _ = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                break
+            if reaped == 0:
+                break
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return os.WEXITSTATUS(status)
 
 
 if __name__ == "__main__":

@@ -44,31 +44,33 @@ SPAWNING_CALLS = {
     ("subprocess", "check_output"),
     ("subprocess", "getoutput"),
     ("subprocess", "getstatusoutput"),
-    ("os", "system"),
-    ("os", "popen"),
-    ("os", "execv"),
-    ("os", "execve"),
-    ("os", "execvp"),
-    ("os", "execvpe"),
-    ("os", "spawnv"),
-    ("os", "spawnve"),
-    ("os", "posix_spawn"),
-    ("os", "posix_spawnp"),
+    ("pty", "spawn"),
     ("asyncio", "create_subprocess_exec"),
     ("asyncio", "create_subprocess_shell"),
+    ("os", "system"),
+    ("os", "popen"),
+    ("os", "posix_spawn"),
+    ("os", "posix_spawnp"),
+    *(
+        ("os", f"{family}{suffix}")
+        for family in ("exec", "spawn")
+        for suffix in ("l", "le", "lp", "lpe", "v", "ve", "vp", "vpe")
+    ),
 }
-SPAWNING_NAMES = {name for _, name in SPAWNING_CALLS}
+SPAWNING_MODULES = {module for module, _ in SPAWNING_CALLS}
 
 
 def _direct_spawns(path: Path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    # Local name -> module, so `import subprocess as sp` is caught as sp.run.
+    module_names = {module: module for module in SPAWNING_MODULES}
     imported_names = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in {
-            "subprocess",
-            "os",
-            "asyncio",
-        }:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in SPAWNING_MODULES:
+                    module_names[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module in SPAWNING_MODULES:
             for alias in node.names:
                 if (node.module, alias.name) in SPAWNING_CALLS:
                     imported_names.add(alias.asname or alias.name)
@@ -79,7 +81,8 @@ def _direct_spawns(path: Path):
         if (
             isinstance(func, ast.Attribute)
             and isinstance(func.value, ast.Name)
-            and (func.value.id, func.attr) in SPAWNING_CALLS
+            and func.value.id in module_names
+            and (module_names[func.value.id], func.attr) in SPAWNING_CALLS
         ):
             yield f"{path.relative_to(PACKAGE)}:{node.lineno} {func.value.id}.{func.attr}"
         elif isinstance(func, ast.Name) and func.id in imported_names:
@@ -120,10 +123,17 @@ def test_the_detector_sees_a_direct_spawn(tmp_path):
     sample = tmp_path / "sample.py"
     sample.write_text(
         "import subprocess, os\n"
+        "import subprocess as sp\n"
+        "import pty\n"
         "from subprocess import Popen as P\n"
+        "from os import execlp\n"
         "subprocess.run(['x'])\n"
+        "sp.check_output(['x'])\n"
         "P(['x'])\n"
         "os.system('x')\n"
+        "os.spawnlp(os.P_WAIT, 'x', 'x')\n"
+        "execlp('x', 'x')\n"
+        "pty.spawn(['x'])\n"
     )
     global PACKAGE
     saved = PACKAGE
@@ -132,4 +142,4 @@ def test_the_detector_sees_a_direct_spawn(tmp_path):
         found = list(_direct_spawns(sample))
     finally:
         PACKAGE = saved
-    assert len(found) == 3, found
+    assert len(found) == 7, found

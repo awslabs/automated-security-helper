@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union, Any, Liter
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
 if TYPE_CHECKING:
     from automated_security_helper.utils.sandbox.backends import SpawnPlan
@@ -413,11 +414,10 @@ def _write_stream_log(
     results_dir_path = Path(results_dir)
     results_dir_path.mkdir(parents=True, exist_ok=True)
     filename = f"{class_name}.{stream_name}.log" if class_name else f"{stream_name}.log"
-    with open(
-        results_dir_path.joinpath(filename),
-        "w",
-        encoding="utf-8",
-        errors="replace",
+    # Not a plain open(): a sandboxed scanner can leave a symlink at this name, and
+    # ASH is not sandboxed. See utils/sandbox/fs_guard.py.
+    with open_for_write(
+        results_dir_path.joinpath(filename), encoding="utf-8", errors="replace"
     ) as log_file:
         log_file.write(text)
 

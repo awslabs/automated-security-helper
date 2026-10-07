@@ -66,6 +66,14 @@ it needs.
 - A results directory that is, or is reached through, a symlink is refused (the
   scanner is recorded `MISSING`). The default output directory is inside the source
   tree, so the scanned repository could otherwise plant one pointing anywhere.
+- ASH writes into the results directory after the scanner exits, and ASH is not
+  sandboxed. So after every sandboxed spawn, and again after the scan, ASH removes
+  every symlink and special file the scanner left there, and ASH's own writes there
+  (stream logs, `ASH.ScanResults.json`, the files a scanner override writes) open
+  without following a symlink. A process the scanner leaves running cannot keep
+  planting links afterwards: bwrap and firejail end the whole process tree with the
+  scanner, and the Landlock wrapper is a child subreaper that kills any process its
+  scanner left behind before it exits.
 - Network: under `--offline` no scanner gets a network. Online, only scanners that
   declare a network need get one (to fetch a vulnerability database, a rule pack, or
   audit data from a package registry); everything else runs with no network.
@@ -85,6 +93,12 @@ it needs.
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when its verification filter is configured | none | ASH's Python, in a worker subprocess |
 | cdk-nag | no | jsii's runtime cache | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
+
+detect-secrets' network grant follows its configuration, and that configuration can
+come from a `.secrets.baseline` committed to the scanned repository. A repository can
+therefore give detect-secrets a network by listing the verification filter in its
+baseline. Set `sandbox.network_scanners` to a list without `detect-secrets` to rule
+that out.
 
 detect-secrets and cdk-nag are Python libraries. They used to run inside the ASH
 process, where no OS sandbox can reach them; they now run in worker subprocesses that
@@ -251,6 +265,12 @@ With no network, no socket of any kind is allowed. With a network, IP sockets ar
 allowed and Unix sockets are not, except the resolver's (`mDNSResponder`), so Docker
 Desktop's socket and the launchd SSH agent stay out of reach. The scanner starts in a
 new session, with no controlling terminal.
+
+sandbox-exec does not end processes the scanner leaves running. ASH's removal of
+symlinks after each spawn and its non-following writes still apply, but a process that
+outlives the scanner could replace a subdirectory of the results directory with a
+link between the sweep and ASH's next write there. That is a known gap of this
+backend.
 
 Mach service lookup is allowed without a filter, because system libraries look up a
 long and version-dependent list of services and a missing one fails in ways that are

@@ -18,6 +18,7 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import sweep_writable
 from automated_security_helper.utils.sandbox.scope import (
     SandboxUnavailable,
     sandbox_scope,
@@ -388,6 +389,11 @@ class ScannerExecutor:
                             # duration (scan_result_processor), so sandboxed and
                             # unsandboxed results would differ in shape. The backend
                             # is in ash.log ("Scanner sandbox: using ...").
+                            if sandbox is not None:
+                                ASH_LOGGER.info(
+                                    f"Scanner sandbox: {scanner_config_name} on "
+                                    f"{target_type} runs under {sandbox.backend.name}"
+                                )
                             heartbeat.start()
                             with sandbox_scope(sandbox):
                                 try:
@@ -416,6 +422,11 @@ class ScannerExecutor:
                                 self._assess_content_databases(
                                     scanner_plugin, raw_results
                                 )
+                            if sandbox is not None:
+                                # Again after the scan, for anything a process that
+                                # outlived its spawn left behind, before the results
+                                # are written into this directory.
+                                sweep_writable([sandbox.results_dir])
                     else:
                         ASH_LOGGER.warning(f"{scanner_config_name} is not enabled!")
                 except Exception as e:

@@ -31,6 +31,7 @@ from automated_security_helper.utils.sandbox.backends import (
     SandboxBackend,
     SpawnPlan,
 )
+from automated_security_helper.utils.sandbox.fs_guard import sweep_writable
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     SandboxUnavailable as SandboxUnavailable,
@@ -287,6 +288,14 @@ def prepare_spawn(
         extra_read_paths=scope.extra_read_paths,
     )
     plan = scope.backend.plan(list(argv), base_env, policy)
+    # First in line once the process has exited: nothing ASH writes into the
+    # results directory afterwards may follow a link the scanner left there.
+    writable = list(policy.writable)
+
+    def sweep() -> None:
+        sweep_writable(writable)
+
+    plan.cleanup.insert(0, sweep)
     ASH_LOGGER.debug(
         f"Scanner sandbox ({scope.backend.name}, network={'yes' if policy.network else 'no'}) "
         f"for {scope.scanner_name}: {' '.join(plan.argv)}"

@@ -27,6 +27,14 @@ from automated_security_helper.utils.sandbox.backends import (
 from automated_security_helper.utils.sandbox.policy import build_scanner_policy
 
 
+#: The policy and the bwrap command line are POSIX: there is no Windows backend, and a
+#: Windows scan with a sandbox requested is MISSING before any policy is built (see
+#: TestScope.test_windows_auto_names_the_alternatives, which runs everywhere).
+posix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="sandbox policies exist only on Linux and macOS"
+)
+
+
 @pytest.fixture
 def layout(tmp_path, monkeypatch):
     home = tmp_path / "home"
@@ -88,6 +96,7 @@ class TestNetwork:
         )
 
 
+@posix_only
 class TestPaths:
     def test_only_the_results_directory_is_writable(self, layout):
         policy = _policy(layout)
@@ -139,6 +148,7 @@ class TestPaths:
         assert Path(os.path.realpath(extra)) in _resolved(policy.read_only)
 
 
+@posix_only
 class TestEnvironment:
     def test_credentials_are_dropped_and_declared_prefixes_kept(self, layout):
         policy = _policy(layout, SandboxRequirements(env_prefixes=("GRYPE_",)))
@@ -174,6 +184,7 @@ class TestEnvironment:
         assert online.filter_env({"HTTPS_PROXY": "p"})["HTTPS_PROXY"] == "p"
 
 
+@posix_only
 class TestBwrapCommandLine:
     def test_mount_order_and_namespaces(self, layout):
         backend = BwrapBackend()
@@ -316,13 +327,15 @@ class TestScope:
             offline=True,
         )
         with sandbox_scope(scope):
-            result = run_command(["echo hi"], shell=True)
+            # nosec B604 - asserts the sandbox refuses to start a shell command
+            result = run_command(["echo hi"], shell=True)  # nosec B604
         # Reported as a command that could not start (SandboxUnavailable is an
         # OSError), never run unwrapped.
         assert result.returncode == SPAWN_FAILURE_RETURNCODE
         assert "shell" in result.stderr
 
 
+@posix_only
 class TestReviewFindings:
     """Regressions for the gaps the policy review found."""
 
@@ -442,6 +455,7 @@ class TestProbeScope:
             clear_backend_cache()
 
 
+@posix_only
 class TestWritableWinsOverReadOnly:
     """A read-only bind inside the writable results directory must not cover it.
 
@@ -493,6 +507,7 @@ class TestWritableWinsOverReadOnly:
         assert (work / "written").read_text() == "ok\n"
 
 
+@posix_only
 def test_every_import_path_directory_is_readable(layout, monkeypatch, tmp_path):
     """An editable install's .pth adds sys.path entries outside site-packages.
 
@@ -511,3 +526,13 @@ def test_every_import_path_directory_is_readable(layout, monkeypatch, tmp_path):
             ):
                 continue
             assert Path(os.path.realpath(entry)) in exposed, entry
+
+
+@posix_only
+def test_an_import_path_entry_elsewhere_in_home_is_not_mounted(layout, monkeypatch):
+    """PYTHONPATH=~/anything must not make that directory readable to scanners."""
+    stray = layout.home / "notes"
+    stray.mkdir()
+    monkeypatch.setattr(sys, "path", [*sys.path, str(stray)])
+    exposed = _resolved(_policy(layout).read_only)
+    assert Path(os.path.realpath(stray)) not in exposed

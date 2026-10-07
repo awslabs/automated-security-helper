@@ -43,6 +43,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
 
@@ -483,8 +484,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ``self._secrets_collection`` exactly as before.
 
         Returns None when the worker was killed at ``scan_timeout``. The caller then
-        keeps the collection it already holds (the parsed baseline, or empty), which
-        is what the in-process scan reported after a timeout.
+        keeps the collection it already holds (the parsed baseline, or empty). This
+        differs from the in-process scan, which kept whatever it had found before
+        the cutoff: a killed worker's partial results are not recoverable. The scan
+        is reported as timed out either way, so a partial result was never a
+        complete one.
 
         Raises:
             ScannerError: the worker failed, or exited 0 without writing results.
@@ -504,7 +508,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         request_file = work_dir.joinpath("detect-secrets-worker-request.json")
         output_file = work_dir.joinpath("detect-secrets-worker-output.json")
         output_file.unlink(missing_ok=True)
-        with open(request_file, mode="w", encoding="utf-8") as fp:
+        with open_for_write(request_file) as fp:
             json.dump(
                 {
                     "root": str(root),
@@ -515,13 +519,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 fp,
             )
         try:
-            # cwd is the scanner's results directory, which only ASH writes to:
-            # `python -m` puts the working directory first on sys.path, so running
-            # from the scanned tree would let a repository's own `detect_secrets/`
-            # package replace the library. The scanner-level directory rather than
-            # the per-target one beneath it, because the sandbox makes the working
-            # directory readable and that must not shadow the writable results
-            # directory with a read-only mount.
+            # cwd is the scanner's results directory, which ASH empties at the
+            # start of each run: `python -m` puts the working directory first on
+            # sys.path, so running from the scanned tree would let a repository's
+            # own `detect_secrets/` package replace the library.
             response = run_command_with_output_handling(
                 command=self._worker_command(request_file, output_file),
                 stdout_preference="return",
@@ -970,7 +971,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
                 ],
             )
-            with open(results_file, mode="w", encoding="utf-8") as fp:
+            with open_for_write(results_file) as fp:
                 report_str = sarif_report.model_dump_json(
                     exclude_none=True,
                     exclude_unset=True,

@@ -329,15 +329,28 @@ def _ash_paths() -> List[Path]:
     # (detect-secrets, cdk-nag) imports from the same entries, and an editable
     # install's .pth file adds entries outside site-packages. Landlock denies an
     # entry it was not given, so the import fails with ModuleNotFoundError.
+    #
+    # Inside $HOME only entries that belong to the interpreter (under sys.prefix or
+    # sys.base_prefix, which is where uv keeps managed Pythons and venvs) or that
+    # hold the ASH package are added: a PYTHONPATH pointing at ~/anything would
+    # otherwise mount that directory for every scanner.
     real_home = Path(os.path.realpath(Path.home()))
-    import_path = [
-        Path(entry)
-        for entry in sys.path
-        if entry
-        and os.path.isabs(entry)
-        and os.path.isdir(entry)
-        and Path(os.path.realpath(entry)) not in (Path("/"), real_home)
-    ]
+    interpreter_roots = {
+        Path(os.path.realpath(p))
+        for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)
+    } | {Path(os.path.realpath(import_root))}
+
+    def _importable(entry: str) -> bool:
+        if not entry or not os.path.isabs(entry) or not os.path.isdir(entry):
+            return False
+        real = Path(os.path.realpath(entry))
+        if real in (Path("/"), real_home):
+            return False
+        if real_home not in real.parents:
+            return True
+        return any(real == root or root in real.parents for root in interpreter_roots)
+
+    import_path = [Path(entry) for entry in sys.path if _importable(entry)]
     return _existing(
         [
             package_dir,

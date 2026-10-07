@@ -224,6 +224,22 @@ def main() -> int:
         pair_rows, pair_problems = compare(label, off, boxed)
         rows += pair_rows
         problems += pair_problems
+        # Identical results prove nothing if the sandbox was never applied, and
+        # since the backend no longer shows in the results, only the log can say.
+        log_text = (boxed / "ash.log").read_text(encoding="utf-8", errors="replace")
+        box_statuses, _, _ = read_results(boxed)
+        if f"Scanner sandbox: using {args.sandbox}" not in log_text:
+            problems.append(
+                f"[{label}] the sandboxed run never selected {args.sandbox}"
+            )
+        for name, status in box_statuses.items():
+            if status in ("SKIPPED", "MISSING"):
+                continue
+            if (
+                f"Scanner sandbox: {name} on source runs under {args.sandbox}"
+                not in log_text
+            ):
+                problems.append(f"[{label}] {name} ran but not under {args.sandbox}")
         statuses, findings, _ = read_results(off)
         total = sum(len(f) for f in findings.values())
         if total < args.min_findings:

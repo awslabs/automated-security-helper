@@ -167,6 +167,8 @@ def _scan(
     outside = home / "outside"
     outside.mkdir()
     (outside / "secret.txt").write_text(SECRET)
+    for victim in ("victim-results.txt", "victim-log.txt"):
+        (outside / victim).write_text("original\n")
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("print('hello')\n")
@@ -190,9 +192,14 @@ def _scan(
         "udp_port": listeners.udp.getsockname()[1],
         "host_ip": host_ip or "127.0.0.1",
         "unix_socket": str(listeners.unix_path),
+        "victims": {
+            "ASH.ScanResults.json": str(outside / "victim-results.txt"),
+            "SandboxEscapeScanner.stdout.log": str(outside / "victim-log.txt"),
+        },
         "shm_file": (
-            f"/dev/shm/ash-sandbox-probe-{os.getpid()}-{mode}"
-            if Path("/dev/shm").is_dir()
+            # nosec B108 - the probe's target; the test asserts it never appears
+            f"/dev/shm/ash-sandbox-probe-{os.getpid()}-{mode}"  # nosec B108
+            if Path("/dev/shm").is_dir()  # nosec B108
             else ""
         ),
     }
@@ -246,6 +253,17 @@ def _scan(
         or (source / "pwned.txt").exists()
         else "blocked: source tree unchanged"
     )
+    # Planting the links is allowed (it is the scanner's own directory); what must
+    # not happen is ASH writing through them afterwards.
+    outcomes.pop("plant_symlinks", None)
+    victims_intact = all(
+        Path(v).read_text() == "original\n" for v in spec["victims"].values()
+    )
+    outcomes["_parent_writes_contained"] = (
+        "blocked: ASH did not write through the planted links"
+        if victims_intact
+        else "succeeded"
+    )
     if spec["shm_file"]:
         # Only the host side counts. bwrap gives the scanner a private /dev/shm, so
         # its write can succeed there without anything reaching the host.
@@ -266,7 +284,11 @@ def _scan(
 def test_every_attempt_succeeds_without_a_sandbox(tmp_path, listeners):
     """The negative control. If this fails, the probe is broken, not the sandbox."""
     outcomes = _run_escape(tmp_path, listeners, "off")
-    failed = {k: v for k, v in outcomes.items() if v != "succeeded"}
+    failed = {
+        k: v
+        for k, v in outcomes.items()
+        if v != "succeeded" and k not in CONTROL_EXEMPT
+    }
     assert not failed, f"attempts that should have succeeded unsandboxed: {failed}"
     assert any(SECRET.encode() in data for data in listeners.received)
 
@@ -285,8 +307,17 @@ BLOCKED_BY = (
     "blocked: source tree unchanged",
     "blocked: nothing written outside the results directory",
     "blocked: nothing left in /dev/shm",
+    "blocked: ASH did not write through the planted links",
 )
 
+
+#: Attempts the negative control is not expected to make succeed, and why.
+CONTROL_EXEMPT = {
+    # ASH writes its own files without following symlinks in every mode, so the
+    # attack fails unsandboxed too; and an unsandboxed scanner could simply write
+    # the victim itself.
+    "_parent_writes_contained": "ASH never follows a link at its own output names",
+}
 
 #: Attempts a backend is documented not to block (docs/content/docs/scanner-sandbox.md).
 #: Listed here rather than skipped, so each one is asserted to be exactly the known
@@ -307,7 +338,9 @@ def test_every_attempt_is_blocked_by_the_sandbox(
     # The negative control first, in the same test, so this test cannot pass on a
     # machine where the probe's attempts would have failed anyway.
     control = _run_escape(tmp_path_factory.mktemp("control"), listeners, "off")
-    not_real = {k: v for k, v in control.items() if v != "succeeded"}
+    not_real = {
+        k: v for k, v in control.items() if v != "succeeded" and k not in CONTROL_EXEMPT
+    }
     assert not not_real, (
         f"the control could not escape either, so proves nothing: {not_real}"
     )
