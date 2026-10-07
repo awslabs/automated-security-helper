@@ -35,6 +35,10 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.schemas.sarif_schema_model import Location
 from cfn_tools import dump_yaml
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import (
+    apply_environ_overrides,
+    restore_environ,
+)
 
 
 class CdkNagWrapperResponse:
@@ -695,15 +699,18 @@ def run_cdk_nag_against_cfn_template(
     # permanent writes would race with other work).
     # A lock serialises the save-modify-execute-restore cycle so that
     # parallel ThreadPoolExecutor invocations don't clobber each other.
+    # That lock only orders cdk-nag against cdk-nag. The writes themselves go
+    # through utils/process_env.py, whose process-wide lock every spawn helper
+    # also takes to copy the environment it hands a child: on Linux a child
+    # spawned with the live environ can exec against the array these writes
+    # free, and fail with EFAULT (seen as cfn-nag "returned no stdout").
     with _env_lock:
         _jsii_env_keys = (
             "NODE_NO_WARNINGS",
             "JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION",
             "JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION",
         )
-        _original_jsii_env = {k: os.environ.get(k) for k in _jsii_env_keys}
-        for _k in _jsii_env_keys:
-            os.environ[_k] = "1"
+        _original_jsii_env = apply_environ_overrides(dict.fromkeys(_jsii_env_keys, "1"))
 
         # Suppress JSII stack traces by redirecting stderr for entire function
         import sys
@@ -1156,11 +1163,7 @@ def run_cdk_nag_against_cfn_template(
                 devnull_file.close()
             # Restore JSII-related env vars so we don't leak into the parent
             # process. Vars that didn't exist originally are removed.
-            for _k, _orig in _original_jsii_env.items():
-                if _orig is None:
-                    os.environ.pop(_k, None)
-                else:
-                    os.environ[_k] = _orig
+            restore_environ(_original_jsii_env)
 
 
 if __name__ == "__main__":

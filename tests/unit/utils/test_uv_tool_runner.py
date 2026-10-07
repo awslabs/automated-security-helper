@@ -1,5 +1,6 @@
 """Tests for utils/uv_tool_runner.py — covers UVToolRunner class methods."""
 
+import os
 import re
 import subprocess  # nosec B404
 import threading
@@ -1266,7 +1267,9 @@ class TestGetUvToolCommand:
                 "bandit",
                 "--version",
             ]
-            assert probe.kwargs["env"] is None
+            # An explicit copy of the environment, never None: see
+            # utils/process_env.py.
+            assert probe.kwargs["env"] == dict(os.environ)
 
     def test_falls_back_to_direct_binary_when_uv_probe_fails(self, reset_module_caches):
         with (

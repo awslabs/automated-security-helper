@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 # How often the install progress monitor calls back while an attempt is running.
@@ -101,6 +102,7 @@ class UVToolRunner:
                 text=True,
                 timeout=10,
                 check=False,
+                env=snapshot_environ(),
                 encoding="utf-8",
                 errors="replace",
             )
@@ -122,6 +124,7 @@ class UVToolRunner:
                 text=True,
                 timeout=30,
                 check=True,
+                env=snapshot_environ(),
                 encoding="utf-8",
                 errors="replace",
             )
@@ -226,7 +229,7 @@ class UVToolRunner:
 
                 probe_env: Optional[Dict[str, str]] = None
                 if is_offline_mode():
-                    probe_env = os.environ.copy()
+                    probe_env = snapshot_environ()
                     probe_env["UV_OFFLINE"] = "1"
                     command.append("--offline")
 
@@ -245,7 +248,7 @@ class UVToolRunner:
                     command,
                     capture_output=True,
                     text=True,
-                    env=probe_env,
+                    env=probe_env if probe_env is not None else snapshot_environ(),
                     timeout=_UV_TOOL_VERSION_PROBE_TIMEOUT,
                     check=False,
                     encoding="utf-8",
@@ -307,7 +310,6 @@ class UVToolRunner:
         Returns:
             True if installation succeeded, False otherwise
         """
-        import os
 
         if not self.is_uv_available():
             return False
@@ -471,6 +473,7 @@ class UVToolRunner:
                     text=True,
                     timeout=timeout,
                     check=True,
+                    env=snapshot_environ(),
                     encoding="utf-8",
                     errors="replace",
                 )
@@ -583,10 +586,10 @@ class UVToolRunner:
         """
         from automated_security_helper.utils.subprocess_utils import (
             TIMEOUT_RETURNCODE,
+            SpawnFailedProcess,
             TimedOutProcess,
             run_command_with_output_handling,
         )
-        import os
 
         if not self.is_uv_available():
             raise UVToolRunnerError("UV is not available")
@@ -602,7 +605,7 @@ class UVToolRunner:
         from automated_security_helper.core.constants import is_offline_mode
 
         if is_offline_mode():
-            env = dict(env) if env is not None else os.environ.copy()
+            env = dict(env) if env is not None else snapshot_environ()
             env["UV_OFFLINE"] = "1"
             command.append("--offline")
 
@@ -661,9 +664,13 @@ class UVToolRunner:
                 # dict says timed_out and CompletedProcess has no field for it, so
                 # rebuilding a plain one made a killed scanner indistinguishable
                 # from one that exited 124 by itself.
-                result_type = (
+                # SpawnFailedProcess does the same for a uv that never started,
+                # so the mixin can tell it from a uv that ran and exited 127.
+                result_type: type[subprocess.CompletedProcess] = (
                     TimedOutProcess
                     if response.get("timed_out")
+                    else SpawnFailedProcess
+                    if response.get("spawn_failed")
                     else subprocess.CompletedProcess
                 )
                 result = result_type(
@@ -696,7 +703,7 @@ class UVToolRunner:
                 text=text,
                 check=check,
                 timeout=timeout,
-                env=env,
+                env=env if env is not None else snapshot_environ(),
                 encoding="utf-8" if text else None,
                 errors="replace" if text else None,
             )
@@ -782,6 +789,7 @@ class UVToolRunner:
                 text=True,
                 timeout=30,
                 check=False,
+                env=snapshot_environ(),
                 encoding="utf-8",
                 errors="replace",
             )
@@ -823,6 +831,7 @@ class UVToolRunner:
                 text=True,
                 timeout=60,
                 check=True,
+                env=snapshot_environ(),
                 encoding="utf-8",
                 errors="replace",
             )
@@ -1126,7 +1135,7 @@ def get_uv_tool_command(
             probe_env: Optional[Dict[str, str]] = None
             if is_offline_mode():
                 probe_command.insert(3, "--offline")
-                probe_env = os.environ.copy()
+                probe_env = snapshot_environ()
                 probe_env["UV_OFFLINE"] = "1"
             try:
                 probe = subprocess.run(  # nosec B603 — fixed list of trusted strings
@@ -1134,7 +1143,7 @@ def get_uv_tool_command(
                     capture_output=True,
                     text=True,
                     check=False,
-                    env=probe_env,
+                    env=probe_env if probe_env is not None else snapshot_environ(),
                     timeout=_UV_VERSION_PROBE_TIMEOUT,
                 )
                 if probe.returncode == 0:

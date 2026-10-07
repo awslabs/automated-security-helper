@@ -48,6 +48,17 @@
 
 ### Behavior changes
 
+- **A scanner's `offline: false` no longer overrides ASH's offline mode.** ASH's
+  offline mode (`--offline`, `ASH_OFFLINE`, or an image built with `--offline`) now
+  applies to every scanner, and `options.offline: false` means "follow ASH". It used
+  to win over `ASH_OFFLINE` in the container, which put a scanner back online during an
+  air-gapped run; `ash config init` writes `offline: false` for every scanner that has
+  the option, so generated configs did that by default. `options.offline: true` still
+  runs one scanner offline while ASH is online. No scanner can now be opted back online
+  under `ASH_OFFLINE`. A local `--offline` scan with no semgrep or opengrep rule cache
+  now reports that scanner MISSING with the cache guidance and exits 1 as an incomplete
+  scan, where it used to pass by going online. See
+  [Which scanners run offline](docs/content/docs/advanced-usage.md#which-scanners-run-offline).
 - **`fail_on_incomplete_scanners` now defaults to `true`.** A scan in which a
   selected scanner did not complete — status `ERROR` (it ran and failed) or `MISSING`
   (its dependencies were unavailable, so it never ran) — exits 1 without anyone
@@ -473,7 +484,34 @@
   `diff_scan_results` functions in `cli/mcp_server.py` now take the MCP `Context` as
   their first argument, as the other tools already did. The MCP tool schemas are
   unchanged; only direct Python callers need to pass it.
-
+- **A scanner whose tool could not be started is reported as ERROR.** When the
+  exec itself failed (an `OSError` such as a missing binary or `[Errno 14] Bad address`),
+  the subprocess helpers returned exit code 1. Semgrep and bandit accept 1, so the scan
+  went on and the only error shown was a missing SARIF file. The helpers now return 127
+  with a `Could not start <cmd>: <error>` message, 127 is never an accepted exit code,
+  and the scanner is recorded as ERROR. The spawn is not retried.
+- **Scanner spawns no longer fail intermittently with `[Errno 14] Bad address`.** On
+  Linux, Python 3.10+ starts children with vfork, and a spawn with `env=None` hands the
+  child the parent's live `environ` array until `execve`. Scanners run in parallel
+  threads and cdk-nag sets and removes three JSII variables around every template, so
+  another scanner's child could exec against freed memory. In CI this showed up as
+  cfn-nag recording "returned no stdout" and "1 of 9 targets unevaluated", with a rerun
+  passing. ASH's spawn helpers and the other spawns that run alongside scanners now pass
+  an explicit copy of the environment, and runtime changes to `os.environ` go through
+  one process-wide lock in `utils/process_env.py`. Scanners see the same variables as
+  before. An offline scan also now restores a pre-existing `ASH_OFFLINE` value when it
+  finishes rather than clearing it.
+- **`ash scan --offline` in local mode runs every scanner offline.** checkov, grype,
+  npm-audit, opengrep, semgrep, syft and the trivy-repo plugin defaulted their
+  `offline` option to `ASH_OFFLINE` as read when their config was built, and ASH builds
+  the default scanner configs at import, before `--offline` sets `ASH_OFFLINE`. Those
+  scanners kept `offline: false` and used the network: checkov ran without
+  `--skip-download` and opened three HTTPS connections, grype and syft kept their
+  database and update checks, and semgrep ran `--config p/ci --metrics auto` against the
+  registry instead of the offline rule cache. Offline mode is now resolved when each
+  scanner runs. The precedence change and the new exit code for a missing rule cache
+  are under Behavior changes. The option's schema default is now a plain `false`
+  instead of the import-time environment value.
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
   `>=2.4.5,<2.5.0` to `>=2.4.5,<2.6.0`, and the recommended version from 2.4.5 to 2.5.2.
   Two 2.5.x changes needed handling. Its SARIF locations are now relative to the scan
