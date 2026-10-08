@@ -1651,6 +1651,13 @@
 # name: test_list_scanners[result]
   dict({
     'result': dict({
+      'actionlint': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'actionlint',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
       'bandit': dict({
         'dependencies_satisfied': True,
         'enabled': True,
@@ -1664,6 +1671,20 @@
         'name': 'cdk_nag',
         'offline_strategy': 'bundled',
         'version': '<CDK_NAG_VERSION>',
+      }),
+      'cfn_guard': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'cfn_guard',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'cfn_lint': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'cfn_lint',
+        'offline_strategy': 'bundled',
+        'version': '<CFN_LINT_VERSION>',
       }),
       'cfn_nag': dict({
         'dependencies_satisfied': True,
@@ -1690,6 +1711,13 @@
         'dependencies_satisfied': True,
         'enabled': True,
         'name': 'ferret_scan',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
+      'gitleaks': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'gitleaks',
         'offline_strategy': 'bundled',
         'version': None,
       }),
@@ -1735,12 +1763,26 @@
         'offline_strategy': 'cache_flags',
         'version': None,
       }),
+      'trivy': dict({
+        'dependencies_satisfied': True,
+        'enabled': False,
+        'name': 'trivy',
+        'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
       'trivy_repo': dict({
         'dependencies_satisfied': True,
         'enabled': True,
         'name': 'trivy_repo',
         'offline_strategy': 'cache_flags',
         'version': None,
+      }),
+      'zizmor': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'zizmor',
+        'offline_strategy': 'bundled',
+        'version': '<ZIZMOR_VERSION>',
       }),
     }),
     'tool': 'list_scanners',
