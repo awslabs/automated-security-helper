@@ -351,6 +351,12 @@ library only) that restricts itself and then `exec`s the scanner:
   DNS too, and refuses `io_uring_setup`, because io_uring can create sockets without
   the `socket` syscall. Landlock's own network rules (ABI 4, Linux 6.7) cover only TCP
   and are added as a second layer.
+- A tool that creates a Unix socket of its own fails too, under this backend and, since
+  bwrap and firejail run the same filter, under every Linux backend. Python 3.14's
+  default multiprocessing start method, `forkserver`, is one: it listens on a Unix
+  socket, so a Python tool on 3.14 that relies on the default fails with
+  `PermissionError`, while the `fork` and `spawn` methods work. ASH's own workers
+  select `fork`, and the builtin scanners do not rely on the default.
 - The wrapper starts a new session before it execs the scanner, so the scanner has no
   controlling terminal to inject keystrokes into.
 - `/dev/shm` is the host's and is writable, because POSIX semaphores live there and
