@@ -1,0 +1,4 @@
+# Known positive: requests 2.19.1 has published advisories with fixed versions.
+requests==2.19.1
+# Known negative: six 1.17.0 has no published advisory.
+six==1.17.0

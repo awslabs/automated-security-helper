@@ -11,6 +11,15 @@ The Trivy plugin enables ASH to leverage Trivy's powerful scanning capabilities 
 - **Secret Detection**: Finds hardcoded secrets and sensitive information
 - **License Scanning**: Analyzes software licenses and compliance issues
 
+## Two scanners
+
+This module holds two trivy scanners:
+
+- `trivy-repo` (this README): all four trivy scanners, on by default once the module is listed. Unchanged.
+- `trivy`: `trivy fs`, the `vuln` scanner only by default, held to the trivy database's 24h bound. It is off by default even with the module listed, so a config that lists this module for `trivy-repo` keeps its results; turn it on with `scanners.trivy.enabled: true`. See [docs/content/docs/plugins/community/trivy-fs-plugin.md](../../../docs/content/docs/plugins/community/trivy-fs-plugin.md).
+
+With both on, trivy runs twice and each finding is reported once per scanner.
+
 ## Prerequisites
 
 ### Install Trivy CLI
