@@ -664,6 +664,7 @@ PERMISSIVE_SPDX = frozenset(
         "BSD-3-Clause",
         "ISC",
         "MIT",
+        "MIT-0",
         "Unlicense",
     }
 )
@@ -826,6 +827,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "aws-guard-rules-registry/LICENSE": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",  # pragma: allowlist secret
     "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
+    "cfn-lint commit": "be66fb3e224b41c85065cb3002ad0b24e31db535",  # pragma: allowlist secret
     "checkov commit": "e5f995a6e2dd033e99354b6c477d056eb5eaf2d0",  # pragma: allowlist secret
     "cfn-guard commit": "e531ef56092abb662e08fc6062c92db6d53f99c9",  # pragma: allowlist secret
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
@@ -844,6 +846,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "uv commit": "46b84fd0bfec23b72f29e8e2185ba68a65052f48",  # pragma: allowlist secret
     "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
     "uv/LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",  # pragma: allowlist secret
+    "zizmor commit": "99a054ed9283c90abdd2d5b9fb5101d27dde9783",  # pragma: allowlist secret
 }
 
 
@@ -929,6 +932,20 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
                 "NOTICE",
             ),
         ),
+    ),
+    # The cfn-lint community scanner's uv tool. The wheel's dist-info carries
+    # licenses/LICENSE and licenses/NOTICE.
+    "cfn-lint": ThirdPartyLicense(
+        tool="cfn-lint",
+        version="v1.57.2",
+        license="MIT-0",
+        repository="https://github.com/aws-cloudformation/cfn-lint",
+        commit=_THIRD_PARTY_HASHES["cfn-lint commit"],
+        files=(
+            LicenseFile("LICENSE"),
+            LicenseFile("NOTICE"),
+        ),
+        distribution="cfn-lint",
     ),
     # The wheel's dist-info carries licenses/LICENSE. The repository has no NOTICE.
     "checkov": ThirdPartyLicense(
@@ -1022,6 +1039,17 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             _from_source("uv", "https://github.com/astral-sh/uv", "LICENSE-MIT"),
         ),
         executables=("uv", "uvx"),
+    ),
+    # The zizmor community scanner's uv tool, a compiled Rust binary in a wheel. The
+    # wheel's dist-info carries licenses/LICENSE.
+    "zizmor": ThirdPartyLicense(
+        tool="zizmor",
+        version="v1.30.1",
+        license="MIT",
+        repository="https://github.com/zizmorcore/zizmor",
+        commit=_THIRD_PARTY_HASHES["zizmor commit"],
+        files=(LicenseFile("LICENSE"),),
+        distribution="zizmor",
     ),
 }
 
