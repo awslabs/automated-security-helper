@@ -625,22 +625,41 @@ vl_load_n1() {
 # Says what the upgrade crosses in the maintainer scripts. N-1 always differs from N in
 # its tree, not necessarily in these files; when they are byte-identical the leg still
 # proves the upgrade works, but not that changed scripts meet an older install. Each
-# argument is a path relative to the repository root. Informational: never fails.
+# argument is a path relative to the repository root. Informational: it fails only when
+# it cannot hash a file (see vl_sha256), never on what the comparison finds.
 vl_report_script_delta() {
-  local rel changed=()
+  local rel prev_sum head_sum changed=()
   for rel in "$@"; do
-    # sha256sum rather than cmp: coreutils is in every image these legs use, diffutils
-    # is not. A file missing on either side reads as a difference.
-    if [ "$(sha256sum <"$PREV_SRC/$rel" 2>/dev/null || echo missing-n1)" \
-      != "$(sha256sum <"$REPO/$rel" 2>/dev/null || echo missing-n)" ]; then
+    # A file missing on either side reads as a difference.
+    if [ ! -f "$PREV_SRC/$rel" ] || [ ! -f "$REPO/$rel" ]; then
       changed+=("$rel")
+      continue
     fi
+    prev_sum="$(vl_sha256 "$PREV_SRC/$rel")" || exit 1
+    head_sum="$(vl_sha256 "$REPO/$rel")" || exit 1
+    [ "$prev_sum" = "$head_sum" ] || changed+=("$rel")
   done
   if [ "${#changed[@]}" -gt 0 ]; then
     vl_say "   maintainer scripts that differ between N-1 and N: ${changed[*]}"
   else
     vl_say "   maintainer scripts are byte-identical in N-1 and N ($*): this upgrade crosses a code change, not a script change"
   fi
+}
+
+# The SHA-256 of a file, as hex. sha256sum rather than cmp: coreutils is in every image
+# these legs use, diffutils is not. macOS has no sha256sum before 15 but ships shasum.
+# A host with neither fails here: a fallback string in place of a digest would make two
+# identical files read as different and hide why.
+vl_sha256() {
+  local out
+  if command -v sha256sum >/dev/null 2>&1; then
+    out="$(sha256sum <"$1")" || vl_fail "sha256sum could not read $1"
+  elif command -v shasum >/dev/null 2>&1; then
+    out="$(shasum -a 256 <"$1")" || vl_fail "shasum could not read $1"
+  else
+    vl_fail "neither sha256sum nor shasum is on PATH, so $1 cannot be compared"
+  fi
+  printf '%s\n' "${out%% *}"
 }
 
 # The payload gate as N-1's tree defines it, for the N-1 package.

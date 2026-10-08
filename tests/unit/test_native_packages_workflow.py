@@ -25,6 +25,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -714,6 +715,54 @@ def test_the_script_delta_is_reported_either_way(
     result = run_bash(script)
     assert result.returncode == 0, result.stderr
     assert expected in result.stdout
+
+
+def _delta_script(tmp_path: Path, same: bool, path_dir: Path) -> str:
+    prev = tmp_path / "prev" / "packaging" / "deb" / "debian"
+    prev.mkdir(parents=True)
+    real = (REPO_ROOT / "packaging" / "deb" / "debian" / "postinst").read_bytes()
+    (prev / "postinst").write_bytes(real if same else real + b"# changed\n")
+    return (
+        f'PATH="{bash_path(path_dir)}"\n'
+        f'REPO="{bash_path(REPO_ROOT)}"; . "$REPO/packaging/verify-lib.sh"\n'
+        f'PREV_SRC="{bash_path(tmp_path / "prev")}"\n'
+        "vl_report_script_delta packaging/deb/debian/postinst\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("same", "expected"), [(True, "byte-identical"), (False, "differ")]
+)
+def test_the_script_delta_falls_back_to_shasum_without_sha256sum(
+    tmp_path: Path, same: bool, expected: str
+) -> None:
+    """A macOS before 15 has shasum and no sha256sum: identical files must still match."""
+    real = shutil.which("sha256sum") or shutil.which("shasum")
+    assert real, "neither sha256sum nor shasum on this host"
+    shasum_args = "" if real.endswith(("sha256sum", "sha256sum.exe")) else " -a 256"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_lf(
+        bin_dir / "shasum",
+        "#!/bin/sh\n"
+        '[ "$1 $2" = "-a 256" ] || { echo "shasum shim: want -a 256" >&2; exit 2; }\n'
+        f'exec "{bash_path(real)}"{shasum_args}\n',
+        executable=True,
+    )
+
+    result = run_bash(_delta_script(tmp_path, same, bin_dir))
+    assert result.returncode == 0, result.stderr
+    assert expected in result.stdout
+
+
+def test_the_script_delta_fails_loudly_with_no_hash_tool(tmp_path: Path) -> None:
+    """Without one, identical files used to read as different, with the cause hidden."""
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    result = run_bash(_delta_script(tmp_path, True, empty))
+    assert result.returncode == 1, result.stdout
+    assert "neither sha256sum nor shasum is on PATH" in result.stderr
+    assert "differ" not in result.stdout
 
 
 def test_the_refused_branch_of_the_alternatives_control_requires_its_reason() -> None:
