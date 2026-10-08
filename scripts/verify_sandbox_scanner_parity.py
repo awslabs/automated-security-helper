@@ -33,11 +33,13 @@ import argparse
 import json
 import os
 import shutil
-import subprocess  # nosec B404 - this script drives `ash scan`
+import subprocess  # nosec B404 - this script drives `ashx scan`
 import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
+
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME as CLI_NAME
 
 REPO = Path(__file__).resolve().parents[1]
 SNAPSHOT_REPO = REPO / "tests" / "test_data" / "snapshot_fixture" / "repo"
@@ -98,8 +100,7 @@ def run_scan(
         "--sandbox",
         mode,
         "--no-progress",
-        "--fail-on-findings",
-        "false",
+        "--no-fail-on-findings",
         "--no-fail-on-incomplete-scanners",
     ]
     if offline:
@@ -206,11 +207,13 @@ def main() -> int:
     )
     parser.add_argument("--min-findings", type=int, default=10)
     parser.add_argument(
-        "--ash", default=None, help="ash command, default: this interpreter's"
+        "--ash",
+        default=None,
+        help=f"the ASH command, default: this interpreter's {CLI_NAME}",
     )
     args = parser.parse_args()
 
-    ash = [args.ash] if args.ash else [str(Path(sys.executable).with_name("ash"))]
+    ash = [args.ash] if args.ash else [str(Path(sys.executable).with_name(CLI_NAME))]
     work = Path(tempfile.mkdtemp(prefix="ash-sandbox-parity-"))
     source = build_fixture(work)
     rows: List[dict] = []

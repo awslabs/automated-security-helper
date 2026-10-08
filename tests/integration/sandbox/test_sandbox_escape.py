@@ -7,7 +7,7 @@ The scanner is ``tests/test_data/sandbox_escape``: a third-party-style plugin wh
 (escape_probe.py) tries to read a planted ~/.ssh key and a file outside the source
 tree, write outside its results directory, modify the source tree, open TCP and UDP
 sockets under --offline, and read credentials from its environment and from other
-processes' /proc/<pid>/environ. It runs through a real ``ash scan``, so the spawn goes
+processes' /proc/<pid>/environ. It runs through a real ``ashx scan``, so the spawn goes
 through the same choke point as a builtin scanner.
 
 ``--sandbox off`` is the negative control: every attempt has to succeed there, which is
@@ -34,6 +34,7 @@ from typing import Dict, Iterator
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
 
@@ -140,10 +141,15 @@ def listeners(tmp_path_factory) -> Iterator[_Listeners]:
 
 
 def _ash_executable() -> str:
-    beside = Path(sys.executable).with_name("ash")
-    found = str(beside) if beside.exists() else shutil.which("ash")
+    # The canonical command, not the deprecated `ash`, whose own deprecation line
+    # would land in the stderr this test reads.
+    beside = Path(sys.executable).with_name(CANONICAL_CLI_NAME)
+    found = str(beside) if beside.exists() else shutil.which(CANONICAL_CLI_NAME)
     if not found:
-        pytest.fail("the ash entry point is not installed beside this interpreter")
+        pytest.fail(
+            f"the {CANONICAL_CLI_NAME} entry point is not installed beside this "
+            "interpreter"
+        )
     return found
 
 
@@ -229,8 +235,7 @@ def _scan(
         mode,
         "--offline",
         "--no-progress",
-        "--fail-on-findings",
-        "false",
+        "--no-fail-on-findings",
     ]
     result = subprocess.run(  # nosec B603 - fixed argv
         command,
