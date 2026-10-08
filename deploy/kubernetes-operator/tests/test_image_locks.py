@@ -8,6 +8,7 @@ runtime export is real, and that no install in either Dockerfile bypasses the fi
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 from pathlib import Path
@@ -254,50 +255,109 @@ class TestTheAshRuntimeExport:
         assert not overlap, f"scanner-requirements.txt repeats {overlap}; run relock.sh"
 
 
-INSTALLER = re.compile(r"\b(pip3?|uv|easy_install|pipx|conda|mamba|poetry)\b")
+# The first word of a command that installs packages. pip with any version suffix
+# (pip, pip3, pip3.12), and every other installer, which is refused outright.
+INSTALLER = re.compile(r"pip[0-9.]*|uv|uvx|easy_install|pipx|conda|mamba|micromamba|poetry|pdm")
+SHELLS = frozenset({"sh", "bash", "dash", "ash", "zsh"})
+# Install-shaped text anywhere in a RUN. A RUN that contains one and in which the parser
+# recognised no installer command is flagged as unreadable rather than passed.
+INSTALL_TEXT = re.compile(
+    r"\bpip[0-9.]*\s+(?:install|wheel|download)\b|\buvx?\s+(?:pip|tool|add|sync|run)\b"
+    r"|\b(?:easy_install|pipx|conda|mamba|micromamba|poetry|pdm)\b"
+)
+
+
+def run_bodies(dockerfile: str) -> list[str]:
+    """The shell text of every RUN, continuation lines joined, exec form rendered as argv."""
+    text = re.sub(r"\\\n", " ", dockerfile)
+    bodies = []
+    for line in text.splitlines():
+        match = re.match(r"\s*RUN\s+(?:--\S+\s+)*(.*)", line, re.IGNORECASE)
+        if not match:
+            continue
+        body = match.group(1).strip()
+        if body.startswith("["):
+            try:
+                argv = json.loads(body)
+            except ValueError:
+                argv = None
+            if isinstance(argv, list) and all(isinstance(a, str) for a in argv):
+                body = shlex.join(argv)
+        bodies.append(body)
+    return bodies
+
+
+OPERATORS = frozenset({"&&", "||", ";", "|", "&", ";;", "(", ")"})
+
+
+def tokens(body: str) -> list[str]:
+    """Shell words and control operators, honoring quotes."""
+    lexer = shlex.shlex(body, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:  # unbalanced quotes: fall back to whitespace, never to nothing
+        return body.split()
+
+
+def split_commands(body: str) -> list[list[str]]:
+    """argv of each command in *body*, split at shell operators, entering `sh -c` strings."""
+    commands: list[list[str]] = []
+    words: list[str] = []
+    for token in [*tokens(body), ";"]:
+        if token not in OPERATORS:
+            words.append(token)
+            continue
+        if words and Path(words[0]).name in SHELLS:
+            # -c, alone or combined with other short options (-lc, -ec).
+            flag = next(
+                (i for i, w in enumerate(words[1:], 1) if re.fullmatch(r"-[a-z]*c[a-z]*", w)),
+                None,
+            )
+            if flag is not None and flag + 1 < len(words):
+                commands += split_commands(words[flag + 1])
+                words = []
+                continue
+        if words:
+            commands.append(words)
+        words = []
+    return commands
 
 
 def run_commands(dockerfile: str) -> list[str]:
-    """Every command of every RUN, continuation lines joined, split at && ; || and |."""
-    text = re.sub(r"\\\n", " ", dockerfile)
-    commands = []
-    for line in text.splitlines():
-        match = re.match(r"\s*RUN\s+(.*)", line)
-        if match:
-            commands += [c.strip() for c in re.split(r"&&|\|\||;|\|", match.group(1)) if c.strip()]
-    return commands
+    return [shlex.join(words) for body in run_bodies(dockerfile) for words in split_commands(body)]
+
+
+def classify(words: list[str]) -> str | None:
+    """'locked', 'unlocked', or None when *words* is not an installer command."""
+    if len(words) >= 3 and Path(words[0]).name.startswith("python") and words[1:3] == ["-m", "pip"]:
+        words = ["pip", *words[3:]]
+    tool = Path(words[0]).name
+    if not INSTALLER.fullmatch(tool):
+        return None
+    if not tool.startswith("pip") or tool.startswith("pipx"):
+        return "unlocked"
+    if words[1:2] not in (["install"], ["wheel"], ["download"]):
+        return "locked"  # pip check, pip --version, pip list: nothing is fetched
+    if "--no-index" in words:
+        return "locked"
+    files = [words[i + 1] for i, w in enumerate(words[:-1]) if w in ("-r", "--requirement")]
+    others = [
+        w
+        for i, w in enumerate(words[2:], 2)
+        if not w.startswith("-") and words[i - 1] not in ("-r", "--requirement")
+    ]
+    return "locked" if "--require-hashes" in words and files and not others else "unlocked"
 
 
 def unlocked_installs(dockerfile: str) -> list[str]:
     """Commands that could fetch a package from an index without a hash check."""
     bad = []
-    for command in run_commands(dockerfile):
-        words = shlex.split(command, posix=True) if command.count('"') % 2 == 0 else command.split()
-        if (
-            len(words) >= 3
-            and Path(words[0]).name.startswith("python")
-            and words[1:3] == ["-m", "pip"]
-        ):
-            words = ["pip", *words[3:]]
-        if not words or not INSTALLER.fullmatch(Path(words[0]).name):
-            continue
-        tool, verbs = Path(words[0]).name, words[1:3]
-        if tool.startswith("pip") and verbs[:1] in (["install"], ["wheel"], ["download"]):
-            if "--no-index" in words:
-                continue
-            files = [words[i + 1] for i, w in enumerate(words[:-1]) if w in ("-r", "--requirement")]
-            others = [
-                w
-                for i, w in enumerate(words[2:], 2)
-                if not w.startswith("-") and words[i - 1] not in ("-r", "--requirement")
-            ]
-            if "--require-hashes" in words and files and not others:
-                continue
-            bad.append(command)
-        elif tool.startswith("pip"):
-            continue
-        else:
-            bad.append(command)
+    for body in run_bodies(dockerfile):
+        verdicts = [(classify(words), words) for words in split_commands(body)]
+        bad += [shlex.join(words) for verdict, words in verdicts if verdict == "unlocked"]
+        if INSTALL_TEXT.search(body) and not any(verdict for verdict, _ in verdicts):
+            bad.append(f"unrecognised install in RUN {body[:160]}")
     return bad
 
 
@@ -325,6 +385,14 @@ class TestNoInstallBypassesTheLocks:
             "RUN python3 -m pip install kopf==1.37.2",
             "RUN pip wheel --no-deps .",
             "RUN true \\\n    && uv pip install --system kopf",
+            "RUN pip3.12 install kopf",
+            'RUN sh -c "pip install kopf"',
+            "RUN bash -lc 'true && pip install --require-hashes -r a.txt requests'",
+            'RUN ["pip", "install", "kopf"]',
+            'RUN ["/bin/sh", "-c", "pip install kopf"]',
+            "RUN --mount=type=cache,target=/root/.cache pip install kopf",
+            'RUN eval "pip install kopf"',
+            "RUN uvx --from bandit bandit --version",
         ],
     )
     def test_a_planted_unlocked_install_is_found(self, planted):
@@ -336,6 +404,8 @@ class TestNoInstallBypassesTheLocks:
             "RUN pip install --no-cache-dir --require-hashes -r /locks/a.txt -r /locks/b.txt",
             "RUN pip install --no-deps --no-index /wheels/x-1.whl && pip check",
             "RUN pip wheel --no-deps --no-build-isolation --no-index --wheel-dir /w .",
+            'RUN ["pip", "install", "--require-hashes", "-r", "/locks/a.txt"]',
+            'RUN sh -c "pip install --require-hashes -r /locks/a.txt && pip check"',
         ],
     )
     def test_a_locked_or_offline_install_is_not_flagged(self, allowed):
