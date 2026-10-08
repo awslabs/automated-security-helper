@@ -1,20 +1,35 @@
 """Centralized subprocess execution utilities for ASH."""
 
-import errno
 import logging
 import os
 import platform
 import shutil
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
-import time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union, Any, Literal
+from typing import Dict, List, Optional, Tuple, Union, Any, Literal
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 _find_executable_cache: dict[str, str | None] = {}
+
+
+def _spawn_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """The environment to hand a child: the caller's, or a copy of ours.
+
+    Never None. On Linux, CPython 3.10+ spawns with vfork, and with ``env=None``
+    the child execs against the parent's live ``environ`` array. Scanners run in
+    parallel threads and some of them change the environment while they work
+    (cdk_nag_wrapper's JSII variables), which can free that array under a child
+    that has not reached ``execve`` yet; the spawn then fails with
+    ``[Errno 14] Bad address``. A copy is built into a fresh ``envp`` that no other
+    thread can touch, and the child sees the same variables. See
+    ``utils/process_env.py``.
+    """
+    return env if env is not None else snapshot_environ()
+
 
 # Exit code reported for a command killed at its timeout, matching coreutils
 # ``timeout(1)``. run_command keeps its own -1 for compatibility; see there.
@@ -47,14 +62,6 @@ class TimedOutProcess(subprocess.CompletedProcess):
 # on, and the only error anyone saw was the SARIF file the tool never wrote.
 SPAWN_FAILURE_RETURNCODE = 127
 
-# errnos from exec that a second attempt can clear: ETXTBSY while another process
-# still holds the binary open for writing, EFAULT seen intermittently from exec
-# under emulation. Retried once; anything else fails on the first attempt.
-_SPAWN_RETRY_ERRNOS = frozenset({errno.EFAULT, errno.ETXTBSY})
-_SPAWN_RETRY_DELAY_SECONDS = 0.2
-
-_T = TypeVar("_T")
-
 
 class SpawnFailedProcess(subprocess.CompletedProcess):
     """A CompletedProcess for a command the OS could not start.
@@ -73,25 +80,6 @@ def spawn_failure_message(cmd_str: str, exc: OSError) -> str:
         f"Could not start {cmd_str}: {exc}. The command never ran "
         f"(exit code {SPAWN_FAILURE_RETURNCODE})."
     )
-
-
-def _retry_transient_spawn_failure(spawn: Callable[[], _T], cmd_str: str) -> _T:
-    """Call ``spawn``; if exec failed with a transient errno, call it once more.
-
-    ``spawn`` wraps ``subprocess.run`` or ``subprocess.Popen``. Both raise OSError
-    only when the child could not be started (exec failures are passed back from
-    the child before it runs anything), so retrying cannot run the tool twice.
-    """
-    try:
-        return spawn()
-    except OSError as e:
-        if e.errno not in _SPAWN_RETRY_ERRNOS:
-            raise
-        ASH_LOGGER.warning(
-            f"Could not start {cmd_str} ({e}); retrying once", extra=NO_MARKUP
-        )
-        time.sleep(_SPAWN_RETRY_DELAY_SECONDS)
-        return spawn()
 
 
 def clear_find_executable_cache() -> None:
@@ -117,6 +105,23 @@ def _bin_path() -> Path:
     """
     from_env = os.environ.get("ASH_BIN_PATH")
     return Path(from_env) if from_env else ASH_BIN_PATH
+
+
+def path_independent_dirs() -> List[Path]:
+    """The directories ``find_executable`` searches whatever PATH says, in order.
+
+    These are the fallbacks after ``shutil.which``: ASH's bin directory, then
+    /usr/local/bin except on Windows. A tool in one of them is found by every
+    later lookup in any environment, which is not true of a tool found only
+    through PATH -- a different shell, a CI job or a cron entry may not have the
+    same PATH. ``download_utils.find_verified_pinned_executable`` relies on that
+    difference, so the list lives here, where ``find_executable`` reads it too,
+    rather than being restated there.
+    """
+    dirs = [_bin_path()]
+    if platform.system().lower() != "windows":
+        dirs.append(Path("/usr/local/bin"))
+    return dirs
 
 
 def _executable_candidate_names(command: str) -> List[str]:
@@ -191,16 +196,7 @@ def find_executable(command: str) -> Optional[str]:
                 _find_executable_cache[command] = found
                 return found
             possibles = [
-                item
-                for item in [
-                    _bin_path().joinpath(cmd),
-                    (
-                        Path("/usr/local/bin").joinpath(cmd)
-                        if platform.system().lower() != "windows"
-                        else None
-                    ),
-                ]
-                if item is not None
+                directory.joinpath(cmd) for directory in path_independent_dirs()
             ]
             for poss in possibles:
                 ASH_LOGGER.debug(f"Checking for executable: {poss}", extra=NO_MARKUP)
@@ -266,20 +262,17 @@ def run_command(
         encoding = "utf-8"
 
     try:
-        result = _retry_transient_spawn_failure(
-            lambda: subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                args,
-                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                env=env,
-                capture_output=capture_output,
-                text=text,
-                check=check,
-                shell=shell,
-                timeout=timeout,
-                encoding=encoding,
-                errors=errors,
-            ),
-            cmd_str,
+        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+            args,
+            cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+            env=_spawn_env(env),
+            capture_output=capture_output,
+            text=text,
+            check=check,
+            shell=shell,
+            timeout=timeout,
+            encoding=encoding,
+            errors=errors,
         )
 
         # Log command result
@@ -448,20 +441,17 @@ def run_command_with_output_handling(
 
     try:
         try:
-            result = _retry_transient_spawn_failure(
-                lambda: subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                    command,
-                    capture_output=True,
-                    text=True,
-                    shell=shell,
-                    check=False,
-                    cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                    env=env,
-                    encoding=encoding,
-                    errors=errors,
-                    timeout=timeout,
-                ),
-                cmd_str,
+            result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+                command,
+                capture_output=True,
+                text=True,
+                shell=shell,
+                check=False,
+                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+                env=_spawn_env(env),
+                encoding=encoding,
+                errors=errors,
+                timeout=timeout,
             )
         except OSError as e:
             # Caught here, around the spawn alone, so an OSError from writing the
@@ -600,19 +590,16 @@ def run_command_stream_output(
         encoding = "utf-8"
 
     try:
-        process = _retry_transient_spawn_failure(
-            lambda: subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                args,
-                cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                shell=shell,
-                encoding=encoding,
-                errors=errors,
-            ),
-            cmd_str,
+        process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+            args,
+            cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
+            env=_spawn_env(env),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            shell=shell,
+            encoding=encoding,
+            errors=errors,
         )
 
         try:
@@ -754,7 +741,7 @@ def create_process_with_pipes(
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-            env=env,
+            env=_spawn_env(env),
             stdout=subprocess.PIPE,
             stderr=stderr,
             text=text,

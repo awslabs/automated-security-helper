@@ -17,7 +17,6 @@ from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
@@ -64,8 +63,8 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     offline: Annotated[
         bool,
         Field(
-            description="Run in offline mode, using locally cached rules.",
-            default_factory=is_offline_mode,
+            description="Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+            default=False,
         ),
     ]
 
@@ -132,7 +131,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
 
     def extra_subprocess_env(self) -> dict | None:
         """Propagate `SEMGREP_RULES` from the cache dir for offline runs."""
-        if self.config.options.offline and "SEMGREP_RULES_CACHE_DIR" in os.environ:
+        if self._scanner_offline() and "SEMGREP_RULES_CACHE_DIR" in os.environ:
             return {"SEMGREP_RULES": f"{os.environ['SEMGREP_RULES_CACHE_DIR']}/*"}
         return None
 

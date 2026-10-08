@@ -25,6 +25,7 @@ from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.suppression_matcher import (
     file_path_matches as path_matches_pattern,
 )
+from automated_security_helper.utils.process_env import snapshot_environ
 
 
 class JupyterConverterConfigOptions(ConverterOptionsBase):
@@ -150,6 +151,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=snapshot_environ(),
             )
             if result.returncode == 0:
                 ASH_LOGGER.debug("Found jupyter nbconvert via direct execution")
@@ -359,7 +361,11 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                             f"UV tool execution failed for {ipynb_file}, trying direct execution"
                         )
                         result = subprocess.run(  # nosec B603 — list args from validated nbconvert command
-                            cmd, capture_output=True, text=True, timeout=60
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                            env=snapshot_environ(),
                         )
                         if result.returncode != 0:
                             raise subprocess.CalledProcessError(
@@ -367,7 +373,11 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                             )
                 else:
                     result = subprocess.run(  # nosec B603 — list args from validated nbconvert command
-                        cmd, capture_output=True, text=True, timeout=60
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                        env=snapshot_environ(),
                     )
                     if result.returncode != 0:
                         raise subprocess.CalledProcessError(

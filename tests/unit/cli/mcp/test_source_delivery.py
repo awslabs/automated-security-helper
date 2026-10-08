@@ -618,7 +618,7 @@ class TestMcpWrappers:
         monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path))
         with patch.object(sd, "set_source_git", side_effect=RuntimeError("boom")):
             r = mcp_tools.mcp_set_source_git(
-                url="x",
+                url="https://example.com/x.git",
                 session_id=_SESSION,
             )
         assert r["success"] is False

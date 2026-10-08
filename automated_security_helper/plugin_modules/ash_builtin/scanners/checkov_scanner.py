@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar, List, Literal
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS, is_offline_mode
+from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
@@ -105,8 +105,8 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
     offline: Annotated[
         bool,
         Field(
-            description="Run in offline mode, disabling policy downloads",
-            default_factory=is_offline_mode,
+            description="Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+            default=False,
         ),
     ]
     frameworks: Annotated[
@@ -292,7 +292,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 break
 
         # Add offline mode if enabled
-        if self.config.options.offline:
+        if self._scanner_offline():
             self.args.extra_args.append(
                 ToolExtraArg(
                     key="--skip-download",

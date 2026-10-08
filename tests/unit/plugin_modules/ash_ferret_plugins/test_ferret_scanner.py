@@ -1114,6 +1114,7 @@ class TestFerretScanScannerVersionSupport:
         assert "2.3.3" not in specifier
         assert "2.4.5" in specifier
         assert "2.5.2" in specifier
+        assert "2.5.3" in specifier
         assert "2.6.0" not in specifier
 
     def test_installation_command_honours_a_user_pin(self, mock_plugin_context):
@@ -1344,6 +1345,7 @@ class TestFerretVersionWindowBoundaries:
         ("2.4.5", True),
         ("2.5.0", True),
         ("2.5.2", True),
+        ("2.5.3", True),
         ("2.6.0", False),
     ]
 
@@ -1400,7 +1402,7 @@ class TestFerretVersionWindowBoundaries:
             is_version_compatible,
         )
 
-        assert RECOMMENDED_VERSION == "2.5.2"
+        assert RECOMMENDED_VERSION == "2.5.3"
         assert is_version_compatible(
             RECOMMENDED_VERSION, MIN_SUPPORTED_VERSION, MAX_SUPPORTED_VERSION
         )
