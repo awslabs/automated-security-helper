@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: f585bc857fe69df3
+    ash.awslabs.github.io/ash-config-schema-sha256: f9aa365afc85f0ee
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -309,6 +309,58 @@ spec:
                     - fail
                     - warn
                     type: string
+                  content_db_staleness_overrides:
+                    description: Per-database exceptions to content_db_staleness, each with a required
+                      expiration date and reason. An entry holds one named database to its own policy
+                      until 00:00 UTC on its expiration date, and every database not named keeps content_db_staleness.
+                      An expired entry is ignored with a warning. Empty by default. Either form of --allow-stale-content-db
+                      clears this list for that scan, so the flag still decides for every database.
+                    items:
+                      description: 'One content database held to a different staleness policy, until a
+                        fixed date.
+
+
+                        ``content_db_staleness`` decides for every database at once. This narrows a
+
+                        relaxation to the one database that needs it -- typically one whose upstream
+
+                        publisher has stopped publishing for a while -- so every other database is still
+
+                        held to the scan-wide policy. ``expiration`` and ``reason`` are required, the
+
+                        same two fields a time-boxed suppression carries: an exception to a freshness
+
+                        gate that has no end date is a permanent one. On and after ``expiration``
+
+                        (00:00 UTC) the entry is ignored, with a warning in the log, and the database
+
+                        falls back to ``content_db_staleness``.'
+                      properties:
+                        database:
+                          description: 'The content database''s registry name, as listed in automated_security_helper/utils/content_databases.py:
+                            grype-db, trivy-db, semgrep-offline-rules or opengrep-offline-rules.'
+                          type: string
+                        policy:
+                          description: The policy this database is held to while the entry is in effect.
+                          enum:
+                          - fail
+                          - warn
+                          type: string
+                        expiration:
+                          description: 'Required. The date (YYYY-MM-DD, UTC) from which the entry no longer
+                            applies: at 00:00 UTC that day the database returns to content_db_staleness.'
+                          type: string
+                        reason:
+                          description: Required. Why this database is held differently.
+                          minLength: 1
+                          type: string
+                      required:
+                      - database
+                      - policy
+                      - expiration
+                      - reason
+                      type: object
+                    type: array
                   ash_plugin_modules:
                     description: List of Python modules to import containing ASH plugins and/or event
                       subscribers. These are loaded in addition to the default modules.
