@@ -68,23 +68,23 @@ jobs:
       # would have checked out the default branch, and one that is not github.sha would
       # give the attestation a source commit the assets were not built from.
       # tests/unit/test_release_assets.py runs this script.
+      #
+      # Two comparisons, no format check: HEAD is always a full 40-hex SHA, so any
+      # MERGE_SHA that is empty or not a commit ID differs from github.sha or from HEAD.
+      # A separate regex on MERGE_SHA would refuse nothing these two let through.
       - name: Pin the commit being released
         id: sha
         env:
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
-          if [[ ! "$MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::the pull request's merge_commit_sha is '${MERGE_SHA}', not a commit. Refusing to release."
-            exit 1
-          fi
           if [ "$MERGE_SHA" != "$GITHUB_SHA" ]; then
-            echo "::error::merge_commit_sha ${MERGE_SHA} is not github.sha ${GITHUB_SHA}, which the provenance attestation records as the source commit. Refusing to attest assets built from a commit the attestation does not name."
+            echo "::error::merge_commit_sha '${MERGE_SHA}' is not github.sha ${GITHUB_SHA}, which the provenance attestation records as the source commit. Refusing to attest assets built from a commit the attestation does not name."
             exit 1
           fi
           SHA="$(git rev-parse HEAD)"
           if [ "$SHA" != "$MERGE_SHA" ]; then
-            echo "::error::the checkout is at ${SHA}, not the merge commit ${MERGE_SHA}"
+            echo "::error::the checkout is at ${SHA}, not the merge commit '${MERGE_SHA}'"
             exit 1
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
