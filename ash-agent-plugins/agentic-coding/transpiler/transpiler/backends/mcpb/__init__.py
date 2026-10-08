@@ -76,21 +76,21 @@ class MCPBBackend(BaseBackend):
     def phase_copy_archive(self, ctx: BuildContext) -> None:
         """Copy the deterministic .mcpb archive to the dist directory.
 
-        Stamps the filename with the manifest version (e.g. dist/ash-1.0.0.mcpb).
+        Stamps the filename with the bundle's version (e.g. dist/ash-4.0.0.mcpb).
         The plain ash.mcpb in plugins/mcpb/ stays as the canonical, committed
         artifact; dist/ is the staging area for release uploads.
 
-        READ THIS BEFORE "FIXING" THE VERSION IN THAT FILENAME
+        WHICH VERSION THAT IS
 
-        ctx.manifest.version is the *plugin* version from
-        transpiler/_base/manifest.json. It is deliberately not ASH's package
-        version, so a release attaches an asset named after the plugin version.
-        That looks like a bug and is not one: pyproject.toml's
-        [tool.commitizen] version_files matches `_base/manifest.json:ash_version`
-        specifically so that a bump rewrites the ASH tag the manifest pins
-        WITHOUT touching this field. Wiring this filename to the ASH version
-        would mean a version_files entry that matches the plugin `version` key,
-        which is the collision that entry is written to avoid.
+        The bundle's version is the ASH release it launches, derived from
+        `_base/manifest.json:ash_version` by packagers.mcpb_bundle_version, and
+        read back here out of the committed archive's own manifest so the file
+        name and the version a host compares cannot disagree. It used to be the
+        plugin `version` key, which is 1.0.0 for every release, so the asset was
+        ash-1.0.0.mcpb forever and a host could not tell one bundle from the next.
+        Deriving it from ash_version needs no new [tool.commitizen] version_files
+        entry, and the entry that exists (`_base/manifest.json:ash_version`) still
+        never touches the plugin `version` key the other backends use.
 
         This copy is a plain copy2 of a committed file, so it proves nothing
         about the archive's contents on its own. What establishes that the
@@ -105,8 +105,12 @@ class MCPBBackend(BaseBackend):
             raise FileNotFoundError(
                 f"{src} missing — run `agentic-plugins build mcpb` before release"
             )
+        with zipfile.ZipFile(src) as zf:
+            bundle_version = json.loads(zf.read("manifest.json").decode("utf-8"))[
+                "version"
+            ]
         ctx.dist_dir.mkdir(parents=True, exist_ok=True)
-        dest = ctx.dist_dir / f"ash-{ctx.manifest.version}.mcpb"
+        dest = ctx.dist_dir / f"ash-{bundle_version}.mcpb"
         shutil.copy2(src, dest)
 
     def smoke_test(self, ctx: BuildContext) -> dict | None:
