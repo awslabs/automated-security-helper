@@ -1,0 +1,15 @@
+# A workflow actionlint reports nothing for: the negative control.
+name: clean
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print the ref through an environment variable
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "$REF_NAME"
