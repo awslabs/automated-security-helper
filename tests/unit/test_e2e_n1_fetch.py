@@ -58,6 +58,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.utils.posix_bash import bash_path
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 PREV_TREE = REPO_ROOT / "scripts" / "e2e" / "prev_tree.py"
@@ -1927,7 +1929,7 @@ def _n1_ref_sh(clone: Path, require, prev_ref=None) -> subprocess.CompletedProce
         **os.environ,
         "REPO": str(clone),
         "E2E_TEST_PYTHON": sys.executable,
-        "E2E_TEST_HELPER": str(N1_HELPER),
+        "E2E_TEST_HELPER": bash_path(N1_HELPER),
     }
     env.pop("E2E_PREV_REF", None)
     if prev_ref is not None:
@@ -2110,7 +2112,7 @@ def test_a_passed_over_commit_is_reported_once_with_each_path_once(tmp_path, cap
 # reviewed and listed: the legs' own rule (no git outside a comment) leans on this.
 N1_GIT_LINES = [
     'git -C "$REPO" rev-parse HEAD',
-    'git -C "$REPO" archive "$rev" "$@" | tar -x -C "$dir"',
+    'git -C "$REPO" archive "$rev" "$@" | (cd "$dir" && tar -x)',
     'git -C "$REPO" archive --format=tar.gz --prefix="$prefix" -o "$out" "$rev"',
     'git -C "$REPO" diff --quiet "$PREV_SHA" HEAD -- "$@"',
 ]
@@ -2146,19 +2148,23 @@ HELPER_DRIVER = r"""
 set -euo pipefail
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 harness() { "$E2E_TEST_PYTHON" "$@"; }
+if [ -n "${E2E_TEST_PATH_PREPEND:-}" ]; then PATH="$E2E_TEST_PATH_PREPEND:$PATH"; fi
 . "$E2E_TEST_HELPER"
 PREV_SHA="$E2E_TEST_PREV"
 "$@"
 """
 
 
-def _helper(repo: Path, prev: str, *argv: str) -> subprocess.CompletedProcess:
+def _helper(
+    repo: Path, prev: str, *argv: str, extra_env: dict | None = None
+) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
         "REPO": str(repo),
         "E2E_TEST_PYTHON": sys.executable,
-        "E2E_TEST_HELPER": str(N1_HELPER),
+        "E2E_TEST_HELPER": bash_path(N1_HELPER),
         "E2E_TEST_PREV": prev,
+        **(extra_env or {}),
     }
     return subprocess.run(
         [_bash(), "-c", HELPER_DRIVER, "n1-helper-test", *argv],
@@ -2187,22 +2193,57 @@ def test_the_helpers_export_head_and_the_chosen_commit(two_commits, tmp_path):
     for rev, want in (("HEAD", "4\n"), (prev, "3\n")):
         out = tmp_path / f"out-{rev[:4]}"
         out.mkdir()
-        result = _helper(repo, prev, "n1_export", rev, str(out))
+        result = _helper(repo, prev, "n1_export", rev, bash_path(out))
         assert result.returncode == 0, result.stderr
         assert (out / "a.txt").read_text(encoding="utf-8") == want
     paths = tmp_path / "paths"
     paths.mkdir()
-    result = _helper(repo, prev, "n1_export", prev, str(paths), "same.txt")
+    result = _helper(repo, prev, "n1_export", prev, bash_path(paths), "same.txt")
     assert result.returncode == 0, result.stderr
     assert sorted(p.name for p in paths.iterdir()) == ["same.txt"]
     result = _helper(repo, prev, "n1_head_sha")
     assert result.stdout.strip() == two_commits["head"]
     tarball = tmp_path / "t.tar.gz"
-    result = _helper(repo, prev, "n1_tarball", "HEAD", "pkg-1/", str(tarball))
+    result = _helper(repo, prev, "n1_tarball", "HEAD", "pkg-1/", bash_path(tarball))
     assert result.returncode == 0, result.stderr
     assert tarball.stat().st_size > 0
     assert _helper(repo, prev, "n1_unchanged", "same.txt").returncode == 0
     assert _helper(repo, prev, "n1_unchanged", "a.txt").returncode == 1
+
+
+# A tar that refuses -C, standing in for the MSYS tar on a Windows runner, which reads a
+# native C:\\... directory as a remote host:path and cannot open it. n1_export must not
+# hand its directory to tar at all; bash's own cd resolves both path forms.
+TAR_REFUSING_DIR = """#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in -C | -C* | --directory*) echo "tar shim: refused $arg" >&2; exit 2 ;; esac
+done
+exec "$E2E_REAL_TAR" "$@"
+"""
+
+
+def test_n1_export_does_not_pass_its_directory_to_tar(two_commits, tmp_path):
+    real_tar = shutil.which("tar")
+    assert real_tar, "no tar on PATH"
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    (shim / "tar").write_bytes(TAR_REFUSING_DIR.encode("utf-8"))
+    (shim / "tar").chmod(0o755)
+    out = tmp_path / "out"
+    out.mkdir()
+    result = _helper(
+        two_commits["repo"],
+        two_commits["prev"],
+        "n1_export",
+        "HEAD",
+        bash_path(out),
+        extra_env={
+            "E2E_TEST_PATH_PREPEND": bash_path(shim),
+            "E2E_REAL_TAR": real_tar,
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert (out / "a.txt").read_text(encoding="utf-8") == "4\n"
 
 
 @pytest.mark.parametrize(
@@ -2217,7 +2258,7 @@ def test_the_helpers_export_head_and_the_chosen_commit(two_commits, tmp_path):
 def test_the_helpers_refuse_any_other_revision(two_commits, tmp_path, argv):
     out = tmp_path / "out"
     out.mkdir()
-    argv = [a.format(out=out, first=two_commits["first"]) for a in argv]
+    argv = [a.format(out=bash_path(out), first=two_commits["first"]) for a in argv]
     result = _helper(two_commits["repo"], two_commits["prev"], *argv)
     assert result.returncode == 1, result.stdout
     assert "is neither HEAD nor the N-1 n1_resolve chose" in result.stderr

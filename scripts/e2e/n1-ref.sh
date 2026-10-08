@@ -70,7 +70,10 @@ n1_export() {
   local rev="$1" dir="$2"
   shift 2
   n1_revision "$rev"
-  git -C "$REPO" archive "$rev" "$@" | tar -x -C "$dir"
+  # tar reads the archive in DIR rather than being handed DIR: on a Windows runner a
+  # native C:\... directory reaches MSYS tar as a remote host:path it cannot open, and
+  # bash's own cd resolves both forms.
+  git -C "$REPO" archive "$rev" "$@" | (cd "$dir" && tar -x)
 }
 
 n1_tarball() {
