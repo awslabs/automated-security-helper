@@ -490,6 +490,8 @@
       ]),
       'build': None,
       'content_db_staleness': 'fail',
+      'content_db_staleness_overrides': list([
+      ]),
       'converters': dict({
         'archive': dict({
           'enabled': True,
@@ -521,6 +523,7 @@
               '/fail_on_findings',
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
+              '/content_db_staleness_overrides',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
               '/reporters/bedrock-summary-reporter/options/aws_*',
@@ -866,6 +869,8 @@
       ]),
       'build': None,
       'content_db_staleness': 'fail',
+      'content_db_staleness_overrides': list([
+      ]),
       'converters': dict({
         'archive': dict({
           'enabled': True,
@@ -897,6 +902,7 @@
               '/fail_on_findings',
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
+              '/content_db_staleness_overrides',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
               '/reporters/bedrock-summary-reporter/options/aws_*',
@@ -1242,6 +1248,8 @@
       ]),
       'build': None,
       'content_db_staleness': 'fail',
+      'content_db_staleness_overrides': list([
+      ]),
       'converters': dict({
         'archive': dict({
           'enabled': True,
@@ -1273,6 +1281,7 @@
               '/fail_on_findings',
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
+              '/content_db_staleness_overrides',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
               '/reporters/bedrock-summary-reporter/options/aws_*',
