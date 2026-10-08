@@ -250,11 +250,13 @@ def test_the_fallback_cwd_is_a_new_system_temp_dir_outside_the_tree(
     )
     assert cwd != Path("/") and not path_trust.in_scanned_tree(cwd, source)
     assert cwd.is_dir() and not any(cwd.iterdir())
-    # Made once per root and process.
+    # Made once per root and process, and removed at exit while empty.
     again = path_trust.cwd_outside_scanned_tree(
         source, results_dir=results, source_dir=source
     )
     assert again == cwd
+    path_trust._remove_fallback_cwds()
+    assert not cwd.exists()
 
 
 def test_the_fallback_cwd_goes_under_the_root_when_temp_is_in_the_tree(

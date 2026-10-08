@@ -59,6 +59,16 @@ def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool
 _FALLBACK_CWDS: Dict[str, Path] = {}
 
 
+def _remove_fallback_cwds() -> None:
+    """Remove the fallback working directories at exit; rmdir leaves any that hold anything."""
+    for directory in _FALLBACK_CWDS.values():
+        try:
+            os.rmdir(directory)
+        except OSError:
+            pass
+    _FALLBACK_CWDS.clear()
+
+
 def _new_directory(parent: Optional[Path]) -> Optional[Path]:
     """A new empty directory under ``parent`` (the system temp dir for None)."""
     import tempfile
@@ -95,7 +105,8 @@ def cwd_outside_scanned_tree(
        this is used only when 1 and 2 are not possible, and under a sandbox.
 
     Each is new and empty, so it holds no config file. One is made per root and
-    process and reused; nothing is cleared or deleted.
+    process and reused, and removed at exit if it is still empty; nothing is
+    cleared.
     """
     root = getattr(config, "_scanned_root", None) or source_dir
     anchor = Path(Path(os.path.abspath(target)).anchor)
@@ -105,7 +116,12 @@ def cwd_outside_scanned_tree(
 
     if active_scope() is None:
         cached = _FALLBACK_CWDS.get(anchor.as_posix())
-        if cached is not None and cached.is_dir() and not any(cached.iterdir()):
+        if (
+            cached is not None
+            and cached.is_dir()
+            and not any(cached.iterdir())
+            and (cached.parent == anchor or not in_scanned_tree(cached, root))
+        ):
             return cached
         for parent in (None, anchor):
             made = _new_directory(parent)
@@ -114,6 +130,10 @@ def cwd_outside_scanned_tree(
             if parent is None and in_scanned_tree(made, root):
                 made.rmdir()
                 continue
+            if not _FALLBACK_CWDS:
+                import atexit
+
+                atexit.register(_remove_fallback_cwds)
             _FALLBACK_CWDS[anchor.as_posix()] = made
             return made
     directory = Path(os.path.abspath(results_dir))
