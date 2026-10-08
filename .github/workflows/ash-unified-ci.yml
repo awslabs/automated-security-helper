@@ -835,6 +835,145 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
+  # Scanner sandbox: escape tests on real backends, and scanner parity under bwrap.
+  #
+  # tests/integration/sandbox runs a malicious fixture scanner through a real
+  # `ash scan` and requires every escape attempt to fail under each backend and to
+  # succeed with --sandbox off (the negative control). ASH_REQUIRE_SANDBOX_BACKENDS
+  # makes a backend the runner should have a failure rather than a skip, so a
+  # runner image that drops bubblewrap goes red instead of quietly testing less.
+  #
+  # bubblewrap and firejail come from the Ubuntu archive, so there is no action to
+  # pin. The container image does not need either: container mode forces
+  # sandbox.mode=off for the inner run, because the container is the boundary.
+  # ---------------------------------------------------------------------------
+  sandbox:
+    name: "sandbox escape (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            require: "bwrap,firejail,landlock"
+          - os: macos-latest
+            require: "sandbox-exec"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job uses git credentials after checkout.
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install bubblewrap and firejail
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap firejail
+          bwrap --version
+          firejail --version | head -1
+      # Ubuntu 23.10+ restricts unprivileged user namespaces through AppArmor. The
+      # packaged bwrap is meant to be allowed by its profile, but the hosted runner
+      # image has been seen to refuse it. Lifting the restriction is runner setup,
+      # the same thing docs/content/docs/scanner-sandbox.md tells a user to do; the
+      # tests themselves are unchanged and still require bwrap to work.
+      - name: Let bwrap create user namespaces
+        if: runner.os == 'Linux'
+        run: |
+          if bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true; then
+            echo "bwrap can create a sandbox as-is"
+          else
+            echo "::notice::bwrap refused by the AppArmor userns restriction; lifting it for this runner"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
+          fi
+      - name: Install dependencies
+        run: uv sync
+      - name: Run the sandbox escape and unit suites
+        env:
+          ASH_REQUIRE_SANDBOX_BACKENDS: ${{ matrix.require }}
+        run: |
+          uv run pytest \
+            tests/integration/sandbox \
+            tests/unit/utils/test_sandbox_policy.py \
+            tests/unit/utils/test_sandbox_choke_point.py \
+            --run-integration --no-cov -p no:randomly -n 0 -v \
+            --junit-xml=test-results/sandbox.junit.xml
+      - name: Collect the suite report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sandbox-escape-report-${{ matrix.os }}
+          path: test-results/sandbox.junit.xml
+          retention-days: 7
+          if-no-files-found: warn
+
+  sandbox-scanner-parity:
+    name: "sandbox scanner parity (bwrap, ubuntu-latest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job uses git credentials after checkout.
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Set up Ruby for cfn-nag
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.3"
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap
+          if ! bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true; then
+            echo "::notice::bwrap refused by the AppArmor userns restriction; lifting it for this runner"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
+          fi
+      - name: Install ASH with the cdk extra, and every scanner
+        run: |
+          pip install ".[cdk]"
+          ash dependencies install
+      # Every scanner runs twice over one fixture, with --sandbox off and --sandbox
+      # bwrap, offline and online, and status plus findings must match per scanner.
+      # --require names the scanners that must actually have run, so a scanner that
+      # is MISSING in both runs cannot pass parity by being absent.
+      - name: Compare every scanner with and without the sandbox
+        # The report path through the environment, not interpolated into the script,
+        # which is this repository's convention for every context value a shell reads.
+        env:
+          TMPDIR: ${{ runner.temp }}
+          PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
+        run: |
+          python scripts/verify_sandbox_scanner_parity.py \
+            --sandbox bwrap --online --ash ash \
+            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft \
+            --report "$PARITY_REPORT"
+      - name: Collect the parity report and scan output
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sandbox-scanner-parity
+          path: |
+            ${{ runner.temp }}/sandbox-parity.json
+            ${{ runner.temp }}/ash-sandbox-parity-*
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
   # Multi-project attribution: assert a workspace scan keeps its projects apart.
   #
   # The sibling of external-target-scan, one dimension up. That job proves ASH
@@ -1622,6 +1761,8 @@ jobs:
       - deploy-aws-helpers
       - integration-test
       - install-validation
+      - sandbox
+      - sandbox-scanner-parity
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

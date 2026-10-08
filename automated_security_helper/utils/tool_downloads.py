@@ -642,7 +642,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
-    "semgrep commit": "fed96460fd67f504ea59342eba8f921f4d74fe17",  # pragma: allowlist secret
+    "semgrep commit": "a35fe8306115b3e55274969098cc46f8451d6b4d",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "syft commit": "b254e6d92f28c3868a755f62fb3ca8f26e9fee76",  # pragma: allowlist secret
@@ -716,7 +716,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # of the two readings, and the one opengrep's entry takes from the same text.
     "semgrep": ThirdPartyLicense(
         tool="semgrep",
-        version="v1.179.0",
+        version="v1.180.0",
         license="LGPL-2.1-only",
         repository="https://github.com/semgrep/semgrep",
         commit=_THIRD_PARTY_HASHES["semgrep commit"],

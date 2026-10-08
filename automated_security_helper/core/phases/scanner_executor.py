@@ -18,6 +18,12 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import sweep_writable
+from automated_security_helper.utils.sandbox.scope import (
+    SandboxUnavailable,
+    sandbox_scope,
+    scanner_sandbox_scope,
+)
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     sanitize_sarif_paths,
@@ -348,27 +354,79 @@ class ScannerExecutor:
                         if isinstance(scanner_plugin, PluginBase):
                             scanner_plugin.clear_scan_timeout()
                             scanner_plugin.clear_scan_spawn_failure()
-                        heartbeat.start()
+                        # Resolved before the scan, so a scanner that cannot be
+                        # sandboxed as requested never starts: it is recorded MISSING
+                        # below, with the reason, rather than run unsandboxed.
                         try:
-                            raw_results = scanner_plugin.scan(
-                                target=scan_target,
-                                config=scanner_config,
-                                target_type=target_type,
-                                global_ignore_paths=self._global_ignore_paths,
+                            sandbox = scanner_sandbox_scope(
+                                scanner_plugin,
+                                self.plugin_context,
+                                Path(scan_target),
                             )
-                        finally:
-                            heartbeat.stop()
-                        # A tool that never started found nothing, so the scan is an
-                        # error even when scan() returned normally. A scanner that
-                        # overrides scan() may have read the empty output as "no
-                        # findings", or accepted the exit code; neither may stand.
-                        spawn_failure = _spawn_failure(scanner_plugin)
-                        if spawn_failure is not None:
-                            raise ScannerError(
-                                f"{scanner_config_name} could not start its tool on "
-                                f"{target_type}: {spawn_failure}"
+                            sandbox_refusal = None
+                        except SandboxUnavailable as refusal:
+                            sandbox, sandbox_refusal = None, str(refusal)
+                        if sandbox_refusal is not None:
+                            ASH_LOGGER.error(
+                                f"{scanner_config_name} not run: scanner sandbox "
+                                f"unavailable: {sandbox_refusal}"
                             )
-                        self._assess_content_databases(scanner_plugin, raw_results)
+                            container.add_error(
+                                f"Scanner sandbox unavailable: {sandbox_refusal}"
+                            )
+                            # Recorded on the plugin too: scanner_results reads the
+                            # plugin's flag, and a MISSING row claiming satisfied
+                            # dependencies would contradict its own status.
+                            scanner_plugin.dependencies_satisfied = False
+                            if hasattr(scanner_plugin, "dependency_unavailable_reason"):
+                                scanner_plugin.dependency_unavailable_reason = (
+                                    f"scanner sandbox unavailable: {sandbox_refusal}"
+                                )
+                            raw_results = False
+                        else:
+                            # Not recorded as container metadata: any metadata at
+                            # all makes the SARIF tool_invocation gain exit_code and
+                            # duration (scan_result_processor), so sandboxed and
+                            # unsandboxed results would differ in shape. The backend
+                            # is in ash.log ("Scanner sandbox: using ...").
+                            if sandbox is not None:
+                                ASH_LOGGER.info(
+                                    f"Scanner sandbox: {scanner_config_name} on "
+                                    f"{target_type} runs under {sandbox.backend.name}"
+                                )
+                            heartbeat.start()
+                            with sandbox_scope(sandbox):
+                                try:
+                                    raw_results = scanner_plugin.scan(
+                                        target=scan_target,
+                                        config=scanner_config,
+                                        target_type=target_type,
+                                        global_ignore_paths=self._global_ignore_paths,
+                                    )
+                                finally:
+                                    heartbeat.stop()
+                                # A tool that never started found nothing, so the
+                                # scan is an error even when scan() returned
+                                # normally. A scanner that overrides scan() may have
+                                # read the empty output as "no findings", or accepted
+                                # the exit code; neither may stand.
+                                spawn_failure = _spawn_failure(scanner_plugin)
+                                if spawn_failure is not None:
+                                    raise ScannerError(
+                                        f"{scanner_config_name} could not start its "
+                                        f"tool on {target_type}: {spawn_failure}"
+                                    )
+                                # Inside the scope: this runs the scanner's own
+                                # binary (`grype db status`), which is that
+                                # scanner's code like any other spawn of it.
+                                self._assess_content_databases(
+                                    scanner_plugin, raw_results
+                                )
+                            if sandbox is not None:
+                                # Again after the scan, for anything a process that
+                                # outlived its spawn left behind, before the results
+                                # are written into this directory.
+                                sweep_writable([sandbox.results_dir])
                     else:
                         ASH_LOGGER.warning(f"{scanner_config_name} is not enabled!")
                 except Exception as e:

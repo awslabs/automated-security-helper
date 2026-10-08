@@ -16,6 +16,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.scope import plugin_probe_scope
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
@@ -325,11 +326,13 @@ class ScanPhase(EnginePhase):
                                 )
                             )
 
-                        # Create scanner instance
-                        plugin_instance = plugin_class(
-                            config=plugin_config,
-                            context=self.plugin_context,
-                        )
+                        # Create scanner instance. Under a sandbox, the tool probes
+                        # some scanners run while they are constructed run sandboxed.
+                        with plugin_probe_scope(plugin_class, self.plugin_context):
+                            plugin_instance = plugin_class(
+                                config=plugin_config,
+                                context=self.plugin_context,
+                            )
                         scanner_instances.append(plugin_instance)
                         ASH_LOGGER.debug(f"Created scanner instance for: {plugin_name}")
                     except Exception as e:
@@ -735,9 +738,10 @@ class ScanPhase(EnginePhase):
 
                         # Check dependencies early
                         ASH_LOGGER.debug(f"Validating dependencies for: {display_name}")
-                        plugin_instance.dependencies_satisfied = (
-                            plugin_instance.validate_plugin_dependencies()
-                        )
+                        with plugin_probe_scope(plugin_instance, self.plugin_context):
+                            plugin_instance.dependencies_satisfied = (
+                                plugin_instance.validate_plugin_dependencies()
+                            )
                         if not plugin_instance.dependencies_satisfied:
                             ASH_LOGGER.warning(
                                 f"Scanner {display_name} dependencies are not satisfied, marking as MISSING"

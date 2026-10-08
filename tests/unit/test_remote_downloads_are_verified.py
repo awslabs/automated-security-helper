@@ -150,7 +150,7 @@ _ALLOWED: dict[tuple[str, str], str] = {
         '"${ASH_ASSETS_URL}/Gemfile.lock"',
     ): "The lockfile beside that Gemfile; same source, same trust, same reason.",
     (
-        ".github/actions/run-scan-test/action.yml",
+        ".github/actions/run-scan-test/validate_gitlab_sast_reports.sh",
         "gitlab-sast-schema.json",
     ): (
         "GitLab's SAST report JSON schema at the tag the reporter emits. Data handed "

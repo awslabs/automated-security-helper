@@ -79,16 +79,23 @@ scanner. The reason it read as something else entirely: nothing wrote
 completed" was SKIPPED rather than failed. The visible symptom was a missing
 artifact four steps downstream, not a shadowed binary.
 
-``setup-ash`` puts ASH's console scripts on ``PATH`` via ``GITHUB_PATH`` before
-this action runs, and setup-ruby adds MSYS2 later; since the runner reverses the
+ASH's console scripts are on ``PATH`` before this action runs (setup-python put
+the interpreter's scripts directory there, and ``setup-ash`` asserts ``ash``
+resolves into it), and setup-ruby adds MSYS2 later; since the runner reverses the
 accumulated list, later wins. So the fix is to put ASH's scripts directory back
 in front after setup-ruby, above MSYS2 without evicting MSYS2 -- sh, make and gcc
 keep coming from the one coherent tree psych needs. The promote step finds the
 directory and hands it over as its `dirs` output; the two steps that call `ash`
 prepend it to their own PATH. (It was a GITHUB_PATH write until zizmor's
 github-env audit reported it.) Promoting Git Bash
-there instead would break the gem build for the 18e5cba9 reason, which is what
-``test_git_bash_precedence_is_restored_after_the_windows_scan`` already forbids.
+there instead would break the gem build for the 18e5cba9 reason.
+
+MSYS2 then stays first on ``PATH`` until the job ends. This action used to hand
+precedence back to Git Bash after the Windows scan with a ``GITHUB_PATH`` write,
+the second github-env finding, and that write is gone too. So nothing after the
+toolchain step that can run on this leg may be ``shell: bash``: the runner would
+resolve it to MSYS2's bash. The GitLab SAST step, which needs bash, runs from
+``shell: pwsh`` and launches Git Bash by absolute path.
 """
 
 import re
@@ -102,7 +109,8 @@ ACTION = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
 
 SETUP_RUBY = "ruby/setup-ruby@"
 WINDOWS_TOOLCHAIN_STEP = "Set up Ruby and MSYS2 toolchain for cfn-nag (Windows)"
-RESTORE_STEP = "Restore Git Bash precedence after the Ruby toolchain (Windows)"
+GITLAB_STEP = "Validate GitLab SAST Report Schema Compliance"
+GIT_BASH = r"C:\Program Files\Git\bin\bash.exe"
 CONFIG_VALIDATE_STEP = "Validate ASH config files"
 WINDOWS_SCAN_STEP = "Validate ASH using Python Local (Windows)"
 PROMOTE_STEP = "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)"
@@ -172,16 +180,42 @@ def test_the_toolchain_lands_before_the_windows_install(steps):
     )
 
 
-def test_git_bash_precedence_is_restored_after_the_windows_scan(steps):
-    restore = _index(steps, RESTORE_STEP)
-    assert _index(steps, WINDOWS_SCAN_STEP) < restore, (
-        "precedence is restored before the Windows scan, so psych would build "
-        "with Git's sh against another tree's make -- the 18e5cba9 failure."
+def test_nothing_hands_precedence_back_through_github_path():
+    """The restore step was a GITHUB_PATH write, and no write may come back.
+
+    Read as text rather than per step, so a write in any step, comment-free line,
+    or shell dialect counts.
+    """
+    commands = [
+        line
+        for line in ACTION.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    offenders = [line.strip() for line in commands if "GITHUB_PATH" in line]
+    assert not offenders, (
+        f"{ACTION} writes GITHUB_PATH again: {offenders}. zizmor's github-env audit "
+        "reports that in a composite action, and the entry reaches every later step "
+        "of the caller's job."
     )
-    step = steps[restore]
-    assert "GITHUB_PATH" in step["run"], (
-        "the restore step no longer writes GITHUB_PATH, so MSYS2 bash stays first "
-        "on PATH for every later `shell: bash` step."
+
+
+def test_the_gitlab_step_runs_under_git_bash_on_windows(steps):
+    """The one later step that needs bash names Git's by absolute path."""
+    gitlab = _index(steps, GITLAB_STEP)
+    assert _index(steps, WINDOWS_TOOLCHAIN_STEP) < gitlab, (
+        f"{GITLAB_STEP!r} moved ahead of the toolchain step, so this test no "
+        "longer covers the case it was written for."
+    )
+    step = steps[gitlab]
+    assert step.get("shell") == "pwsh", (
+        f"{GITLAB_STEP!r} is `shell: {step.get('shell')}`. On Windows python-local "
+        "`shell: bash` resolves to MSYS2's bash, which setup-ruby left first on PATH."
+    )
+    assert GIT_BASH in step["run"] and "$IsWindows" in step["run"], (
+        f"{GITLAB_STEP!r} does not launch {GIT_BASH} on Windows."
+    )
+    assert "::error::" in step["run"], (
+        f"{GITLAB_STEP!r} does not fail by name when Git Bash is missing."
     )
 
 
@@ -194,6 +228,9 @@ def _runs_on_python_local(step: dict) -> bool:
     as in scope, so an unrecognized condition fails safe rather than being excused.
     """
     condition = str(step.get("if", ""))
+    # Only a top-level conjunct can exclude the leg; an `||` could re-admit it.
+    if "inputs.method != 'python-local'" in condition and "||" not in condition:
+        return False
     for method in ("python-container", "bash", "powershell"):
         if f"inputs.method == '{method}'" in condition:
             return False
@@ -201,30 +238,30 @@ def _runs_on_python_local(step: dict) -> bool:
 
 
 def test_no_bash_step_sits_inside_the_msys2_window(steps):
-    """Any bash step between the two would resolve to MSYS2 bash.
+    """Any bash step after the toolchain step would resolve to MSYS2 bash.
 
-    Scoped to steps that can actually run on this leg: the two ``python-container``
-    bash steps sit inside the window textually but are excluded by their own ``if``.
+    The window runs to the end of the action, since nothing restores Git Bash.
+    Scoped to steps that can run on the Windows python-local leg: the
+    ``python-container`` bash steps and the Unix python-local steps sit inside the
+    window textually but are excluded by their own ``if``.
     """
-    lo = _index(steps, WINDOWS_TOOLCHAIN_STEP)
-    hi = _index(steps, RESTORE_STEP)
-    window = steps[lo + 1 : hi]
-    # Control: the window must not be empty, or this test would pass by measuring
-    # nothing -- which is what it would do if either anchor step were renamed and
-    # the two ended up adjacent.
-    assert window, (
-        f"nothing sits between {WINDOWS_TOOLCHAIN_STEP!r} and {RESTORE_STEP!r}, so "
-        "the Windows install step is no longer inside the toolchain window."
+    window = steps[_index(steps, WINDOWS_TOOLCHAIN_STEP) + 1 :]
+    # Control: the window must hold steps that do run on this leg, or this test
+    # would pass by measuring nothing. The scan, the GitLab check and the
+    # completeness check all do.
+    in_scope = [s.get("name") for s in window if _runs_on_windows_python_local(s)]
+    assert WINDOWS_SCAN_STEP in in_scope and GITLAB_STEP in in_scope, (
+        f"the window after {WINDOWS_TOOLCHAIN_STEP!r} no longer holds the steps it "
+        f"is meant to cover: {in_scope}"
     )
     offenders = [
         s.get("name")
         for s in window
-        if s.get("shell") == "bash" and _runs_on_python_local(s)
+        if s.get("shell") == "bash" and _runs_on_windows_python_local(s)
     ]
     assert not offenders, (
-        f"these steps run between {WINDOWS_TOOLCHAIN_STEP!r} and {RESTORE_STEP!r} "
-        f"with `shell: bash` on the python-local leg, so they would get MSYS2 "
-        f"bash: {offenders}"
+        f"these steps run after {WINDOWS_TOOLCHAIN_STEP!r} with `shell: bash` on the "
+        f"Windows python-local leg, so they would get MSYS2 bash: {offenders}"
     )
 
 
@@ -284,7 +321,7 @@ def test_every_windows_ash_invocation_follows_the_promotion(steps):
     # in-window pwsh steps call `ash`, so the count is two.
     callers = [
         step.get("name")
-        for step in steps[promote + 1 : _index(steps, RESTORE_STEP)]
+        for step in steps[promote + 1 :]
         if _runs_on_windows_python_local(step)
         and ASH_INVOCATION.search(str(step.get("run", "")))
     ]
@@ -297,7 +334,7 @@ def test_every_windows_ash_invocation_follows_the_promotion(steps):
     # that maps it and puts it at the front of its own PATH before calling `ash`.
     promote_id = steps[promote].get("id")
     assert promote_id, f"{PROMOTE_STEP!r} has no id, so nothing can read its output"
-    for step in steps[promote + 1 : _index(steps, RESTORE_STEP)]:
+    for step in steps[promote + 1 :]:
         if not (
             _runs_on_windows_python_local(step)
             and ASH_INVOCATION.search(str(step.get("run", "")))
@@ -310,18 +347,6 @@ def test_every_windows_ash_invocation_follows_the_promotion(steps):
         assert '$env:PATH = "$env:ASH_ENTRY_POINT_DIRS;$env:PATH"' in step["run"], (
             f"{step.get('name')!r} maps the promotion but does not prepend it to PATH"
         )
-    # And nothing after the Git Bash restore may call `ash` on this leg: the
-    # promotion does not persist past the two steps that apply it.
-    late = [
-        step.get("name")
-        for step in steps[_index(steps, RESTORE_STEP) + 1 :]
-        if _runs_on_windows_python_local(step)
-        and ASH_INVOCATION.search(str(step.get("run", "")))
-    ]
-    assert not late, (
-        f"these steps call `ash` after {RESTORE_STEP!r}, where the promotion no longer "
-        f"applies and MSYS2's or Git's Almquist shell can win: {late}"
-    )
 
 
 def test_the_promotion_does_not_hand_precedence_to_git_bash(steps):

@@ -5,12 +5,17 @@ import os
 import platform
 import shutil
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
+import weakref
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any, Literal
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union, Any, Literal
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+if TYPE_CHECKING:
+    from automated_security_helper.utils.sandbox.backends import SpawnPlan
 
 
 _find_executable_cache: dict[str, str | None] = {}
@@ -211,6 +216,113 @@ def find_executable(command: str) -> Optional[str]:
     return None
 
 
+def _prepare_spawn(
+    args: Union[List[str], str],
+    env: Optional[Dict[str, str]],
+    cwd: Optional[Union[str, Path]],
+    shell: bool,
+) -> "Optional[SpawnPlan]":
+    """The scanner sandbox's rewrite of this spawn, or None when none applies.
+
+    Every helper in this module calls this immediately before starting a process, which
+    makes it the one place a scanner subprocess is sandboxed (see
+    ``utils/sandbox/scope.py``). Outside a scanner's sandbox scope it returns None and
+    the spawn is exactly what it was.
+    """
+    from automated_security_helper.utils.sandbox.scope import (
+        SandboxUnavailable,
+        active_scope,
+        prepare_spawn,
+    )
+
+    if active_scope() is None:
+        return None
+    if shell or isinstance(args, str):
+        # No builtin scanner spawns through a shell. Refused rather than wrapped as
+        # `sh -c`, so that a string command cannot reach the sandbox unparsed.
+        raise SandboxUnavailable(
+            "a scanner tried to start a shell command, which the sandbox does not wrap"
+        )
+    return prepare_spawn(args, env, cwd)
+
+
+#: How long a sandboxed process gets to stop after SIGTERM on a timeout before it is
+#: killed outright.
+SANDBOX_STOP_GRACE_SECONDS = 10.0
+
+
+def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
+    """``subprocess.run`` that stops a timed-out process with SIGTERM first.
+
+    subprocess.run kills a timed-out child with SIGKILL, which the Landlock
+    wrapper cannot catch; it would then never end the processes its scanner left
+    running. Sending SIGTERM lets the wrapper kill its whole tree. SIGKILL follows
+    if it has not exited within SANDBOX_STOP_GRACE_SECONDS. Raises TimeoutExpired
+    the way subprocess.run does. Used for sandboxed spawns only.
+    """
+    timeout = kwargs.pop("timeout", None)
+    check = kwargs.pop("check", False)
+    input_data = kwargs.pop("input", None)
+    if kwargs.pop("capture_output", False):
+        if "stdout" in kwargs or "stderr" in kwargs:
+            raise ValueError(
+                "stdout and stderr arguments may not be used with capture_output."
+            )
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+    with subprocess.Popen(args, **kwargs) as process:  # nosec B603 - sandbox-built argv
+        try:
+            stdout, stderr = process.communicate(input_data, timeout=timeout)
+        except subprocess.TimeoutExpired as first:
+            stdout, stderr = first.output, first.stderr
+            process.terminate()
+            try:
+                stdout, stderr = process.communicate(timeout=SANDBOX_STOP_GRACE_SECONDS)
+            except subprocess.TimeoutExpired as second:
+                stdout = second.output or stdout
+                stderr = second.stderr or stderr
+                process.kill()
+                # wait(), not communicate(): a process the scanner left holding the
+                # pipes would keep communicate() reading until it chose to exit, and
+                # the timeout would stop being one. subprocess.run waits the same
+                # way after its kill.
+                process.wait()
+            raise subprocess.TimeoutExpired(
+                args, timeout, output=stdout, stderr=stderr
+            ) from None
+        except BaseException:
+            process.terminate()
+            try:
+                process.wait(timeout=SANDBOX_STOP_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            raise
+    result = subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+    if check:
+        result.check_returncode()
+    return result
+
+
+def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
+    """``subprocess.run`` through the scanner sandbox choke point.
+
+    Same arguments, same return value, same exceptions as ``subprocess.run``, for the
+    call sites that rely on its exact semantics (``check=True`` raising,
+    ``TimeoutExpired`` propagating) and so cannot move to :func:`run_command`.
+    """
+    plan = _prepare_spawn(
+        args, kwargs.get("env"), kwargs.get("cwd"), bool(kwargs.get("shell", False))
+    )
+    if plan is None:
+        kwargs["env"] = _spawn_env(kwargs.get("env"))
+        return subprocess.run(args, **kwargs)  # nosec B603 - callers pass list argv
+    kwargs["env"] = _spawn_env(plan.env)
+    try:
+        return _run_stoppable(plan.argv, **kwargs)
+    finally:
+        plan.run_cleanup()
+
+
 def run_command(
     args: List[str],
     cwd: Optional[Union[str, Path]] = None,
@@ -261,8 +373,14 @@ def run_command(
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    sandbox_plan = None
     try:
-        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+        sandbox_plan = _prepare_spawn(args, env, cwd, shell)
+        if sandbox_plan is not None:
+            args, env = sandbox_plan.argv, sandbox_plan.env
+        # A sandboxed spawn is stopped with SIGTERM on a timeout; see _run_stoppable.
+        runner = _run_stoppable if sandbox_plan is not None else subprocess.run
+        result = runner(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=_spawn_env(env),
@@ -337,6 +455,9 @@ def run_command(
             stdout="",
             stderr=f"Error: {str(e)}",
         )
+    finally:
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
 
 
 def _write_stream_log(
@@ -352,11 +473,10 @@ def _write_stream_log(
     results_dir_path = Path(results_dir)
     results_dir_path.mkdir(parents=True, exist_ok=True)
     filename = f"{class_name}.{stream_name}.log" if class_name else f"{stream_name}.log"
-    with open(
-        results_dir_path.joinpath(filename),
-        "w",
-        encoding="utf-8",
-        errors="replace",
+    # Not a plain open(): a sandboxed scanner can leave a symlink at this name, and
+    # ASH is not sandboxed. See utils/sandbox/fs_guard.py.
+    with open_for_write(
+        results_dir_path.joinpath(filename), encoding="utf-8", errors="replace"
     ) as log_file:
         log_file.write(text)
 
@@ -439,16 +559,27 @@ def run_command_with_output_handling(
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    sandbox_plan = None
     try:
         try:
-            result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                command,
+            # Inside the spawn's own try: a sandbox that cannot be provided raises
+            # SandboxUnavailable, an OSError, which is reported like any command
+            # that could not start, and never falls through to an unsandboxed run.
+            spawn_command, spawn_env = command, env
+            sandbox_plan = _prepare_spawn(command, env, cwd, shell)
+            if sandbox_plan is not None:
+                spawn_command, spawn_env = sandbox_plan.argv, sandbox_plan.env
+            # A sandboxed spawn is stopped with SIGTERM on a timeout; see
+            # _run_stoppable.
+            runner = _run_stoppable if sandbox_plan is not None else subprocess.run
+            result = runner(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+                spawn_command,
                 capture_output=True,
                 text=True,
                 shell=shell,
                 check=False,
                 cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
-                env=_spawn_env(env),
+                env=_spawn_env(spawn_env),
                 encoding=encoding,
                 errors=errors,
                 timeout=timeout,
@@ -459,6 +590,11 @@ def run_command_with_output_handling(
             return _spawn_failure_response(
                 cmd_str, e, results_dir, class_name, stderr_preference
             )
+
+        # Before ASH writes the stream logs into the scanner's results directory:
+        # the sandbox's cleanup removes any link the scanner left there.
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
 
         # Use the actual returncode from the result
         returncode = result.returncode
@@ -485,6 +621,8 @@ def run_command_with_output_handling(
         # Handled ahead of the generic branch below so a timeout is reported as
         # such. That branch returns returncode 1 for everything, which cannot be
         # told apart from a tool that simply exited 1.
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
         error_msg = f"Command timed out after {timeout}s: {cmd_str}"
         # NO_MARKUP rather than escaping error_msg: it is also returned to the
         # caller below and lands in the scanner's stderr, which must stay verbatim.
@@ -519,6 +657,9 @@ def run_command_with_output_handling(
         error_msg = f"Error running {cmd_str}: {e}"
         ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
         return {"error": str(e), "returncode": 1, "stderr": error_msg}
+    finally:
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
 
 
 def run_command_get_output(
@@ -589,7 +730,11 @@ def run_command_stream_output(
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    sandbox_plan = None
     try:
+        sandbox_plan = _prepare_spawn(args, env, cwd, shell)
+        if sandbox_plan is not None:
+            args, env = sandbox_plan.argv, sandbox_plan.env
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
@@ -624,6 +769,9 @@ def run_command_stream_output(
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
         return 1
+    finally:
+        if sandbox_plan is not None:
+            sandbox_plan.run_cleanup()
 
 
 def get_host_uid() -> int:
@@ -738,6 +886,9 @@ def create_process_with_pipes(
         encoding = "utf-8"
 
     try:
+        sandbox_plan = _prepare_spawn(args, env, cwd, shell)
+        if sandbox_plan is not None:
+            args, env = sandbox_plan.argv, sandbox_plan.env
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
@@ -749,6 +900,9 @@ def create_process_with_pipes(
             encoding=encoding,
             errors=errors,
         )
+        if sandbox_plan is not None:
+            # The caller owns the process, so the plan's temporary files go when it does.
+            weakref.finalize(process, sandbox_plan.run_cleanup)
         return process
     except Exception as e:
         ASH_LOGGER.error(f"Error creating process with pipes: {e}", extra=NO_MARKUP)

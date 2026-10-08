@@ -23,6 +23,7 @@ These parameters are available across multiple ASH commands:
 | `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan`, `build-image` |
 | `--base-ref` | Git ref to diff against when --changed-files-only is set. | | `ASH_BASE_REF` | `scan` |
 | `--allow-stale-content-db` / `--no-allow-stale-content-db` | Let the scan pass when a scanner's content database is past its declared age bound (for grype, 5 days after it was built), recording a warning in the log and the reports. Without it such a scan exits 1. Takes precedence over the `content_db_staleness` config value; see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database). | Unset: the `content_db_staleness` config value, then `fail` |  | `scan` |
+| `--sandbox` | Run every scanner subprocess in an OS-level sandbox: `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` or `off`. A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the `sandbox.mode` config value; ignored in container mode. See [Scanner sandboxing](scanner-sandbox.md). | `off` (or `sandbox.mode`) |  | `scan` |
 | `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
 | `--color` | Enable/disable colorized output | |  | `scan` |
 | `--compact-report` | Produce a shorter markdown report suitable for PR comments. | |  | `scan` |

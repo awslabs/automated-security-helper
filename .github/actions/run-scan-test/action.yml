@@ -315,8 +315,11 @@ runs:
     # src/Runner.Worker/Handlers/ScriptHandler.cs calls
     # WhichUtil.Which("bash", ..., prependPath) -- so running this any earlier makes
     # MSYS2 bash the shell for "Validate ASH config files" just above, which exited 2
-    # in 176ms when that happened. Everything between here and the precedence restore
-    # below is `shell: pwsh`, which does not care which bash is first.
+    # in 176ms when that happened. MSYS2 then stays first for the rest of the job:
+    # nothing hands precedence back, because that would take a GITHUB_PATH write.
+    # So every later step that can run on this leg is `shell: pwsh`, which does not
+    # care which bash is first, and the one that needs bash launches Git Bash by
+    # absolute path (see "Validate GitLab SAST Report Schema Compliance").
     #
     # What the toolchain is actually for, and it is not a missing libyaml. cfn-nag
     # pins cfn-model 0.6.6, which requires `psych ~> 3`; psych 3.3.4 has a C
@@ -369,9 +372,7 @@ runs:
     # from a different mount table.
     #
     # Re-adding ASH's scripts directory promotes it without removing MSYS2, so
-    # sh, make and gcc still all come from the one coherent tree psych needs,
-    # and the Git Bash restore below stays where it is for the `shell: bash`
-    # steps that follow it.
+    # sh, make and gcc still all come from the one coherent tree psych needs.
     #
     # The directory goes out as this step's `dirs` output, and the two steps that
     # invoke `ash` put it at the front of their own PATH. Nothing after them on
@@ -591,31 +592,6 @@ runs:
           .ash/ash_output/ash_aggregated_results.json
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    # Hand PATH precedence back to Git Bash now that psych is built. MSYS2 has to be
-    # first while the gem compiles and must not still be first for the `shell: bash`
-    # steps below it -- "Validate GitLab SAST Report Schema Compliance" and
-    # "Validate all selected scanners completed" both run on this leg and both
-    # expect Git Bash.
-    #
-    # Re-adding the directory is enough to move it, rather than merely duplicating
-    # it. GITHUB_PATH lines accumulate in a list that the runner reverses before
-    # joining, so the last entry added ends up first
-    # (actions/runner src/Runner.Worker/Handlers/Handler.cs,
-    # PrependPath.Reverse<string>()), and each line is removed from the list before
-    # being appended (src/Runner.Worker/FileCommandManager.cs, RemoveAll then Add),
-    # so an entry already present is promoted instead of repeated.
-    #
-    # This one stays a GITHUB_PATH write. What it changes is which `bash.exe` the
-    # runner launches for a later `shell: bash` step, and the runner resolves that
-    # from PATH before the step's script starts, so nothing inside the step, and no
-    # `env:` mapping of an output, can do it. `shell:` takes no expression, so a
-    # step shared with Linux and macOS cannot name Git's bash by absolute path
-    # either. The value is a literal.
-    - name: Restore Git Bash precedence after the Ruby toolchain (Windows)
-      if: inputs.method == 'python-local' && runner.os == 'Windows'
-      shell: pwsh
-      run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
-
     # Python Local scan (Unix)
     - name: Validate ASH using Python Local (Unix)
       if: inputs.method == 'python-local' && runner.os != 'Windows'
@@ -744,84 +720,31 @@ runs:
           }
         }
 
+    # The script is what used to be this step's inline `shell: bash` body, unchanged.
+    # It moved to a file because this step runs on every leg, including Windows
+    # python-local, where setup-ruby earlier in this action left MSYS2's usr/bin first
+    # on PATH for the rest of the job, and the runner resolves `shell: bash` through
+    # PATH (actions/runner src/Runner.Worker/Handlers/ScriptHandler.cs,
+    # WhichUtil.Which("bash", ..., prependPath)). This action used to hand precedence
+    # back to Git Bash with a GITHUB_PATH write, which zizmor's github-env audit
+    # reports in a composite action and which reached every later step of the
+    # caller's job. `shell:` takes no expression, so the choice of bash is made here
+    # in pwsh: Git Bash by absolute path on Windows, `bash` from PATH elsewhere.
     - name: Validate GitLab SAST Report Schema Compliance
-      shell: bash
+      shell: pwsh
       run: |
-        echo "Validating GitLab SAST report schema compliance..."
-        GITLAB_REPORTS=$(find .ash/ash_output -name "*.gl-sast-report.json")
-        if [ -z "$GITLAB_REPORTS" ]; then
-          echo "ERROR: GitLab SAST report not found in .ash/ash_output"
-          exit 1
-        fi
-        echo "Found GitLab SAST reports to validate:"
-        echo "$GITLAB_REPORTS"
-
-        # Both network operations below used to be unretried, and the npm one took the
-        # job down: on pull request #582, run 35177045049, job 105060929678,
-        # `npm install -g ajv-cli` hit `ECONNRESET` reaching registry.npmjs.org and the
-        # step's `-e` ended the job before a single report was validated. Nothing about
-        # that failure concerned the code under test.
-        #
-        # Same retry shape as the tool-install step earlier in this file. Redefined
-        # rather than shared because each `run:` block is its own shell, so a function
-        # defined in another step is not in scope here.
-        retry() {
-          local attempts=3 n=1
-          until "$@"; do
-            if [ "$n" -ge "$attempts" ]; then
-              echo "::error::'$*' failed after ${attempts} attempts"
-              return 1
-            fi
-            echo "::warning::'$*' failed (attempt ${n}/${attempts}); retrying in $((n * 10))s"
-            sleep $((n * 10))
-            n=$((n + 1))
-          done
+        if ($IsWindows) {
+          $Bash = 'C:\Program Files\Git\bin\bash.exe'
+          if (-not (Test-Path $Bash)) {
+            Write-Host "::error::Git Bash is not at $Bash, so the GitLab SAST schema check has no bash to run under."
+            exit 1
+          }
+        } else {
+          $Bash = 'bash'
         }
-
-        # ajv-cli pinned to a major. Unpinned, this step validated against whatever
-        # validator was newest, so a breaking ajv release could fail the gate on
-        # reports that had not changed -- the same class of problem as the floating
-        # schema below, one layer up.
-        retry npm install -g ajv-cli@5
-
-        # The schema is fetched at the version the reporter DECLARES conformance to,
-        # not from `master`. It was `master`, which made this gate validate against
-        # whatever GitLab had merged most recently: measured 2026-09-17, `master` was
-        # schema 15.2.5 while the reporter emits 15.2.2, a 1,030-byte difference with a
-        # different digest. A gate whose contract can change without a commit here can
-        # start failing for reasons unrelated to the code, which is the defect.
-        #
-        # Read from the reporter so the two cannot disagree, in the same shape as the
-        # ferret-scan constraint lookup earlier in this file.
-        SCHEMA_VERSION="$(python -c 'from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import GITLAB_SAST_SCHEMA_VERSION as v; print(v)')"
-        if [ -z "${SCHEMA_VERSION}" ]; then
-          echo "::error::Could not read GITLAB_SAST_SCHEMA_VERSION from the GitLab SAST reporter. Refusing to validate against an unpinned schema."
-          exit 1
-        fi
-        echo "Validating against GitLab security-report schema v${SCHEMA_VERSION} (the version the reporter emits)"
-
-        # `-f` matters now that the URL contains a version: without it curl exits 0 on
-        # a 404 and writes GitLab's error page to the file, and ajv then fails with a
-        # parse error that says nothing about the tag being wrong. The upstream tags
-        # carry a `v` prefix; a bare `15.2.2` is a 404.
-        retry curl -sSfL -o gitlab-sast-schema.json \
-          "https://gitlab.com/gitlab-org/security-products/security-report-schemas/-/raw/v${SCHEMA_VERSION}/dist/sast-report-format.json"
-        VALIDATION_FAILED=false
-        for report in $GITLAB_REPORTS; do
-          echo "Validating $report..."
-          if ajv validate -s gitlab-sast-schema.json -d "$report" --strict=false --all-errors; then
-            echo "PASS: $report passed schema validation"
-          else
-            echo "FAIL: $report failed schema validation"
-            VALIDATION_FAILED=true
-          fi
-        done
-        if [ "$VALIDATION_FAILED" = true ]; then
-          echo "ERROR: One or more GitLab SAST reports failed schema validation"
-          exit 1
-        else
-          echo "SUCCESS: All GitLab SAST reports passed schema validation"
-        fi
+        # The same flags the runner passes for `shell: bash`.
+        & $Bash --noprofile --norc -eo pipefail (Join-Path $env:GITHUB_ACTION_PATH 'validate_gitlab_sast_reports.sh')
+        exit $LASTEXITCODE
 
     # The completeness half of the scanner guard, and it is NOT the ERROR counter used by
     # the five method-gated steps above. `count_scanner_errors.py` fails a cell when a
@@ -863,17 +786,15 @@ runs:
     # the same field rather than the only one.
     - name: Validate all selected scanners completed
       if: ${{ !cancelled() }}
-      shell: bash
+      shell: pwsh
       run: |
-        # python3 on the Linux and macOS runners, python under Git Bash on the
-        # Windows one. Probed rather than assumed, because this is the only bash
-        # step in this action that runs on all three.
-        if command -v python3 >/dev/null 2>&1; then
-          PY=python3
-        else
-          PY=python
-        fi
-        "$PY" .github/scripts/assert_scanners_completed.py
+        # pwsh rather than bash: this runs on every leg, and on Windows python-local
+        # `shell: bash` would be MSYS2's bash (see the GitLab SAST step above).
+        # setup-python puts `python` on PATH everywhere and `python3` only on Unix,
+        # so resolve rather than assuming either.
+        $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+        & $Python .github/scripts/assert_scanners_completed.py
+        exit $LASTEXITCODE
 
     # Snapshots of what ASH prints when a real runtime runs its image: `ashx --version` and
     # `ashx build-image --help` inside it, `ashx --mode container` and the PowerShell wrapper scanning

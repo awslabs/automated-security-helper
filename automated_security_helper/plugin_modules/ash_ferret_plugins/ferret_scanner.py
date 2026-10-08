@@ -15,6 +15,7 @@ from urllib.parse import urljoin
 
 from pydantic import Field, model_validator
 
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import pep440_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -30,7 +31,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
 # Path to the default ferret-scan config bundled with this plugin
@@ -534,6 +535,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        env_prefixes=("FERRET_",)
+    )
+
     # ferret-scan exits 0 on a normal scan (even with findings) and 3 when
     # --fail-on-incomplete is set and a file could not be fully scanned. Exit 3 is a
     # deliberate integrity signal that still ships valid (partial) SARIF, so it is an
@@ -632,7 +637,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             if not ferret_binary:
                 return None
 
-            result = subprocess.run(  # nosec B603 B607 — list args, executable from shutil.which()
+            result = spawn_run(  # nosec B603 B607 — list args, executable from shutil.which()
                 [ferret_binary, "--version"],
                 capture_output=True,
                 text=True,

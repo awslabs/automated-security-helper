@@ -46,6 +46,46 @@
 
 ## Unreleased
 
+### Features
+
+- **Opt-in OS sandboxing for scanners: `--sandbox auto|bwrap|firejail|landlock|sandbox-exec|off`**,
+  or `sandbox.mode` in the config file. Off by default. With a sandbox, every scanner
+  subprocess, including version probes and the detect-secrets and cdk-nag workers,
+  runs with:
+  - the source tree read-only, and only its own `<output>/scanners/<name>/`
+    directory writable;
+  - a private, empty `$HOME` and `/tmp`;
+  - an environment filtered to an allowlist, so cloud credentials and tokens are not
+    passed in;
+  - no network under `--offline`, and online only for the scanners that fetch rules,
+    databases or audit data. detect-secrets' secret verification gets a network only
+    when `sandbox.network_scanners` names it, because the settings that enable it
+    can come from the scanned repository.
+
+  `sandbox.network_scanners` and `sandbox.extra_read_paths` grant access, so a config
+  file inside the scanned tree (discovered, `--config`, an `extends` base, or
+  `ASH_CONFIG`) cannot set them; they come from `--config-overrides` or a config
+  file outside the tree. Such a file's `network_scanners` can still remove network,
+  and its `sandbox.mode` applies only when nothing trusted turned the sandbox on.
+  The tree is the enclosing checkout, not only the scanned directory.
+
+  If a sandbox was requested and cannot be provided, the scanner is recorded
+  `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
+  unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and
+  sandbox-exec on macOS. There is no Windows backend: use WSL2 or container mode.
+  Container mode ignores the setting, because the container is the boundary.
+
+  Two timeout behaviors change with the worker move, sandbox or not. cdk-nag now
+  honors `scanners.cdk-nag.options.scan_timeout` (1800 seconds by default) for the
+  whole batch of templates; it had no timeout before, and templates not evaluated by
+  the cutoff are reported as failed targets. A detect-secrets scan that times out
+  now keeps only its baseline's entries, where the in-process scan kept whatever it
+  had found before the cutoff; either way the scan is reported as timed out. See
+  `docs/content/docs/scanner-sandbox.md` for the threat model and per-scanner
+  policy. Two scanners that ran inside the ASH process now run as worker
+  subprocesses so the sandbox can cover them: detect-secrets and cdk-nag. Their
+  findings are unchanged.
+
 ### Behavior changes
 
 - **`ash dependencies install --tool` selects the archive converter as `archive`.**
@@ -70,7 +110,7 @@
   errors. The default `scanners.opengrep.options.version` is now `v1.30.2`; a
   configuration that names v1.15.1 explicitly has to bring its own `sha256`.
 
-- **The container image pins bandit 1.9.4, checkov 3.3.26 and semgrep 1.179.0.**
+- **The container image pins bandit 1.9.4, checkov 3.3.26 and semgrep 1.180.0.**
   The image used to install the newest release each scanner's default version
   constraint allowed, which was whatever PyPI had on the day of the build. It now
   installs exactly the versions in their `THIRD_PARTY_LICENSES` entries in
@@ -705,7 +745,7 @@
   checked against the wheel's RECORD; a wheel that ships a file is always read before
   anything is fetched. So that these files describe the release in the image, the
   image now installs each of the three at exactly its entry's version (bandit 1.9.4,
-  checkov 3.3.26, semgrep 1.179.0) instead of the newest release its scanner's default
+  checkov 3.3.26, semgrep 1.180.0) instead of the newest release its scanner's default
   range allowed on the day of the build. Outside the image the defaults are unchanged.
 
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from

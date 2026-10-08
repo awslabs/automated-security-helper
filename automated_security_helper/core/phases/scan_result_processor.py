@@ -9,6 +9,7 @@ from automated_security_helper.models.scan_results_container import ScanResultsC
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     normalize_sarif_result_severities,
@@ -171,14 +172,17 @@ class ScanResultProcessor:
                 results.target_type
             ].pop("severity_counts", None)
 
-        ash_target_result_path.write_text(
-            json.dumps(
-                aggregated_results.additional_reports[scanner_name][
-                    results.target_type
-                ],
-                default=str,
+        # Without following a symlink: this is the scanner's own results directory,
+        # which a sandboxed scanner could write. See utils/sandbox/fs_guard.py.
+        with open_for_write(ash_target_result_path) as handle:
+            handle.write(
+                json.dumps(
+                    aggregated_results.additional_reports[scanner_name][
+                        results.target_type
+                    ],
+                    default=str,
+                )
             )
-        )
 
         return aggregated_results
 

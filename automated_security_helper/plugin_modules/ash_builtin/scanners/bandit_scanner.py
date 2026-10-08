@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -97,6 +98,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     This scanner uses Bandit to perform static security analysis of Python code
     and returns results in a structured format using the StaticAnalysisReport model.
     """
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        env_prefixes=("BANDIT_",)
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 

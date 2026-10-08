@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from yaml import YAMLError
 
 from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -44,10 +45,12 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.utils.cdk_nag_worker import cdk_nag_worker_batch
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.subprocess_utils import find_executable
 
@@ -190,7 +193,11 @@ if _CDK_AVAILABLE:
         from importlib.metadata import version as _get_version
 
         _cdk_nag_version = _get_version("cdk_nag")
-        from automated_security_helper.utils.cdk_nag_wrapper import (
+        # Imported for the availability check it has always been: the wrapper's own
+        # imports (cfn_tools, the SARIF model) failing still makes cdk-nag MISSING.
+        # It does not import cdk_nag itself; that happens in the worker child.
+        import automated_security_helper.utils.cdk_nag_wrapper  # noqa: F401
+        from automated_security_helper.utils.cdk_nag_worker import (
             run_cdk_nag_against_cfn_template,
         )
     except Exception:
@@ -872,6 +879,14 @@ class CdkNagScannerConfig(ScannerPluginConfigBase):
 class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     """CDK Nag security scanner, custom CDK-CLI-less implementation."""
 
+    # The evaluation runs in a child (utils/cdk_nag_worker.py), and jsii starts `node`
+    # from it; both reach the network for nothing. JSII_ variables tune that runtime.
+    # NODE_OPTIONS is deliberately not passed: a --require preload pointing into the
+    # home directory, which the sandbox hides, would stop node from starting.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        env_prefixes=("JSII_",)
+    )
+
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
@@ -1145,158 +1160,166 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         outdir = self.results_dir.joinpath(target_type)
         sarif_results: List[Result] = []
-        for cfn_file in scannable:
-            self.targets_attempted += 1
-            try:
-                # Run CDK synthesis for this file
-                config_options: CdkNagScannerConfigOptions = (
-                    CdkNagScannerConfigOptions.model_validate(self.config.options)
-                )
-                nag_packs = config_options.nag_packs
-                if isinstance(config_options.nag_packs, CdkNagPacks):
-                    nag_packs = nag_packs.model_dump(by_alias=True)
+        # One worker child evaluates every template in this loop; see
+        # utils/cdk_nag_worker.py. The block encloses the loop so the child starts
+        # inside the sandbox scope the executor entered around this scan() call.
+        # scan_timeout bounds the child, as it bounds every other scanner's tool; a
+        # child killed at it fails the templates it had not answered.
+        with cdk_nag_worker_batch(
+            scannable, work_root=outdir, timeout=self._effective_scan_timeout()
+        ):
+            for cfn_file in scannable:
+                self.targets_attempted += 1
+                try:
+                    # Run CDK synthesis for this file
+                    config_options: CdkNagScannerConfigOptions = (
+                        CdkNagScannerConfigOptions.model_validate(self.config.options)
+                    )
+                    nag_packs = config_options.nag_packs
+                    if isinstance(config_options.nag_packs, CdkNagPacks):
+                        nag_packs = nag_packs.model_dump(by_alias=True)
 
-                nag_result_dict = run_cdk_nag_against_cfn_template(
-                    template_path=Path(cfn_file),
-                    nag_packs=[
-                        item
-                        for item, value in nag_packs.items()
-                        if item in nag_packs and bool(value)
-                    ],
-                    outdir=outdir,
-                    include_compliant_checks=config_options.include_compliant_checks,
-                    # A template synthesized by a CDK app records that app's reviewed
-                    # cdk-nag suppressions in its own resource metadata, and cdk-nag 3.x
-                    # does not read them back when it re-scans the template. Honoring them
-                    # is therefore ASH's job; gating on ignore_suppressions keeps the flag
-                    # meaning what it says, which is that an audit sees everything the
-                    # repository accepted, including what it accepted in-band.
+                    nag_result_dict = run_cdk_nag_against_cfn_template(
+                        template_path=Path(cfn_file),
+                        nag_packs=[
+                            item
+                            for item, value in nag_packs.items()
+                            if item in nag_packs and bool(value)
+                        ],
+                        outdir=outdir,
+                        include_compliant_checks=config_options.include_compliant_checks,
+                        # A template synthesized by a CDK app records that app's reviewed
+                        # cdk-nag suppressions in its own resource metadata, and cdk-nag 3.x
+                        # does not read them back when it re-scans the template. Honoring them
+                        # is therefore ASH's job; gating on ignore_suppressions keeps the flag
+                        # meaning what it says, which is that an audit sees everything the
+                        # repository accepted, including what it accepted in-band.
+                        #
+                        # Read directly rather than through getattr(..., False).
+                        # ``ignore_suppressions`` is a declared field on PluginContext, so the
+                        # default can only ever be reached by the field being renamed away -- and
+                        # then it silently resolves to the lenient direction, honoring every
+                        # in-template suppression even on a run that asked to ignore them. A
+                        # direct read raises instead, which the handler below records as a failed
+                        # target: loud, and consistent with the rest of this scanner, where a
+                        # target that was not evaluated as requested must never read as clean.
+                        # Every other consumer of this field in the codebase reads it directly
+                        # too, so this is also the house form.
+                        honor_template_suppressions=not self.context.ignore_suppressions,
+                    )
+                    if nag_result_dict is None:
+                        # Not counted as a failure: a non-CloudFormation file in the scan set is
+                        # an expected skip, not a scanner malfunction. Counting it would make a
+                        # repository of plain JSON report ERROR.
+                        #
+                        # Decrementing back to a running total of zero is not a silent success
+                        # either. When every file in the scan set lands here the count ends at 0,
+                        # which the container reads as "tracked, attempted none" and reports
+                        # SKIPPED.
+                        #
+                        # This branch is now reached by exactly one wrapper state, and that is the
+                        # point. The wrapper used to return None for two further states -- cdk-nag
+                        # failing to import, and no nag pack registered -- and both landed here,
+                        # so a real template that no rule ever ran against un-counted itself and
+                        # the scan reported SKIPPED with exit code 0. Both now return a response
+                        # carrying ``failure`` and are counted below.
+                        self.targets_attempted -= 1
+                        ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
+                        continue
+
+                    if nag_result_dict.failure is not None:
+                        # The wrapper ran but could not read a validation report, so no rule was
+                        # evaluated against this template. Counted as a failed target because the
+                        # alternative is what this branch previously did: fall through to a
+                        # zero-iteration findings loop, raise nothing, and report the template as
+                        # clean. With one template that also defeated the "failed on all N" guard,
+                        # since no failure was ever recorded for it to count.
+                        self.targets_failed += 1
+                        ASH_LOGGER.error(
+                            f"cdk-nag did not evaluate {cfn_file}: {nag_result_dict.failure}"
+                        )
+                        self.errors.append(f"{cfn_file}: {nag_result_dict.failure}")
+                        continue
+
+                    for pack, findings in nag_result_dict.results.items():
+                        ASH_LOGGER.debug(
+                            f"Found {len(findings)} findings for {pack} on template {cfn_file}"
+                        )
+                        sarif_results.extend(findings)
+                except (YAMLError, UnicodeDecodeError) as e:
+                    # NOT a failed target, and NOT silent either. Both halves are the point.
                     #
-                    # Read directly rather than through getattr(..., False).
-                    # ``ignore_suppressions`` is a declared field on PluginContext, so the
-                    # default can only ever be reached by the field being renamed away -- and
-                    # then it silently resolves to the lenient direction, honoring every
-                    # in-template suppression even on a run that asked to ignore them. A
-                    # direct read raises instead, which the handler below records as a failed
-                    # target: loud, and consistent with the rest of this scanner, where a
-                    # target that was not evaluated as requested must never read as clean.
-                    # Every other consumer of this field in the codebase reads it directly
-                    # too, so this is also the house form.
-                    honor_template_suppressions=not self.context.ignore_suppressions,
-                )
-                if nag_result_dict is None:
-                    # Not counted as a failure: a non-CloudFormation file in the scan set is
-                    # an expected skip, not a scanner malfunction. Counting it would make a
-                    # repository of plain JSON report ERROR.
+                    # WHY IT IS NOT A FAILED TARGET
+                    # -----------------------------
+                    # A file no YAML or JSON parser can load cannot carry a ``Resources``
+                    # mapping, and carrying one is the single question that separates "not
+                    # CloudFormation" from "CloudFormation this model cannot represent" --
+                    # see ``CloudFormationTemplateModelError``. So a parse failure answers
+                    # "this was never a candidate template", which is the skip below, not a
+                    # coverage hole. ``cfn_nag_scanner`` already classifies it exactly this
+                    # way over the same scan set through the same
+                    # ``get_model_from_template``, and that function's docstring records the
+                    # contract both callers are meant to honor: "Exceptions from
+                    # ``load_yaml`` propagate unchanged ... and the two callers already
+                    # classify that case for themselves." cdk-nag was the caller that did
+                    # not -- the parse error fell through to the broad handler below and
+                    # incremented ``targets_failed``.
                     #
-                    # Decrementing back to a running total of zero is not a silent success
-                    # either. When every file in the scan set lands here the count ends at 0,
-                    # which the container reads as "tracked, attempted none" and reports
-                    # SKIPPED.
+                    # It matters well beyond two files. This scanner's scan set is every
+                    # ``*.json``, ``*.yaml`` and ``*.yml`` file in the tree, most of which
+                    # were never CloudFormation. ASH's own repository holds two that do not
+                    # parse -- ``deploy/cdk/tsconfig.json`` (JSON with ``//`` comments) and
+                    # ``mkdocs.yml`` (``!!python/name:`` tags ``SafeLoader`` refuses) -- so
+                    # with ``fail_on_incomplete_scanners`` on by default, ANY repository
+                    # holding either shape failed its scan for files containing no
+                    # CloudFormation to scan.
                     #
-                    # This branch is now reached by exactly one wrapper state, and that is the
-                    # point. The wrapper used to return None for two further states -- cdk-nag
-                    # failing to import, and no nag pack registered -- and both landed here,
-                    # so a real template that no rule ever ran against un-counted itself and
-                    # the scan reported SKIPPED with exit code 0. Both now return a response
-                    # carrying ``failure`` and are counted below.
+                    # WHY IT IS STILL RECORDED
+                    # -----------------------
+                    # Uncounting it silently was the first attempt and it was wrong. A parse
+                    # failure is not confidently a non-template the way a document that
+                    # parses and has no ``Resources`` key is: the same symptom fits a
+                    # truncated or malformed real template, and ASH cannot tell which from
+                    # here. Dropping it to DEBUG left that indistinguishable from a file
+                    # nobody ever thought was a template, and
+                    # ``tests/integration/scanners/test_cdk_nag_real_pack.py``'s
+                    # ``TestTargetThatCouldNotBeParsed`` says why that is unacceptable in its
+                    # own words -- "'not a finding' on its own would also be satisfied by the
+                    # failure vanishing entirely".
+                    #
+                    # So it goes through ``_plugin_log`` with ``append_to_stream="stderr"``,
+                    # which appends to ``self.errors`` and therefore reaches the SARIF
+                    # ``exitCodeDescription`` -- the same channel the "target directory is
+                    # empty" notice above uses, and for the same reason: a fact worth
+                    # surfacing that is not an error. INFO rather than ERROR because
+                    # ``_plugin_log`` routes ERROR into ``self.errors`` too, so the level is
+                    # free to say what this actually is.
+                    #
+                    # NARROW ON PURPOSE. Only a parse failure. ``UnicodeDecodeError`` comes
+                    # from the ``open(...).read()`` inside ``get_model_from_template`` on a
+                    # file that is not text at all -- the same answer for the same reason.
+                    # ``OSError`` is deliberately NOT caught: an unreadable file is a target
+                    # ASH was asked to scan and could not, which is real incompleteness the
+                    # gate should see. Nor is ``CloudFormationTemplateModelError``, which the
+                    # wrapper converts into a ``failure`` handled above.
                     self.targets_attempted -= 1
-                    ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
-                    continue
-
-                if nag_result_dict.failure is not None:
-                    # The wrapper ran but could not read a validation report, so no rule was
-                    # evaluated against this template. Counted as a failed target because the
-                    # alternative is what this branch previously did: fall through to a
-                    # zero-iteration findings loop, raise nothing, and report the template as
-                    # clean. With one template that also defeated the "failed on all N" guard,
-                    # since no failure was ever recorded for it to count.
+                    self._plugin_log(
+                        f"{cfn_file} is not parseable as YAML or JSON "
+                        f"({type(e).__name__}: {e}), so it is not a CloudFormation template "
+                        "and cdk-nag evaluated no rule against it.",
+                        target_type=target_type,
+                        level=logging.INFO,
+                        append_to_stream="stderr",
+                    )
+                except Exception as e:
+                    # error, not trace. trace sits below debug, so this was invisible even with
+                    # --debug: a scanner failing on every template produced no operator-visible
+                    # signal anywhere.
                     self.targets_failed += 1
                     ASH_LOGGER.error(
-                        f"cdk-nag did not evaluate {cfn_file}: {nag_result_dict.failure}"
+                        f"cdk-nag failed to scan {cfn_file}: {type(e).__name__}: {e}"
                     )
-                    self.errors.append(f"{cfn_file}: {nag_result_dict.failure}")
-                    continue
-
-                for pack, findings in nag_result_dict.results.items():
-                    ASH_LOGGER.debug(
-                        f"Found {len(findings)} findings for {pack} on template {cfn_file}"
-                    )
-                    sarif_results.extend(findings)
-            except (YAMLError, UnicodeDecodeError) as e:
-                # NOT a failed target, and NOT silent either. Both halves are the point.
-                #
-                # WHY IT IS NOT A FAILED TARGET
-                # -----------------------------
-                # A file no YAML or JSON parser can load cannot carry a ``Resources``
-                # mapping, and carrying one is the single question that separates "not
-                # CloudFormation" from "CloudFormation this model cannot represent" --
-                # see ``CloudFormationTemplateModelError``. So a parse failure answers
-                # "this was never a candidate template", which is the skip below, not a
-                # coverage hole. ``cfn_nag_scanner`` already classifies it exactly this
-                # way over the same scan set through the same
-                # ``get_model_from_template``, and that function's docstring records the
-                # contract both callers are meant to honor: "Exceptions from
-                # ``load_yaml`` propagate unchanged ... and the two callers already
-                # classify that case for themselves." cdk-nag was the caller that did
-                # not -- the parse error fell through to the broad handler below and
-                # incremented ``targets_failed``.
-                #
-                # It matters well beyond two files. This scanner's scan set is every
-                # ``*.json``, ``*.yaml`` and ``*.yml`` file in the tree, most of which
-                # were never CloudFormation. ASH's own repository holds two that do not
-                # parse -- ``deploy/cdk/tsconfig.json`` (JSON with ``//`` comments) and
-                # ``mkdocs.yml`` (``!!python/name:`` tags ``SafeLoader`` refuses) -- so
-                # with ``fail_on_incomplete_scanners`` on by default, ANY repository
-                # holding either shape failed its scan for files containing no
-                # CloudFormation to scan.
-                #
-                # WHY IT IS STILL RECORDED
-                # -----------------------
-                # Uncounting it silently was the first attempt and it was wrong. A parse
-                # failure is not confidently a non-template the way a document that
-                # parses and has no ``Resources`` key is: the same symptom fits a
-                # truncated or malformed real template, and ASH cannot tell which from
-                # here. Dropping it to DEBUG left that indistinguishable from a file
-                # nobody ever thought was a template, and
-                # ``tests/integration/scanners/test_cdk_nag_real_pack.py``'s
-                # ``TestTargetThatCouldNotBeParsed`` says why that is unacceptable in its
-                # own words -- "'not a finding' on its own would also be satisfied by the
-                # failure vanishing entirely".
-                #
-                # So it goes through ``_plugin_log`` with ``append_to_stream="stderr"``,
-                # which appends to ``self.errors`` and therefore reaches the SARIF
-                # ``exitCodeDescription`` -- the same channel the "target directory is
-                # empty" notice above uses, and for the same reason: a fact worth
-                # surfacing that is not an error. INFO rather than ERROR because
-                # ``_plugin_log`` routes ERROR into ``self.errors`` too, so the level is
-                # free to say what this actually is.
-                #
-                # NARROW ON PURPOSE. Only a parse failure. ``UnicodeDecodeError`` comes
-                # from the ``open(...).read()`` inside ``get_model_from_template`` on a
-                # file that is not text at all -- the same answer for the same reason.
-                # ``OSError`` is deliberately NOT caught: an unreadable file is a target
-                # ASH was asked to scan and could not, which is real incompleteness the
-                # gate should see. Nor is ``CloudFormationTemplateModelError``, which the
-                # wrapper converts into a ``failure`` handled above.
-                self.targets_attempted -= 1
-                self._plugin_log(
-                    f"{cfn_file} is not parseable as YAML or JSON "
-                    f"({type(e).__name__}: {e}), so it is not a CloudFormation template "
-                    "and cdk-nag evaluated no rule against it.",
-                    target_type=target_type,
-                    level=logging.INFO,
-                    append_to_stream="stderr",
-                )
-            except Exception as e:
-                # error, not trace. trace sits below debug, so this was invisible even with
-                # --debug: a scanner failing on every template produced no operator-visible
-                # signal anywhere.
-                self.targets_failed += 1
-                ASH_LOGGER.error(
-                    f"cdk-nag failed to scan {cfn_file}: {type(e).__name__}: {e}"
-                )
-                self.errors.append(f"{cfn_file}: {type(e).__name__}: {e}")
+                    self.errors.append(f"{cfn_file}: {type(e).__name__}: {e}")
 
         # Every template failed. Say so loudly here as well as through the returned status:
         # this is the one line that distinguishes "your templates are compliant" from "cdk-nag
@@ -1415,12 +1438,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         )
         out_path = outdir.joinpath("ash-cdk-nag.sarif")
         outdir.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(
-            report.model_dump_json(
-                exclude_none=True,
-                exclude_unset=True,
+        # encoding=None: the locale's, as Path.write_text used.
+        with open_for_write(out_path, encoding=None, errors=None) as handle:
+            handle.write(
+                report.model_dump_json(
+                    exclude_none=True,
+                    exclude_unset=True,
+                )
             )
-        )
 
         return report
 

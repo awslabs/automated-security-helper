@@ -735,6 +735,26 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
+        publishes="name=sandbox-escape-report-${{ matrix.os }} path=test-results/sandbox.junit.xml",
+        reason="Failure evidence only: one JUnit XML report from the sandbox escape suite.",
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=sandbox-scanner-parity "
+            "path=${{ runner.temp }}/sandbox-parity.json|${{ runner.temp }}/ash-sandbox-parity-*"
+        ),
+        reason=(
+            "Failure evidence only: the parity report and the fixture's scan output "
+            "with and without the sandbox. Fixture and reports, not build output."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
         publishes=(
             "name=external-target-scan-evidence-${{ matrix.os }} "
             "path=${{ runner.temp }}/ash-external-target-*"

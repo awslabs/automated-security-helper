@@ -1556,7 +1556,10 @@ def _run_container_mode(
         container_uid=opts.container_uid,
         container_gid=opts.container_gid,
         config=opts.config,
-        config_overrides=opts.config_overrides,
+        # The container is the boundary, and the image does not ship bubblewrap: an
+        # inner run that read sandbox.mode from the config file or --sandbox would
+        # record every scanner MISSING. Appended last so it wins.
+        config_overrides=[*(opts.config_overrides or []), "sandbox.mode=off"],
         strategy=opts.strategy,
         scanners=opts.scanners,
         exclude_scanners=opts.excluded_scanners,

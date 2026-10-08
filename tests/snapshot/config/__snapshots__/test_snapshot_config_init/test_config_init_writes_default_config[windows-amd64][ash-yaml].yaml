@@ -13,6 +13,8 @@ global_settings:
       - /fail_on_incomplete_scanners
       - /content_db_staleness
       - /content_db_staleness_overrides
+      - /sandbox
+      - /sandbox/**
       - /global_settings/ignore_paths
       - /global_settings/suppressions
       - /reporters/bedrock-summary-reporter/options/aws_*
@@ -20,6 +22,10 @@ global_settings:
       denied_value_patterns: {}
 fail_on_findings: true
 fail_on_incomplete_scanners: true
+sandbox:
+  mode: 'off'
+  network_scanners: null
+  extra_read_paths: []
 content_db_staleness: fail
 content_db_staleness_overrides: []
 ash_plugin_modules: []

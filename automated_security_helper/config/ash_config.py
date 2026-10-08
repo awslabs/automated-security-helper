@@ -676,6 +676,10 @@ class RuntimeOverridesConfig(BaseModel):
         # out-of-date vulnerability database pass.
         "/content_db_staleness",
         "/content_db_staleness_overrides",
+        # The scanner sandbox: a client must not be able to switch it off, hand a
+        # scanner a network, or widen what it can read.
+        "/sandbox",
+        "/sandbox/**",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
@@ -696,6 +700,71 @@ class RuntimeOverridesConfig(BaseModel):
             )
         ),
     ] = {}
+
+
+class SandboxConfig(BaseModel):
+    """OS-level sandboxing of scanner subprocesses. Off by default.
+
+    See docs/content/docs/scanner-sandbox.md for the policy each scanner gets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Annotated[
+        Literal["off", "auto", "bwrap", "firejail", "landlock", "sandbox-exec"],
+        Field(
+            description=(
+                "How scanner subprocesses are confined. 'off' runs them as plain "
+                "subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, "
+                "then firejail, then landlock; macOS: sandbox-exec). Any other value "
+                "requires that backend. A scanner that cannot be sandboxed as requested "
+                "is recorded MISSING with the reason; it is never run unsandboxed. "
+                "Ignored in container mode, where the container is the boundary."
+            )
+        ),
+    ] = "off"
+
+    network_scanners: Annotated[
+        Optional[List[str]],
+        Field(
+            description=(
+                "Scanners allowed a network when the scan is online. Null (the default) "
+                "uses each scanner's declared need: semgrep, opengrep, grype, trivy, "
+                "npm-audit and snyk-code fetch rules, databases or audit data. A list "
+                "replaces those defaults. Under --offline no scanner gets a network. "
+                "Honored only from --config-overrides or a config file outside the "
+                "scanned tree; set inside the tree, a list can only remove network."
+            )
+        ),
+    ] = None
+
+    extra_read_paths: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Additional host paths every sandboxed scanner may read, for example a "
+                "corporate CA bundle or a shared rule directory. '~' and $VARS expand. "
+                "Ignored when set by a config file inside the scanned tree."
+            )
+        ),
+    ] = []
+
+    # Set by config/sandbox_grants.py from a network_scanners list that a config
+    # file inside the scanned tree wrote. Private, so no config file can set it.
+    _network_limit: Optional[List[str]] = PrivateAttr(default=None)
+
+    @property
+    def network_limit(self) -> Optional[List[str]]:
+        """Scanners a config file in the scanned tree allows a network, or None.
+
+        Only ever narrows: a scanner outside this list gets no network whatever
+        network_scanners says. See config/sandbox_grants.py.
+        """
+        return self._network_limit
+
+    @network_limit.setter
+    def network_limit(self, value: Optional[List[str]]) -> None:
+        self._network_limit = value
 
 
 class AshMcpConfig(BaseModel):
@@ -1036,6 +1105,11 @@ class AshConfig(BaseModel):
             )
         ),
     ] = True
+
+    sandbox: Annotated[
+        SandboxConfig,
+        Field(description="OS-level sandboxing of scanner subprocesses."),
+    ] = SandboxConfig()
 
     content_db_staleness: Annotated[
         Literal["fail", "warn"],

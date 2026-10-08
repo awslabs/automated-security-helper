@@ -24,6 +24,7 @@ nav:
       - Output Formats: docs/output-formats.md
       - Suppressions: docs/suppressions.md
       - Configuration Overrides: docs/config-overrides.md
+      - Scanner Sandboxing: docs/scanner-sandbox.md
       - Scanner Statistics: user-guide/scanner-statistics.md
   - Built-in Plugins:
       - Overview: docs/plugins/builtin/index.md

@@ -1140,11 +1140,11 @@ class TestFerretScanScannerVersionSupport:
 
         scanner = FerretScanScanner(context=mock_plugin_context)
 
-        # Mock subprocess.run to return a version
+        # Mock the spawn to return a version
         with patch(
-            "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.subprocess"
-        ) as mock_subprocess:
-            mock_subprocess.run.return_value = MagicMock(
+            "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.spawn_run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(
                 returncode=0, stdout="ferret-scan version 1.2.3"
             )
 
@@ -1177,13 +1177,11 @@ class TestFerretScanScannerVersionSupport:
 
         scanner = FerretScanScanner(context=mock_plugin_context)
 
-        # Mock subprocess.run to raise an exception
+        # Mock the spawn to raise an exception
         with patch(
-            "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.subprocess"
-        ) as mock_subprocess:
-            mock_subprocess.run.side_effect = OSError("Command failed")
-            mock_subprocess.TimeoutExpired = TimeoutError
-            mock_subprocess.SubprocessError = Exception
+            "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.spawn_run"
+        ) as mock_run:
+            mock_run.side_effect = OSError("Command failed")
 
             version = scanner._get_installed_version()
 

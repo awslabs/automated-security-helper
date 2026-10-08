@@ -86,6 +86,8 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
 from automated_security_helper.utils.process_env import snapshot_environ
 
+from automated_security_helper.utils.subprocess_utils import spawn_run
+
 Status = Literal["satisfied", "unsatisfied", "unverifiable"]
 
 # A cold import of checkov or semgrep takes seconds; this bounds a hung one.
@@ -246,7 +248,7 @@ def _run(
     command: List[str], timeout: int
 ) -> Optional[subprocess.CompletedProcess[str]]:
     try:
-        return subprocess.run(  # nosec B603 - list args; executable resolved from PATH by the caller
+        return spawn_run(  # nosec B603 - list args; executable resolved from PATH by the caller
             command,
             capture_output=True,
             text=True,

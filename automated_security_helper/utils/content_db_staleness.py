@@ -72,7 +72,6 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess  # nosec B404 - fixed tool binaries, list arguments, no shell
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -100,6 +99,7 @@ from automated_security_helper.utils.content_databases import (
     parse_timestamp,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
 if TYPE_CHECKING:
@@ -345,7 +345,7 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
     ``grype db status`` exits 1 when it considers the database invalid -- including when it
     is merely past grype's own bound -- and still prints the JSON with ``built`` in it.
     """
-    proc = subprocess.run(  # nosec B603 - resolved tool binary, list arguments
+    proc = spawn_run(  # nosec B603 - resolved tool binary, list arguments
         command,
         capture_output=True,
         text=True,
