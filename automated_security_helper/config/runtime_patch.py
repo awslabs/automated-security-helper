@@ -26,6 +26,11 @@ Defense-in-depth checks (in order):
 7. The result, after applying the patch, must validate as a full `AshConfig`.
 
 A single failing op aborts the entire patch. The base config is never mutated.
+
+A whole-document override (`select_profile(override_yaml=...)`) is gated by
+`apply_runtime_override`, which expresses the override as the patch that turns
+the base into it and sends that patch through `apply_runtime_patch`. There is no
+second copy of these rules: an override is permitted exactly when that patch is.
 """
 
 from __future__ import annotations
@@ -359,3 +364,84 @@ def apply_runtime_patch(
         raise RuntimePatchDeniedError(
             None, f"patched config failed validation: {exc.errors()}"
         ) from exc
+
+
+def _escape_pointer_segment(key: str) -> str:
+    """Escape a mapping key as an RFC 6901 JSON-Pointer segment (`~` first)."""
+    return key.replace("~", "~0").replace("/", "~1")
+
+
+def _same_json_value(before: Any, after: Any) -> bool:
+    """Compare two JSON values as JSON, not as Python.
+
+    Python's `==` says `True == 1` and `1 == 1.0`, so a change between them
+    would produce no op and never reach the gate. Serializing both sides keeps
+    them apart.
+    """
+    return json.dumps(before, sort_keys=True) == json.dumps(after, sort_keys=True)
+
+
+def json_patch_between(before: Any, after: Any, path: str = "") -> List[Dict[str, Any]]:
+    """Return add/remove/replace ops that turn the JSON value `before` into `after`.
+
+    Mappings are walked key by key, so a change deep in the document becomes an
+    op at the deepest pointer that differs; that is the pointer an operator's
+    `allowed_paths` names. Lists and scalars are compared whole and replaced
+    whole. An element-wise list diff would emit index pointers (`/x/0`) that an
+    allowlist written for the list itself or for appends (`/x/-`) does not name,
+    and the denylist covers a list's elements either way.
+
+    No `move` or `copy` ops are produced, because `apply_runtime_patch` refuses
+    them.
+    """
+    if isinstance(before, dict) and isinstance(after, dict):
+        ops: List[Dict[str, Any]] = []
+        for key in before:
+            if key not in after:
+                ops.append(
+                    {"op": "remove", "path": f"{path}/{_escape_pointer_segment(key)}"}
+                )
+        for key, value in after.items():
+            child = f"{path}/{_escape_pointer_segment(key)}"
+            if key not in before:
+                ops.append({"op": "add", "path": child, "value": value})
+            else:
+                ops.extend(json_patch_between(before[key], value, child))
+        return ops
+    if _same_json_value(before, after):
+        return []
+    return [{"op": "replace", "path": path, "value": after}]
+
+
+def apply_runtime_override(
+    base: AshConfig,
+    override: AshConfig,
+    *,
+    allowlist: RuntimeOverridesConfig,
+) -> AshConfig:
+    """Gate a whole-document override with the rules `apply_runtime_patch` enforces.
+
+    The override replaces `base` wholesale, so a field it leaves out reverts to
+    its default. Diffing the two documents, rather than reading only the fields
+    the override names, is what catches that: an override that omits `sandbox`
+    from a profile that sets `sandbox.mode: bwrap` is a `replace` at
+    `/sandbox/mode`, and is refused like one.
+
+    Returns the config the gated patch produces, not `override` itself, so what
+    the caller binds is exactly what the gate checked. If that config differs
+    from the override, part of the override was not expressed as an op and so
+    was never checked; that is refused rather than bound either way.
+    """
+    base_doc = base.model_dump(mode="json", by_alias=False)
+    override_doc = override.model_dump(mode="json", by_alias=False)
+    patch_ops = json_patch_between(base_doc, override_doc)
+    patched = apply_runtime_patch(base, patch_ops, allowlist=allowlist)
+    if not _same_json_value(
+        patched.model_dump(mode="json", by_alias=False), override_doc
+    ):
+        raise RuntimePatchDeniedError(
+            None,
+            "the patch computed from the override does not reproduce the "
+            "override, so part of it could not be checked",
+        )
+    return patched

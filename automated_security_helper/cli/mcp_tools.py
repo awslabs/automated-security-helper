@@ -1457,7 +1457,11 @@ def mcp_select_profile(
           config is patched through `apply_runtime_patch` (which enforces the
           MCP allowlist).
         * **override** — `override_yaml` is provided; the profile is
-          replaced wholesale by the YAML, validated through `AshConfig`.
+          replaced wholesale by the YAML, validated through `AshConfig`, and
+          held to the same allowlist as `patch_ops`: the difference between
+          the profile and the YAML is checked as the JSON-Patch that produces
+          it (`apply_runtime_override`), so both modes are held to one set of
+          rules.
 
     `patch_ops` and `override_yaml` are mutually exclusive.
 
@@ -1474,6 +1478,7 @@ def mcp_select_profile(
     )
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
+        apply_runtime_override,
         apply_runtime_patch,
     )
     from automated_security_helper.config.ash_config import (
@@ -1483,6 +1488,19 @@ def mcp_select_profile(
     )
     import yaml as _yaml
     from pydantic import ValidationError as _ValidationError
+
+    def _runtime_overrides_policy(profile_cfg: AshConfig) -> RuntimeOverridesConfig:
+        # One reading of the profile's allowlist for both mutating modes, so
+        # override_yaml cannot be checked against a different policy than
+        # patch_ops.
+        mcp_cfg: Optional[AshMcpConfig] = getattr(
+            profile_cfg.global_settings, "mcp", None
+        )
+        return (
+            mcp_cfg.runtime_overrides
+            if mcp_cfg is not None
+            else RuntimeOverridesConfig()
+        )
 
     if patch_ops is not None and override_yaml is not None:
         return {
@@ -1528,12 +1546,20 @@ def mcp_select_profile(
                 ),
             }
         try:
-            new_cfg = AshConfig.model_validate(raw or {}, strict=True)
+            override_cfg = AshConfig.model_validate(raw or {}, strict=True)
         except _ValidationError as exc:
             return {
                 "success": False,
                 "error": f"override_yaml validation error: {exc.errors()}",
             }
+        try:
+            new_cfg = apply_runtime_override(
+                base_cfg,
+                override_cfg,
+                allowlist=_runtime_overrides_policy(base_cfg),
+            )
+        except RuntimePatchDeniedError as exc:
+            return {"success": False, "error": f"override denied: {exc}"}
         materialized = _materialize_or_error(
             materialize_session_config, session_id, new_cfg
         )
@@ -1555,14 +1581,10 @@ def mcp_select_profile(
         }
 
     if patch_ops is not None:
-        mcp_cfg: Optional[AshMcpConfig] = getattr(base_cfg.global_settings, "mcp", None)
-        allowlist = (
-            mcp_cfg.runtime_overrides
-            if mcp_cfg is not None
-            else RuntimeOverridesConfig()
-        )
         try:
-            patched = apply_runtime_patch(base_cfg, patch_ops, allowlist=allowlist)
+            patched = apply_runtime_patch(
+                base_cfg, patch_ops, allowlist=_runtime_overrides_policy(base_cfg)
+            )
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"patch denied: {exc}"}
         materialized = _materialize_or_error(

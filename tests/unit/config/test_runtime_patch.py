@@ -12,7 +12,9 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.runtime_patch import (
     RuntimePatchDeniedError,
+    apply_runtime_override,
     apply_runtime_patch,
+    json_patch_between,
 )
 
 
@@ -898,3 +900,121 @@ class TestDeniedValuePatternsAreSubtreeClosed:
         ]
         result = apply_runtime_patch(base, ops, allowlist=allowlist)
         assert result.global_settings.severity_threshold == "HIGH"
+
+
+class TestOverrideAsPatch:
+    """A whole-document override is gated as the patch that produces it.
+
+    `select_profile(override_yaml=...)` binds a client-supplied config in place
+    of the profile. These tests pin the two halves of holding that to the
+    runtime-override rules: `json_patch_between` turns the difference into
+    add/remove/replace ops, and `apply_runtime_override` runs those ops through
+    `apply_runtime_patch`, so the rules live in one place.
+    """
+
+    def test_identical_documents_need_no_ops(self) -> None:
+        doc = {"a": {"b": [1, 2]}, "c": "x"}
+        assert json_patch_between(doc, json.loads(json.dumps(doc))) == []
+
+    def test_a_nested_scalar_change_is_one_replace_at_the_leaf(self) -> None:
+        before = {"global_settings": {"severity_threshold": "LOW", "x": 1}}
+        after = {"global_settings": {"severity_threshold": "HIGH", "x": 1}}
+        assert json_patch_between(before, after) == [
+            {
+                "op": "replace",
+                "path": "/global_settings/severity_threshold",
+                "value": "HIGH",
+            }
+        ]
+
+    def test_a_list_change_replaces_the_whole_list(self) -> None:
+        """Lists are values: an element-wise diff would emit index pointers that
+        an allowlist written for the list (or for `/-`) does not name."""
+        before = {"paths": ["a", "b"]}
+        after = {"paths": ["a", "b", "c"]}
+        assert json_patch_between(before, after) == [
+            {"op": "replace", "path": "/paths", "value": ["a", "b", "c"]}
+        ]
+
+    def test_added_and_removed_keys(self) -> None:
+        before = {"reporters": {"old": {"enabled": True}}}
+        after = {"reporters": {"new": {"enabled": False}}}
+        assert json_patch_between(before, after) == [
+            {"op": "remove", "path": "/reporters/old"},
+            {"op": "add", "path": "/reporters/new", "value": {"enabled": False}},
+        ]
+
+    def test_keys_are_escaped_per_rfc_6901(self) -> None:
+        import jsonpatch
+
+        before = {"m": {"a/b": 1, "c~d": 1}}
+        after = {"m": {"a/b": 2, "c~d": 3}}
+        ops = json_patch_between(before, after)
+        assert [op["path"] for op in ops] == ["/m/a~1b", "/m/c~0d"]
+        assert jsonpatch.apply_patch(before, ops) == after
+
+    @pytest.mark.parametrize(
+        "before, after",
+        [(True, 1), (1, 1.0), (False, 0), ([True], [1]), ({"k": 1}, {"k": True})],
+    )
+    def test_values_python_calls_equal_are_still_different(
+        self, before: object, after: object
+    ) -> None:
+        """`True == 1` and `1 == 1.0` in Python; they are distinct JSON values,
+        and a change between them must reach the gate."""
+        assert json_patch_between({"v": before}, {"v": after}) != []
+
+    def test_override_is_refused_when_the_allowlist_is_disabled(self) -> None:
+        base = AshConfig(project_name="base")
+        override = AshConfig(project_name="changed")
+        allowlist = RuntimeOverridesConfig(
+            enabled=False, allowed_paths=["/project_name"]
+        )
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_override(base, override, allowlist=allowlist)
+        assert "disabled" in excinfo.value.rule
+
+    def test_override_is_refused_by_a_shipped_denied_path(self) -> None:
+        base = AshConfig(project_name="base", sandbox={"mode": "bwrap"})
+        override = AshConfig(project_name="base", sandbox={"mode": "off"})
+        allowlist = RuntimeOverridesConfig(enabled=True, allowed_paths=["/**"])
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_override(base, override, allowlist=allowlist)
+        assert excinfo.value.op == {
+            "op": "replace",
+            "path": "/sandbox/mode",
+            "value": "off",
+        }
+        assert "denied_paths entry '/sandbox'" in excinfo.value.rule
+
+    def test_permitted_override_returns_the_override(self) -> None:
+        base = AshConfig(project_name="base", sandbox={"mode": "bwrap"})
+        override = AshConfig(project_name="changed", sandbox={"mode": "bwrap"})
+        allowlist = RuntimeOverridesConfig(
+            enabled=True, allowed_paths=["/project_name"]
+        )
+        result = apply_runtime_override(base, override, allowlist=allowlist)
+        assert result.model_dump(mode="json") == override.model_dump(mode="json")
+        assert base.project_name == "base"
+
+    def test_a_difference_the_ops_miss_is_refused_not_bound(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What is returned is what the gate checked. If the ops ever failed to
+        express part of the override, that part would be unchecked; the call
+        refuses instead of returning either config."""
+        from automated_security_helper.config import runtime_patch
+
+        base = AshConfig(project_name="base", sandbox={"mode": "bwrap"})
+        override = AshConfig(project_name="changed", sandbox={"mode": "off"})
+        allowlist = RuntimeOverridesConfig(enabled=True, allowed_paths=["/**"])
+        monkeypatch.setattr(
+            runtime_patch,
+            "json_patch_between",
+            lambda before, after: [
+                {"op": "replace", "path": "/project_name", "value": "changed"}
+            ],
+        )
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_override(base, override, allowlist=allowlist)
+        assert "does not reproduce the override" in excinfo.value.rule
