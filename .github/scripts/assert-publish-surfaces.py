@@ -814,9 +814,22 @@ ALLOWLIST: tuple[Entry, ...] = (
     ),
     Entry(
         file=".github/workflows/ash-vscode-extension.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_NODE,
-        publishes="cache=npm cache-dependency-path=editors/vscode/package-lock.json",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}"
+        ),
+        reason=_NPM_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}"
+        ),
         reason=_NPM_CACHE_REASON,
     ),
     Entry(

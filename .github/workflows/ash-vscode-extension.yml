@@ -140,11 +140,44 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: editors/vscode/package-lock.json
+
+      # npm's download cache, restored here and saved after `npm ci` from main only,
+      # as ash-typescript-ci.yml does and for its reason: setup-node's `cache: npm`
+      # saved from every ref, so each pull request kept a copy no other pull request
+      # could read. The key is the one ash-typescript-ci.yml computes for
+      # editors/vscode, so the two workflows share one entry.
+      - name: Restore the npm cache
+        id: npm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}
+
+      - name: "Cache report: npm"
+        if: ${{ !cancelled() && steps.npm-cache.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: npm
+          CACHE_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+          CACHE_MATCHED: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        run: |
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Save the npm cache (main only)
+        if: >-
+          steps.npm-cache.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}
 
       # Type-aware, so a floating promise -- a failure that lands in the extension
       # host's log while the command reports success -- fails here.
