@@ -101,18 +101,18 @@ say "build N ($HEAD_VERSION) from this checkout"
 HEAD_ZIP="$HERE/build/distributions/ash-jetbrains-$HEAD_VERSION.zip"
 [ -f "$HEAD_ZIP" ] || fail "buildPlugin wrote no $HEAD_ZIP"
 
-HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+HEAD_SHA="$(n1_head_sha)"
 # N-1 is built from its own editors/jetbrains, so it has to have one; and this script, so
 # that it is a plugin this cycle was already run against.
 n1_resolve editors/jetbrains/e2e-ide-cycle.sh editors/jetbrains/build.gradle.kts
-if git -C "$REPO" diff --quiet "$PREV_SHA" HEAD -- editors/jetbrains; then
+if n1_unchanged editors/jetbrains; then
   say "editors/jetbrains is unchanged between $PREV_REF and HEAD; the upgrade crosses a version change only"
 fi
 
 PREV_SRC="$WORK/src-prev"
 rm -rf "$PREV_SRC"
 mkdir -p "$PREV_SRC"
-git -C "$REPO" archive "$PREV_SHA" editors/jetbrains | tar -x -C "$PREV_SRC"
+n1_export "$PREV_SHA" "$PREV_SRC" editors/jetbrains
 PREV_DIR="$PREV_SRC/editors/jetbrains"
 PREV_BASE_VERSION="$(gradle_version "$PREV_DIR")"
 [ -n "$PREV_BASE_VERSION" ] || fail "no version line in $PREV_REF's build.gradle.kts"

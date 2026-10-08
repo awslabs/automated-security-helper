@@ -34,6 +34,14 @@ This file holds three things to that:
 The shell legs are also held, line by line, to setting PREV_REF only on their default
 line and the commit only through n1_resolve, and to naming no branch at all, so an N-1
 cannot come back through a variable or a git argument the value patterns do not see.
+
+None of the legs runs git itself. scripts/e2e/n1-ref.sh holds every git call they need
+(n1_head_sha, n1_export, n1_tarball, n1_unchanged), each refusing at run time any
+revision but HEAD and the chosen N-1, and its git lines are pinned below. So the rule
+for a leg script, and for verify-on-windows.ps1, is the simplest one that can hold: the
+word git appears only in comments. Messages and heredoc text are not exempt. Earlier
+versions tried to tell a message from code, and each round of that parsing let a real
+call through or refused an ordinary line.
 """
 
 from __future__ import annotations
@@ -557,24 +565,11 @@ BRANCH_SPELLINGS = re.compile(r"v4-capabilities|origin/|refs/heads/")
 DEFAULT_LINE = 'PREV_REF="${E2E_PREV_REF:-auto}"'
 # The one sanctioned copy of the commit n1_resolve sets (homebrew.sh's leg function).
 SANCTIONED_SHA = 'prev_sha="$PREV_SHA"'
-# The only revisions a leg script may hand git: N, and the N-1 n1_resolve chose.
+# The word git, as a word: a leg script may carry it only in a comment.
+GIT_WORD = re.compile(r"(?<![A-Za-z0-9_])git(?![A-Za-z0-9_])")
+# The n1-ref.sh helpers that run git, and the only revisions a caller may hand them.
+N1_GIT_HELPERS = ("n1_export", "n1_tarball")
 ALLOWED_REVISIONS = {"HEAD", "$PREV_SHA", "$prev_sha"}
-# The git subcommands a leg may use, each read the same way: options skipped, every
-# other word up to `--` a revision (archive: only the first). Anything else (checkout,
-# worktree, fetch, ...) can take a tree or a ref in a position this cannot read, and is
-# refused rather than parsed.
-GIT_SUBCOMMANDS = {"archive", "diff", "rev-parse", "log", "show", "status", "describe"}
-# Options of those subcommands that take the next word as their value.
-_GIT_VALUE_OPTIONS = {
-    "-o",
-    "--output",
-    "--format",
-    "--prefix",
-    "--remote",
-    "--exec",
-    "--match",
-    "--exclude",
-}
 
 
 def writes_to(name: str, text: str) -> list:
@@ -669,19 +664,13 @@ def dynamic_write_problems(text: str) -> list:
 
 
 def _code_lines(text: str) -> list:
-    """(first line number, code): comment lines dropped, backslash-continued lines joined."""
-    lines, pending, first, heredoc, expands = [], "", 0, None, False
+    """(first line number, code): comment lines dropped, backslash-continued lines joined.
+
+    Heredoc bodies are read as code like every other line. That is deliberate: deciding
+    which bodies are data is how earlier versions of these checks went wrong.
+    """
+    lines, pending, first = [], "", 0
     for number, line in enumerate(text.splitlines(), 1):
-        # The body of a <<'X' heredoc is data (here, Python), never shell. An unquoted
-        # <<X body is text too, but expands $(...) and `...`, so it is read as one
-        # double-quoted string: only those substitutions are code.
-        if heredoc is not None:
-            if line.strip() == heredoc:
-                heredoc = None
-            elif expands:
-                body = line.replace("\\", "\\\\").replace('"', '\\"')
-                lines.append((number, f'"{body}"'))
-            continue
         if not pending and line.lstrip().startswith("#"):
             continue
         if not pending:
@@ -690,9 +679,6 @@ def _code_lines(text: str) -> list:
             pending += line[:-1] + " "
             continue
         lines.append((first, pending + line))
-        opened = re.search(r"""<<-?\s*(['"]?)([A-Za-z_]\w*)\1""", pending + line)
-        if opened and not re.search(r"<<<", pending + line):
-            heredoc, expands = opened.group(2), not opened.group(1)
         pending = ""
     if pending:
         lines.append((first, pending))
@@ -702,7 +688,7 @@ def _code_lines(text: str) -> list:
 # A command word: at the start of a command (after ;, |, ||, &, &&, (, {, $(, `, a
 # keyword or !), past any VAR=value prefixes and any wrapper that runs its argument as a
 # command (command, env VAR=x, nice -n N, timeout N, xargs ...), never a word inside a
-# message. Whatever this misses is caught by _live_git_words below, which fails closed.
+# message.
 _ASSIGNMENTS = r"""(?:\w+=(?:"[^"]*"|'[^']*'|[^\s;|&])*\s+)*"""
 _WRAPPERS = (
     r"(?:(?:command|builtin|exec|xargs|env|time|nice|nohup|timeout|stdbuf|sudo|ionice)"
@@ -712,9 +698,6 @@ _COMMAND_START = (
     r"(?:^|\$\(|`|\|\|?|&&?|;|(?<!\$)\(|(?<!\$)\{"
     r"|\b(?:if|then|elif|else|do|while|until)\b|!)\s*" + _ASSIGNMENTS + _WRAPPERS
 )
-_GIT_CALL = re.compile(_COMMAND_START + r"\\?(git\s[^|;&)`\n]*)")
-# Any command word, to catch git spelled so that the pattern above does not see it.
-_COMMAND_WORD = re.compile(_COMMAND_START + r"([^\s;|&)`]+)")
 # A redirection: >x, 2>x, &>x, <x, 2>&1, or the bare operator with its target next.
 _REDIRECT = re.compile(r"^(?:\d*|&)[<>]{1,2}&?")
 
@@ -765,144 +748,46 @@ def _code_mask(line: str) -> list:
     return mask
 
 
-def _live_git_words(line: str) -> list:
-    """Offsets of every `git` word bash would run as code, a backslashed one included."""
-    mask = _code_mask(line)
-    offsets = []
-    for match in re.finditer(r"git", line):
-        index = match.start()
-        if not mask[index]:
-            continue
-        before = line[index - 1] if index else " "
-        after = line[index + 3] if index + 3 < len(line) else " "
-        if before in " \t;|&({`!\\" and after in " \t;|&)}`":
-            offsets.append(index)
-    return offsets
+def git_word_problems(text: str) -> list:
+    """Every line of a leg script that mentions git outside a comment.
 
-
-# `command -v git`, `type git`, `which git`, `hash git`: git is looked up, not run.
-_LOOKUP = re.compile(r"(?:\bcommand\s+-[vV]|\btype(?:\s+-\w+)*|\bwhich|\bhash)\s+\\?$")
-
-
-def _allowed_revision(rev: str) -> bool:
-    # ${PREV_SHA} is $PREV_SHA, a peel (^{commit}) names the same commit, a range's
-    # ends and a rev:path's rev must each be allowed (an empty range end is HEAD).
-    rev = re.sub(r"\$\{(\w+)\}", r"$\1", rev)
-    if ".." in rev:
-        return all(
-            _allowed_revision(end or "HEAD") for end in re.split(r"\.{2,3}", rev)
-        )
-    if ":" in rev:
-        rev = rev.split(":", 1)[0]
-    rev = re.sub(r"\^\{(?:commit|tree)\}$", "", rev)
-    return rev in ALLOWED_REVISIONS
-
-
-def git_revision_problems(text: str) -> list:
-    """Every git call in a leg script whose revisions are not HEAD or the chosen N-1.
-
-    A deny-list of branch spellings cannot enumerate split strings, other remotes,
-    tags or SHAs; checking what each git call is given catches all of them. Only git
-    in command position is a call, so `say "... git archive ..."` is a message, and
-    redirections are not revisions.
+    The legs run git only through the n1-ref.sh helpers, so the rule needs no parsing:
+    the word git, anywhere but a comment line, fails. That includes messages and
+    heredoc text, by design; telling a message from code is what the earlier, cleverer
+    versions of this check kept getting wrong in both directions. The line is also read
+    with quotes and backslashes removed, so "g"it, g''it and a backslashed git are the word too.
     """
     problems = []
-    for number, line in _code_lines(text):
-        mask = _code_mask(line)
-        calls = [m for m in _GIT_CALL.finditer(line) if mask[m.start(1)]]
-        parsed = {match.start(1) for match in calls}
-        for offset in _live_git_words(line):
-            if _LOOKUP.search(line[:offset]):
-                continue
-            if offset not in parsed:
-                problems.append(
-                    f"line {number}: git at column {offset + 1} is not a call this "
-                    f"can read: {line.strip()!r}"
-                )
-        for match in calls:
-            if _LOOKUP.search(line[: match.start(1)]) or re.search(
-                r"\bcommand\s+-[vV]\s+$", line[: match.start(1)]
-            ):
-                continue
-            call = match.group(1).strip()
-            try:
-                argv = shlex.split(call)
-            except ValueError:
-                problems.append(f"line {number}: cannot read the git call {call!r}")
-                continue
-            words, skip = [], False
-            for word in argv:
-                if skip:
-                    skip = False
-                    continue
-                redirect = _REDIRECT.match(word)
-                if redirect:
-                    # `2>` with its target as the next word, or `2>/dev/null` in one.
-                    skip = redirect.end() == len(word) and not word.endswith("&")
-                    continue
-                words.append(word)
-            index = 1
-            while index < len(words) and words[index] in ("-C", "-c"):
-                index += 2
-            if index >= len(words):
-                problems.append(f"line {number}: git call with no subcommand {call!r}")
-                continue
-            if words[index] in ("--version", "--help") and index + 1 == len(words):
-                continue
-            sub, args = words[index], words[index + 1 :]
-            if sub not in GIT_SUBCOMMANDS:
-                problems.append(f"line {number}: git {sub} is not one the legs use")
-                continue
-            revisions, skip = [], False
-            for arg in args:
-                if skip:
-                    skip = False
-                    continue
-                if arg == "--":
-                    break
-                if arg in _GIT_VALUE_OPTIONS:
-                    skip = True
-                    continue
-                if arg.startswith("-"):
-                    continue
-                revisions.append(arg)
-            if sub == "archive":
-                # git archive <tree-ish> [<path>...]: only the first word is a revision.
-                revisions = revisions[:1]
-            # rev-parse with only options (--show-toplevel, --is-shallow-repository)
-            # reads no revision; archive always needs one.
-            if not revisions and sub == "archive":
-                problems.append(f"line {number}: git archive with no revision {call!r}")
-            for rev in revisions:
-                if not _allowed_revision(rev):
-                    problems.append(f"line {number}: git {sub} is given {rev!r}")
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if GIT_WORD.search(line) or GIT_WORD.search(re.sub(r"[\"'\\]", "", line)):
+            problems.append(
+                f"line {number} mentions git outside a comment (use the n1-ref.sh "
+                f"helpers): {line.strip()!r}"
+            )
     return problems
 
 
-def git_spelling_problems(text: str) -> list:
-    """git run under another spelling, or replaced by a function, which _GIT_CALL misses."""
+def helper_call_problems(text: str) -> list:
+    """Calls of the n1-ref.sh git helpers whose revision is not HEAD or the chosen N-1.
+
+    The helpers refuse such a revision at run time too (n1_revision); this reports it
+    without running the leg.
+    """
     problems = []
     for number, line in _code_lines(text):
-        if re.search(
-            r"(?:^|[;&|{]\s*|\bfunction\s+)git\s*\(\s*\)|\bfunction\s+git\b", line
+        for match in re.finditer(
+            r"\b(" + "|".join(N1_GIT_HELPERS) + r")\b([^;|&)\n]*)", line
         ):
-            problems.append(f"line {number}: defines a git function")
-        mask = _code_mask(line)
-        for match in _COMMAND_WORD.finditer(line):
-            if not mask[match.start(1)]:
-                continue
-            word = match.group(1)
             try:
-                plain = shlex.split(word)[0] if shlex.split(word) else ""
+                words = shlex.split(match.group(2))
             except ValueError:
-                plain = word
-            plain = plain.replace("\\", "")
-            if word in ("git", "\\git"):
+                problems.append(f"line {number}: cannot read {match.group(0)!r}")
                 continue
-            if plain.rsplit("/", 1)[-1] == "git" or re.fullmatch(
-                r"\$\{?\w*GIT\w*\}?", word, re.IGNORECASE
-            ):
-                problems.append(f"line {number}: runs git as {word}")
+            if not words or words[0] not in ALLOWED_REVISIONS:
+                rev = words[0] if words else ""
+                problems.append(f"line {number}: {match.group(1)} is given {rev!r}")
     return problems
 
 
@@ -945,16 +830,18 @@ def shell_leg_problems(text: str, require) -> list:
     problems += dynamic_write_problems(text)
     if any(re.search(r"\beval\b", line) for line in code):
         problems.append("uses eval, which can write any variable unseen")
-    if any(re.search(r"\bn1_resolve\s*\(\)", line) for line in code):
-        problems.append("redefines n1_resolve")
+    for line in code:
+        redefined = re.search(r"\b(n1_\w+)\s*\(\s*\)", line)
+        if redefined:
+            problems.append(f"redefines {redefined.group(1)}")
     if len([line for line in code if re.match(r"\s*harness\s*\(\)", line)]) != 1:
         problems.append("defines harness other than exactly once")
     for match in BRANCH_SPELLINGS.finditer(text):
         line = text.count("\n", 0, match.start()) + 1
         problems.append(f"line {line} names a branch: {match.group(0)}")
-    problems += git_revision_problems(text)
+    problems += git_word_problems(text)
+    problems += helper_call_problems(text)
     problems += sourcing_problems(text)
-    problems += git_spelling_problems(text)
     for number, line in _code_lines(text):
         found = REPOSITORY_REDIRECTS.search(line)
         if found:
@@ -1001,131 +888,69 @@ _REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
     ("label", "old", "new"),
     [
         (
-            "rev-parse with only options",
-            _REAL_CALL,
-            _REAL_CALL + 'TOP="$(git -C "$REPO" rev-parse --show-toplevel)"\n',
-        ),
-        (
-            "a redirection after HEAD",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" rev-parse HEAD 2>/dev/null >"$WORK/head"\n',
-        ),
-        (
-            "a redirection operator with its target apart",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" rev-parse HEAD 2> /dev/null\n',
-        ),
-        (
-            "a continued git call",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'git -C "$REPO" \\\n  archive "$PREV_SHA"',
-        ),
-        (
-            "git named in a message",
-            _REAL_CALL,
-            _REAL_CALL + 'say "N-1 comes from git archive of $X (HEAD~1 is not it)"\n',
-        ),
-        (
-            "git --version",
-            _REAL_CALL,
-            _REAL_CALL + 'say "git: $(git --version)"\n',
-        ),
-        (
-            "the commit in braces, peeled",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            (
-                'git -C "$REPO" rev-parse --verify --quiet "${PREV_SHA}^{commit}" >/dev/null\n'
-                'git -C "$REPO" archive "${PREV_SHA}"'
-            ),
-        ),
-        (
-            "a log of the chosen commit",
-            _REAL_CALL,
-            _REAL_CALL + 'say "$(git -C "$REPO" log -1 --oneline "$PREV_SHA")"\n',
-        ),
-        (
             "an archive of some paths",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'git -C "$REPO" archive "$PREV_SHA" pyproject.toml src',
-        ),
-        (
-            "git after ( inside a message",
-            _REAL_CALL,
-            _REAL_CALL + 'echo "N-1 (git archive of the chosen commit) unpacked"\n',
-        ),
-        (
-            "git after ; inside a message",
-            _REAL_CALL,
-            _REAL_CALL + 'echo "step 2; git archive"\n',
-        ),
-        (
-            "git after && inside a message",
-            _REAL_CALL,
-            _REAL_CALL + 'echo "done && git is clean"\n',
-        ),
-        (
-            "an unquoted heredoc that mentions git",
-            _REAL_CALL,
-            _REAL_CALL
-            + "cat <<EOF2\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
-        ),
-        (
-            "a quoted heredoc that mentions git",
-            _REAL_CALL,
-            _REAL_CALL
-            + "cat <<'EOF2'\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
-        ),
-        (
-            "a check that git is installed",
-            _REAL_CALL,
-            _REAL_CALL
-            + 'command -v git >/dev/null || { echo "git missing"; exit 1; }\n',
-        ),
-        (
-            "git describe of HEAD",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" describe --tags --always\n',
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'n1_export "$PREV_SHA" "$WORK/src-prev" pyproject.toml src',
         ),
         (
             "a message that shows prev_sha=",
-            _REAL_CALL,
-            _REAL_CALL + 'say "N-1: prev_sha=$PREV_SHA"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "N-1: prev_sha=$PREV_SHA"\n',
         ),
         (
             "a message that says cannot read (mJ)",
-            _REAL_CALL,
-            _REAL_CALL + 'say "cannot read $WORK/list"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "cannot read $WORK/list"\n',
         ),
         (
             "read into fixed names from a here-string (mK)",
-            _REAL_CALL,
-            _REAL_CALL + 'read -r A B <<< "$WORK x"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nread -r A B <<< "$WORK x"\n',
         ),
         (
             "a read loop over a file",
-            _REAL_CALL,
-            _REAL_CALL
-            + 'while IFS= read -r line; do say "$line"; done < "$WORK/list"\n',
-        ),
-        (
-            "a range from the chosen commit to HEAD",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" log --oneline "$PREV_SHA..HEAD"\n',
-        ),
-        (
-            "a file of the chosen commit",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" show "$PREV_SHA:pyproject.toml" >/dev/null\n',
-        ),
-        (
-            "an env prefix on an allowed call",
-            _REAL_CALL,
-            _REAL_CALL + 'LC_ALL=C git -C "$REPO" log -1 --oneline "$PREV_SHA"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nwhile IFS= read -r line; do say "$line"; done < "$WORK/list"\n',
         ),
         (
             "git in a comment",
-            _REAL_CALL,
-            _REAL_CALL + "# git archive HEAD~1 is what this replaced\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n# git archive HEAD~1 is what this replaced\n",
+        ),
+        (
+            "a continued helper call",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'n1_export "$PREV_SHA" \\\n  "$WORK/src-prev"',
+        ),
+        (
+            "a message about the export",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "N-1 comes from the export of $PREV_SHA (HEAD~1 is not it)"\n',
+        ),
+        (
+            "the HEAD commit through the helper",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nTOP="$(n1_head_sha)"\n',
+        ),
+        (
+            "a changed-paths check through the helper",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\nif n1_unchanged pyproject.toml; then say same; fi\n",
+        ),
+        (
+            "an unquoted heredoc using the helpers",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncat <<EOF\nN-1 is $(n1_head_sha) and $PREV_SHA\nEOF\n",
+        ),
+        (
+            "a case arm on a tool name",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncase "$TOOL" in\n  uv) say uv ;;\nesac\n',
+        ),
+        (
+            "echo inside a message that says then read",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "then read $WORK/n"\n',
         ),
     ],
 )
@@ -1143,330 +968,477 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
     [
         (
             "a branch through a variable",
-            _REAL_DEFAULT,
-            _REAL_DEFAULT
-            + "N1_BRANCH=main-line\n"
-            + '[ "$PREV_REF" != auto ] || PREV_REF=$N1_BRANCH\n',
+            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
+            'PREV_REF="${E2E_PREV_REF:-auto}"\nN1_BRANCH=main-line\n[ "$PREV_REF" != auto ] || PREV_REF=$N1_BRANCH\n',
             "PREV_REF is assigned",
         ),
         (
             "the resolved commit overridden",
-            _REAL_CALL,
-            _REAL_CALL + 'PREV_SHA="$(git -C "$REPO" rev-parse "$N1_BRANCH")"\n',
-            "set outside n1_resolve",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nPREV_SHA="$(git -C "$REPO" rev-parse "$N1_BRANCH")"\n',
+            "mentions git outside a comment",
         ),
         (
             "a remote-tracking ref as a git argument",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" archive origin/release | tar -x\n',
-            "names a branch: origin/",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" archive origin/release | tar -x\n',
+            "mentions git outside a comment",
         ),
         (
             "the development branch by name",
-            _REAL_CALL,
-            _REAL_CALL + "BASE=v4-capabilities\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\nBASE=v4-capabilities\n",
             "names a branch: v4-capabilities",
         ),
         (
             "a heads ref",
-            _REAL_CALL,
-            _REAL_CALL + "git fetch origin refs/heads/main\n",
-            "names a branch: refs/heads/",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit fetch origin refs/heads/main\n",
+            "mentions git outside a comment",
         ),
         (
             "an assigning default",
-            _REAL_DEFAULT,
-            _REAL_DEFAULT + ': "${PREV_REF:=main}"\n',
+            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
+            'PREV_REF="${E2E_PREV_REF:-auto}"\n: "${PREV_REF:=main}"\n',
             "PREV_REF is assigned",
         ),
         (
             "the commit read from elsewhere",
-            _REAL_CALL,
-            _REAL_CALL + 'read -r PREV_SHA < "$WORK/n1"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nread -r PREV_SHA < "$WORK/n1"\n',
             "set outside n1_resolve",
         ),
         (
             "the commit written with printf -v",
-            _REAL_CALL,
-            _REAL_CALL + 'printf -v PREV_SHA %s "$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nprintf -v PREV_SHA %s "$other"\n',
             "set outside n1_resolve",
         ),
         (
             "E2E_PREV_REF through a variable (mA)",
-            _REAL_DEFAULT,
-            "N1_BRANCH=main-line\nE2E_PREV_REF=$N1_BRANCH\n" + _REAL_DEFAULT,
+            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
+            'N1_BRANCH=main-line\nE2E_PREV_REF=$N1_BRANCH\nPREV_REF="${E2E_PREV_REF:-auto}"\n',
             "E2E_PREV_REF is used other than by the default line",
         ),
         (
             "E2E_PREV_REF exported with a default",
-            _REAL_DEFAULT,
-            ': "${E2E_PREV_REF:=$N1}"\n' + _REAL_DEFAULT,
+            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
+            ': "${E2E_PREV_REF:=$N1}"\nPREV_REF="${E2E_PREV_REF:-auto}"\n',
             "E2E_PREV_REF is used other than by the default line",
         ),
         (
             "a hard-coded N-1 revision in the export (mC)",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'git -C "$REPO" archive HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "a split branch name in the export",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'git -C "$REPO" archive "$R""/main"',
-            "git archive is given '$R/main'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'git -C "$REPO" archive "$R""/main" | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "another remote's ref",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'git -C "$REPO" archive refs/remotes/upstream/main',
-            "git archive is given 'refs/remotes/upstream/main'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'git -C "$REPO" archive refs/remotes/upstream/main | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "a commit taken from rev-parse",
-            _REAL_CALL,
-            _REAL_CALL + 'OTHER="$(git -C "$REPO" rev-parse HEAD~1)"\n',
-            "git rev-parse is given 'HEAD~1'",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nOTHER="$(git -C "$REPO" rev-parse HEAD~1)"\n',
+            "mentions git outside a comment",
         ),
         (
             "a tree read some other way",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" worktree add "$WORK/old" v3.7.0\n',
-            "git worktree is not one the legs use",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" worktree add "$WORK/old" v3.7.0\n',
+            "mentions git outside a comment",
         ),
         (
             "a nameref to the commit",
-            _REAL_CALL,
-            _REAL_CALL + 'declare -n _r=PREV_SHA\n_r="$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ndeclare -n _r=PREV_SHA\n_r="$other"\n',
             "set outside n1_resolve",
         ),
         (
             "printf -v with the name quoted",
-            _REAL_CALL,
-            _REAL_CALL + 'printf -v "PREV_SHA" %s "$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nprintf -v "PREV_SHA" %s "$other"\n',
             "set outside n1_resolve",
         ),
         (
             "read with the name quoted",
-            _REAL_CALL,
-            _REAL_CALL + 'read -r "PREV_SHA" <<<"$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nread -r "PREV_SHA" <<<"$other"\n',
             "set outside n1_resolve",
         ),
         (
             "mapfile",
-            _REAL_CALL,
-            _REAL_CALL + 'mapfile -t PREV_SHA < "$WORK/n1"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nmapfile -t PREV_SHA < "$WORK/n1"\n',
             "set outside n1_resolve",
         ),
         (
             "readarray",
-            _REAL_CALL,
-            _REAL_CALL + 'readarray -t PREV_SHA < "$WORK/n1"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nreadarray -t PREV_SHA < "$WORK/n1"\n',
             "set outside n1_resolve",
         ),
         (
             "an append after unset",
-            _REAL_CALL,
-            _REAL_CALL + 'unset PREV_SHA; PREV_SHA+="$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nunset PREV_SHA; PREV_SHA+="$other"\n',
             "set outside n1_resolve",
         ),
         (
             "declare -g",
-            _REAL_CALL,
-            _REAL_CALL + 'declare -g PREV_SHA="$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ndeclare -g PREV_SHA="$other"\n',
             "set outside n1_resolve",
         ),
         (
             "a nameref to PREV_REF",
-            _REAL_DEFAULT,
-            _REAL_DEFAULT + "declare -n _p=PREV_REF; _p=main\n",
+            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
+            'PREV_REF="${E2E_PREV_REF:-auto}"\ndeclare -n _p=PREV_REF; _p=main\n',
             "PREV_REF is assigned",
         ),
         (
             "eval",
-            _REAL_CALL,
-            _REAL_CALL + 'eval "PREV_""SHA=$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\neval "PREV_""SHA=$other"\n',
             "uses eval",
         ),
         (
             "n1_resolve redefined",
-            _REAL_CALL,
-            'n1_resolve() { PREV_SHA="$other"; }\n' + _REAL_CALL,
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve() { PREV_SHA="$other"; }\nn1_resolve scripts/e2e/wheel.sh pyproject.toml\n',
             "redefines n1_resolve",
         ),
         (
             "harness redefined before the call",
-            _REAL_CALL,
-            'harness() { echo "$other x"; }\n' + _REAL_CALL,
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'harness() { echo "$other x"; }\nn1_resolve scripts/e2e/wheel.sh pyproject.toml\n',
             "defines harness other than exactly once",
         ),
         (
             "another file sourced",
-            _REAL_CALL,
-            _REAL_CALL + '. "$WORK/overrides.sh"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\n. "$WORK/overrides.sh"\n',
             "sources",
         ),
         (
             "another file sourced with source",
-            _REAL_CALL,
-            _REAL_CALL + 'source "$REPO/packaging/verify-lib.sh"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsource "$REPO/packaging/verify-lib.sh"\n',
             "sources",
         ),
         (
             "git pointed at another repository",
-            _REAL_CALL,
-            _REAL_CALL + 'export GIT_DIR="$WORK/other.git"\n',
-            "redirects git with GIT_DIR",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nexport GIT_DIR="$WORK/other.git"\n',
+            "mentions git outside a comment",
         ),
         (
             "a replaced commit",
-            _REAL_CALL,
-            _REAL_CALL + 'cp "$WORK/x" "$REPO/.git/refs/replace/$PREV_SHA"\n',
-            "redirects git with refs/replace",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncp "$WORK/x" "$REPO/.git/refs/replace/$PREV_SHA"\n',
+            "mentions git outside a comment",
         ),
         (
             "a git call on a continued line",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'git -C "$REPO" \\\n  archive HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'git -C "$REPO" \\\n  archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "a git call after a redirection",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'git -C "$REPO" archive 2>/dev/null HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'git -C "$REPO" archive 2>/dev/null HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git quoted",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            '"git" -C "$REPO" archive HEAD~1',
-            'runs git as "git"',
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            '"git" -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git by absolute path",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            '/usr/bin/git -C "$REPO" archive HEAD~1',
-            "runs git as /usr/bin/git",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            '/usr/bin/git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git through a variable",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'GIT=git; $GIT -C "$REPO" archive HEAD~1',
-            "runs git as $GIT",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'GIT=git; $GIT -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git behind a wrapper",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'command git -C "$REPO" archive HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'command git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git replaced by a function",
-            _REAL_CALL,
-            'git() { command git "${@/$PREV_SHA/HEAD~1}"; }\n' + _REAL_CALL,
-            "defines a git function",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'git() { command git "${@/$PREV_SHA/HEAD~1}"; }\nn1_resolve scripts/e2e/wheel.sh pyproject.toml\n',
+            "mentions git outside a comment",
         ),
         (
             "a write to a name held in a variable",
-            _REAL_CALL,
-            _REAL_CALL + 'n=PREV_SHA; printf -v "$n" %s "$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nn=PREV_SHA; printf -v "$n" %s "$other"\n',
             "named by an expansion",
         ),
         (
             "a name split by quoting",
-            _REAL_CALL,
-            _REAL_CALL + 'declare PREV_"SHA"="$other"\n',
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ndeclare PREV_"SHA"="$other"\n',
             "set outside n1_resolve",
         ),
         (
             "an env prefix before git, on an extra line (mG2)",
-            'git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"\n',
-            (
-                'git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"\n'
-                'LC_ALL=C git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"\n'
-            ),
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"\n',
+            'n1_export "$PREV_SHA" "$WORK/src-prev"\nLC_ALL=C git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"\n',
+            "mentions git outside a comment",
         ),
         (
             "git in a subshell, on an extra line (mH3)",
-            'git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"\n',
-            (
-                'git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"\n'
-                '(git -C "$REPO" archive HEAD~1) | tar -x -C "$WORK/src-prev"\n'
-            ),
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"\n',
+            'n1_export "$PREV_SHA" "$WORK/src-prev"\n(git -C "$REPO" archive HEAD~1) | tar -x -C "$WORK/src-prev"\n',
+            "mentions git outside a comment",
         ),
         (
             "an env prefix with a value",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'TZ=UTC git -C "$REPO" archive HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'TZ=UTC git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git in a brace group",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            '{ git -C "$REPO" archive HEAD~1; }',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            '{ git -C "$REPO" archive HEAD~1; } | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git after ||",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'false || git -C "$REPO" archive HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'false || git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git behind env VAR=x",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'env GIT_PAGER=cat git -C "$REPO" archive HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'env GIT_PAGER=cat git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git behind nice -n N",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'nice -n 10 git -C "$REPO" archive HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'nice -n 10 git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git behind timeout N",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'timeout 60 git -C "$REPO" archive HEAD~1',
-            "git archive is given 'HEAD~1'",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'timeout 60 git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "git behind a wrapper this cannot read",
-            'git -C "$REPO" archive "$PREV_SHA"',
-            'sudo -u builder git -C "$REPO" archive HEAD~1',
-            "is not a call this can read",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'sudo -u builder git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
         ),
         (
             "a range that leaves the chosen commit",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" log --oneline "HEAD~3..HEAD"\n',
-            "git log is given 'HEAD~3..HEAD'",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" log --oneline "HEAD~3..HEAD"\n',
+            "mentions git outside a comment",
         ),
         (
             "a rev:path of another commit",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" show "HEAD~1:pyproject.toml"\n',
-            "git show is given 'HEAD~1:pyproject.toml'",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" show "HEAD~1:pyproject.toml"\n',
+            "mentions git outside a comment",
         ),
         (
             "a substitution in an unquoted heredoc",
-            _REAL_CALL,
-            _REAL_CALL
-            + 'cat <<EOF2\nN-1: $(git -C "$REPO" archive HEAD~1 | wc -c)\nEOF2\n',
-            "git archive is given 'HEAD~1'",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncat <<EOF2\nN-1: $(git -C "$REPO" archive HEAD~1 | wc -c)\nEOF2\n',
+            "mentions git outside a comment",
         ),
         (
             "git describe of another commit",
-            _REAL_CALL,
-            _REAL_CALL + 'git -C "$REPO" describe --tags HEAD~1\n',
-            "git describe is given 'HEAD~1'",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" describe --tags HEAD~1\n',
+            "mentions git outside a comment",
         ),
         (
             "the helper not called",
-            _REAL_CALL,
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
             "",
             "n1_resolve is called",
+        ),
+        (
+            "rev-parse with only options",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nTOP="$(git -C "$REPO" rev-parse --show-toplevel)"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "a redirection after HEAD",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" rev-parse HEAD 2>/dev/null >"$WORK/head"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "a redirection operator with its target apart",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" rev-parse HEAD 2> /dev/null\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "a continued git call",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'git -C "$REPO" \\\n  archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
+        ),
+        (
+            "git named in a message",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "N-1 comes from git archive of $X (HEAD~1 is not it)"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "git --version",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "git: $(git --version)"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "the commit in braces, peeled",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'git -C "$REPO" rev-parse --verify --quiet "${PREV_SHA}^{commit}" >/dev/null\ngit -C "$REPO" archive "${PREV_SHA}" | tar -x -C "$WORK/src-prev"',
+            "mentions git outside a comment",
+        ),
+        (
+            "a log of the chosen commit",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "$(git -C "$REPO" log -1 --oneline "$PREV_SHA")"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "git after ( inside a message",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "N-1 (git archive of the chosen commit) unpacked"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "git after ; inside a message",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "step 2; git archive"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "git after && inside a message",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "done && git is clean"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "an unquoted heredoc that mentions git",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncat <<EOF2\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
+            "mentions git outside a comment",
+        ),
+        (
+            "a quoted heredoc that mentions git",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncat <<'EOF2'\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
+            "mentions git outside a comment",
+        ),
+        (
+            "a check that git is installed",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncommand -v git >/dev/null || { echo "git missing"; exit 1; }\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "git describe of HEAD",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" describe --tags --always\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "a range from the chosen commit to HEAD",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" log --oneline "$PREV_SHA..HEAD"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "a file of the chosen commit",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" show "$PREV_SHA:pyproject.toml" >/dev/null\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "an env prefix on an allowed call",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nLC_ALL=C git -C "$REPO" log -1 --oneline "$PREV_SHA"\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "a helper given another revision",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'n1_export HEAD~1 "$WORK/src-prev"',
+            "n1_export is given 'HEAD~1'",
+        ),
+        (
+            "a helper given a variable",
+            'n1_export "$PREV_SHA" "$WORK/src-prev"',
+            'n1_export "$OTHER" "$WORK/src-prev"',
+            "n1_export is given '$OTHER'",
+        ),
+        (
+            "a helper redefined",
+            '. "$REPO/scripts/e2e/n1-ref.sh"\n',
+            '. "$REPO/scripts/e2e/n1-ref.sh"\nn1_revision() { :; }\n',
+            "redefines n1_revision",
+        ),
+        (
+            "a heredoc fed to a shell",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nbash <<EOF\ngit -C "$REPO" archive HEAD~1 | tar -x\nEOF\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "a heredoc after an arithmetic shift",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nn=$(( a << b ))\ngit -C "$REPO" archive HEAD~1 | tar -x\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "a quoted heredoc opener in a message",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "feed it with <<EOF"\ngit -C "$REPO" archive HEAD~1 | tar -x\n',
+            "mentions git outside a comment",
+        ),
+        (
+            "bash -c with git",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\nbash -c 'git -C \"$REPO\" archive HEAD~1'\n",
+            "mentions git outside a comment",
+        ),
+        (
+            "a trap string with git",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ntrap 'git -C \"$REPO\" archive HEAD~1 >/dev/null' EXIT\n",
+            "mentions git outside a comment",
         ),
     ],
 )
@@ -1525,14 +1497,12 @@ def ps1_leg_problems(text: str, require) -> list:
             f"{others}"
         )
     # The script runs no git itself; prev_tree.py does, and is what these tests hold.
+    # The script runs no git; prev_tree.py does, and is what these tests hold. So the
+    # word git may appear only in a comment, whatever the line around it is: a string,
+    # a $(...) inside one, $x = git, Invoke-Expression, Start-Process or a call operator.
     for line in lines:
-        # A string is a message, unless it is what the call operator runs (& "git").
-        called = re.search(r"""(?i)&\s*(['"])[^'"]*\bgit(?:\.exe)?\1""", line)
-        unquoted = re.sub(r"'[^']*'|\"(?:`.|[^\"`])*\"", "''", line)
-        if called or re.search(
-            r"(?i)(?:^|[;|({]\s*|&\s*)(?:\S*[\\/])?git(?:\.exe)?\b", unquoted
-        ):
-            problems.append(f"runs git itself: {line}")
+        if GIT_WORD.search(line) or GIT_WORD.search(re.sub(r"[\"'`]", "", line)):
+            problems.append(f"mentions git outside a comment: {line}")
     for path in require:
         if f"'--require', '{path}'" not in code:
             problems.append(f"does not require {path}")
@@ -1560,10 +1530,10 @@ _PS1_CALL = "'--prev-ref', $PrevRef,"
 @pytest.mark.parametrize(
     "line",
     [
-        'Write-Host "N-1 source (git archive of $PrevRef) ready"',
-        'Write-Verbose "step 3; git archive happens in prev_tree.py"',
-        "Write-Host 'see: git log'",
-        'if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "git is required" }',
+        'Write-Host "N-1 source (prev_tree.py export of $PrevRef) ready"',
+        'Write-Verbose "step 3; the export happens in prev_tree.py"',
+        "if ($PrevRef -eq 'auto') { Write-Host auto }",
+        "# git runs only inside prev_tree.py",
     ],
 )
 def test_an_ordinary_line_in_the_chocolatey_script_passes(line):
@@ -1571,6 +1541,27 @@ def test_an_ordinary_line_in_the_chocolatey_script_passes(line):
     text = (REPO_ROOT / script).read_text(encoding="utf-8")
     anchor = PS1_DEFAULT_LINE + "\n"
     assert ps1_leg_problems(text.replace(anchor, anchor + line + "\n"), require) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '$sha = "$(git -C $Repo rev-parse HEAD~1)"',
+        'Write-Host "sha: $(git -C $Repo rev-parse HEAD~1)"',
+        "$null = git -C $Repo archive HEAD~1 -o x.tar",
+        'Invoke-Expression "git -C $Repo archive HEAD~1 -o x.tar"',
+        "Start-Process git -ArgumentList 'archive', 'HEAD~1'",
+        '& "git" archive HEAD~1',
+        "$g = 'git'; & $g archive HEAD~1",
+        'Write-Host "N-1 source (git archive of $PrevRef) ready"',
+    ],
+)
+def test_git_anywhere_in_the_chocolatey_script_is_refused(line):
+    script, require = LEGS[CHOCO]
+    text = (REPO_ROOT / script).read_text(encoding="utf-8")
+    anchor = PS1_DEFAULT_LINE + "\n"
+    problems = ps1_leg_problems(text.replace(anchor, anchor + line + "\n"), require)
+    assert any("mentions git outside a comment" in p for p in problems), problems
 
 
 @pytest.mark.parametrize(
@@ -1635,7 +1626,7 @@ def test_an_ordinary_line_in_the_chocolatey_script_passes(line):
             "git run by the script",
             PS1_DEFAULT_LINE + "\n",
             PS1_DEFAULT_LINE + "\n& git -C $Repo archive HEAD~1 -o x.tar\n",
-            "runs git itself",
+            "mentions git outside a comment",
         ),
         (
             "another value for --prev-ref",
@@ -2111,3 +2102,129 @@ def test_a_passed_over_commit_is_reported_once_with_each_path_once(tmp_path, cap
     err = capsys.readouterr().err
     tagged = [line for line in err.splitlines() if "v3.9.0" in line]
     assert tagged == ["passed over v3.9.0 (newest release tag): no pkg/build.sh"], err
+
+
+# -- n1-ref.sh: the only place a leg runs git ----------------------------------
+
+# Every git line in n1-ref.sh. A new one, or a changed one, fails here until it is
+# reviewed and listed: the legs' own rule (no git outside a comment) leans on this.
+N1_GIT_LINES = [
+    'git -C "$REPO" rev-parse HEAD',
+    'git -C "$REPO" archive "$rev" "$@" | tar -x -C "$dir"',
+    'git -C "$REPO" archive --format=tar.gz --prefix="$prefix" -o "$out" "$rev"',
+    'git -C "$REPO" diff --quiet "$PREV_SHA" HEAD -- "$@"',
+]
+
+
+def _shell_function(text: str, name: str) -> str:
+    match = re.search(rf"^{name}\(\) \{{\n(.*?)^\}}", text, re.MULTILINE | re.DOTALL)
+    assert match, name
+    return match.group(1)
+
+
+def test_n1_ref_sh_runs_git_only_in_its_helpers_and_checks_each_revision():
+    text = N1_HELPER.read_text(encoding="utf-8")
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if not line.lstrip().startswith("#") and GIT_WORD.search(line)
+    ]
+    assert lines == N1_GIT_LINES
+    # Each helper that takes a revision checks it before git sees it.
+    for name, rev in (
+        ("n1_export", '"$rev"'),
+        ("n1_tarball", '"$rev"'),
+        ("n1_unchanged", '"${PREV_SHA:-}"'),
+    ):
+        body = _shell_function(text, name)
+        assert body.index(f"n1_revision {rev}") < body.index("git "), name
+    revision = _shell_function(text, "n1_revision")
+    assert "HEAD) ;;" in revision and '[ "$1" = "$PREV_SHA" ]' in revision
+
+
+HELPER_DRIVER = r"""
+set -euo pipefail
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+harness() { "$E2E_TEST_PYTHON" "$@"; }
+. "$E2E_TEST_HELPER"
+PREV_SHA="$E2E_TEST_PREV"
+"$@"
+"""
+
+
+def _helper(repo: Path, prev: str, *argv: str) -> subprocess.CompletedProcess:
+    env = {
+        **os.environ,
+        "REPO": str(repo),
+        "E2E_TEST_PYTHON": sys.executable,
+        "E2E_TEST_HELPER": str(N1_HELPER),
+        "E2E_TEST_PREV": prev,
+    }
+    return subprocess.run(
+        [_bash(), "-c", HELPER_DRIVER, "n1-helper-test", *argv],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.fixture
+def two_commits(tmp_path: Path) -> dict:
+    work = tmp_path / "r"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    first = _commit(work, {"a.txt": "1\n", "same.txt": "s\n"}, "one")
+    _commit(work, {"a.txt": "2\n"}, "two")
+    older = _commit(work, {"a.txt": "3\n"}, "three")
+    head = _commit(work, {"a.txt": "4\n"}, "four")
+    return {"repo": work, "prev": older, "first": first, "head": head}
+
+
+def test_the_helpers_export_head_and_the_chosen_commit(two_commits, tmp_path):
+    repo, prev = two_commits["repo"], two_commits["prev"]
+    for rev, want in (("HEAD", "4\n"), (prev, "3\n")):
+        out = tmp_path / f"out-{rev[:4]}"
+        out.mkdir()
+        result = _helper(repo, prev, "n1_export", rev, str(out))
+        assert result.returncode == 0, result.stderr
+        assert (out / "a.txt").read_text(encoding="utf-8") == want
+    paths = tmp_path / "paths"
+    paths.mkdir()
+    result = _helper(repo, prev, "n1_export", prev, str(paths), "same.txt")
+    assert result.returncode == 0, result.stderr
+    assert sorted(p.name for p in paths.iterdir()) == ["same.txt"]
+    result = _helper(repo, prev, "n1_head_sha")
+    assert result.stdout.strip() == two_commits["head"]
+    tarball = tmp_path / "t.tar.gz"
+    result = _helper(repo, prev, "n1_tarball", "HEAD", "pkg-1/", str(tarball))
+    assert result.returncode == 0, result.stderr
+    assert tarball.stat().st_size > 0
+    assert _helper(repo, prev, "n1_unchanged", "same.txt").returncode == 0
+    assert _helper(repo, prev, "n1_unchanged", "a.txt").returncode == 1
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("n1_export", "HEAD~1", "{out}"),
+        ("n1_export", "{first}", "{out}"),
+        ("n1_tarball", "HEAD~1", "pkg/", "{out}/t.tar.gz"),
+        ("n1_export", "", "{out}"),
+    ],
+)
+def test_the_helpers_refuse_any_other_revision(two_commits, tmp_path, argv):
+    out = tmp_path / "out"
+    out.mkdir()
+    argv = [a.format(out=out, first=two_commits["first"]) for a in argv]
+    result = _helper(two_commits["repo"], two_commits["prev"], *argv)
+    assert result.returncode == 1, result.stdout
+    assert "is neither HEAD nor the N-1 n1_resolve chose" in result.stderr
+    assert list(out.iterdir()) == []
+
+
+def test_n1_unchanged_refuses_to_run_before_n1_resolve(two_commits):
+    result = _helper(two_commits["repo"], "", "n1_unchanged", "a.txt")
+    assert result.returncode == 1
+    assert "is neither HEAD nor the N-1 n1_resolve chose" in result.stderr
