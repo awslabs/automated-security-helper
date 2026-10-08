@@ -24,7 +24,7 @@
 #
 # HOW N-1 IS CHOSEN
 #
-# `--prev-ref auto`, the same derivation every other upgrade leg uses: the newest
+# --prev-ref auto, the same derivation every other upgrade leg uses: the newest
 # release tag reachable from HEAD, else the newest ancestor, whose tree differs from
 # HEAD's and which carries every path in N1_REQUIRE. A commit with HEAD's tree is
 # passed over, never built, so the upgrade always crosses a code change, and a clone
