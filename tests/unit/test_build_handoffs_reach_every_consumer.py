@@ -50,12 +50,17 @@ GITHUB_DIR = REPO_ROOT / ".github"
 PREPULL = "prepull-base-image"
 TOOL_CACHE = "tool-download-cache"
 
-# A step that builds ASH's image, or may: `ash build-image`, `ash --mode container`
-# and `ash scan --mode container` (both rebuild by default), the PowerShell wrapper,
-# and the bash wrapper `./ash`, which builds before it runs anything.
-BUILD_RE = re.compile(r"build-image|--mode container|Invoke-ASH|(?<![\w/.-])\./ash\b")
-# A step that runs ASH on the host, which may download pinned tool release assets.
-ASH_RUN_RE = re.compile(r"(?<![\w./$-])ash\s|scripts/verify_\w+\.py")
+# A step that builds ASH's image, or may: `ashx build-image`, `ashx --mode container`
+# and `ashx scan --mode container` (both rebuild by default), the PowerShell wrapper,
+# the bash wrapper `./ash`, which builds before it runs anything, and the container
+# e2e leg's script, which runs `ashx build-image` itself.
+BUILD_RE = re.compile(
+    r"build-image|--mode container|Invoke-ASH|(?<![\w/.-])\./ash\b"
+    r"|scripts/e2e/container\.sh"
+)
+# A step that runs ASH on the host, which may download pinned tool release assets:
+# the `ashx` command or its deprecated `ash` alias.
+ASH_RUN_RE = re.compile(r"(?<![\w./$-])ashx?\s|scripts/verify_\w+\.py")
 
 TOKEN_NAMES = ("ACTIONS_RUNTIME_TOKEN", "ACTIONS_CACHE_URL", "ACTIONS_RESULTS_URL")
 
@@ -179,6 +184,14 @@ def test_the_check_sees_the_handoffs_it_is_about() -> None:
             seen["tool"] += _uses(step, TOOL_CACHE)
             seen["token"] += _is_token_handoff(step)
     assert seen["prepull"] >= 5 and seen["tool"] >= 6 and seen["token"] >= 2, seen
+
+
+def test_the_patterns_see_the_canonical_command_and_the_e2e_script() -> None:
+    # v4 runs `ashx`; a pattern that only knew `ash` matched none of its steps.
+    assert ASH_RUN_RE.search("ashx dependencies install")
+    assert ASH_RUN_RE.search("ash dependencies install")
+    assert not ASH_RUN_RE.search("uvx --from . ashxyz")
+    assert BUILD_RE.search('bash scripts/e2e/container.sh "$RUNNER_TEMP/x"')
 
 
 def test_a_missing_mapping_is_reported() -> None:

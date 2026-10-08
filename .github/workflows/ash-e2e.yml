@@ -165,12 +165,17 @@ jobs:
       # anything builds, so the build is digest-pinned. container.sh pins N-1's base by
       # its own digest when it differs from head's.
       - name: Pre-pull the base image
+        id: prepull
         uses: ./.github/actions/prepull-base-image
         with:
           oci-runner: docker
 
+      # container.sh runs `ashx build-image`, which reads the pre-pull's hand-off from
+      # the environment. The action returns it as outputs, not through GITHUB_ENV.
       - name: Build, install, scan, upgrade, uninstall
         env:
+          ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+          ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
           E2E_PREV_REF: auto
           E2E_IMAGE_TAG: ash-e2e-container:${{ github.run_id }}-${{ github.run_attempt }}
         run: bash scripts/e2e/container.sh "$RUNNER_TEMP/e2e-container"

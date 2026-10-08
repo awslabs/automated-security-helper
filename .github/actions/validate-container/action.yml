@@ -748,6 +748,9 @@ runs:
     - name: "Scan the detection fixture with the built image"
       shell: bash
       env:
+        # Rebuilds like the scan above, so it gets the same base-image hand-off.
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
         RUNTIME: ${{ inputs.runtime }}
       run: |
         set +e
