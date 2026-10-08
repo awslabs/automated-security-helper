@@ -209,27 +209,28 @@
  * The contract lives in exported TypeScript constants — `ASH_OPERATOR_CRDS`,
  * `ASH_OPERATOR_CLUSTER_RULES`, `ASH_OPERATOR_NAMESPACED_RULES` — and is
  * interpolated into the applier, rather than being written directly into the Python.
- * That placement is the whole point: `test/ash-eks-operator-stack.test.ts` holds an
- * independent second copy of the same table and compares the two AS SETS, failing on
- * any difference in EITHER direction. A table embedded in the Python string could
- * only be checked by grepping, and "contains the required verbs" passes while an
- * extra verb sits next to them. Over-grant on RBAC installed by a cluster-admin
- * bootstrap matters as much as under-grant.
+ * That placement is the whole point: `test/ash-eks-operator-stack.test.ts` PARSES the
+ * operator's own `manifests/rbac.yaml` and `generated/crd-*.yaml` and compares them
+ * with these constants AS SETS, failing on any difference in EITHER direction. A
+ * table embedded in the Python string could only be checked by grepping, and
+ * "contains the required verbs" passes while an extra verb sits next to them.
+ * Over-grant on RBAC installed by a cluster-admin bootstrap matters as much as
+ * under-grant. `tests/unit/deploy/test_eks_operator_applier.py` makes the same
+ * comparison against the committed template's applier, so the artifact an adopter
+ * launches is held to the operator's files too, and not only the TypeScript.
  *
- * WHAT THAT TEST IS NOT: it is not a check against the operator's own
- * `manifests/rbac.yaml`. Both copies in this repository are HAND TRANSCRIPTIONS of
- * it. The set comparison catches this stack drifting from its own transcription; it
- * cannot catch the transcription drifting from the operator. Re-verify by hand when
- * either moves.
+ * Before that test parsed the YAML, both copies of the table were hand transcriptions
+ * and the CRD columns had already drifted: the operator's AshScan CRD gained a
+ * `Coverage` column that this stack never installed, with every test green.
  *
  * WHERE THE OPERATOR ACTUALLY IS: `deploy/kubernetes-operator/`, in this repository,
  * on this commit. An earlier revision of this comment said it "lives in a different
  * repository", which was false, and that false premise was the stated justification
  * for three separate decisions here — including installing a permissive CRD schema
  * rather than the real one. The real reason for the subset schema is a measured size
- * limit, not inaccessibility; see `crd()`. A transcription is still a transcription,
- * and nothing automated couples the two files, but the source is two directories away
- * and should be read rather than recalled.
+ * limit, not inaccessibility; see `crd()`. The names, columns, required fields and
+ * RBAC are coupled to the operator's files by the tests named above; the subset
+ * schema's own property constraints are coupled by the Python test.
  *
  * Four rules in that table are load-bearing and each is one a reader would
  * plausibly "correct" in the wrong direction: `pods` is READ-ONLY, `batch/jobs` has
@@ -435,8 +436,9 @@ export const ASH_OPERATOR_CLUSTER_RULES: RbacRule[] = [
  *    `ashscans` alone does NOT cover status writes, and status patches are the
  *    operator's entire reporting path.
  *
- * `test/ash-eks-operator-stack.test.ts` compares this array against the same table
- * as a SET, failing on any difference in EITHER direction. A "contains everything
+ * `test/ash-eks-operator-stack.test.ts` compares this array against the Role parsed
+ * from `manifests/rbac.yaml` as a SET, failing on any difference in EITHER direction.
+ * A "contains everything
  * required" assertion would pass while silently keeping an over-grant such as
  * `jobs: patch`, and over-grant on something installed by a cluster-admin bootstrap
  * matters as much as under-grant.
