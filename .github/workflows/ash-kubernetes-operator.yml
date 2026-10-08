@@ -25,6 +25,8 @@ on:
       # The shared e2e contract the kind job scans and judges with.
       - "tests/e2e/**"
       - "scripts/e2e/**"
+      # The lock the e2e ASH image's runtime is exported from.
+      - "uv.lock"
       - ".github/workflows/ash-kubernetes-operator.yml"
   pull_request:
     paths:
@@ -34,6 +36,8 @@ on:
       # The shared e2e contract the kind job scans and judges with.
       - "tests/e2e/**"
       - "scripts/e2e/**"
+      # The lock the e2e ASH image's runtime is exported from.
+      - "uv.lock"
       - ".github/workflows/ash-kubernetes-operator.yml"
   # A merge queue runs every required check on the merged result, and accepts no
   # paths filter, so this one is unfiltered.

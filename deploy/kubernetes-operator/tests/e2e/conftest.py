@@ -26,6 +26,7 @@ from tests.e2e.helpers import (
     OPERATOR_DIR,
     OPERATOR_IMAGE,
     run,
+    stage_ash_locks,
     stage_ash_source,
 )
 from tests.e2e.lifecycle import install_operator
@@ -57,7 +58,7 @@ def pytest_report_header(config):
 def require_tooling():
     if not E2E_ENABLED:
         pytest.skip("ASH_OPERATOR_E2E is not 1")
-    missing = [tool for tool in ("kind", "kubectl", "docker") if shutil.which(tool) is None]
+    missing = [tool for tool in ("kind", "kubectl", "docker", "uv") if shutil.which(tool) is None]
     if missing:
         pytest.fail(
             f"the e2e was enabled but {missing} are not on PATH. Failing rather than "
@@ -78,6 +79,7 @@ def ash_image(require_tooling) -> str:
         context_dir = Path(ctx)
         shutil.copy(E2E_DIR / "Dockerfile.ash", context_dir / "Dockerfile")
         stage_ash_source(context_dir / "ash-source")
+        stage_ash_locks(context_dir / "locks")
         run(
             [
                 "docker",

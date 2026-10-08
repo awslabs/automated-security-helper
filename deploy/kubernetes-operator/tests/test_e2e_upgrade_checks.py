@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from tests.e2e.crd_compat import upgrade_problems
-from tests.e2e.lifecycle import previous_ref
+from tests.e2e.lifecycle import previous_ref, repin_base_images
 from tests.e2e.shared_contract import (
     CASES_FILE,
     ENV_EQUIVALENTS,
@@ -126,3 +126,44 @@ class TestPreviousRef:
         monkeypatch.setenv("ASH_OPERATOR_E2E_PREV_REF", "HEAD")
         with pytest.raises(AssertionError, match="crosses no change"):
             previous_ref()
+
+
+PINNED = "python:3.12-slim@sha256:" + "a" * 64
+HEAD_MULTI_STAGE = f"FROM {PINNED} AS build\nRUN true\nFROM {PINNED}\nCOPY --from=build /w /w\n"
+
+
+class TestRepinBaseImages:
+    # N-1's Dockerfile is rebuilt on HEAD's base digest. HEAD builds the wheel in a
+    # second stage, so N-1 and HEAD can differ in how many FROM lines they have.
+    def test_heads_own_dockerfile_repins_to_itself(self):
+        head = (OPERATOR_DIR / "Dockerfile").read_text()
+        assert repin_base_images(head, head).rstrip("\n") == head.rstrip("\n")
+
+    def test_a_single_stage_n_minus_one_takes_heads_digest(self):
+        previous = "FROM python:3.12-slim\nRUN pip install .\n"
+        assert repin_base_images(previous, HEAD_MULTI_STAGE) == (
+            f"FROM {PINNED}\nRUN pip install .\n"
+        )
+
+    def test_a_multi_stage_n_minus_one_keeps_its_aliases_and_stage_references(self):
+        previous = (
+            "FROM python:3.12-slim@sha256:" + "b" * 64 + " AS build\n"
+            "FROM build AS again\n"
+            "FROM python:3.12-slim\n"
+        )
+        assert repin_base_images(previous, HEAD_MULTI_STAGE) == (
+            f"FROM {PINNED} AS build\nFROM build AS again\nFROM {PINNED}\n"
+        )
+
+    def test_a_different_base_image_is_refused(self):
+        with pytest.raises(AssertionError, match="would change its base image"):
+            repin_base_images("FROM python:3.11-alpine\n", HEAD_MULTI_STAGE)
+
+    def test_an_unpinned_head_is_refused(self):
+        with pytest.raises(AssertionError, match="not digest-pinned"):
+            repin_base_images("FROM python:3.12-slim\n", "FROM python:3.12-slim\n")
+
+    def test_a_head_naming_two_bases_is_refused(self):
+        head = f"FROM {PINNED} AS build\nFROM debian:12@sha256:{'c' * 64}\n"
+        with pytest.raises(AssertionError, match="not one base"):
+            repin_base_images("FROM python:3.12-slim\n", head)
