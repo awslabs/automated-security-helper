@@ -26,7 +26,14 @@ This file holds three things to that:
    --require list and, for the shell legs, through n1-ref.sh in a real bash: a push to
    the development branch, a pull request's merge commit whose base predates the
    channel (the development branch deleted), a commit after the first release, a
-   squash landing that leaves no earlier package, and a shallow clone.
+   squash landing that leaves no earlier package, and a shallow clone. Then the shapes
+   where a reachable commit has HEAD's tree and must never be N-1: an up-to-date
+   `merge --no-ff`, GitHub's merge ref of an up-to-date pull request, a merge of a
+   branch that reverts itself, and an empty commit on a release tag.
+
+The shell legs are also held, line by line, to setting PREV_REF only on their default
+line and the commit only through n1_resolve, and to naming no branch at all, so an N-1
+cannot come back through a variable or a git argument the value patterns do not see.
 """
 
 from __future__ import annotations
@@ -108,10 +115,10 @@ PATTERNS = [
     # env: E2E_PREV_REF: origin/main   /   E2E_PREV_REF=origin/main
     (
         "E2E_PREV_REF value",
-        re.compile(r"\bE2E_PREV_REF\s*(?::(?!-)|=)\s*" + _LITERAL),
+        re.compile(r"\bE2E_PREV_REF\s*(?::(?![-=])|=)\s*" + _LITERAL),
     ),
-    # "${E2E_PREV_REF:-origin/main}"
-    ("E2E_PREV_REF default", re.compile(r"\$\{E2E_PREV_REF:?-" + _LITERAL)),
+    # "${E2E_PREV_REF:-origin/main}", and the assigning forms "${E2E_PREV_REF:=...}"
+    ("E2E_PREV_REF default", re.compile(r"\$\{E2E_PREV_REF:?[-=]" + _LITERAL)),
     # if ($env:E2E_PREV_REF) { $env:E2E_PREV_REF } else { 'origin/main' }
     (
         "E2E_PREV_REF fallback",
@@ -233,6 +240,8 @@ def test_the_patterns_match_the_real_syntax_they_guard():
             "origin/main",
         ),
         ('X="${E2E_PREV_REF-release/4.x}"\n', "E2E_PREV_REF default", "release/4.x"),
+        (': "${E2E_PREV_REF:=origin/main}"\n', "E2E_PREV_REF default", "origin/main"),
+        ('X="${E2E_PREV_REF=origin/main}"\n', "E2E_PREV_REF default", "origin/main"),
         (
             "if (-not $PrevRef) { $PrevRef = if ($env:E2E_PREV_REF) { $env:E2E_PREV_REF } else { 'origin/main' } }\n",
             "E2E_PREV_REF fallback",
@@ -380,16 +389,149 @@ def test_a_container_leg_hands_the_checkout_to_its_user_before_git_runs(key):
     assert text.index("run-unprivileged.sh") < text.index("n1_resolve ")
 
 
+# What no leg script, n1-ref.sh or N-1 job may contain at all: a branch named as an N-1
+# can be spelled through a variable or a git argument, which no value pattern sees.
+BRANCH_SPELLINGS = re.compile(r"v4-capabilities|origin/|refs/heads/")
+DEFAULT_LINE = 'PREV_REF="${E2E_PREV_REF:-auto}"'
+# The one sanctioned copy of the commit n1_resolve sets (homebrew.sh's leg function).
+SANCTIONED_SHA = 'prev_sha="$PREV_SHA"'
+# Other ways bash writes a variable: `read [-r] NAME`, `printf -v NAME`.
+_WRITES = r"(?:\bread\b[^\n;|&]*\s|\bprintf\s+-v\s+)"
+
+
+def shell_leg_problems(text: str, require) -> list:
+    """Every way a shell leg's text could pick an N-1 other than through n1_resolve."""
+    problems = []
+    assigns = [
+        line.strip()
+        for line in text.splitlines()
+        if re.search(
+            r"(?<![\w$])PREV_REF\s*=|\$\{PREV_REF:?=|" + _WRITES + r"PREV_REF\b", line
+        )
+    ]
+    if assigns != [DEFAULT_LINE]:
+        problems.append(
+            f"PREV_REF is assigned other than by the default line: {assigns}"
+        )
+    shas = [
+        line.strip()
+        for line in text.splitlines()
+        if re.search(
+            r"(?i)(?<![\w$])prev_sha\s*=|\$\{prev_sha:?=|" + _WRITES + r"prev_sha\b",
+            line,
+        )
+    ]
+    if any(line != SANCTIONED_SHA for line in shas):
+        problems.append(f"the N-1 commit is set outside n1_resolve: {shas}")
+    for match in BRANCH_SPELLINGS.finditer(text):
+        line = text.count("\n", 0, match.start()) + 1
+        problems.append(f"line {line} names a branch: {match.group(0)}")
+    if '. "$REPO/scripts/e2e/n1-ref.sh"' not in text:
+        problems.append("does not source scripts/e2e/n1-ref.sh")
+    calls = re.findall(r"^\s*n1_resolve (.+)$", text, re.MULTILINE)
+    if [tuple(call.split()) for call in calls] != [tuple(require)]:
+        problems.append(
+            f"n1_resolve is called as {calls}, expected once with {require}"
+        )
+    # The derivation lives in prev_tree.py now, not in a copy per script.
+    if "HEAD^1^{commit}" in text:
+        problems.append("re-derives HEAD^ itself")
+    return problems
+
+
 @pytest.mark.parametrize("key", sorted(SHELL_LEGS), ids=lambda k: ":".join(k))
 def test_a_shell_leg_defaults_to_auto_and_requires_its_paths(key):
     script, require = LEGS[key]
     text = (REPO_ROOT / script).read_text(encoding="utf-8")
-    assert 'PREV_REF="${E2E_PREV_REF:-auto}"' in text
-    assert '. "$REPO/scripts/e2e/n1-ref.sh"' in text
-    calls = re.findall(r"^\s*n1_resolve (.+)$", text, re.MULTILINE)
-    assert [tuple(call.split()) for call in calls] == [require]
-    # The derivation lives in prev_tree.py now, not in a copy per script.
-    assert "HEAD^1^{commit}" not in text
+    assert shell_leg_problems(text, require) == []
+
+
+def test_n1_ref_sh_and_the_chocolatey_script_name_no_branch():
+    for path in (N1_HELPER, REPO_ROOT / LEGS[("ash-package.yml", "chocolatey")][0]):
+        text = path.read_text(encoding="utf-8")
+        assert BRANCH_SPELLINGS.findall(text) == [], path
+
+
+@pytest.mark.parametrize("key", sorted(LEGS), ids=IDS)
+def test_an_n_minus_1_job_body_names_no_branch(key):
+    # The job body only: a workflow's `on:` may still list a branch to run on.
+    dumped = yaml.safe_dump(N1[key])
+    assert BRANCH_SPELLINGS.findall(dumped) == [], key
+
+
+WHEEL = ("ash-e2e.yml", "wheel")
+_REAL_DEFAULT = DEFAULT_LINE + "\n"
+_REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
+
+
+@pytest.mark.parametrize(
+    ("label", "old", "new", "expect"),
+    [
+        (
+            "a branch through a variable",
+            _REAL_DEFAULT,
+            _REAL_DEFAULT
+            + "N1_BRANCH=main-line\n"
+            + '[ "$PREV_REF" != auto ] || PREV_REF=$N1_BRANCH\n',
+            "PREV_REF is assigned",
+        ),
+        (
+            "the resolved commit overridden",
+            _REAL_CALL,
+            _REAL_CALL + 'PREV_SHA="$(git -C "$REPO" rev-parse "$N1_BRANCH")"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "a remote-tracking ref as a git argument",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" archive origin/release | tar -x\n',
+            "names a branch: origin/",
+        ),
+        (
+            "the development branch by name",
+            _REAL_CALL,
+            _REAL_CALL + "BASE=v4-capabilities\n",
+            "names a branch: v4-capabilities",
+        ),
+        (
+            "a heads ref",
+            _REAL_CALL,
+            _REAL_CALL + "git fetch origin refs/heads/main\n",
+            "names a branch: refs/heads/",
+        ),
+        (
+            "an assigning default",
+            _REAL_DEFAULT,
+            _REAL_DEFAULT + ': "${PREV_REF:=main}"\n',
+            "PREV_REF is assigned",
+        ),
+        (
+            "the commit read from elsewhere",
+            _REAL_CALL,
+            _REAL_CALL + 'read -r PREV_SHA < "$WORK/n1"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "the commit written with printf -v",
+            _REAL_CALL,
+            _REAL_CALL + 'printf -v PREV_SHA %s "$other"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "the helper not called",
+            _REAL_CALL,
+            "",
+            "n1_resolve is called",
+        ),
+    ],
+)
+def test_a_planted_bypass_in_a_real_shell_leg_is_caught(label, old, new, expect):
+    script, require = LEGS[WHEEL]
+    text = (REPO_ROOT / script).read_text(encoding="utf-8")
+    assert text.count(old) == 1, label
+    problems = shell_leg_problems(text.replace(old, new), require)
+    assert problems, label
+    assert any(expect in problem for problem in problems), (label, problems)
 
 
 def test_the_chocolatey_script_requires_its_own_channel():
@@ -403,9 +545,17 @@ def test_the_chocolatey_script_requires_its_own_channel():
 # -- 3. the derivation on every shape of history ------------------------------
 
 
+_CLOCK = [1_700_000_000]
+
+
 def _git(repo: Path, *args: str) -> str:
+    # Every call moves the clock a minute, so commit dates, and with them --date-order,
+    # follow the order the fixtures create commits in rather than tying on one second.
+    _CLOCK[0] += 60
+    stamp = f"{_CLOCK[0]} +0000"
     return subprocess.run(
         ["git", "-C", str(repo), *args],
+        env={**os.environ, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp},
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -678,3 +828,128 @@ def test_n1_ref_sh_keeps_a_named_ref_and_its_heads_parent_fallback(tmp_path):
     result = _n1_ref_sh(work, require, prev_ref="named")
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [f"sha={parent}", "ref=HEAD^"]
+
+
+# -- candidates with HEAD's tree ------------------------------------------------
+
+
+@pytest.fixture(params=sorted(LEGS), ids=IDS)
+def same_tree(request, tmp_path: Path) -> dict:
+    """HEADs where some commit auto could reach has HEAD's tree, and must be passed over.
+
+    main:    m0 (no channel) - c1 (adds the channel) - B
+    noff:    B - X, an up-to-date `merge --no-ff` of feature (B - f1): X^2 = f1 has X's tree
+    pr:      P, GitHub's merge ref of an up-to-date pull request (B - p1 - p2): its first
+             parent is B, its second p2, with p2's tree
+    revert:  R, a `merge --no-ff` of a branch that reverts itself (B - r1 - r2, r2 = B's
+             tree): R, its first parent B and its second r2 all share one tree
+    release: B - t1 (tag v4.0.0) - E, an empty commit: the tag has HEAD's tree
+    """
+    key = request.param
+    require = LEGS[key][1]
+    work = tmp_path / "author"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    ident = ["-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid"]
+    _commit(work, {"pyproject.toml": _pyproject("3.9.0"), "a.py": "0\n"}, "m0")
+    channel = {path: f"{path}\n" for path in require if path != "pyproject.toml"}
+    c1 = _commit(work, {"pyproject.toml": _pyproject("4.0.0"), **channel}, "c1")
+    base = _commit(work, {"a.py": "base\n"}, "B")
+
+    _git(work, "checkout", "-q", "-b", "feature", base)
+    f1 = _commit(work, {"f.py": "1\n"}, "f1")
+    _git(work, "checkout", "-q", "-b", "noff", base)
+    _git(work, *ident, "merge", "-q", "--no-ff", "-m", "X", "feature")
+    noff = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "pr-head", base)
+    _commit(work, {"p.py": "1\n"}, "p1")
+    p2 = _commit(work, {"p.py": "2\n"}, "p2")
+    pr = _git(
+        work, *ident, "commit-tree", f"{p2}^{{tree}}", "-p", base, "-p", p2, "-m", "P"
+    )
+    _git(work, "branch", "pr-merge", pr)  # refs/pull/N/merge, as a branch to clone
+
+    _git(work, "checkout", "-q", "-b", "self-revert", base)
+    r1 = _commit(work, {"a.py": "changed\n"}, "r1")
+    _commit(work, {"a.py": "base\n"}, "r2: revert r1")
+    _git(work, "checkout", "-q", "-b", "revert", base)
+    _git(work, *ident, "merge", "-q", "--no-ff", "-m", "R", "self-revert")
+    revert = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "release", base)
+    t1 = _commit(work, {"a.py": "4.0.0\n"}, "t1")
+    _git(work, "tag", "v4.0.0", t1)
+    _git(work, *ident, "commit", "-q", "--allow-empty", "-m", "E: empty")
+    empty = _git(work, "rev-parse", "HEAD")
+
+    origin = _bare(work, tmp_path / "origin.git")
+    return {
+        "key": key,
+        "require": require,
+        "url": origin.as_uri(),
+        "head": {"noff": noff, "pr": pr, "revert": revert, "release": empty},
+        "want": {"noff": base, "pr": base, "revert": r1, "release": base},
+        "same": {"noff": [f1], "pr": [p2], "revert": [base], "release": [t1]},
+        "c1": c1,
+    }
+
+
+SAME_TREE_SHAPES = ["noff", "pr", "revert", "release"]
+
+
+def _tree(repo: Path, rev: str) -> str:
+    return _git(repo, "rev-parse", f"{rev}^{{tree}}")
+
+
+@pytest.mark.parametrize("shape", SAME_TREE_SHAPES)
+def test_auto_never_picks_a_commit_with_heads_tree(same_tree, tmp_path, shape):
+    clone = _full_clone(same_tree["url"], same_tree["head"][shape], tmp_path / "ws")
+    # The shape is what it claims: some candidate really has HEAD's tree.
+    for sha in same_tree["same"][shape]:
+        assert _tree(clone, sha) == _tree(clone, "HEAD"), shape
+    label, prev_sha = pt.resolve(clone, "auto", same_tree["require"])
+    assert _tree(clone, prev_sha) != _tree(clone, "HEAD"), (shape, label)
+    assert prev_sha == same_tree["want"][shape], (same_tree["key"], shape, label)
+
+
+@pytest.mark.parametrize("shape", SAME_TREE_SHAPES)
+def test_n1_ref_sh_never_picks_a_commit_with_heads_tree(same_tree, tmp_path, shape):
+    clone = _full_clone(same_tree["url"], same_tree["head"][shape], tmp_path / "ws")
+    result = _n1_ref_sh(clone, same_tree["require"])
+    assert result.returncode == 0, (shape, result.stderr)
+    lines = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    assert _tree(clone, lines["sha"]) != _tree(clone, "HEAD"), (shape, result.stdout)
+    assert lines["sha"] == same_tree["want"][shape], (same_tree["key"], shape)
+    if shape in ("revert", "release"):
+        # Here the commit with HEAD's tree comes first, and is seen and passed over.
+        assert "HEAD's tree" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("shape", ["noff", "pr"])
+def test_auto_on_a_merge_takes_the_base_before_the_merged_tip(
+    same_tree, tmp_path, shape
+):
+    # The base is what a pull request is upgraded from; the tip, newer by date, is
+    # passed over for having HEAD's tree, and the first parent is tried before the walk.
+    clone = _full_clone(same_tree["url"], same_tree["head"][shape], tmp_path / "ws")
+    label, prev_sha = pt.resolve(clone, "auto", same_tree["require"])
+    assert prev_sha == _git(clone, "rev-parse", "HEAD^1")
+    assert "(first parent)" in label, label
+
+
+def test_a_passed_over_commit_is_reported_once_with_each_path_once(tmp_path, capsys):
+    # The release tag is also an ancestor; it was queried, and reported, twice.
+    work = tmp_path / "r"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    _commit(work, {"pyproject.toml": _pyproject("3.9.0")}, "v3")
+    _git(work, "tag", "v3.9.0")
+    channel = _commit(work, {"pkg/build.sh": "1\n"}, "channel")
+    _commit(work, {"pkg/build.sh": "2\n"}, "head")
+    capsys.readouterr()
+    label, prev_sha = pt.resolve(work, "auto", ["pkg/build.sh"])
+    assert prev_sha == channel
+    err = capsys.readouterr().err
+    tagged = [line for line in err.splitlines() if "v3.9.0" in line]
+    assert tagged == ["passed over v3.9.0 (newest release tag): no pkg/build.sh"], err
