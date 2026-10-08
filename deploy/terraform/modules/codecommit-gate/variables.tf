@@ -364,10 +364,10 @@ variable "vpc_id" {
     with open egress to the internet, as before this variable existed.
 
     When set, the module creates a security group for the function in this VPC
-    whose only egress is TCP 443, exported as scan_security_group_id so you can
-    widen it. Your network ACLs and route tables must still reach CodeCommit, ECR,
-    SSM and CloudWatch Logs, through a NAT gateway or interface endpoints you
-    provide, or every scan fails.
+    whose only egress is TCP 443 to scan_egress_cidr, exported as
+    scan_security_group_id so you can widen it. Your route tables must reach what
+    that CIDR names, through a NAT gateway or interface endpoints you provide, or
+    every scan fails.
   EOT
   type        = string
   default     = ""
@@ -381,6 +381,35 @@ variable "vpc_subnet_ids" {
   validation {
     condition     = (length(var.vpc_subnet_ids) == 0) == (var.vpc_id == "")
     error_message = "Set vpc_id and vpc_subnet_ids together, or leave both empty."
+  }
+}
+
+variable "scan_egress_cidr" {
+  description = <<-EOT
+    Contract name: ScanEgressCidr. Required with vpc_id. The IPv4 CIDR the gate
+    function may reach on TCP 443 once it is in a VPC; it is the security group's
+    only egress rule.
+
+    The function calls CodeCommit (the API and git-codecommit) and Systems Manager
+    for its config parameter. The Lambda service, not the function's network
+    interfaces, pulls the image and delivers its logs. With ash_offline_mode false
+    the scanners also download rules and vulnerability databases from public hosts
+    outside AWS. So: your VPC CIDR for an offline image with interface endpoints
+    for codecommit, git-codecommit and ssm, or 0.0.0.0/0 for an online image
+    behind a NAT gateway. There is no default because the right value depends on
+    your network.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.scan_egress_cidr == "" || can(regex("^(\\d{1,3}\\.){3}\\d{1,3}/(\\d|[12]\\d|3[0-2])$", var.scan_egress_cidr))
+    error_message = "scan_egress_cidr must be an IPv4 CIDR such as 10.0.0.0/16, or empty."
+  }
+
+  validation {
+    condition     = (var.scan_egress_cidr == "") == (var.vpc_id == "")
+    error_message = "Set scan_egress_cidr with vpc_id, or leave both empty."
   }
 }
 

@@ -81,6 +81,7 @@ import {
   diagnosticLogGroupProps,
   rebuildSchedule,
   ashVpcId,
+  scanEgressCidr,
   vpcSubnetIds,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
@@ -244,17 +245,22 @@ export class AshCodeCommitGateStack extends Stack {
     });
 
     /*
-     * OPTIONAL VPC PLACEMENT: VpcId plus VpcSubnetIds.
+     * OPTIONAL VPC PLACEMENT: VpcId, VpcSubnetIds and ScanEgressCidr.
      *
-     * Both empty, the default, leaves the function outside any VPC, as it always was:
-     * egress is then open to the internet, which is how it reaches CodeCommit, ECR,
-     * Systems Manager and CloudWatch Logs with nothing to configure. Both set attaches
-     * it to those subnets with a security group this stack creates in that VPC,
-     * `ScanSecurityGroup`, whose only egress is TCP 443 -- the same shape as the
-     * Fargate task group. The function still needs a NAT gateway or interface
-     * endpoints for those four services, or every scan fails. Egress is then that
-     * group plus the adopter's network ACLs and route tables, and the group id is the
-     * `ScanSecurityGroupId` output, the handle for widening it.
+     * All empty, the default, leaves the function outside any VPC, as it always was:
+     * egress is then open to the internet, which is how it reaches CodeCommit and
+     * Systems Manager (and, with an online image, the scanners' download hosts) with
+     * nothing to configure. All three set attaches it to those subnets with a
+     * security group this stack creates in that VPC, `ScanSecurityGroup`, whose only
+     * egress is TCP 443 to `ScanEgressCidr`. The function still needs a NAT gateway
+     * or interface endpoints behind that CIDR, or every scan fails. Egress is then
+     * that group plus the adopter's network ACLs and route tables, and the group id
+     * is the `ScanSecurityGroupId` output, the handle for widening it.
+     *
+     * The destination is a parameter rather than `0.0.0.0/0` because it depends on
+     * the adopter's network, and the open default is what trivy AWS-0104 reports;
+     * `scanEgressCidr` in ash-config.ts records what the function reaches and the
+     * alternatives that were rejected.
      *
      * WHY THE STACK CREATES THE GROUP rather than taking adopter group ids. An optional
      * list parameter needs an empty default, and CDK's CloudFormation validator (which
@@ -293,37 +299,40 @@ export class AshCodeCommitGateStack extends Stack {
         },
       ],
     });
+    const egressCidr = scanEgressCidr(this);
+    const egressCidrEmpty = Fn.conditionEquals(egressCidr.valueAsString, '');
+    new CfnRule(this, 'ScanEgressWithVpc', {
+      assertions: [
+        {
+          assert: Fn.conditionOr(
+            Fn.conditionAnd(vpcIdEmpty, egressCidrEmpty),
+            Fn.conditionAnd(Fn.conditionNot(vpcIdEmpty), Fn.conditionNot(egressCidrEmpty)),
+          ),
+          assertDescription:
+            'Set ScanEgressCidr with VpcId, or neither: in a VPC the scan function can ' +
+            'reach only that CIDR on TCP 443.',
+        },
+      ],
+    });
     const scanSecurityGroup = new ec2.CfnSecurityGroup(this, 'ScanSecurityGroup', {
       vpcId: vpcId.valueAsString,
       groupDescription:
-        'ASH pull-request scan function. Egress is TCP 443 only; widen it against ' +
-        'ScanSecurityGroupId.',
+        'ASH pull-request scan function. Egress is TCP 443 to ScanEgressCidr only; widen ' +
+        'it against ScanSecurityGroupId.',
+      // The one egress rule. The group exists only under ScanFunctionInVpc, and the
+      // ScanEgressWithVpc Rule refuses that launch without a CIDR, so the Ref is
+      // never empty on a group CloudFormation creates.
       securityGroupEgress: [
         {
           ipProtocol: 'tcp',
           fromPort: 443,
           toPort: 443,
-          cidrIp: '0.0.0.0/0',
-          description: 'CodeCommit, ECR, SSM and CloudWatch Logs over HTTPS, via your NAT.',
+          cidrIp: egressCidr.valueAsString,
+          description: 'CodeCommit, SSM and, online, scanner downloads over HTTPS.',
         },
       ],
     });
     scanSecurityGroup.cfnOptions.condition = scanInVpc;
-    // cfn-nag W5 (egress to 0.0.0.0/0), suppressed on this one group, for the reason
-    // the Fargate task group's .ash/.ash.yaml entry records: the destinations are
-    // public AWS endpoints reached through NAT, and no AWS-managed prefix list covers
-    // ECR or CloudWatch Logs. Protocol and port are already pinned to TCP 443.
-    scanSecurityGroup.addMetadata('cfn_nag', {
-      rules_to_suppress: [
-        {
-          id: 'W5',
-          reason:
-            'Egress is TCP 443 to public AWS endpoints (CodeCommit, ECR, SSM, CloudWatch ' +
-            'Logs) through the adopter NAT. No AWS-managed prefix list covers ECR or Logs, ' +
-            'and naming them needs interface endpoints. Widen via ScanSecurityGroupId.',
-        },
-      ],
-    });
     const cfnScanFunction = scanFunction.node.defaultChild as lambda.CfnFunction;
     cfnScanFunction.vpcConfig = Fn.conditionIf(
       scanInVpc.logicalId,
@@ -333,7 +342,7 @@ export class AshCodeCommitGateStack extends Stack {
     const scanSecurityGroupOutput = new CfnOutput(this, 'ScanSecurityGroupId', {
       description:
         "The scan function's security group, created only when VpcId and VpcSubnetIds are " +
-        'set. Egress is TCP 443 only. To reach a registry on another port: aws ec2 ' +
+        'set. Egress is TCP 443 to ScanEgressCidr. To reach a registry on another port: aws ec2 ' +
         'authorize-security-group-egress --group-id <this> --protocol tcp --port 8080 ' +
         '--cidr <your-registry-cidr>. A missing rule shows up as a scan timing out.',
       value: scanSecurityGroup.attrGroupId,
@@ -420,8 +429,8 @@ export class AshCodeCommitGateStack extends Stack {
     suppressGuardRule(
       scanFunction,
       'LAMBDA_INSIDE_VPC',
-      'Opt-in: set VpcId and VpcSubnetIds to confine egress to a 443-only SG and your ' +
-        'NACLs. Empty (default) leaves egress open.',
+      'Opt-in: set VpcId, VpcSubnetIds and ScanEgressCidr to confine egress to 443 on ' +
+        'that CIDR and your NACLs. Empty (default) leaves egress open.',
     );
 
     scanFunction.node.addDependency(image.bootstrap!);

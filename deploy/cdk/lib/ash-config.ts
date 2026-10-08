@@ -84,6 +84,7 @@ export const ASH_PARAMETER_NAMES = {
   // stacks. First consumed by AshEksOperator; see that stack's header.
   vpcSecurityGroupIds: 'VpcSecurityGroupIds',
   vpcId: 'VpcId',
+  scanEgressCidr: 'ScanEgressCidr',
   certificateArn: 'CertificateArn',
 } as const;
 
@@ -631,24 +632,24 @@ export function kmsKeyArn(scope: Stack): CfnParameter {
  * WHAT CONSUMES IT
  * ----------------
  * `AshCodeCommitGate`'s scan function, together with `VpcId`. Both set puts the
- * function in those subnets with a 443-only security group the stack creates in
- * that VPC; both empty, the default, leaves it outside any VPC exactly as before
+ * function in those subnets with a security group the stack creates in that VPC,
+ * whose only egress is TCP 443 to `ScanEgressCidr`; both empty, the default, leaves it outside any VPC exactly as before
  * these parameters existed. A template Rule refuses a launch that sets one and not
  * the other. ash-codecommit-gate-stack.ts says why the stack creates the group
  * rather than taking adopter group ids.
  *
  * Once attached, the function's egress is that group plus whatever the adopter's
- * network ACLs and route tables allow. It still has to reach CodeCommit, ECR,
- * Systems Manager and CloudWatch Logs, through a NAT gateway or interface endpoints
- * the adopter provides, or every scan fails.
+ * network ACLs and route tables allow. It still has to reach what `scanEgressCidr`
+ * lists, through a NAT gateway or interface endpoints the adopter provides, or
+ * every scan fails.
  */
 export function vpcSubnetIds(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.vpcSubnetIds, {
     type: 'CommaDelimitedList',
     default: '',
     description:
-      'Subnets for the scan function, with VpcId. Empty: no VPC. Set: a 443-only SG is ' +
-      'created; your NACLs/routes must reach CodeCommit, ECR, SSM, Logs.',
+      'Subnets for the scan function, with VpcId. Empty: no VPC. Set: an SG allowing ' +
+      '443 to ScanEgressCidr is created; your routes must reach CodeCommit and SSM.',
   });
 }
 
@@ -666,6 +667,56 @@ export function ashVpcId(scope: Stack): CfnParameter {
     default: '',
     allowedPattern: '^$|^vpc-[0-9a-f]{8,17}$',
     description: 'VPC for the scan function, with VpcSubnetIds. Empty (default): no VPC.',
+  });
+}
+
+/**
+ * Where the gate's scan function may connect on TCP 443 once it is in a VPC.
+ *
+ * The security group the stack creates in `VpcId` gets exactly one egress rule,
+ * TCP 443 to this CIDR. Its destination used to be a hard-coded
+ * `0.0.0.0/0`, which trivy reports as AWS-0104 and which the template had no way to
+ * narrow, because the right destination depends on how the adopter's VPC reaches
+ * what the function calls:
+ *
+ * - CodeCommit, both the API and git over HTTPS (`git-codecommit`), and Systems
+ *   Manager for the config parameter, a plain String parameter, so no KMS call.
+ *   Those are the function's own calls. Pulling the image and delivering its logs
+ *   are done by the Lambda service, not through the function's interfaces.
+ * - With `AshOfflineMode=NO`, the default, the scanners also download their rules
+ *   and vulnerability databases at scan time from public hosts outside AWS. No
+ *   AWS-managed prefix list or VPC endpoint names those.
+ *
+ * So an offline image behind interface endpoints for those services can use the
+ * VPC's CIDR, and an online image behind a NAT gateway needs `0.0.0.0/0`. Both are
+ * accepted; which one is the adopter's call, made where they can see it.
+ *
+ * WHY THERE IS NO DEFAULT DESTINATION. A default would be a guess about a network
+ * this template knows nothing about, and the only guess that never breaks a scan
+ * is the open one the parameter exists to replace. Empty is the default so that a
+ * launch without a VPC still needs nothing; the `ScanEgressWithVpc` Rule refuses a
+ * VPC launch without it, so the empty value cannot reach a function in a VPC.
+ *
+ * REJECTED: a prefix-list parameter. AWS publishes managed prefix lists for S3,
+ * DynamoDB and a few other services, but none for CodeCommit or Systems Manager,
+ * so an adopter would have to build and maintain one from ip-ranges.json, and it
+ * still could not name the scanners' download hosts. An adopter who has one
+ * can authorize it against the `ScanSecurityGroupId` output.
+ *
+ * REJECTED: creating interface endpoints in the stack. That is roughly 7 USD a
+ * month per endpoint per Availability Zone for three endpoints, it fails outright
+ * in a VPC that already has a private-DNS endpoint for any of those services, and
+ * it still cannot serve an online image.
+ */
+export function scanEgressCidr(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.scanEgressCidr, {
+    type: 'String',
+    default: '',
+    allowedPattern: '^$|^(\\d{1,3}\\.){3}\\d{1,3}/(\\d|[12]\\d|3[0-2])$',
+    description:
+      'Required with VpcId. IPv4 CIDR the scan function may reach on TCP 443: your VPC ' +
+      'CIDR for interface endpoints (codecommit, git-codecommit, ssm) with ' +
+      'AshOfflineMode=YES, or 0.0.0.0/0 for a NAT with online scanners.',
   });
 }
 

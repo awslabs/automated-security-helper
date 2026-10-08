@@ -522,7 +522,26 @@ run_case "vpc_subnet_ids without vpc_id -> refused" must \
 run_case "both VPC inputs set -> allowed" mustnot \
   "Set vpc_id and vpc_subnet_ids together" \
   "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var vpc_id=vpc-example \
+  -var 'vpc_subnet_ids=["subnet-example"]' -var scan_egress_cidr=10.0.0.0/16
+# scan_egress_cidr is the security group's only egress destination, so a VPC
+# without it would leave every scan unable to connect. The both-set case above is
+# the mustnot control for the pairing; 0.0.0.0/0 is accepted on purpose (an online
+# image behind a NAT needs it) and is the format rule's mustnot control.
+run_case "vpc_id without scan_egress_cidr -> refused" must \
+  "Set scan_egress_cidr with vpc_id" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var vpc_id=vpc-example \
   -var 'vpc_subnet_ids=["subnet-example"]'
+run_case "scan_egress_cidr without vpc_id -> refused" must \
+  "Set scan_egress_cidr with vpc_id" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var scan_egress_cidr=10.0.0.0/16
+run_case "scan_egress_cidr not a CIDR -> refused" must \
+  "scan_egress_cidr must be an IPv4 CIDR" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var vpc_id=vpc-example \
+  -var 'vpc_subnet_ids=["subnet-example"]' -var scan_egress_cidr=10.0.0.0
+run_case "scan_egress_cidr 0.0.0.0/0 -> allowed" mustnot \
+  "scan_egress_cidr must be an IPv4 CIDR" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var vpc_id=vpc-example \
+  -var 'vpc_subnet_ids=["subnet-example"]' -var scan_egress_cidr=0.0.0.0/0
 
 # A validation rule says a value is well-formed, not that the module uses it. These
 # `terraform test` files plan each module against a mocked AWS provider and assert

@@ -30,7 +30,7 @@
     {
       "logicalId": "ScanFunction322CD7EE",
       "reasons": {
-        "LAMBDA_INSIDE_VPC": "Opt-in: set VpcId and VpcSubnetIds to confine egress to a 443-only SG and your NACLs. Empty (default) leaves egress open."
+        "LAMBDA_INSIDE_VPC": "Opt-in: set VpcId, VpcSubnetIds and ScanEgressCidr to confine egress to 443 on that CIDR and your NACLs. Empty (default) leaves egress open."
       },
       "rules": [
         "LAMBDA_INSIDE_VPC"

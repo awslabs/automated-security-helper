@@ -1,3 +1,6 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 
@@ -152,7 +155,11 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
   const SCAN_SG = Object.keys(json.Resources).find(
     (id) => json.Resources[id].Type === 'AWS::EC2::SecurityGroup',
   )!;
-  const SET = { VpcId: 'vpc-0123456789abcdef0', VpcSubnetIds: 'subnet-0aaa,subnet-0bbb' };
+  const SET = {
+    VpcId: 'vpc-0123456789abcdef0',
+    VpcSubnetIds: 'subnet-0aaa,subnet-0bbb',
+    ScanEgressCidr: '10.20.0.0/16',
+  };
   const NO_VALUE = Symbol('AWS::NoValue');
 
   function evaluate(parameters: Record<string, string>) {
@@ -239,6 +246,10 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
       Default: '',
     });
     expect(json.Parameters[ASH_PARAMETER_NAMES.vpcId]).toMatchObject({ Type: 'String', Default: '' });
+    expect(json.Parameters[ASH_PARAMETER_NAMES.scanEgressCidr]).toMatchObject({
+      Type: 'String',
+      Default: '',
+    });
     // Adopter-supplied group ids were removed on purpose; see the stack's comment.
     expect(json.Parameters.VpcSecurityGroupIds).toBeUndefined();
   });
@@ -256,10 +267,12 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
     const guard = json.Resources[SCAN_FUNCTION].Metadata?.guard;
     expect(guard.SuppressedRules).toEqual(['LAMBDA_INSIDE_VPC']);
     expect(guard.SuppressedRuleReasons.LAMBDA_INSIDE_VPC).toMatch(/egress open/);
-    expect(guard.SuppressedRuleReasons.LAMBDA_INSIDE_VPC).toMatch(/VpcId and VpcSubnetIds/);
+    expect(guard.SuppressedRuleReasons.LAMBDA_INSIDE_VPC).toMatch(
+      /VpcId, VpcSubnetIds and ScanEgressCidr/,
+    );
   });
 
-  test('set: the stack creates a 443-only group in that VPC and wires VpcConfig to it', () => {
+  test('set: the stack creates a group allowing only 443 to ScanEgressCidr and wires VpcConfig to it', () => {
     const { fn, ruleViolations, created, outputs, resolve } = evaluate(SET);
     expect(created).toContain(SCAN_SG);
     expect(fn.VpcConfig).toEqual({
@@ -269,9 +282,19 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
     const sg = resolve(json.Resources[SCAN_SG].Properties);
     expect(sg.VpcId).toBe(SET.VpcId);
     expect(sg.SecurityGroupEgress).toEqual([
-      expect.objectContaining({ IpProtocol: 'tcp', FromPort: 443, ToPort: 443, CidrIp: '0.0.0.0/0' }),
+      {
+        IpProtocol: 'tcp',
+        FromPort: 443,
+        ToPort: 443,
+        CidrIp: SET.ScanEgressCidr,
+        Description: expect.any(String),
+      },
     ]);
     expect(sg.SecurityGroupIngress).toBeUndefined();
+    // No standalone rule can add egress to this group behind the parameter's back.
+    expect(
+      Object.values<any>(json.Resources).filter((r) => r.Type === 'AWS::EC2::SecurityGroupEgress'),
+    ).toEqual([]);
     expect(outputs).toContainEqual(['ScanSecurityGroupId', { 'Fn::GetAtt': [SCAN_SG, 'GroupId'] }]);
     expect(ruleViolations).toEqual([]);
   });
@@ -333,7 +356,47 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
   });
 
   test('setting only one of VpcId and VpcSubnetIds is refused before anything is created', () => {
-    expect(evaluate({ VpcId: SET.VpcId }).ruleViolations).toEqual(['VpcIdWithSubnets']);
+    expect(evaluate({ VpcId: SET.VpcId, ScanEgressCidr: SET.ScanEgressCidr }).ruleViolations).toEqual([
+      'VpcIdWithSubnets',
+    ]);
     expect(evaluate({ VpcSubnetIds: 'subnet-0aaa' }).ruleViolations).toEqual(['VpcIdWithSubnets']);
+  });
+
+  test('a VPC launch without ScanEgressCidr, or ScanEgressCidr without a VPC, is refused', () => {
+    // Without it the group's only rule is the placeholder, so every scan would time out.
+    expect(
+      evaluate({ VpcId: SET.VpcId, VpcSubnetIds: SET.VpcSubnetIds }).ruleViolations,
+    ).toEqual(['ScanEgressWithVpc']);
+    expect(evaluate({ ScanEgressCidr: SET.ScanEgressCidr }).ruleViolations).toEqual([
+      'ScanEgressWithVpc',
+    ]);
+  });
+
+  test('ScanEgressCidr accepts an IPv4 CIDR, including 0.0.0.0/0, and nothing else', () => {
+    // 0.0.0.0/0 is accepted on purpose: an online image behind a NAT downloads scanner
+    // rules and databases from public hosts no narrower range can name. It is the
+    // adopter's explicit choice rather than the template's default.
+    const pattern = new RegExp(json.Parameters[ASH_PARAMETER_NAMES.scanEgressCidr].AllowedPattern);
+    for (const ok of ['', '10.20.0.0/16', '192.168.1.0/24', '0.0.0.0/0', '10.0.0.1/32']) {
+      expect({ value: ok, ok: pattern.test(ok) }).toEqual({ value: ok, ok: true });
+    }
+    for (const bad of ['10.0.0.0', '10.0.0.0/33', 'pl-0123456789abcdef0', '::/0', ' 10.0.0.0/8']) {
+      expect({ value: bad, ok: pattern.test(bad) }).toEqual({ value: bad, ok: false });
+    }
+  });
+
+  test('no egress rule in the committed template is open to every address by default', () => {
+    // trivy AWS-0104. The destination is now the adopter's ScanEgressCidr.
+    const committed = JSON.parse(
+      readFileSync(join(__dirname, '..', 'templates', 'AshCodeCommitGate.template.json'), 'utf8'),
+    );
+    const cidrs = Object.values<any>(committed.Resources)
+      .flatMap((r) => [
+        ...(r.Type === 'AWS::EC2::SecurityGroup' ? (r.Properties.SecurityGroupEgress ?? []) : []),
+        ...(r.Type === 'AWS::EC2::SecurityGroupEgress' ? [r.Properties] : []),
+      ])
+      .map((rule: any) => rule.CidrIp);
+    // Positive control: the scan group's rule is found, as the parameter.
+    expect(cidrs).toEqual([{ Ref: 'ScanEgressCidr' }]);
   });
 });

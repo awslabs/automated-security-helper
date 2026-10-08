@@ -194,23 +194,26 @@ function cfnNagEntries(templates: Record<string, any>): string[] {
 describe('cfn-nag suppressions sit only on the approved resource', () => {
   const VPC_POLICY = 'AshCodeCommitGate/ScanFunctionRoleEc2Access99A7E33E';
 
-  const SCAN_SG = 'AshCodeCommitGate/ScanSecurityGroup';
 
-  test('W12 is on the conditional ENI policy, W5 on the scan group, and nothing else', () => {
-    expect(cfnNagEntries(COMMITTED)).toEqual(
-      [`${VPC_POLICY} [AWS::IAM::Policy] W12`, `${SCAN_SG} [AWS::EC2::SecurityGroup] W5`].sort(),
-    );
+  test('W12 is on the conditional ENI policy, and nothing else', () => {
+    expect(cfnNagEntries(COMMITTED)).toEqual([`${VPC_POLICY} [AWS::IAM::Policy] W12`]);
   });
 
-  test('the W5 group is conditional, egress-only and pinned to TCP 443', () => {
+  test('the scan group needs no W5 suppression: its egress is TCP 443 to ScanEgressCidr', () => {
+    // It carried one while its destination was a hard-coded 0.0.0.0/0. The
+    // destination is now the adopter's parameter, so there is nothing to suppress.
     const sg = COMMITTED.AshCodeCommitGate.Resources.ScanSecurityGroup;
     expect(sg.Condition).toBe('ScanFunctionInVpc');
     expect(sg.Properties.SecurityGroupIngress).toBeUndefined();
     expect(sg.Properties.SecurityGroupEgress).toEqual([
-      expect.objectContaining({ IpProtocol: 'tcp', FromPort: 443, ToPort: 443 }),
+      expect.objectContaining({
+        IpProtocol: 'tcp',
+        FromPort: 443,
+        ToPort: 443,
+        CidrIp: { Ref: 'ScanEgressCidr' },
+      }),
     ]);
-    const [entry] = sg.Metadata.cfn_nag.rules_to_suppress;
-    expect(entry.reason).toMatch(/prefix list/);
+    expect(sg.Metadata?.cfn_nag).toBeUndefined();
   });
 
   test('it carries a reason, and the policy it covers is the conditional one', () => {
