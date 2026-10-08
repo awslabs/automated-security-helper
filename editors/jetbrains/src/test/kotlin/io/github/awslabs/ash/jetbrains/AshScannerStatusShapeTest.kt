@@ -43,10 +43,9 @@ class AshScannerStatusShapeTest {
         )
         assertEquals(listOf("a", "b", "d"), report.incomplete.map { it.name })
         assertEquals(listOf("UNKNOWN", "UNKNOWN", "UNKNOWN"), report.incomplete.map { it.status })
-        // Non-boolean flags are absent, so they take their defaults.
+        // A non-boolean flag is absent, so it takes its default. `excluded` is not read at all.
         val c = report.scanners.single { it.name == "c" }
         assertTrue(c.dependenciesSatisfied)
-        assertFalse(c.excluded)
     }
 
     @Test

@@ -562,6 +562,321 @@
           {}
         ]
       ]
+    },
+    {
+      "base": "scans/incomplete/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [
+          "semgrep"
+        ],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "an excluded scanner recorded ERROR is still a gap",
+      "set": [
+        [
+          [
+            "scanner_results",
+            "semgrep",
+            "excluded"
+          ],
+          true
+        ]
+      ]
+    },
+    {
+      "base": "scans/missing/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [
+          "cfn-nag"
+        ],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "an excluded scanner recorded MISSING is still a gap",
+      "set": [
+        [
+          [
+            "scanner_results",
+            "cfn-nag",
+            "excluded"
+          ],
+          true
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [
+          "jupyter"
+        ],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "dependencies_satisfied written as the string false is false",
+      "set": [
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "dependencies_satisfied"
+          ],
+          "false"
+        ],
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "candidate_inputs"
+          ],
+          2
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "candidate_inputs written as 0.0 is the claim of nothing to convert",
+      "set": [
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "dependencies_satisfied"
+          ],
+          false
+        ],
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "candidate_inputs"
+          ],
+          0.0
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "candidate_inputs written as the string 0 is the claim of nothing to convert",
+      "set": [
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "dependencies_satisfied"
+          ],
+          false
+        ],
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "candidate_inputs"
+          ],
+          "0"
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "excluded written as the string true excludes a failed converter",
+      "set": [
+        [
+          [
+            "converter_results",
+            "archive",
+            "failure"
+          ],
+          "archive converter raised"
+        ],
+        [
+          [
+            "converter_results",
+            "archive",
+            "excluded"
+          ],
+          "true"
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a whitespace-only converter failure is no failure",
+      "set": [
+        [
+          [
+            "converter_results",
+            "archive",
+            "failure"
+          ],
+          "   "
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "an error-level staleness notification with an empty record is unreadable",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolConfigurationNotifications"
+          ],
+          [
+            {
+              "descriptor": {
+                "id": "ASH-CONTENT-DB-STALE"
+              },
+              "level": "error",
+              "message": {
+                "text": "Content database grype-db is stale"
+              },
+              "properties": {
+                "content_database": {}
+              }
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a staleness record with no measured_at is unreadable",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolConfigurationNotifications"
+          ],
+          [
+            {
+              "descriptor": {
+                "id": "ASH-CONTENT-DB-STALE"
+              },
+              "level": "error",
+              "message": {
+                "text": "Content database grype-db is stale"
+              },
+              "properties": {
+                "content_database": {
+                  "name": "grype-db",
+                  "policy": "fail"
+                }
+              }
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [
+          "grype-db"
+        ],
+        "unevaluated_rules": []
+      },
+      "name": "a staleness record with no build time is of unknown age, so stale",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolConfigurationNotifications"
+          ],
+          [
+            {
+              "descriptor": {
+                "id": "ASH-CONTENT-DB-STALE"
+              },
+              "level": "error",
+              "message": {
+                "text": "Content database grype-db is stale"
+              },
+              "properties": {
+                "content_database": {
+                  "measured_at": "2026-10-01T00:00:00Z",
+                  "name": "grype-db",
+                  "policy": "fail"
+                }
+              }
+            }
+          ]
+        ]
+      ]
     }
   ]
 }

@@ -48,6 +48,7 @@ import com.google.gson.JsonSyntaxException
  *   unevaluated rules        an error-level `toolExecutionNotifications` entry, unless every
  *                            notApplicable result for its rule is suppressed
  *   stale content databases  an error-level `ASH-CONTENT-DB-STALE` configuration notification
+ *                            carrying a readable `content_database` record
  *
  * The last three have no scanner row. With `fail_on_incomplete_scanners: false` ASH exits 0 over
  * a stale database or an unevaluated rule, so a reader of the roster alone reports such a scan
@@ -55,9 +56,20 @@ import com.google.gson.JsonSyntaxException
  * holds it to the verdicts in editors/vscode/test/fixtures/coverage-cases/cases.json, which
  * tests/unit/test_vscode_coverage_parity.py holds ASH to.
  *
- * Two deliberate differences from ASH, both toward reporting a gap: a status file with no roster
- * and no `expected_scanners` is "completeness unknown" here (ASH reads it as a convert-only run),
- * and statuses are compared case-insensitively.
+ * WHERE THIS DIFFERS FROM ASH, on files ASH does not write:
+ *
+ *  * A status file with no roster and no `expected_scanners` is "completeness unknown" here; ASH
+ *    reads it as a convert-only run. This one is toward reporting a gap.
+ *  * Statuses are compared case-insensitively, and the legacy `metadata.scanner_status` roster is
+ *    read when `scanner_results` is absent. ASH's model rejects a lowercase status outright, so
+ *    ASH cannot assess such a file at all, and ASH 4 never writes either form.
+ *  * A field ASH's model would reject (a `failure` that is not a string, a count that is not a
+ *    whole number, an `excluded` that is not a boolean) makes the file one ASH cannot assess.
+ *    Here it reads toward a gap. The values pydantic coerces (`"false"`, `1`, `"0"`, `0.0`) are
+ *    coerced the same way, so those files reach ASH's verdict.
+ *  * An error-level staleness notification with a readable record counts as stale. ASH also
+ *    recomputes staleness from the record against its registry's bound, but it writes the error
+ *    level only for a record it found stale, so on a file ASH wrote the two agree.
  */
 object AshScannerStatus {
 
@@ -130,8 +142,6 @@ object AshScannerStatus {
          * observed true on a MISSING scanner, so true says nothing.
          */
         val dependenciesSatisfied: Boolean = true,
-        /** Deliberately switched off by configuration, so not a problem to report. */
-        val excluded: Boolean = false,
         /**
          * Targets attempted, summed over the scanner's `additional_reports` rows, or null when no
          * row carries a count. Null is the absence of a claim, not zero: most scanners track no
@@ -191,12 +201,15 @@ object AshScannerStatus {
         val complete: List<Scanner> get() = scanners.filter { it.isComplete && !it.lostTargets }
 
         /**
-         * Scanners that did not complete, or ran and lost some of their targets. An EXCLUDED
-         * scanner whose status is incomplete is left out: it was deliberately switched off by
-         * configuration, so reporting it as a problem would train the user to ignore this warning.
+         * Scanners that did not complete, or ran and lost some of their targets.
+         *
+         * `excluded` is NOT read, as ASH's `incomplete_scanners` does not read it. An excluded
+         * scanner is recorded SKIPPED, which is complete; one recorded ERROR or MISSING anyway
+         * (ASH's unified metrics rank an error above an exclusion) did not complete, and ASH's
+         * verdict counts it.
          */
         val incomplete: List<Scanner>
-            get() = scanners.filter { (!it.isComplete && !it.excluded) || it.lostTargets }
+            get() = scanners.filter { !it.isComplete || it.lostTargets }
 
         /** Scanners that actually examined the target. See [REACHED_A_VERDICT]. */
         val reachedAVerdict: List<Scanner> get() = scanners.filter { it.reachedAVerdict }
@@ -347,7 +360,6 @@ object AshScannerStatus {
                     name = name,
                     status = status ?: "UNKNOWN",
                     dependenciesSatisfied = entry?.optBoolean("dependencies_satisfied") ?: true,
-                    excluded = entry?.optBoolean("excluded") ?: false,
                     targetsAttempted = attempted,
                     targetsFailed = failed,
                 ),
@@ -384,20 +396,30 @@ object AshScannerStatus {
     }
 
     /**
-     * Converters that were meant to run and did not. Excluded rows are skipped; a truthy
-     * `failure` (Python truthiness, which is what ASH's `if failure:` tests) is a gap; so is
-     * `dependencies_satisfied: false` unless the row says it had nothing to convert.
+     * Converters that were meant to run and did not, read as ASH reads a `ConverterStatusInfo`
+     * row after pydantic has coerced it. Excluded rows are skipped; a non-empty `failure`
+     * (whitespace stripped, as the model's str_strip_whitespace does) is a gap; so is
+     * `dependencies_satisfied` false unless `candidate_inputs` is 0, the row's positive claim
+     * that there was nothing to convert.
      */
     private fun incompleteConverters(rows: JsonObject?): List<Converter> {
         val listed = mutableListOf<Converter>()
         for ((name, element) in rows?.entrySet().orEmpty()) {
             val row = element.takeIf { it.isJsonObject }?.asJsonObject ?: continue
-            if (row.optBoolean("excluded") == true) continue
+            if (pydanticBool(row.get("excluded")) == true) continue
             val failure = row.get("failure")
-            if (failure != null && truthy(failure)) {
-                val reason = failure.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
-                listed += Converter(name, reason ?: failure.toString())
-            } else if (row.optBoolean("dependencies_satisfied") == false && row.count("candidate_inputs") != 0) {
+            val reason = when {
+                failure == null || failure.isJsonNull -> null
+                failure.isJsonPrimitive && failure.asJsonPrimitive.isString -> failure.asString.trim().ifEmpty { null }
+                // Not a string, so ASH's model rejects the file. Python truthiness, as
+                // coverage.ts reads it, so the two plugins agree on such a file.
+                else -> failure.takeIf { truthy(it) }?.toString()
+            }
+            if (reason != null) {
+                listed += Converter(name, reason)
+            } else if (pydanticBool(row.get("dependencies_satisfied")) == false &&
+                pydanticInt(row.get("candidate_inputs")) != 0
+            ) {
                 listed += Converter(name, "dependencies unavailable, so it never ran")
             }
         }
@@ -439,7 +461,11 @@ object AshScannerStatus {
         return reported.toList()
     }
 
-    /** Names of content databases with an error-level staleness notification, sorted. */
+    /**
+     * Names of content databases with an error-level staleness notification, sorted. A record ASH
+     * cannot read is skipped, as `stale_content_databases` skips it: an empty one, one without a
+     * `measured_at` timestamp, or one whose `built` is present and not a timestamp.
+     */
     private fun staleDatabases(sarif: JsonObject?): List<String> {
         val names = sortedSetOf<String>()
         for (run in sarif.objects("runs")) {
@@ -448,6 +474,9 @@ object AshScannerStatus {
                     if (notification.obj("descriptor")?.text("id") != STALE_CONTENT_DB_NOTIFICATION_ID) continue
                     if (notification.text("level") != "error") continue
                     val record = notification.obj("properties")?.obj("content_database") ?: continue
+                    if (record.size() == 0 || !isTimestamp(record.get("measured_at"))) continue
+                    val built = record.get("built")
+                    if (truthy(built) && !isTimestamp(built)) continue
                     names += record.text("name") ?: ""
                 }
             }
@@ -481,9 +510,51 @@ object AshScannerStatus {
         return value.asJsonPrimitive.asString.toIntOrNull()
     }
 
+    /**
+     * pydantic's lax bool: a JSON boolean, 0 or 1, or one of its accepted words in any case.
+     * Null for anything else, including absence; pydantic would reject the whole file.
+     */
+    private fun pydanticBool(value: JsonElement?): Boolean? {
+        val primitive = value?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive ?: return null
+        return when {
+            primitive.isBoolean -> primitive.asBoolean
+            primitive.isNumber -> when (primitive.asBigDecimal.compareTo(java.math.BigDecimal.ZERO)) {
+                0 -> false
+                else -> if (primitive.asBigDecimal.compareTo(java.math.BigDecimal.ONE) == 0) true else null
+            }
+            else -> when (primitive.asString.lowercase()) {
+                "0", "off", "f", "false", "n", "no" -> false
+                "1", "on", "t", "true", "y", "yes" -> true
+                else -> null
+            }
+        }
+    }
+
+    /**
+     * pydantic's lax int: a whole number written as an integer, a float or a numeric string, or
+     * a boolean as 1 or 0. Null for anything else.
+     */
+    private fun pydanticInt(value: JsonElement?): Int? {
+        val primitive = value?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive ?: return null
+        if (primitive.isBoolean) return if (primitive.asBoolean) 1 else 0
+        val number = if (primitive.isNumber) primitive.asBigDecimal else primitive.asString.trim().toBigDecimalOrNull()
+        return number?.takeIf { it.stripTrailingZeros().scale() <= 0 }?.toInt()
+    }
+
+    /**
+     * An RFC 3339 date-time with an offset, which is what ASH's `parse_timestamp` accepts in
+     * practice: `datetime.fromisoformat` after `Z` becomes `+00:00`, and refused without a zone.
+     */
+    private fun isTimestamp(value: JsonElement?): Boolean {
+        val text = value?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString?.trim() ?: return false
+        return TIMESTAMP.matches(text)
+    }
+
+    private val TIMESTAMP = Regex("""\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})""")
+
     /** Python's truthiness for a JSON value. */
-    private fun truthy(value: JsonElement): Boolean = when {
-        value.isJsonNull -> false
+    private fun truthy(value: JsonElement?): Boolean = when {
+        value == null || value.isJsonNull -> false
         value.isJsonArray -> !value.asJsonArray.isEmpty
         value.isJsonObject -> value.asJsonObject.size() > 0
         value.asJsonPrimitive.isBoolean -> value.asBoolean

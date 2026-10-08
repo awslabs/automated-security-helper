@@ -110,6 +110,35 @@ class AshScannerStatusGapsTest {
         )
     }
 
+    @Test
+    fun converterFieldsAreCoercedAsPydanticCoercesThem() {
+        // What ASH's ConverterStatusInfo holds after loading. Each row is one coercion.
+        val report = parse(
+            passed,
+            """"converter_results": {
+                "excluded-word": {"failure": "raised", "excluded": "YES"},
+                "excluded-one": {"failure": "raised", "excluded": 1},
+                "excluded-junk": {"failure": "raised", "excluded": "maybe"},
+                "deps-word": {"dependencies_satisfied": "off"},
+                "deps-zero": {"dependencies_satisfied": 0.0},
+                "deps-two": {"dependencies_satisfied": 2},
+                "deps-true-word": {"dependencies_satisfied": "t"},
+                "deps-object": {"dependencies_satisfied": {}},
+                "cand-float": {"dependencies_satisfied": false, "candidate_inputs": 0.0},
+                "cand-string": {"dependencies_satisfied": false, "candidate_inputs": " 0 "},
+                "cand-false": {"dependencies_satisfied": false, "candidate_inputs": false},
+                "cand-true": {"dependencies_satisfied": false, "candidate_inputs": true},
+                "cand-half": {"dependencies_satisfied": false, "candidate_inputs": 0.5},
+                "cand-word": {"dependencies_satisfied": false, "candidate_inputs": "none"},
+                "blank-failure": {"failure": "   "}
+            }""",
+        )
+        assertEquals(
+            listOf("excluded-junk", "deps-word", "deps-zero", "cand-true", "cand-half", "cand-word"),
+            report.incompleteConverters.map { it.name },
+        )
+    }
+
     // ---- unevaluated rules ----
 
     @Test
@@ -158,24 +187,33 @@ class AshScannerStatusGapsTest {
     fun onlyAnErrorLevelStalenessRecordIsAGap() {
         fun stale(id: String, level: String, properties: String) =
             """{"descriptor": {"id": "$id"}, "level": "$level", "properties": $properties}"""
-        val record = """{"content_database": {"name": "grype-db"}}"""
+        fun db(name: String) = """{"content_database": {"name": "$name", "measured_at": "2026-10-01T00:00:00Z"}}"""
+        val record = db("grype-db")
         val report = parse(
             passed,
             sarif(
                 """{"toolConfigurationNotifications": [
                     ${stale("ASH-CONTENT-DB-STALE", "error", record)},
-                    ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": {"name": "a-db"}}""")},
+                    ${stale("ASH-CONTENT-DB-STALE", "error", db("a-db"))},
+                    ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": {"measured_at": "2026-10-01 00:00:00+00:00"}}""")},
                     ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": {}}""")},
-                    ${stale("ASH-CONTENT-DB-STALE", "warning", """{"content_database": {"name": "warned"}}""")},
-                    ${stale("OTHER", "error", """{"content_database": {"name": "other"}}""")},
+                    ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": {"name": "no-time"}}""")},
+                    ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": {"name": "naive", "measured_at": "2026-10-01T00:00:00"}}""")},
+                    ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": {"name": "bad-built", "measured_at": "2026-10-01T00:00:00Z", "built": "yesterday"}}""")},
+                    ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": {"name": "built", "measured_at": "2026-10-01T00:00:00Z", "built": "2026-01-01T00:00:00.123456789+02:00"}}""")},
+                    ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": {"name": "num-time", "measured_at": 5}}""")},
+                    ${stale("ASH-CONTENT-DB-STALE", "warning", db("warned"))},
+                    ${stale("OTHER", "error", db("other"))},
                     ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": "x"}""")},
                     {"level": "error", "properties": $record}]}""",
             ),
         )
-        assertEquals(listOf("", "a-db", "grype-db"), report.staleContentDatabases)
+        // Unreadable to ASH, and skipped: the empty record, no measured_at, a measured_at with no
+        // zone or not a string, and a built that is not a timestamp.
+        assertEquals(listOf("", "a-db", "built", "grype-db"), report.staleContentDatabases)
         assertTrue(
             report.describeIncompleteness()!!.contains(
-                "3 content database(s) are past their age bound: , a-db, grype-db.",
+                "4 content database(s) are past their age bound: , a-db, built, grype-db.",
             ),
         )
     }
@@ -227,7 +265,7 @@ class AshScannerStatusGapsTest {
             passed,
             sarif(
                 """{"toolConfigurationNotifications": [{"descriptor": {"id": "ASH-CONTENT-DB-STALE"},
-                    "level": "error", "properties": {"content_database": {"name": "grype-db"}}}]}""",
+                    "level": "error", "properties": {"content_database": {"name": "grype-db", "measured_at": "2026-10-01T00:00:00Z"}}}]}""",
             ),
         )
         val outcome = exitZero(report)

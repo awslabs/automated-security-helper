@@ -34,7 +34,8 @@
  *                            unless every notApplicable result for its rule is
  *                            suppressed.
  *   stale_content_databases  an error-level `ASH-CONTENT-DB-STALE`
- *                            `toolConfigurationNotifications` entry.
+ *                            `toolConfigurationNotifications` entry whose
+ *                            `content_database` record ASH can read.
  *
  * gate=True on purpose, matching `assess_coverage`: an operator who turned
  * `fail_on_incomplete_scanners` off has accepted the gap, not asked to be told
@@ -112,6 +113,57 @@ function asText(value: unknown): string | undefined {
 }
 
 /**
+ * pydantic's lax bool, which is what a `ConverterStatusInfo` field holds once ASH has
+ * loaded the file: a boolean, 0 or 1, or one of its accepted words in any case.
+ * Undefined for anything else, a value pydantic would reject.
+ */
+function asPydanticBool(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value === 0 ? false : value === 1 ? true : undefined;
+  }
+  if (typeof value === 'string') {
+    const word = value.toLowerCase();
+    if (['0', 'off', 'f', 'false', 'n', 'no'].includes(word)) {
+      return false;
+    }
+    if (['1', 'on', 't', 'true', 'y', 'yes'].includes(word)) {
+      return true;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * pydantic's lax int: a whole number written as an integer, a float or a numeric
+ * string, or a boolean as 1 or 0. Undefined for anything else.
+ */
+function asPydanticInt(value: unknown): number | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
+  const number =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value.trim())
+        : Number.NaN;
+  return Number.isInteger(number) ? number : undefined;
+}
+
+/**
+ * An RFC 3339 date-time with an offset, which is what ASH's `parse_timestamp` accepts
+ * in practice (`datetime.fromisoformat`, refused without a zone).
+ */
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
+
+function isTimestamp(value: unknown): boolean {
+  return typeof value === 'string' && TIMESTAMP.test(value.trim());
+}
+
+/**
  * Python truthiness for a JSON value, which is what `if failure:` tests. It differs
  * from JavaScript's on exactly the empty array and the empty object.
  */
@@ -176,7 +228,12 @@ function staleDatabases(sarif: unknown): string[] {
         }
         const properties = isRecord(notification.properties) ? notification.properties : {};
         const record = properties.content_database;
-        if (!isRecord(record)) {
+        // A record ASH cannot read is skipped, as `stale_content_databases` skips it:
+        // empty, no `measured_at` timestamp, or a `built` that is not one.
+        if (!isRecord(record) || Object.keys(record).length === 0 || !isTimestamp(record.measured_at)) {
+          continue;
+        }
+        if (isTruthy(record.built) && !isTimestamp(record.built)) {
           continue;
         }
         names.add(asText(record.name) ?? '');
@@ -230,17 +287,19 @@ function incompleteConverters(converterResults: unknown): IncompleteConverter[] 
     return listed;
   }
   for (const [name, row] of Object.entries(converterResults)) {
-    if (!isRecord(row) || row.excluded === true) {
+    // Read as pydantic coerces a `ConverterStatusInfo` row: `"true"` is excluded, a
+    // whitespace-only failure is none, and `"0"` or `0.0` candidate inputs exempt.
+    if (!isRecord(row) || asPydanticBool(row.excluded) === true) {
       continue;
     }
-    const failure = row.failure;
+    const failure = typeof row.failure === 'string' ? row.failure.trim() : row.failure;
     if (isTruthy(failure)) {
       listed.push({
         converter: name,
         reason: typeof failure === 'string' ? failure : JSON.stringify(failure),
       });
-    } else if (row.dependencies_satisfied === false) {
-      if (asCount(row.candidate_inputs) === 0) {
+    } else if (asPydanticBool(row.dependencies_satisfied) === false) {
+      if (asPydanticInt(row.candidate_inputs) === 0) {
         continue;
       }
       listed.push({ converter: name, reason: 'dependencies unavailable, so it never ran' });
