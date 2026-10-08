@@ -354,16 +354,25 @@ def test_a_leg_derives_n_minus_1_and_runs_its_script(key):
     for _, step in users:
         assert script.rsplit("/", 1)[-1] in str(step.get("run", "")), (key, script)
     workflow = yaml.safe_load((WORKFLOWS / key[0]).read_text(encoding="utf-8"))
-    assert workflow_leg_problems(workflow, key[1]) == [], key
+    assert workflow_leg_problems(workflow, key[1], LEG_OVERRIDES.get(key, ())) == [], (
+        key
+    )
 
 
-def workflow_leg_problems(workflow: dict, job_name: str) -> list:
-    """How an N-1 job could hand its script an E2E_PREV_REF other than `auto`.
+# What each leg's script also takes the N-1 from, besides E2E_PREV_REF: the Chocolatey
+# script's -PrevRef parameter wins over the environment.
+LEG_OVERRIDES = {("ash-package.yml", "chocolatey"): ("PrevRef",)}
 
-    Every env that can reach a step (the workflow's, the job's, each step's) may set it
-    only to `auto`, and no step's run: text may mention it at all: a command-prefix
-    assignment (`E2E_PREV_REF=x bash leg.sh`) or a write to $GITHUB_ENV overrides the
-    pinned env without touching it.
+
+def workflow_leg_problems(workflow: dict, job_name: str, overrides=None) -> list:
+    """How an N-1 job could hand its script an N-1 other than `auto`.
+
+    Every env that can reach a step (the workflow's, the job's, each step's) may set
+    E2E_PREV_REF only to `auto`, and no step's run: text may mention it, or any of the
+    leg's OVERRIDES (a script parameter such as -PrevRef), at all: a command-prefix
+    assignment (`E2E_PREV_REF=x bash leg.sh`), a parameter, or a write to $GITHUB_ENV
+    overrides the pinned env without touching it. Case-insensitive, as PowerShell
+    parameters and Windows environment names are.
     """
     problems = []
     job = workflow["jobs"][job_name]
@@ -373,13 +382,23 @@ def workflow_leg_problems(workflow: dict, job_name: str) -> list:
         for index, step in enumerate(job.get("steps") or [])
     ]
     for where, env in scopes:
-        if env and "E2E_PREV_REF" in env and env["E2E_PREV_REF"] != "auto":
-            problems.append(f"{where} sets E2E_PREV_REF to {env['E2E_PREV_REF']!r}")
+        for name, value in (env or {}).items():
+            if str(name).upper() == "E2E_PREV_REF" and value != "auto":
+                problems.append(f"{where} sets E2E_PREV_REF to {value!r}")
+    if overrides is None:
+        overrides = next(
+            (names for (_, job), names in LEG_OVERRIDES.items() if job == job_name), ()
+        )
+    names = ("E2E_PREV_REF", *overrides)
     for index, step in enumerate(job.get("steps") or []):
-        if "E2E_PREV_REF" in str(step.get("run", "")):
-            problems.append(
-                f"step {step.get('name', index)!r} run: mentions E2E_PREV_REF"
-            )
+        # With quotes removed too, so a name split by quoting ("E2E_PREV""_REF") is seen.
+        raw = str(step.get("run", ""))
+        run = raw + "\n" + re.sub(r"[\"'`]", "", raw)
+        for name in names:
+            if re.search(rf"(?i)(?<![\w]){re.escape(name)}(?![\w])", run):
+                problems.append(
+                    f"step {step.get('name', index)!r} run: mentions {name}"
+                )
     if not _prev_ref_steps(job.get("steps") or []):
         problems.append("no step sets E2E_PREV_REF")
     return problems
@@ -402,6 +421,23 @@ def workflow_leg_problems(workflow: dict, job_name: str) -> list:
             "a write to GITHUB_ENV in an earlier step",
             lambda wf: wf["jobs"]["wheel"]["steps"].insert(
                 1, {"name": "pick", "run": 'echo "E2E_PREV_REF=$X" >> "$GITHUB_ENV"'}
+            ),
+            "run: mentions E2E_PREV_REF",
+        ),
+        (
+            "a name split by quoting, into GITHUB_ENV",
+            lambda wf: wf["jobs"]["wheel"]["steps"].insert(
+                1, {"name": "pick", "run": 'echo "E2E_PREV""_REF=$X" >> "$GITHUB_ENV"'}
+            ),
+            "run: mentions E2E_PREV_REF",
+        ),
+        (
+            "a name split by quoting, through env",
+            lambda wf: wf["jobs"]["wheel"]["steps"][-1].update(
+                run=wf["jobs"]["wheel"]["steps"][-1]["run"].replace(
+                    "bash scripts/e2e/wheel.sh",
+                    'env "E2E_PREV_""REF=$X" bash scripts/e2e/wheel.sh',
+                )
             ),
             "run: mentions E2E_PREV_REF",
         ),
@@ -480,9 +516,11 @@ DEFAULT_LINE = 'PREV_REF="${E2E_PREV_REF:-auto}"'
 SANCTIONED_SHA = 'prev_sha="$PREV_SHA"'
 # The only revisions a leg script may hand git: N, and the N-1 n1_resolve chose.
 ALLOWED_REVISIONS = {"HEAD", "$PREV_SHA", "$prev_sha"}
-# The git subcommands the legs use. Anything else (show, checkout, worktree, ...) could
-# read another tree and is refused rather than parsed.
-GIT_SUBCOMMANDS = {"archive", "diff", "rev-parse"}
+# The git subcommands a leg may use, each read the same way: options skipped, every
+# other word up to `--` a revision (archive: only the first). Anything else (checkout,
+# worktree, fetch, ...) can take a tree or a ref in a position this cannot read, and is
+# refused rather than parsed.
+GIT_SUBCOMMANDS = {"archive", "diff", "rev-parse", "log", "show", "status"}
 # Options of those subcommands that take the next word as their value.
 _GIT_VALUE_OPTIONS = {"-o", "--output", "--format", "--prefix", "--remote", "--exec"}
 
@@ -504,38 +542,93 @@ def writes_to(name: str, text: str) -> list:
         rf"\b(?:declare|local|typeset)\s+(?:-\w+\s+)*-\w*n\w*\s+\w+={q}{name}{q}(?![\w])",
     ]
     pattern = re.compile("|".join(forms), re.IGNORECASE)
+    # Matched with quotes removed too, so a name split by quoting (PREV_"SHA") is seen.
     return [
         line.strip()
         for line in text.splitlines()
-        if not line.lstrip().startswith("#") and pattern.search(line)
+        if not line.lstrip().startswith("#")
+        and (pattern.search(line) or pattern.search(re.sub(r"[\"']", "", line)))
     ]
+
+
+# A write whose target name is itself an expansion: read "$n", printf -v "$n",
+# export "$n=...", declare -n r="$n". The name it writes cannot be known from the text.
+_DYNAMIC_WRITE = re.compile(
+    r"""\b(?:read|mapfile|readarray)\b[^\n;|&]*\s["']?\$"""
+    r"""|\bprintf\s+(?:-\S+\s+)*-v\s*["']?\$"""
+    r"""|\b(?:export|declare|local|typeset|readonly)\s+(?:-\w+\s+)*["']?\$\{?\w+\}?="""
+    r"""|\b(?:declare|local|typeset)\s+(?:-\w+\s+)*-\w*n\w*\s+\w+=["']?\$"""
+)
+
+
+def _code_lines(text: str) -> list:
+    """(first line number, code): comment lines dropped, backslash-continued lines joined."""
+    lines, pending, first = [], "", 0
+    for number, line in enumerate(text.splitlines(), 1):
+        if not pending and line.lstrip().startswith("#"):
+            continue
+        if not pending:
+            first = number
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+            continue
+        lines.append((first, pending + line))
+        pending = ""
+    if pending:
+        lines.append((first, pending))
+    return lines
+
+
+# A command word: at the start of a command, after a wrapper that runs its argument as
+# one (command, exec, xargs, env ...), never a word inside a message.
+_COMMAND_START = (
+    r"(?:^|\$\(|`|\||&&|;|\b(?:if|then|elif|else|do|while|until)\b|!)\s*"
+    r"(?:(?:command|builtin|exec|xargs|env|time|nice|nohup)\s+(?:-\S+\s+)*)*"
+)
+_GIT_CALL = re.compile(_COMMAND_START + r"\\?(git\s[^|;&)`\n]*)")
+# Any command word, to catch git spelled so that the pattern above does not see it.
+_COMMAND_WORD = re.compile(_COMMAND_START + r"([^\s;|&)`]+)")
+# A redirection: >x, 2>x, &>x, <x, 2>&1, or the bare operator with its target next.
+_REDIRECT = re.compile(r"^(?:\d*|&)[<>]{1,2}&?")
 
 
 def git_revision_problems(text: str) -> list:
     """Every git call in a leg script whose revisions are not HEAD or the chosen N-1.
 
     A deny-list of branch spellings cannot enumerate split strings, other remotes,
-    tags or SHAs; checking what each git call is given catches all of them.
+    tags or SHAs; checking what each git call is given catches all of them. Only git
+    in command position is a call, so `say "... git archive ..."` is a message, and
+    redirections are not revisions.
     """
     problems = []
-    for number, line in enumerate(text.splitlines(), 1):
-        if line.lstrip().startswith("#"):
-            continue
-        for match in re.finditer(r"(?<![\w./-])git\s+[^|;&)\n]*", line):
-            call = match.group(0)
+    for number, line in _code_lines(text):
+        for match in _GIT_CALL.finditer(line):
+            call = match.group(1).strip()
             try:
                 argv = shlex.split(call)
             except ValueError:
                 problems.append(f"line {number}: cannot read the git call {call!r}")
                 continue
-            # Quoted words come back unquoted; compare the variable names as written.
+            words, skip = [], False
+            for word in argv:
+                if skip:
+                    skip = False
+                    continue
+                redirect = _REDIRECT.match(word)
+                if redirect:
+                    # `2>` with its target as the next word, or `2>/dev/null` in one.
+                    skip = redirect.end() == len(word) and not word.endswith("&")
+                    continue
+                words.append(word)
             index = 1
-            while index < len(argv) and argv[index] in ("-C", "-c"):
+            while index < len(words) and words[index] in ("-C", "-c"):
                 index += 2
-            if index >= len(argv):
+            if index >= len(words):
                 problems.append(f"line {number}: git call with no subcommand {call!r}")
                 continue
-            sub, args = argv[index], argv[index + 1 :]
+            if words[index] in ("--version", "--help") and index + 1 == len(words):
+                continue
+            sub, args = words[index], words[index + 1 :]
             if sub not in GIT_SUBCOMMANDS:
                 problems.append(f"line {number}: git {sub} is not one the legs use")
                 continue
@@ -555,11 +648,60 @@ def git_revision_problems(text: str) -> list:
             if sub == "archive":
                 # git archive <tree-ish> [<path>...]: only the first word is a revision.
                 revisions = revisions[:1]
-            if not revisions and sub != "diff":
-                problems.append(f"line {number}: git {sub} with no revision {call!r}")
+            # rev-parse with only options (--show-toplevel, --is-shallow-repository)
+            # reads no revision; archive always needs one.
+            if not revisions and sub == "archive":
+                problems.append(f"line {number}: git archive with no revision {call!r}")
             for rev in revisions:
+                # ${PREV_SHA} is $PREV_SHA, and a peel (^{commit}) names the same commit.
+                rev = re.sub(r"^\$\{(\w+)\}", r"$\1", rev)
+                rev = re.sub(r"\^\{(?:commit|tree)\}$", "", rev)
                 if rev not in ALLOWED_REVISIONS:
                     problems.append(f"line {number}: git {sub} is given {rev!r}")
+    return problems
+
+
+def git_spelling_problems(text: str) -> list:
+    """git run under another spelling, or replaced by a function, which _GIT_CALL misses."""
+    problems = []
+    for number, line in _code_lines(text):
+        if re.search(
+            r"(?:^|[;&|{]\s*|\bfunction\s+)git\s*\(\s*\)|\bfunction\s+git\b", line
+        ):
+            problems.append(f"line {number}: defines a git function")
+        for match in _COMMAND_WORD.finditer(line):
+            word = match.group(1)
+            try:
+                plain = shlex.split(word)[0] if shlex.split(word) else ""
+            except ValueError:
+                plain = word
+            plain = plain.replace("\\", "")
+            if word in ("git", "\\git"):
+                continue
+            if plain.rsplit("/", 1)[-1] == "git" or re.fullmatch(
+                r"\$\{?\w*GIT\w*\}?", word, re.IGNORECASE
+            ):
+                problems.append(f"line {number}: runs git as {word}")
+    return problems
+
+
+# The only files a leg script may source. Anything else is code this scan never reads.
+KNOWN_HELPERS = {'"$REPO/packaging/cli-name.sh"', '"$REPO/scripts/e2e/n1-ref.sh"'}
+# Ways to point git at another repository, or to swap what a commit id resolves to.
+REPOSITORY_REDIRECTS = re.compile(
+    r"\bGIT_DIR\b|\bGIT_WORK_TREE\b|\bGIT_OBJECT_DIRECTORY\b|\bGIT_ALTERNATE_OBJECT_DIRECTORIES\b"
+    r"|--git-dir\b|--work-tree\b|refs/replace\b"
+)
+
+
+def sourcing_problems(text: str) -> list:
+    problems = []
+    for number, line in _code_lines(text):
+        for match in re.finditer(
+            r"(?:^|[;&|]|\bthen\b|\bdo\b)\s*(?:\.|source)\s+(\S+)", line
+        ):
+            if match.group(1) not in KNOWN_HELPERS:
+                problems.append(f"line {number}: sources {match.group(1)}")
     return problems
 
 
@@ -579,6 +721,9 @@ def shell_leg_problems(text: str, require) -> list:
     shas = writes_to("PREV_SHA", text)
     if any(line != SANCTIONED_SHA for line in shas):
         problems.append(f"the N-1 commit is set outside n1_resolve: {shas}")
+    dynamic = [line.strip() for line in code if _DYNAMIC_WRITE.search(line)]
+    if dynamic:
+        problems.append(f"writes a variable whose name is an expansion: {dynamic}")
     if any(re.search(r"\beval\b", line) for line in code):
         problems.append("uses eval, which can write any variable unseen")
     if any(re.search(r"\bn1_resolve\s*\(\)", line) for line in code):
@@ -589,6 +734,12 @@ def shell_leg_problems(text: str, require) -> list:
         line = text.count("\n", 0, match.start()) + 1
         problems.append(f"line {line} names a branch: {match.group(0)}")
     problems += git_revision_problems(text)
+    problems += sourcing_problems(text)
+    problems += git_spelling_problems(text)
+    for number, line in _code_lines(text):
+        found = REPOSITORY_REDIRECTS.search(line)
+        if found:
+            problems.append(f"line {number}: redirects git with {found.group(0)}")
     if '. "$REPO/scripts/e2e/n1-ref.sh"' not in text:
         problems.append("does not source scripts/e2e/n1-ref.sh")
     calls = re.findall(r"^\s*n1_resolve (.+)$", text, re.MULTILINE)
@@ -625,6 +776,73 @@ def test_an_n_minus_1_job_body_names_no_branch(key):
 WHEEL = ("ash-e2e.yml", "wheel")
 _REAL_DEFAULT = DEFAULT_LINE + "\n"
 _REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
+
+
+@pytest.mark.parametrize(
+    ("label", "old", "new"),
+    [
+        (
+            "rev-parse with only options",
+            _REAL_CALL,
+            _REAL_CALL + 'TOP="$(git -C "$REPO" rev-parse --show-toplevel)"\n',
+        ),
+        (
+            "a redirection after HEAD",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" rev-parse HEAD 2>/dev/null >"$WORK/head"\n',
+        ),
+        (
+            "a redirection operator with its target apart",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" rev-parse HEAD 2> /dev/null\n',
+        ),
+        (
+            "a continued git call",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'git -C "$REPO" \\\n  archive "$PREV_SHA"',
+        ),
+        (
+            "git named in a message",
+            _REAL_CALL,
+            _REAL_CALL + 'say "N-1 comes from git archive of $X (HEAD~1 is not it)"\n',
+        ),
+        (
+            "git --version",
+            _REAL_CALL,
+            _REAL_CALL + 'say "git: $(git --version)"\n',
+        ),
+        (
+            "the commit in braces, peeled",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            (
+                'git -C "$REPO" rev-parse --verify --quiet "${PREV_SHA}^{commit}" >/dev/null\n'
+                'git -C "$REPO" archive "${PREV_SHA}"'
+            ),
+        ),
+        (
+            "a log of the chosen commit",
+            _REAL_CALL,
+            _REAL_CALL + 'say "$(git -C "$REPO" log -1 --oneline "$PREV_SHA")"\n',
+        ),
+        (
+            "an archive of some paths",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'git -C "$REPO" archive "$PREV_SHA" pyproject.toml src',
+        ),
+        (
+            "git in a comment",
+            _REAL_CALL,
+            _REAL_CALL + "# git archive HEAD~1 is what this replaced\n",
+        ),
+    ],
+)
+def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
+    # The checks fail closed; these are edits a maintainer makes for other reasons, and a
+    # check that refused them would be one a maintainer learns to loosen.
+    script, require = LEGS[WHEEL]
+    text = (REPO_ROOT / script).read_text(encoding="utf-8")
+    assert text.count(old) == 1, label
+    assert shell_leg_problems(text.replace(old, new), require) == [], label
 
 
 @pytest.mark.parametrize(
@@ -789,6 +1007,84 @@ _REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
             "defines harness other than exactly once",
         ),
         (
+            "another file sourced",
+            _REAL_CALL,
+            _REAL_CALL + '. "$WORK/overrides.sh"\n',
+            "sources",
+        ),
+        (
+            "another file sourced with source",
+            _REAL_CALL,
+            _REAL_CALL + 'source "$REPO/packaging/verify-lib.sh"\n',
+            "sources",
+        ),
+        (
+            "git pointed at another repository",
+            _REAL_CALL,
+            _REAL_CALL + 'export GIT_DIR="$WORK/other.git"\n',
+            "redirects git with GIT_DIR",
+        ),
+        (
+            "a replaced commit",
+            _REAL_CALL,
+            _REAL_CALL + 'cp "$WORK/x" "$REPO/.git/refs/replace/$PREV_SHA"\n',
+            "redirects git with refs/replace",
+        ),
+        (
+            "a git call on a continued line",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'git -C "$REPO" \\\n  archive HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "a git call after a redirection",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'git -C "$REPO" archive 2>/dev/null HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git quoted",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            '"git" -C "$REPO" archive HEAD~1',
+            'runs git as "git"',
+        ),
+        (
+            "git by absolute path",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            '/usr/bin/git -C "$REPO" archive HEAD~1',
+            "runs git as /usr/bin/git",
+        ),
+        (
+            "git through a variable",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'GIT=git; $GIT -C "$REPO" archive HEAD~1',
+            "runs git as $GIT",
+        ),
+        (
+            "git behind a wrapper",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'command git -C "$REPO" archive HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git replaced by a function",
+            _REAL_CALL,
+            'git() { command git "${@/$PREV_SHA/HEAD~1}"; }\n' + _REAL_CALL,
+            "defines a git function",
+        ),
+        (
+            "a write to a name held in a variable",
+            _REAL_CALL,
+            _REAL_CALL + 'n=PREV_SHA; printf -v "$n" %s "$other"\n',
+            "whose name is an expansion",
+        ),
+        (
+            "a name split by quoting",
+            _REAL_CALL,
+            _REAL_CALL + 'declare PREV_"SHA"="$other"\n',
+            "set outside n1_resolve",
+        ),
+        (
             "the helper not called",
             _REAL_CALL,
             "",
@@ -805,12 +1101,136 @@ def test_a_planted_bypass_in_a_real_shell_leg_is_caught(label, old, new, expect)
     assert any(expect in problem for problem in problems), (label, problems)
 
 
-def test_the_chocolatey_script_requires_its_own_channel():
-    script, require = LEGS[("ash-package.yml", "chocolatey")]
-    text = (REPO_ROOT / script).read_text(encoding="utf-8")
+def ps1_leg_problems(text: str, require) -> list:
+    """Every way verify-on-windows.ps1 could pick an N-1 other than through auto.
+
+    $PrevRef may be assigned only on its default line (the parameter, else
+    $env:E2E_PREV_REF, else 'auto'); E2E_PREV_REF may appear nowhere else; and
+    prev_tree.py's --prev-ref may be handed only $PrevRef. PowerShell names are
+    case-insensitive, so every match is. Comments, including <# ... #> help, are skipped.
+    """
+    code = re.sub(
+        r"<#.*?#>", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.DOTALL
+    )
+    lines = [
+        line.strip()
+        for line in code.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    problems = []
+    writes = [
+        line
+        for line in lines
+        if re.search(
+            r"(?i)\$PrevRef\s*(?:[-+*/]?=)(?!=)|Set-Variable\b.*\bPrevRef\b|\[ref\]\s*\$PrevRef",
+            line,
+        )
+    ]
+    if writes != [PS1_DEFAULT_LINE]:
+        problems.append(
+            f"$PrevRef is assigned other than by the default line: {writes}"
+        )
+    reads = [line for line in lines if re.search(r"(?i)E2E_PREV_REF", line)]
+    if reads != [PS1_DEFAULT_LINE]:
+        problems.append(f"E2E_PREV_REF is used other than by the default line: {reads}")
+    for line in lines:
+        for match in re.finditer(r"(?i)['\"]--prev-ref['\"]\s*,\s*([^,)]+)", line):
+            if match.group(1).strip().lower() != "$prevref":
+                problems.append(f"--prev-ref is handed {match.group(1).strip()}")
+    if len(re.findall(r"(?i)--prev-ref", code)) != 1:
+        problems.append("--prev-ref is passed other than exactly once")
     for path in require:
-        assert f"'--require', '{path}'" in text
-    assert "else { 'auto' }" in text
+        if f"'--require', '{path}'" not in code:
+            problems.append(f"does not require {path}")
+    for match in BRANCH_SPELLINGS.finditer(code):
+        problems.append(f"names a branch: {match.group(0)}")
+    return problems
+
+
+PS1_DEFAULT_LINE = (
+    "if (-not $PrevRef) { $PrevRef = if ($env:E2E_PREV_REF) "
+    "{ $env:E2E_PREV_REF } else { 'auto' } }"
+)
+CHOCO = ("ash-package.yml", "chocolatey")
+
+
+def test_the_chocolatey_script_takes_its_n_minus_1_only_from_auto():
+    script, require = LEGS[CHOCO]
+    text = (REPO_ROOT / script).read_text(encoding="utf-8")
+    assert ps1_leg_problems(text, require) == []
+
+
+_PS1_CALL = "'--prev-ref', $PrevRef,"
+
+
+@pytest.mark.parametrize(
+    ("label", "old", "new", "expect"),
+    [
+        (
+            "an override after the default (mE)",
+            PS1_DEFAULT_LINE + "\n",
+            PS1_DEFAULT_LINE
+            + "\nif ($PrevRef -eq 'auto') { $PrevRef = $env:N1_FALLBACK }\n",
+            "$PrevRef is assigned",
+        ),
+        (
+            "a parameter default",
+            "[string] $PrevRef",
+            "[string] $PrevRef = 'release'",
+            "$PrevRef is assigned",
+        ),
+        (
+            "a differently cased write",
+            PS1_DEFAULT_LINE + "\n",
+            PS1_DEFAULT_LINE + "\n$prevref = $Other\n",
+            "$PrevRef is assigned",
+        ),
+        (
+            "Set-Variable",
+            PS1_DEFAULT_LINE + "\n",
+            PS1_DEFAULT_LINE + "\nSet-Variable -Name PrevRef -Value $Other\n",
+            "$PrevRef is assigned",
+        ),
+        (
+            "the environment written",
+            PS1_DEFAULT_LINE + "\n",
+            "$env:E2E_PREV_REF = $Other\n" + PS1_DEFAULT_LINE + "\n",
+            "E2E_PREV_REF is used",
+        ),
+        (
+            "another value for --prev-ref",
+            _PS1_CALL,
+            "'--prev-ref', $Other,",
+            "--prev-ref is handed $Other",
+        ),
+        (
+            "a literal for --prev-ref",
+            _PS1_CALL,
+            "'--prev-ref', 'HEAD~1',",
+            "--prev-ref is handed 'HEAD~1'",
+        ),
+    ],
+)
+def test_a_planted_bypass_in_the_chocolatey_script_is_caught(label, old, new, expect):
+    script, require = LEGS[CHOCO]
+    text = (REPO_ROOT / script).read_text(encoding="utf-8")
+    assert text.count(old) == 1, label
+    problems = ps1_leg_problems(text.replace(old, new), require)
+    assert any(expect in problem for problem in problems), (label, problems)
+
+
+def test_a_prevref_parameter_in_the_chocolatey_step_is_caught():
+    # mD: the edit a maintainer debugging a red Chocolatey leg would make.
+    workflow = yaml.safe_load((WORKFLOWS / CHOCO[0]).read_text(encoding="utf-8"))
+    overrides = LEG_OVERRIDES[CHOCO]
+    assert workflow_leg_problems(workflow, CHOCO[1], overrides) == []
+    step = _prev_ref_steps(workflow["jobs"][CHOCO[1]]["steps"])[0][1]
+    for planted in (' -PrevRef "${{ vars.N1_REF }}"', " -prevref $ref"):
+        step_run = step["run"]
+        step["run"] = step_run + planted
+        problems = workflow_leg_problems(workflow, CHOCO[1], overrides)
+        assert any("mentions PrevRef" in problem for problem in problems), problems
+        step["run"] = step_run
 
 
 # -- 3. the derivation on every shape of history ------------------------------
