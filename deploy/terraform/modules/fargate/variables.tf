@@ -355,8 +355,10 @@ variable "additional_environment_variables" {
 variable "kms_key_arn" {
   description = <<-EOT
     ARN of an existing symmetric customer managed KMS key for the MCP auth header
-    secret and the task log group. When null, both use their AWS managed
-    encryption, which is what this module did before the input existed.
+    secret, the task log group and, when enable_execute_command is true and this
+    module creates the cluster, ECS Exec session data. When null, each uses its
+    AWS managed encryption, which is what this module did before the input
+    existed.
 
     Checked against the same pattern as the CloudFormation templates' KmsKeyArn
     parameter: a full key ARN, not an alias or a bare key id. The module does not
@@ -364,11 +366,13 @@ variable "kms_key_arn" {
     managed key is only worth having if you control its policy and rotation.
 
     Permissions: the module adds kms:Decrypt on this key to the task role, which
-    reads the secret. Whoever runs the apply needs kms:GenerateDataKey on the key
-    to store the secret value. The key policy must admit the
+    reads the secret and decrypts ECS Exec sessions. Whoever opens an ECS Exec
+    session needs kms:GenerateDataKey on the key, and so does whoever runs the
+    apply, to store the secret value. The key policy must admit the
     logs.<region>.amazonaws.com service principal, or creating the log group
     fails. See
-    https://docs.aws.amazon.com/kms/latest/developerguide/services-secrets-manager.html
+    https://docs.aws.amazon.com/kms/latest/developerguide/services-secrets-manager.html,
+    https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html
     and
     https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/encrypt-log-data-kms.html
   EOT

@@ -267,6 +267,21 @@ resource "aws_ecs_cluster" "this" {
     value = "enabled"
   }
 
+  # ECS Exec session data is encrypted with kms_key_arn when the caller supplies
+  # a key and turns ECS Exec on. Without both, the block is absent and the
+  # cluster is unchanged from before the input existed. A cluster passed in
+  # through cluster_arn is the caller's to configure.
+  dynamic "configuration" {
+    for_each = var.enable_execute_command && var.kms_key_arn != null ? [1] : []
+
+    content {
+      execute_command_configuration {
+        kms_key_id = var.kms_key_arn
+        logging    = "DEFAULT"
+      }
+    }
+  }
+
   tags = var.tags
 }
 
@@ -395,6 +410,19 @@ data "aws_iam_policy_document" "task" {
       ]
 
       resources = ["*"]
+    }
+  }
+
+  # The task decrypts ECS Exec session data with the cluster's key, so the grant
+  # follows the configuration block on aws_ecs_cluster.this.
+  dynamic "statement" {
+    for_each = var.enable_execute_command && var.kms_key_arn != null && local.create_cluster ? [1] : []
+
+    content {
+      sid       = "DecryptEcsExecSession"
+      effect    = "Allow"
+      actions   = ["kms:Decrypt"]
+      resources = [var.kms_key_arn]
     }
   }
 }
