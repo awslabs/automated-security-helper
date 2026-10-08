@@ -191,7 +191,7 @@ function readScannerName(result: Record<string, unknown>): string | undefined {
  * suppressed results in tests/test_data/outputs/ash_aggregated_results.json have
  * that shape), so a level or kind filter would re-display them.
  *
- * `state` is read from each suppression object. The dispositions are a decision,
+ * The state is read from each suppression object. The dispositions are a decision,
  * not a citation of the SARIF text:
  *
  *   absent or null  -> suppressed. A suppression was recorded and its state was
@@ -205,9 +205,13 @@ function readScannerName(result: Record<string, unknown>): string | undefined {
  *   not a string    -> suppressed. Somebody recorded a suppression and its state
  *                      cannot be read; a malformed entry is treated the same way.
  *
- * The key is `state` because ASH's own model
- * (automated_security_helper/schemas/sarif_schema_model.py, class Suppression,
- * extra="forbid") has no other field for it.
+ * TWO KEYS ARE READ. SARIF 2.1.0 section 3.35.3 names the property `status`;
+ * ASH's own model (automated_security_helper/schemas/sarif_schema_model.py, class
+ * Suppression, extra="forbid") writes `state` and has no `status`. Reading only
+ * `state` would take a spec-conformant producer's `status: "rejected"` as "no
+ * state recorded" and hide a finding the team decided to keep. `status` decides
+ * when it is present and not null; otherwise `state` does. The JetBrains parser
+ * (AshSarifParser.suppressionOf) reads them in the same order.
  */
 export function isSuppressed(result: Record<string, unknown>): boolean {
   const suppressions = result.suppressions;
@@ -218,7 +222,7 @@ export function isSuppressed(result: Record<string, unknown>): boolean {
     if (!isRecord(entry)) {
       return true;
     }
-    const state = entry.state;
+    const state = entry.status ?? entry.state;
     if (typeof state !== 'string') {
       return true;
     }

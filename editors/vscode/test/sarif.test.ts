@@ -373,6 +373,22 @@ describe('isSuppressed', () => {
     expect(isSuppressed({ suppressions: [{ kind: 'external', state: 'accepted ' }] })).toBe(false);
   });
 
+  // SARIF 2.1.0 section 3.35.3 names the property `status`; ASH's model writes
+  // `state`. A spec-conformant producer's `rejected` must not be read as "no
+  // status recorded" and hide the finding. Matches JetBrains' suppressionOf.
+  it('reads the spec\'s `status` as well as ASH\'s `state`', () => {
+    expect(isSuppressed({ suppressions: [{ kind: 'external', status: 'accepted' }] })).toBe(true);
+    expect(isSuppressed({ suppressions: [{ kind: 'external', status: 'rejected' }] })).toBe(false);
+    expect(isSuppressed({ suppressions: [{ kind: 'external', status: 'underReview' }] })).toBe(false);
+    expect(isSuppressed({ suppressions: [{ kind: 'external', status: null }] })).toBe(true);
+  });
+
+  it('lets `status` decide when both are present, and falls back to `state` when it is null', () => {
+    expect(isSuppressed({ suppressions: [{ status: 'rejected', state: 'accepted' }] })).toBe(false);
+    expect(isSuppressed({ suppressions: [{ status: 'accepted', state: 'rejected' }] })).toBe(true);
+    expect(isSuppressed({ suppressions: [{ status: null, state: 'rejected' }] })).toBe(false);
+  });
+
   it('honors a suppression it cannot read, at either depth', () => {
     expect(isSuppressed({ suppressions: [12345] })).toBe(true);
     expect(isSuppressed({ suppressions: [{ state: 12345 }] })).toBe(true);
