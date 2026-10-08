@@ -270,6 +270,8 @@ class TestSocketFilterWrapper:
     daemon's socket under /nix answered, offline and online.
     """
 
+    # firejail's plan reads os.getuid(), which Windows lacks; neither backend runs there.
+    @pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
     @pytest.mark.parametrize("backend_class", [BwrapBackend, FirejailBackend])
     @pytest.mark.parametrize("network", [False, True])
     def test_the_scanner_runs_under_the_filter(self, layout, backend_class, network):
