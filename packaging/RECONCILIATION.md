@@ -208,10 +208,11 @@ still satisfy `[project.dependencies]`.
 `tests/unit/test_homebrew_formula_resources.py` were run locally; the generated
 `cryptography` 50.0.1 and `cffi` 2.1.1 stanzas are byte-identical to the `url`/`sha256`
 in homebrew-core's own formulae for those versions, which is the control that the
-generator reads the right PyPI fields. **The `brew install` itself has not been run.**
-Homebrew is absent from the machine this was written on, exactly as the plan recorded, so
-the `homebrew` job in `ash-package.yml` is the first place it executes. Read its first
-run before treating the resource list as verified.
+generator reads the right PyPI fields. When this was written, the `brew install` itself
+had not been run: Homebrew is absent from the machine this was written on, exactly as the
+plan recorded, so the `homebrew` job in `ash-package.yml` was the first place it would
+execute. It has since run green, along with the Homebrew legs in `ash-e2e.yml`; see
+"Still open" below.
 
 Two known limitations are recorded in `packaging/homebrew/README.md` rather than here:
 pip's default build isolation fetches PEP 517 backends from PyPI unpinned at build time,
@@ -249,8 +250,8 @@ how the deb and rpm were done.
 - **Homebrew** still has no `brew` on the host. What changed is that the missing piece was
   a `resource` block, and a `resource` stanza is a URL and a sha256 that the PyPI JSON API
   serves — metadata, not a build — so the generator and its test are real local evidence
-  even though `brew install` is not. That leg runs on `macos-latest` and its first run is
-  the first execution anywhere. See "The Homebrew formula could not have worked" above.
+  even though `brew install` is not. That leg runs on `macos-latest`, and has run green
+  there. See "The Homebrew formula could not have worked" above.
 
 The validators are named here because they are the substitute for a local build, and a
 validator is only worth what its negative control proves: `packaging/chocolatey/validate-nuspec.sh`
@@ -258,24 +259,60 @@ against NuGet's XSD, `packaging/winget/validate-manifests.py` against Microsoft'
 Schemas, and `packaging/msix/msix.py` over `AppxManifest.xml` and the staged layout. Each
 was observed rejecting a corrupted document before it was trusted to accept a correct one.
 
-Still open:
+Still open, re-measured against `v4-capabilities` at `bd1ce7de`:
 
-- **VS Code `.vsix` and the JetBrains plugin.**
-- **Provenance for the native packages.** The wheel and sdist are attested; the `.deb`
-  and `.rpm` are built in CI but not attached to a release or attested.
-- **`push: branches: ["!main"]`** in `ash-unified-ci.yml` is untouched here on purpose —
-  separate in-flight work fixes exactly that, and this branch avoids the collision.
+- **Native packages as release assets, and their provenance.** `ash-tag-on-merge.yml`
+  is the only `gh release create` under `.github/`, and it attaches
+  `dist/*.whl dist/*.tar.gz dist/*.mcpb` and nothing else; the attestation step names the
+  same three. So the `.deb`, `.rpm`, `.msix`, `.nupkg` and `.flatpak` are built and
+  exercised in CI but are neither attached to a release nor attested, and the same holds
+  for the VS Code `.vsix` and the JetBrains plugin zip. Of the OS packages only the MSIX
+  leaves CI at all, as a 14-day workflow artifact; the `.vsix` is uploaded the same way.
+  Attesting outside a tag run writes to the repository's public attestation store, so
+  how a negative control for native provenance should run is a maintainer decision, not
+  a mechanical change. Until this closes, the install pages
+  under `docs/content/docs/native-packages/` tell users to build from a checkout, and
+  `check_native_package_docs` in `scripts/verify_docs_freshness.py` fails when the
+  release step starts attaching anything else, so those pages cannot go stale silently.
 
-## One unresolved observation
+No longer open, and why:
+
+- **VS Code `.vsix` and the JetBrains plugin.** Both exist, under `editors/vscode` and
+  `editors/jetbrains`. `ash-vscode-extension.yml` installs the `.vsix`, scans with a real
+  `ashx`, upgrades and uninstalls it. `ash-jetbrains-ci.yml` runs an end-to-end suite
+  against a real `ashx` and an install, upgrade and uninstall cycle in the IDE; its scans
+  run the CLI from the test sandbox rather than through the installed plugin zip. Neither
+  upgrade leg can start from a released plugin, because none exists: VS Code builds its
+  N-1 from the same tree at a lower version, and JetBrains from `v4-capabilities` with a
+  lowered version, replaced by remove-then-install because the headless installer
+  answers "already installed" to an upgrade. Two things are not finished: the VS Code
+  workflow's pinned-editor pixel snapshot job is red at `bd1ce7de`, and the JetBrains
+  plugin versions independently of ASH at 0.1.0, deliberately (the exclusion is explained beside
+  `[tool.commitizen] version_files` in `pyproject.toml`).
+- **`push: branches: ["!main"]` in `ash-unified-ci.yml`.** Fixed on main, and the
+  measurement behind the fix is in the comment on that workflow's `on:` block: a filter
+  made only of negative patterns matches no branch, so the trigger never fired. It is now
+  `push: [main]`. That trigger does not fire on `v4-capabilities` pushes, so the Unified
+  CI evidence for this branch comes from dispatched runs.
+- **Homebrew's first real install.** The `native: homebrew (macos-latest)` job and the
+  three `Homebrew from head` legs in `ash-e2e.yml` (fresh, upgrade and a negative) have
+  run green at `bd1ce7de`, so the resource list generated from `uv.lock` has now been
+  installed by `brew` and not only parsed.
+
+## One observation, not reproduced
 
 A run on this branch showed 8 failures, all `ubuntu-24.04-arm` container and scan legs,
-in workflows this branch **does not modify** (`ash-unified-ci.yml`,
-`ash-install-methods.yml`, `run-scan-test/action.yml`, `validate-container/action.yml` are
-all byte-identical to main here). Two recent merge-group runs at main show 35 arm64 legs
-with 0 failures, so "pre-existing" is not supported either.
+in workflows this branch **did not modify** (`ash-unified-ci.yml`,
+`ash-install-methods.yml`, `run-scan-test/action.yml`, `validate-container/action.yml`
+were all byte-identical to main then). Two merge-group runs at main around the same time
+showed 35 arm64 legs with 0 failures, so "pre-existing" was not supported either. The
+likeliest cause was a transient upstream failure fetching a pinned scanner asset during
+the arm64 image builds (an `HTTP 500` on grype's release download was diagnosed on
+another pull request the same day, and all 8 legs share that download), but the log
+could not be extracted cleanly enough to confirm it.
 
-The likeliest cause is a transient upstream failure fetching a pinned scanner asset
-during the arm64 image builds — a `HTTP 500` on grype's release download was diagnosed on
-another pull request the same day, and all 8 legs share that download. **That was not
-confirmed**, because the log could not be extracted cleanly. Treat it as open, and re-run
-those legs the next time this branch goes through CI before reading anything into them.
+It has not recurred. A dispatched Unified CI run at `bd1ce7de` ran 18 arm64 legs, all
+green, on both of its attempts; the only failures in that run were a Windows Python 3.14
+unit-test leg and the gate job that reports it, neither on arm64. That does not identify
+what failed the first time, so if arm64 container legs fail again, check the scanner
+asset downloads first.

@@ -105,7 +105,7 @@ The no-argument form depends on the session id being the same on both calls, whi
 
 The two refusals exist because the alternative is worse than an error. Falling back to the server's working directory on a network transport scans a tree that holds none of the caller's code, completes normally, and reports no findings — a result a caller cannot distinguish from a clean repository. A scan that examined nothing and reads as clean is the failure mode this whole surface is meant to avoid, so the ambiguous cases say so instead. The mismatch error reports how many *other* sessions hold source, never which, so it diagnoses a rotating session id without disclosing one caller's session to another.
 
-This matters most on Bedrock AgentCore Runtime, where it is **not** established that the id is stable: that platform mints its own session ids and, measured against live runtimes, returns a fresh one on nearly every response while honoring only the id from `initialize`. What the container sees per request could not be determined from outside. On that target, capture the `source_dir` the delivery tool returns and pass it back to `run_ash_scan(source_dir=...)`; see [deploy/cdk/README.md](../../../../deploy/cdk/README.md) for the detail and for a two-call probe that settles the question.
+This matters most on Bedrock AgentCore Runtime, where it is **not** established that the id is stable: that platform mints its own session ids and, measured against live runtimes, returns a fresh one on nearly every response while honoring only the id from `initialize`. What the container sees per request could not be determined from outside. On that target, capture the `source_dir` the delivery tool returns and pass it back to `run_ash_scan(source_dir=...)`; see [deploy/cdk/README.md](https://github.com/awslabs/automated-security-helper/blob/main/deploy/cdk/README.md) for the detail and for a two-call probe that settles the question.
 
 ### Git ref
 
@@ -288,7 +288,7 @@ This is sufficient for **single-tenant** deploys where one trusted client owns t
 
 - Run ASH behind a reverse proxy (nginx, traefik, an API gateway) that terminates TLS and authenticates the caller.
 - Have the proxy inject the static `--auth-header-value` so ASH only accepts traffic that has already been authenticated upstream.
-- Run one server per tenant if their configs must differ. Per-tenant config selection over the protocol is not available yet — see [Selecting a profile is not available yet](#selecting-a-profile-is-not-available-yet) — so a single server cannot currently give two tenants two different configs.
+- Run one server per tenant if tenants must not run under each other's configs. A session can bind a registered profile with `select_profile` (see [Selecting a profile](#selecting-a-profile)), but the server does not tie a profile to a caller: any client that passes the auth header can select any registered profile, or replace it with `override_yaml`.
 
 The runtime-override allowlist (Track 10.4) plus per-session workspaces (Track 10.5) are the in-process isolation primitives. They are not a substitute for upstream tenant authentication.
 

@@ -23,6 +23,7 @@ import yaml
 
 from automated_security_helper.config.config_sources import read_config_file
 from automated_security_helper.config.config_validator import ConfigValidator
+from automated_security_helper.core.constants import ash_extra_install_command
 
 logger = logging.getLogger(__name__)
 
@@ -1017,8 +1018,8 @@ class ConfigLinter:
                         f"Suppressions that set 'symbol' need the optional "
                         f"'{SYMBOLS_EXTRA}' extra, which is not installed here. "
                         f"Until it is, they match nothing and the findings they "
-                        f"name stay visible. Install "
-                        f"automated-security-helper[{SYMBOLS_EXTRA}]"
+                        f"name stay visible. Install it with: "
+                        f"{ash_extra_install_command(SYMBOLS_EXTRA)}"
                     ),
                     path=path_prefix,
                 )

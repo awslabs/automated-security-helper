@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from automated_security_helper.core.constants import ash_extra_install_command
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 #: The optional-dependency extra that provides tree-sitter and its grammars.
@@ -390,7 +391,7 @@ def _index_file(path: Path) -> Any:
                 result = _Unresolvable(
                     f"the {grammar.language} grammar is not available ({exc}). "
                     f"Symbol suppressions need the optional '{SYMBOLS_EXTRA}' extra: "
-                    f"install automated-security-helper[{SYMBOLS_EXTRA}]"
+                    f"{ash_extra_install_command(SYMBOLS_EXTRA)}"
                 )
             except SymbolParseError as exc:
                 result = _Unresolvable(f"the file does not parse cleanly: {exc}")

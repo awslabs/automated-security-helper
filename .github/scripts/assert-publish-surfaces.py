@@ -876,6 +876,25 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
         reason=_OPENGREP_CACHE_REASON,
     ),
+    # mkdocs-material's privacy plugin cache: the external assets the docs site
+    # references, downloaded so --strict does not fail on a transient fetch. Both jobs
+    # of the workflow carry the step, hence count=2.
+    Entry(
+        file=".github/workflows/ash-repo-docs.yml",
+        kind=KIND_CACHE,
+        action="actions/cache",
+        publishes=(
+            "path=.cache/plugin/privacy "
+            "key=mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}"
+        ),
+        count=2,
+        reason=(
+            "Third-party assets the published docs site already links to (the "
+            "mermaid bundle, twemoji images, a star-history badge), fetched from "
+            "their public CDNs by mkdocs-material's privacy plugin. Nothing this "
+            "project builds goes in it; the site that embeds them is itself public."
+        ),
+    ),
     # The build base image, as a verified OCI layout. The only cache the maintainer has
     # approved for image bytes, and deliberately not ASH's own image or layers. Restore runs
     # on every run; save is gated to a push to refs/heads/main in the action itself, so a
