@@ -61,6 +61,7 @@ on:
       # or pull_request's. Its .github/** entry is exempted here, with the reason.
       - "tests/test_data/outputs/ash_aggregated_results.json"
       - ".github/workflows/ash-typescript-ci.yml"
+      - ".github/scripts/assert-artifact-contents.py"
       # The coverage-parity job below runs ASH's own coverage rule over the
       # extension's fixtures, so a change to that rule must run it. These are the
       # modules `assess_coverage` reads its verdict through.
@@ -92,6 +93,7 @@ on:
       - ".github/scripts/check-snapshot-trailers.py"
       - "tests/test_data/outputs/ash_aggregated_results.json"
       - ".github/workflows/ash-typescript-ci.yml"
+      - ".github/scripts/assert-artifact-contents.py"
       - "tests/unit/test_vscode_coverage_parity.py"
       - "automated_security_helper/interactions/run_ash_scan.py"
       - "automated_security_helper/core/resource_management/scan_tracking.py"

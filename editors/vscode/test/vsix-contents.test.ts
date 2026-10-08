@@ -33,6 +33,7 @@ import {
   shapeProblem,
 } from '../src/vsix-contents';
 import { main, verify } from '../src/verify-vsix';
+import { repoPath } from './repo-inputs';
 import { CLEAN_VSIX_MEMBERS, WriteOptions, ZipEntry, writeZip } from './zip';
 
 function collector(): { write(text: string): void; text(): string } {
@@ -559,7 +560,7 @@ describe('the payload tables match the shared gate', () => {
   // file's tables through python3 and fails on any difference, so a header added
   // there and not here turns this suite red instead of opening a bypass.
   it('has the same archive and executable headers, read size and size ceiling', () => {
-    const gate = path.resolve(__dirname, '..', '..', '..', '.github', 'scripts', 'assert-artifact-contents.py');
+    const gate = repoPath('.github/scripts/assert-artifact-contents.py');
     const program = [
       'import importlib.util, json, sys',
       'sys.dont_write_bytecode = True',
