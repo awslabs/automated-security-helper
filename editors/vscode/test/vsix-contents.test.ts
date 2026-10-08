@@ -466,6 +466,18 @@ describe('duplicate names and bytes no reader extracts', () => {
     }
   });
 
+  it('refuses bytes hidden behind the data-descriptor flag, signed or not', () => {
+    for (const descriptor of ['signed', 'unsigned'] as const) {
+      const entries = CLEAN_VSIX_MEMBERS.map((entry) =>
+        entry.name === 'extension/out/ash-cli.js' ? { ...entry, descriptor, descriptorBytes: ELF.subarray(0, 12) } : entry,
+      );
+      expect(misshapenOf(entries)).toEqual([
+        '(archive) extension/out/ash-cli.js sets the data-descriptor flag, but the 12 or 16 bytes after its body ' +
+          'do not repeat the CRC and sizes of its central record, so they are bytes no reader extracts',
+      ]);
+    }
+  });
+
   it('refuses a name carried twice even when both copies are clean', () => {
     const extension = CLEAN_VSIX_MEMBERS.find((entry) => entry.name === 'extension/out/extension.js') as ZipEntry;
     expect(misshapenOf([...CLEAN_VSIX_MEMBERS, extension])).toEqual([`${DUPLICATE}`]);

@@ -35,6 +35,8 @@ export interface ZipEntry {
    * does: `signed` with the optional PK\x07\x08 signature, `unsigned` without.
    */
   readonly descriptor?: 'signed' | 'unsigned';
+  /** Writes these bytes as the descriptor instead of the CRC and sizes it should repeat. */
+  readonly descriptorBytes?: Buffer;
 }
 
 const LOCAL_SIGNATURE = 0x04034b50;
@@ -111,6 +113,11 @@ export function writeZip(entries: readonly ZipEntry[], options: WriteOptions = {
       descriptor.writeUInt32LE(crc, at);
       descriptor.writeUInt32LE(body.length, at + 4);
       descriptor.writeUInt32LE(plain.length, at + 8);
+      if (entry.descriptorBytes !== undefined) {
+        descriptor = signed
+          ? Buffer.concat([descriptor.subarray(0, 4), entry.descriptorBytes])
+          : Buffer.from(entry.descriptorBytes);
+      }
       locals.push(descriptor);
     }
     const gap = index === 0 && options.afterFirst !== undefined ? options.afterFirst : Buffer.alloc(0);
