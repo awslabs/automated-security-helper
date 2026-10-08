@@ -86,6 +86,47 @@ updates:
           - "minor"
           - "patch"
 
+  # Every other directory holding a Dockerfile with a digest-pinned FROM. `directory` is not
+  # recursive, so the entry above sees the root Dockerfile only, and these digests were
+  # never proposed for an update. tests/unit/test_dependabot_docker_coverage.py fails when a
+  # Dockerfile with a digest-pinned FROM sits in a directory no docker entry lists, so a new
+  # one cannot be added unmonitored.
+  #
+  # Same two-group shape as the root entry. The operator directory and its e2e image both
+  # pin python:3.12-slim and are updated separately; nothing requires them to move together,
+  # and the e2e job builds both from the branch, so a bump to either is tested before merge.
+  # The editor test images are visual and UI harnesses, so a base bump can move a screenshot
+  # baseline; their CI is what reviews it.
+  #
+  # tests/test_data/snapshot_fixture/repo is left out on purpose: it is a fixture that ASH
+  # scans in the snapshot tests, and its bytes are part of the expected output.
+  - package-ecosystem: "docker"
+    directories:
+      - "/deploy/kubernetes-operator"
+      - "/deploy/kubernetes-operator/tests/e2e"
+      - "/editors/jetbrains/ui-test"
+      - "/editors/vscode/test/visual"
+    schedule:
+      interval: "daily"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+    groups:
+      component-image-major-upgrade:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+      component-image:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   # There is deliberately no docker entry for automated_security_helper/assets. One was here and
   # was removed after checking what that directory contains: a Gemfile and Gemfile.lock, six Ruby
   # rule files, a YAML rule set, a README and a shell script. No Dockerfile, and no other

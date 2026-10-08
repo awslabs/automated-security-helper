@@ -25,6 +25,11 @@ on:
       # The shared e2e contract the kind job scans and judges with.
       - "tests/e2e/**"
       - "scripts/e2e/**"
+      # The EKS stack's inline applier, which e2e-kind runs against the cluster
+      # (tests/e2e/test_e2e_eks_applier.py), and the lock the e2e ASH image's
+      # runtime is exported from.
+      - "deploy/cdk/templates/AshEksOperator.template.json"
+      - "uv.lock"
       - ".github/workflows/ash-kubernetes-operator.yml"
   pull_request:
     paths:
@@ -34,6 +39,11 @@ on:
       # The shared e2e contract the kind job scans and judges with.
       - "tests/e2e/**"
       - "scripts/e2e/**"
+      # The EKS stack's inline applier, which e2e-kind runs against the cluster
+      # (tests/e2e/test_e2e_eks_applier.py), and the lock the e2e ASH image's
+      # runtime is exported from.
+      - "deploy/cdk/templates/AshEksOperator.template.json"
+      - "uv.lock"
       - ".github/workflows/ash-kubernetes-operator.yml"
   # A merge queue runs every required check on the merged result, and accepts no
   # paths filter, so this one is unfiltered.
@@ -186,7 +196,8 @@ jobs:
   e2e-kind:
     runs-on: ubuntu-latest
     # The fresh-install suite, the shared contract cases, then uninstall, an N-1
-    # build and install, the upgrade, and a second uninstall, all on one cluster.
+    # build and install, the upgrade, and a second uninstall, then the EKS stack's
+    # applier installing, scanning with and deleting the operator, all on one cluster.
     timeout-minutes: 120
     env:
       # Unique per run, so a re-run or a parallel job never shares a cluster or an
@@ -243,29 +254,12 @@ jobs:
             echo "::error::the e2e reported no passing tests. It is enabled in this job, so this means it never stood a cluster up."
             exit 1
           }
-          # The legs the brief requires, by node id, so deleting or renaming one fails
-          # here instead of leaving a green run that no longer tests it.
-          missing=0
-          while read -r node; do
-            [ -z "$node" ] && continue
-            grep -Fxq "PASSED $node" e2e.log || {
-              echo "::error::required e2e test did not pass: $node"
-              missing=1
-            }
-          done <<'NODES'
-          tests/e2e/test_e2e_contract.py::TestSharedCase::test_the_shared_verdict_accepts_it[findings]
-          tests/e2e/test_e2e_contract.py::TestSharedCase::test_the_shared_verdict_accepts_it[clean]
-          tests/e2e/test_e2e_contract.py::TestSharedCase::test_the_shared_verdict_accepts_it[incomplete]
-          tests/e2e/test_e2e_contract.py::TestTheVerdictCanFail::test_a_mismatched_case_is_rejected[findings-clean-exit code 2]
-          tests/e2e/test_e2e_lifecycle.py::TestUninstallTheFreshInstall::test_nothing_the_operator_created_is_left
-          tests/e2e/test_e2e_lifecycle.py::TestCrdUpgrade::test_the_api_server_refuses_dropping_the_stored_version
-          tests/e2e/test_e2e_lifecycle.py::TestAfterUpgrade::test_the_inflight_scan_was_merged_by_heads_operator
-          tests/e2e/test_e2e_lifecycle.py::TestAfterUpgrade::test_the_finished_scan_was_not_touched
-          tests/e2e/test_e2e_lifecycle.py::TestAfterUpgrade::test_the_finished_scans_report_is_unchanged
-          tests/e2e/test_e2e_lifecycle.py::TestAfterUpgrade::test_the_upgraded_operator_meets_the_case_exactly
-          tests/e2e/test_e2e_lifecycle.py::TestUninstallTheUpgradedInstall::test_nothing_the_operator_created_is_left
-          NODES
-          [ "$missing" -eq 0 ] || exit 1
+          # Every required leg and every negative control, by node id, so deleting or
+          # renaming one fails here instead of leaving a green run that no longer tests
+          # it. The list is tests/e2e/required_nodes.txt; tests/test_e2e_required_nodes.py
+          # holds it to the collected suite in lint-and-unit, and shows this check
+          # rejecting a log that lacks one of them.
+          uv run --no-project --python 3.12 python -m tests.e2e.require_nodes e2e.log
 
       - name: Delete this run's cluster
         # Unconditional. The fixture deletes it, and so does this: a kind cluster

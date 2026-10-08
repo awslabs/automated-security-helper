@@ -1,0 +1,4 @@
+# ASH's [build-system] requirement (the root pyproject.toml), locked so the e2e ASH image
+# builds the ASH wheel with --no-build-isolation from hashed inputs only. Regenerate the
+# .txt with deploy/kubernetes-operator/relock.sh.
+hatchling>=1.32.4

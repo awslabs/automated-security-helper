@@ -211,13 +211,63 @@ def previous_ref() -> tuple[str, str]:
 ASH_CLI_LINE = re.compile(r'^ASH_CLI = "([^"]+)"$', re.MULTILINE)
 
 
+FROM_LINE = re.compile(r"^FROM\s+(?P<ref>\S+)(?P<alias>\s+AS\s+\S+)?\s*$", re.IGNORECASE)
+
+
+def repin_base_images(previous: str, head: str) -> str:
+    """*previous* (N-1's Dockerfile) with each FROM of the base image repinned to HEAD's digest.
+
+    HEAD's FROM lines that name an image, rather than an earlier stage, must all name
+    one digest-pinned image. Every N-1 FROM of the same image (any tag or digest) is
+    rewritten to it, keeping its ``AS`` alias; a FROM naming an earlier stage is left
+    alone. The rewrite is refused unless at least one line was rewritten and N-1 names
+    no other base image, so it cannot hide a base change. This handles N-1 being a
+    single-stage Dockerfile while HEAD builds the wheel in a separate stage, and both
+    being multi-stage.
+    """
+
+    def froms(text: str) -> list[tuple[int, str, str]]:
+        found = []
+        stages: set[str] = set()
+        for number, line in enumerate(text.splitlines()):
+            match = FROM_LINE.match(line)
+            if not match:
+                continue
+            ref, alias = match.group("ref"), (match.group("alias") or "")
+            if ref.lower() not in stages:
+                found.append((number, ref, alias))
+            if alias:
+                stages.add(alias.split()[-1].lower())
+        return found
+
+    head_refs = {ref for _, ref, _ in froms(head)}
+    assert len(head_refs) == 1, f"HEAD's Dockerfile names {sorted(head_refs)}, not one base"
+    (pinned,) = head_refs
+    assert "@sha256:" in pinned, f"HEAD's base {pinned} is not digest-pinned"
+    base = pinned.split("@")[0]
+
+    lines = previous.splitlines()
+    previous_froms = froms(previous)
+    others = sorted({ref for _, ref, _ in previous_froms if ref.split("@")[0] != base})
+    assert not others, (
+        f"N-1 builds FROM {others} and HEAD FROM {base}; repinning N-1 onto HEAD's "
+        f"digest would change its base image, so this needs a deliberate decision"
+    )
+    assert previous_froms, "N-1's Dockerfile has no FROM naming an image"
+    for number, _, alias in previous_froms:
+        lines[number] = f"FROM {pinned}{alias}"
+    return "\n".join(lines) + "\n"
+
+
 def build_previous_operator(dest: Path) -> dict[str, Any]:
     """Export N-1's operator tree into *dest*, build its image and load it into kind.
 
-    N-1's own Dockerfile is used with one change: its FROM line is replaced by HEAD's,
-    which is digest-pinned. An older Dockerfile may name a bare tag, and building one
-    would pull whatever that tag points at today. The replacement is refused unless
-    both lines name the same base image, so it cannot hide a base change.
+    N-1's own Dockerfile is used with one change: every FROM of its base image is
+    repinned to HEAD's digest (:func:`repin_base_images`). An older Dockerfile may name a
+    bare tag, and building one would pull whatever that tag points at today. The
+    rewrite is refused unless both name the same base image, so it cannot hide a base
+    change. N-1's own pip steps are used as they were: a commit from before the image's
+    requirements were hash-locked builds with that commit's unlocked installs.
     """
     sha, why = previous_ref()
     present = subprocess.run(
@@ -240,22 +290,9 @@ def build_previous_operator(dest: Path) -> dict[str, Any]:
     tree = dest / OPERATOR_REL
 
     dockerfile = tree / "Dockerfile"
-    lines = dockerfile.read_text().splitlines()
-    from_lines = [i for i, line in enumerate(lines) if line.startswith("FROM ")]
-    head_from = [
-        line
-        for line in (OPERATOR_DIR / "Dockerfile").read_text().splitlines()
-        if line.startswith("FROM ")
-    ]
-    assert len(from_lines) == 1 and len(head_from) == 1, (from_lines, head_from)
-    old_base = lines[from_lines[0]].split()[1].split("@")[0]
-    new_base = head_from[0].split()[1].split("@")[0]
-    assert old_base == new_base, (
-        f"N-1 builds FROM {old_base} and HEAD FROM {new_base}; repinning N-1 onto HEAD's "
-        f"digest would change its base image, so this needs a deliberate decision"
+    dockerfile.write_text(
+        repin_base_images(dockerfile.read_text(), (OPERATOR_DIR / "Dockerfile").read_text())
     )
-    lines[from_lines[0]] = head_from[0]
-    dockerfile.write_text("\n".join(lines) + "\n")
 
     run(
         ["docker", "build", "-t", PREVIOUS_OPERATOR_IMAGE, "-f", str(dockerfile), str(tree)],

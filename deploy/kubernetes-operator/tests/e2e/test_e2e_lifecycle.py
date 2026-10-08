@@ -327,19 +327,23 @@ class TestPreviousVersion:
 
 
 class TestCrdUpgrade:
+    @pytest.mark.positive_control
     def test_heads_crd_strands_nothing_the_cluster_stored(self, upgraded):
         assert upgraded["compat"] == [], upgraded["compat"]
 
+    @pytest.mark.negative_control
     def test_the_comparison_detects_a_removed_field(self, upgraded):
         assert any("extraScanArguments is removed" in p for p in upgraded["compat_planted"]), (
             upgraded["compat_planted"]
         )
 
+    @pytest.mark.negative_control
     def test_the_api_server_refuses_dropping_the_stored_version(self, upgraded):
         refusal = upgraded["refusal"]
         assert refusal["rc"] != 0, "the API server accepted a CRD without its stored version"
         assert "storedVersions" in refusal["stderr"], refusal["stderr"]
 
+    @pytest.mark.positive_control
     def test_the_stored_versions_are_still_valid(self, upgraded):
         crd = upgraded["crd"]
         served = {v["name"] for v in crd["spec"]["versions"] if v["served"]}
