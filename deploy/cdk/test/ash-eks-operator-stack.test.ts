@@ -838,6 +838,8 @@ function walkManifests(raw: unknown[]): { docs: K8sDoc[]; problems: string[] } {
     const isList = kind?.endsWith('List') ?? false;
     if ('items' in doc) {
       if (!isList) problems.push(`manifests: items on a non-List kind: ${key}`);
+      // kubectl refuses a non-array items at decode time; say so here rather than read [].
+      if (!Array.isArray(doc.items)) problems.push(`manifests: items is not a list: ${key}`);
       const inner = walkManifests(Array.isArray(doc.items) ? doc.items : []);
       docs.push(...inner.docs);
       problems.push(...inner.problems);
@@ -1482,17 +1484,27 @@ describe("the stack's operator contract equals the operator's own files", () => 
   });
 
   test("NEGATIVE CONTROL: items on operator.yaml's own Namespace are read (H2)", () => {
+    // Planted on the parsed documents and written back, so no line of operator.yaml has
+    // to stay as it is for this control to land.
     const planted = plantedManifestsDir((dir) => {
       const file = join(dir, 'operator.yaml');
-      const text = readFileSync(file, 'utf8');
-      const from = 'kind: Namespace\nmetadata:\n  name: ash-system\n';
-      expect(text).toContain(from);
-      writeFileSync(file, text.replace(from, `${from}items:\n  - ${JSON.stringify(SECRETS_ROLE)}\n`));
+      const docs = loadYamlDocs(file) as any[];
+      const namespaces = docs.filter((d) => d.kind === 'Namespace');
+      expect(namespaces).toHaveLength(1);
+      namespaces[0].items = [SECRETS_ROLE];
+      writeFileSync(file, docs.map((d) => JSON.stringify(d)).join('\n---\n'));
     });
     expect(contractDrift(planted)).toEqual([
       'manifests: items on a non-List kind: Namespace (cluster)/ash-system',
       'RBAC objects: only in the operator: Role ash-system/ash-secrets',
     ]);
+  });
+
+  test('NEGATIVE CONTROL: items that is not a list is reported (M)', () => {
+    const planted = plantedManifestsDir((dir) =>
+      writeFileSync(join(dir, 'zz-m.json'), JSON.stringify({ apiVersion: 'v1', kind: 'List', metadata: { name: 'm' }, items: SECRETS_ROLE })),
+    );
+    expect(contractDrift(planted)).toEqual(['manifests: items is not a list: List (cluster)/m']);
   });
 
   test('NEGATIVE CONTROL: items on a ServiceAccount are read (H)', () => {
