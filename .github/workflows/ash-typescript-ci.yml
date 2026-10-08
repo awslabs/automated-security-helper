@@ -144,6 +144,11 @@ on:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
       - "editors/vscode/**"
+      # The EKS stack's jest suite parses these operator files and fails when the
+      # stack's RBAC or CRD tables disagree with them. A change on the operator side
+      # alone has to run that suite, or the drift lands green.
+      - "deploy/kubernetes-operator/manifests/**"
+      - "deploy/kubernetes-operator/generated/**"
       # .nvmrc is load-bearing for both jobs below: it is where setup-node reads the
       # Node version from, so editing it changes the toolchain this gate runs on. A
       # file that decides what a gate tests belongs in the gate's own filter.
@@ -161,6 +166,8 @@ on:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
       - "editors/vscode/**"
+      - "deploy/kubernetes-operator/manifests/**"
+      - "deploy/kubernetes-operator/generated/**"
       - ".nvmrc"
       - ".github/scripts/assert-artifact-contents.py"
   # THE MERGE QUEUE LEG, AND WHY IT CARRIES NO paths FILTER
