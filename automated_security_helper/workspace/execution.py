@@ -258,7 +258,7 @@ import json
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Event, Lock
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
@@ -826,6 +826,14 @@ def _scan_one_project(
     return _ProjectRun(outcome=outcome, run=run)
 
 
+def _workspace_root(project: ProjectPlan) -> Path:
+    """The workspace root, which every project path sits below."""
+    root = Path(project.path)
+    for _ in PurePosixPath(project.relative_path).parts:
+        root = root.parent
+    return root
+
+
 def _project_config_with_policy(
     project: ProjectPlan, settings: ProjectScanSettings
 ) -> Any:
@@ -880,6 +888,9 @@ def _project_config_with_policy(
         fallback_to_default=True,
         # Load-bearing. See the warning above.
         config_overrides=list(settings.config_overrides),
+        # The whole workspace is scanned, so a config anywhere under its root was
+        # written by the repository, not only one under this project.
+        scanned_root=_workspace_root(project),
     )
 
     # Preserves the diagnostic the orchestrator used to emit from config_path,

@@ -57,6 +57,7 @@ class SandboxScope:
     offline: bool
     network_scanners: Optional[List[str]] = None
     extra_read_paths: List[str] = field(default_factory=list)
+    network_limit: Optional[List[str]] = None
 
 
 @dataclass
@@ -186,6 +187,18 @@ def scanner_sandbox_scope(
     # there (a worker's request file) is guarded.
     register_writable_root(results_dir)
     network_scanners = getattr(settings, "network_scanners", None)
+    if (
+        requirements.network
+        and requirements.network_requires_grant
+        and network_scanners is None
+        and not is_offline_mode()
+    ):
+        ASH_LOGGER.warning(
+            f"{name}'s settings ask for a network, and those settings can come from "
+            "the scanned repository, so the sandbox does not grant it. To allow it, "
+            f"add {name} to sandbox.network_scanners with --config-overrides or a "
+            "config file outside the scanned tree."
+        )
     return SandboxScope(
         backend=backend,
         scanner_name=name,
@@ -199,6 +212,9 @@ def scanner_sandbox_scope(
         if network_scanners is not None
         else None,
         extra_read_paths=list(getattr(settings, "extra_read_paths", []) or []),
+        network_limit=list(settings.network_limit)
+        if settings.network_limit is not None
+        else None,
     )
 
 
@@ -292,6 +308,7 @@ def prepare_spawn(
         offline=scope.offline,
         network_scanners=scope.network_scanners,
         extra_read_paths=scope.extra_read_paths,
+        network_limit=scope.network_limit,
     )
     plan = scope.backend.plan(list(argv), base_env, policy)
     # First in line once the process has exited: nothing ASH writes into the

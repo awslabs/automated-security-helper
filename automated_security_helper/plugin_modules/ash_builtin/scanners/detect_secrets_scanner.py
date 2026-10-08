@@ -219,12 +219,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ``_process_config_options`` has already merged from the baseline by the
         time the executor asks. Under --offline no scanner gets a network, so
         there the extra, unverified findings are reported.
+
+        The need is declared with ``network_requires_grant``: the settings come
+        from a baseline or ASH config that the scanned repository can write,
+        and the same baseline can load a plugin from the repository, so a
+        repository could otherwise give its own code a network. The sandbox
+        grants it only when ``sandbox.network_scanners`` names detect-secrets.
         """
         verifying = any(
             item.path == _VERIFICATION_FILTER_PATH
             for item in self.config.options.scan_settings.filters_used
         )
-        return SandboxRequirements(network=verifying)
+        return SandboxRequirements(network=verifying, network_requires_grant=True)
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.

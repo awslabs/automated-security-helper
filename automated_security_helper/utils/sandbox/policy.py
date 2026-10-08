@@ -48,6 +48,11 @@ class SandboxRequirements:
             names under an allowed prefix are still dropped; see ``env_names``.
         env_names: Exact variable names passed through even though they look like
             credentials, because the scanner needs them (``SNYK_TOKEN``).
+        network_requires_grant: The network need follows settings the scanned
+            repository can write (detect-secrets' baseline enables verification),
+            so the scanner's own declaration does not grant it. It gets a network
+            only when ``sandbox.network_scanners``, which only a trusted source
+            can set, names it.
     """
 
     network: bool = False
@@ -55,6 +60,7 @@ class SandboxRequirements:
     cache_paths: Tuple[str, ...] = ()
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
+    network_requires_grant: bool = False
 
 
 #: The baseline environment allowlist. Exact names, then prefixes. Anything else in
@@ -447,18 +453,24 @@ def build_scanner_policy(
     offline: bool,
     network_scanners: Optional[Sequence[str]],
     extra_read_paths: Sequence[str] = (),
+    network_limit: Optional[Sequence[str]] = None,
 ) -> SandboxPolicy:
     """The policy one scanner gets for one spawn.
 
     Args:
         network_scanners: When not None, replaces every scanner's declared network
             need: only scanners named here get a network (still never under offline).
+        network_limit: When not None, a scanner not named here gets no network
+            whatever the rest says. Set from a config file in the scanned tree,
+            which may take network away but not grant it.
     """
     real_home = Path.home()
     if network_scanners is None:
-        network = requirements.network
+        network = requirements.network and not requirements.network_requires_grant
     else:
         network = scanner_name in set(network_scanners)
+    if network_limit is not None and scanner_name not in set(network_limit):
+        network = False
     if offline:
         network = False
 

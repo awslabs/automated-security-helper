@@ -95,7 +95,7 @@ it needs.
 | trivy | yes (database update) | trivy cache | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
 | cfn-nag | no | none | Ruby and its gem paths |
-| detect-secrets | only when its verification filter is configured | none | ASH's Python, in a worker subprocess |
+| detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
 | cdk-nag | no | jsii's runtime cache | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
 
 ### Community and third-party plugin scanners
@@ -136,18 +136,22 @@ The community scanners declare theirs: snyk-code asks for a network, its `SNYK_`
 variables and `SNYK_TOKEN`, and read access to its token file; trivy-repo asks for a
 network and its database cache; ferret-scan asks only for its `FERRET_` variables.
 
-detect-secrets' network grant follows its configuration, and that configuration can
-come from a `.secrets.baseline` committed to the scanned repository. A repository can
-therefore give detect-secrets a network by listing the verification filter in its
-baseline. Set `sandbox.network_scanners` to a list without `detect-secrets` to rule
-that out.
+detect-secrets needs a network only to verify candidate secrets with their issuers,
+which it does when its settings list the verification filter. Those settings come
+from a `.secrets.baseline` or an ASH config file, and the scanned repository can
+commit either one. The same baseline can also load a detect-secrets plugin from the
+repository. So the sandbox doesn't take detect-secrets' own word for it: detect-secrets
+gets a network only when `sandbox.network_scanners` names it, and a repository can't
+set that (see below). Without a network every candidate counts as unverified, so a
+sandboxed scan whose settings verify reports the candidates that verification would
+have dropped, and ASH logs a warning naming the setting.
 
 detect-secrets and cdk-nag are Python libraries. They used to run inside the ASH
 process, where no OS sandbox can reach them; they now run in worker subprocesses that
 use the same interpreter and the same library calls, so their findings are unchanged
-and the sandbox wraps them like any other scanner. detect-secrets gets a network only
-if your baseline enables its secret-verification filter, which calls the issuers'
-APIs; under `--offline` it gets none.
+and the sandbox wraps them like any other scanner. To let detect-secrets verify
+secrets under the sandbox, pass `--config-overrides 'sandbox.network_scanners=[detect-secrets]'`
+(plus any other scanners that need a network). Under `--offline` it gets none.
 
 To give an extra scanner network access, or take it away:
 
@@ -159,9 +163,20 @@ sandbox:
 ```
 
 `network_scanners` and `extra_read_paths` grant access, so they are honored only from
-`--config-overrides` or a config file outside the scanned tree. Set in a config file
-inside the tree, which the repository being scanned can write, they are ignored with
-a warning. `mode` is honored from either.
+`--config-overrides` or a config file outside the scanned tree. When any file the
+config was built from is inside the tree, both settings are taken from the defaults
+plus `--config-overrides`, and ASH logs a warning naming the file. That covers the
+discovered `.ash/.ash.yaml`, a `--config` path, an `extends` base, and the file
+`ASH_CONFIG` names. In workspace mode the tree is the workspace root, not just the
+project. A symlink, a `..` segment, or a case-only difference on a case-insensitive
+filesystem doesn't change the answer, because ASH compares the files themselves,
+not their path strings. An in-tree `network_scanners` list still takes network away:
+a scanner it doesn't name gets none, so a repository can keep its own scan offline
+with `network_scanners: []`. `mode` is honored from either.
+
+A trusted config outside the tree that `extends` a base inside the tree loses its own
+grants too, because the merged settings no longer record which file set them. Pass
+the grants with `--config-overrides` in that layout.
 
 A sandboxed scan does not install tools: installing runs a package's build code and
 writes uv's tool directory, which a sandboxed scanner may only read. Run
@@ -194,6 +209,10 @@ Out of scope:
   base. Converters unpack archives and notebooks into the work directory; they are
   ASH code, not third-party tools. `git` runs only for `--changed-files-only` and
   workspace planning, never inside a scanner.
+- Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
+  its own process, so they run unsandboxed. That includes a config file committed to
+  the scanned repository. The sandbox doesn't change this; review the plugin modules a
+  repository's config names before you scan it.
 - Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
   fork until a limit stops it; the existing per-scanner `scan_timeout` bounds how long.
 - A scanner allowed a network under bwrap shares the host's network namespace, which
