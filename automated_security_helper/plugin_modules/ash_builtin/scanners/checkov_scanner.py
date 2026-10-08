@@ -3,8 +3,10 @@
 import logging
 import os
 import re
+import json
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, Any, ClassVar, List, Literal, Optional
+from urllib.parse import quote, unquote
 
 from pydantic import Field
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -26,6 +28,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
@@ -73,6 +76,91 @@ CheckFrameworks = Literal[
 # it matches or breaking the regex checkov's terraform module finder builds from
 # it. See CheckovScanner._output_dir_skip_pattern.
 _CHECKOV_SAFE_SKIP_PATH = re.compile(r"^[\w./:-]+$")
+
+
+def checkov_repo_file_path(file_path: str, cwd: str) -> str:
+    """The ``repo_file_path`` checkov records for ``file_path`` when run in ``cwd``.
+
+    A copy of ``checkov.common.output.record.Record._determine_repo_file_path``
+    (checkov 3.3.26) with the working directory as a parameter: ``"/" +`` the path
+    relative to the working directory, separators made ``/``, and every ``/..``
+    removed, or the path without its drive when the drive differs. checkov puts
+    this, without the leading ``/`` and URL-quoted, in each SARIF result's URI.
+    tests/unit/plugin_modules/ash_builtin/test_checkov_repo_file_path.py pins the
+    shape and the integration test compares it with checkov's output.
+    """
+    path = Path(file_path)
+    if Path(cwd).drive == path.drive:
+        return f"/{os.path.relpath(path, cwd)}".replace("\\", "/").replace("/..", "")
+    return f"/{'/'.join(path.parts[1:])}"
+
+
+def rewrite_checkov_paths(document: Any, *, ran_in: str, source_dir: str) -> None:
+    """Make the paths in a checkov SARIF or JSON report read as if run in source_dir.
+
+    ASH runs checkov from the filesystem root (``CheckovScanner._subprocess_cwd``),
+    so the paths checkov writes relative to its working directory are absolute
+    paths without the leading ``/``. They are recomputed here with the source
+    directory as the working directory, which is what checkov wrote when ASH ran
+    it there, so findings and the suppressions that match their paths are
+    unchanged. The JSON report's ``file_abs_path`` is used as is; a SARIF URI is
+    joined to ``ran_in``, which loses nothing because nothing is relative to it.
+    """
+    cwd = os.path.realpath(source_dir)
+
+    def _uri(uri: str) -> str:
+        absolute = os.path.join(ran_in, unquote(uri))
+        return quote(checkov_repo_file_path(absolute, cwd).lstrip("/"))
+
+    def _locations(items: Any) -> None:
+        for location in items or []:
+            artifact = (location.get("physicalLocation") or {}).get("artifactLocation")
+            if isinstance(artifact, dict) and isinstance(artifact.get("uri"), str):
+                artifact["uri"] = _uri(artifact["uri"])
+
+    if isinstance(document, dict) and "runs" in document:
+        for run in document.get("runs") or []:
+            for result in run.get("results") or []:
+                _locations(result.get("locations"))
+                _locations(result.get("relatedLocations"))
+            for artifact in run.get("artifacts") or []:
+                location = artifact.get("location")
+                if isinstance(location, dict) and isinstance(location.get("uri"), str):
+                    location["uri"] = _uri(location["uri"])
+        return
+
+    reports = document if isinstance(document, list) else [document]
+    for report in reports:
+        results = report.get("results") if isinstance(report, dict) else None
+        for records in (results or {}).values():
+            for record in records if isinstance(records, list) else []:
+                if isinstance(record, dict) and isinstance(
+                    record.get("file_abs_path"), str
+                ):
+                    record["repo_file_path"] = checkov_repo_file_path(
+                        record["file_abs_path"], cwd
+                    )
+
+
+def _directory_as_one_token(argv: List[str]) -> List[str]:
+    """``--directory <path>`` as the single token ``--directory=<path>``.
+
+    checkov also reads ``.checkov.yaml`` from the directory it scans, found by
+    looking for a ``-d`` or ``--directory`` token followed by a path
+    (``get_default_config_paths``). Passed as one token, the same option names no
+    such pair, so a config file in the scanned directory is not read. Checked
+    against the checkov ASH installs.
+    """
+    out: List[str] = []
+    index = 0
+    while index < len(argv):
+        if argv[index] in ("--directory", "-d") and index + 1 < len(argv):
+            out.append(f"--directory={argv[index + 1]}")
+            index += 2
+            continue
+        out.append(argv[index])
+        index += 1
+    return out
 
 
 class CheckovScannerConfigOptions(ScannerOptionsBase):
@@ -381,7 +469,44 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
         finally:
             self.args.extra_args = original_extra_args
-        return final_args, results_file, None
+        return _directory_as_one_token(final_args), results_file, None
+
+    def _subprocess_cwd(self, results_dir: Path) -> Path | None:
+        """Run checkov from the filesystem root, outside the scanned tree.
+
+        checkov reads ``.checkov.yaml`` and ``.checkov.yml`` from its working
+        directory as default config files, whatever ``--config-file`` says
+        (``checkov.common.util.config_utils.get_default_config_paths``), so the
+        source directory is not usable. A directory under the results directory
+        is not either: when the output directory is inside the source directory,
+        checkov's paths relative to it drop their ``..`` components and can no
+        longer be told apart. Every path relative to the root is absolute, so
+        ``rewrite_checkov_paths`` recovers the source-relative form exactly.
+        """
+        return Path(Path(os.path.abspath(results_dir)).anchor)
+
+    def _read_results_file(self, results_file: Path) -> Optional[dict]:
+        """Read checkov's SARIF with its paths made relative to the source directory.
+
+        The JSON report, written when ``additional_formats`` asks for it, is
+        rewritten the same way so it matches. CycloneDX carries no such path.
+        """
+        ran_in = Path(os.path.abspath(results_file)).anchor
+        source_dir = str(self.context.source_dir)
+        json_report = Path(results_file).parent / "results_json.json"
+        if json_report.is_file():
+            try:
+                with open(json_report, encoding="utf-8") as handle:
+                    document = json.load(handle)
+                rewrite_checkov_paths(document, ran_in=ran_in, source_dir=source_dir)
+                with open_for_write(json_report) as handle:
+                    json.dump(document, handle, indent=4)
+            except (OSError, ValueError) as error:
+                ASH_LOGGER.debug(f"Could not rewrite paths in {json_report}: {error}")
+        raw = super()._read_results_file(results_file)
+        if raw is not None:
+            rewrite_checkov_paths(raw, ran_in=ran_in, source_dir=source_dir)
+        return raw
 
     def _output_dir_skip_pattern(self, target: Path) -> str | None:
         """A ``--skip-path`` value matching ASH's output directory under ``target``.

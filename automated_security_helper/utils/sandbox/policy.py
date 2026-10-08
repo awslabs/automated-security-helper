@@ -440,6 +440,21 @@ def _refuse_symlinked_results_dir(output_dir: Path, results_dir: Path) -> None:
             )
 
 
+def _readable_cwd(cwd: Optional[Path]) -> Optional[Path]:
+    """``cwd`` as a read grant, or None for a filesystem root.
+
+    checkov runs from the filesystem root so that it reads no config file from the
+    scanned tree, and is handed only absolute paths
+    (``CheckovScanner._subprocess_cwd``). Granting the root would let every
+    sandboxed process read the whole filesystem; every backend can still change
+    into ``/`` without it.
+    """
+    if cwd is None:
+        return None
+    absolute = Path(os.path.abspath(cwd))
+    return None if absolute == Path(absolute.anchor) else cwd
+
+
 def build_scanner_policy(
     scanner_name: str,
     requirements: SandboxRequirements,
@@ -482,7 +497,7 @@ def build_scanner_policy(
         + _executable_prefix(argv0)
         + [_expand(p) for p in requirements.read_paths]
         + [_expand(p) for p in extra_read_paths]
-        + [source_dir, output_dir, scan_target, cwd]
+        + [source_dir, output_dir, scan_target, _readable_cwd(cwd)]
     )
 
     cache = _existing(

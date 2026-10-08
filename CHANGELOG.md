@@ -104,6 +104,10 @@
   - checkov's and ferret-scan's `config_file`, the `.checkov.yaml` and `ferret.yaml`
     files they find by name, and detect-secrets plugins and filters that name a
     file are passed to the tool only when the file is outside the scanned tree.
+    checkov now runs from the filesystem root, because it reads `.checkov.yaml`
+    from its working directory itself; the paths in its findings are unchanged.
+  - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
+    write `==1.2.3`, or leave it unset for the supported range.
 
   Each value that is not honored is logged once as a warning naming the key. See
   [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
