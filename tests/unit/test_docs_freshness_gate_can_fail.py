@@ -621,6 +621,7 @@ _NATIVE_SOURCES = (
     "packaging/flatpak/build.sh",
     "packaging/flatpak/README.flatpak",
     ".github/workflows/ash-tag-on-merge.yml",
+    "packaging/release-assets.py",
 )
 
 
@@ -690,6 +691,7 @@ def native_tree(gate, tmp_path, monkeypatch):
         "RELEASE_WORKFLOW",
         tmp_path / ".github" / "workflows" / "ash-tag-on-merge.yml",
     )
+    monkeypatch.setattr(gate, "RELEASE_ASSETS_PY", packaging / "release-assets.py")
     monkeypatch.setattr(gate, "collect_md_files", lambda: sorted(pages.glob("*.md")))
     return tmp_path
 
@@ -734,13 +736,31 @@ def test_native_package_docs_check_can_fail(gate, native_tree):
 
     cases = [
         (
-            "the release starts attaching a native package",
+            "the release starts attaching another package",
+            lambda: _edit(
+                packaging / "release-assets.py",
+                'key="flatpak",',
+                'key="appimage",',
+            ),
+            "release-assets.py now attaches ['appimage', 'deb',",
+        ),
+        (
+            "the release attaches files the asset check never saw",
             lambda: _edit(
                 native_tree / ".github" / "workflows" / "ash-tag-on-merge.yml",
-                "dist/*.whl dist/*.tar.gz dist/*.mcpb",
-                "dist/*.whl dist/*.tar.gz dist/*.mcpb dist/*.msix",
+                "            release-assets/*\n",
+                "            release-assets/* dist/*.msix\n",
             ),
-            "now attaches ['*.mcpb', '*.msix', '*.tar.gz', '*.whl']",
+            "attaches ['release-assets/*', 'dist/*.msix'], not the release-assets/*",
+        ),
+        (
+            "the release no longer checks the directory it attaches",
+            lambda: _edit(
+                native_tree / ".github" / "workflows" / "ash-tag-on-merge.yml",
+                "release-assets.py check release-assets",
+                "release-assets.py list release-assets",
+            ),
+            "does not run `release-assets.py check`",
         ),
         (
             "nuspec id renamed under the pages",

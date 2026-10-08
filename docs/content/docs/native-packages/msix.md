@@ -10,7 +10,13 @@ The MSIX package installs ASH on Windows 10 version 2004 (build 19041) or later 
 
 ## Get the package
 
-There is no release asset. Use one of these:
+Use one of these:
+
+- Download it from a GitHub release. With the GitHub CLI:
+
+    ```powershell
+    gh release download v<version> --repo awslabs/automated-security-helper --pattern '*.msix'
+    ```
 
 - Download the `.msix` that CI built. Every run of the `ASH - Package` workflow (`ash-package.yml`) that builds the MSIX uploads it as an artifact named `ash-msix-<commit>-attempt-<n>`, kept for 14 days. With the GitHub CLI, signed in:
 

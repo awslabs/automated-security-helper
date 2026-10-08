@@ -56,6 +56,7 @@ FLATPAK_MANIFEST = (
 )
 FLATPAK_BUILD_SH = PACKAGING_DIR / "flatpak" / "build.sh"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-tag-on-merge.yml"
+RELEASE_ASSETS_PY = PACKAGING_DIR / "release-assets.py"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1058,29 +1059,69 @@ def _native_package_facts() -> dict[str, str]:
     }
 
 
-# What the install pages say a release carries. If the release workflow starts
-# attaching anything else, the "Publication status" section is out of date.
-_DOCUMENTED_RELEASE_ASSETS = frozenset({"*.whl", "*.tar.gz", "*.mcpb"})
+# What the install pages say a release carries, by packaging/release-assets.py key.
+# If that table starts attaching anything else, the "Publication status" section is
+# out of date.
+_DOCUMENTED_RELEASE_ASSETS = frozenset(
+    {
+        "wheel",
+        "sdist",
+        "mcpb",
+        "deb",
+        "rpm",
+        "msix",
+        "nupkg",
+        "flatpak",
+        "winget",
+        "vsix",
+        "jetbrains",
+    }
+)
 
 
-def _release_asset_globs() -> set[str]:
-    """The asset globs passed to `gh release create` in the release workflow."""
+def _release_asset_keys() -> set[str]:
+    """The keys of the assets a release attaches.
+
+    The release workflow attaches `release-assets/*` only after
+    `packaging/release-assets.py check release-assets` has held that directory to
+    the script's ASSETS table, so the table is what a release carries. Both halves
+    of that are read here: a `gh release create` that attached anything other than
+    the checked directory would make the table say nothing about the release.
+    """
     text = read_text(RELEASE_WORKFLOW)
     start = text.find("gh release create")
     if start < 0:
         raise ValueError(f"no `gh release create` in {RELEASE_WORKFLOW.name}")
-    globs: set[str] = set()
+    command: list[str] = []
     for line in text[start:].splitlines():
-        found = re.findall(r"\bdist/(\*\.[\w.]+)", line)
-        globs.update(found)
+        command.append(line)
         if not line.rstrip().endswith("\\"):
-            if globs:
-                break
-    if not globs:
+            break
+    attached = [
+        word
+        for line in command
+        for word in line.split()
+        if "/" in word and not word.startswith(("-", '"', "$"))
+    ]
+    if attached != ["release-assets/*"]:
         raise ValueError(
-            f"`gh release create` in {RELEASE_WORKFLOW.name} attaches nothing"
+            f"`gh release create` in {RELEASE_WORKFLOW.name} attaches {attached}, "
+            "not the release-assets/* directory packaging/release-assets.py checks"
         )
-    return globs
+    if not re.search(r"release-assets\.py check release-assets\b", text):
+        raise ValueError(
+            f"{RELEASE_WORKFLOW.name} does not run `release-assets.py check` on the "
+            "directory it attaches"
+        )
+    table = re.search(
+        r"^ASSETS\b[^=\n]*= \((.*?)^\)",
+        read_text(RELEASE_ASSETS_PY),
+        re.MULTILINE | re.DOTALL,
+    )
+    keys = set(re.findall(r'\bkey="([\w-]+)"', table.group(1))) if table else set()
+    if not keys:
+        raise ValueError(f"no ASSETS keys in {RELEASE_ASSETS_PY.name}")
+    return keys
 
 
 def _nav_paths() -> set[str]:
@@ -1130,13 +1171,13 @@ def check_native_package_docs() -> list[str]:
         return [f"could not read the packaging sources: {exc}"]
 
     try:
-        attached = _release_asset_globs()
+        attached = _release_asset_keys()
     except (OSError, ValueError) as exc:
         return [f"could not read the release workflow: {exc}"]
     if attached != _DOCUMENTED_RELEASE_ASSETS:
         failures.append(
-            f"{RELEASE_WORKFLOW.name} now attaches {sorted(attached)}, but the install "
-            f"pages say a release carries only {sorted(_DOCUMENTED_RELEASE_ASSETS)}. "
+            f"{RELEASE_ASSETS_PY.name} now attaches {sorted(attached)}, but the install "
+            f"pages say a release carries {sorted(_DOCUMENTED_RELEASE_ASSETS)}. "
             "Update 'Publication status' in docs/native-packages/index.md and each "
             "page's 'Get the package' steps, then this table"
         )
