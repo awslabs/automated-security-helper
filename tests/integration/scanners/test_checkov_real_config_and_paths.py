@@ -197,3 +197,25 @@ def test_ash_copy_of_repo_file_path_matches_checkovs(
         check=True,
     ).stdout.strip()
     assert checkov_repo_file_path(file_path, os.path.realpath(cwd)) == checkovs
+
+
+def test_a_cwd_one_level_below_the_root_writes_the_same_paths_as_the_root(tmp_path):
+    """The basis for the fallback working directory under a drive root.
+
+    path_trust.cwd_outside_scanned_tree falls back to a new directory directly
+    under the target's root. Here ``tmp_path`` stands in for that root: checkov
+    run from a fresh child of it must write the same paths as checkov run from it.
+    """
+    _checkov()
+    source = tmp_path / "src"
+    for relative in ("main.tf", "build/foo.tf", "a/b/nested.tf"):
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_INSECURE_BUCKET)
+    child = tmp_path / "ash-tool-cwd-x"
+    child.mkdir()
+
+    from_root = _uris(_run_from(tmp_path, source, tmp_path / "o1"))
+    from_child = _uris(_run_from(child, source, tmp_path / "o2"))
+    assert from_root
+    assert from_child == from_root

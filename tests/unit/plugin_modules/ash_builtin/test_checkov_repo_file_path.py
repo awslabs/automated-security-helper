@@ -223,35 +223,93 @@ def test_a_source_under_a_directory_starting_with_dots_maps_back(tmp_path):
     assert _uris(document) == ["main.tf"]
 
 
-def test_the_cwd_falls_back_outside_the_tree_when_the_root_is_in_it(
-    tmp_path, monkeypatch
-):
-    """A source directory that is a drive root (subst, mapped drive) on Windows.
-
-    The root is then inside the tree, so a new, empty directory under the results
-    directory is used; it holds no config file wherever it is.
-    """
+def _root_in_tree(monkeypatch, *, also=lambda path: False):
+    """Make the filesystem root count as inside the tree, as for a drive-root source."""
     from automated_security_helper.config import path_trust
 
-    source = tmp_path / "src"
-    source.mkdir()
     real = path_trust.in_scanned_tree
 
-    def root_is_in_the_tree(path, scan_root):
-        return Path(path) == Path("/") or real(path, scan_root)
+    def fake(path, scan_root):
+        return Path(path) == Path("/") or also(Path(path)) or real(path, scan_root)
 
-    monkeypatch.setattr(path_trust, "in_scanned_tree", root_is_in_the_tree)
-    results = source / ".ash" / "ash_output" / "scanners" / "checkov" / "source"
-    # A directory already there, with a config file in it, is neither used nor
-    # removed: the working directory is a new one.
-    (results / "cwd").mkdir(parents=True)
-    (results / "cwd" / ".checkov.yaml").write_text("")
+    monkeypatch.setattr(path_trust, "in_scanned_tree", fake)
+    monkeypatch.setattr(path_trust, "_FALLBACK_CWDS", {})
+    return path_trust
+
+
+def test_the_fallback_cwd_is_a_new_system_temp_dir_outside_the_tree(
+    tmp_path, monkeypatch
+):
+    """A source directory that is a drive root (subst, mapped drive) on Windows."""
+    path_trust = _root_in_tree(monkeypatch)
+    source = tmp_path / "src"
+    source.mkdir()
+    results = tmp_path / "results"
     cwd = path_trust.cwd_outside_scanned_tree(
         source, results_dir=results, source_dir=source
     )
-    assert cwd.parent == results and cwd != results / "cwd"
+    assert cwd != Path("/") and not path_trust.in_scanned_tree(cwd, source)
     assert cwd.is_dir() and not any(cwd.iterdir())
-    assert (results / "cwd" / ".checkov.yaml").exists()
+    # Made once per root and process.
+    again = path_trust.cwd_outside_scanned_tree(
+        source, results_dir=results, source_dir=source
+    )
+    assert again == cwd
+
+
+def test_the_fallback_cwd_goes_under_the_root_when_temp_is_in_the_tree(
+    tmp_path, monkeypatch
+):
+    import tempfile
+
+    fake_root = tmp_path / "root"
+    fake_root.mkdir()
+    path_trust = _root_in_tree(
+        monkeypatch, also=lambda p: Path(tempfile.gettempdir()) in (p, *p.parents)
+    )
+    made = []
+
+    def new_directory(parent):
+        if parent is None:
+            return Path(tempfile.mkdtemp(prefix="ash-tool-cwd-"))
+        made.append(parent)
+        return Path(tempfile.mkdtemp(prefix="ash-tool-cwd-", dir=fake_root))
+
+    monkeypatch.setattr(path_trust, "_new_directory", new_directory)
+    source = tmp_path / "src"
+    source.mkdir()
+    cwd = path_trust.cwd_outside_scanned_tree(
+        source, results_dir=tmp_path / "results", source_dir=source
+    )
+    assert made == [Path("/")]
+    assert cwd.parent == fake_root
+
+
+def test_under_a_sandbox_the_fallback_cwd_is_under_the_results_dir(
+    tmp_path, monkeypatch
+):
+    from automated_security_helper.utils.sandbox import scope
+
+    path_trust = _root_in_tree(monkeypatch)
+    monkeypatch.setattr(scope, "active_scope", lambda: object())
+    source = tmp_path / "src"
+    source.mkdir()
+    results = tmp_path / "results"
+    cwd = path_trust.cwd_outside_scanned_tree(
+        source, results_dir=results, source_dir=source
+    )
+    assert cwd.parent == results
+    assert cwd.is_dir() and not any(cwd.iterdir())
+
+
+def test_a_cwd_one_level_below_a_common_ancestor_gives_the_same_paths(tmp_path):
+    """Why a directory directly under the root maps exactly (fallback option 2)."""
+    child = tmp_path / "ash-tool-cwd-x"
+    for relative in ("main.tf", "a/b/c.tf", "..odd/d.tf"):
+        file_path = (tmp_path / relative).as_posix()
+        assert checkov_repo_file_path(file_path, str(child)) == checkov_repo_file_path(
+            file_path, str(tmp_path)
+        )
 
 
 @pytest.mark.parametrize("which", ["checkov", "ferret-scan"])

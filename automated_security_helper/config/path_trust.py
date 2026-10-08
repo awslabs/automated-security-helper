@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import Any, Optional, Set, Tuple, Union
+from typing import Any, Dict, Optional, Set, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -54,6 +54,21 @@ def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool
     return any(is_within(Path(path), tree) for tree in scanned_trees(Path(scan_root)))
 
 
+#: Fallback working directories already made, by filesystem root, so a process
+#: makes at most one per root (see cwd_outside_scanned_tree).
+_FALLBACK_CWDS: Dict[str, Path] = {}
+
+
+def _new_directory(parent: Optional[Path]) -> Optional[Path]:
+    """A new empty directory under ``parent`` (the system temp dir for None)."""
+    import tempfile
+
+    try:
+        return Path(tempfile.mkdtemp(prefix="ash-tool-cwd-", dir=parent))
+    except OSError:
+        return None
+
+
 def cwd_outside_scanned_tree(
     target: Union[str, Path],
     *,
@@ -63,23 +78,55 @@ def cwd_outside_scanned_tree(
 ) -> Path:
     """A working directory for a tool that reads its config file from its cwd.
 
-    The filesystem root of ``target``: outside the scanned tree, and with every
-    path relative to it absolute. When that root is inside the tree itself (a
-    source directory that is a drive root, such as a ``subst`` or mapped drive on
-    Windows, or a scan of a whole filesystem), a new empty directory under
-    ``results_dir`` is created for the run instead. It holds no config file
-    whatever tree it is in, and a sandboxed tool can enter it. It is created, never
-    cleared, so nothing is deleted on the way.
+    Normally the filesystem root of ``target``: outside the scanned tree, and with
+    every path relative to it absolute, which checkov_scanner.rewrite_checkov_paths
+    relies on. When that root is inside the tree itself (a source directory that
+    is a drive root, such as a ``subst`` or mapped drive on Windows, or a scan of a
+    whole filesystem), a new empty directory is made instead, in this order:
+
+    1. In the system temp directory, when that is outside the tree. On Windows
+       that is another drive, where checkov writes paths without the drive, so
+       they still read as relative to the target's root.
+    2. Directly under the target's root. checkov removes the ``/..`` its paths
+       start with, so a directory one level below the root gives the same paths
+       as the root.
+    3. Under ``results_dir``, which a sandboxed tool can enter. checkov's paths
+       can then lose directories the file shares with the results directory, so
+       this is used only when 1 and 2 are not possible, and under a sandbox.
+
+    Each is new and empty, so it holds no config file. One is made per root and
+    process and reused; nothing is cleared or deleted.
     """
     root = getattr(config, "_scanned_root", None) or source_dir
     anchor = Path(Path(os.path.abspath(target)).anchor)
     if not in_scanned_tree(anchor, root):
         return anchor
-    import tempfile
+    from automated_security_helper.utils.sandbox.scope import active_scope
 
+    if active_scope() is None:
+        cached = _FALLBACK_CWDS.get(anchor.as_posix())
+        if cached is not None and cached.is_dir() and not any(cached.iterdir()):
+            return cached
+        for parent in (None, anchor):
+            made = _new_directory(parent)
+            if made is None:
+                continue
+            if parent is None and in_scanned_tree(made, root):
+                made.rmdir()
+                continue
+            _FALLBACK_CWDS[anchor.as_posix()] = made
+            return made
     directory = Path(os.path.abspath(results_dir))
     directory.mkdir(parents=True, exist_ok=True)
-    return Path(tempfile.mkdtemp(prefix="cwd-", dir=directory))
+    made = _new_directory(directory)
+    if made is None:
+        raise OSError(f"cannot create a working directory under {directory}")
+    ASH_LOGGER.warning(
+        f"The filesystem root of {Path(target).as_posix()} is inside the scanned "
+        f"tree, so the tool runs from {made.as_posix()}; paths in its findings "
+        "may leave out directories they share with that location."
+    )
+    return made
 
 
 def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:
