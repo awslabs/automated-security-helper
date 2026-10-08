@@ -31,6 +31,9 @@ from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 
 RUN_ASH_SCAN = "automated_security_helper.cli.scan.run_ash_scan"
+# Wide enough that no error panel wraps a path; Rich reads COLUMNS when its output
+# is not a terminal, as under CliRunner.
+WIDE_CONSOLE = {"COLUMNS": "1000"}
 
 
 @pytest.fixture
@@ -282,13 +285,32 @@ class TestScanJsonInputErrors:
         assert "JSON" in result.output
 
     def test_missing_file_is_rejected(self, runner, tmp_path):
+        missing = tmp_path / "absent.json"
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(
-                app, ["scan", "--cli-json-input", str(tmp_path / "absent.json")]
+                app, ["scan", "--cli-json-input", str(missing)], env=WIDE_CONSOLE
             )
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "absent.json" in result.output
+        assert str(missing) in result.output
+
+    # The error panel is drawn at the console width and wraps a long path at any
+    # character, so at the default width "absent.json" came out as "absent.j" and
+    # "son" whenever the temp directory's length put the break there: a pass or a
+    # failure decided by where pytest's basetemp happened to be. Rendered wide, the
+    # whole path is on one line, so the assertion can name all of it.
+    @pytest.mark.parametrize("pad", range(0, 84, 3))
+    def test_missing_file_is_named_in_full_at_any_path_length(
+        self, runner, tmp_path, pad
+    ):
+        missing = tmp_path / ("d" * (pad + 1)) / "absent.json"
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(
+                app, ["scan", "--cli-json-input", str(missing)], env=WIDE_CONSOLE
+            )
+        assert result.exit_code == 2
+        assert not mock_run.called
+        assert str(missing) in result.output
 
     def test_meta_options_cannot_be_set_from_json(self, runner, tmp_path):
         result, mock_run = self._invoke(
