@@ -10,8 +10,10 @@
 #
 #   E2E_PYTHON     interpreter for the host venv that drives `ashx scan --mode container`
 #                  (default 3.12)
-#   E2E_PREV_REF   the git ref the N-1 image is built from (default origin/v4-capabilities).
-#                  When it has HEAD's tree, HEAD's first parent is used instead, as in
+#   E2E_PREV_REF   the git ref the N-1 image is built from (default auto: the newest
+#                  release tag, else the newest ancestor of HEAD, that differs from HEAD
+#                  and carries this script and the Dockerfile; scripts/e2e/n1-ref.sh).
+#                  A named ref with HEAD's tree falls back to HEAD's first parent, as in
 #                  scripts/e2e/wheel.sh.
 #   E2E_IMAGE_TAG  the image repository:tag prefix to build under (default
 #                  ash-e2e-container:local). CI makes it unique per run. Two tags are
@@ -67,7 +69,7 @@ set -euo pipefail
 WORK="${1:?usage: container.sh <work-dir>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON="${E2E_PYTHON:-3.12}"
-PREV_REF="${E2E_PREV_REF:-origin/v4-capabilities}"
+PREV_REF="${E2E_PREV_REF:-auto}"
 TAG_PREFIX="${E2E_IMAGE_TAG:-ash-e2e-container:local}"
 TAG_FRESH="${TAG_PREFIX}-fresh"
 TAG_UPGRADE="${TAG_PREFIX}-upgrade"
@@ -75,6 +77,8 @@ OCI=docker
 
 # shellcheck source=packaging/cli-name.sh
 . "$REPO/packaging/cli-name.sh"
+# shellcheck source=scripts/e2e/n1-ref.sh
+. "$REPO/scripts/e2e/n1-ref.sh"
 
 # A layer cache exported to the Actions cache would publish the image's layers from a
 # public repository. run_ash_container.py only exports one when ACTIONS_RUNTIME_TOKEN is
@@ -185,17 +189,10 @@ harness "$REPO/.github/scripts/assert-no-image-publish.py"
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO/pyproject.toml" | head -n 1)"
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
 HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
-PREV_SHA="$(git -C "$REPO" rev-parse --verify --quiet "$PREV_REF^{commit}")" \
-  || fail "E2E_PREV_REF $PREV_REF does not name a commit"
-tree_of() { git -C "$REPO" rev-parse "$1^{tree}"; }
-if [ "$(tree_of "$PREV_SHA")" = "$(tree_of HEAD)" ]; then
-  say "$PREV_REF has HEAD's tree; using HEAD's first parent as N-1"
-  PREV_REF="HEAD^"
-  PREV_SHA="$(git -C "$REPO" rev-parse --verify --quiet "HEAD^1^{commit}")" \
-    || fail "HEAD has no parent in this clone; fetch at least one more commit of history"
-  [ "$(tree_of "$PREV_SHA")" != "$(tree_of HEAD)" ] \
-    || fail "HEAD's first parent has HEAD's tree too; there is no code change to upgrade across"
-fi
+# N-1 must carry this script: N-1's own CLI builds N-1's image with the flags step 3
+# passes (`build-image --ash-revision LOCAL`), and a release from before this leg
+# existed has no such flag.
+n1_resolve scripts/e2e/container.sh Dockerfile automated_security_helper/__init__.py
 # N-1's package often equals HEAD's: a branch that touches only packaging, editors or
 # workflows, and the merge of one. The marker below gives N-1 code of its own
 # either way, so the provenance checks can always tell the two images apart.
