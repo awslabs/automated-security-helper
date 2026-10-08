@@ -51,6 +51,7 @@ testpaths = ["tests"]
 addopts = "-q"
 markers = [
   "e2e: needs a real kind cluster and docker; skipped unless ASH_OPERATOR_E2E=1",
+  "negative_control: feeds the system a planted defect or a wrong input it must reject. Every one is required by node id in tests/e2e/required_nodes.txt (tests/test_e2e_required_nodes.py checks)",
 ]
 
 [tool.ruff]

@@ -103,6 +103,7 @@ class TestSharedCase:
             assert argument in logs, (argument, logs[-2000:])
 
 
+@pytest.mark.negative_control
 class TestTheVerdictCanFail:
     """Real outputs from this run, judged as the wrong case, must be rejected."""
 

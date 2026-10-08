@@ -223,6 +223,7 @@ def clean_result(fixtures):
     return wait_terminal("clean-scan")
 
 
+@pytest.mark.negative_control
 class TestCleanFixtureNegativeControl:
     def test_it_is_clean(self, clean_result):
         assert clean_result["phase"] == PHASE_CLEAN, (
@@ -269,6 +270,7 @@ def incomplete_result(fixtures):
     return wait_terminal("partial-scan")
 
 
+@pytest.mark.negative_control
 class TestAPartialScanIsIncomplete:
     def test_the_phase_is_incomplete_not_clean_or_findings(self, incomplete_result):
         assert incomplete_result["phase"] == PHASE_INCOMPLETE, (
@@ -364,6 +366,7 @@ HOLE_JOB = textwrap.dedent(
 )
 
 
+@pytest.mark.negative_control
 class TestAMissingShardIsRefused:
     """The failure mode the whole design is built against.
 
@@ -541,6 +544,7 @@ class TestPodDeletionMidRun:
         )
 
 
+@pytest.mark.negative_control
 class TestProvenanceAbsentIsRefused:
     """The negative control for the provenance check.
 
