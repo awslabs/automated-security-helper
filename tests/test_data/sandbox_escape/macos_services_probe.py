@@ -12,15 +12,19 @@ exec) is reported as it is, and a test can tell "the sandbox stopped the tool fr
 running" apart from "the tool ran and the service refused it".
 
 - ``launch_services``: ``open -a TextEdit``. LaunchServices asks launchd to start the
-  app, and launchd starts it outside the sandbox. With ``open`` able to reach
-  LaunchServices, a sandboxed process can run code that is not sandboxed (a
-  ``.command`` file opened in Terminal, for example).
+  app, and launchd starts it outside the sandbox, so a process that can do this can
+  run code that is not sandboxed (a ``.command`` file opened in Terminal).
 - ``pasteboard_read``: ``pbpaste``. The test puts a canary on the pasteboard first, so
   the attempt succeeds only if the canary comes back, not merely if pbpaste exits 0.
+- ``mach_lookup``: ``bootstrap_look_up`` of the Mach service the spec names, through
+  ctypes, which is the lookup itself with no client library around it. ``open`` is
+  also refused by the profile's default deny of the ``lsopen`` operation; this check
+  does not depend on that.
 
 Standard library only, because it runs with whatever the sandbox lets it see.
 """
 
+import ctypes
 import json
 import subprocess
 import sys
@@ -66,9 +70,25 @@ def main() -> int:
                 f"(exit {result.returncode}: {_last_line(result.stderr)})"
             )
 
+    def mach_lookup():
+        libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        lookup = libsystem.bootstrap_look_up
+        lookup.argtypes = [
+            ctypes.c_uint32,
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_uint32),
+        ]
+        lookup.restype = ctypes.c_int
+        bootstrap_port = ctypes.c_uint32.in_dll(libsystem, "bootstrap_port")
+        port = ctypes.c_uint32(0)
+        result = lookup(bootstrap_port, spec["service"].encode(), ctypes.byref(port))
+        if result != 0:
+            raise RuntimeError(f"bootstrap_look_up returned {result}")
+
     checks = {
         "launch_services": launch_services,
         "pasteboard_read": pasteboard_read,
+        "mach_lookup": mach_lookup,
     }
     outcomes = {
         name: attempt(fn)

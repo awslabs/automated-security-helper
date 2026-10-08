@@ -7,6 +7,10 @@ macOS only. The scanner is the sandbox-escape fixture plugin running
 tests/test_data/sandbox_escape/macos_services_probe.py as its tool, through a real
 ``ash scan``, so the spawn goes through the same choke point as a builtin scanner.
 
+Two levels: the tools a user would reach for (``open -a TextEdit``, ``pbpaste``), and
+the Mach lookup of each service itself, which is what the profile's Mach rules
+decide and which a process could use without going through those tools.
+
 Each attempt is made twice. ``--sandbox off`` is the control and has to succeed: that
 proves the session has a pasteboard and a LaunchServices to reach, which a login over
 SSH without a GUI session does not. Then ``--sandbox sandbox-exec``, where the tool must
@@ -45,7 +49,18 @@ PROBE = FIXTURE / "macos_services_probe.py"
 REFUSED = {
     "launch_services": "blocked: RuntimeError: open exited",
     "pasteboard_read": "blocked: RuntimeError: pbpaste did not return the pasteboard",
+    "mach_lookup": "blocked: RuntimeError: bootstrap_look_up returned",
 }
+
+#: Session services a scanner has no use for, looked up directly. LaunchServices
+#: (launchservicesd, coreservicesd and the lsd database) can start apps outside the
+#: sandbox; the pasteboard holds whatever the user last copied.
+SESSION_SERVICES = (
+    "com.apple.coreservices.launchservicesd",
+    "com.apple.CoreServices.coreservicesd",
+    "com.apple.lsd.mapdb",
+    "com.apple.pasteboard.1",
+)
 
 
 def _required() -> bool:
@@ -128,7 +143,9 @@ def textedit() -> Iterator[bool]:
         _quit_textedit()
 
 
-def _attempt(tmp_path: Path, mode: str, check: str, secret: str) -> str:
+def _attempt(
+    tmp_path: Path, mode: str, check: str, secret: str, service: str = ""
+) -> str:
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("print('hello')\n")
@@ -143,7 +160,12 @@ def _attempt(tmp_path: Path, mode: str, check: str, secret: str) -> str:
     spec_file = tmp_path / "spec.json"
     spec_file.write_text(
         json.dumps(
-            {"probe": str(source / PROBE.name), "secret": secret, "checks": [check]}
+            {
+                "probe": str(source / PROBE.name),
+                "secret": secret,
+                "service": service,
+                "checks": [check],
+            }
         )
     )
     env = {
@@ -219,3 +241,21 @@ def test_a_sandboxed_scanner_cannot_read_the_pasteboard(tmp_path_factory, pasteb
     )
     assert outcome != "succeeded", "sandbox-exec let the scanner read the pasteboard"
     assert outcome.startswith(REFUSED["pasteboard_read"]), outcome
+
+
+@pytest.mark.parametrize("service", SESSION_SERVICES)
+def test_a_sandboxed_scanner_cannot_look_up_a_session_service(
+    tmp_path_factory, service
+):
+    _require_sandbox_exec()
+    control = _attempt(
+        tmp_path_factory.mktemp("control"), "off", "mach_lookup", "", service
+    )
+    if control != "succeeded":
+        _unavailable(f"{service} cannot be looked up even unsandboxed: {control}")
+
+    outcome = _attempt(
+        tmp_path_factory.mktemp("sandboxed"), "sandbox-exec", "mach_lookup", "", service
+    )
+    assert outcome != "succeeded", f"sandbox-exec let the scanner look up {service}"
+    assert outcome.startswith(REFUSED["mach_lookup"]), outcome
