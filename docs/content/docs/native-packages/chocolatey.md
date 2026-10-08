@@ -1,6 +1,6 @@
 # Installing with Chocolatey (Windows)
 
-The Chocolatey package id is `ash`. That is what you pass to `choco`; the command it installs is `ashx`. The package is not on `community.chocolatey.org`, so you install it from a directory holding a `.nupkg` you built. See [Publication status](index.md#publication-status).
+The Chocolatey package id is `ash`. That is what you pass to `choco`; the command it installs is `ashx`. The package is not on `community.chocolatey.org`, so you install it from a directory holding a `.nupkg`, one you downloaded from a GitHub release or built. See [Publication status](index.md#publication-status).
 
 ## Prerequisites
 
@@ -10,7 +10,13 @@ The Chocolatey package id is `ash`. That is what you pass to `choco`; the comman
 
 ## Build the package
 
-From a checkout, with `uv` and Chocolatey installed:
+A GitHub release attaches `ash.<version>.nupkg`; to use that one, put it in a directory such as `C:\ash-pkg` and go to [Install](#install):
+
+```powershell
+gh release download v<version> --repo awslabs/automated-security-helper --pattern '*.nupkg' --dir C:\ash-pkg
+```
+
+To build it instead, from a checkout, with `uv` and Chocolatey installed:
 
 ```powershell
 uv build --out-dir dist

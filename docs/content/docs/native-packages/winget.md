@@ -13,6 +13,8 @@ The manifest set is schema-valid and CI installs, upgrades and uninstalls throug
 
 ## Install from a local manifest
 
+A GitHub release attaches a manifest set rendered for its own `.msix`, whose installer URL is that release's download. To use it, trust the certificate of the release's `.msix` (step 1), put the three `Amazon.AutomatedSecurityHelper*.yaml` files in one directory, and run step 4 with `--manifest` naming that directory; steps 2 and 3 are for a `.msix` that is not on a release.
+
 1. Get the `.msix` and trust its certificate, following [Get the package](msix.md#get-the-package) and steps 1 and 2 of [Trust the certificate and install](msix.md#trust-the-certificate-and-install). Do not run `Add-AppxPackage`; winget installs it.
 
 2. Serve the directory holding the `.msix` on loopback. Leave this running in its own shell:

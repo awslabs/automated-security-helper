@@ -1,12 +1,18 @@
 # Installing the Flatpak (Linux)
 
-The Flatpak app id is `io.github.awslabs.automated_security_helper`. It is not on Flathub, so you build the bundle from a checkout and install the file. See [Publication status](index.md#publication-status).
+The Flatpak app id is `io.github.awslabs.automated_security_helper`. It is not on Flathub, so you install a bundle file: one downloaded from a GitHub release, or one you build from a checkout. See [Publication status](index.md#publication-status).
 
 Read [The sandbox trade](#the-sandbox-trade) before choosing the Flatpak over a pip install: the app needs `--filesystem=host`, which gives up most of the file system confinement a Flatpak would otherwise provide.
 
 ## Build the bundle
 
-You need `flatpak`, `flatpak-builder`, `uv`, and the `org.freedesktop.Sdk//24.08` runtime, which also has to be present on any machine you install the bundle on:
+A GitHub release attaches an x86_64 bundle, `ash-<version>-x86_64.flatpak`. To use it, download it into `out/` and go to [Install](#install); the `org.freedesktop.Sdk//24.08` runtime below still has to be installed:
+
+```bash
+gh release download v<version> --repo awslabs/automated-security-helper --pattern '*.flatpak' --dir out
+```
+
+To build it instead, you need `flatpak`, `flatpak-builder`, `uv`, and the `org.freedesktop.Sdk//24.08` runtime, which also has to be present on any machine you install the bundle on:
 
 ```bash
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
