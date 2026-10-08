@@ -228,8 +228,8 @@ def test_the_cwd_falls_back_outside_the_tree_when_the_root_is_in_it(
 ):
     """A source directory that is a drive root (subst, mapped drive) on Windows.
 
-    The root is then inside the tree, so a fresh, empty directory under the
-    results directory is used; it holds no config file wherever it is.
+    The root is then inside the tree, so a new, empty directory under the results
+    directory is used; it holds no config file wherever it is.
     """
     from automated_security_helper.config import path_trust
 
@@ -242,14 +242,16 @@ def test_the_cwd_falls_back_outside_the_tree_when_the_root_is_in_it(
 
     monkeypatch.setattr(path_trust, "in_scanned_tree", root_is_in_the_tree)
     results = source / ".ash" / "ash_output" / "scanners" / "checkov" / "source"
-    # A config file planted where the fresh directory goes is removed with it.
+    # A directory already there, with a config file in it, is neither used nor
+    # removed: the working directory is a new one.
     (results / "cwd").mkdir(parents=True)
     (results / "cwd" / ".checkov.yaml").write_text("")
     cwd = path_trust.cwd_outside_scanned_tree(
         source, results_dir=results, source_dir=source
     )
-    assert cwd == results / "cwd"
+    assert cwd.parent == results and cwd != results / "cwd"
     assert cwd.is_dir() and not any(cwd.iterdir())
+    assert (results / "cwd" / ".checkov.yaml").exists()
 
 
 @pytest.mark.parametrize("which", ["checkov", "ferret-scan"])

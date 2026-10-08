@@ -66,23 +66,20 @@ def cwd_outside_scanned_tree(
     The filesystem root of ``target``: outside the scanned tree, and with every
     path relative to it absolute. When that root is inside the tree itself (a
     source directory that is a drive root, such as a ``subst`` or mapped drive on
-    Windows, or a scan of a whole filesystem), an empty ``cwd`` directory under
-    ``results_dir`` is made fresh for the run instead. It holds no config file
-    whatever tree it is in, and a sandboxed tool can enter it.
+    Windows, or a scan of a whole filesystem), a new empty directory under
+    ``results_dir`` is created for the run instead. It holds no config file
+    whatever tree it is in, and a sandboxed tool can enter it. It is created, never
+    cleared, so nothing is deleted on the way.
     """
     root = getattr(config, "_scanned_root", None) or source_dir
     anchor = Path(Path(os.path.abspath(target)).anchor)
     if not in_scanned_tree(anchor, root):
         return anchor
-    import shutil
+    import tempfile
 
-    fresh = Path(os.path.abspath(results_dir)) / "cwd"
-    if fresh.is_symlink() or fresh.is_file():
-        fresh.unlink()
-    elif fresh.exists():
-        shutil.rmtree(fresh)
-    fresh.mkdir(parents=True)
-    return fresh
+    directory = Path(os.path.abspath(results_dir))
+    directory.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="cwd-", dir=directory))
 
 
 def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:
