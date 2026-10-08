@@ -148,11 +148,30 @@ jobs:
           ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
 
+      # download-artifact treats an empty artifact-ids as "no filter" and downloads
+      # every artifact of the run, each into its own subdirectory. The verify step
+      # would then fail, but on a confusing message, so the ID is held to a number here.
+      - name: Check the release asset artifact ID
+        if: needs.resolve.outputs.skip == 'false'
+        env:
+          ARTIFACT_ID: ${{ needs.assets.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the assets job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "release asset artifact: ${ARTIFACT_ID}"
+
+      # By ID, so exactly the one artifact the assemble job uploaded is fetched, and
+      # with one artifact download-artifact extracts it straight into `path` (no
+      # per-artifact subdirectory). An ID also survives "re-run failed jobs", where a
+      # name carrying run_attempt would name an artifact that was never uploaded.
       - name: Download the gated release assets
         if: needs.resolve.outputs.skip == 'false'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.assets.outputs.artifact }}
+          artifact-ids: ${{ needs.assets.outputs.artifact-id }}
           path: release-assets
 
       # The bytes about to be attached are the bytes the gates passed: the digests come

@@ -303,7 +303,10 @@ def test_the_release_attests_and_attaches_the_one_checked_directory():
     download = _index(
         steps, lambda s: str(s.get("uses", "")).startswith("actions/download-artifact@")
     )
-    assert steps[download]["with"]["path"] == "release-assets"
+    assert steps[download]["with"] == {
+        "artifact-ids": "${{ needs.assets.outputs.artifact-id }}",
+        "path": "release-assets",
+    }
     verify = _index(
         steps,
         lambda s: "release-assets.py check release-assets" in str(s.get("run", "")),
@@ -336,6 +339,7 @@ def test_publishing_steps_are_skipped_together_when_the_release_exists():
         if step.get("if") == "needs.resolve.outputs.skip == 'false'"
     ]
     assert guarded == [
+        "Check the release asset artifact ID",
         "Download the gated release assets",
         "Verify the assets are the gated set",
         "Attest build provenance",
