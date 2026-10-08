@@ -454,6 +454,7 @@ itself outside a checkout.
 | Setting | From a config file inside the scanned tree |
 |---|---|
 | `scanners.<name>.options.tool_version`, `converters.jupyter.options.tool_version` | Must be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`. This applies from every source, including `--config-overrides`. Any other value is replaced by the scanner's default constraint. |
+| `scanners.opengrep.options.version` | Must be a release tag such as `v1.15.1`, from every source. Any other value is replaced by the pinned version. |
 | `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. |
 | `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool only when the file is outside the scanned tree. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
 | `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept only when the file is outside the scanned tree. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
