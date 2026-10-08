@@ -1,9 +1,11 @@
 ASH as a Flatpak
 ================
 
-This package is built and tested here and published as a GitHub Release asset. It is
-not submitted to Flathub, and nothing under packaging/flatpak/ talks to Flathub except
-to download the org.freedesktop runtime it builds against.
+This package is built and tested here. It is meant to be published as a GitHub Release
+asset and is not attached to a release yet, so today you build it from a checkout (see
+"Building it yourself" below). It is not submitted to Flathub, and nothing under
+packaging/flatpak/ talks to Flathub except to download the org.freedesktop runtime it
+builds against.
 
 What you get on PATH, which is not "ashx"
 -----------------------------------------

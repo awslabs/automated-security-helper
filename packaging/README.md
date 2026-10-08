@@ -1,8 +1,12 @@
 # Native packaging
 
-Builders for OS-native ASH packages. Every artifact here is published as a **GitHub
-Release asset only** — nothing in this directory submits to `microsoft/winget-pkgs`,
-`community.chocolatey.org`, or Flathub, and nothing publishes a container image.
+Builders for OS-native ASH packages. A GitHub Release asset is the **only** place any
+artifact here is meant to be published — nothing in this directory submits to
+`microsoft/winget-pkgs`, `community.chocolatey.org`, or Flathub, and nothing publishes a
+container image. None of them is attached to a release yet, either:
+`.github/workflows/ash-tag-on-merge.yml` attaches the wheel, the sdist and the MCPB
+bundle and nothing else, so today every package here is built from a checkout. The
+user-facing install steps are in `docs/content/docs/native-packages/`.
 
 ## The boundary these builders must not cross
 

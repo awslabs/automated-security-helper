@@ -31,7 +31,11 @@ Nix mode supplies every scanner from a pinned flake, so nothing else needs insta
 
 The command is `ashx`. Every installation method on this page puts `ashx` on your `PATH`.
 
-In v4, pip-based installs (pip, pipx, `uv tool install`), Homebrew and the container also provide `ash` as a deprecated alias. It prints one warning line on stderr, then runs the same command with the same exit codes. The deb and rpm packages ship only `ashx`, because `ash` is the Almquist shell on many distributions (BusyBox, Alpine, MSYS2). Update scripts to call `ashx`.
+In v4, pip-based installs (pip, pipx, `uv tool install`), Homebrew and the container also provide `ash` as a deprecated alias. It prints one warning line on stderr, then runs the same command with the same exit codes. The native packages (deb, rpm, MSIX, winget, Chocolatey and Flatpak) ship only `ashx`, because `ash` is the Almquist shell on many systems (BusyBox, Alpine, MSYS2, Git for Windows). Update scripts to call `ashx`.
+
+### Native packages
+
+ASH also builds an MSIX, a Chocolatey package and a winget manifest set for Windows, and a Flatpak for Linux. None of them is published to a public feed yet. [Native Packages](native-packages/index.md) covers how to build and install each one.
 
 ### Standard Installation
 
