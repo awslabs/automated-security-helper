@@ -97,7 +97,7 @@ def test_installed_but_not_on_path_fails(locate, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PATH", str(elsewhere))
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     assert locate.main() == 1
-    assert "None" in capsys.readouterr().out
+    assert "resolves to nothing" in capsys.readouterr().out
 
 
 def test_the_candidates_come_from_this_interpreter(locate):

@@ -167,14 +167,14 @@ def _triggers(data: dict[Any, Any]) -> set[str]:
 def _composite_offenders(check, helper_check) -> list[str]:
     offenders = []
     for path in _action_files():
-        rel = path.relative_to(REPO_ROOT)
+        rel = path.relative_to(REPO_ROOT).as_posix()
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for name, body in _step_bodies((data.get("runs") or {}).get("steps")):
             offenders += [f"{rel}: {name!r}: {line}" for line in check(body)]
         for helper in sorted(path.parent.iterdir()):
             if helper.suffix in HELPER_SUFFIXES and helper.is_file():
                 offenders += [
-                    f"{helper.relative_to(REPO_ROOT)}: {line}"
+                    f"{helper.relative_to(REPO_ROOT).as_posix()}: {line}"
                     for line in helper_check(helper.read_text(encoding="utf-8"))
                 ]
     return offenders
@@ -182,7 +182,7 @@ def _composite_offenders(check, helper_check) -> list[str]:
 
 def test_the_scan_sees_the_actions_it_is_meant_to_guard():
     """Control: the two actions that had the findings must be in the scanned set."""
-    rels = {str(p.relative_to(REPO_ROOT)) for p in _action_files()}
+    rels = {p.relative_to(REPO_ROOT).as_posix() for p in _action_files()}
     for expected in (
         ".github/actions/setup-ash/action.yml",
         ".github/actions/run-scan-test/action.yml",
@@ -286,7 +286,7 @@ def test_no_attacker_triggered_workflow_writes_github_path_or_env():
                         r"GITHUB_(PATH|ENV)|core\.(addPath|exportVariable)", line
                     ):
                         offenders.append(
-                            f"{path.relative_to(REPO_ROOT)}: {name!r}: {line}"
+                            f"{path.relative_to(REPO_ROOT).as_posix()}: {name!r}: {line}"
                         )
     assert not offenders, (
         "a workflow on pull_request_target or workflow_run writes GITHUB_PATH or "

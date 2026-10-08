@@ -46,10 +46,11 @@ def main() -> int:
     installed = os.path.join(found[0], exe)
     resolved = shutil.which("ash")
     if resolved is None or not os.path.samefile(resolved, installed):
+        where = resolved if resolved is not None else "nothing"
         print(
             f"::error::ASH was installed to {installed}, but 'ash' on PATH resolves to "
-            f"{resolved!r}. Callers of setup-ash run 'ash' by name, so they would get "
-            "that one or none."
+            f"{where}. Callers of setup-ash run 'ash' by name, so they would get that "
+            "one or none."
         )
         return 1
     print(f"ash resolves to {resolved}")
