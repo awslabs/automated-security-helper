@@ -33,7 +33,8 @@
 #    byte for byte (scripts/e2e/image_provenance.py) and reports head's version. Then the
 #    three cases from tests/e2e/fixtures/cases.json through scripts/e2e/run_case.py with
 #    `--mode container --no-build`: findings (exit 2, 3 findings), clean (exit 0) and
-#    incomplete (exit 1, opengrep MISSING). Then the negative controls that need this
+#    incomplete (exit 1, opengrep MISSING). Before the cases, scripts/e2e/alias_check.sh
+#    checks the image's deprecated `ash` alias inside it. Then the negative controls that need this
 #    image (4), and the fresh tag is removed before N-1 is built, so at most two full
 #    images share the disk.
 # 3. Upgrade: installs the N-1 wheel into a second venv and has that CLI build N-1
@@ -177,6 +178,8 @@ harness "$REPO/scripts/e2e/assert_outcome.py" --self-test
 harness "$REPO/scripts/e2e/image_provenance.py" --self-test
 harness "$REPO/.github/scripts/assert-no-image-publish.py" --self-test
 harness "$REPO/.github/scripts/assert-no-image-publish.py"
+ALIAS_ASSERT="$REPO/.github/actions/validate-install/assert-deprecated-alias.sh"
+bash "$REPO/scripts/e2e/alias_check.sh" self-test "$ALIAS_ASSERT"
 "$OCI" version --format 'docker client {{.Client.Version}}, server {{.Server.Version}}'
 
 # --------------------------------------------------------------------------
@@ -293,6 +296,18 @@ case "$version_line" in
   *"v$VERSION"*) say "in-image $ASH_CLI_NAME --version: $version_line" ;;
   *) fail "in-image $ASH_CLI_NAME --version printed '$version_line', expected v$VERSION" ;;
 esac
+
+# The image keeps the deprecated `ash` next to `ashx`, as validate-container checks in
+# Unified CI. This is the same check on this push-triggered leg, run inside the image
+# with both scripts mounted read-only so the image under test is the one that was
+# built: exactly one notice, the same stdout and exit codes as ashx, and an ash that
+# prints the notice twice rejected. ENTRYPOINT is empty, so `bash` is the command.
+say "the image's deprecated ash alias"
+"$OCI" run --rm --network none \
+  -v "$REPO/scripts/e2e/alias_check.sh:/tmp/ash-alias/alias_check.sh:ro" \
+  -v "$ALIAS_ASSERT:/tmp/ash-alias/assert-deprecated-alias.sh:ro" \
+  "$TAG_FRESH" bash /tmp/ash-alias/alias_check.sh check /tmp/ash-alias/assert-deprecated-alias.sh \
+  || fail "$TAG_FRESH's deprecated ash alias is not ashx with one notice"
 
 run_case "$CLI" "$TAG_FRESH" findings fresh-findings
 run_case "$CLI" "$TAG_FRESH" clean fresh-clean

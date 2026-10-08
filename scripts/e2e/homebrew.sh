@@ -23,9 +23,12 @@
 # Legs, one per CI matrix entry because each is a full source build of every resource:
 #
 #   fresh     install N, check the version, run the formula's own `brew test` (which
-#             runs ashx and checks the deprecated ash alias), run the three cases from
-#             tests/e2e/fixtures/cases.json through scripts/e2e/run_case.py (exit 2 with
-#             3 findings, exit 0, exit 1 with opengrep MISSING), two negative controls,
+#             runs ashx and checks the deprecated ash alias), run
+#             scripts/e2e/alias_check.sh on the linked ash and ashx (one notice, same
+#             output and exit codes, and an ash printing it twice rejected), run the
+#             three cases from tests/e2e/fixtures/cases.json through
+#             scripts/e2e/run_case.py (exit 2 with 3 findings, exit 0, exit 1 with
+#             opengrep MISSING), two negative controls,
 #             then `brew uninstall` and require every link, the keg and the opt link gone.
 #   upgrade   install N-1 (E2E_PREV_REF's tree and its own formula, version lowered),
 #             scan with it, point the tap at N, `brew upgrade`, require N linked and the
@@ -77,6 +80,8 @@ OPT_LINK="$BREW_PREFIX/opt/ash"
 
 say "Homebrew: $(brew --version | head -n 1); harness: $("$HARNESS_PYTHON" --version 2>&1)"
 harness "$REPO/scripts/e2e/assert_outcome.py" --self-test
+ALIAS_ASSERT="$REPO/.github/actions/validate-install/assert-deprecated-alias.sh"
+bash "$REPO/scripts/e2e/alias_check.sh" self-test "$ALIAS_ASSERT"
 
 version_of() { sed -n 's/^version = "\(.*\)"$/\1/p' "$1/pyproject.toml" | head -n 1; }
 
@@ -202,6 +207,13 @@ leg_fresh() {
   # The formula's own test block: ashx --version, the ash alias's deprecation line on
   # stderr, and a real scan with a non-zero SARIF count.
   brew test --verbose "$FORMULA"
+
+  # The test block's assert_match passes on a notice printed twice and never compares
+  # exit codes. The check pip and the container image get does both: exactly one notice,
+  # and the same stdout and exit code as ashx. It then shows itself rejecting an ash
+  # that prints the notice twice.
+  PATH="$BREW_BIN:$PATH" bash "$REPO/scripts/e2e/alias_check.sh" check "$ALIAS_ASSERT" \
+    || fail "the deprecated ash alias Homebrew linked is not ashx with one notice"
 
   run_case "$cli" findings fresh-findings
   run_case "$cli" clean fresh-clean
