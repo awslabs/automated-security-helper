@@ -445,10 +445,14 @@ REPO_PINS: tuple[RepoPin, ...] = (
         DOCKER_HUB,
         "",
         (
-            PinSite("deploy/kubernetes-operator/Dockerfile", _image_ref("python")),
+            # Two stages, the wheel build and the runtime, on the same digest.
+            PinSite(
+                "deploy/kubernetes-operator/Dockerfile", _image_ref("python"), count=2
+            ),
             PinSite(
                 "deploy/kubernetes-operator/tests/e2e/Dockerfile.ash",
                 _image_ref("python"),
+                count=2,
             ),
         ),
     ),

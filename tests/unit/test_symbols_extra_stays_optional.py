@@ -29,6 +29,7 @@ was checked.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -98,13 +99,14 @@ INSTALL_LINES = [
         r'"--from=[^"]*"',
         set(),
     ),
-    # The operator's e2e image installs two scanners by name next to the source
-    # tree; see the comment above that RUN line.
+    # The operator's e2e image builds ASH's wheel in its own stage and installs it
+    # with --no-deps --no-index; its dependencies come from the uv.lock export that
+    # test_operator_e2e_runtime_export_requests_no_extra pins below.
     (
         "deploy/kubernetes-operator/tests/e2e/Dockerfile.ash",
-        r"pip install .* \. ",
-        r" \. ",
-        {"bandit", "detect-secrets"},
+        r"pip install .*/wheels/automated_security_helper-\*\.whl",
+        r"/wheels/automated_security_helper-\*\.whl",
+        set(),
     ),
 ]
 
@@ -154,6 +156,37 @@ def test_channel_installs_without_the_symbols_extra(relative, pattern, wheel, al
     # The extra's packages can also be named outright after the wheel.
     extra = [p for p in _packages_after_wheel(logical, wheel) if p not in allowed]
     assert not extra, f"{relative} installs more than ASH: {extra} in {logical}"
+
+
+def _returned_list(source: str, function: str) -> list[str]:
+    """The string literals of the list ``function`` returns, read without importing."""
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name == function:
+            for statement in ast.walk(node):
+                if isinstance(statement, ast.Return) and isinstance(
+                    statement.value, ast.List
+                ):
+                    return [
+                        element.value
+                        for element in statement.value.elts
+                        if isinstance(element, ast.Constant)
+                        and isinstance(element.value, str)
+                    ]
+    raise AssertionError(f"{function} returning a list literal not found")
+
+
+def test_operator_e2e_runtime_export_requests_no_extra():
+    """Dockerfile.ash installs ASH's dependencies from a `uv export` of uv.lock, and
+    the wheel itself with --no-deps. An extra requested on that export would put the
+    [symbols] packages in the image with no install line naming them."""
+    source = (REPO_ROOT / "deploy/kubernetes-operator/tests/e2e/helpers.py").read_text(
+        "utf-8"
+    )
+    argv = _returned_list(source, "ash_runtime_export_argv")
+
+    assert argv[:2] == ["uv", "export"], argv
+    asks = [a for a in argv if a in ("--all-extras", "--extra") or "symbols" in a]
+    assert not asks, f"the e2e image's runtime export requests an extra: {asks}"
 
 
 def test_mcpb_server_adds_no_packages_to_the_uvx_environment():
