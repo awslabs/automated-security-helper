@@ -59,6 +59,8 @@ describe('parameter names are the contract', () => {
     // - `VpcSubnetIds` was reserved here and is now LIVE, with `VpcId`
     //   beside it: AshCodeCommitGate declares both, and they place the scan function
     //   in the adopter's VPC when set. No other stack declares either.
+    //   `ScanEgressCidr` joined them as the destination of that function's only
+    //   egress rule, replacing a hard-coded 0.0.0.0/0 (trivy AWS-0104).
     // - `CertificateArn` is RESERVED, as `VpcSubnetIds` was until the gate consumed it. `ash-config.ts` ships a
     //   factory for each, with the type and pattern settled, and no stack calls
     //   either one. They are the opt-in names the `CKV_AWS_117` and
@@ -84,6 +86,7 @@ describe('parameter names are the contract', () => {
         'McpMountPath',
         'McpStatelessHttp',
         'RebuildSchedule',
+        'ScanEgressCidr',
         'ShardCount',
         'VpcId',
         'VpcSubnetIds',
@@ -115,12 +118,14 @@ describe('parameter names are the contract', () => {
         stack: id,
         vpcSubnetIds: declared.includes(ASH_PARAMETER_NAMES.vpcSubnetIds),
         vpcId: declared.includes(ASH_PARAMETER_NAMES.vpcId),
+        scanEgressCidr: declared.includes(ASH_PARAMETER_NAMES.scanEgressCidr),
         certificateArn: declared.includes(ASH_PARAMETER_NAMES.certificateArn),
         kmsKeyArn: declared.includes(ASH_PARAMETER_NAMES.kmsKeyArn),
       }).toEqual({
         stack: id,
         vpcSubnetIds: isGate,
         vpcId: isGate,
+        scanEgressCidr: isGate,
         certificateArn: false,
         kmsKeyArn: true,
       });
