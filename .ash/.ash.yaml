@@ -15,8 +15,8 @@ global_settings:
     # elsewhere in the file is still reported.
     - rule_id: "threat-filesystem-read"
       path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 480
-      line_end: 480
+      line_start: 496
+      line_end: 496
       reason: >-
         False positive. The line writes a creds.env holding a fake AWS key id and
         secret, generated per run with secrets.choice, into the test's temporary

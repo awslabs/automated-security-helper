@@ -43,8 +43,8 @@ scanners:
     enabled: true           # once the module is listed; false turns it off
     options:
       config_file: null     # actionlint config, relative to the source directory
-      shellcheck: null      # command name or path; null disables the integration
-      pyflakes: null        # command name or path; null disables the integration
+      shellcheck: null      # "shellcheck" to enable it; null disables the integration
+      pyflakes: null        # "pyflakes" to enable it; null disables the integration
       severity_threshold: null
       scan_timeout: 1800
 ```
@@ -65,7 +65,15 @@ If the config has `paths.<glob>.ignore` patterns, actionlint drops matching find
 
 actionlint runs `shellcheck` on `run:` scripts and `pyflakes` on `shell: python` steps when they are on `PATH`, and skips them silently when they are not. Results would then depend on what a host happens to have installed, so ASH disables both by default (`-shellcheck= -pyflakes=`).
 
-To use them, set the option to a command name (looked up on `PATH` and in ASH's bin directory) or a path. A relative path is resolved against the source directory. If the configured tool cannot be found or is not executable, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
+To use them, set the option to `shellcheck` or `pyflakes`, which is looked up on `PATH` and in ASH's bin directory. If the configured tool cannot be found or is not executable, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
+
+Each option names the program actionlint pipes every `run:` script to, started from the root of the scanned tree. Set to a shell or an interpreter, that program runs the repository's code. ASH's config usually comes from the repository being scanned (`.ash/.ash.yaml`), so from a config file inside the scanned tree each option accepts only its own name. Another program, or an absolute path, is honored only from `--config-overrides` or a config file outside the scanned tree:
+
+```bash
+ash scan --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
+```
+
+Whoever sets it, a program that resolves inside the scanned tree is refused, and so is a relative path. A refused value is logged as a warning and actionlint runs with that integration off.
 
 ## Severity mapping
 

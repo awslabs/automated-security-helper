@@ -50,6 +50,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_scanner im
     TrivyScannerConfig,
     TrivyScannerConfigOptions,
 )
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
 PluginContext.model_rebuild()
@@ -146,12 +147,19 @@ def _copy_fixture(tmp_path: Path) -> Path:
     return source
 
 
-def _scan_direct(source: Path, output: Path, **options):
+def _scan_direct(source: Path, output: Path, *, operator: bool = False, **options):
+    """A direct scan whose config is the scanned tree's, or the operator's."""
+    config = AshConfig()
+    record_provenance(
+        config,
+        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+    )
     context = PluginContext(
         source_dir=source,
         output_dir=output,
         work_dir=output / "converted",
-        config=AshConfig(),
+        config=config,
     )
     options.setdefault("offline", False)
     scanner = TrivyScanner(
@@ -447,7 +455,15 @@ def test_the_scanned_repos_own_trivy_config_cannot_shrink_the_report(
     assert _pairs(ignored) == _pairs(baseline) - {
         ("CVE-2018-18074", "requirements.txt")
     }
-    _, critical = _scan_direct(source, tmp_path / "out3", config_file="trivy.yaml")
+    # config_file is honored only from the operator, for a file outside the tree.
+    _, in_tree = _scan_direct(source, tmp_path / "out3", config_file="trivy.yaml")
+    assert _pairs(in_tree) == _pairs(baseline)
+    operator_config = tmp_path / "operator" / "trivy.yaml"
+    operator_config.parent.mkdir()
+    operator_config.write_text("severity:\n  - CRITICAL\n", encoding="utf-8")
+    _, critical = _scan_direct(
+        source, tmp_path / "out4", operator=True, config_file=str(operator_config)
+    )
     assert _pairs(critical) < _pairs(baseline)
 
 

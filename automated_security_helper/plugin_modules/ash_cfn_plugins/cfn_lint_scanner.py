@@ -92,7 +92,14 @@ from automated_security_helper.utils.cfn_template_discovery import (
     discover_templates,
     display_path,
 )
+from automated_security_helper.utils.config_trust import (
+    inside_scanned_tree,
+    set_by_operator,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.pre_installed_tool import (
+    validate_version_constraint,
+)
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
@@ -161,11 +168,13 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "Path to a cfn-lint configuration file (.cfnlintrc), relative to the "
-                "source directory. When unset, ASH gives cfn-lint an empty "
-                "configuration, so a .cfnlintrc in the scanned repository or the "
-                "home directory is NOT read: such a file can load Python rules "
-                "(append_rules) and switch checks off. Name one here to use it."
+                "Path to a cfn-lint configuration file (.cfnlintrc). When unset, ASH "
+                "gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned "
+                "repository or the home directory is NOT read: such a file can load "
+                "Python rules (append_rules) and switch checks off. Honored only when "
+                "set by --config-overrides or a config file outside the scanned tree, "
+                "and only for a file outside the scanned tree; otherwise "
+                "it is ignored with a warning."
             ),
         ),
     ] = None
@@ -236,6 +245,12 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                     f"{item!r} is not a cfn-lint rule id or prefix (letters and digits)"
                 )
         return value
+
+    @field_validator("tool_version")
+    @classmethod
+    def _valid_tool_version(cls, value: Optional[str]) -> Optional[str]:
+        # Appended to the package name for uv; see validate_version_constraint.
+        return validate_version_constraint(value)
 
 
 class CfnLintScannerConfig(ScannerPluginConfigBase):
@@ -330,10 +345,21 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         ASH's suppression accounting. So the default is an empty configuration ASH
         writes itself, and a ``.cfnlintrc`` is used only when the ASH config names
         it in ``config_file``.
+
+        The ASH config usually comes from the scanned repository too, so
+        ``config_file`` is honored only when the operator set it (through
+        ``--config-overrides`` or a config file outside the scanned tree, see
+        ``utils/config_trust.py``) and it resolves outside the scanned tree.
+        Otherwise it is ignored with a warning and the empty configuration is used.
         """
         options = self._options()
         args: List[str] = []
-        if not options.config_file:
+        config_file = (
+            self._operator_config_file(options.config_file)
+            if options.config_file
+            else None
+        )
+        if config_file is None:
             empty = Path(results_dir).joinpath("ash-empty.cfnlintrc")
             # Unlinked and recreated rather than overwritten, so a symlink left at
             # this path (the output directory usually sits inside the scanned tree)
@@ -346,15 +372,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 handle.write("{}\n")
             args.append(f"--config-file={empty.resolve().as_posix()}")
         else:
-            candidate = Path(options.config_file)
-            if not candidate.is_absolute():
-                candidate = self._source_dir() / candidate
-            if not candidate.is_file():
-                raise ScannerError(
-                    f"scanners.cfn-lint.options.config_file names {candidate}, which "
-                    "does not exist"
-                )
-            args.append(f"--config-file={candidate.resolve().as_posix()}")
+            args.append(f"--config-file={config_file.as_posix()}")
         if options.regions:
             args.extend(["--regions", *options.regions])
         if options.ignore_checks:
@@ -362,6 +380,43 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if options.include_checks:
             args.extend(["--include-checks", *options.include_checks])
         return args
+
+    def _operator_config_file(self, configured: Path | str) -> Optional[Path]:
+        """The ``config_file`` to pass, or None when it must not be used.
+
+        Raises:
+            ScannerError: the operator named a file that does not exist.
+        """
+        source_dir = self._source_dir()
+        candidate = Path(configured)
+        if not candidate.is_absolute():
+            candidate = source_dir / candidate
+        context_config = self.context.config if self.context is not None else None
+        if not set_by_operator(
+            context_config, "scanners.cfn-lint.options.config_file", configured
+        ):
+            reason = (
+                "it came from a config file in the scanned tree; set it with "
+                "--config-overrides or a config file outside the tree"
+            )
+        elif inside_scanned_tree(candidate, source_dir):
+            reason = "it is inside the scanned tree"
+        else:
+            if not candidate.is_file():
+                raise ScannerError(
+                    f"scanners.cfn-lint.options.config_file names {candidate}, which "
+                    "does not exist"
+                )
+            return candidate.resolve()
+        # A .cfnlintrc can make cfn-lint import Python files (append_rules), so one
+        # the scanned repository chose is never handed to it.
+        self._plugin_log(
+            f"Ignoring scanners.cfn-lint.options.config_file ({str(configured)!r}): "
+            f"{reason}. A .cfnlintrc can load Python rules, so cfn-lint runs with "
+            "ASH's empty configuration instead.",
+            level=logging.WARNING,
+        )
+        return None
 
     @staticmethod
     def _recorded_args(option_args: List[str], source_dir: Path) -> List[str]:

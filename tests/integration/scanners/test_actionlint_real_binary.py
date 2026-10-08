@@ -191,3 +191,116 @@ def test_enabled_but_missing_is_missing_and_exits_one(repo, tmp_path):
         (output / "ash_aggregated_results.json").read_text(encoding="utf-8")
     )
     assert aggregated["scanner_results"]["actionlint"]["status"] == "MISSING"
+
+
+# --------------------------------------------------------------------------- #
+# The scanned tree's config cannot choose the program actionlint pipes run:
+# scripts to. actionlint runs it as `<program> --norc -f json -x --shell bash
+# ... -` from the scan root, so `shellcheck: bash` makes bash execute a file
+# named `json` that the repository committed. Each case plants a program that
+# leaves a marker when run; the operator case is the control that proves a
+# planted program does run when it is allowed to.
+# --------------------------------------------------------------------------- #
+
+MODULE = "automated_security_helper.plugin_modules.ash_actionlint_plugins"
+
+
+def _marker_program(path: Path, marker: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\ntouch '{marker}'\necho '[]'\n")
+    path.chmod(0o755)
+    return path
+
+
+def _repo_config(repo: Path, **options: str) -> None:
+    lines = [
+        "ash_plugin_modules:",
+        f"  - {MODULE}",
+        "scanners:",
+        "  actionlint:",
+        "    options:",
+        *(f"      {name}: {json.dumps(value)}" for name, value in options.items()),
+    ]
+    (repo / ".ash").mkdir(exist_ok=True)
+    (repo / ".ash" / ".ash.yaml").write_text("\n".join(lines) + "\n")
+
+
+def _scan(repo: Path, output: Path, *extra: str) -> subprocess.CompletedProcess:
+    return _ash(
+        "scan",
+        "--ash-plugin-modules",
+        MODULE,
+        "--mode",
+        "local",
+        "--source-dir",
+        str(repo),
+        "--output-dir",
+        str(output),
+        "--scanners",
+        "actionlint",
+        "--no-progress",
+        "--fail-on-findings",
+        "false",
+        *extra,
+        env={**os.environ, "ASH_OFFLINE": "true"},
+    )
+
+
+def _actionlint_sarif(output: Path) -> str:
+    found = sorted((output / "scanners" / "actionlint").rglob("actionlint.sarif"))
+    assert found, f"actionlint wrote no SARIF under {output}"
+    return found[0].read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell and execute bit")
+def test_shellcheck_bash_from_the_scanned_tree_never_runs_its_json(repo, tmp_path):
+    _require_actionlint()
+    if not shutil.which("bash"):
+        pytest.skip("bash is not installed")
+    marker = tmp_path / "json-ran"
+    _marker_program(repo / "json", marker)
+    _repo_config(repo, shellcheck="bash")
+    output = tmp_path / "out"
+
+    result = _scan(repo, output)
+
+    assert not marker.exists(), "actionlint ran bash on the repository's json file"
+    log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    assert "Ignoring scanners.actionlint.options.shellcheck" in log, (
+        result.stdout[-3000:] + result.stderr[-3000:]
+    )
+    assert "-shellcheck=bash" not in _actionlint_sarif(output)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell and execute bit")
+@pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
+def test_a_program_planted_in_the_scanned_tree_never_runs(repo, tmp_path, flag):
+    _require_actionlint()
+    marker = tmp_path / "planted-ran"
+    planted = _marker_program(repo / "tools" / "planted", marker)
+    _repo_config(repo, **{flag: planted.as_posix()})
+    output = tmp_path / "out"
+
+    _scan(repo, output)
+
+    assert not marker.exists()
+    assert planted.as_posix() not in _actionlint_sarif(output)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell and execute bit")
+def test_the_operator_can_name_a_program_outside_the_tree(repo, tmp_path):
+    """The control: the same kind of program does run when the operator names it."""
+    _require_actionlint()
+    marker = tmp_path / "operator-ran"
+    program = _marker_program(tmp_path / "operator-bin" / "shellcheck", marker)
+    _repo_config(repo, shellcheck="bash")
+    output = tmp_path / "out"
+
+    _scan(
+        repo,
+        output,
+        "--config-overrides",
+        f"scanners.actionlint.options.shellcheck={program.as_posix()}",
+    )
+
+    assert marker.exists(), "the operator's shellcheck never ran"

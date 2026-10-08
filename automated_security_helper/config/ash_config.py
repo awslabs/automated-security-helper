@@ -108,6 +108,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScannerConfig,
 )
+from automated_security_helper.utils.config_trust import ConfigProvenance
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -1065,6 +1066,10 @@ class AshConfig(BaseModel):
 
     # Internal field to track config resolution warnings (not serialized)
     _resolution_warnings: List[str] = PrivateAttr(default_factory=list)
+    # Whether the operator or the scanned tree supplied this config, recorded by the
+    # orchestrator (utils/config_trust.py). None means unknown, which counts as the
+    # scanned tree.
+    _provenance: Optional[ConfigProvenance] = PrivateAttr(default=None)
 
     # The tree a scan with this config covers, when it is wider than the source
     # directory: workspace mode sets the workspace root. config/path_trust.py

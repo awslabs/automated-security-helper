@@ -44,9 +44,9 @@ scanners:
   cfn-lint:
     enabled: true
     options:
-      # A .cfnlintrc to use, relative to the source directory. When unset, ASH
-      # gives cfn-lint an empty configuration (see "Configuration files" below).
-      config_file: .cfnlintrc
+      # A .cfnlintrc to use, outside the scanned tree. When unset, ASH gives
+      # cfn-lint an empty configuration (see "Configuration files" below).
+      config_file: /etc/ash/cfnlintrc
       # Regions to validate against. Defaults to cfn-lint's own default (us-east-1).
       regions: [us-east-1, eu-west-1]
       # Rule ids or prefixes to skip everywhere, or to enable (e.g. "I" for
@@ -65,7 +65,9 @@ Region names, rule ids and prefixes are validated when the config is loaded, so 
 
 Left to itself, cfn-lint reads a `.cfnlintrc` from the directory it runs in (the scanned repository) and from your home directory. ASH does not let it: unless `config_file` names a file, ASH passes cfn-lint an empty configuration of its own, which stops both lookups. A `.cfnlintrc` is not passive settings. Its `append_rules` key loads Python files as rules, which runs them during the scan, and `ignore_checks: [E, W]` turns every finding off without anything showing up in ASH's suppression reporting. In a repository whose changes you scan before trusting them, such as a pull request in CI, that is code execution and a silent bypass.
 
-Naming a file in `config_file` uses it, with the same trust you give the ASH config that names it, `append_rules` included.
+For the same reason `config_file` is honored only when the operator sets it, through `--config-overrides` or a config file outside the scanned tree, and only for a file outside the scanned tree. A `config_file` from the repository's own `.ash/.ash.yaml`, or one naming a file inside the tree, is ignored with a warning and cfn-lint gets ASH's empty configuration. A file you name this way is used with `append_rules` included.
+
+`tool_version` is appended to the package name when ASH installs cfn-lint, so it must be a version constraint such as `>=1.43.3,<2.0.0`. Anything else, a direct reference such as `@ file:///...` included, fails config validation.
 
 ### Severity mapping
 

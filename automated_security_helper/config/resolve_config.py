@@ -26,6 +26,7 @@ from automated_security_helper.config.sandbox_grants import (
     scanned_trees,
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -252,6 +253,7 @@ def resolve_config(
     if chain:
         in_tree = list(chain) if untrusted_config else files_inside(chain, trees)
         if not in_tree:
+            record_provenance(config, in_tree=[])
             return config
         default_in_tree = files_inside(default_config_chain(), trees)
     else:
@@ -259,6 +261,7 @@ def resolve_config(
         # file when that variable names one, which can be inside the tree too.
         in_tree = default_in_tree = files_inside(default_config_chain(), trees)
         if not in_tree:
+            record_provenance(config, in_tree=[])
             return config
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
     if operator is not None and not files_inside(operator[1], trees):
@@ -274,6 +277,15 @@ def resolve_config(
             if operator is not None
             else get_default_config().sandbox.mode
         )
+    # What scanners consult before honoring an option that names code to run
+    # (utils/config_trust.py): the same trusted base, with the overrides replayed
+    # per section when a scanner asks.
+    record_provenance(
+        config,
+        in_tree=in_tree,
+        trusted=trusted.model_copy(deep=True),
+        config_overrides=config_overrides,
+    )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
     # section they write into.

@@ -81,8 +81,10 @@ default. Measured on v0.69.3 against the fixture repository (10 findings): a
 A scanned repository should not be able to quietly shape its own report, so ASH
 passes ``--config``, ``--ignorefile`` and ``--secret-config`` pointing at files of
 its own that set nothing. ``config_file``, ``ignore_file`` and
-``secret_config_file`` opt in to real ones. ``trivy-repo`` is unchanged and still
-reads them.
+``secret_config_file`` opt in to real ones. ``config_file`` is honored only from the
+operator and only for a file outside the scanned tree, because a trivy.yaml can load
+WASM modules (``module.dir``); see ``_operator_config_file``. ``trivy-repo`` is
+unchanged and still reads them.
 
 Skipping ASH's output directory
 -------------------------------
@@ -116,6 +118,10 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins._trivy_scanner_b
     TrivyScannerBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.utils.config_trust import (
+    inside_scanned_tree,
+    set_by_operator,
+)
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -188,11 +194,14 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy config file (trivy.yaml), relative to the source directory, "
-                "passed as --config. Unset, ASH passes an empty one, so a trivy.yaml "
-                "in the scanned repository is not read: its settings (severity, "
-                "scan.skip-files, db.repository, ...) can drop findings with nothing "
-                "in the report saying so. A path that does not exist fails the scan."
+                "A trivy config file (trivy.yaml), passed as --config. Unset, ASH "
+                "passes an empty one, so a trivy.yaml in the scanned repository is not "
+                "read: its settings (severity, scan.skip-files, db.repository, ...) can "
+                "drop findings with nothing in the report saying so, and module.dir "
+                "can load WASM modules. Honored only when set by --config-overrides "
+                "or a config file outside the scanned tree, for a file outside that "
+                "tree; otherwise ignored with a warning. A path "
+                "that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -389,6 +398,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         so nothing in the scanned repository is read as trivy configuration.
         """
         value = getattr(self._options(), option)
+        if value and option == "config_file" and not self._operator_config_file(value):
+            value = None
         if value:
             candidate = Path(value)
             if not candidate.is_absolute():
@@ -409,6 +420,42 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         with open_for_write(empty) as handle:
             handle.write(ash_content)
         return empty.resolve().as_posix()
+
+    def _operator_config_file(self, value: Path | str) -> bool:
+        """Whether ``config_file`` may be handed to trivy; logs why when not.
+
+        A trivy.yaml is more than filters: ``module.dir`` and
+        ``module.enable-modules`` make trivy load and run WASM modules from a
+        directory it names. So a config file is used only when the operator set
+        the option (``--config-overrides`` or a config file outside the scanned
+        tree, see ``utils/config_trust.py``) and it resolves outside that tree.
+        ``ignore_file`` and ``secret_config_file`` hold patterns, not
+        code, and are not gated.
+        """
+        if self.context is None:
+            raise ScannerError("TrivyScanner has no plugin context")
+        source_dir = Path(self.context.source_dir)
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = source_dir / candidate
+        if not set_by_operator(
+            self.context.config, "scanners.trivy.options.config_file", value
+        ):
+            reason = (
+                "it came from a config file in the scanned tree; set it with "
+                "--config-overrides or a config file outside the tree"
+            )
+        elif inside_scanned_tree(candidate, source_dir):
+            reason = "it is inside the scanned tree"
+        else:
+            return True
+        self._plugin_log(
+            f"Ignoring scanners.trivy.options.config_file ({str(value)!r}): {reason}. "
+            "A trivy.yaml can load WASM modules, so trivy runs with ASH's empty "
+            "config instead.",
+            level=logging.WARNING,
+        )
+        return False
 
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
         """Refuse the report of a run trivy did not finish (any exit but 0)."""

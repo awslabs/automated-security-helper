@@ -80,6 +80,8 @@ scanners:
 
 A relative path is anchored on the source directory. A configured file that does not exist fails the scan rather than running without it.
 
+`config_file` is held to more than that, because a `trivy.yaml` can point trivy at a directory of WASM modules (`module.dir`) and enable them, which runs them during the scan. It is honored only when the operator sets it, through `--config-overrides` or a config file outside the scanned tree, and only for a file outside the scanned tree. Otherwise it is ignored with a warning and trivy gets ASH's empty config. `ignore_file` and `secret_config_file` hold patterns, not code, and are honored from the repository's config as shown above.
+
 To accept a finding, prefer an ASH suppression, which is recorded in the reports. The community `trivy-repo` plugin still reads the repository's files, as it always has.
 
 ## Severity
