@@ -49,8 +49,13 @@ from automated_security_helper.plugins.loader import (
     load_internal_plugins,
 )
 
-VENDORED_SCANNER_NAMES = {"ferret_scan", "snyk_code", "trivy_repo"}
-VENDORED_SCANNER_CLASSES = {"FerretScanScanner", "SnykCodeScanner", "TrivyRepoScanner"}
+VENDORED_SCANNER_NAMES = {"ferret_scan", "hadolint", "snyk_code", "trivy_repo"}
+VENDORED_SCANNER_CLASSES = {
+    "FerretScanScanner",
+    "HadolintScanner",
+    "SnykCodeScanner",
+    "TrivyRepoScanner",
+}
 
 
 def _resolve_without_the_vendored_packages() -> set:
@@ -163,6 +168,7 @@ class TestLoadedScannerClasses:
         """
         leaves = {
             "ash_ferret_plugins": "ferret_scanner",
+            "ash_hadolint_plugins": "hadolint_scanner",
             "ash_snyk_plugins": "snyk_code_scanner",
             "ash_trivy_plugins": "trivy_repo_scanner",
         }

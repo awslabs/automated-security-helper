@@ -40,8 +40,9 @@ Known limitations
 -----------------
 * Not every tool publishes an asset for every platform ASH runs on.
   ``get_tool_asset`` raises :class:`ToolNotProvisionableError` for those pairs
-  rather than guessing at a nearby architecture. The absences are real: grype and
-  trivy publish no windows/arm64 asset, and trivy publishes no 32-bit macOS one.
+  rather than guessing at a nearby architecture. The absences are real: grype,
+  hadolint and trivy publish no windows/arm64 asset, and trivy publishes no 32-bit
+  macOS one.
 * cfn-nag is not here. It is a Ruby gem with a dependency closure, not a single
   release binary, so it is provisioned through the committed
   ``assets/Gemfile.lock`` instead -- see ``cfn_nag_scanner``.
@@ -51,7 +52,7 @@ Known limitations
 * Bumping a version means replacing every digest for that tool, in both tables:
   the archive digests and the executable digests (see ``_EXECUTABLE_DIGESTS``).
   A version bumped without its digests will fail every install with an integrity
-  error, which is the intended direction to fail in. cfn-guard, opengrep and uv name their assets
+  error, which is the intended direction to fail in. cfn-guard, hadolint, opengrep and uv name their assets
   without a version, so for those a bump would not even change a filename; see
   ``_DIGESTS_TAKEN_AT`` for what catches it instead.
   Nothing bumps these pins on its own, and Dependabot cannot see a Python dict.
@@ -97,9 +98,11 @@ class ToolAsset:
     arbitrarily.
 
     ``archive`` is False when the release asset *is* the executable, which is how
-    opengrep publishes. There is nothing to extract, ``member_name`` is unused, and
-    the pinned digest then covers the very bytes that will be executed -- which is
-    what lets a cached copy be checked against the pin directly.
+    opengrep and hadolint publish. There is nothing to extract, ``member_name`` is
+    unused, and the pinned digest then covers the very bytes that will be executed
+    -- which is what lets a cached copy be checked against the pin directly. It is
+    a field rather than something inferred from the filename's extension because
+    hadolint's Linux and macOS assets have no extension at all.
     """
 
     tool: str
@@ -121,7 +124,7 @@ class ToolAsset:
         not the file that runs, so it cannot tell whether a binary already on disk
         is the pinned one; ``executable_sha256`` can. An asset that is the
         executable itself, with no archive around it, needs no second digest: the
-        asset digest already covers the bytes that run (opengrep, ``archive`` False).
+        asset digest already covers the bytes that run (opengrep and hadolint, ``archive`` False).
 
         None means there is nothing to compare a binary on disk against. Callers
         then install as they always have; they never treat None as a match.
@@ -147,6 +150,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "cfn-guard": "3.2.1",
     "gitleaks": "v8.30.1",
     "grype": "v0.120.1",
+    "hadolint": "v2.15.1",
     "opengrep": "v1.30.2",
     "syft": "v1.54.1",
     "trivy": "v0.75.0",
@@ -210,6 +214,18 @@ _GRYPE_ASSETS: dict[PlatformArch, str] = {
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
+# hadolint publishes bare executables, not archives, and its filenames carry no
+# version -- the version is only in the release tag in the URL. See
+# ToolAsset.archive, _BARE_EXECUTABLE_TOOLS and _DIGESTS_TAKEN_AT.
+_HADOLINT_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "hadolint-linux-x86_64",
+    ("linux", "arm64"): "hadolint-linux-arm64",
+    ("darwin", "amd64"): "hadolint-macos-x86_64",
+    ("darwin", "arm64"): "hadolint-macos-arm64",
+    ("windows", "amd64"): "hadolint-windows-x86_64.exe",
+    # windows/arm64: upstream publishes no such asset for this release.
+}
+
 _SYFT_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "syft_1.54.1_linux_amd64.tar.gz",
     ("linux", "arm64"): "syft_1.54.1_linux_arm64.tar.gz",
@@ -253,6 +269,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #   https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt
 #   https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
 #   https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_checksums.txt
+#   https://github.com/hadolint/hadolint/releases/download/v2.15.1/checksums.sha256
 #   https://github.com/anchore/syft/releases/download/v1.54.1/syft_1.54.1_checksums.txt
 #   https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_checksums.txt
 #
@@ -310,6 +327,9 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # executable that does not hash to this value, so a wrong entry fails the first real
 # install of that asset in CI rather than sitting here unnoticed.
 #
+# hadolint has no entry: its asset is the executable itself, so the asset digest
+# already covers the bytes that run (ToolAsset.executable_digest; the same holds for opengrep).
+#
 # The two tables are adjacent so that one line-pinned suppression covers both (see
 # .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
 # ---------------------------------------------------------------------------
@@ -344,6 +364,12 @@ _DIGESTS: dict[str, str] = {
     "grype_0.120.1_darwin_amd64.tar.gz": "5313004ccbc524c8757521dc3913f1edf4309f56bef06a2fb2d0c0eeade7cc62",  # pragma: allowlist secret
     "grype_0.120.1_darwin_arm64.tar.gz": "cf97957fa467d25575ec2cc3228289f391ea51cf88b9cffc5f83dc03d4cbc732",  # pragma: allowlist secret
     "grype_0.120.1_windows_amd64.zip": "32e3c811f31822d17592908bafdc6288aaaca3d52583c479167a8dc8399ed65d",  # pragma: allowlist secret
+    # hadolint v2.15.1
+    "hadolint-linux-x86_64": "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507",  # pragma: allowlist secret
+    "hadolint-linux-arm64": "f6198ef8090f404dbb771abfee086eb8c48ac177f30da7fd3510aca35b344b5d",  # pragma: allowlist secret
+    "hadolint-macos-x86_64": "ffe9bb18b23d5ed1eae50237aecdbb523d016e96da0bd4e7aa432040acfc3fde",  # pragma: allowlist secret
+    "hadolint-macos-arm64": "5c09f3213f8e40406abe048233d985eebef336d4a6a20021be47fadb6cf480a2",  # pragma: allowlist secret
+    "hadolint-windows-x86_64.exe": "01d927294962b5387f9ead4f18679158452be4f17c765ad0bdffe5264b9c7b0a",  # pragma: allowlist secret
     # syft v1.54.1
     "syft_1.54.1_linux_amd64.tar.gz": "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47",  # pragma: allowlist secret
     "syft_1.54.1_linux_arm64.tar.gz": "dfdf0537610113edbefe1f1fc6548bc957b2d77439636ec824fcf0e10d46d054",  # pragma: allowlist secret
@@ -427,12 +453,13 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
 # edit. Recording the version here turns it into the same refusal by name instead.
 _DIGESTS_TAKEN_AT: dict[str, str] = {
     "cfn-guard": "3.2.1",
+    "hadolint": "v2.15.1",
     "opengrep": "v1.30.2",
     "uv": "0.12.23",
 }
 
 # Tools whose release asset is the executable itself rather than an archive.
-_BARE_EXECUTABLE_TOOLS = frozenset({"opengrep"})
+_BARE_EXECUTABLE_TOOLS = frozenset({"hadolint", "opengrep"})
 
 
 _RELEASE_BASE_URLS: dict[str, str] = {
@@ -440,6 +467,7 @@ _RELEASE_BASE_URLS: dict[str, str] = {
     "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
     "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
+    "hadolint": "https://github.com/hadolint/hadolint/releases/download",
     "opengrep": "https://github.com/opengrep/opengrep/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
@@ -451,6 +479,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "cfn-guard": _CFN_GUARD_ASSETS,
     "gitleaks": _GITLEAKS_ASSETS,
     "grype": _GRYPE_ASSETS,
+    "hadolint": _HADOLINT_ASSETS,
     "opengrep": _OPENGREP_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
@@ -723,6 +752,10 @@ class ThirdPartyLicense:
     executables: "tuple[str, ...]" = ()
     version_probe: "tuple[str, ...]" = ()
     distribution: "str | None" = None
+    # Appended to the "Corresponding source" section of a copyleft entry whose
+    # binary also carries code from outside its own repository (a statically
+    # linked binary's library dependencies), saying where that source is.
+    source_note: "str | None" = None
 
     @property
     def executable_names(self) -> tuple[str, ...]:
@@ -788,6 +821,8 @@ class ThirdPartyLicense:
                 "",
                 *(f"  {command}" for command in self.source_checkout),
             ]
+            if self.source_note:
+                lines += ["", self.source_note]
         return "\n".join(lines) + "\n"
 
     def index_record(self) -> "dict[str, object]":
@@ -834,6 +869,9 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "grype commit": "6f8d854af29d3a3086b11a84afa51554a2a245fe",  # pragma: allowlist secret
+    "hadolint commit": "2eece55955ced00200be9729e9728cb7dacca505",  # pragma: allowlist secret
+    "hadolint/LICENSE": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",  # pragma: allowlist secret
+    "hadolint/ThirdPartyNotices.txt": "424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27",  # pragma: allowlist secret
     "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
@@ -972,6 +1010,32 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         repository="https://github.com/anchore/grype",
         commit=_THIRD_PARTY_HASHES["grype commit"],
         files=(LicenseFile("LICENSE"),),
+    ),
+    # The asset is the executable itself, so both files come from the repository.
+    # LICENSE: GPL version 3, with no "or later" grant in the repository.
+    # ThirdPartyNotices.txt is upstream's report of the libraries linked into the
+    # binary (ShellCheck, language-docker, HsYAML and others).
+    "hadolint": ThirdPartyLicense(
+        tool="hadolint",
+        version="v2.15.1",
+        license="GPL-3.0-only",
+        repository="https://github.com/hadolint/hadolint",
+        commit=_THIRD_PARTY_HASHES["hadolint commit"],
+        files=(
+            _from_source("hadolint", "https://github.com/hadolint/hadolint", "LICENSE"),
+            _from_source(
+                "hadolint",
+                "https://github.com/hadolint/hadolint",
+                "ThirdPartyNotices.txt",
+            ),
+        ),
+        source_note=(
+            "The release binary is statically linked with the Haskell libraries "
+            "ThirdPartyNotices.txt in this directory lists, at the versions it "
+            "lists. Their sources are on Hackage at "
+            "https://hackage.haskell.org/package/<name>-<version>, the links that "
+            "file gives."
+        ),
     ),
     # Installed by `ash dependencies install`, which publishes a bare executable
     # with no archive around it, so both files come from the repository.

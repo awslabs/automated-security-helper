@@ -503,11 +503,36 @@ class TestThePythonTools:
         text = DOCKERFILE.read_text()
         for line in lines:
             assert line.strip() == (
-                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \\'
+                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \\'
             ), line
         assert (
             text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
         )
+        # Both load the community modules that bring tools of their own, so those
+        # tools are installed and pinned too.
+        assert (
+            text.count(
+                '    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \\\n'
+            )
+            == 2
+        )
+        declared = re.findall(
+            r'^ARG ASH_COMMUNITY_PLUGIN_MODULES="([^"]+)"$', text, re.MULTILINE
+        )
+        assert len(declared) == 2 and declared[0] == declared[1], declared
+        from automated_security_helper.core.community_scanners import (
+            community_scanner_modules,
+        )
+
+        expected = sorted(
+            set(community_scanner_modules().values())
+            - {
+                "automated_security_helper.plugin_modules.ash_ferret_plugins",
+                "automated_security_helper.plugin_modules.ash_snyk_plugins",
+                "automated_security_helper.plugin_modules.ash_trivy_plugins",
+            }
+        )
+        assert sorted(declared[0].split(",")) == expected
 
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())
@@ -574,3 +599,17 @@ class TestTheHashBlock:
             used.add(entry.commit)
             used.update(f.sha256 for f in entry.files if f.sha256)
         assert sorted(set(tool_downloads._THIRD_PARTY_HASHES.values()) - used) == []
+
+
+def test_hadolints_source_notice_points_at_its_linked_libraries():
+    """hadolint is one statically linked binary: its corresponding source is its
+    repository plus the Hackage packages ThirdPartyNotices.txt lists."""
+    notice = THIRD_PARTY_LICENSES["hadolint"].source_notice()
+    assert "Corresponding source" in notice
+    assert "ThirdPartyNotices.txt" in notice.split("Corresponding source")[1]
+    assert "hackage.haskell.org" in notice
+
+
+def test_an_entry_without_a_source_note_is_unchanged():
+    notice = THIRD_PARTY_LICENSES["opengrep"].source_notice()
+    assert "Hackage" not in notice

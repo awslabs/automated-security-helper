@@ -448,8 +448,19 @@ RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}" && chmod 777 "${TRIVY_CACHE_DIR}"; \
         echo "offline provisioning verified: trivy database present"; \
     fi
 
+# hadolint, the community Dockerfile linter, from its pinned release asset like the tools
+# above. Its asset is the executable itself rather than an archive; install-pinned-tool
+# handles that through ToolAsset.archive. ASH runs it as a separate process and never
+# links to it. It is GPL-3.0-only, so its entry in THIRD_PARTY_LICENSES gives it, under
+# ${ASH_THIRD_PARTY_DIR}/hadolint, its LICENSE and upstream ThirdPartyNotices.txt (both
+# fetched from the release commit and checked against their SHA256) and a SOURCE file
+# with the corresponding-source section every copyleft entry gets.
+ARG HADOLINT_VERSION="v2.15.1"
+RUN with-retry 'install-pinned-tool hadolint -b /usr/local/bin'
+RUN hadolint --version
+
 # cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
-# templates against. The binary comes from its pinned release asset like the three
+# templates against. The binary comes from its pinned release asset like the tools
 # above. The rules archive is pinned the same way (RULES_BUNDLES in
 # utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan
 # user cannot rewrite the rules a later scan trusts. `ash dependencies install`
@@ -522,10 +533,18 @@ ENV _ASH_EXEC_MODE="local"
 # commit below describe the release in the image. Assigned first so a failure stops
 # the build rather than leaving the install unpinned. UV_NO_CACHE=1 keeps uv's cache
 # out of the layer.
+#
+# The community plugin modules that ship with ASH and bring tools of their own are
+# loaded for this install only (ASH_COMMUNITY_PLUGIN_MODULES), so those tools are
+# installed and pinned too, and the image carries them; a scan in the image still
+# loads a module only when it is listed. trivy-repo, snyk and ferret are not in the
+# list: their tools come another way.
+ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_hadolint_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
-    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
+    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
@@ -619,11 +638,15 @@ ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Pinned as in the core stage: this user's uv tool directory starts empty, so the
-# Python tools are installed again here and would otherwise float.
+# Python tools are installed again here and would otherwise float. The same community
+# modules are loaded for it; an ARG does not reach a stage built FROM another, so it
+# is declared again (a unit test keeps the two equal).
+ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_hadolint_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
-    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
+    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \

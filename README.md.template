@@ -85,6 +85,14 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 | [actionlint](https://github.com/rhysd/actionlint)             | IaC       | GitHub Actions workflows                                                                     | `ash dependencies install` (pinned release binary)                      |
 | [zizmor](https://github.com/zizmorcore/zizmor)                | SAST      | GitHub Actions workflows and composite actions                                               | Managed via UV tool isolation (auto-installed: `zizmor>=1.29.0,<2.0.0`) |
 
+## Community Scanner Plugins
+
+These ship with ASH and run when their plugin module is listed in `ash_plugin_modules` (or passed with `--ash-plugin-modules`); a scan that does not list a module is unchanged by it. The container image includes their tools. See [Community Plugins](docs/content/docs/plugins/community/index.md) for every community plugin.
+
+| Scanner | Module | Type | Targets |
+|---------|--------|------|---------|
+| [hadolint](https://github.com/hadolint/hadolint) | `ash_hadolint_plugins` | IaC | Dockerfile, Containerfile |
+
 ## Prerequisites
 
 ### Runtime Requirements

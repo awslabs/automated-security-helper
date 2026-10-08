@@ -25,6 +25,7 @@ ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins
+  - automated_security_helper.plugin_modules.ash_hadolint_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
@@ -101,8 +102,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 317
-      line_end: 416
+      line_start: 337
+      line_end: 442
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of the executable inside one of those verified
@@ -123,8 +124,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 824
-      line_end: 850
+      line_start: 859
+      line_end: 888
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of

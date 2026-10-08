@@ -48,6 +48,23 @@ def _load_installer():
 installer = _load_installer()
 
 
+def _dockerfile_community_modules() -> str:
+    """The plugin modules the Dockerfile loads for its `ash dependencies install` runs.
+
+    A community scanner, and any uv tool it installs, is a plugin only once its
+    module is loaded. The image loads the community modules that bring tools of
+    their own through ASH_COMMUNITY_PLUGIN_MODULES, so the recorded install has to
+    load the same ones.
+    """
+    match = re.search(
+        r'^ARG ASH_COMMUNITY_PLUGIN_MODULES="([^"]+)"$',
+        DOCKERFILE.read_text(),
+        re.MULTILINE,
+    )
+    assert match, "the Dockerfile no longer declares ASH_COMMUNITY_PLUGIN_MODULES"
+    return match.group(1)
+
+
 def _dockerfile_run_instructions() -> "list[str]":
     """Each RUN instruction with its continuation lines joined, comments dropped."""
     lines = [
@@ -112,6 +129,8 @@ def recorded_install(tmp_path, monkeypatch):
                 "--bin-path",
                 str(tmp_path / "bin"),
                 *tool_args,
+                "--config-overrides",
+                f"ash_plugin_modules+=[{_dockerfile_community_modules()}]",
                 *extra_args,
             ],
         )

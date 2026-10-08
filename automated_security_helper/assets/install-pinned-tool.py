@@ -405,7 +405,7 @@ def install(
                     raise SystemExit(_EXIT_INTEGRITY)
                 print(f"Verified executable SHA256 {extracted}", flush=True)
         else:
-            # The asset is the executable itself (opengrep), so the digest just
+            # The asset is the executable itself (opengrep, hadolint), so the digest just
             # verified covers the exact bytes being installed, and it is also the
             # executable digest (ToolAsset.executable_digest falls back to it).
             archive.rename(staged)
@@ -1095,7 +1095,10 @@ def main(argv: "list[str] | None" = None) -> int:
     )
     parser.add_argument(
         "tool",
-        help=("actionlint, cfn-guard, gitleaks, grype, opengrep, syft, trivy or uv"),
+        help=(
+            "actionlint, cfn-guard, gitleaks, grype, hadolint, opengrep, syft, "
+            "trivy or uv"
+        ),
     )
     parser.add_argument(
         "-b",

@@ -54,11 +54,12 @@ tags. So the spelling is hyphenated (``cfn-nag``, ``detect-secrets``,
 snake_cased set would recognize none of the three hyphenated names.
 
 The set covers every scanner ASH ships, which is the sixteen in
-``plugin_modules/ash_builtin/scanners`` plus the three vendored packages
-(``ferret-scan``, ``snyk-code``, ``trivy-repo``) that ``load_internal_plugins()``
-does not load. The vendored three are included because a vendored scanner's
-result hits the same fallback as a builtin one, and because a gate that passed
-only by hand-excluding three shipped scanners would be a weaker gate.
+``plugin_modules/ash_builtin/scanners`` plus the scanners of the in-tree packages
+that ``load_internal_plugins()`` does not load: the vendored three
+(``ferret-scan``, ``snyk-code``, ``trivy-repo``) and the hadolint community
+module. They are included because their results hit the same fallback as a
+builtin scanner's, and because a gate that passed only by hand-excluding shipped
+scanners would be a weaker gate.
 
 Why this is declared rather than derived from the plugin registry
 ----------------------------------------------------------------
@@ -134,6 +135,7 @@ SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(
         "ferret-scan",
         "gitleaks",
         "grype",
+        "hadolint",
         "npm-audit",
         "opengrep",
         "semgrep",

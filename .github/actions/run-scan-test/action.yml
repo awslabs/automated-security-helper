@@ -291,9 +291,12 @@ runs:
         # PATH. The installer's own post-install sweep already resolves the binary
         # and exits non-zero if it cannot -- a PATH-dependent version check here
         # would fail for a working install and pass for none.
+        # hadolint, a community scanner whose module that config lists, comes the
+        # same way: its pinned binary, checked against its SHA256.
         ash dependencies install \
           --config .ash/.ash_community_plugins.yaml \
-          --tool trivy-repo
+          --tool trivy-repo \
+          --tool hadolint
 
     # Validate config
     - name: Validate ASH config files
@@ -598,6 +601,38 @@ runs:
           .ash/ash_output/ash_aggregated_results.json
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    # The same hadolint check on Windows, in pwsh for the reason the Windows scan step
+    # above gives: ASH's entry point is put ahead of MSYS2's `ash` only inside a pwsh
+    # step, through the promote step's `dirs`, never through GITHUB_PATH.
+    - name: Validate community hadolint (Python Local Windows)
+      if: inputs.method == 'python-local' && inputs.config-file == 'default' && runner.os == 'Windows'
+      shell: pwsh
+      env:
+        ASH_ENTRY_POINT_DIRS: ${{ steps.ash-entry-point.outputs.dirs }}
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
+      run: |
+        # See "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)".
+        $env:PATH = "$env:ASH_ENTRY_POINT_DIRS;$env:PATH"
+        $AshPath = (Get-Command ash -ErrorAction SilentlyContinue).Source
+        if ($AshPath -notmatch '\\Scripts\\ash\.exe$') {
+          Write-Host "::error::ash resolved to '$AshPath', not the ASH entry point"
+          exit 1
+        }
+        & ash dependencies install --tool hadolint --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $Out = Join-Path $env:RUNNER_TEMP "hadolint-out"
+        & ash scan --mode local --no-progress --simple `
+          --source-dir tests/test_data/scanners/hadolint/positive `
+          --output-dir $Out `
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins `
+          --scanners hadolint
+        $Rc = $LASTEXITCODE
+        $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+        & $Python "${{ github.action_path }}/assert_community_scanner_ran.py" `
+          (Join-Path $Out "ash_aggregated_results.json") hadolint `
+          --exit-code $Rc --expect-exit 1 --min-findings 12
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     # Python Local scan (Unix)
     - name: Validate ASH using Python Local (Unix)
       if: inputs.method == 'python-local' && runner.os != 'Windows'
@@ -633,6 +668,37 @@ runs:
         ash report --format text
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
+
+    # hadolint is a community scanner, so the default scans above, which list no
+    # community module, never run it, and the plain `ash dependencies install` above
+    # does not install it either: its name is a tool only once its module is loaded.
+    # So this installs it with the module loaded and runs that copy on the committed
+    # fixture with only hadolint selected, on every OS. The fixture has known findings at every
+    # hadolint level, and services/Dockerfile.broken, which hadolint cannot parse.
+    # That file is an unevaluated target, so the scan is incomplete and 1 is the
+    # expected exit (#640), not 2; assert_community_scanner_ran.py then checks hadolint
+    # ran and reported the other files' 12 findings rather than going MISSING.
+    - name: Validate community hadolint (Python Local Unix)
+      if: inputs.method == 'python-local' && inputs.config-file == 'default' && runner.os != 'Windows'
+      shell: bash
+      env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
+      run: |
+        ash dependencies install --tool hadolint \
+          --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
+        out="${RUNNER_TEMP}/hadolint-out"
+        set +e
+        ash scan --mode local --no-progress --simple \
+          --source-dir tests/test_data/scanners/hadolint/positive \
+          --output-dir "$out" \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
+          --scanners hadolint
+        rc=$?
+        set -e
+        PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
+        "$PY" "${{ github.action_path }}/assert_community_scanner_ran.py" \
+          "$out/ash_aggregated_results.json" hadolint --exit-code "$rc" \
+          --expect-exit 1 --min-findings 12
 
     # PowerShell scan
     - name: Validate ASH using PowerShell

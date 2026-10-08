@@ -399,6 +399,52 @@ class TestTheDigestCheckCanFail:
         )
 
 
+class TestABareBinaryAsset:
+    """hadolint's release asset is the executable, with no archive around it."""
+
+    # The published release checksum of hadolint-linux-x86_64 v2.15.1, as pinned in
+    # tool_downloads.py; public by construction, not a credential.
+    HADOLINT_LINUX_AMD64 = "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"  # pragma: allowlist secret
+
+    @staticmethod
+    def _fake_download(payload: bytes):
+        import hashlib
+
+        def download(url: str, target: Path) -> str:
+            target.write_bytes(payload)
+            return hashlib.sha256(payload).hexdigest()
+
+        return download, hashlib.sha256(payload).hexdigest()
+
+    def _linux(self, monkeypatch, download):
+        monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
+        monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(installer, "download", download)
+
+    def test_the_verified_bytes_are_installed_verbatim(self, tmp_path, monkeypatch):
+        payload = b"\x7fELF fake hadolint"
+        download, digest = self._fake_download(payload)
+        pins = _pins_dir(tmp_path, {self.HADOLINT_LINUX_AMD64: digest})
+        self._linux(monkeypatch, download)
+
+        installed = installer.install("hadolint", tmp_path / "bin", pins)
+
+        assert installed == tmp_path / "bin" / "hadolint"
+        assert installed.read_bytes() == payload
+        assert os.access(installed, os.X_OK)
+
+    def test_a_mismatch_exits_three_and_installs_nothing(self, tmp_path, monkeypatch):
+        download, _ = self._fake_download(b"\x7fELF fake hadolint")
+        pins = _pins_dir(tmp_path, {self.HADOLINT_LINUX_AMD64: "0" * 64})
+        self._linux(monkeypatch, download)
+
+        bin_dir = tmp_path / "bin"
+        with pytest.raises(SystemExit) as raised:
+            installer.install("hadolint", bin_dir, pins)
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not bin_dir.exists() or list(bin_dir.iterdir()) == []
+
+
 class TestABareExecutableAsset:
     """opengrep publishes the executable itself; there is no archive to open."""
 

@@ -48,6 +48,7 @@ nav:
   - Community Plugins:
       - Overview: docs/plugins/community/index.md
       - Ferret Scan Plugin: docs/plugins/community/ferret-scan-plugin.md
+      - hadolint Plugin: docs/plugins/community/hadolint-plugin.md
       - Trivy Plugin: docs/plugins/community/trivy-plugin.md
       - Snyk Plugin:
           - Snyk Plugin: docs/plugins/community/snyk-plugin.md

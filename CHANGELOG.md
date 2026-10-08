@@ -148,15 +148,25 @@
   ASH does not deduplicate across scanners, so overlapping pairs (gitleaks and
   detect-secrets, trivy and grype or trivy-repo, zizmor and actionlint) report a
   shared finding once per scanner; each scanner page says where.
+- **A hadolint community plugin, `ash_hadolint_plugins`.** It runs hadolint 2.15.1
+  with ShellCheck on `Dockerfile`, `Containerfile`, `*.Dockerfile` and
+  `Dockerfile.*` when the module is listed in `ash_plugin_modules` (or passed with
+  `--ash-plugin-modules`), and is on by default then. A Dockerfile hadolint cannot
+  parse is an unevaluated target, named, which makes the scan incomplete (exit 1),
+  and not a DL1000 finding. The container image ships hadolint, pinned and
+  digest-verified; `ash dependencies install --tool hadolint`, with the module
+  loaded, installs the same build locally; nix mode supplies it. See
+  [hadolint Plugin](docs/content/docs/plugins/community/hadolint-plugin.md).
 - **`--scanners` names the module to add for a community scanner that is not loaded.**
   `--scanners snyk-code` without `ash_snyk_plugins` listed is refused with a message
   naming the module, rather than reading as a typo; a selection in which other names
   resolved warns with the same advice and runs those, as any partly unresolved
   `--scanners` list does. `ash dependencies install --tool <name>` gives the same hint.
 - **The container image ships license files for the new scanners' tools.**
-  actionlint, gitleaks, and cfn-guard with the Guard Rules Registry bundle it reads
-  get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0) and zizmor,
-  read from each installed wheel's dist-info and checked against its RECORD. Every
+  actionlint, gitleaks, cfn-guard with the Guard Rules Registry bundle it reads, and
+  hadolint (GPL-3.0, with its upstream ThirdPartyNotices and a corresponding-source
+  pointer) get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0) and
+  zizmor, read from each installed wheel's dist-info and checked against its RECORD. Every
   uv install in the image now runs with `UV_NO_CACHE=1`, so uv's cache is no longer
   kept in any layer.
 

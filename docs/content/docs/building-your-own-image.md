@@ -143,12 +143,12 @@ non-root `USER` in your own Dockerfile if you need one.
 
 The image bundles third-party programs that ASH installs from their upstream
 releases: actionlint, cfn-guard (with the AWS Guard Rules Registry it reads),
-gitleaks, grype, opengrep, syft, trivy and uv today, and the Python scanners bandit,
-checkov, cfn-lint, semgrep and zizmor (installed with `uv tool install`). Each one's
-license and notice files are in the image under `/usr/share/doc/ash/third-party/<tool>/`, taken from the
+gitleaks, grype, hadolint, opengrep, syft, trivy and uv today, and the Python
+scanners bandit, checkov, cfn-lint, semgrep and zizmor (installed with `uv tool
+install`). Each one's license and notice files are in the image under `/usr/share/doc/ash/third-party/<tool>/`, taken from the
 exact release the image carries. Beside them, a `SOURCE` file names the upstream
-repository, release tag and commit. For a copyleft tool (opengrep is LGPL-2.1), that
-file also says where the corresponding source is.
+repository, release tag and commit. For a copyleft tool (opengrep is LGPL-2.1,
+hadolint GPL-3.0), that file also says where the corresponding source is.
 
 `/usr/share/doc/ash/third-party/index.json` lists every bundled tool with its version,
 license expression, repository, commit and files. The image build writes it only

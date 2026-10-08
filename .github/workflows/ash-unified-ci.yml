@@ -1272,6 +1272,14 @@ jobs:
       # those tests instead of skipping them.
       - name: Install the scanners the integration suite runs for real
         run: uv run ash dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard
+      # hadolint is a community scanner, so nothing else in this job provisions it. The
+      # pinned, digest-verified release asset, through the same installer the image uses,
+      # into ~/.ash/bin, which the suite step below puts on its own PATH.
+      # ASH_REQUIRE_HADOLINT below makes a missing hadolint fail its tests.
+      - name: Install hadolint
+        run: |
+          mkdir -p "$HOME/.ash/bin"
+          python3 automated_security_helper/assets/install-pinned-tool.py hadolint -b "$HOME/.ash/bin"
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
@@ -1286,6 +1294,7 @@ jobs:
           ASH_REQUIRE_CDK_EXTRA: "1"
           ASH_REQUIRE_CFN_TOOLS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
+          ASH_REQUIRE_HADOLINT: "1"
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           uv run pytest \

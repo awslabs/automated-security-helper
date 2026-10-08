@@ -1172,7 +1172,7 @@ def install_pinned_tool(
             )
             _store_cached_asset(downloaded, asset_name)
         if not asset.archive:
-            # The asset is the executable (opengrep). It goes to its final name through
+            # The asset is the executable (opengrep, hadolint). It goes to its final name through
             # the same staged, symlink-safe, pin-checked rename the unarchived URL path
             # uses; _replace_atomically refuses anything but the pinned digest.
             installed_digest = _replace_atomically(
