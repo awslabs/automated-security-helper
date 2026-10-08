@@ -179,6 +179,7 @@ def test_a_scanner_cannot_kill_its_wrapper_to_escape_reaping(tmp_path):
 
 def test_the_reaper_sees_the_whole_tree_not_only_direct_children():
     """One reap pass must reach every level, so a deep tree dies in one pass."""
+    _landlock()  # the reaper walks /proc, which exists only where landlock runs
     import subprocess  # nosec B404 - starts a short-lived process tree to inspect
 
     from automated_security_helper.utils.sandbox import landlock_exec
