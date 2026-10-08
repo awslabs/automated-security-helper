@@ -10,7 +10,9 @@
 # MODE is one of:
 #   assert             build, gate the payload, install beside Debian's `ash` shell,
 #                      scan, purge (the default)
-#   upgrade            install N-1 built from $PREV_DIST, upgrade to N, require the venv
+#   upgrade            install N-1 (the previous commit's package, built from the
+#                      $PREV_DIST wheel by that commit's own build script; see
+#                      packaging/n1-source.sh), upgrade to N, require the venv
 #                      to be replaced; then fail an upgrade on purpose and require the
 #                      working install to survive it; then migrate a venv left as a
 #                      directory by an older release to the symlink layout; then purge
@@ -24,6 +26,10 @@
 #                      each FAIL
 #   negative-install   a package whose postinst fails must FAIL the install step
 #   negative-payload   a package with an empty payload must FAIL the payload gate
+#   negative-alternatives
+#                      a package whose postinst registers /usr/bin/ash as an
+#                      alternative must FAIL the maintainer-script check, and
+#                      installing it must either be refused or FAIL the host check
 #   negative-shell-path
 #                      a build that also installs /usr/bin/ash must FAIL the command
 #                      path check, and installing it beside the `ash` shell must
@@ -73,6 +79,19 @@ build_deb() {
 # listing, and the path is its sixth column.
 check_deb_paths() {
   dpkg-deb -c "$1" | awk '{ print $6 }' | vl_check_command_paths "dpkg-deb -c $(basename "$1")"
+}
+
+# Every maintainer script in a built .deb, concatenated, for vl_check_maintainer_scripts.
+deb_maintainer_scripts() {
+  local ctl name
+  ctl="$(mktemp -d)"
+  dpkg-deb -e "$1" "$ctl"
+  for name in preinst postinst prerm postrm config; do
+    if [ -f "$ctl/$name" ]; then
+      cat "$ctl/$name"
+    fi
+  done
+  rm -rf "$ctl"
 }
 
 # Debian's `ash` package, the Almquist shell's name (a compatibility package for
@@ -237,6 +256,48 @@ for field in Provides Conflicts Breaks Replaces; do
 done
 vl_payload_gate "$DEB"
 check_deb_paths "$DEB" || vl_fail "the package's file list must carry /usr/bin/$ASH_CLI_NAME and no other command"
+deb_maintainer_scripts "$DEB" | vl_check_maintainer_scripts "the maintainer scripts of $(basename "$DEB")" \
+  || vl_fail "the package's maintainer scripts must register no alternative and no diversion"
+
+if [ "$MODE" = negative-alternatives ]; then
+  echo "== NEGATIVE CONTROL: a .deb whose postinst registers /usr/bin/ash as an alternative must FAIL"
+  # The real package with one line added before postinst's final `exit 0`: what an
+  # `ash` alias done through update-alternatives instead of a shipped file would be.
+  ALT_ROOT="$(mktemp -d)"
+  dpkg-deb -R "$DEB" "$ALT_ROOT"
+  sed -i "s|^exit 0\$|update-alternatives --install /usr/bin/ash ash /usr/bin/${ASH_CLI_NAME} 100\nexit 0|" "$ALT_ROOT/DEBIAN/postinst"
+  grep -q '^update-alternatives --install /usr/bin/ash ' "$ALT_ROOT/DEBIAN/postinst" \
+    || vl_fail "could not plant the update-alternatives call in postinst"
+  mkdir -p "$OUT/alternatives"
+  ALT="$OUT/alternatives/${ASH_PKG_NAME}_${VERSION}_all.deb"
+  dpkg-deb --build -Zgzip --root-owner-group "$ALT_ROOT" "$ALT" >/dev/null
+  rc=0
+  deb_maintainer_scripts "$ALT" | vl_check_maintainer_scripts "the maintainer scripts of the variant" || rc=$?
+  [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the maintainer-script check ACCEPTED a postinst calling update-alternatives"
+  echo "   OK: the maintainer-script check rejected the package (exit $rc)"
+  echo "== NEGATIVE CONTROL: installed beside Debian's ash, that package must be refused or caught"
+  install_distro_ash
+  vl_assert_no_alternatives || vl_fail "the host already has an alternative into the package before the variant was installed"
+  rc=0
+  deb_install "$ALT" 2>/tmp/variant-install.err || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    tail -n 5 /tmp/variant-install.err | sed 's/^/   /'
+    # Refused counts only if the planted call is what failed, not anything else.
+    grep -qF update-alternatives /tmp/apt-install.log \
+      || vl_fail "NEGATIVE CONTROL: the install failed, but not in the planted update-alternatives call"
+    echo "   OK: the install was refused in the planted update-alternatives call"
+  else
+    rc=0
+    vl_assert_no_alternatives || rc=$?
+    [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the host check ACCEPTED an install that registered an alternative"
+    echo "   OK: the host check rejected the alternative the postinst registered (exit $rc)"
+    rc=0
+    vl_assert_shell_intact ash || rc=$?
+    echo "   for the record, the shell check on that host exited $rc"
+  fi
+  echo; echo "DEB NEGATIVE CONTROL (alternatives) PASSED"
+  exit 0
+fi
 
 if [ "$MODE" = negative-install ]; then
   echo "== NEGATIVE CONTROL: a .deb whose postinst exits 1 must FAIL the install step"
@@ -266,9 +327,11 @@ if [ "$MODE" = upgrade ]; then
   . "$REPO/packaging/version-map.sh"
   dpkg --compare-versions "$(pkg_version "$PREV_VERSION" deb)" lt "$(pkg_version "$VERSION" deb)" \
     || vl_fail "the N-1 wheel ($PREV_VERSION) does not sort below N ($VERSION)"
-  PREV_DEB="$(build_deb "$PREV_WHEEL" "$OUT/prev")"
-  echo "   built N-1: $PREV_DEB"
-  vl_payload_gate "$PREV_DEB"
+  vl_load_n1
+  vl_report_script_delta packaging/deb/debian/postinst packaging/deb/debian/prerm packaging/deb/build.sh
+  PREV_DEB="$("$PREV_SRC/packaging/deb/build.sh" "$PREV_WHEEL" "$OUT/prev")"
+  echo "   built N-1 with N-1's own packaging/deb/build.sh: $PREV_DEB"
+  vl_payload_gate_n1 "$PREV_DEB"
 
   echo "== 3. install N-1 ($PREV_VERSION)"
   deb_install "$PREV_DEB"
@@ -283,6 +346,7 @@ if [ "$MODE" = upgrade ]; then
   vl_probe_stop_and_assert
   vl_assert_installed_version "$VERSION"
   vl_assert_venv_layout
+  vl_assert_no_alternatives || vl_fail "the upgrade registered an alternative or a diversion"
   [ "$(readlink -f "$ASH_VENV")" != "$OLD_VENV" ] || vl_fail "the venv is the one N-1 created"
   [ ! -e "$OLD_VENV" ] || vl_fail "the N-1 venv $OLD_VENV survived a successful upgrade"
   echo "   OK: the venv was rebuilt and the N-1 venv is gone"
@@ -348,6 +412,7 @@ echo "   python3-venv was pulled in by the package's Depends"
 vl_assert_installed_version "$VERSION"
 dpkg -L "$ASH_PKG_NAME" | vl_check_command_paths "dpkg -L $ASH_PKG_NAME" \
   || vl_fail "the installed package's file list must carry /usr/bin/$ASH_CLI_NAME and no other command"
+vl_assert_no_alternatives || vl_fail "the install registered an alternative or a diversion"
 
 case "$MODE" in
   negative-findings)
@@ -380,6 +445,9 @@ vl_assert_shell_coexists ash || vl_fail "the package and Debian's ash shell do n
 
 echo "== 4. the three e2e cases: findings (exit 2), clean (exit 0), incomplete (exit 1)"
 vl_scan_and_assert
+
+echo "== 4b. scanners are selected after install: --tool grype installs and verifies it, an unknown name is refused"
+vl_assert_dependency_selection
 
 echo "== 5. purge leaves nothing behind, and leaves the shell alone"
 purge_and_check

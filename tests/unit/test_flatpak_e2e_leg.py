@@ -28,6 +28,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from tests.utils.posix_bash import bash_path, run_bash, write_lf
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "packaging" / "flatpak" / "verify-in-container.sh"
 RUN_CASE = REPO_ROOT / "scripts" / "e2e" / "run_case.py"
@@ -60,15 +62,72 @@ def test_every_case_runs_through_run_case() -> None:
 
 def test_no_private_report_reader_is_left() -> None:
     # The defects this leg replaced: an exit code captured and never compared, and a
-    # SARIF lookup that took any *.sarif when reports/ash.sarif was missing.
-    # The one *.sarif walk left is step 7's sandbox control, which counts results in an
-    # output directory that must NOT be visible on the host; every judged scan goes
-    # through assert_outcome.py.
+    # SARIF lookup that took any *.sarif when reports/ash.sarif was missing. The last
+    # *.sarif walk was step 7's sandbox control, which read rc=1 with no report as
+    # "0 findings" and passed; it is gone too.
     text = _script()
     assert "SCAN_RC=" not in text
-    assert text.count('rglob("*.sarif")') == 1, (
-        "a *.sarif walk was added outside the sandbox control"
+    assert "rglob(" not in text
+    assert '.sarif")' not in text
+
+
+def _step(number: str) -> str:
+    text = _script()
+    start = text.index(f'echo "== {number}. ')
+    nxt = re.compile(r'^echo "== [0-9]+[a-z]?\. ', re.MULTILINE)
+    match = nxt.search(text, start + 1)
+    return text[start : match.start() if match else len(text)]
+
+
+def test_the_sandbox_control_asserts_its_exit_code_message_and_report_paths() -> None:
+    step = _step("7")
+    assert 'if [ "$NEG_RC" -ne 1 ]; then' in step
+    # The refusal ASH prints for a missing --source-dir, naming this fixture's path.
+    assert 'grep -qF "Source directory does not exist: $FIX_UNREACHABLE"' in step
+    source = (REPO_ROOT / "automated_security_helper" / "cli" / "scan.py").read_text(
+        encoding="utf-8"
     )
+    assert 'f"Source directory does not exist: {source_dir}. "' in source, (
+        "the message step 7 requires is no longer what ASH prints"
+    )
+    # Both reports, at their exact paths, under an output dir the sandbox can write.
+    assert "for report in reports/ash.sarif ash_aggregated_results.json; do" in step
+    assert "NEG_OUT=/srv/" in step
+    assert '--output-dir "$NEG_OUT"' in step
+    assert "exit 1" in step
+
+
+def _run_version_check(reported: str, expected: str) -> int:
+    text = _script()
+    start = text.index("assert_reports_version() {")
+    end = text.index("\n}\n", start) + 3
+    script = text[start:end] + f'assert_reports_version "{reported}" "{expected}"\n'
+    return run_bash(script).returncode
+
+
+@pytest.mark.parametrize(
+    ("reported", "expected", "rc"),
+    [
+        ("awslabs/automated-security-helper v4.0.0", "4.0.0", 0),
+        ("awslabs/automated-security-helper v3.0.0", "4.0.0", 1),
+        ("awslabs/automated-security-helper v14.0.0", "4.0.0", 1),
+        ("awslabs/automated-security-helper v4.0.01", "4.0.0", 1),
+        ("", "4.0.0", 1),
+    ],
+)
+def test_the_version_check_requires_the_exact_version(
+    reported: str, expected: str, rc: int
+) -> None:
+    assert _run_version_check(reported, expected) == rc
+
+
+def test_every_version_the_app_reports_is_compared() -> None:
+    text = _script()
+    # step 5's --version and -V, and step 12's N-1 and N.
+    assert text.count('assert_reports_version "$REPORTED" "$VERSION"') == 2
+    assert 'assert_reports_version "$PREV_REPORTED" "$PREV_VERSION"' in text
+    assert 'assert_reports_version "$NEW_REPORTED" "$VERSION"' in text
+    assert 'flatpak run "$APP_ID" --version\nflatpak' not in text
 
 
 def test_exit_code_control_matches_what_run_case_prints(
@@ -149,3 +208,58 @@ def test_the_push_caller_rebuilds_on_product_and_contract_changes() -> None:
         "packaging/**",
     ):
         assert path in push["paths"], path
+
+
+def _function(name: str) -> str:
+    text = _script()
+    start = text.index(f"{name}() {{")
+    return text[start : text.index("\n}\n", start) + 3]
+
+
+def test_the_runtime_is_pinned_by_a_full_commit_and_read_back() -> None:
+    text = _script()
+    match = re.search(r'^RUNTIME_COMMIT_X86_64="([0-9a-f]+)"$', text, re.MULTILINE)
+    assert match, "the x86_64 runtime commit pin is gone or not a literal"
+    assert len(match.group(1)) == 64, "an OSTree commit is 64 hex digits"
+    assert '--commit="$RUNTIME_COMMIT"' in text
+    assert 'assert_runtime_commit "$RUNTIME_COMMIT"' in text
+    # The pin is applied before anything is built against the runtime.
+    assert text.index('assert_runtime_commit "$RUNTIME_COMMIT"') < text.index(
+        "== 2. build the N and N-1 bundles"
+    )
+
+
+@pytest.mark.parametrize(
+    ("installed", "pinned", "rc"),
+    [("a" * 64, "a" * 64, 0), ("b" * 64, "a" * 64, 1), ("", "a" * 64, 1)],
+)
+def test_the_runtime_commit_check_rejects_any_other_commit(
+    tmp_path: Path, installed: str, pinned: str, rc: int
+) -> None:
+    write_lf(
+        tmp_path / "flatpak",
+        f"#!/bin/sh\nprintf '%s\\n' '{installed}'\n",
+        executable=True,
+    )
+    # The stub goes first on the PATH bash already has, so the host's own tools stay.
+    script = (
+        f'PATH="{bash_path(tmp_path)}:$PATH"\n'
+        "RUNTIME_VERSION=24.08\n"
+        + _function("assert_runtime_commit")
+        + f'assert_runtime_commit "{pinned}"\n'
+    )
+    result = run_bash(script)
+    assert result.returncode == rc, result.stderr
+
+
+def test_n_minus_1_is_built_with_its_own_packaging() -> None:
+    text = _script()
+    assert 'PREV_BUNDLE="$("$PREV_SRC/packaging/flatpak/build.sh" "$PREV_WHEEL"' in text
+    assert '"$REPO/packaging/flatpak/build.sh" "$PREV_WHEEL"' not in text
+    assert '[ "$N1_SHA" != "$N1_HEAD" ]' in text
+
+
+def test_the_runtime_pin_is_checked_again_after_the_app_update() -> None:
+    text = _script()
+    update = text.index('flatpak update -y --system --noninteractive "$APP_ID"')
+    assert text.find('assert_runtime_commit "$RUNTIME_COMMIT"', update) > update
