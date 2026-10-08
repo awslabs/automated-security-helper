@@ -53,11 +53,31 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 
 # The top-level key each package manager's audit report always carries, clean or
 # not. An exit status other than 0 without it means the audit did not run to a
-# report. yarn is absent: `yarn audit --json` writes one JSON object per line,
-# which this scanner does not parse, so there is no report key to look for.
+# report. yarn is absent because its output is not one JSON document: see
+# _parse_yarn_audit, which decides for yarn whether a report came back.
 _REPORT_KEY = {"npm": "vulnerabilities", "pnpm": "advisories"}
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+# Advisory severity to SARIF level, for npm and yarn alike.
+_SEVERITY_LEVEL = {
+    "critical": "error",
+    "high": "error",
+    "moderate": "warning",
+    "low": "note",
+    "info": "note",
+}
+
+# Where a yarn audit's advisories sit in the per-lockfile document, after
+# _parse_yarn_audit has put all three yarn output formats into one shape.
+_YARN_ADVISORIES_KEY = "yarn_advisories"
+
+_SEMVER_MAJOR = re.compile(r"^\s*v?(\d+)\.\d+")
+
+# In a Node crash dump: the "file.js:LINE" header above the offending source
+# line, and a line that names its error ("Error: ...", "Ls [RequestError]: ...").
+_SOURCE_LOCATION = re.compile(r"^\S+\.[cm]?js:\d+$")
+_NAMED_ERROR = re.compile(r"(?:^|\s|\[)\w*Error\]?:\s")
 
 
 class NpmAuditScannerConfigOptions(ScannerOptionsBase):
@@ -245,6 +265,328 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         return f"{binary} audit exited {returncode} without an audit report{detail}"
 
     @staticmethod
+    def _yarn_major(version_output: Any) -> int | None:
+        """The major version in `yarn --version` output, or None if there is none."""
+        lines = [
+            line
+            for line in _ANSI_ESCAPE.sub("", str(version_output or "")).splitlines()
+            if line.strip()
+        ]
+        match = _SEMVER_MAJOR.match(lines[-1]) if lines else None
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _yarn_error_detail(text: Any) -> str:
+        """The lines of yarn output that say what went wrong, joined and capped.
+
+        yarn 1 writes errors as NDJSON ``{"type": "error"}`` events, which are
+        reduced to their message. yarn 2+ and crashes write a Node stack trace,
+        often after a line of minified source; stack frames and source lines are
+        dropped, and lines naming an error (``Error:``, ``[HTTPError]:``) are
+        preferred over the rest.
+        """
+        lines: List[str] = []
+        named: List[str] = []
+        for raw in _ANSI_ESCAPE.sub("", str(text or "")).splitlines():
+            line = raw.strip()
+            try:
+                event = json.loads(line) if line.startswith("{") else None
+            except ValueError:
+                event = None
+            if isinstance(event, dict) and "type" in event:
+                if event.get("type") != "error":
+                    continue
+                message = str(event.get("data") or "").strip().splitlines()
+                if message:
+                    named.append(message[0].strip()[:200])
+                continue
+            if (
+                not line
+                or line.startswith(("at ", "^", "Node.js v"))
+                or len(line) > 200
+                or _SOURCE_LOCATION.match(line)
+            ):
+                continue
+            lines.append(line)
+            if _NAMED_ERROR.search(line):
+                named.append(line)
+        return " / ".join((named or lines)[:3])[:300]
+
+    @staticmethod
+    def _v1_advisory_record(advisory: Dict[str, Any]) -> Dict[str, Any] | None:
+        """One npm v1 advisory (yarn 1 auditAdvisory, yarn 2/3 advisories) as a record."""
+        package = advisory.get("module_name")
+        if not package:
+            return None
+        cwe = advisory.get("cwe") or []
+        versions: Dict[str, List[str]] = {}
+        for finding in advisory.get("findings") or []:
+            if not isinstance(finding, dict) or not finding.get("version"):
+                continue
+            paths = versions.setdefault(str(finding["version"]), [])
+            paths.extend(str(p) for p in finding.get("paths") or [] if p not in paths)
+        return {
+            "package": str(package),
+            "id": advisory.get("id"),
+            "title": advisory.get("title"),
+            "url": advisory.get("url") or "",
+            "severity": advisory.get("severity") or "moderate",
+            "cvss": advisory.get("cvss")
+            if isinstance(advisory.get("cvss"), dict)
+            else {},
+            "cwe": [cwe] if isinstance(cwe, str) else list(cwe),
+            "vulnerable_versions": advisory.get("vulnerable_versions") or "*",
+            "patched_versions": advisory.get("patched_versions"),
+            "versions": versions,
+            "paths_key": "dependency_paths",
+        }
+
+    @staticmethod
+    def _berry_advisory_record(line: Dict[str, Any]) -> Dict[str, Any] | None:
+        """One `yarn npm audit --json` (yarn 4) line as a record, or None.
+
+        None for deprecation notices: yarn 4 lists deprecated packages in the
+        same stream, with an ID such as ``"mkdirp (deprecation)"`` and no
+        advisory URL. A deprecation is not a vulnerability, and npm audit does
+        not report them either.
+        """
+        children = line.get("children")
+        package = line.get("value")
+        if not isinstance(children, dict) or not package:
+            return None
+        advisory_id = children.get("ID")
+        if isinstance(advisory_id, str) and advisory_id.endswith("(deprecation)"):
+            return None
+        return {
+            "package": str(package),
+            "id": advisory_id,
+            "title": children.get("Issue"),
+            "url": children.get("URL") or "",
+            "severity": children.get("Severity") or "moderate",
+            "cvss": {},
+            "cwe": [],
+            "vulnerable_versions": children.get("Vulnerable Versions") or "*",
+            "patched_versions": None,
+            "versions": {
+                str(v): [str(d) for d in children.get("Dependents") or []]
+                for v in children.get("Tree Versions") or []
+            },
+            "paths_key": "dependents",
+        }
+
+    @classmethod
+    def _parse_yarn_audit(
+        cls, yarn_major: int, result: Dict[str, Any]
+    ) -> tuple[Dict[str, Any] | None, str | None]:
+        """(report, None) when yarn produced an audit report, else (None, reason).
+
+        yarn writes three formats, all captured from real runs:
+
+        - yarn 1, `yarn audit --json`: NDJSON events. ``auditAdvisory`` lines
+          carry npm v1 advisories and an ``auditSummary`` line closes every
+          report, clean or not. The exit code is a bitmask of the severities
+          found (1 info ... 16 critical), so exit 1 can be a report too. A
+          failed request writes an ``error`` event, or a stack trace, and no
+          summary.
+        - yarn 2 and 3, `yarn npm audit --json`: one npm v1 document with
+          ``advisories`` and ``metadata``.
+        - yarn 4, `yarn npm audit --json`: one ``{"value", "children"}`` line
+          per advisory and package, and nothing at all when clean. A failed
+          request exits 1 with nothing on stdout and the error on stderr.
+
+        The report is ``{_YARN_ADVISORIES_KEY: [records], "metadata": ...}``.
+        """
+        returncode = result.get("returncode")
+        if returncode is None and "error" in result:
+            return None, f"yarn audit did not run: {result['error']}"
+        stdout = _ANSI_ESCAPE.sub("", str(result.get("stdout") or ""))
+        detail = cls._yarn_error_detail(result.get("stderr"))
+
+        records: List[Dict[str, Any]] = []
+        metadata: Dict[str, Any] = {}
+        is_report = False
+        problems: List[str] = []
+
+        if yarn_major < 2:
+            for line in stdout.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    problems.append(line.strip())
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                data = event.get("data")
+                if event.get("type") == "auditAdvisory" and isinstance(data, dict):
+                    advisory = data.get("advisory")
+                    record = (
+                        cls._v1_advisory_record(advisory)
+                        if isinstance(advisory, dict)
+                        else None
+                    )
+                    if record is not None:
+                        records.append(record)
+                elif event.get("type") == "auditSummary" and isinstance(data, dict):
+                    is_report = True
+                    metadata = {"vulnerabilities": data.get("vulnerabilities") or {}}
+                elif event.get("type") == "error":
+                    message = str(data or "").strip().splitlines()
+                    problems.append(message[0] if message else "error event")
+        else:
+            document: Any = None
+            try:
+                document = json.loads(stdout) if stdout.strip() else None
+            except ValueError:
+                document = None
+            if isinstance(document, dict) and "advisories" in document:
+                advisories = document.get("advisories") or {}
+                if isinstance(advisories, dict):
+                    is_report = True
+                    for advisory in advisories.values():
+                        record = (
+                            cls._v1_advisory_record(advisory)
+                            if isinstance(advisory, dict)
+                            else None
+                        )
+                        if record is not None:
+                            records.append(record)
+                    meta = document.get("metadata")
+                    if isinstance(meta, dict):
+                        metadata = {
+                            "vulnerabilities": meta.get("vulnerabilities") or {}
+                        }
+            else:
+                advisory_lines = 0
+                for line in stdout.splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        problems.append(line.strip())
+                        continue
+                    if isinstance(entry, dict) and "children" in entry:
+                        advisory_lines += 1
+                        record = cls._berry_advisory_record(entry)
+                        if record is not None:
+                            records.append(record)
+                # yarn 4 prints nothing when it finds nothing, and exits 0.
+                is_report = not problems and (advisory_lines > 0 or returncode == 0)
+                counts: Dict[str, int] = {}
+                for record in records:
+                    severity = str(record["severity"])
+                    counts[severity] = counts.get(severity, 0) + 1
+                metadata = {"vulnerabilities": counts}
+
+        if problems and not is_report:
+            reason = cls._yarn_error_detail("\n".join(problems)) or problems[0][:300]
+            if detail:
+                reason = f"{reason} / {detail}"[:300]
+            return None, f"yarn audit reported an error: {reason}"
+        if not is_report:
+            suffix = f": {detail}" if detail else ""
+            return (
+                None,
+                f"yarn audit exited {returncode} without an audit report{suffix}",
+            )
+
+        # One record per (advisory, package); yarn 1 repeats an advisory once
+        # per dependency path that reaches it.
+        merged: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for record in records:
+            key = (str(record["url"] or record["id"]), record["package"])
+            if key not in merged:
+                merged[key] = record
+                continue
+            for version, paths in record["versions"].items():
+                known = merged[key]["versions"].setdefault(version, [])
+                known.extend(p for p in paths if p not in known)
+        return {_YARN_ADVISORIES_KEY: list(merged.values()), "metadata": metadata}, None
+
+    def _add_yarn_results(
+        self,
+        records: List[Dict[str, Any]],
+        rules_dict: Dict[str, ReportingDescriptor],
+        results: List[Result],
+    ) -> None:
+        """Rules and results for yarn advisories, in the shape npm's take.
+
+        One result per installed version of the advisory's package. The URI is
+        the one the npm path gives a hoisted package, so path-based
+        suppressions read the same; yarn does not say where a copy is
+        installed, so ``package_path`` is left out.
+        """
+        for record in records:
+            pkg_name = record["package"]
+            severity = str(record["severity"])
+            level = _SEVERITY_LEVEL.get(severity, "warning")
+            vuln_id = self._advisory_id(pkg_name, {"url": record["url"]})
+            title = record["title"] or f"Vulnerability in {pkg_name}"
+            if vuln_id not in rules_dict:
+                rule_props: Dict[str, Any] = {
+                    "tags": [
+                        "security",
+                        "npm-audit",
+                        severity,
+                        f"tool_name::{self.config.name}",
+                        f"tool_type::{self.tool_type or 'UNKNOWN'}",
+                    ],
+                }
+                cvss_score = record["cvss"].get("score")
+                if cvss_score is not None:
+                    rule_props["security_severity"] = cvss_score
+                rules_dict[vuln_id] = ReportingDescriptor(
+                    id=vuln_id,
+                    name=f"npm-audit-{vuln_id}",
+                    shortDescription=MultiformatMessageString(text=title),
+                    fullDescription=MultiformatMessageString(
+                        text=f"Vulnerability in {pkg_name}: {title}"
+                    ),
+                    helpUri=record["url"],
+                    properties=PropertyBag(**rule_props),
+                )
+            patched = record["patched_versions"]
+            extra: Dict[str, Any] = {}
+            if patched is not None:
+                extra["patched_versions"] = patched
+                extra["fix_available"] = bool(patched) and patched != "<0.0.0"
+            for version, paths in sorted(record["versions"].items()):
+                per_copy = dict(extra)
+                if paths:
+                    per_copy[record["paths_key"]] = paths
+                results.append(
+                    Result(
+                        ruleId=vuln_id,
+                        level=level,
+                        message=Message(
+                            text=f"{title} in {pkg_name} {record['vulnerable_versions']}. {record['url']}"
+                        ),
+                        locations=[
+                            Location(
+                                physicalLocation=PhysicalLocation(
+                                    artifactLocation=ArtifactLocation(
+                                        uri=f"node_modules/{pkg_name}/package.json"
+                                    ),
+                                    region=Region(startLine=1, startColumn=1),
+                                )
+                            )
+                        ],
+                        properties=PropertyBag(
+                            **identity_properties(pkg_name, version, None),
+                            installed_version=version,
+                            vulnerable_versions=record["vulnerable_versions"],
+                            recommendation=f"Update {pkg_name} to a non-vulnerable version",
+                            severity=severity,
+                            cwe=record["cwe"],
+                            cvss=record["cvss"],
+                            **per_copy,
+                        ),
+                    )
+                )
+
+    @staticmethod
     def _advisory_id(pkg_name: str, via: Dict[str, Any]) -> str:
         """Rule id of one advisory entry, the same for direct and root findings."""
         return (
@@ -372,14 +714,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 severity = vuln_info.get("severity", "moderate")
 
                 # Map npm severity to SARIF level
-                level_map = {
-                    "critical": "error",
-                    "high": "error",
-                    "moderate": "warning",
-                    "low": "note",
-                    "info": "note",
-                }
-                level = level_map.get(severity, "warning")
+                level = _SEVERITY_LEVEL.get(severity, "warning")
 
                 # Process each vulnerability path
                 via_items = vuln_info.get("via", [])
@@ -546,6 +881,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             ),
                         )
                         results.append(result)
+
+        if _YARN_ADVISORIES_KEY in npm_audit_results:
+            self._add_yarn_results(
+                npm_audit_results[_YARN_ADVISORIES_KEY], rules_dict, results
+            )
 
         # Add all rules to the tool component
         tool_component.rules = list(rules_dict.values())
@@ -755,7 +1095,69 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             )
                             continue
 
+                        # Corepack resolves the package manager version from the
+                        # repository's `packageManager` field, and fetches it if the
+                        # image has a different one cached. The Dockerfile sets
+                        # COREPACK_ENABLE_DOWNLOAD_PROMPT=0 so that fetch cannot
+                        # block on a stdin prompt that no one can answer -- but
+                        # disabling the prompt only stops the *asking*, not the
+                        # download.
+                        #
+                        # In offline mode a download is the wrong outcome twice
+                        # over: there is no network, so it fails, and it fails
+                        # instead of using the package manager already cached in the
+                        # image. COREPACK_ENABLE_NETWORK=0 makes corepack fall back
+                        # to the cached version rather than reach out.
+                        subprocess_env = None
+                        if self._scanner_offline():
+                            subprocess_env = {
+                                **os.environ,
+                                "COREPACK_ENABLE_NETWORK": "0",
+                            }
+
+                        # yarn 2 and later dropped `yarn audit` for `yarn npm
+                        # audit`, and print a different report. Which yarn runs
+                        # depends on the project (corepack honours its
+                        # `packageManager` field), so ask it from there.
+                        yarn_major: int | None = None
                         cmd = [binary, "audit", "--json"]
+                        if binary == "yarn":
+                            version_result = self._run_subprocess(
+                                command=[binary, "--version"],
+                                stdout_preference="return",
+                                stderr_preference="return",
+                                cwd=package_dir,
+                                env=subprocess_env,
+                                timeout=self._effective_scan_timeout(),
+                            )
+                            yarn_major = self._yarn_major(version_result.get("stdout"))
+                            if yarn_major is None:
+                                detail = self._yarn_error_detail(
+                                    version_result.get("stderr")
+                                    or version_result.get("error")
+                                )
+                                audit_failures.append(
+                                    f"{lock_file}: could not tell which yarn "
+                                    "version runs here; `yarn --version` printed "
+                                    f"{str(version_result.get('stdout') or '').strip()[:80]!r}"
+                                    + (f" ({detail})" if detail else "")
+                                )
+                                continue
+                            if yarn_major >= 2:
+                                if self._scanner_offline():
+                                    # `yarn npm audit` has no offline mode: it
+                                    # rejects --offline and always asks the
+                                    # registry. Offline, that is an audit that
+                                    # cannot run, as it is for npm.
+                                    audit_failures.append(
+                                        f"{lock_file}: yarn {yarn_major} audits "
+                                        "with `yarn npm audit`, which has no "
+                                        "offline mode, so it was not run"
+                                    )
+                                    continue
+                                # --recursive: the whole tree, as npm audits
+                                # it. Without it yarn checks direct deps only.
+                                cmd = [binary, "npm", "audit", "--json", "--recursive"]
 
                         # Add offline mode if enabled
                         if self._scanner_offline():
@@ -777,26 +1179,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     "npm audit offline mode validation failed, but continuing with scan"
                                 )
 
-                        # Corepack resolves the package manager version from the
-                        # repository's `packageManager` field, and fetches it if the
-                        # image has a different one cached. The Dockerfile sets
-                        # COREPACK_ENABLE_DOWNLOAD_PROMPT=0 so that fetch cannot
-                        # block on a stdin prompt that no one can answer -- but
-                        # disabling the prompt only stops the *asking*, not the
-                        # download.
-                        #
-                        # In offline mode a download is the wrong outcome twice
-                        # over: there is no network, so it fails, and it fails
-                        # instead of using the package manager already cached in the
-                        # image. COREPACK_ENABLE_NETWORK=0 makes corepack fall back
-                        # to the cached version rather than reach out.
-                        subprocess_env = None
-                        if self._scanner_offline():
-                            subprocess_env = {
-                                **os.environ,
-                                "COREPACK_ENABLE_NETWORK": "0",
-                            }
-
                         # Run from the lock file's parent directory so
                         # that pnpm (and yarn) can locate their lock
                         # files (#99).
@@ -814,14 +1196,21 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # npm audit returns non-zero exit code when vulnerabilities are found
                         # but we still want to process the output
                         audit_results: Any = None
-                        if result.get("stdout", None):
-                            try:
-                                audit_results = json.loads(result.get("stdout", None))
-                            except json.JSONDecodeError:
-                                ASH_LOGGER.warning(
-                                    f"Failed to parse npm audit output for {package_dir}"
-                                )
-                        failure = self._audit_failure(binary, result, audit_results)
+                        if yarn_major is not None:
+                            audit_results, failure = self._parse_yarn_audit(
+                                yarn_major, result
+                            )
+                        else:
+                            if result.get("stdout", None):
+                                try:
+                                    audit_results = json.loads(
+                                        result.get("stdout", None)
+                                    )
+                                except json.JSONDecodeError:
+                                    ASH_LOGGER.warning(
+                                        f"Failed to parse npm audit output for {package_dir}"
+                                    )
+                            failure = self._audit_failure(binary, result, audit_results)
                         if failure is not None:
                             audit_failures.append(f"{lock_file}: {failure}")
                             continue

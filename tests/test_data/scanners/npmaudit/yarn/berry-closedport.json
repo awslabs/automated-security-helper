@@ -1,0 +1,13 @@
+{
+  "command": [
+    "yarn",
+    "npm",
+    "audit",
+    "--json",
+    "--recursive"
+  ],
+  "returncode": 1,
+  "stderr": "node:internal/process/promises:394\n    triggerUncaughtException(err, true /* fromPromise */);\n    ^\n\nLs [RequestError]: connect ECONNREFUSED 127.0.0.1:9\n    at ClientRequest.<anonymous> (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:148:14258)\n\u001b[90m    at Object.onceWrapper (node:events:634:26)\u001b[39m\n\u001b[90m    at ClientRequest.emit (node:events:531:35)\u001b[39m\n    at l.emit (/root/.cache/node/corepack/v1/yarn/4.18.1/yarn.js:143:22975)\n\u001b[90m    at emitErrorEvent (node:_http_client:107:11)\u001b[39m\n\u001b[90m    at Socket.socketErrorListener (node:_http_client:574:5)\u001b[39m\n\u001b[90m    at Socket.emit (node:events:519:28)\u001b[39m\n\u001b[90m    at emitErrorNT (node:internal/streams/destroy:170:8)\u001b[39m\n\u001b[90m    at emitErrorCloseNT (node:internal/streams/destroy:129:3)\u001b[39m\n\u001b[90m    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)\u001b[39m\n\u001b[90m    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)\u001b[39m {\n  code: \u001b[32m'ECONNREFUSED'\u001b[39m,\n  timings: {\n    start: \u001b[33m1791409615822\u001b[39m,\n    socket: \u001b[33m1791409615823\u001b[39m,\n    lookup: \u001b[90mundefined\u001b[39m,\n    connect: \u001b[90mundefined\u001b[39m,\n    secureConnect: \u001b[90mundefined\u001b[39m,\n    upload: \u001b[90mundefined\u001b[39m,\n    response: \u001b[90mundefined\u001b[39m,\n    end: \u001b[90mundefined\u001b[39m,\n    error: \u001b[33m1791409615824\u001b[39m,\n    abort: \u001b[90mundefined\u001b[39m,\n    phases: {\n      wait: \u001b[33m1\u001b[39m,\n      dns: \u001b[90mundefined\u001b[39m,\n      tcp: \u001b[90mundefined\u001b[39m,\n      tls: \u001b[90mundefined\u001b[39m,\n      request: \u001b[90mundefined\u001b[39m,\n      firstByte: \u001b[90mundefined\u001b[39m,\n      download: \u001b[90mundefined\u001b[39m,\n      total: \u001b[33m2\u001b[39m\n    }\n  }\n}\n\nNode.js v22.22.0\n",
+  "stdout": "",
+  "yarn_version": "4.18.1"
+}

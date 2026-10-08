@@ -92,6 +92,15 @@
   Other lockfiles are still audited. Offline scans keep their previous behavior and log a
   warning instead. Pass `--no-fail-on-incomplete-scanners` to accept the partial scan.
 
+- **npm-audit now reports yarn findings, and a failed yarn audit is ERROR.** A project
+  with a `yarn.lock` always came out of npm-audit PASSED with 0 findings and exit 0,
+  whatever its dependencies held. It now reports yarn's advisories as findings, so a
+  vulnerable yarn project fails the scan (exit 2) the way an npm one does, and a yarn
+  audit that could not get advisories reports ERROR and the scan exits 1 as incomplete.
+  Under yarn 2 and later, npm-audit now runs `yarn npm audit --recursive`; offline, it
+  does not run it at all, because that command has no offline mode, and logs a warning
+  naming the lockfile, as it does for an npm audit that cannot run offline.
+
 - **A scanner's `offline: false` no longer overrides ASH's offline mode.** ASH's
   offline mode (`--offline`, `ASH_OFFLINE`, or an image built with `--offline`) now
   applies to every scanner, and `options.offline: false` means "follow ASH". It used
@@ -590,6 +599,18 @@
   exit without that tool's report, is now an audit failure reported as ERROR. A clean
   audit (exit 0, empty `vulnerabilities`) still passes, and findings on exit 1 are still
   findings.
+
+- npm-audit now parses yarn's audit output. yarn 1 writes `yarn audit --json` as one JSON
+  object per line, which the scanner handed to `json.loads` whole, so every report failed
+  to parse and was dropped. yarn 2 and later have no `yarn audit`; the scanner ran it
+  anyway and took the usage error for a clean audit. The scanner now asks `yarn --version`
+  in the project, runs `yarn audit --json` for yarn 1 and `yarn npm audit --json
+  --recursive` for yarn 2+, and reads all three output formats (yarn 1 NDJSON, the npm v1
+  document yarn 2 and 3 print, and yarn 4's NDJSON). Each advisory becomes one result per
+  installed version, with the npm path's severity levels, rule ids and properties.
+  yarn 4's deprecation notices are not findings. A yarn audit with no report (yarn 1
+  without its closing `auditSummary`, yarn 2+ exiting non-zero without advisories, or an
+  error event or crash) goes through the same failure path as npm and pnpm.
 
 - MCP config tools now confine config paths, including `extends` chains, to the allowed roots.
   The `get_config`, `validate_config`, `explain_finding`, `suggest_suppression` and
