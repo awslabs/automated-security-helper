@@ -29,7 +29,6 @@ concurrency:
 jobs:
   build-docs:
     name: Build documentation
-    needs: []
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -52,12 +51,15 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # --strict turns every mkdocs warning into a failure: a link to a file outside
+      # docs_dir, a nav entry naming a missing page, an unknown anchor. Without it the
+      # build reported success over a broken link in docs/mcp/streamable-http.md, and
+      # nothing else in CI reads the rendered site.
       - name: Build documentation
-        run: uv run mkdocs build --clean
+        run: uv run mkdocs build --clean --strict
 
   deploy-docs:
     name: Deploy documentation
-    needs: []
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -81,5 +83,7 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # Strict here too, so a warning that reached main without the pull request
+      # build (a ruleset bypass) stops the deploy instead of publishing it.
       - name: Deploy documentation
-        run: uv run mkdocs gh-deploy --clean --force
+        run: uv run mkdocs gh-deploy --clean --force --strict
