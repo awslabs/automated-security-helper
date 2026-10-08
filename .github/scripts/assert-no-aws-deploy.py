@@ -99,9 +99,9 @@ block itself, so the scan follows what a command executes:
     flags. The words after the script name are appended to the script's value
     before it is scanned, as npm, yarn and pnpm pass them to it, so
     `"tool": "npx cdk"` with `npm run tool -- deploy` is a deploy. A script
-    followed with more than MAX_SCRIPT_ARGUMENT_SETS different argument lists
-    (each ambiguous flag in a script that runs another can double them) is a
-    finding too. The lifecycle
+    followed from one workflow file with more than MAX_SCRIPT_ARGUMENT_SETS
+    different argument lists (each ambiguous flag in a script that runs another
+    can double them) is a finding too. The lifecycle
     commands map to the scripts npm's scripts.md lists for them: `npm ci` and a
     bare `npm install` (and their aliases) to `preinstall`, `install`,
     `postinstall`, `prepublish`, `preprepare`, `prepare`, `postprepare`; `npm
@@ -123,15 +123,16 @@ block itself, so the scan follows what a command executes:
     multi-line array literal or call is joined onto its first line, so a
     `spawn("npx", [...])` argv written one word per line is one command. Joining
     has no length cap, because it can only add words to a command. Telling a
-    regex from a division is still a guess, so a line where a comment starts
-    after code on the same line is also read whole, with its comment, which can
-    only add a hit; only a comment that is alone on its line (or inside a
-    multi-line comment) is never read. A file whose strings, templates or
+    regex from a division is a guess, so a line where a comment starts after a
+    regex-or-division decision, or a line that starts inside a template literal,
+    is also read whole, with its comment, which can only add a hit. A comment
+    after strings or plain code is a comment and is not read. A file whose strings, templates or
     brackets do not balance at its end is a finding, and the finding says to
     restructure that JavaScript rather than change this check.
   * In a workflow, a folded block scalar (`run: >`) is read as the one line
-    Actions makes of it, and a `script:` block (actions/github-script) is read
-    as JavaScript, with its multi-line arrays and calls joined. A shell command
+    Actions makes of it, and the `script:` block of an actions/github-script
+    step is read as JavaScript, with its multi-line arrays and calls joined;
+    another action's `script:` (an SSH action's shell, say) is read as written. A shell command
     that calls a function or alias the same file defines (`c() { npx cdk "$@";
     }`, `alias c='npx cdk'`) is also read with the definition in its place, and
     a pipe into `xargs` is also read with the producer's words as its arguments
@@ -143,17 +144,28 @@ block itself, so the scan follows what a command executes:
     `os.system`/`os.popen`, the `os.exec*`/`os.spawn*` families,
     `posix_spawn`, `pty.spawn` and asyncio's `create_subprocess_exec`/`_shell`,
     also when imported under another name (`from subprocess import run as sh`).
-    A runner is also anything bound to one (`sh = subprocess.check_call`),
-    reached through `getattr(subprocess, "run")`, or a function that hands a
-    parameter (positional, keyword-only or `*args`) to a runner's input, found
-    to a fixpoint across every followed Python file and matched by name at its
-    call sites, so `def sh(c): subprocess.run(c, shell=True)` makes `sh("npx cdk
-    deploy")` a runner call. The sh library's `sh.<program>(...)` runs
+    A runner is also anything bound to one (`sh = subprocess.check_call`,
+    `sh = functools.partial(subprocess.run, shell=True)`), reached through
+    `getattr(subprocess, "run")`, or a function or lambda that hands a parameter
+    (positional, keyword-only or `*args`) to a runner's input. Wrappers are found
+    to a fixpoint; each keeps the runner inputs it builds, and a call site is
+    read with its arguments in the parameters' places, through any number of
+    wrapper levels, so `def cdk(a): subprocess.run(["npx", "cdk", a, "--all"])`
+    makes `cdk("deploy")` read as `npx cdk deploy --all`, and every string of a
+    wrapper call is also read joined in order. Parameters are kept in a fixed
+    order, so the reading does not depend on string hashing. A wrapper is seen
+    in the file that defines it and in the followed files that import that file
+    (`from helpers import run_command`, `import helpers`), matched by name; a
+    bare call to a wrapper named like a runner (`def run(*argv): ...`, then
+    `run("cdk", a)`) reaches the wrapper, while `subprocess.run(...)` stays the
+    runner. The sh library's `sh.<program>(...)` runs
     `<program>`. `runpy.run_path`, `runpy.run_module`, `importlib.import_module`
     and `exec(open(path).read())` follow the file they name. The runner's input
     (including an `executable=` keyword) may be a literal, a name bound to one by
     a plain, chained or annotated assignment (`cmd = [...]`, `a = b = "..."`,
-    `cmd: list[str] = [...]`), an f-string (each `{...}` read as `$EXPR`), or any
+    `cmd: list[str] = [...]`), a list grown after it is bound (`cmd.append(x)`,
+    `cmd.extend(xs)`, `cmd.insert(i, x)`, `cmd += [...]`, read in source order),
+    an f-string (each `{name}` read as what the name holds, else `$EXPR`), or any
     other expression, whose strings are all read in source order, through the
     names they are bound from (`shlex.split("...")`, `"...".split()`, `["npx",
     "cdk"] + ["deploy"]`, `C["go"]` with `C = {"go": "..."}`); all of an
@@ -182,13 +194,17 @@ KNOWN LIMITS
 
 A deploy assembled from variables at run time is not seen: a script named only
 through a variable (`npm run "$script"`, `bash "$HELPER"` when the env value is
-set elsewhere), a Python name reassigned or built up after it is bound (only the
-last binding of a name in the file is used), a Python value read from a file or
-the environment, or a JavaScript argv pushed onto a variable
-(`args.push("deploy")`). A Python wrapper is matched by its bare name, so one
-reached only as an object's attribute under another name, or passed around as a
-value, is not; a JavaScript function that wraps child_process is not followed
-to its callers. An env value written as a literal path in the
+set elsewhere), a Python name reassigned after it is bound (only the last
+binding of a name in the file is used, grown by the appends after it), a list
+grown through a different name or inside a loop over values from elsewhere, a
+Python value read from a file or the environment, or a JavaScript argv pushed
+onto a variable (`args.push("deploy")`). A Python wrapper is matched by name in
+its own file and in the files that import it directly, so one reached through a
+re-export (a package `__init__` that imports it from a submodule), passed around
+as a value, or renamed by assignment in another file is not; a wrapper keeps at
+most MAX_WRAPPER_INPUTS runner inputs, past which its calls are read only by
+their own joined strings. A JavaScript function that wraps child_process is not
+followed to its callers. An env value written as a literal path in the
 same file (`HELPER: ${{ github.action_path }}/x.py`) is followed, because the path
 is a token on that line. A Python import is resolved only against the importing
 file's directory and the repository root, so a module found through another
@@ -228,6 +244,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_DIRS = (".github/workflows", ".github/actions")
@@ -765,9 +782,10 @@ class JsScan:
     depths: tuple[int, ...]
     # The file ends inside a template literal, a `${...}` or an open bracket.
     unbalanced: bool
-    # Lines where a comment starts after code, or after a string, template or
-    # regex decision, on the same line. A decision may be wrong, so these lines
-    # are also scanned with their comments in place (which can only add hits).
+    # Lines where a comment starts after a regex-or-division decision on the same
+    # line, or on a line that started inside a template literal. Those decisions
+    # may be wrong, so these lines are also scanned with their comments in place
+    # (which can only add hits).
     suspect: frozenset[int]
 
 
@@ -784,16 +802,18 @@ def _js_walk(text: str) -> JsScan:
     after_control = False
     code = ""  # recent code, for the regex test
     line = 1
-    decided = False
+    # A regex-or-division decision was made on this line, or the line started
+    # inside a template literal: the two places the walker can be wrong.
+    guessed = False
     index = 0
     length = len(text)
 
-    def newlines(segment: str) -> None:
-        nonlocal line, decided
+    def newlines(segment: str, in_template: bool = False) -> None:
+        nonlocal line, guessed
         for _ in range(segment.count("\n")):
             depths.append(depth)
             line += 1
-            decided = True  # the new line starts inside a string or comment
+            guessed = in_template
 
     while index < length:
         char = text[index]
@@ -801,7 +821,7 @@ def _js_walk(text: str) -> JsScan:
         if char == "\n":
             depths.append(depth)
             line += 1
-            decided = False
+            guessed = top is None
             out.append(char)
             index += 1
             continue
@@ -809,7 +829,7 @@ def _js_walk(text: str) -> JsScan:
             if char == "\\" and index + 1 < length:
                 pair = text[index : index + 2]
                 out.append(pair)
-                newlines(pair)
+                newlines(pair, in_template=True)
                 index += 2
                 continue
             if char == "`":
@@ -841,21 +861,18 @@ def _js_walk(text: str) -> JsScan:
             segment = text[index:end]
             out.append(segment)
             newlines(segment)
-            decided = True
             code += "x"
             after_control = False
             index = end
             continue
         if char == "`":
             stack.append(None)
-            decided = True
             after_control = False
             out.append(char)
             index += 1
             continue
         if text.startswith("//", index) or text.startswith("/*", index):
-            line_start = text.rfind("\n", 0, index) + 1
-            if decided or text[line_start:index].strip():
+            if guessed:
                 suspect.add(line)
             if text[index + 1] == "/":
                 end = text.find("\n", index)
@@ -866,14 +883,13 @@ def _js_walk(text: str) -> JsScan:
             segment = text[index:end]
             out.append(re.sub(r"[^\n]", " ", segment))
             newlines(segment)
-            decided = decided or "\n" in segment
             index = end
             continue
         if char == "/":
             end = _js_regex_end(text, index, code.rstrip(), after_control)
+            guessed = True  # a regex or a division: either way, a decision
             if end > 0:
                 out.append(text[index:end])
-                decided = True
                 code += "x"  # a regex is a value; a `/` after it divides
                 after_control = False
                 index = end
@@ -1047,9 +1063,10 @@ def yaml_block_scalars(text: str) -> str:
 
     A folded scalar (`run: >`) is one line: its lines are joined onto the first,
     so `npx cdk` and `deploy` on two lines are one command, as the runner sees
-    them. A `script:` block (actions/github-script) is JavaScript, so each
-    multi-line array or call in it is joined as in a followed .js file. Other
-    lines become empty and keep their numbers.
+    them. The `script:` block of an actions/github-script step is JavaScript, so
+    each multi-line array or call in it is joined as in a followed .js file;
+    another action's `script:` is left as written. Other lines become empty and
+    keep their numbers.
     """
     lines = text.split("\n")
     index = 0
@@ -1073,11 +1090,29 @@ def yaml_block_scalars(text: str) -> str:
                 indent = block[first][: len(block[first]) - len(block[first].lstrip())]
                 block = [""] * len(block)
                 block[first] = indent + " ".join(content)
-        elif match.group(2) == "script":
+        elif match.group(2) == "script" and _in_github_script_step(lines, index):
             block = _join_by_depth(block, _js_walk("\n".join(block)).depths)
         lines[index + 1 : end] = block
         index = end
     return "\n".join(lines)
+
+
+def _in_github_script_step(lines: list[str], index: int) -> bool:
+    """Whether the `script:` key on line `index` belongs to a step that uses
+    actions/github-script, whose script is JavaScript. Another action's `script:`
+    (an SSH action's, say) is shell, and is left as it is."""
+    key_indent = len(lines[index]) - len(lines[index].lstrip())
+    for back in range(index - 1, -1, -1):
+        raw = lines[back]
+        if not raw.strip():
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        match = USES.match(raw)
+        if match and indent < key_indent:
+            return match.group(1).lower() == "actions/github-script"
+        if raw.lstrip().startswith("- ") and indent < key_indent - 2:
+            return False  # the start of the step, with no uses: above the key
+    return False
 
 
 def matrix_item_lines(text: str) -> set[int]:
@@ -1120,41 +1155,95 @@ def _string_elements(node: ast.List | ast.Tuple) -> list[str]:
     return [v for v in (_string_value(e) for e in node.elts) if v is not None]
 
 
+# What a wrapper's parameters stand for at one call site: each name maps to the
+# call's argument expressions (several for `*args`). A chain is read innermost
+# first; an argument found in env i is read with the envs after it, which hold
+# the names of the scope the call was made in.
+Env = dict[str, tuple[ast.expr, ...]]
+Chain = tuple[Env, ...]
+
+
+def _lookup(name: str, chain: Chain) -> tuple[tuple[ast.expr, ...], Chain] | None:
+    for index, env in enumerate(chain):
+        if name in env:
+            return env[name], chain[index + 1 :]
+    return None
+
+
 def _strings_in(
-    node: ast.AST, bound: dict[str, ast.expr] | None = None, depth: int = 0
+    node: ast.AST,
+    bound: dict[str, ast.expr] | None = None,
+    chain: Chain = (),
+    depth: int = 0,
 ) -> list[str]:
     """Every string in an expression, in source order (`shlex.split("...")`, `a + b`,
-    `"%s" % x`, `"{}".format(x)`), with a name bound to a value read as that value."""
+    `"%s" % x`, `"{}".format(x)`). A name a wrapper's call site gives a value, or
+    one bound in the file, is read as that value (a binding inside a wrapper is
+    read with the call site's arguments); an f-string's `{name}` too."""
     bound = bound or {}
-    # The parts of an f-string are read with it, not on their own.
-    inner = {
-        id(part)
-        for child in ast.walk(node)
-        if isinstance(child, ast.JoinedStr)
-        for part in ast.walk(child)
-        if part is not child
-    }
-    found: list[tuple[int, int, list[str]]] = []
-    for child in ast.walk(node):
-        if id(child) in inner or not isinstance(child, ast.expr):
-            continue
-        value = _string_value(child)
-        if value is not None:
-            found.append((child.lineno, child.col_offset, [value]))
-        elif (
-            isinstance(child, ast.Name)
-            and child.id in bound
-            and depth < MAX_BINDING_DEPTH
-            and bound[child.id] is not node
-        ):
-            found.append(
-                (
-                    child.lineno,
-                    child.col_offset,
-                    _strings_in(bound[child.id], bound, depth + 1),
-                )
-            )
-    return [value for _, _, values in sorted(found) for value in values]
+    if depth > MAX_BINDING_DEPTH:
+        return []
+    if isinstance(node, ast.Constant):
+        return [node.value] if isinstance(node.value, str) else []
+    if isinstance(node, ast.JoinedStr):
+        parts: list[str] = []
+        for part in node.values:
+            if isinstance(part, ast.Constant):
+                parts.append(str(part.value))
+            else:
+                value = part.value if isinstance(part, ast.FormattedValue) else part
+                inner = _strings_in(value, bound, chain, depth + 1)
+                parts.append(" ".join(inner) if inner else "$EXPR")
+        return ["".join(parts)]
+    if isinstance(node, ast.Name):
+        found = _lookup(node.id, chain)
+        if found is not None:
+            values, rest = found
+            return [s for v in values for s in _strings_in(v, bound, rest, depth + 1)]
+        if node.id in bound:
+            return _strings_in(bound[node.id], bound, chain, depth + 1)
+        return []
+    out: list[str] = []
+    for child in ast.iter_child_nodes(node):
+        out.extend(_strings_in(child, bound, chain, depth))
+    return out
+
+
+def _expr_words(
+    node: ast.expr, bound: dict[str, ast.expr], chain: Chain = (), depth: int = 0
+) -> list[str]:
+    """The argv words an expression gives a runner: a list's elements one word each
+    (`*xs` spread), a name through its value, anything else its strings as one."""
+    if depth > MAX_BINDING_DEPTH:
+        return []
+    if isinstance(node, ast.Starred):
+        return _expr_words(node.value, bound, chain, depth)
+    if isinstance(node, ast.Name):
+        found = _lookup(node.id, chain)
+        if found is not None:
+            values, rest = found
+            return [w for v in values for w in _expr_words(v, bound, rest, depth + 1)]
+        if node.id in bound:
+            return _expr_words(bound[node.id], bound, chain, depth + 1)
+        return []
+    if isinstance(node, (ast.List, ast.Tuple)):
+        words: list[str] = []
+        for element in node.elts:
+            if isinstance(element, ast.Starred) or isinstance(element, ast.Name):
+                words.extend(_expr_words(element, bound, chain, depth + 1))
+            else:
+                text = " ".join(_strings_in(element, bound, chain, depth + 1))
+                if text:
+                    words.append(text)
+        return words
+    if (
+        isinstance(node, ast.Call)
+        and getattr(node.func, "id", "") in ("list", "tuple")
+        and len(node.args) == 1
+    ):
+        return _expr_words(node.args[0], bound, chain, depth + 1)
+    text = " ".join(_strings_in(node, bound, chain, depth))
+    return [text] if text else []
 
 
 def _command_lines(line: int, text: str) -> list[Command]:
@@ -1185,8 +1274,13 @@ def _argv_commands(line: int, words: list[str], run: bool) -> list[Command]:
 
 # How far a name bound to an expression naming other names is followed.
 MAX_BINDING_DEPTH = 8
+# The most runner inputs one wrapper keeps; a wrapper of wrappers of wrappers can
+# multiply them, and past this the rest are read only by name, as before.
+MAX_WRAPPER_INPUTS = 64
 # Keyword arguments that carry a runner's command.
 PY_COMMAND_KEYWORDS = frozenset({"args", "cmd", "argv", "executable", "command"})
+# Modules whose functions are the runners themselves.
+PY_RUNNER_MODULES = frozenset({"subprocess", "os", "asyncio", "pty", "sp"})
 # Calls whose string argument names a Python file or module that is then run.
 PY_RUN_PATH_CALLS = frozenset({"run_path", "run_module", "import_module"})
 
@@ -1200,7 +1294,29 @@ class WrapperParam:
     vararg: bool = False
 
 
-Wrappers = dict[str, frozenset[WrapperParam]]
+def _param_order(param: WrapperParam) -> tuple[bool, int, str]:
+    # A fixed order, so nothing depends on how a set of parameters hashes.
+    return (param.position is None, param.position or 0, param.name)
+
+
+@dataclass(frozen=True)
+class RunnerInput:
+    """An expression a runner reads its command from, inside a wrapper, with what
+    the names of inner wrappers it went through stand for."""
+
+    expression: ast.expr
+    kind: str  # "shell" (a command line or an argv) or "argv" (one word each)
+    chain: Chain
+    line: int
+
+
+@dataclass(frozen=True)
+class Wrapper:
+    params: tuple[WrapperParam, ...]  # sorted by _param_order
+    inputs: tuple[RunnerInput, ...]
+
+
+Wrappers = dict[str, Wrapper]
 
 
 def _call_name(func: ast.expr, aliases: dict[str, str]) -> str:
@@ -1219,37 +1335,103 @@ def _call_name(func: ast.expr, aliases: dict[str, str]) -> str:
     return ""
 
 
+def _call_env(call: ast.Call, params: tuple[WrapperParam, ...]) -> Env:
+    """What each parameter of a wrapper stands for at `call`."""
+    env: Env = {}
+    for param in params:
+        values: list[ast.expr] = []
+        if param.position is not None:
+            if param.vararg:
+                values.extend(call.args[param.position :])
+            elif param.position < len(call.args):
+                values.append(call.args[param.position])
+            else:
+                # A positional parameter after a `*xs` argument at the call.
+                values.extend(a for a in call.args if isinstance(a, ast.Starred))
+        values.extend(k.value for k in call.keywords if k.arg == param.name)
+        if values:
+            env[param.name] = tuple(values)
+    return env
+
+
 def _runner_inputs(
     call: ast.Call, name: str, wrappers: Wrappers
-) -> tuple[list[ast.expr], str] | None:
-    """The arguments of `call` that carry a command, and how to read them: "shell"
-    (a command line, or an argv), "argv" (one word per argument) or None."""
+) -> list[RunnerInput] | None:
+    """The inputs a call hands a runner, read in its own scope, or None if the call
+    is not to a runner or a wrapper."""
     keywords = [k.value for k in call.keywords if k.arg in PY_COMMAND_KEYWORDS]
+    # A function under a runner's name (`def run(*argv): ...`) is what a bare
+    # call to that name, `self.run(...)` or `helpers.run(...)` reaches;
+    # `subprocess.run(...)` and `os.system(...)` keep meaning the runner.
+    wrapper = wrappers.get(name)
+    if wrapper is not None and (
+        isinstance(call.func, ast.Name)
+        or (
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id not in PY_RUNNER_MODULES
+        )
+        or (name not in PY_ARGV_CALLS and name not in PY_SHELL_CALLS)
+    ):
+        return _wrapper_inputs(call, wrapper)
     if name in PY_ARGV_CALLS:
-        return list(call.args) + keywords, "argv"
+        return [
+            RunnerInput(a, "argv", (), getattr(a, "lineno", call.lineno))
+            for a in list(call.args) + keywords
+        ]
     if name in PY_SHELL_CALLS:
-        return list(call.args[:1]) + keywords, "shell"
-    params = wrappers.get(name)
-    if not params:
-        return None
-    inputs: list[ast.expr] = []
-    kind = "shell"
-    for param in params:
-        if param.vararg and param.position is not None:
-            inputs.extend(call.args[param.position :])
-            kind = "argv"
-        elif param.position is not None and param.position < len(call.args):
-            inputs.append(call.args[param.position])
-        inputs.extend(k.value for k in call.keywords if k.arg == param.name)
-    return inputs, kind
+        return [
+            RunnerInput(a, "shell", (), getattr(a, "lineno", call.lineno))
+            for a in list(call.args[:1]) + keywords
+        ]
+    return None
+
+
+def _wrapper_inputs(call: ast.Call, wrapper: Wrapper) -> list[RunnerInput]:
+    """A wrapper's runner inputs with its parameters standing for `call`'s arguments."""
+    env = _call_env(call, wrapper.params)
+    inputs = [
+        RunnerInput(i.expression, i.kind, (*i.chain, env), call.lineno)
+        for i in wrapper.inputs
+    ]
+    # Every string of the call is also read, joined in order: a wrapper whose own
+    # input could not be kept still shows its call's words.
+    inputs.append(RunnerInput(_call_arguments(call), "shell", (), call.lineno))
+    return inputs
+
+
+def _call_arguments(call: ast.Call) -> ast.expr:
+    """A call's positional arguments as one tuple expression, made once per call so
+    that reading the call again yields an equal input."""
+    made = getattr(call, "_guard_arguments", None)
+    if not isinstance(made, ast.expr):
+        made = ast.copy_location(ast.Tuple(elts=list(call.args), ctx=ast.Load()), call)
+        setattr(call, "_guard_arguments", made)
+    return made
 
 
 def _bindings(tree: ast.AST) -> tuple[dict[str, ast.expr], dict[str, str]]:
     """What each name is bound to, and which names are other names for a callable
-    (`from subprocess import run as sh`, `sh = subprocess.check_call`)."""
+    (`from subprocess import run as sh`, `sh = subprocess.check_call`).
+
+    A list a name is bound to is extended, in source order, by what is appended to
+    it later (`cmd.append(x)`, `cmd.extend(xs)`, `cmd.insert(i, x)`, `cmd +=
+    [...]`), so an argv built up step by step is read whole.
+    """
     bound: dict[str, ast.expr] = {}
     aliases: dict[str, str] = {}
+    events: list[tuple[int, int, ast.AST]] = []
     for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.ImportFrom)):
+            events.append((node.lineno, node.col_offset, node))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("append", "extend", "insert")
+            and isinstance(node.func.value, ast.Name)
+        ):
+            events.append((node.lineno, node.col_offset, node))
+    for _, _, node in sorted(events, key=lambda e: (e[0], e[1])):
         targets: list[ast.expr] = []
         value: ast.expr | None = None
         if isinstance(node, ast.Assign):
@@ -1260,6 +1442,35 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, ast.expr], dict[str, str]]:
             for alias in node.names:
                 if alias.asname:
                     aliases[alias.asname] = alias.name
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            name = node.target.id
+            if name in bound:
+                bound[name] = _extended(bound[name], [ast.Starred(node.value)], node)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+        ):
+            name = node.func.value.id
+            if name in bound and node.args:
+                added = node.args[-1]
+                base = bound[name]
+                position = node.args[0] if node.func.attr == "insert" else None
+                if (
+                    isinstance(position, ast.Constant)
+                    and isinstance(position.value, int)
+                    and isinstance(base, (ast.List, ast.Tuple))
+                ):
+                    elements = list(base.elts)
+                    elements.insert(position.value, added)
+                    bound[name] = ast.copy_location(
+                        ast.List(elts=elements, ctx=ast.Load()), node
+                    )
+                else:
+                    extra = (
+                        [ast.Starred(added)] if node.func.attr == "extend" else [added]
+                    )
+                    bound[name] = _extended(base, extra, node)
         if value is None:
             continue
         for target in targets:
@@ -1267,9 +1478,32 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, ast.expr], dict[str, str]]:
                 continue
             if isinstance(value, (ast.Attribute, ast.Name)):
                 aliases[target.id] = _call_name(value, {})
+            elif _partial_runner(value) is not None:
+                aliases[target.id] = _partial_runner(value) or ""
             else:
                 bound[target.id] = value
     return bound, aliases
+
+
+def _partial_runner(value: ast.expr) -> str | None:
+    """The callable `functools.partial(<callable>, ...)` wraps, by name."""
+    if (
+        isinstance(value, ast.Call)
+        and _call_name(value.func, {}) == "partial"
+        and value.args
+        and isinstance(value.args[0], (ast.Name, ast.Attribute))
+    ):
+        return _call_name(value.args[0], {})
+    return None
+
+
+def _extended(base: ast.expr, extra: Sequence[ast.expr], at: ast.AST) -> ast.expr:
+    elements: list[ast.expr] = (
+        list(base.elts)
+        if isinstance(base, (ast.List, ast.Tuple))
+        else [ast.Starred(base)]
+    )
+    return ast.copy_location(ast.List(elts=[*elements, *extra], ctx=ast.Load()), at)
 
 
 @functools.lru_cache(maxsize=4096)
@@ -1294,6 +1528,25 @@ class _PyFacts:
     aliases: dict[str, str]
     functions: tuple[_PyFunction, ...]
     nodes: tuple[ast.AST, ...]
+    # The name of every call in the file, for knowing when a wrapper found in
+    # another file can change what this one runs.
+    called: frozenset[str]
+
+
+def _function_params(arguments: ast.arguments) -> dict[str, WrapperParam]:
+    positional = [a.arg for a in arguments.posonlyargs + arguments.args]
+    offset = 1 if positional[:1] in (["self"], ["cls"]) else 0
+    params = {
+        name: WrapperParam(index - offset, name)
+        for index, name in enumerate(positional)
+        if index >= offset
+    }
+    params.update({a.arg: WrapperParam(None, a.arg) for a in arguments.kwonlyargs})
+    if arguments.vararg:
+        params[arguments.vararg.arg] = WrapperParam(
+            len(positional) - offset, arguments.vararg.arg, vararg=True
+        )
+    return params
 
 
 @functools.lru_cache(maxsize=4096)
@@ -1303,33 +1556,87 @@ def _facts(text: str) -> _PyFacts:
     nodes = tuple(ast.walk(tree))
     functions: list[_PyFunction] = []
     for node in nodes:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        body: ast.AST
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            name, arguments, body = node.name, node.args, node
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Lambda)
+        ):
+            # `sh = lambda c: subprocess.run(c, shell=True)` is a function.
+            name, arguments, body = node.targets[0].id, node.value.args, node.value
+        else:
             continue
-        arguments = node.args
-        positional = [a.arg for a in arguments.posonlyargs + arguments.args]
-        offset = 1 if positional[:1] in (["self"], ["cls"]) else 0
-        params = {
-            name: WrapperParam(index - offset, name)
-            for index, name in enumerate(positional)
-            if index >= offset
-        }
-        params.update({a.arg: WrapperParam(None, a.arg) for a in arguments.kwonlyargs})
-        if arguments.vararg:
-            params[arguments.vararg.arg] = WrapperParam(
-                len(positional) - offset, arguments.vararg.arg, vararg=True
-            )
-        calls = tuple(c for c in ast.walk(node) if isinstance(c, ast.Call))
+        params = _function_params(arguments)
+        calls = tuple(c for c in ast.walk(body) if isinstance(c, ast.Call))
         if params and calls:
-            functions.append(_PyFunction(node.name, params, calls))
-    return _PyFacts(tree, bound, aliases, tuple(functions), nodes)
+            functions.append(_PyFunction(name, params, calls))
+    called = frozenset(
+        _call_name(n.func, aliases) for n in nodes if isinstance(n, ast.Call)
+    )
+    return _PyFacts(tree, bound, aliases, tuple(functions), nodes, called)
+
+
+def _free_names(
+    node: ast.AST, bound: dict[str, ast.expr], chain: Chain, depth: int = 0
+) -> set[str]:
+    """The names an expression reads that its chain does not give a value, through
+    the names they are bound from."""
+    names: set[str] = set()
+    if depth > MAX_BINDING_DEPTH:
+        return names
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Name):
+            continue
+        found = _lookup(child.id, chain)
+        if found is not None:
+            values, rest = found
+            for value in values:
+                names |= _free_names(value, bound, rest, depth + 1)
+            continue
+        names.add(child.id)
+        if child.id in bound and bound[child.id] is not node:
+            names |= _free_names(bound[child.id], bound, chain, depth + 1)
+    return names
+
+
+def _input_key(runner_input: RunnerInput) -> tuple[object, ...]:
+    """An identity for a runner input: its expression and what each name in its
+    chain stands for, by node."""
+    return (
+        id(runner_input.expression),
+        runner_input.kind,
+        tuple(
+            (name, tuple(id(v) for v in values))
+            for env in runner_input.chain
+            for name, values in env.items()
+        ),
+    )
+
+
+def _merge_inputs(
+    old: Sequence[RunnerInput], new: Sequence[RunnerInput]
+) -> tuple[RunnerInput, ...]:
+    merged = list(old)
+    keys = {_input_key(i) for i in merged}
+    for runner_input in new:
+        key = _input_key(runner_input)
+        if key not in keys and len(merged) < MAX_WRAPPER_INPUTS:
+            keys.add(key)
+            merged.append(runner_input)
+    return tuple(merged)
 
 
 def python_wrappers(text: str, known: Wrappers | None = None) -> Wrappers:
     """Functions in `text` that hand a parameter to a runner, to a fixpoint.
 
     A function whose parameter reaches the input of a runner, or of a function
-    already found to do so, is itself one: its call sites are read as runner calls.
-    `known` holds wrappers found in other files, matched by name.
+    already found to do so, is itself one. Each keeps the runner inputs it builds,
+    so a call site is read with its arguments in the parameters' places
+    (`def cdk(a): run(["npx", "cdk", a])` then `cdk("deploy")` is `npx cdk
+    deploy`). `known` holds wrappers found in other files, matched by name.
     """
     facts = _facts(text)
     wrappers: Wrappers = dict(known or {})
@@ -1337,40 +1644,73 @@ def python_wrappers(text: str, known: Wrappers | None = None) -> Wrappers:
     while changed:
         changed = False
         for function in facts.functions:
-            reached: set[WrapperParam] = set()
-            for call in function.calls:
-                found = _runner_inputs(
-                    call, _call_name(call.func, facts.aliases), wrappers
-                )
-                if found is None:
+            names_called = [_call_name(c.func, facts.aliases) for c in function.calls]
+            if not any(
+                n in PY_SHELL_CALLS or n in PY_ARGV_CALLS or n in wrappers
+                for n in names_called
+            ):
+                continue
+            reached: dict[str, WrapperParam] = {}
+            inputs: list[RunnerInput] = []
+            for call, call_name in zip(function.calls, names_called):
+                found = _runner_inputs(call, call_name, wrappers)
+                if not found:
                     continue
-                for expression in found[0]:
-                    for name in _names_in(expression, facts.bound):
-                        if name in function.params:
-                            reached.add(function.params[name])
-            known_params = wrappers.get(function.name, frozenset())
-            if reached and not reached <= known_params:
-                wrappers[function.name] = known_params | reached
+                for runner_input in found:
+                    names = _free_names(
+                        runner_input.expression, facts.bound, runner_input.chain
+                    )
+                    hit = [
+                        function.params[n]
+                        for n in sorted(names)
+                        if n in function.params
+                    ]
+                    if hit:
+                        reached.update((p.name, p) for p in hit)
+                        inputs.append(runner_input)
+            if not reached:
+                continue
+            old = wrappers.get(function.name)
+            params = tuple(
+                sorted(
+                    {*(old.params if old else ()), *reached.values()}, key=_param_order
+                )
+            )
+            merged = _merge_inputs(old.inputs if old else (), inputs)
+            new = Wrapper(params, merged)
+            if (
+                old is None
+                or new.params != old.params
+                or len(new.inputs) != len(old.inputs)
+            ):
+                wrappers[function.name] = new
                 changed = True
     return wrappers
 
 
-def _names_in(node: ast.AST, bound: dict[str, ast.expr], depth: int = 0) -> set[str]:
-    """Every name an expression reads, through the names it is bound from."""
-    names: set[str] = set()
-    for child in ast.walk(node):
-        if isinstance(child, ast.Name):
-            names.add(child.id)
-            if (
-                child.id in bound
-                and depth < MAX_BINDING_DEPTH
-                and bound[child.id] is not node
-            ):
-                names |= _names_in(bound[child.id], bound, depth + 1)
-    return names
+def _input_commands(
+    runner_input: RunnerInput, bound: dict[str, ast.expr]
+) -> list[Command]:
+    """The commands one runner input gives: its words as an argv (a spaced word also
+    a command line), and all its strings joined as one command line."""
+    expression, chain, line = (
+        runner_input.expression,
+        runner_input.chain,
+        runner_input.line,
+    )
+    if isinstance(expression, (ast.List, ast.Tuple)) and not chain:
+        line = expression.lineno  # the list's own line, where it is also read alone
+    words = _expr_words(expression, bound, chain)
+    commands = _argv_commands(line, words, run=True)
+    joined = " ".join(_strings_in(expression, bound, chain))
+    if joined.strip():
+        commands.extend(_command_lines(line, joined))
+    return commands
 
 
-def python_commands(text: str, wrappers: Wrappers | None = None) -> list[Command]:
+def python_commands(
+    text: str, wrappers: Wrappers | None = None, resolved: bool = False
+) -> list[Command]:
     """What a Python script runs: argv lists of strings, and command-line strings
     passed to a runner or to a function that hands them to one.
 
@@ -1378,7 +1718,12 @@ def python_commands(text: str, wrappers: Wrappers | None = None) -> list[Command
     """
     facts = _facts(text)
     bound, aliases = facts.bound, facts.aliases
-    wrappers = python_wrappers(text, wrappers)
+    # `resolved`: `wrappers` already holds this file's own wrappers.
+    wrappers = (
+        wrappers
+        if resolved and wrappers is not None
+        else python_wrappers(text, wrappers)
+    )
     uses_sh = any(
         isinstance(node, ast.Import) and any(a.name == "sh" for a in node.names)
         for node in facts.nodes
@@ -1424,41 +1769,14 @@ def python_commands(text: str, wrappers: Wrappers | None = None) -> list[Command
         found = _runner_inputs(node, name, wrappers)
         if found is None:
             continue
-        inputs, kind = found
         positional_words: list[str] = []
-        for arg in inputs:
-            # Commands from one argument are reported on one line: the list's own
-            # line for an argv list (where it is also read on its own), else the
-            # argument's line at the call.
-            line = getattr(arg, "lineno", node.lineno)
-            if isinstance(arg, ast.Starred):
-                arg = arg.value
-            if isinstance(arg, ast.Name) and arg.id in bound:
-                arg = bound[arg.id]
-            text_value = _string_value(arg)
-            if isinstance(arg, (ast.List, ast.Tuple)):
-                line = arg.lineno
-                words = [
-                    value if value is not None else " ".join(_strings_in(e, bound))
-                    for e, value in ((e, _string_value(e)) for e in arg.elts)
-                ]
-                commands.extend(_argv_commands(line, words, run=True))
-            elif text_value is not None:
-                if kind == "argv":
-                    # `os.execlp("npx", "npx", "cdk", "deploy")`: one word each.
-                    positional_words.append(text_value)
-                else:
-                    commands.extend(_command_lines(line, text_value))
-            elif not isinstance(arg, ast.Name):
-                # `shlex.split("npx cdk deploy")`, `"npx cdk deploy".split()`,
-                # `["npx", "cdk"] + ["deploy"]`: every string in the expression.
-                commands.extend(_argv_commands(line, _strings_in(arg, bound), run=True))
-            # String building (`"npx cdk " + "deploy"`, `"npx cdk %s" % x`,
-            # `"npx cdk {}".format(x)`) splits one command across strings, so every
-            # string of the argument is also read as one command line.
-            joined = " ".join(_strings_in(arg, bound))
-            if joined.strip():
-                commands.extend(_command_lines(line, joined))
+        for runner_input in found:
+            if runner_input.kind == "argv":
+                # `os.execlp("npx", "npx", "cdk", "deploy")`: one word each.
+                positional_words.extend(
+                    _expr_words(runner_input.expression, bound, runner_input.chain)
+                )
+            commands.extend(_input_commands(runner_input, bound))
         commands.extend(_argv_commands(node.lineno, positional_words, run=True))
     return list(dict.fromkeys(commands))
 
@@ -1668,14 +1986,20 @@ class Follower:
         self._packages: dict[Path, dict[str, str]] | None = None
         # Python functions, in any followed file, that hand a parameter to a
         # runner; a call to one by name in any followed file is a runner call.
-        self.py_wrappers: Wrappers = {}
+        # By followed file: the wrappers it defines, and the followed files it
+        # imports. A file sees its own wrappers and those of the files it imports.
+        self._defined: dict[str, Wrappers] = {}
+        self._imports_of: dict[str, list[str]] = {}
         # Followed Python files with what each was scanned for so far, so a
         # wrapper found later re-reads them (rescan_python()).
         self._python: dict[str, tuple[Path, tuple[str, ...], str, set[Command]]] = {}
         self._hit_lines: dict[str, set[int]] = {}
-        # Bumped whenever py_wrappers grows; a file is re-read only after that.
+        # Bumped whenever a file's wrappers grow; a file is re-read only after one
+        # of the files it imports changed.
         self._wrapper_version = 0
         self._read_at: dict[str, int] = {}
+        # The version at which each file's wrappers last changed.
+        self._changed_at: dict[str, int] = {}
         # Distinct pass-through word sets followed per script.
         self._extras: dict[str, set[str]] = {}
         # Where a script that is not a package.json script is defined
@@ -1861,7 +2185,9 @@ class Follower:
 
         for index, (previous, token) in enumerate(zip(["", *tokens], tokens)):
             # `HELPER=x.py`, `-v x.sh:/tmp/x.sh:ro`: each piece may be a path.
-            words = {token, *re.split(r"[=:]", token)}
+            # A dict, not a set: the order things are followed in must not depend
+            # on string hashing.
+            words = dict.fromkeys([token, *re.split(r"[=:]", token)])
             module = None
             if previous == "-m" and PY_MODULE.fullmatch(token):
                 module = token
@@ -1972,7 +2298,10 @@ class Follower:
             if key in self._seen:
                 continue
             self._seen.add(key)
-            extras = self._extras.setdefault(f"{directory}:{script}", set())
+            # Counted per workflow file that started the chain, so many workflows
+            # each running a script with their own arguments do not add up.
+            origin = via[0].rsplit(":", 1)[0] if via else ""
+            extras = self._extras.setdefault(f"{origin}:{directory}:{script}", set())
             extras.add(extra)
             if len(extras) > MAX_SCRIPT_ARGUMENT_SETS:
                 if len(extras) == MAX_SCRIPT_ARGUMENT_SETS + 1:
@@ -2025,9 +2354,10 @@ class Follower:
         imports: list[Path] = []
         if mode == "python":
             try:
-                self._learn_wrappers(text)
-                commands = python_commands(text, self.py_wrappers)
                 imports = self.python_imports(text, path)
+                self._imports_of[relative] = [self.rel(m) for m in imports]
+                self._learn_wrappers(relative, text)
+                commands = python_commands(text, self.view(relative), resolved=True)
             except SyntaxError as error:
                 self.hits.append(
                     Hit(relative, error.lineno or 1, str(error.msg), PARSE_FAILURE, via)
@@ -2067,31 +2397,61 @@ class Follower:
             relative, commands, self.bases(text, path.parent), via, None
         )
 
-    def _learn_wrappers(self, text: str) -> bool:
-        """Add the wrappers `text` defines to the registry; True if it grew."""
-        grew = False
-        for name, params in python_wrappers(text, self.py_wrappers).items():
-            known = self.py_wrappers.get(name, frozenset())
-            if not params <= known:
-                self.py_wrappers[name] = known | params
-                grew = True
-        if grew:
+    def view(self, relative: str) -> Wrappers:
+        """The wrappers a followed file can call: its own and those of the followed
+        files it imports, matched by name."""
+        seen: Wrappers = {}
+        for source in [*self._imports_of.get(relative, []), relative]:
+            for name, wrapper in self._defined.get(source, {}).items():
+                known = seen.get(name)
+                seen[name] = (
+                    wrapper
+                    if known is None
+                    else Wrapper(
+                        tuple(
+                            sorted({*known.params, *wrapper.params}, key=_param_order)
+                        ),
+                        _merge_inputs(known.inputs, wrapper.inputs),
+                    )
+                )
+        return seen
+
+    def _learn_wrappers(self, relative: str, text: str) -> bool:
+        """Record the wrappers `text` defines; True if they changed."""
+        own = {f.name for f in _facts(text).functions}
+        found = python_wrappers(text, self.view(relative))
+        defined = {name: found[name] for name in found if name in own}
+        old = self._defined.get(relative, {})
+        changed = set(defined) != set(old) or any(
+            defined[n].params != old[n].params
+            or len(defined[n].inputs) != len(old[n].inputs)
+            for n in defined
+        )
+        if changed:
+            self._defined[relative] = defined
             self._wrapper_version += 1
-        return grew
+            self._changed_at[relative] = self._wrapper_version
+        return changed
 
     def rescan_python(self) -> None:
-        """Re-read followed Python files until no wrapper found in one of them
-        reveals a new command in another (a fixpoint across files)."""
+        """Re-read followed Python files whose imports learned new wrappers, until
+        none do (a fixpoint across files)."""
         changed = True
         while changed:
             changed = False
             for relative, (path, via, text, done) in list(self._python.items()):
-                if self._read_at.get(relative) == self._wrapper_version:
+                read_at = self._read_at.get(relative, -1)
+                if not any(
+                    self._changed_at.get(source, -1) > read_at
+                    for source in self._imports_of.get(relative, [])
+                ):
                     continue
-                self._learn_wrappers(text)
                 self._read_at[relative] = self._wrapper_version
+                self._learn_wrappers(relative, text)
                 new = [
-                    c for c in python_commands(text, self.py_wrappers) if c not in done
+                    c
+                    for c in python_commands(text, self.view(relative), resolved=True)
+                    if c not in done
                 ]
                 if new:
                     done.update(new)
@@ -2875,6 +3235,118 @@ PLANTED_REPOS: tuple[tuple[str, dict[str, str], tuple[tuple[str, str], ...]], ..
             + "      - uses: actions/github-script@0123456789abcdef0123456789abcdef01234567\n        with:\n          script: |\n            await exec.exec('npx', [\n              'cdk',\n              'deploy'])\n",
         },
         ((".github/workflows/w.yml", "`cdk ... deploy`"),),
+    ),
+    (
+        "a two-parameter Python wrapper puts its words in parameter order",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef tool(name, *args):\n    subprocess.run([name, *args])\n\n\ntool("terraform", "apply")\n',
+        },
+        (("s.py", "`terraform ... apply`"),),
+    ),
+    (
+        "an os.execlp wrapper with a program and its arguments",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import os\n\n\ndef tool(prog, *args):\n    os.execlp(prog, prog, *args)\n\n\ntool("terraform", "apply", "-auto-approve")\n',
+        },
+        (("s.py", "`terraform ... apply`"),),
+    ),
+    (
+        "a Python wrapper adds fixed words around its parameter",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef cdk(action):\n    subprocess.run(["npx", "cdk", action, "--all"], check=True)\n\n\ncdk("deploy")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python wrapper spreads its *args after fixed words",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef cdk(*args):\n    subprocess.run(["npx", "cdk", *args], check=True)\n\n\ncdk("deploy", "--all")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python wrapper builds an f-string around its parameter",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef cdk(action):\n    subprocess.run(f"npx cdk {action} --all", shell=True)\n\n\ncdk("deploy")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python wrapper takes the program and its argument",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef run2(prog, arg):\n    subprocess.run([prog, arg])\n\n\nrun2("terraform", "apply")\n',
+        },
+        (("s.py", "`terraform ... apply`"),),
+    ),
+    (
+        "functools.partial of a runner",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import functools\nimport subprocess\n\nsh = functools.partial(subprocess.run, shell=True)\nsh("npx cdk deploy")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a lambda that hands its parameter to a runner",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\nsh = lambda c: subprocess.run(c, shell=True)  # noqa: E731\nsh("npx cdk deploy")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a wrapper through a keyword-only parameter",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef sh(*, command):\n    subprocess.run(["npx", "cdk", command])\n\n\nsh(command="deploy")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a wrapper of a wrapper with fixed words at each level",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef run(*argv):\n    subprocess.run(["npx", *argv])\n\n\ndef cdk(action):\n    run("cdk", action)\n\n\ncdk("destroy")\n',
+        },
+        (("s.py", "`cdk ... destroy`"),),
+    ),
+    (
+        "an argv built up with append and +=",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\ncmd = ["npx", "cdk"]\ncmd.append("deploy")\nargs = ["terraform"]\nargs += ["apply"]\nsubprocess.run(cmd)\nsubprocess.run(args)\n',
+        },
+        (
+            ("s.py", "`cdk ... deploy`"),
+            ("s.py", "`terraform ... apply`"),
+        ),
+    ),
+    (
+        "another action's script: block is shell, not JavaScript",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - uses: appleboy/ssh-action@0123456789abcdef0123456789abcdef01234567\n        with:\n          script: |\n            # restart (prod\n            npx cdk deploy\n",
+        },
+        ((".github/workflows/w.yml", "`cdk ... deploy`"),),
+    ),
+    (
+        "one word that names two scripts, each followed in a fixed order",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: docker run -v scripts/a.sh:scripts/b.sh:ro img\n",
+            "scripts/a.sh": "#!/bin/sh\nnpx cdk deploy\n",
+            "scripts/b.sh": "#!/bin/sh\nterraform apply\n",
+        },
+        (
+            ("scripts/a.sh", "`cdk ... deploy`"),
+            ("scripts/b.sh", "`terraform ... apply`"),
+        ),
     ),
     (
         "a followed Python file that does not parse",
