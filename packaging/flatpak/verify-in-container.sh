@@ -6,8 +6,13 @@
 # shows each gate failing on a planted wrong outcome.
 #
 #   DIST       directory holding the head wheel (default: $REPO/dist)
-#   PREV_DIST  directory holding the N-1 wheel, the same tree with a lower version, as
-#              packaging/build-test-wheels.sh writes it (default: $REPO/dist-prev)
+#   PREV_DIST  directory holding the N-1 wheel, the previous commit with a lower
+#              version, as packaging/build-test-wheels.sh writes it
+#              (default: $REPO/dist-prev)
+#   PREV_SRC   that commit's tree, whose packaging/flatpak/build.sh builds the N-1
+#              bundle (default: prev/src beside PREV_DIST, where build-test-wheels.sh
+#              writes it); N1_ENV, the record of which commit it is (default: n1.env
+#              beside PREV_DIST)
 #
 # Every scan is judged by scripts/e2e/assert_outcome.py, the verdict every e2e channel
 # shares: findings exits exactly 2 with 3 detect-secrets findings, clean exits exactly 0,
@@ -17,8 +22,9 @@
 # nothing, and it accepted any *.sarif under the output directory. Both are gone.
 #
 # The scan that has to find something matters more for a Flatpak than for the other
-# channels: a sandbox that cannot see the source tree produces exactly a clean,
-# zero-finding, exit-0 scan. Step 7 turns that into a positive control instead of a trap.
+# channels: a sandbox that cannot see the source tree cannot scan it. Step 7 shows that
+# happening on purpose, on a path outside the grant, so step 8's findings mean the
+# grant works.
 #
 # WHERE THIS CAN RUN, WHICH IS NOT THE SAME AS THE .deb AND .rpm SCRIPTS
 #
@@ -49,6 +55,9 @@ set -euo pipefail
 REPO="${REPO:-/src}"
 DIST="${DIST:-$REPO/dist}"
 PREV_DIST="${PREV_DIST:-$REPO/dist-prev}"
+PREV_ROOT="$(cd "$(dirname "$PREV_DIST")" && pwd)"
+PREV_SRC="${PREV_SRC:-$PREV_ROOT/prev/src}"
+N1_ENV="${N1_ENV:-$PREV_ROOT/n1.env}"
 # Scratch for build output and step logs: one mktemp directory, removed on exit, so a
 # run leaves nothing behind in the temp directory and two runs cannot share log names.
 # mktemp honors TMPDIR; CI points that at RUNNER_TEMP.
@@ -56,6 +65,17 @@ WORK="$(mktemp -d -t ash-flatpak.XXXXXX)"
 OUT="${OUT:-$WORK/flatpakbuild}"
 APP_ID="io.github.awslabs.automated_security_helper"
 RUNTIME_VERSION="24.08"
+# The runtime is pinned by OSTree commit, not only by branch. Flathub rebuilds
+# org.freedesktop.Sdk//24.08 in place for point releases, so the branch alone lets the
+# build and test input change under an unchanged tree. The pin is per architecture
+# because each one is its own commit; an architecture without a pin fails rather than
+# floating. To refresh, run
+#   flatpak remote-info --system flathub org.freedesktop.Sdk//24.08
+# and copy its Commit line here (and say why in the commit message). A pin Flathub has
+# pruned fails at the `flatpak update --commit` below, loudly, which is the point.
+# Measured 2026-10-08: this commit is the branch tip, dated 2026-10-03, and flathub
+# reports org.freedesktop.Platform 24.08 end-of-life, so it is also the last one.
+RUNTIME_COMMIT_X86_64="f840a6835a5d303866d8309ca512833fb516910f6994662cbe1c298371ef6873"
 
 # shellcheck source=packaging/cli-name.sh
 . "$REPO/packaging/cli-name.sh"
@@ -88,6 +108,18 @@ assert_outcome() { python3 "$REPO/scripts/e2e/assert_outcome.py" "$@"; }
 # The version a bundle carries, read from its wheel's filename as build.sh does.
 wheel_version() {
   basename "$1" | sed -n 's/^automated_security_helper-\([^-]*\)-py3-none-any\.whl$/\1/p'
+}
+
+# `$1` is what the app printed for --version or -V; it must END in v$2, the way the
+# CLI prints it ("... v4.0.0"). A substring match would accept 4.0.0 inside 14.0.01.
+assert_reports_version() {
+  case "$1" in
+    *"v$2") ;;
+    *)
+      echo "   FAIL: the app reports '$1', expected v$2" >&2
+      exit 1
+      ;;
+  esac
 }
 
 # Exactly one wheel in a directory, or fail naming the directory.
@@ -190,7 +222,31 @@ flatpak info --system "org.freedesktop.Sdk//${RUNTIME_VERSION}" >/dev/null || {
   echo "   FAIL: org.freedesktop.Sdk//${RUNTIME_VERSION} is not installed" >&2
   exit 1
 }
-echo "   runtime: org.freedesktop.Sdk//${RUNTIME_VERSION}"
+case "$(uname -m)" in
+  x86_64) RUNTIME_COMMIT="$RUNTIME_COMMIT_X86_64" ;;
+  *)
+    echo "   FAIL: no pinned org.freedesktop.Sdk commit for $(uname -m); add one above" >&2
+    exit 1
+    ;;
+esac
+# Deploys exactly that commit whatever the branch now points at, then reads back what
+# is installed: the update's exit code alone would not say which commit it left.
+flatpak update -y --system --noninteractive --commit="$RUNTIME_COMMIT" \
+  "org.freedesktop.Sdk//${RUNTIME_VERSION}" >"$WORK/runtime-pin.log" 2>&1 || {
+  echo "   FAIL: could not deploy the pinned runtime commit $RUNTIME_COMMIT" >&2
+  sed 's/^/     /' "$WORK/runtime-pin.log" >&2
+  exit 1
+}
+assert_runtime_commit() {
+  local installed
+  installed="$(flatpak info --system --show-commit "org.freedesktop.Sdk//${RUNTIME_VERSION}")"
+  if [ "$installed" != "$1" ]; then
+    echo "   FAIL: org.freedesktop.Sdk//${RUNTIME_VERSION} is at commit $installed, not the pinned $1" >&2
+    exit 1
+  fi
+}
+assert_runtime_commit "$RUNTIME_COMMIT"
+echo "   runtime: org.freedesktop.Sdk//${RUNTIME_VERSION} at the pinned commit $RUNTIME_COMMIT"
 echo -n "   runtime python: "
 flatpak run --command=python3 "org.freedesktop.Sdk//${RUNTIME_VERSION}" -V
 
@@ -219,7 +275,22 @@ echo "   wheel N-1: $(basename "$PREV_WHEEL")"
 # installed one, measured: with N built first, step 12's update failed with "Update is
 # older than current version". Building in release order keeps the timestamps in the
 # order a real release would produce them.
-PREV_BUNDLE="$("$REPO/packaging/flatpak/build.sh" "$PREV_WHEEL" "$OUT/prev")"
+#
+# N-1 is the previous commit (packaging/n1-source.sh), built with THAT commit's
+# packaging/flatpak/build.sh, manifest and launcher, so `flatpak update` moves an
+# install an older bundle made onto this one. The record says which two commits.
+N1_SHA="$(sed -n 's/^N1_SHA=//p' "$N1_ENV" 2>/dev/null || true)"
+N1_HEAD="$(sed -n 's/^N1_HEAD=//p' "$N1_ENV" 2>/dev/null || true)"
+[ -n "$N1_SHA" ] && [ -n "$N1_HEAD" ] && [ "$N1_SHA" != "$N1_HEAD" ] || {
+  echo "   FAIL: $N1_ENV does not record an N-1 commit different from HEAD" >&2
+  exit 1
+}
+[ -x "$PREV_SRC/packaging/flatpak/build.sh" ] || {
+  echo "   FAIL: no N-1 packaging/flatpak/build.sh under $PREV_SRC" >&2
+  exit 1
+}
+echo "   N-1: commit $N1_SHA, packaged by its own packaging/flatpak; N: commit $N1_HEAD"
+PREV_BUNDLE="$("$PREV_SRC/packaging/flatpak/build.sh" "$PREV_WHEEL" "$OUT/prev")"
 echo "   built N-1: $PREV_BUNDLE ($(du -h "$PREV_BUNDLE" | cut -f1))"
 BUNDLE="$("$REPO/packaging/flatpak/build.sh" "$WHEEL" "$OUT")"
 echo "   built N:   $BUNDLE ($(du -h "$BUNDLE" | cut -f1))"
@@ -247,9 +318,8 @@ META="$(flatpak info --system --show-metadata "$APP_ID")"
 printf '%s\n' "$META" | sed 's/^/   /'
 printf '%s\n' "$META" | grep -Eq '^filesystems=(.*;)?host(;|$)' || {
   echo "   FAIL: the installed app does not have filesystems=host." >&2
-  echo "   Without it ASH cannot read the tree it is asked to scan; step 7 would" >&2
-  echo "   report zero findings and exit 0, which is the silent pass this package" >&2
-  echo "   must not ship." >&2
+  echo "   Without it ASH cannot see the tree it is asked to scan, and every scan of" >&2
+  echo "   a host path would be refused as a missing source directory." >&2
   exit 1
 }
 printf '%s\n' "$META" | grep -Eq '^shared=(.*;)?network(;|$)' || {
@@ -292,10 +362,12 @@ echo "== 5. all three entry points work"
 #
 # This is also where the first run happens: the launcher builds the venv and pip-installs
 # the wheel, which needs the network grant asserted in step 4.
-echo -n "   flatpak run \$APP_ID --version -> "
-flatpak run "$APP_ID" --version
-echo -n "   -V (the short form the CLI contract fixes as --version) -> "
-flatpak run "$APP_ID" -V
+REPORTED="$(flatpak run "$APP_ID" --version)"
+echo "   flatpak run \$APP_ID --version -> $REPORTED"
+assert_reports_version "$REPORTED" "$VERSION"
+REPORTED="$(flatpak run "$APP_ID" -V)"
+echo "   -V (the short form the CLI contract fixes as --version) -> $REPORTED"
+assert_reports_version "$REPORTED" "$VERSION"
 for name in ashv3 automated-security-helper; do
   echo -n "   --command=$name --version -> "
   flatpak run --command="$name" "$APP_ID" --version 2>"$WORK/${name}.err" || {
@@ -332,44 +404,64 @@ ls -d "$DATA_ROOT"/automated_security_helper-*-py3.* 2>/dev/null | sed 's/^/   /
 echo -n "   ashx resolved inside the sandbox: "
 flatpak run --command=sh "$APP_ID" -c 'command -v ashx; readlink -f "$XDG_DATA_HOME" 2>/dev/null | head -1'
 
-echo "== 7. negative control: a fixture the sandbox cannot reach must find nothing"
+echo "== 7. negative control: a fixture the sandbox cannot reach must not be scanned"
 # Run BEFORE the real scan. This is the positive control for the whole verification:
-# it proves that a zero-finding result is what an unreachable source tree looks like, so
-# the non-zero result in step 8 is evidence the grant is doing work rather than evidence
-# that detect-secrets fires on anything.
+# it shows the sandbox really hides a path outside the grant, so the findings in step 8
+# are evidence the grant is doing work rather than evidence that the app sees
+# everything.
 #
 # /tmp is deliberately outside --filesystem=host, so the app sees its own empty tmpfs
-# there and the planted secret is not in it.
+# there: the fixture directory does not exist inside the sandbox at all. ASH refuses a
+# --source-dir that does not exist (cli/scan.py: "Source directory does not exist",
+# exit 1), so that refusal, naming this exact path, IS what an unreachable tree looks
+# like. An earlier version of this step expected a clean exit-0 scan, counted results
+# over any *.sarif it could find, and printed the exit code without comparing it; once
+# ASH started refusing a missing source directory it read rc=1 with no report as "0
+# findings" and kept passing. Each of the three facts is now required:
+#
+#   - exit exactly 1, the usage refusal, and not 0, 2 or a crash;
+#   - the refusal names this fixture's path, so the exit 1 is that refusal;
+#   - neither report exists at its exact path under an output directory the sandbox
+#     CAN write (under /srv, inside the grant), so "no report" means the scan stopped
+#     before writing one rather than wrote it somewhere the host cannot see.
 #
 # The file is the findings case's own fixture, copied rather than written out here, so
 # the only difference between this scan and that case in step 8 is whether the sandbox
 # can reach the tree. It also keeps the planted key out of this script, which therefore
 # needs no secret-scanner entry of its own.
 cp "$REPO/tests/e2e/fixtures/findings/leak.py" "$FIX_UNREACHABLE/leak.py"
+NEG_OUT=/srv/ash-negative-control-out
+rm -rf "$NEG_OUT"
 set +e
 flatpak run "$APP_ID" scan --source-dir "$FIX_UNREACHABLE" \
-  --output-dir "$FIX_UNREACHABLE/.ash/ash_output" \
+  --output-dir "$NEG_OUT" \
   --scanners detect-secrets --no-progress >"$WORK/scan-negative.log" 2>&1
 NEG_RC=$?
 set -e
-NEG_RESULTS="$(python3 - "$FIX_UNREACHABLE" <<'PY'
-import json, pathlib, sys
-out = pathlib.Path(sys.argv[1]) / ".ash" / "ash_output"
-n = 0
-for s in sorted(out.rglob("*.sarif")):
-    doc = json.loads(s.read_text(encoding="utf-8"))
-    n += sum(len(r.get("results", [])) for r in doc.get("runs", []))
-print(n)
-PY
-)"
-echo "   /tmp fixture: rc=$NEG_RC, findings=$NEG_RESULTS"
-[ "$NEG_RESULTS" -eq 0 ] || {
-  echo "   FAIL: the negative control found $NEG_RESULTS finding(s), so /tmp IS" >&2
-  echo "   reachable from the sandbox and step 8 proves nothing about the grant." >&2
+echo "   /tmp fixture: rc=$NEG_RC"
+sed -n 's/^/     /;/Source directory/p' "$WORK/scan-negative.log"
+NEG_PROBLEMS=0
+if [ "$NEG_RC" -ne 1 ]; then
+  echo "   FAIL: the scan of a tree outside the grant exited $NEG_RC, not 1 (refused)" >&2
+  NEG_PROBLEMS=1
+fi
+if ! grep -qF "Source directory does not exist: $FIX_UNREACHABLE" "$WORK/scan-negative.log"; then
+  echo "   FAIL: the scan did not refuse $FIX_UNREACHABLE as missing, so the sandbox may see" >&2
+  echo "   the host's /tmp and step 8 proves nothing about the grant" >&2
+  NEG_PROBLEMS=1
+fi
+for report in reports/ash.sarif ash_aggregated_results.json; do
+  if [ -e "$NEG_OUT/$report" ]; then
+    echo "   FAIL: $NEG_OUT/$report exists, so the sandbox scanned a tree it should not see" >&2
+    NEG_PROBLEMS=1
+  fi
+done
+if [ "$NEG_PROBLEMS" -ne 0 ]; then
+  tail -n 25 "$WORK/scan-negative.log" >&2
   exit 1
-}
-echo "   OK: an unreachable tree yields a clean, zero-finding, exit-0 scan --"
-echo "       which is precisely the failure this package must not ship silently"
+fi
+rm -rf "$NEG_OUT"
+echo "   OK: inside the sandbox the /tmp fixture does not exist: refused with exit 1, no report"
 
 echo "== 8. the three e2e cases, through the installed app"
 # run_case.py takes an executable, so the app is reached through a two-line shim named
@@ -547,10 +639,7 @@ flatpak install -y --system --noninteractive "$E2E_REMOTE" "$APP_ID" >"$E2E/inst
 PREV_COMMIT="$(flatpak info --system --show-commit "$APP_ID")"
 PREV_REPORTED="$(flatpak run "$APP_ID" --version 2>&1)"
 echo "   N-1 installed: commit ${PREV_COMMIT:0:12}, reports: $PREV_REPORTED"
-case "$PREV_REPORTED" in
-  *"$PREV_VERSION"*) ;;
-  *) echo "   FAIL: N-1 does not report $PREV_VERSION" >&2; exit 1 ;;
-esac
+assert_reports_version "$PREV_REPORTED" "$PREV_VERSION"
 run_case --cli "$SHIM" --case findings --work "$E2E/scans" --label upgrade-from-n-1
 PREV_VENV="$DATA_ROOT/$(basename "$PREV_WHEEL" .whl)-"
 ls -d "$PREV_VENV"py3.* >/dev/null 2>&1 || {
@@ -572,10 +661,7 @@ NEW_COMMIT="$(flatpak info --system --show-commit "$APP_ID")"
 }
 NEW_REPORTED="$(flatpak run "$APP_ID" --version 2>&1)"
 echo "   updated to N: commit ${NEW_COMMIT:0:12}, reports: $NEW_REPORTED"
-case "$NEW_REPORTED" in
-  *"$VERSION"*) ;;
-  *) echo "   FAIL: after the update the app does not report $VERSION" >&2; exit 1 ;;
-esac
+assert_reports_version "$NEW_REPORTED" "$VERSION"
 NEW_VENV="$DATA_ROOT/$(basename "$WHEEL" .whl)-"
 ls -d "$NEW_VENV"py3.* >/dev/null 2>&1 || {
   echo "   FAIL: the first run after the update built no venv for the N wheel" >&2
@@ -585,6 +671,11 @@ ls -d "$NEW_VENV"py3.* >/dev/null 2>&1 || {
 echo "   venvs after the update (the N-1 one lingers by design; README.flatpak):"
 ls -d "$DATA_ROOT"/automated_security_helper-* | sed 's/^/     /'
 run_case --cli "$SHIM" --case findings --work "$E2E/scans" --label upgrade-to-n
+
+# `flatpak update APP` may pull runtime updates too; the build input must still be the
+# pinned commit after it.
+assert_runtime_commit "$RUNTIME_COMMIT"
+echo "   runtime still at the pinned commit after the update"
 
 uninstall_delete_data upgrade
 flatpak remote-delete --system "$E2E_REMOTE"

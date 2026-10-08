@@ -408,9 +408,12 @@ jobs:
     # index, which the other two do at install time.
     timeout-minutes: 60
     steps:
+      # Full history: build-test-wheels.sh takes the upgrade leg's N-1 from it
+      # (packaging/n1-source.sh), and a shallow clone fails that derivation.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       - name: Download the wheel built and gated by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

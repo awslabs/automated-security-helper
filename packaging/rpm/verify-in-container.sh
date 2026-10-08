@@ -11,7 +11,9 @@
 # MODE is one of:
 #   assert             build, gate the payload, install beside a package that owns
 #                      /usr/bin/ash, scan, erase (the default)
-#   upgrade            install N-1 built from $PREV_DIST, upgrade to N, require the venv
+#   upgrade            install N-1 (the previous commit's package, built from the
+#                      $PREV_DIST wheel by that commit's own build script; see
+#                      packaging/n1-source.sh), upgrade to N, require the venv
 #                      to be replaced; then fail an upgrade on purpose and require the
 #                      working install to survive it; then migrate a venv left as a
 #                      directory by an older release to the symlink layout; then erase
@@ -25,6 +27,10 @@
 #                      each FAIL
 #   negative-install   a package whose %post fails must FAIL the install step
 #   negative-payload   a package with an empty payload must FAIL the payload gate
+#   negative-alternatives
+#                      a package whose %post registers /usr/bin/ash as an
+#                      alternative must FAIL the scriptlet check, and installing it
+#                      must either be refused or FAIL the host check
 #   negative-shell-path
 #                      a build that also installs /usr/bin/ash must FAIL the command
 #                      path check, and installing it beside the package that owns
@@ -156,6 +162,15 @@ elif edit == "ships-ash-path":
         install_line + "cp -p %{buildroot}%{_bindir}/%{ash_cli} %{buildroot}%{_bindir}/ash\n",
     )
     spec = spec.replace(files_line, files_line + "%{_bindir}/ash\n")
+elif edit == "alternatives":
+    # One line added before %post's final `exit 0`: an `ash` alias done through the
+    # alternatives system instead of a shipped file.
+    head, sep, tail = spec.partition("\n%post\n")
+    body, sep2, rest = tail.partition("\n%postun\n")
+    if body.count("\nexit 0\n") != 1:
+        sys.exit("could not find the single top-level `exit 0` in %post")
+    plant = "\nupdate-alternatives --install /usr/bin/ash ash %{_bindir}/%{ash_cli} 100\nexit 0\n"
+    spec = head + sep + body.replace("\nexit 0\n", plant) + sep2 + rest
 elif edit == "failing-post":
     # %post's final `exit 0` becomes `exit 1`, after a working venv has been built.
     head, sep, tail = spec.partition("\n%post\n")
@@ -183,6 +198,11 @@ fi
 
 check_rpm_paths() {
   rpm -qlp "$1" | vl_check_command_paths "rpm -qlp $(basename "$1")"
+}
+
+# Every scriptlet and trigger script in a built .rpm, for vl_check_maintainer_scripts.
+rpm_scriptlets() {
+  rpm -qp --scripts --triggerscripts "$1"
 }
 
 # Neither Amazon Linux 2023 nor RHEL 9 ships an Almquist shell: measured with
@@ -262,6 +282,40 @@ case "$MODE" in
     echo; echo "RPM NEGATIVE CONTROL (payload) PASSED"
     exit 0
     ;;
+  negative-alternatives)
+    echo "== NEGATIVE CONTROL: an .rpm whose %post registers /usr/bin/ash as an alternative must FAIL"
+    ALT="$(build_variant alternatives "$WHEEL" "$OUT/alternatives")"
+    rpm -qp --scripts "$ALT" | grep -n 'alternatives' | sed 's/^/   planted: /'
+    rc=0
+    rpm_scriptlets "$ALT" | vl_check_maintainer_scripts "the scriptlets of the variant" || rc=$?
+    [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the scriptlet check ACCEPTED a %post calling update-alternatives"
+    echo "   OK: the scriptlet check rejected the package (exit $rc)"
+    echo "== NEGATIVE CONTROL: installed beside a package owning /usr/bin/ash, it must be refused or caught"
+    install_ash_standin
+    vl_assert_no_alternatives || vl_fail "the host already has an alternative into the package before the variant was installed"
+    rc=0
+    rpm_install install "$ALT" 2>/tmp/variant-install.err || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      tail -n 5 /tmp/variant-install.err | sed 's/^/   /'
+      # Refused counts only if the planted call is what failed: rpm reports a failed
+      # %post scriptlet, and the error names the planted update-alternatives command.
+      grep -qE 'scriptlet failed|Error in POST scriptlet' /tmp/dnf-install.log \
+        || vl_fail "NEGATIVE CONTROL: the install failed, but not in %post"
+      grep -qF update-alternatives /tmp/dnf-install.log \
+        || vl_fail "NEGATIVE CONTROL: %post failed, but not in the planted update-alternatives call"
+      echo "   OK: the install was refused: %post failed in the planted update-alternatives call"
+    else
+      rc=0
+      vl_assert_no_alternatives || rc=$?
+      [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the host check ACCEPTED an install that registered an alternative"
+      echo "   OK: the host check rejected the alternative the %post registered (exit $rc)"
+      rc=0
+      vl_assert_shell_intact "ash stand-in" || rc=$?
+      echo "   for the record, the shell check on that host exited $rc"
+    fi
+    echo; echo "RPM NEGATIVE CONTROL (alternatives) PASSED"
+    exit 0
+    ;;
   negative-install)
     echo "== NEGATIVE CONTROL: an .rpm whose %post exits 1 must FAIL the install step"
     BROKEN="$(build_variant failing-post "$WHEEL" "$OUT/broken")"
@@ -289,6 +343,8 @@ for kind in provides conflicts obsoletes; do
 done
 vl_payload_gate "$RPM"
 check_rpm_paths "$RPM" || vl_fail "the package's file list must carry /usr/bin/$ASH_CLI_NAME and no other command"
+rpm_scriptlets "$RPM" | vl_check_maintainer_scripts "the scriptlets of $(basename "$RPM")" \
+  || vl_fail "the package's scriptlets must register no alternative and no diversion"
 
 if [ "$MODE" = upgrade ]; then
   PREV_WHEEL="$(one_wheel "$PREV_DIST")"
@@ -300,9 +356,11 @@ if [ "$MODE" = upgrade ]; then
   # after it means what its message says. The deb leg makes the same check.
   rpm_sorts_below "$(pkg_version "$PREV_VERSION" rpm)" "$(pkg_version "$VERSION" rpm)" \
     || vl_fail "the N-1 wheel ($PREV_VERSION) does not sort below N ($VERSION)"
-  PREV_RPM="$(build_rpm "$PREV_WHEEL" "$OUT/prev")"
-  echo "   built N-1: $PREV_RPM"
-  vl_payload_gate "$PREV_RPM"
+  vl_load_n1
+  vl_report_script_delta packaging/rpm/ash.spec packaging/rpm/build.sh
+  PREV_RPM="$("$PREV_SRC/packaging/rpm/build.sh" "$PREV_WHEEL" "$OUT/prev")"
+  echo "   built N-1 with N-1's own packaging/rpm/build.sh: $PREV_RPM"
+  vl_payload_gate_n1 "$PREV_RPM"
 
   echo "== 3. install N-1 ($PREV_VERSION)"
   rpm_install install "$PREV_RPM"
@@ -319,6 +377,7 @@ if [ "$MODE" = upgrade ]; then
     || vl_fail "rpm reports $(rpm -q "$ASH_PKG_NAME") after the upgrade"
   vl_assert_installed_version "$VERSION"
   vl_assert_venv_layout
+  vl_assert_no_alternatives || vl_fail "the upgrade registered an alternative"
   [ "$(readlink -f "$ASH_VENV")" != "$OLD_VENV" ] || vl_fail "the venv is the one N-1 created"
   [ ! -e "$OLD_VENV" ] || vl_fail "the N-1 venv $OLD_VENV survived a successful upgrade"
   echo "   OK: the venv was rebuilt from the N wheel and the N-1 venv is gone"
@@ -377,6 +436,7 @@ echo "   venv built with: $(readlink -f "$ASH_VENV/bin/python3")"
 vl_assert_installed_version "$VERSION"
 rpm -ql "$ASH_PKG_NAME" | vl_check_command_paths "rpm -ql $ASH_PKG_NAME" \
   || vl_fail "the installed package's file list must carry /usr/bin/$ASH_CLI_NAME and no other command"
+vl_assert_no_alternatives || vl_fail "the install registered an alternative"
 
 case "$MODE" in
   negative-findings)
@@ -410,6 +470,9 @@ vl_assert_shell_coexists "ash stand-in" || vl_fail "the package and the ash stan
 
 echo "== 4. the three e2e cases: findings (exit 2), clean (exit 0), incomplete (exit 1)"
 vl_scan_and_assert
+
+echo "== 4b. scanners are selected after install: --tool grype installs and verifies it, an unknown name is refused"
+vl_assert_dependency_selection
 
 echo "== 5. erase leaves nothing behind, and leaves /usr/bin/ash alone"
 erase_and_check
