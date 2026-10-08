@@ -16,8 +16,9 @@
  * already happened twice on this branch, to packaging/rpm/ash.spec and
  * packaging/msix/README.msix.
  *
- * No compression: the reader under test only walks the central directory, and
- * STORED entries keep this helper small enough to read.
+ * STORED by default, so a planted body sits in the archive byte for byte. An
+ * entry can ask for DEFLATE instead, which is what `vsce` writes, so the content
+ * check is also tested over bodies it has to inflate before it can read them.
  */
 
 import * as zlib from 'zlib';
@@ -25,6 +26,10 @@ import * as zlib from 'zlib';
 export interface ZipEntry {
   readonly name: string;
   readonly data?: Buffer | string;
+  /** Writes the body DEFLATE-compressed, as `vsce` does, instead of STORED. */
+  readonly deflate?: boolean;
+  /** Writes this compression method number into both headers, with the body stored as is. */
+  readonly rawMethod?: number;
 }
 
 const LOCAL_SIGNATURE = 0x04034b50;
@@ -45,26 +50,31 @@ export interface WriteOptions {
   readonly extraEntryCount?: number;
   /** Corrupts the signature of the nth central-directory entry (0-based). */
   readonly corruptEntry?: number;
+  /** Bytes written before the first local header, with every offset shifted to match. */
+  readonly leading?: Buffer;
 }
 
 /** Builds a ZIP archive whose members are exactly `entries`, in order. */
 export function writeZip(entries: readonly ZipEntry[], options: WriteOptions = {}): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
-  let offset = 0;
+  const leading = options.leading ?? Buffer.alloc(0);
+  let offset = leading.length;
 
   entries.forEach((entry, index) => {
     const name = Buffer.from(entry.name, 'utf8');
-    const body = bodyOf(entry);
-    const crc = zlib.crc32(body);
+    const plain = bodyOf(entry);
+    const crc = zlib.crc32(plain);
+    const body = entry.deflate === true ? zlib.deflateRawSync(plain) : plain;
+    const method = entry.rawMethod ?? (entry.deflate === true ? 8 : 0);
 
     const local = Buffer.alloc(30 + name.length);
     local.writeUInt32LE(LOCAL_SIGNATURE, 0);
     local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0, 8); // stored
+    local.writeUInt16LE(method, 8);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(body.length, 18);
-    local.writeUInt32LE(body.length, 22);
+    local.writeUInt32LE(plain.length, 22);
     local.writeUInt16LE(name.length, 26);
     name.copy(local, 30);
     locals.push(local, body);
@@ -73,10 +83,10 @@ export function writeZip(entries: readonly ZipEntry[], options: WriteOptions = {
     central.writeUInt32LE(index === options.corruptEntry ? 0xdeadbeef : CENTRAL_SIGNATURE, 0);
     central.writeUInt16LE(20, 4);
     central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0, 10); // stored
+    central.writeUInt16LE(method, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(body.length, 20);
-    central.writeUInt32LE(body.length, 24);
+    central.writeUInt32LE(plain.length, 24);
     central.writeUInt16LE(name.length, 28);
     central.writeUInt32LE(offset, 42);
     name.copy(central, 46);
@@ -94,9 +104,9 @@ export function writeZip(entries: readonly ZipEntry[], options: WriteOptions = {
   eocd.writeUInt16LE(options.zip64Sentinel === true ? 0xffff : count, 8);
   eocd.writeUInt16LE(options.zip64Sentinel === true ? 0xffff : count, 10);
   eocd.writeUInt32LE(centralBytes.length, 12);
-  eocd.writeUInt32LE(localBytes.length, 16);
+  eocd.writeUInt32LE(leading.length + localBytes.length, 16);
 
-  return Buffer.concat([localBytes, centralBytes, eocd]);
+  return Buffer.concat([leading, localBytes, centralBytes, eocd]);
 }
 
 /**
