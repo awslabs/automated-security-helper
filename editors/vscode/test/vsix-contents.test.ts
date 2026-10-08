@@ -27,12 +27,13 @@ import {
   inspectArchive,
   inspectMembers,
   listZipMembers,
+  layoutProblems,
   readEntryData,
   readZipDirectory,
   shapeProblem,
 } from '../src/vsix-contents';
 import { main, verify } from '../src/verify-vsix';
-import { CLEAN_VSIX_MEMBERS, ZipEntry, writeZip } from './zip';
+import { CLEAN_VSIX_MEMBERS, WriteOptions, ZipEntry, writeZip } from './zip';
 
 function collector(): { write(text: string): void; text(): string } {
   const chunks: string[] = [];
@@ -336,7 +337,11 @@ function withMember(name: string, data: Buffer | string, deflate = false): ZipEn
 }
 
 function misshapenOf(entries: readonly ZipEntry[], leading?: Buffer): string[] {
-  return inspectArchive(writeZip(entries, { leading })).misshapen.map((p) => `${p.member} ${p.reason}`);
+  return misshapenWith(entries, { leading });
+}
+
+function misshapenWith(entries: readonly ZipEntry[], options: WriteOptions): string[] {
+  return inspectArchive(writeZip(entries, options)).misshapen.map((p) => `${p.member} ${p.reason}`);
 }
 
 describe('content shape', () => {
@@ -414,6 +419,8 @@ describe('content shape', () => {
   it('rejects a zip appended to an executable, which still lists cleanly', () => {
     expect(misshapenOf(CLEAN_VSIX_MEMBERS, ELF)).toEqual([
       '(archive) does not begin with a ZIP record, so something precedes the archive',
+      `(archive) extension.vsixmanifest starts at byte ${ELF.length}, but the previous record ended at byte 0, ` +
+        'so the bytes between them are not extracted',
     ]);
   });
 
@@ -440,6 +447,94 @@ describe('content shape', () => {
       expect(verify(archive, collector() as never, err as never)).toBe(1);
       expect(err.text()).toContain('content does not match their name');
       expect(err.text()).toContain('extension/out/x.js carries a ELF executable header');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('duplicate names and bytes no reader extracts', () => {
+  const DUPLICATE = 'extension/out/extension.js appears 2 times in the central directory, and an installer extracts only one of them';
+
+  it('accepts records with trailing data descriptors, signed or not, as vsce writes them', () => {
+    for (const descriptor of ['signed', 'unsigned'] as const) {
+      for (const deflate of [false, true]) {
+        const entries = CLEAN_VSIX_MEMBERS.map((entry) => ({ ...entry, deflate, descriptor }));
+        expect(misshapenOf(entries)).toEqual([]);
+        expect(describeProblems(inspectArchive(writeZip(entries)))).toBeNull();
+      }
+    }
+  });
+
+  it('refuses a name carried twice even when both copies are clean', () => {
+    const extension = CLEAN_VSIX_MEMBERS.find((entry) => entry.name === 'extension/out/extension.js') as ZipEntry;
+    expect(misshapenOf([...CLEAN_VSIX_MEMBERS, extension])).toEqual([`${DUPLICATE}`]);
+  });
+
+  it('refuses a name carried twice with an executable first, and inspects both bodies', () => {
+    const entries = [{ name: 'extension/out/extension.js', data: ELF, deflate: true }, ...CLEAN_VSIX_MEMBERS];
+    expect(misshapenOf(entries)).toEqual([DUPLICATE, 'extension/out/extension.js carries a ELF executable header']);
+  });
+
+  it('refuses a name carried twice after backslashes are normalized', () => {
+    const entries = [...CLEAN_VSIX_MEMBERS, { name: 'extension\\out\\extension.js', data: 'module.exports = {};' }];
+    expect(misshapenOf(entries)).toEqual([DUPLICATE]);
+  });
+
+  it('refuses bytes hidden between two records', () => {
+    expect(misshapenWith(CLEAN_VSIX_MEMBERS, { afterFirst: ELF })).toEqual([
+      expect.stringMatching(/^\(archive\) \[Content_Types\]\.xml starts at byte \d+, but the previous record ended at byte \d+, so the bytes between them are not extracted$/),
+    ]);
+  });
+
+  it('refuses bytes hidden between the last record and the central directory', () => {
+    expect(misshapenWith(CLEAN_VSIX_MEMBERS, { beforeDirectory: ELF })).toEqual([
+      expect.stringMatching(/^\(archive\) its last record ends at byte \d+ but the central directory starts at byte \d+, so the bytes between them are not extracted$/),
+    ]);
+  });
+
+  it('refuses bytes hidden inside or after the central directory', () => {
+    expect(misshapenWith(CLEAN_VSIX_MEMBERS, { insideDirectory: ELF })).toEqual([
+      expect.stringMatching(/^\(archive\) its central-directory entries end at byte \d+, not at the \d+ the end record declares$/),
+    ]);
+    expect(misshapenWith(CLEAN_VSIX_MEMBERS, { afterDirectory: ELF })).toEqual([
+      expect.stringMatching(/^\(archive\) its central directory ends at byte \d+ but the end record is at byte \d+, so the bytes between them are not extracted$/),
+    ]);
+  });
+
+  it('refuses an archive comment and bytes after the end record', () => {
+    expect(misshapenWith(CLEAN_VSIX_MEMBERS, { comment: Buffer.from('payload') })).toEqual([
+      '(archive) carries a 7-byte archive comment, bytes no reader extracts',
+    ]);
+    expect(misshapenWith(CLEAN_VSIX_MEMBERS, { trailing: Buffer.from('payload') })).toEqual([
+      '(archive) has 7 byte(s) after its end record that no reader extracts',
+    ]);
+    const cut = writeZip(CLEAN_VSIX_MEMBERS, { comment: Buffer.from('payload') });
+    expect(layoutProblems(cut.subarray(0, cut.length - 3))).toEqual([
+      'carries a 7-byte archive comment, bytes no reader extracts',
+      'declares an archive comment that runs past the end of the file',
+    ]);
+  });
+
+  it('refuses two directory records that share one local record', () => {
+    expect(misshapenWith(CLEAN_VSIX_MEMBERS, { centralOffsets: { 1: 0 } })).toContain(
+      '(archive) [Content_Types].xml starts at byte 0, but the previous record ended at byte 70, so two records overlap',
+    );
+  });
+
+  it('refuses a record whose offset lines up but holds no local header', () => {
+    const zip = writeZip(CLEAN_VSIX_MEMBERS, { leading: ELF, centralOffsets: { 0: 0 } });
+    expect(layoutProblems(zip)).toEqual(['extension.vsixmanifest has no local file header at byte 0']);
+  });
+
+  it('makes verify-vsix exit 1 on a duplicated name', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'ash-vsix-dup-'));
+    try {
+      const archive = path.join(dir, 'dup.vsix');
+      writeFileSync(archive, writeZip([{ name: 'extension/out/extension.js', data: ELF }, ...CLEAN_VSIX_MEMBERS]));
+      const err = collector();
+      expect(verify(archive, collector() as never, err as never)).toBe(1);
+      expect(err.text()).toContain(DUPLICATE);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -60,6 +60,22 @@
  * and the two container XML files must start with `<`. The denylist half catches
  * the formats it knows; the text half catches the ones it does not, because no
  * binary payload is valid NUL-free UTF-8 by accident.
+ *
+ * WHY A DUPLICATED NAME IS REFUSED, AND WHY THE GAPS ARE ACCOUNTED FOR
+ *
+ * A ZIP may carry two entries under one name. Every body is read through its
+ * own central-directory record here, so both copies are inspected; but which
+ * one an installer extracts is up to the installer, and a check that reads by
+ * name sees only one. The JetBrains gate had exactly that hole. A duplicated
+ * name has no legitimate use in a `.vsix`, so it is refused outright.
+ *
+ * The rules above read what a ZIP reader extracts, and a ZIP can carry bytes
+ * no reader extracts: between one entry's data and the next local header,
+ * between the last entry and the central directory, after the end record, or
+ * in the archive comment. Those bytes still ship in the release asset. So the
+ * archive must be laid out end to end: each local record starting where the
+ * previous one ended, the directory where the last record ended, the end
+ * record right after the directory, an empty comment, and nothing after it.
  */
 
 import * as zlib from 'zlib';
@@ -127,6 +143,8 @@ const CENTRAL_HEADER_SIGNATURE = 0x02014b50;
 const MAX_COMMENT = 0xffff;
 const EOCD_MIN_SIZE = 22;
 const CENTRAL_HEADER_MIN_SIZE = 46;
+const LOCAL_HEADER_SIGNATURE = 0x04034b50;
+const LOCAL_HEADER_MIN_SIZE = 30;
 
 /** One central-directory record: where a member's bytes are and how they are stored. */
 export interface ZipDirectoryEntry {
@@ -136,6 +154,19 @@ export interface ZipDirectoryEntry {
   readonly compressedSize: number;
   readonly uncompressedSize: number;
   readonly localHeaderOffset: number;
+  /** General-purpose flags. Bit 3 means a data descriptor follows the body. */
+  readonly flags: number;
+}
+
+/** Where the parts of a ZIP archive sit, as its end record and directory declare them. */
+export interface ZipStructure {
+  readonly entries: ZipDirectoryEntry[];
+  readonly directoryOffset: number;
+  readonly directorySize: number;
+  /** Where the central-directory walk actually ended. */
+  readonly directoryEnd: number;
+  readonly eocdOffset: number;
+  readonly commentLength: number;
 }
 
 /**
@@ -152,6 +183,11 @@ export function listZipMembers(buffer: Buffer): string[] {
 
 /** The central directory of a ZIP archive, in order. Throws on the same shapes listZipMembers does. */
 export function readZipDirectory(buffer: Buffer): ZipDirectoryEntry[] {
+  return readZipStructure(buffer).entries;
+}
+
+/** The directory of a ZIP archive and where its parts sit. Throws on the same shapes listZipMembers does. */
+export function readZipStructure(buffer: Buffer): ZipStructure {
   if (buffer.length < EOCD_MIN_SIZE) {
     throw new Error(`not a ZIP archive: ${buffer.length} bytes is shorter than an end-of-central-directory record`);
   }
@@ -214,11 +250,87 @@ export function readZipDirectory(buffer: Buffer): ZipDirectoryEntry[] {
       compressedSize: buffer.readUInt32LE(cursor + 20),
       uncompressedSize: buffer.readUInt32LE(cursor + 24),
       localHeaderOffset: buffer.readUInt32LE(cursor + 42),
+      flags: buffer.readUInt16LE(cursor + 8),
     });
     cursor = nameEnd + extraLength + commentLength;
   }
 
-  return members;
+  return {
+    entries: members,
+    directoryOffset,
+    directorySize,
+    directoryEnd: cursor,
+    eocdOffset: eocd,
+    commentLength: buffer.readUInt16LE(eocd + 20),
+  };
+}
+
+const FLAG_DATA_DESCRIPTOR = 0x08;
+const DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
+
+/**
+ * Returns every place a ZIP archive carries bytes that no reader extracts.
+ *
+ * Empty for an archive laid out end to end. Records are walked in offset
+ * order, so an archive whose directory lists them in another order is still
+ * accepted when the bytes themselves are contiguous.
+ */
+export function layoutProblems(buffer: Buffer, structure: ZipStructure = readZipStructure(buffer)): string[] {
+  const problems: string[] = [];
+  const { directoryOffset, directorySize, directoryEnd, eocdOffset, commentLength } = structure;
+  if (commentLength !== 0) {
+    problems.push(`carries a ${commentLength}-byte archive comment, bytes no reader extracts`);
+  }
+  const trailing = buffer.length - (eocdOffset + EOCD_MIN_SIZE + commentLength);
+  if (trailing > 0) {
+    problems.push(`has ${trailing} byte(s) after its end record that no reader extracts`);
+  } else if (trailing < 0) {
+    problems.push('declares an archive comment that runs past the end of the file');
+  }
+  if (directoryEnd !== directoryOffset + directorySize) {
+    problems.push(
+      `its central-directory entries end at byte ${directoryEnd}, not at the ` +
+        `${directoryOffset + directorySize} the end record declares`,
+    );
+  }
+  if (directoryOffset + directorySize !== eocdOffset) {
+    problems.push(
+      `its central directory ends at byte ${directoryOffset + directorySize} but the end record ` +
+        `is at byte ${eocdOffset}, so the bytes between them are not extracted`,
+    );
+  }
+
+  let expected = 0;
+  const ordered = [...structure.entries].sort((a, b) => a.localHeaderOffset - b.localHeaderOffset);
+  for (const entry of ordered) {
+    if (entry.localHeaderOffset !== expected) {
+      problems.push(
+        `${entry.name} starts at byte ${entry.localHeaderOffset}, but the previous record ended at ` +
+          `byte ${expected}, so ` +
+          (entry.localHeaderOffset > expected ? 'the bytes between them are not extracted' : 'two records overlap'),
+      );
+      return problems;
+    }
+    const header = entry.localHeaderOffset;
+    if (header + LOCAL_HEADER_MIN_SIZE > buffer.length || buffer.readUInt32LE(header) !== LOCAL_HEADER_SIGNATURE) {
+      problems.push(`${entry.name} has no local file header at byte ${header}`);
+      return problems;
+    }
+    expected =
+      header + LOCAL_HEADER_MIN_SIZE + buffer.readUInt16LE(header + 26) + buffer.readUInt16LE(header + 28) +
+      entry.compressedSize;
+    if ((entry.flags & FLAG_DATA_DESCRIPTOR) !== 0) {
+      const signed = expected + 4 <= buffer.length && buffer.readUInt32LE(expected) === DATA_DESCRIPTOR_SIGNATURE;
+      expected += signed ? 16 : 12;
+    }
+  }
+  if (expected !== directoryOffset) {
+    problems.push(
+      `its last record ends at byte ${expected} but the central directory starts at byte ` +
+        `${directoryOffset}, so the bytes between them are not extracted`,
+    );
+  }
+  return problems;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,8 +399,6 @@ export const NATIVE_MAGICS: readonly Magic[] = [
 /** The two leading signatures a ZIP artifact may start with, as ZIP_LEADING_MAGICS in the shared gate. */
 const ZIP_LEADING_MAGICS: readonly Buffer[] = [Buffer.from('PK\x03\x04', 'latin1'), Buffer.from('PK\x05\x06', 'latin1')];
 
-const LOCAL_HEADER_SIGNATURE = 0x04034b50;
-const LOCAL_HEADER_MIN_SIZE = 30;
 const METHOD_STORED = 0;
 const METHOD_DEFLATE = 8;
 
@@ -445,7 +555,23 @@ export function inspectArchive(buffer: Buffer): ContentsVerdict {
     // begin with a ZIP record is what refuses that.
     misshapen.push({ member: '(archive)', reason: 'does not begin with a ZIP record, so something precedes the archive' });
   }
-  const entries = readZipDirectory(buffer);
+  const structure = readZipStructure(buffer);
+  const { entries } = structure;
+  for (const reason of layoutProblems(buffer, structure)) {
+    misshapen.push({ member: '(archive)', reason });
+  }
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    counts.set(entry.name, (counts.get(entry.name) ?? 0) + 1);
+  }
+  for (const [name, count] of counts) {
+    if (count > 1) {
+      misshapen.push({
+        member: name,
+        reason: `appears ${count} times in the central directory, and an installer extracts only one of them`,
+      });
+    }
+  }
   for (const entry of entries) {
     const reason = shapeProblem(entry.name, entry.uncompressedSize, readEntryData(buffer, entry));
     if (reason !== null) {
