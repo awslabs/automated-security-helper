@@ -25,10 +25,6 @@ ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins
-  - automated_security_helper.plugin_modules.ash_actionlint_plugins
-  - automated_security_helper.plugin_modules.ash_cfn_plugins
-  - automated_security_helper.plugin_modules.ash_gitleaks_plugins
-  - automated_security_helper.plugin_modules.ash_zizmor_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM

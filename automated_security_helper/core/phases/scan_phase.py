@@ -499,7 +499,6 @@ class ScanPhase(EnginePhase):
                 unresolved = [name for name, key in requested if key not in known_names]
                 from automated_security_helper.core.community_scanners import (
                     community_module_for,
-                    community_scanners_off_by_default,
                 )
 
                 # "Not loaded" means no scanner class handed to this phase comes
@@ -532,12 +531,6 @@ class ScanPhase(EnginePhase):
                         + " ".join(f"--ash-plugin-modules {m}" for m in modules)
                         + "."
                     )
-                    for name in sorted({n.lower().strip() for n in unloaded}):
-                        if name in community_scanners_off_by_default():
-                            hint += (
-                                f" {name} is off by default even with its module "
-                                f"listed: also set scanners.{name}.enabled: true."
-                            )
                 if unresolved:
                     ASH_LOGGER.warning(
                         "No registered scanner matches "

@@ -65,13 +65,9 @@ from automated_security_helper.utils.log import ASH_LOGGER
 #: scanners. tests/unit/cli/mcp/test_list_scanners_import_order.py keeps this list
 #: equal to every in-tree community module.
 _VENDORED_SCANNER_PLUGIN_PACKAGES = (
-    "automated_security_helper.plugin_modules.ash_actionlint_plugins",
-    "automated_security_helper.plugin_modules.ash_cfn_plugins",
     "automated_security_helper.plugin_modules.ash_ferret_plugins",
-    "automated_security_helper.plugin_modules.ash_gitleaks_plugins",
     "automated_security_helper.plugin_modules.ash_snyk_plugins",
     "automated_security_helper.plugin_modules.ash_trivy_plugins",
-    "automated_security_helper.plugin_modules.ash_zizmor_plugins",
 )
 
 

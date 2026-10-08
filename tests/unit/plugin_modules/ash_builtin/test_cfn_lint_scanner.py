@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""cfn-lint scanner: severity mapping, argv, exit-code handling and opt-in defaults.
+"""cfn-lint scanner: severity mapping, argv, exit-code handling and defaults.
 
 The SARIF these tests parse is real cfn-lint 1.57.1 output, captured from the fixture
 repository under ``tests/test_data/scanners/cfn_lint_guard/repo`` with::
@@ -33,7 +33,7 @@ from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.plugin_modules.ash_cfn_plugins.cfn_lint_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
     SEVERITY_BY_RULE_LETTER,
     CfnLintScanner,
     CfnLintScannerConfig,
@@ -298,8 +298,8 @@ class TestOptions:
         assert not (results / "ash-empty.cfnlintrc").is_symlink()
 
 
-class TestCommunityPlugin:
-    def test_scanner_is_on_by_default_once_its_module_is_listed(self):
+class TestBuiltin:
+    def test_scanner_is_on_by_default(self):
         assert CfnLintScannerConfig().enabled is True
 
     def test_sarif_extra_is_requested(self, repo):

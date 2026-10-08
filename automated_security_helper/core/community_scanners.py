@@ -7,8 +7,8 @@ Why this exists
 ---------------
 The community scanners that ship inside ASH (``plugin_modules/ash_*_plugins``)
 are loaded only when their module is listed in ``ash_plugin_modules`` or passed
-with ``--ash-plugin-modules``. A ``--scanners gitleaks`` run without
-``ash_gitleaks_plugins`` listed names a scanner ASH has but did not load, and the
+with ``--ash-plugin-modules``. A ``--scanners snyk-code`` run without
+``ash_snyk_plugins`` listed names a scanner ASH has but did not load, and the
 generic "no registered scanner matches" message reads as a typo. This module lets
 the scan phase say which module to add instead.
 
@@ -24,18 +24,15 @@ class, a subclass of ``ScannerPluginConfigBase``.
 import ast
 import functools
 from pathlib import Path
-from typing import Dict, FrozenSet, Optional
+from typing import Dict, Optional
 
 _PLUGIN_MODULES = Path(__file__).resolve().parent.parent / "plugin_modules"
 _PACKAGE = "automated_security_helper.plugin_modules"
 
 
-def _scanner_configs(source: str) -> "list[tuple[str, bool]]":
-    """``(name default, enabled default)`` of every ``ScannerPluginConfigBase`` subclass.
-
-    ``enabled`` is True unless the class declares ``enabled: bool = False``.
-    """
-    configs = []
+def _scanner_config_names(source: str) -> list[str]:
+    """``name`` defaults of every ``ScannerPluginConfigBase`` subclass in *source*."""
+    names = []
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.ClassDef):
             continue
@@ -45,26 +42,16 @@ def _scanner_configs(source: str) -> "list[tuple[str, bool]]":
         }
         if "ScannerPluginConfigBase" not in bases:
             continue
-        name, enabled = None, True
         for stmt in node.body:
-            if not (
+            if (
                 isinstance(stmt, ast.AnnAssign)
                 and isinstance(stmt.target, ast.Name)
+                and stmt.target.id == "name"
                 and isinstance(stmt.value, ast.Constant)
+                and isinstance(stmt.value.value, str)
             ):
-                continue
-            if stmt.target.id == "name" and isinstance(stmt.value.value, str):
-                name = stmt.value.value
-            elif stmt.target.id == "enabled" and stmt.value.value is False:
-                enabled = False
-        if name is not None:
-            configs.append((name, enabled))
-    return configs
-
-
-def _scanner_config_names(source: str) -> list[str]:
-    """``name`` defaults of every ``ScannerPluginConfigBase`` subclass in *source*."""
-    return [name for name, _ in _scanner_configs(source)]
+                names.append(stmt.value.value)
+    return names
 
 
 @functools.lru_cache(maxsize=1)
@@ -78,24 +65,6 @@ def community_scanner_modules() -> Dict[str, str]:
             for name in _scanner_config_names(source.read_text(encoding="utf-8")):
                 mapping.setdefault(name.lower(), f"{_PACKAGE}.{package.name}")
     return mapping
-
-
-@functools.lru_cache(maxsize=1)
-def community_scanners_off_by_default() -> FrozenSet[str]:
-    """Lowercased names of community scanners whose config defaults to disabled.
-
-    Listing the module does not turn these on (``trivy``, beside ``trivy-repo``),
-    so advice to list the module has to say that too.
-    """
-    off = set()
-    for package in sorted(_PLUGIN_MODULES.glob("ash_*_plugins")):
-        if package.name == "ash_builtin" or not (package / "__init__.py").is_file():
-            continue
-        for source in sorted(package.glob("*.py")):
-            for name, enabled in _scanner_configs(source.read_text(encoding="utf-8")):
-                if not enabled:
-                    off.add(name.lower())
-    return frozenset(off)
 
 
 def community_module_for(scanner_name: str) -> Optional[str]:

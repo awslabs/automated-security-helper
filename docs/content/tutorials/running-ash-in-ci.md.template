@@ -45,7 +45,7 @@ Sharding partitions the **scanner** set, not the file set. Scanners are handed a
 
 That choice has consequences worth knowing before you pick a shard count:
 
-1. **There is a ceiling at the number of scanners.** Today that is ten built-in scanners (bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft) plus any scanner plugins you have added. A shard count above the number of scanners leaves the surplus shards with nothing to run. They still start, produce a valid empty report and merge correctly, so this is wasteful rather than wrong.
+1. **There is a ceiling at the number of scanners.** Today that is sixteen built-in scanners (actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor) plus any scanner plugins you have added. A shard count above the number of scanners leaves the surplus shards with nothing to run. They still start, produce a valid empty report and merge correctly, so this is wasteful rather than wrong.
 2. **Balance is by scanner count, not scanner cost.** Scanners are dealt round-robin over a sorted list, so shard sizes differ by at most one. Their runtimes do not: a shard holding semgrep finishes long after a shard holding syft.
 3. **One slow scanner still sets the wall clock.** semgrep and checkov dominate ASH's runtime, so separating those two onto different executors is where most of the improvement comes from. Total time cannot fall below the slowest single scanner, and beyond roughly four shards there is very little left to win.
 

@@ -1,6 +1,6 @@
 # Built-in Security Scanners
 
-ASH includes 10 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
+ASH includes 16 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
 
 > For detailed visual diagrams of the built-in scanner architecture and workflows, see [Built-in Scanner Diagrams](scanners-diagrams.md).
 
@@ -18,6 +18,12 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[Opengrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
 | **[Semgrep](#semgrep)**               | Static analysis scanner         | 30+ languages                   | Community and custom rules                 |
 | **[Syft](#syft)**                     | SBOM generator                  | Container images, filesystems   | Software inventory generation              |
+| **[actionlint](#actionlint)**         | GitHub Actions linter           | Workflow files                  | Script injection, expression types         |
+| **[cfn-lint](#cfn-lint-and-cfn-guard)** | CloudFormation validation     | YAML, JSON                      | Resource schema checks                     |
+| **[cfn-guard](#cfn-lint-and-cfn-guard)** | CloudFormation policy         | YAML, JSON                      | AWS Guard Rules Registry rules             |
+| **[Gitleaks](#gitleaks)**             | Secret detection                | All text files                  | Rule-based secret detection, redacted      |
+| **[Trivy](#trivy)**                   | Dependency vulnerabilities      | Manifests and lockfiles         | `trivy fs`, vulnerability scanner only     |
+| **[zizmor](#zizmor)**                 | GitHub Actions static analysis  | Workflows, composite actions    | Template injection, credential exposure    |
 
 ## Scanner Details
 
@@ -291,6 +297,36 @@ scanners:
 - License identification
 
 **Dependencies**: `syft` binary
+
+### actionlint
+
+**Purpose**: Lints GitHub Actions workflow files (`.github/workflows`): script injection from untrusted event data, expression types, hard-coded container credentials, always-true `if:` conditions.
+
+**Dependencies**: `actionlint` binary (pinned; `ash dependencies install` and the container image provide it). See [actionlint](actionlint.md).
+
+### cfn-lint and cfn-guard
+
+**Purpose**: cfn-lint validates CloudFormation templates against the resource schemas; cfn-guard evaluates them against the AWS Guard Rules Registry (default rule set `wa-Security-Pillar`, every violation HIGH). Both read the templates cfn-nag reads.
+
+**Dependencies**: `cfn-lint` (uv tool) and the `cfn-guard` binary with the Guard Rules Registry bundle (pinned). See [cfn-lint and cfn-guard](cfn-lint-and-cfn-guard.md).
+
+### Gitleaks
+
+**Purpose**: Finds committed credentials with `gitleaks dir` (working tree only), beside detect-secrets. Findings are CRITICAL and values are redacted.
+
+**Dependencies**: `gitleaks` binary (pinned). See [Gitleaks](gitleaks.md).
+
+### Trivy
+
+**Purpose**: `trivy fs` over each target, the vulnerability scanner only by default, held to the trivy database's 24h bound. It reads no trivy configuration from the scanned repository unless configured.
+
+**Dependencies**: `trivy` binary (pinned) and its vulnerability database (downloaded online; offline it must already be in the cache). See [Trivy filesystem scanner](trivy.md).
+
+### zizmor
+
+**Purpose**: Static analysis of GitHub Actions workflows and composite actions, run with `--offline`; GitHub tokens are withheld unless `options.online_audits` is true.
+
+**Dependencies**: `zizmor` (uv tool). See [zizmor](zizmor.md).
 
 ## Best Practices
 

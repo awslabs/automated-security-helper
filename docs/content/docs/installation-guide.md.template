@@ -122,7 +122,7 @@ ash scan --mode nix --source-dir . --output-dir .ash/ash_output
 
 Use it when you want the reproducibility of container mode without building an image. ASH publishes no container image, so `--mode container` requires every adopter to build one first. Nix mode needs no image and no registry.
 
-It also avoids a quieter problem. In local mode, a scanner whose binary is missing reports `MISSING`, contributes zero findings, and the run still writes a complete-looking report, so a scan can under-report without saying so. Nix mode supplies all ten scanners, and if Nix itself is absent it fails with an explanation rather than falling back to local mode.
+It also avoids a quieter problem. In local mode, a scanner whose binary is missing reports `MISSING`, contributes zero findings, and the run still writes a complete-looking report, so a scan can under-report without saying so. Nix mode supplies all sixteen builtin scanners, and if Nix itself is absent it fails with an explanation rather than falling back to local mode.
 
 ### How it works
 

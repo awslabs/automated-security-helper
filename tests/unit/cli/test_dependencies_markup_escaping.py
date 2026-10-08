@@ -127,7 +127,7 @@ def test_error_line_keeps_the_failed_command(monkeypatch, capsys):
 
 
 def test_an_unloaded_community_scanner_names_its_module(tmp_path, monkeypatch):
-    """`--tool zizmor` without its module loaded is not a typo; say what to add."""
+    """`--tool snyk-code` without its module loaded is not a typo; say what to add."""
     _patch_one_plugin(monkeypatch, tmp_path, [])
 
     result = runner.invoke(
@@ -138,17 +138,17 @@ def test_an_unloaded_community_scanner_names_its_module(tmp_path, monkeypatch):
             "--bin-path",
             str(tmp_path / "bin"),
             "--tool",
-            "zizmor",
+            "snyk-code",
         ],
     )
 
     output = _plain(result.output)
     assert result.exit_code == EXIT_BAD_SELECTION
-    assert "zizmor is a community plugin scanner" in output
+    assert "snyk-code is a community plugin scanner" in output
     # Brackets survive rich: the override is printed as typed (COLUMNS=200).
     assert (
         "ash_plugin_modules+=[automated_security_helper.plugin_modules."
-        "ash_zizmor_plugins]" in output
+        "ash_snyk_plugins]" in output
     )
 
 

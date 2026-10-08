@@ -34,7 +34,7 @@ REPORTERS = ("flat-json", "markdown", "sarif", "text")
 def _zizmor_report(source: Path, output: Path):
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.plugin_modules.ash_zizmor_plugins.zizmor_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
         ZizmorScanner,
         ZizmorScannerConfig,
     )
@@ -60,7 +60,7 @@ def _zizmor_report(source: Path, output: Path):
 
 @pytest.fixture
 def zizmor_model(tmp_path, monkeypatch):
-    from automated_security_helper.plugin_modules.ash_zizmor_plugins.zizmor_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
         ZizmorScanner,
     )
     from tests.snapshot.support.fixture_model import _build_model, pin_clock

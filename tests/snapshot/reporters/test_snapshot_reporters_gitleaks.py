@@ -47,7 +47,7 @@ def _fixture_secrets() -> set[str]:
 def gitleaks_scan(pinned_clock, tmp_path: Path):
     """(model, context) for a scan whose only scanner is gitleaks, enabled."""
     from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.plugin_modules.ash_gitleaks_plugins.gitleaks_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
         GitleaksScanner,
         GitleaksScannerConfig,
     )

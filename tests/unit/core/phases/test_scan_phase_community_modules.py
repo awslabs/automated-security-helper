@@ -5,14 +5,14 @@
 
 Why this exists
 ---------------
-gitleaks, zizmor, actionlint, cfn-lint, cfn-guard and trivy live in community
-plugin modules (``plugin_modules/ash_*_plugins``). Listing a module is the opt-in: a run that does not list it never loads its scanners, so a
-default scan is unchanged by them. Two things follow, and are tested here:
+snyk-code, ferret-scan and trivy-repo live in community plugin modules
+(``plugin_modules/ash_*_plugins``). Listing a module is the opt-in: a run that does
+not list it never loads its scanners. Two things follow, and are tested here:
 
-* ``--scanners gitleaks`` without ``ash_gitleaks_plugins`` listed names a scanner
-  ASH has but did not load. It is refused with the module to add, rather than
-  read as a typo, and refused even when other names in the selection resolved.
-* With the module loaded, its scanner is an ordinary scanner and runs by default.
+* ``--scanners snyk-code`` without ``ash_snyk_plugins`` listed names a scanner ASH
+  has but did not load. It is refused with the module to add, rather than read as
+  a typo; a selection in which other names resolved warns with the same advice.
+* With the module loaded, its scanner is an ordinary scanner.
 
 The scan-phase tests drive the real ``ScanPhase`` with plain scanner classes that
 are never registered globally, so nothing leaks into other tests.
@@ -127,13 +127,9 @@ def _scan(context, plugins, enabled_scanners: List[str]) -> AshAggregatedResults
 @pytest.mark.parametrize(
     "scanner,module",
     [
-        ("actionlint", "ash_actionlint_plugins"),
-        ("cfn-guard", "ash_cfn_plugins"),
-        ("cfn-lint", "ash_cfn_plugins"),
-        ("gitleaks", "ash_gitleaks_plugins"),
-        ("trivy", "ash_trivy_plugins"),
+        ("ferret-scan", "ash_ferret_plugins"),
+        ("snyk-code", "ash_snyk_plugins"),
         ("trivy-repo", "ash_trivy_plugins"),
-        ("zizmor", "ash_zizmor_plugins"),
     ],
 )
 def test_each_community_scanner_maps_to_its_module(scanner, module):
@@ -141,9 +137,24 @@ def test_each_community_scanner_maps_to_its_module(scanner, module):
     assert community_module_for(f"  {scanner.upper()} ") == f"{PKG}.{module}"
 
 
-def test_builtin_scanners_are_not_community_scanners():
-    for builtin in ("bandit", "semgrep", "detect-secrets", "grype", "checkov"):
-        assert community_module_for(builtin) is None
+@pytest.mark.parametrize(
+    "builtin",
+    [
+        "bandit",
+        "semgrep",
+        "detect-secrets",
+        "grype",
+        "checkov",
+        "actionlint",
+        "cfn-lint",
+        "cfn-guard",
+        "gitleaks",
+        "trivy",
+        "zizmor",
+    ],
+)
+def test_builtin_scanners_are_not_community_scanners(builtin):
+    assert community_module_for(builtin) is None
 
 
 def test_the_map_agrees_with_what_each_module_registers():
@@ -151,6 +162,7 @@ def test_the_map_agrees_with_what_each_module_registers():
     by_module = {}
     for name, module in community_scanner_modules().items():
         by_module.setdefault(module, set()).add(name)
+    assert by_module, "no community module found; the check below would be vacuous"
     for module, names in by_module.items():
         exported = importlib.import_module(module).ASH_SCANNERS
         declared = set()
@@ -168,13 +180,22 @@ def test_the_map_agrees_with_what_each_module_registers():
 # --------------------------------------------------------------------------- #
 
 
+def _snyk_class():
+    from automated_security_helper.plugin_modules.ash_snyk_plugins import (
+        ASH_SCANNERS,
+    )
+
+    (snyk,) = ASH_SCANNERS
+    return snyk
+
+
 def test_an_unloaded_community_scanner_is_refused_with_its_module(tmp_path):
     with pytest.raises(ScannerSelectionError) as raised:
-        _scan(_context(tmp_path), [DummyControlScanner], ["gitleaks"])
+        _scan(_context(tmp_path), [DummyControlScanner], ["snyk-code"])
     message = str(raised.value)
-    assert "gitleaks is a community scanner" in message
-    assert f"{PKG}.ash_gitleaks_plugins" in message
-    assert f"--ash-plugin-modules {PKG}.ash_gitleaks_plugins" in message
+    assert "snyk-code is a community scanner" in message
+    assert f"{PKG}.ash_snyk_plugins" in message
+    assert f"--ash-plugin-modules {PKG}.ash_snyk_plugins" in message
 
 
 def test_a_partly_resolved_selection_warns_with_the_module(tmp_path, caplog):
@@ -187,28 +208,24 @@ def test_a_partly_resolved_selection_warns_with_the_module(tmp_path, caplog):
 
     with caplog.at_level(logging.WARNING):
         results = _scan(
-            _context(tmp_path), [DummyControlScanner], [CONTROL_NAME, "zizmor"]
+            _context(tmp_path), [DummyControlScanner], [CONTROL_NAME, "ferret-scan"]
         )
     assert CONTROL_NAME in results.scanner_results
-    assert "zizmor is a community scanner" in caplog.text
-    assert f"--ash-plugin-modules {PKG}.ash_zizmor_plugins" in caplog.text
+    assert "ferret-scan is a community scanner" in caplog.text
+    assert f"--ash-plugin-modules {PKG}.ash_ferret_plugins" in caplog.text
 
 
 def test_a_scanner_that_failed_to_construct_is_not_called_unloaded(tmp_path):
     """Its module supplied the class; the ERROR row is the answer, not a refusal."""
-    from automated_security_helper.plugin_modules.ash_gitleaks_plugins import (
-        ASH_SCANNERS,
-    )
+    snyk = _snyk_class()
 
-    (gitleaks,) = ASH_SCANNERS
-
-    class Broken(gitleaks):
+    class Broken(snyk):
         def model_post_init(self, context):
             raise RuntimeError("cannot be built")
 
-    Broken.__module__ = gitleaks.__module__
-    results = _scan(_context(tmp_path), [DummyControlScanner, Broken], ["gitleaks"])
-    assert str(results.scanner_results["gitleaks"].status).upper().endswith("ERROR")
+    Broken.__module__ = snyk.__module__
+    results = _scan(_context(tmp_path), [DummyControlScanner, Broken], ["snyk-code"])
+    assert str(results.scanner_results["snyk-code"].status).upper().endswith("ERROR")
 
 
 def test_a_loaded_module_without_the_name_gets_the_generic_message(tmp_path):
@@ -217,33 +234,11 @@ def test_a_loaded_module_without_the_name_gets_the_generic_message(tmp_path):
     class FromTheModule(DummyControlScanner):
         pass
 
-    FromTheModule.__module__ = f"{PKG}.ash_gitleaks_plugins.gitleaks_scanner"
+    FromTheModule.__module__ = f"{PKG}.ash_snyk_plugins.snyk_code_scanner"
     with pytest.raises(ScannerSelectionError) as raised:
-        _scan(_context(tmp_path), [FromTheModule], ["gitleaks"])
+        _scan(_context(tmp_path), [FromTheModule], ["snyk-code"])
     assert "None of the requested scanners exist" in str(raised.value)
     assert "not loaded" not in str(raised.value)
-
-
-def test_the_trivy_refusal_says_it_is_off_by_default(tmp_path):
-    with pytest.raises(ScannerSelectionError) as raised:
-        _scan(_context(tmp_path), [DummyControlScanner], ["trivy"])
-    message = str(raised.value)
-    assert f"{PKG}.ash_trivy_plugins" in message
-    assert "scanners.trivy.enabled: true" in message
-
-
-def test_the_enable_hint_uses_the_normalized_name(tmp_path):
-    with pytest.raises(ScannerSelectionError) as raised:
-        _scan(_context(tmp_path), [DummyControlScanner], ["  TRIVY "])
-    assert "scanners.trivy.enabled: true" in str(raised.value)
-
-
-def test_only_trivy_is_off_by_default():
-    from automated_security_helper.core.community_scanners import (
-        community_scanners_off_by_default,
-    )
-
-    assert community_scanners_off_by_default() == {"trivy"}
 
 
 def test_several_unloaded_scanners_name_every_module_once(tmp_path):
@@ -251,12 +246,12 @@ def test_several_unloaded_scanners_name_every_module_once(tmp_path):
         _scan(
             _context(tmp_path),
             [DummyControlScanner],
-            ["cfn-lint", "cfn-guard", "gitleaks"],
+            ["snyk-code", "SNYK-CODE", "trivy-repo"],
         )
     message = str(raised.value)
     assert "are community scanners" in message
-    assert message.count(f"--ash-plugin-modules {PKG}.ash_cfn_plugins") == 1
-    assert f"{PKG}.ash_gitleaks_plugins" in message
+    assert message.count(f"--ash-plugin-modules {PKG}.ash_snyk_plugins") == 1
+    assert f"{PKG}.ash_trivy_plugins" in message
 
 
 def test_a_plain_typo_keeps_the_generic_refusal(tmp_path):
@@ -266,57 +261,17 @@ def test_a_plain_typo_keeps_the_generic_refusal(tmp_path):
 
 def test_with_the_module_loaded_its_scanner_resolves_and_runs(tmp_path):
     """Negative control for the refusal: the same name, its class loaded."""
-    from automated_security_helper.plugin_modules.ash_gitleaks_plugins import (
-        ASH_SCANNERS,
-    )
+    snyk = _snyk_class()
 
-    (gitleaks,) = ASH_SCANNERS
-
-    class Present(gitleaks):
+    class Present(snyk):
         def validate_plugin_dependencies(self) -> bool:
             return True
 
         def scan(self, target, target_type, global_ignore_paths=None, config=None):
-            return _sarif("gitleaks")
+            return _sarif("snyk-code")
 
-    results = _scan(_context(tmp_path), [DummyControlScanner, Present], ["gitleaks"])
-    assert "gitleaks" in results.scanner_results
-
-
-@pytest.mark.parametrize(
-    "module,scanners",
-    [
-        ("ash_actionlint_plugins", {"actionlint"}),
-        ("ash_cfn_plugins", {"cfn-lint", "cfn-guard"}),
-        ("ash_gitleaks_plugins", {"gitleaks"}),
-        ("ash_zizmor_plugins", {"zizmor"}),
-    ],
-)
-def test_a_listed_modules_scanners_are_on_by_default(module, scanners):
-    """Listing the module is the opt-in, as for every community plugin."""
-    exported = importlib.import_module(f"{PKG}.{module}").ASH_SCANNERS
-    on = {}
-    for cls in exported:
-        config_cls = cls.model_fields["config"].annotation
-        for arg in getattr(config_cls, "__args__", (config_cls,)):
-            fields = getattr(arg, "model_fields", None) or {}
-            name = getattr(fields.get("name"), "default", None)
-            if isinstance(name, str) and "enabled" in fields:
-                on[name] = arg().enabled
-    assert on == dict.fromkeys(scanners, True)
-
-
-def test_the_trivy_fs_scanner_stays_off_beside_trivy_repo():
-    """The trivy module already held trivy-repo; listing it must not add trivy."""
-    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
-        TrivyRepoScannerConfig,
-    )
-    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_scanner import (
-        TrivyScannerConfig,
-    )
-
-    assert TrivyRepoScannerConfig().enabled is True
-    assert TrivyScannerConfig().enabled is False
+    results = _scan(_context(tmp_path), [DummyControlScanner, Present], ["snyk-code"])
+    assert "snyk-code" in results.scanner_results
 
 
 def test_a_scanner_that_cannot_be_built_is_an_error_under_its_declared_name(

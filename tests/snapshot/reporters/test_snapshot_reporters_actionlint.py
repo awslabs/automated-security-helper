@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from automated_security_helper.plugin_modules.ash_actionlint_plugins.actionlint_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
     build_sarif,
 )
 

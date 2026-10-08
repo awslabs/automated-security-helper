@@ -457,10 +457,10 @@ class TestThePythonTools:
             semgrep_scanner,
         )
 
-        from automated_security_helper.plugin_modules.ash_cfn_plugins import (
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             cfn_lint_scanner,
         )
-        from automated_security_helper.plugin_modules.ash_zizmor_plugins import (
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             zizmor_scanner,
         )
 
@@ -503,35 +503,11 @@ class TestThePythonTools:
         text = DOCKERFILE.read_text()
         for line in lines:
             assert line.strip() == (
-                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \\'
+                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \\'
             ), line
         assert (
             text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
         )
-        # Both load the community modules, so their uv tools are installed and pinned.
-        assert (
-            text.count(
-                '    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \\\n'
-            )
-            == 2
-        )
-        declared = re.findall(
-            r'^ARG ASH_COMMUNITY_PLUGIN_MODULES="([^"]+)"$', text, re.MULTILINE
-        )
-        assert len(declared) == 2 and declared[0] == declared[1], declared
-        from automated_security_helper.core.community_scanners import (
-            community_scanner_modules,
-        )
-
-        expected = sorted(
-            set(community_scanner_modules().values())
-            - {
-                "automated_security_helper.plugin_modules.ash_ferret_plugins",
-                "automated_security_helper.plugin_modules.ash_snyk_plugins",
-                "automated_security_helper.plugin_modules.ash_trivy_plugins",
-            }
-        )
-        assert sorted(declared[0].split(",")) == expected
 
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())

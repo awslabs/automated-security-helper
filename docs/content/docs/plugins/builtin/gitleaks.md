@@ -1,4 +1,4 @@
-# Gitleaks scanner (community plugin)
+# Gitleaks scanner
 
 [gitleaks](https://github.com/gitleaks/gitleaks) finds credentials (API keys, tokens, private keys) by matching its rule set against file contents. ASH runs it as `gitleaks dir` over the files in the scan target. It does not scan git history.
 
@@ -6,20 +6,7 @@ detect-secrets stays on by default and is unaffected; the two can run side by si
 
 ## Enabling it
 
-Gitleaks is a community plugin that ships with ASH. Its plugin module is loaded only when you list it, so a scan that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
-
-```yaml
-# .ash/.ash.yaml
-ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_gitleaks_plugins
-```
-
-```bash
-# For one run
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_gitleaks_plugins
-```
-
-With the module listed, `gitleaks` runs by default, like every other scanner. `scanners.gitleaks.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners gitleaks` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+Gitleaks is a builtin scanner, enabled by default: a default scan runs it. `scanners.gitleaks.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 ## Installing gitleaks
 
@@ -60,7 +47,7 @@ ASH passes the file it finds in step 3 explicitly, so archives and notebooks tha
 
 A `.gitleaks.toml` or `.gitleaksignore` in the scanned repository is therefore trusted the way gitleaks itself trusts it: a change that adds one can narrow or replace the rules (a config without `[extend] useDefault = true` drops the built-in rules, and an allowlist can match everything). That is deliberate, because these files are how a project records its own gitleaks decisions, and it differs from the `trivy` scanner, which reads no config from the scanned repository unless configured. When the repository under scan is not trusted to set its own rules, as when scanning a pull request from a fork, set `options.config_file` to a config you control: step 1 then wins, and the repository's `.gitleaks.toml` is not read. Its `.gitleaksignore` is still read, so review changes to that file the way you would a suppression. ASH logs, at INFO, when it uses a config file from the scanned repository.
 
-gitleaks's config is a community plugin entry under `scanners`, so the JSON schema (`automated_security_helper/schemas/AshConfig.json`) does not describe its options; they are listed below.
+gitleaks's options are described by the JSON schema (`automated_security_helper/schemas/AshConfig.json`) and listed below.
 
 ## Severity
 

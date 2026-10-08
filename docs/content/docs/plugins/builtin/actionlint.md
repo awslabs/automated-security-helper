@@ -1,23 +1,10 @@
-# actionlint (community plugin)
+# actionlint
 
-[actionlint](https://github.com/rhysd/actionlint) checks GitHub Actions workflow files: workflow syntax, `${{ }}` expression types, script injection from untrusted event data, hard-coded container credentials, `if:` conditions that are always true, undefined `needs:` jobs, unknown runner labels, and more. It is a single Go binary, MIT licensed. zizmor, also a community plugin, flags template injection too; ASH does not deduplicate across scanners, so with both enabled such a step is reported by each, under its own rule id.
+[actionlint](https://github.com/rhysd/actionlint) checks GitHub Actions workflow files: workflow syntax, `${{ }}` expression types, script injection from untrusted event data, hard-coded container credentials, `if:` conditions that are always true, undefined `needs:` jobs, unknown runner labels, and more. It is a single Go binary, MIT licensed. zizmor, also a builtin scanner, flags template injection too; ASH does not deduplicate across scanners, so with both enabled such a step is reported by each, under its own rule id.
 
 ## Enabling it
 
-actionlint is a community plugin that ships with ASH. Its plugin module is loaded only when you list it, so a scan that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
-
-```yaml
-# .ash/.ash.yaml
-ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_actionlint_plugins
-```
-
-```bash
-# For one run
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_actionlint_plugins
-```
-
-With the module listed, `actionlint` runs by default, like every other scanner. `scanners.actionlint.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners actionlint` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+actionlint is a builtin scanner, enabled by default: a default scan runs it. `scanners.actionlint.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 ## Installing
 
@@ -40,7 +27,7 @@ If the scan root has no workflow files, actionlint does not run and the scanner 
 ```yaml
 scanners:
   actionlint:
-    enabled: true           # once the module is listed; false turns it off
+    enabled: true           # the default; false turns it off
     options:
       config_file: null     # actionlint config, relative to the source directory
       shellcheck: null      # "shellcheck" to enable it; null disables the integration

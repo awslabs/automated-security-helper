@@ -26,7 +26,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.plugin_modules.ash_actionlint_plugins.actionlint_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
     ActionlintScanner,
     ActionlintScannerConfig,
     ActionlintScannerConfigOptions,
@@ -127,8 +127,6 @@ def test_a_full_scan_with_actionlint_selected(repo, tmp_path):
 
     result = _ash(
         "scan",
-        "--ash-plugin-modules",
-        "automated_security_helper.plugin_modules.ash_actionlint_plugins",
         "--mode",
         "local",
         "--source-dir",
@@ -172,8 +170,6 @@ def test_enabled_but_missing_is_missing_and_exits_one(repo, tmp_path):
 
     result = _ash(
         "scan",
-        "--ash-plugin-modules",
-        "automated_security_helper.plugin_modules.ash_actionlint_plugins",
         "--mode",
         "local",
         "--source-dir",
@@ -202,8 +198,6 @@ def test_enabled_but_missing_is_missing_and_exits_one(repo, tmp_path):
 # planted program does run when it is allowed to.
 # --------------------------------------------------------------------------- #
 
-MODULE = "automated_security_helper.plugin_modules.ash_actionlint_plugins"
-
 
 def _marker_program(path: Path, marker: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,8 +208,6 @@ def _marker_program(path: Path, marker: Path) -> Path:
 
 def _repo_config(repo: Path, **options: str) -> None:
     lines = [
-        "ash_plugin_modules:",
-        f"  - {MODULE}",
         "scanners:",
         "  actionlint:",
         "    options:",
@@ -228,8 +220,6 @@ def _repo_config(repo: Path, **options: str) -> None:
 def _scan(repo: Path, output: Path, *extra: str) -> subprocess.CompletedProcess:
     return _ash(
         "scan",
-        "--ash-plugin-modules",
-        MODULE,
         "--mode",
         "local",
         "--source-dir",

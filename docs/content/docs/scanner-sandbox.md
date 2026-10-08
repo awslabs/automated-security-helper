@@ -126,6 +126,11 @@ it needs.
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
 | cdk-nag | no | jsii's runtime cache, not used on macOS | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
+| actionlint | no | none | single binary |
+| cfn-lint | no | uv cache | uv-managed Python |
+| cfn-guard | no; reads its rules bundle (`$ASH_CFN_GUARD_RULES_DIR`, or `share/cfn-guard-rules` beside ASH's bin directory) | none | single binary |
+| gitleaks | no | none | single binary |
+| zizmor | no; `online_audits` gets neither a network nor a GitHub token yet | uv cache | uv-managed binary |
 
 ### Community and third-party plugin scanners
 
@@ -173,22 +178,17 @@ The community scanners declare theirs:
 
 - snyk-code asks for a network, its `SNYK_` variables and `SNYK_TOKEN`, and read
   access to its token file.
-- trivy-repo and trivy ask for a network, their database cache and their `TRIVY_`
-  variables.
+- trivy-repo shares the builtin trivy's declaration: a network, the database cache and
+  the `TRIVY_` variables.
 - ferret-scan asks only for its `FERRET_` variables.
-- cfn-guard asks for read access to its rules bundle: `$ASH_CFN_GUARD_RULES_DIR`, or
-  `share/cfn-guard-rules` beside ASH's bin directory.
-- gitleaks passes its `GITLEAKS_` variables through and reads the file
-  `GITLEAKS_CONFIG` names.
-- zizmor asks for a network and `GH_TOKEN`, `GITHUB_TOKEN` and `ZIZMOR_GITHUB_TOKEN`
-  only when `options.online_audits` is true; otherwise it gets neither.
-- actionlint and cfn-lint take the strict default.
 
 A file outside the source tree that a scanner option names is not mounted: a
-cfn-guard `rules_paths` entry, a `config_file` of gitleaks, cfn-lint, zizmor or trivy,
-or an absolute actionlint `shellcheck` or `pyflakes`. The scanned repository can set
-some of those options, and the sandbox does not take its grants from them. List such
-a path in `sandbox.extra_read_paths`, from a config outside the tree.
+cfn-guard `rules_paths` entry, a `config_file` of gitleaks, cfn-lint, zizmor, trivy or
+trivy-repo, gitleaks' `baseline_path`, trivy-repo's `module_dir`, or an absolute
+actionlint `shellcheck` or `pyflakes`. Nor do gitleaks' `GITLEAKS_*` variables or
+zizmor's GitHub token reach a sandbox. Grants derived from options or the environment
+wait for the sandbox's grant gates; until then list such a path in
+`sandbox.extra_read_paths`, from a config outside the tree.
 
 detect-secrets needs a network only to verify candidate secrets with their issuers,
 which it does when its settings list the verification filter. Those settings come

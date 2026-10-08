@@ -1,13 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the ``trivy`` and ``trivy-repo`` scanners of this plugin module share.
+"""What the builtin ``trivy`` scanner and the community ``trivy-repo`` scanner share.
 
 Why this module exists
 ----------------------
 trivy reached ASH first as the community plugin ``trivy-repo``
 (``plugin_modules/ash_trivy_plugins``), which users enable through
-``ash_plugin_modules``. The ``trivy`` scanner beside it runs the same binary, so the
+``ash_plugin_modules``. The builtin ``trivy`` scanner runs the same binary, so the
 logic that turns options into trivy flags, installs the pinned binary, and ties a
 vulnerability result to one package copy lives here once instead of being copied
 into a second module that would drift from the first.
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, Generic, TypeVar
+from typing import Annotated, Any, ClassVar, Dict, Generic, Optional, TypeVar
 
 from pydantic import Field, model_validator
 
@@ -37,6 +37,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.enums import OfflineStrategy
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolExtraArg
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
@@ -44,6 +45,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
+)
+from automated_security_helper.utils.config_trust import (
+    inside_scanned_tree,
+    set_by_operator,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -97,6 +102,40 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # when offline mode is active. Kept on the instance so concurrent scanners
     # do not race on os.environ.
     extra_env: Annotated[Dict[str, str], Field(default_factory=dict)]
+
+    def _operator_path(
+        self, option: str, value: Path | str, why: str
+    ) -> Optional[Path]:
+        """``value`` as a path, when the operator set ``option`` and it lies outside the tree.
+
+        trivy reads a ``trivy.yaml`` that can name a directory of WASM modules
+        (``module.dir``) and load them, and ``--module-dir`` names one directly. So
+        a path for either is used only when the operator set the option
+        (``--config-overrides`` or a config file outside the scanned tree, see
+        ``utils/config_trust.py``) and it resolves outside that tree. Otherwise
+        this logs ``why`` and returns None, and the caller uses ASH's own.
+        """
+        if self.context is None:
+            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
+        source_dir = Path(self.context.source_dir)
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = source_dir / candidate
+        name = self.config.name if self.config is not None else "trivy"
+        key = f"scanners.{name}.options.{option}"
+        if not set_by_operator(self.context.config, key, value):
+            reason = (
+                "it came from a config file in the scanned tree; set it with "
+                "--config-overrides or a config file outside the tree"
+            )
+        elif inside_scanned_tree(candidate, source_dir):
+            reason = "it is inside the scanned tree"
+        else:
+            return candidate
+        self._plugin_log(
+            f"Ignoring {key} ({str(value)!r}): {reason}. {why}", level=logging.WARNING
+        )
+        return None
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "TrivyScannerBase[C]":

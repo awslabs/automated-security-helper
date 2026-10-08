@@ -155,7 +155,10 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
     assert argv[:2] == ["trivy", "repository"]
     assert argv[2].startswith("--ignorefile=")
     assert argv[3].startswith("--secret-config=")
-    assert argv[4:] == resolved[2:]
+    # The config and modules directory trivy-repo also pins are the only additions.
+    assert [
+        a for a in argv[4:] if not a.startswith(("--config=", "--module-dir="))
+    ] == resolved[2:]
 
 
 def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_update(

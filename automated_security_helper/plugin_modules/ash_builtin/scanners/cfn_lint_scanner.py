@@ -1,16 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""cfn-lint: CloudFormation template validation, as a community ASH scanner.
+"""cfn-lint: CloudFormation template validation, as a builtin ASH scanner.
 
 What it adds next to cfn-nag and checkov
 ----------------------------------------
 cfn-lint validates templates against the CloudFormation resource schemas and its own
 best-practice rules: misspelled or invalid properties, values the service rejects,
 deprecated runtimes, unused parameters. It is a correctness linter rather than a
-security scanner, which is why it ships as a community plugin and why its severities
-are mapped below
-security findings (see ``severity_for_rule``).
+security scanner, which is why its severities are mapped below security findings
+(see ``severity_for_rule``).
 
 Which files it reads
 --------------------

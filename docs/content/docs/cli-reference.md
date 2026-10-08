@@ -361,7 +361,7 @@ A shard that owned only `syft` and `grype` finds nothing and exits 0. Five such 
 
 Balance is by scanner count, not by scanner cost. `semgrep` and `checkov` dominate ASH's runtime, so a shard holding semgrep finishes long after a shard holding syft: wall clock is bounded by the slowest single scanner, and counts above about four buy very little. Nothing models or measures per-scanner cost.
 
-A `--shard-count` above the number of scanners leaves the surplus shards with nothing assigned. They run, produce a valid empty report, and merge correctly, so this is wasteful rather than wrong. It is allowed on purpose, so that a pipeline can parameterize its shard count without knowing how many scanners are registered — ASH ships ten built-in scanners, and any scanner plugins you register count too.
+A `--shard-count` above the number of scanners leaves the surplus shards with nothing assigned. They run, produce a valid empty report, and merge correctly, so this is wasteful rather than wrong. It is allowed on purpose, so that a pipeline can parameterize its shard count without knowing how many scanners are registered — ASH ships sixteen built-in scanners, and any scanner plugins you register count too.
 
 #### Interaction with other options
 
@@ -601,7 +601,7 @@ $ ash config validate
 ✓ Schema validation passed
 ✓ All required fields present
 ✓ Suppression rules validated (3 rules)
-✓ Scanner configurations validated (10 scanners)
+✓ Scanner configurations validated (16 scanners)
 
 Configuration is valid!
 

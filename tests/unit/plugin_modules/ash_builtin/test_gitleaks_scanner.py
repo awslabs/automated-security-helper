@@ -30,7 +30,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
-from automated_security_helper.plugin_modules.ash_gitleaks_plugins.gitleaks_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
     LEAKS_EXIT_CODE,
     REDACTED,
     GitleaksScanner,
@@ -109,15 +109,13 @@ def _assert_expected_findings(report: SarifReport) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# A community plugin: on once its module is listed
+# A builtin scanner, on by default
 # --------------------------------------------------------------------------- #
 
 
-def test_gitleaks_is_on_by_default_once_its_module_is_listed():
+def test_gitleaks_is_on_by_default():
     assert GitleaksScannerConfig().enabled is True
-    assert not hasattr(AshConfig().scanners, "gitleaks"), (
-        "a community scanner has no declared field on the builtin config segment"
-    )
+    assert AshConfig().scanners.gitleaks.enabled is True
 
 
 # --------------------------------------------------------------------------- #

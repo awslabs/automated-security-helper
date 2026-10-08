@@ -37,10 +37,10 @@ REPORTERS = ("markdown", "sarif", "text")
 def _normalized_outputs(manifest_dir: Path, source_dir: Path) -> None:
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.default_config import get_default_config
-    from automated_security_helper.plugin_modules.ash_cfn_plugins.cfn_guard_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
         CfnGuardScanner,
     )
-    from automated_security_helper.plugin_modules.ash_cfn_plugins.cfn_lint_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
         CfnLintScanner,
     )
     from automated_security_helper.schemas.sarif_schema_model import SarifReport

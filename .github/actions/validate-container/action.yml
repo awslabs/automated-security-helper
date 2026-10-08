@@ -494,12 +494,6 @@ runs:
           --output-dir /tmp/ash-selftest/output \
           --simple \
           --fail-on-incomplete-scanners \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_actionlint_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_cfn_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_gitleaks_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_trivy_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins \
-          --config-overrides 'scanners.trivy.enabled=true' \
           --phases scan \
           --phases report
         rc=$?
@@ -601,9 +595,8 @@ runs:
         # ASH's own environment IS the image, so its status is exactly as much a
         # statement about the image as any other scanner's.
         #
-        # The community scanners listed here are not loaded unless their module is listed.
-        # The scan above lists every community module (and turns on trivy, which is off
-        # by default even then), so the image's copy of each runs, and each is listed
+        # actionlint, cfn-lint, cfn-guard, gitleaks, trivy and zizmor are builtin and on
+        # by default, so the scan above runs the image's copy of each, and each is listed
         # here so a missing binary fails this check.
         image_supplied = [
             "actionlint",
@@ -664,14 +657,14 @@ runs:
         print(f"PASS: all {len(image_supplied)} image-supplied scanners participated")
         PY
 
-    # === community scanner: zizmor ===
+    # === zizmor, on its own ===
     #
     # zizmor also runs in the scan above, whose participation check says only that
     # it was not MISSING. This runs it alone with --scanners against a workflow that
     # has a known template injection, and requires a FAILED status with that finding: MISSING or ERROR would mean the
     # image does not supply a working zizmor, and PASSED would mean it ran
     # but its output was lost.
-    - name: "container: zizmor (community plugin) runs and reports"
+    - name: "container: zizmor runs and reports"
       shell: bash
       env:
         # `ash scan --mode container` rebuilds the image, so it gets the build's
@@ -700,7 +693,6 @@ runs:
           --oci-runner "${RUNTIME}" \
           --source-dir /tmp/ash-zizmor-selftest \
           --output-dir /tmp/ash-zizmor-selftest/output \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins \
           --scanners zizmor \
           --no-fail-on-findings \
           --fail-on-incomplete-scanners \
@@ -737,7 +729,7 @@ runs:
     # --fail-on-incomplete-scanners turns that into exit 1. The template is the
     # compliant fixture from tests/test_data/scanners/cfn_lint_guard, so both scanners
     # must report PASSED and the scan must exit 0.
-    - name: "Scan with the image's CloudFormation scanners (community plugin)"
+    - name: "Scan with the image's CloudFormation scanners"
       shell: bash
       env:
         # `ash scan --mode container` rebuilds the image, so it gets the build's
@@ -755,7 +747,6 @@ runs:
           --oci-runner "${RUNTIME}" \
           --source-dir /tmp/ash-cfn-selftest \
           --output-dir /tmp/ash-cfn-selftest/output \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_cfn_plugins \
           --scanners cfn-lint,cfn-guard \
           --simple \
           --fail-on-incomplete-scanners \

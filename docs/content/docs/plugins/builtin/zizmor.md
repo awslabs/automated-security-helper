@@ -1,4 +1,4 @@
-# zizmor (GitHub Actions, community plugin)
+# zizmor (GitHub Actions)
 
 [zizmor](https://docs.zizmor.sh) is a static analyzer for GitHub Actions. ASH runs it
 over a repository's workflows and composite actions and reports template
@@ -6,26 +6,13 @@ injection, dangerous triggers, credential persistence, unpinned actions,
 excessive permissions and the rest of zizmor's
 [audits](https://docs.zizmor.sh/audits/).
 
-actionlint, also a community plugin, flags template injection from untrusted event data too.
+actionlint, also a builtin scanner, flags template injection from untrusted event data too.
 ASH does not deduplicate across scanners, so with both enabled such a step is
 reported by each, under its own rule id.
 
 ## Enabling it
 
-zizmor is a community plugin that ships with ASH. Its plugin module is loaded only when you list it, so a scan that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
-
-```yaml
-# .ash/.ash.yaml
-ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_zizmor_plugins
-```
-
-```bash
-# For one run
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins
-```
-
-With the module listed, `zizmor` runs by default, like every other scanner. `scanners.zizmor.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners zizmor` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+zizmor is a builtin scanner, enabled by default: a default scan runs it. `scanners.zizmor.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 ## What gets scanned
 

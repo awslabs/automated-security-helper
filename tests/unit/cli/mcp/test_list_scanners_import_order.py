@@ -49,28 +49,8 @@ from automated_security_helper.plugins.loader import (
     load_internal_plugins,
 )
 
-VENDORED_SCANNER_NAMES = {
-    "actionlint",
-    "cfn_guard",
-    "cfn_lint",
-    "ferret_scan",
-    "gitleaks",
-    "snyk_code",
-    "trivy",
-    "trivy_repo",
-    "zizmor",
-}
-VENDORED_SCANNER_CLASSES = {
-    "ActionlintScanner",
-    "CfnGuardScanner",
-    "CfnLintScanner",
-    "FerretScanScanner",
-    "GitleaksScanner",
-    "SnykCodeScanner",
-    "TrivyRepoScanner",
-    "TrivyScanner",
-    "ZizmorScanner",
-}
+VENDORED_SCANNER_NAMES = {"ferret_scan", "snyk_code", "trivy_repo"}
+VENDORED_SCANNER_CLASSES = {"FerretScanScanner", "SnykCodeScanner", "TrivyRepoScanner"}
 
 
 def _resolve_without_the_vendored_packages() -> set:
@@ -182,13 +162,9 @@ class TestLoadedScannerClasses:
         short again. Measured both ways: leaf paths yield 0, package paths yield all.
         """
         leaves = {
-            "ash_actionlint_plugins": "actionlint_scanner",
-            "ash_cfn_plugins": "cfn_lint_scanner",
             "ash_ferret_plugins": "ferret_scanner",
-            "ash_gitleaks_plugins": "gitleaks_scanner",
             "ash_snyk_plugins": "snyk_code_scanner",
             "ash_trivy_plugins": "trivy_repo_scanner",
-            "ash_zizmor_plugins": "zizmor_scanner",
         }
         leaf_paths = [
             f"{package}.{leaves[package.rsplit('.', 1)[1]]}"
