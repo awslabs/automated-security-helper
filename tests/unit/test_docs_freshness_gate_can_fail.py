@@ -763,6 +763,30 @@ def test_native_package_docs_check_can_fail(gate, native_tree):
             "does not run `release-assets.py check`",
         ),
         (
+            "the asset check survives only as a comment",
+            lambda: _edit(
+                native_tree / ".github" / "workflows" / "ash-tag-on-merge.yml",
+                "          python3 packaging/release-assets.py check release-assets",
+                "          # python3 packaging/release-assets.py check release-assets",
+            ),
+            "does not run `release-assets.py check`",
+        ),
+        (
+            "the asset check survives only in a YAML comment",
+            lambda: (
+                _edit(
+                    native_tree / ".github" / "workflows" / "ash-tag-on-merge.yml",
+                    "          python3 packaging/release-assets.py check release-assets",
+                    "          true",
+                ),
+                _append_text(
+                    native_tree / ".github" / "workflows" / "ash-tag-on-merge.yml",
+                    "# python3 packaging/release-assets.py check release-assets\n",
+                ),
+            ),
+            "does not run `release-assets.py check`",
+        ),
+        (
             "nuspec id renamed under the pages",
             lambda: _edit(
                 packaging / "chocolatey" / "ash.nuspec",
