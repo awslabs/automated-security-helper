@@ -92,7 +92,28 @@ on:
   # branch that touches packaging. The triggers above, and the reasons given for
   # having no push trigger here, are unchanged: that file carries the paths filter so
   # this one does not have to.
-  workflow_call: {}
+  #
+  # Also called by ash-release-assets.yml, which takes the .msix, .nupkg and Flatpak
+  # bundle this workflow builds, gates and installs, and stages them as release
+  # assets. `ref` is how the release run builds the exact commit it is about to tag:
+  # on a closed pull request the event's own ref is refs/pull/<n>/merge, which is not
+  # main. Empty means the event's commit, which is what every other caller wants.
+  #
+  # The two signing secrets are declared so that caller can hand them over explicitly
+  # for a release, and only for a release. ash-package-formats.yml passes none, so a
+  # branch push still self-signs (tests/unit/test_package_formats_workflow.py).
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out and build. Empty means the event's commit.
+        type: string
+        required: false
+        default: ""
+    secrets:
+      MSIX_SIGNING_PFX_BASE64:
+        required: false
+      MSIX_SIGNING_PFX_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -132,6 +153,8 @@ jobs:
       # "HEAD" is not one of the values the hook's fallback rejects. It is noted
       # here so nobody reads that string as corruption.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -386,6 +409,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Download the wheel built and gated by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -407,7 +432,7 @@ jobs:
       # scripts/e2e/assert_outcome.py, shows those verdicts rejecting wrong outcomes,
       # uninstalls, then installs N-1 from a local remote and `flatpak update`s it to N.
       - name: Build the Flatpak, install it, run the e2e cases, upgrade and uninstall
-        run: sudo --preserve-env=REPO,DIST,PREV_DIST,TMPDIR bash packaging/flatpak/verify-in-container.sh
+        run: sudo --preserve-env=REPO,DIST,PREV_DIST,TMPDIR,OUT bash packaging/flatpak/verify-in-container.sh
         env:
           # The script's build output and logs go in a mktemp directory, so keep that
           # under RUNNER_TEMP rather than the runner's /tmp.
@@ -415,6 +440,21 @@ jobs:
           REPO: ${{ github.workspace }}
           DIST: ${{ github.workspace }}/dist
           PREV_DIST: ${{ runner.temp }}/flatpak-wheels/dist-prev
+          # Where build.sh writes the bundles: N at the top level, N-1 under prev/. Moved
+          # out of the script's mktemp directory, which it removes on exit, so the N
+          # bundle it installed and updated to survives for the upload below.
+          OUT: ${{ github.workspace }}/build/flatpak-out
+
+      # The N bundle only: `*.flatpak` does not descend into prev/, where the N-1 bundle
+      # (this tree under a version it is not) stays. ash-release-assets.yml unpacks it
+      # and runs the tree gate build.sh ran, on these bytes, before a release attaches it.
+      - name: Upload the N Flatpak bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-flatpak-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/flatpak-out/*.flatpak
+          if-no-files-found: error
+          retention-days: 14
 
   # The MSIX. Unlike the two jobs above there is no container: a hosted Windows runner is
   # both the build host and the test host, and that is a real weakness of this job rather
@@ -460,6 +500,8 @@ jobs:
       # with no git, where actions/checkout silently falls back to a REST tarball. The
       # Windows runner image ships git.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -535,7 +577,9 @@ jobs:
       # Uploaded so the artifact can be inspected without a Windows machine, and because
       # packaging/winget/ declares this filename as its installer against a templated
       # release asset URL -- an upload here is the only place that filename is produced by
-      # the code that decides it rather than asserted in a manifest.
+      # the code that decides it rather than asserted in a manifest. It is also the .msix
+      # ash-release-assets.yml stages as a release asset and renders the winget
+      # manifests from.
       #
       # Same run_attempt suffix as the build job's upload, for the same reason: artifact
       # names are immutable within a run from upload-artifact v4 onward, so "Re-run all
@@ -575,6 +619,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       # xmllint comes from libxml2-utils, which is NOT in the ubuntu-24.04 runner
       # image's apt package list -- checked against
@@ -637,6 +683,7 @@ jobs:
       # and says so. tests/unit/test_e2e_n1_fetch.py rebuilds both clones.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
 
       - name: Download the wheel built and gated by the build job
@@ -669,11 +716,27 @@ jobs:
       # The script runs the three e2e cases (exit 2, 0 and 1) against the installed shim,
       # upgrades from N-1, uninstalls twice, and shows each gate failing on a planted
       # defect, including a package whose install script exits 1.
+      #
+      # -OutDir is in the workspace so the upload below can name it with a relative path.
+      # The script writes exactly one file there, the N .nupkg it installs, upgrades to and
+      # gates with packaging/assert-package-contents.py; N-1 and the negative-control
+      # packages go under -Work.
       - name: Build N and N-1, install, scan, upgrade, uninstall, negative controls
         shell: pwsh
         env:
           E2E_PREV_REF: auto
-        run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}" -Work "${{ runner.temp }}\ash-choco-e2e"
+        run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}" -OutDir "${{ github.workspace }}\build\choco-out" -Work "${{ runner.temp }}\ash-choco-e2e"
+
+      # The .nupkg the step above gated and installed, kept for ash-release-assets.yml,
+      # which gates it again on these bytes before a release attaches it. Same
+      # run_attempt suffix as the other uploads here, for the same reason.
+      - name: Upload the gated .nupkg
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-nupkg-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/choco-out/*.nupkg
+          if-no-files-found: error
+          retention-days: 14
 
   # The winget manifest set, checked against Microsoft's published JSON Schemas.
   #
@@ -704,6 +767,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -754,6 +819,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -852,6 +919,8 @@ jobs:
       HOMEBREW_NO_ANALYTICS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       # Recorded, not assumed. If a future image drops Homebrew or moves it, this line
       # says so in one place instead of the failure surfacing as `brew: command not

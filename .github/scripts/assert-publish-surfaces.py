@@ -329,6 +329,18 @@ _GRYPE_DB_CACHE_REASON = (
     "content_databases.py), so no restored copy is older than that bound."
 )
 
+_RELEASE_ASSET_ARTIFACT_REASON = (
+    "BUILT BYTES, and a release asset (operator decision O3: the native packages and "
+    "IDE artifacts may be public Release downloads; the container image never). "
+    "This upload carries the file the job built, gated and, where the format allows, "
+    "installed and exercised, to .github/workflows/ash-release-assets.yml, which "
+    "gates it again on these bytes and stages it. Each package wraps the one ASH "
+    "wheel the build job already publishes, held to that by its contents gate "
+    "(packaging/assert-package-payload.py, packaging/assert-package-contents.py, "
+    "vsix-contents.ts, editors/jetbrains/assert-plugin-zip-contents.py), so it "
+    "widens the format and not the content. One file per artifact, N only, never "
+    "an N-1 build; if-no-files-found: error and 14-day retention."
+)
 
 ALLOWLIST: tuple[Entry, ...] = (
     # -- GitHub Release attachments ----------------------------------------
@@ -336,15 +348,14 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-tag-on-merge.yml",
         kind=KIND_RELEASE_ASSET,
         action="gh release create",
-        publishes=(
-            "assets=${NOTES_ARGS[@]+${NOTES_ARGS[@]}}|dist/*.whl|dist/*.tar.gz|dist/*.mcpb"
-        ),
+        publishes="assets=${NOTES_ARGS[@]+${NOTES_ARGS[@]}}|release-assets/*",
         reason=(
             "THE RELEASE. The one place files are attached to a GitHub Release, in "
-            "the job that runs only when a chore(release): pull request merges. The "
-            "wheel, sdist and .mcpb are built, gated and attested in that same job "
-            "before this step. NOTES_ARGS expands to --notes and the changelog text, "
-            "never a file."
+            "the job that runs only when a chore(release): pull request merges. "
+            "release-assets/ is the directory the step before it held to "
+            "packaging/release-assets.py (exactly the listed assets, digests equal to "
+            "the ones computed after their gates) and attested. NOTES_ARGS expands to "
+            "--notes and the changelog text, never a file."
         ),
     ),
     # -- Digest-pinned scanner release assets (maintainer decision) ----------
@@ -489,10 +500,86 @@ ALLOWLIST: tuple[Entry, ...] = (
             "packaging/msix/AshLauncher.cs, so it widens the format, not the "
             "content. Signed with the repository's MSIX_SIGNING_PFX secret when set "
             "and a throwaway self-signed certificate otherwise, which Windows will "
-            "not trust; it is evidence for the winget manifest, not a release asset. "
+            "not trust. ash-release-assets.yml stages this file as the release's "
+            ".msix and renders the winget manifests from it (operator decision O3). "
             "Exactly one .msix is uploaded, asserted by verify-on-windows.ps1, with "
             "if-no-files-found: error and 14-day retention."
         ),
+    ),
+    Entry(
+        file=".github/workflows/ash-package.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-nupkg-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/choco-out/*.nupkg"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The Chocolatey .nupkg the chocolatey job installed, scanned with, "
+        "upgraded to and uninstalled.",
+    ),
+    Entry(
+        file=".github/workflows/ash-package.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-flatpak-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/flatpak-out/*.flatpak"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The N Flatpak bundle the flatpak job installed and updated to; the N-1 "
+        "bundle sits under prev/, which the glob does not descend into.",
+    ),
+    Entry(
+        file=".github/workflows/ash-native-packages.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-${{ matrix.family }}-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/native-packages/*.${{ matrix.family }}"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The .deb from the Debian 12 assert leg and the .rpm from the Amazon "
+        "Linux 2023 assert leg (matrix.asset), each uploaded only after that leg "
+        "installed, scanned with and purged it.",
+        required_condition="matrix.asset",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-vsix-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/vsix/*.vsix"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The .vsix, after the no-runtime-dependency check and vsix-contents.ts.",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-jetbrains-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/jetbrains/build/distributions/*.zip"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The JetBrains plugin zip, after assertDistributionContents and "
+        "assert-plugin-zip-contents.py.",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-assets-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=release-assets/"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The whole staged set, uploaded only after packaging/release-assets.py "
+        "passed every gate on it: the files above plus the .mcpb and the winget "
+        "manifests rendered for the staged .msix. ash-tag-on-merge.yml downloads "
+        "it in the same run and attaches exactly these bytes.",
     ),
     Entry(
         file=".github/workflows/ash-vscode-extension.yml",

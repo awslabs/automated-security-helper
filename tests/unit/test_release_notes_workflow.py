@@ -106,6 +106,10 @@ def _release_script() -> str:
     return script
 
 
+# The job-level env the release step reads its --target from (ash-tag-on-merge.yml).
+RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
 class Result:
     def __init__(self, proc: subprocess.CompletedProcess, calls: list[list[str]]):
         self.proc = proc
@@ -150,6 +154,7 @@ def _run(script: str, workdir: Path, version: str, tmp_path: Path) -> Result:
         "GH_TOKEN": "stub-token",
         "GH_CALL_LOG": str(log),
         "RUNNER_TEMP": str(runner_temp),
+        "RELEASE_SHA": RELEASE_SHA,
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
     }
@@ -298,6 +303,23 @@ class TestTheReleaseBody:
         assert result.create is not None and "--generate-notes" in result.create
         assert result.notes is None, result.describe()
         assert "::warning::" in result.proc.stdout, result.describe()
+
+    def test_the_release_targets_the_pinned_commit_and_attaches_the_staged_set(
+        self, tmp_path: Path
+    ):
+        # The tag goes on the commit the assets were built from, not on whatever
+        # main is by then, and the files are the staged directory, unexpanded here
+        # because the fixture has none (the shell passes an unmatched glob through).
+        work = tmp_path / "work"
+        work.mkdir()
+        (work / "CHANGELOG.md").write_text("", encoding="utf-8")
+
+        result = _run(_release_script(), work, "4.0.0", tmp_path)
+
+        assert result.proc.returncode == 0, result.describe()
+        argv = result.create or []
+        assert argv[argv.index("--target") + 1] == RELEASE_SHA, result.describe()
+        assert argv[-1] == "release-assets/*", result.describe()
 
 
 class TestTheHarnessCanFail:
