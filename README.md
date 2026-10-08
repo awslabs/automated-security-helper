@@ -79,6 +79,20 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 | [Grype](https://github.com/anchore/grype)                     | SCA       | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Grype Installation](https://github.com/anchore/grype#installation) |
 | [Syft](https://github.com/anchore/syft)                       | SBOM      | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Syft Installation](https://github.com/anchore/syft#installation)   |
 
+## Community Scanner Plugins
+
+These ship with ASH and run when their plugin module is listed in `ash_plugin_modules` (or passed with `--ash-plugin-modules`); a scan that does not list a module is unchanged by it. The container image includes every tool below. See [Community Plugins](docs/content/docs/plugins/community/index.md).
+
+| Scanner(s) | Module | Type | Targets |
+|------------|--------|------|---------|
+| [actionlint](https://github.com/rhysd/actionlint) | `ash_actionlint_plugins` | IaC | GitHub Actions workflows |
+| [cfn-lint](https://github.com/aws-cloudformation/cfn-lint), [cfn-guard](https://github.com/aws-cloudformation/cloudformation-guard) | `ash_cfn_plugins` | IaC | CloudFormation |
+| [Ferret Scan](https://github.com/awslabs/ferret-scan) | `ash_ferret_plugins` | Sensitive data | All text files |
+| [Gitleaks](https://github.com/gitleaks/gitleaks) | `ash_gitleaks_plugins` | Secrets | All text files |
+| [Snyk Code](https://snyk.io/product/snyk-code/) | `ash_snyk_plugins` | SAST | Source code |
+| [Trivy](https://github.com/aquasecurity/trivy) (`trivy-repo`, and `trivy`, off by default) | `ash_trivy_plugins` | SCA | Dependency manifests and lockfiles |
+| [zizmor](https://github.com/zizmorcore/zizmor) | `ash_zizmor_plugins` | SAST | GitHub Actions workflows and composite actions |
+
 ## Prerequisites
 
 ### Runtime Requirements

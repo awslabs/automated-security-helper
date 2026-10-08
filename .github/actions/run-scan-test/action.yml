@@ -267,20 +267,19 @@ runs:
         retry pip install "ferret-scan${FERRET_CONSTRAINT}"
         ferret-scan --version
 
-    # trivy is the one community-plugin tool ASH can provision itself, so it is
-    # installed through ASH against a pinned version and SHA256 rather than by the
-    # three unpinned per-platform installs this replaces.
+    # The community plugins whose tools ASH can provision itself are installed through
+    # ASH, against pinned versions and SHA256s (trivy rather than by the three
+    # unpinned per-platform installs this replaced).
     #
-    # --config is required and not decorative: trivy-repo arrives through
+    # --config is required and not decorative: these scanners arrive through
     # `ash_plugin_modules` in the community config, and without that flag the
-    # installer only sees the built-in scanners and rejects `--tool trivy-repo` as an
+    # installer only sees the built-in scanners and rejects each `--tool` as an
     # unknown name.
     #
-    # Scoped to --tool trivy-repo rather than installing the whole community set,
-    # because snyk arrives through npm and ferret-scan through pip against the
-    # constraint its own plugin declares; both are handled in the step above and
-    # neither belongs in a binary download path.
-    - name: Install trivy through ASH for the community plugin legs
+    # snyk and ferret-scan are not in the list: snyk arrives through npm and
+    # ferret-scan through pip against the constraint its own plugin declares; both
+    # are handled in the step above and neither belongs in a binary download path.
+    - name: Install the community plugins' tools through ASH for the community plugin legs
       if: inputs.config-file == 'community' && inputs.method == 'python-local'
       shell: bash
       env:
@@ -291,9 +290,18 @@ runs:
         # PATH. The installer's own post-install sweep already resolves the binary
         # and exits non-zero if it cannot -- a PATH-dependent version check here
         # would fail for a working install and pass for none.
+        # The tools of the community modules that ship with ASH come the same way:
+        # pinned binaries checked against their SHA256 (actionlint, cfn-guard and its
+        # rules, gitleaks) and uv tools at their declared constraints (cfn-lint,
+        # zizmor).
         ash dependencies install \
           --config .ash/.ash_community_plugins.yaml \
-          --tool trivy-repo
+          --tool trivy-repo \
+          --tool actionlint \
+          --tool cfn-guard \
+          --tool cfn-lint \
+          --tool gitleaks \
+          --tool zizmor
 
     # Validate config
     - name: Validate ASH config files

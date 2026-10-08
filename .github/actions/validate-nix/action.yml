@@ -96,6 +96,11 @@ runs:
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_actionlint_plugins \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_cfn_plugins \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_gitleaks_plugins \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins \
+          --config-overrides 'scanners.cfn-guard.enabled=false' \
           --simple
         rc=$?
         set -e
@@ -142,16 +147,28 @@ runs:
         # own exit code: fail_on_incomplete_scanners is on by default, so a cdk-nag that
         # goes MISSING or leaves a target unevaluated fails the step before this
         # assertion runs.
+        #
+        # actionlint, cfn-lint, gitleaks and zizmor are community scanners, so
+        # the scan above lists their modules with --ash-plugin-modules; otherwise they
+        # would be absent from the report and this list could not check that the flake
+        # supplies them. cfn-guard shares ash_cfn_plugins with cfn-lint and is turned
+        # off there, and the trivy module is not listed: the flake does not supply
+        # either by design (cfn-guard has no nixpkgs package, and trivy has no
+        # vulnerability database under nix; see docs/plugins/community/trivy-fs-plugin.md).
         flake_supplied = [
+            "actionlint",
             "bandit",
+            "cfn-lint",
             "cfn-nag",
             "checkov",
             "detect-secrets",
+            "gitleaks",
             "grype",
             "npm-audit",
             "opengrep",
             "semgrep",
             "syft",
+            "zizmor",
         ]
 
         for name in sorted(statuses):
@@ -173,6 +190,66 @@ runs:
         print(f"PASS: all {len(flake_supplied)} flake-supplied scanners participated")
         PY
 
+    # === community scanner: zizmor ===
+    #
+    # zizmor also runs in the scan above, whose participation check says only that
+    # it was not MISSING. This runs it alone with --scanners against a workflow that
+    # has a known template injection, and requires a FAILED status with that finding: MISSING or ERROR would mean the
+    # flake does not supply a working zizmor, and PASSED would mean it ran
+    # but its output was lost.
+    - name: "nix: zizmor (community plugin) runs and reports"
+      shell: bash
+      env:
+        # The flake under review, for the reason given on the scan step above.
+        ASH_NIX_FLAKE_REF: "path:${{ github.workspace }}"
+      run: |
+        mkdir -p /tmp/ash-zizmor-selftest/.github/workflows
+        # The expression is assembled from two halves so this action file never
+        # contains a literal one: GitHub would expand it here, in this step.
+        open='$''{{'
+        printf '%s\n' \
+          'on: issues' \
+          'permissions: {}' \
+          'jobs:' \
+          '  greet:' \
+          '    runs-on: ubuntu-latest' \
+          '    steps:' \
+          "      - run: echo \"${open} github.event.issue.title }}\"" \
+          > /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
+        cat /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
+        set +e
+        ash scan \
+          --mode nix \
+          --source-dir /tmp/ash-zizmor-selftest \
+          --output-dir /tmp/ash-zizmor-selftest/output \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins \
+          --scanners zizmor \
+          --no-fail-on-findings \
+          --fail-on-incomplete-scanners \
+          --simple
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::ash scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
+          exit "$rc"
+        fi
+        python3 <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        data = json.loads(pathlib.Path("/tmp/ash-zizmor-selftest/output/ash_aggregated_results.json").read_text())
+        status = str((data.get("scanner_results") or {}).get("zizmor", {}).get("status", "absent"))
+        rules = [
+            result.get("ruleId")
+            for run in (data.get("sarif") or {}).get("runs", [])
+            for result in run.get("results", [])
+        ]
+        print(f"zizmor status: {status}; rules: {sorted(set(r for r in rules if r))}")
+        if status.upper() != "FAILED" or "zizmor/template-injection" not in rules:
+            sys.exit("FAIL: zizmor did not report the fixture's template injection")
+        print("PASS: zizmor ran and reported the fixture's template injection")
+        PY
     # The snapshot tests run under uv, from this checkout, so their `ash` is the code under
     # review. Same uv pin as .github/actions/setup-ash, which this job does not use. Its
     # cache is off: the Actions cache of a public repository is readable by anyone, and

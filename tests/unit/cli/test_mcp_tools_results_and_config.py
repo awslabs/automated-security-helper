@@ -31,6 +31,9 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_suggest_suppression,
     mcp_validate_config,
 )
+from automated_security_helper.core.scanner_inventory import (
+    _VENDORED_SCANNER_PLUGIN_PACKAGES,
+)
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 _TOOLS = "automated_security_helper.cli.mcp_tools"
@@ -594,9 +597,7 @@ class TestListScanners:
         load_extra.assert_called_once_with(
             [
                 "automated_security_helper.plugin_modules.acme_scan",
-                "automated_security_helper.plugin_modules.ash_ferret_plugins",
-                "automated_security_helper.plugin_modules.ash_snyk_plugins",
-                "automated_security_helper.plugin_modules.ash_trivy_plugins",
+                *_VENDORED_SCANNER_PLUGIN_PACKAGES,
             ]
         )
 
