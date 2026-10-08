@@ -15,6 +15,41 @@ ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
 ASH_INSTALLED_REVISION_PATH = ASH_ASSETS_DIR.joinpath("ASH_INSTALLED_REVISION")
 ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
+
+
+def ash_git_requirement(extra: str = "") -> str:
+    """ASH as a PEP 508 direct reference to its own repository, at the running version.
+
+    ASH is installed from git, not from a package index, and the name
+    ``automated-security-helper`` on PyPI belongs to an unrelated third party, so a
+    requirement that names ASH without a URL resolves to a stranger's package.
+    """
+    from automated_security_helper import __version__
+
+    name = (
+        f"automated-security-helper[{extra}]" if extra else "automated-security-helper"
+    )
+    return f"{name} @ git+{ASH_REPO_URL}.git@v{__version__}"
+
+
+def ash_reinstall_command() -> str:
+    """The command that reinstalls the running version of ASH from its repository."""
+    return f'pip install --force-reinstall "{ash_git_requirement()}"'
+
+
+def ash_extra_install_command(extra: str) -> str:
+    """The command that adds one of ASH's optional extras to the running install.
+
+    ASH is installed from git, not from a package index, and the name
+    ``automated-security-helper`` on PyPI belongs to an unrelated third party. So a
+    hint like ``pip install automated-security-helper[symbols]`` installs a
+    stranger's package. This names ASH's own repository as a PEP 508 direct
+    reference, pinned to the tag of the version that is running, so following it
+    adds the extra without changing which ASH is installed.
+    """
+    return f'pip install "{ash_git_requirement(extra)}"'
+
+
 ASH_REPO_LATEST_REVISION = (
     ASH_INSTALLED_REVISION_PATH.read_text().strip()
     if ASH_INSTALLED_REVISION_PATH.exists()

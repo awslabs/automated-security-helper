@@ -106,7 +106,7 @@ say which database was stale and how old it was. See
 `--mode local` runs ASH as a Python process with no image involved:
 
 ```bash
-uvx automated-security-helper --mode local --source-dir .
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v4 ashx --mode local --source-dir .
 ```
 
 This avoids the image question entirely, at a cost: a few of the tools ASH

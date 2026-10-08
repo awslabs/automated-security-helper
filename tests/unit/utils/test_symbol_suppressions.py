@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.core.constants import ash_extra_install_command
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.config_linter import (
@@ -515,6 +516,8 @@ class TestFailClosed:
             )
         assert "'symbols' extra" in caplog.text
         assert "automated-security-helper[symbols]" in caplog.text
+        # Through ASH's git repository: the PyPI name belongs to a third party.
+        assert ash_extra_install_command("symbols") in caplog.text
         assert not symbol_spans.symbols_extra_available()
 
     def test_each_reason_warns_once_per_resolver(self, tmp_path, caplog):
@@ -613,6 +616,7 @@ class TestLint:
         )
         assert len(issues) == 1
         assert "automated-security-helper[symbols]" in issues[0].message
+        assert ash_extra_install_command("symbols") in issues[0].message
 
     def test_linter_id_matches_model_id(self):
         raw = {"path": "a.py", "rule_id": "B602", "reason": "r", "symbol": "A.b"}
