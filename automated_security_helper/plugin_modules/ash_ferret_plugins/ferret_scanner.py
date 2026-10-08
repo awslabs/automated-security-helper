@@ -918,7 +918,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                         f"Using explicitly specified config file: {path}",
                         level=logging.DEBUG,
                     )
-                    return path
+                    return path.resolve()
                 else:
                     self._plugin_log(
                         f"Specified config file not found: {path}",
@@ -932,7 +932,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     f"Using config file relative to source: {full_path}",
                     level=logging.DEBUG,
                 )
-                return full_path
+                return full_path.resolve()
             else:
                 self._plugin_log(
                     f"Specified config file not found: {full_path}",

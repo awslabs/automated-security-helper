@@ -384,39 +384,59 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         return super()._process_config_options()
 
     def _drop_in_tree_settings_paths(self) -> None:
-        """Drop plugins_used and filters_used entries whose file is in the scanned tree.
+        """Keep plugins_used and filters_used file entries only from outside the tree.
 
         detect-secrets names a plugin or filter defined in a file as
-        ``file://<path>`` (a filter adds ``::<function>``). Such an entry, from the
-        config or from the baseline file, is kept only when the file is outside the
-        scanned tree; see config/path_trust.py. Entries naming detect-secrets' own
-        plugins and filters are unaffected.
+        ``file://<path>`` (a filter adds ``::<function>``), and reads a relative
+        path from its worker's working directory, which is not the source
+        directory. So a relative ``file://`` entry is dropped, and an absolute one
+        is kept only when the file is outside the scanned tree (see
+        config/path_trust.py), rewritten to the resolved path that was checked.
+        This covers entries from the config and from the baseline file. Entries
+        naming detect-secrets' own plugins and filters are unaffected.
         """
         settings = self.config.options.scan_settings
         source_dir = Path(self.context.source_dir)
 
-        def _kept(value: Any, key: str) -> bool:
+        def _checked(value: Any, key: str) -> tuple[bool, Any]:
+            """(keep, value to use) for one entry's path."""
             if not isinstance(value, str) or not value.startswith("file://"):
-                return True
-            file_part = value[len("file://") :].split("::", 1)[0]
-            return honored_path(file_part, source_dir=source_dir, key=key) is not None
+                return True, value
+            file_part, separator, function = value[len("file://") :].partition("::")
+            if not Path(file_part).is_absolute():
+                ASH_LOGGER.warning(
+                    f"Ignoring {key} {value!r}: a file:// path must be absolute, "
+                    "because detect-secrets resolves a relative one from its own "
+                    "working directory."
+                )
+                return False, value
+            honored = honored_path(file_part, source_dir=source_dir, key=key)
+            if honored is None:
+                return False, value
+            return True, f"file://{honored.resolve().as_posix()}{separator}{function}"
 
-        settings.plugins_used = [
-            plugin
-            for plugin in settings.plugins_used
-            if _kept(
-                getattr(plugin, "path", None),
-                "scanners.detect-secrets.options.scan_settings.plugins_used[].path",
-            )
-        ]
-        settings.filters_used = [
-            item
-            for item in settings.filters_used
-            if _kept(
-                item.path,
-                "scanners.detect-secrets.options.scan_settings.filters_used[].path",
-            )
-        ]
+        plugins_key = (
+            "scanners.detect-secrets.options.scan_settings.plugins_used[].path"
+        )
+        plugins = []
+        for plugin in settings.plugins_used:
+            keep, value = _checked(getattr(plugin, "path", None), plugins_key)
+            if keep:
+                if value is not None:
+                    setattr(plugin, "path", value)
+                plugins.append(plugin)
+        settings.plugins_used = plugins
+
+        filters_key = (
+            "scanners.detect-secrets.options.scan_settings.filters_used[].path"
+        )
+        filters = []
+        for item in settings.filters_used:
+            keep, value = _checked(item.path, filters_key)
+            if keep:
+                item.path = value
+                filters.append(item)
+        settings.filters_used = filters
 
     @staticmethod
     def _get_baseline_exclude_patterns(

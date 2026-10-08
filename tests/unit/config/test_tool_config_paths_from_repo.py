@@ -136,7 +136,7 @@ def test_an_operator_ferret_config_outside_the_tree_is_passed(tmp_path):
     source = _tree(tmp_path, "")
     operator = _outside(tmp_path, "ferret.yaml")
     found = _ferret_config_file(source, tmp_path, {"config_file": str(operator)})
-    assert found == operator
+    assert found == operator.resolve()
 
 
 def _detect_secrets_settings(source: Path, tmp_path: Path, scan_settings: dict):
@@ -180,12 +180,57 @@ def test_detect_secrets_plugin_and_filter_files_inside_the_tree_are_dropped(
     ]
 
 
-def test_detect_secrets_operator_files_outside_the_tree_are_kept(tmp_path):
+def test_detect_secrets_operator_files_outside_the_tree_are_kept_as_resolved(
+    tmp_path,
+):
     source = _tree(tmp_path, "")
     plugin = _outside(tmp_path, "plugin.py")
+    filters = _outside(tmp_path, "filters.py")
+    unresolved = plugin.parent / ".." / plugin.parent.name / plugin.name
     settings = _detect_secrets_settings(
         source,
         tmp_path,
-        {"plugins_used": [{"name": "StandIn", "path": f"file://{plugin}"}]},
+        {
+            "plugins_used": [{"name": "StandIn", "path": f"file://{unresolved}"}],
+            "filters_used": [{"path": f"file://{filters}::check"}],
+        },
     )
-    assert f"file://{plugin}" in repr(settings)
+    assert (
+        settings["plugins_used"][0]["path"] == f"file://{plugin.resolve().as_posix()}"
+    )
+    assert settings["filters_used"][0]["path"] == (
+        f"file://{filters.resolve().as_posix()}::check"
+    )
+
+
+def test_a_relative_detect_secrets_file_entry_is_dropped(tmp_path):
+    # detect-secrets reads a relative file:// path from its worker's working
+    # directory, not the source directory, so no check against the source
+    # directory can say which file it names. This one points outside the tree when
+    # read from the source directory.
+    source = _tree(tmp_path, "")
+    _outside(tmp_path, "plugin.py")
+    _outside(tmp_path, "filters.py")
+    settings = _detect_secrets_settings(
+        source,
+        tmp_path,
+        {
+            "plugins_used": [
+                {"name": "StandIn", "path": "file://../operator/plugin.py"}
+            ],
+            "filters_used": [{"path": "file://../operator/filters.py::check"}],
+        },
+    )
+    # An emptied plugins_used is refilled with detect-secrets' built-in plugins.
+    assert "../operator" not in repr(settings)
+    assert all("path" not in p or p["path"] is None for p in settings["plugins_used"])
+    assert settings["filters_used"] == []
+
+
+def test_an_operator_ferret_config_given_relative_is_passed_resolved(tmp_path):
+    source = _tree(tmp_path, "")
+    operator = _outside(tmp_path, "ferret.yaml")
+    found = _ferret_config_file(
+        source, tmp_path, {"config_file": "../operator/ferret.yaml"}
+    )
+    assert found == operator.resolve()
