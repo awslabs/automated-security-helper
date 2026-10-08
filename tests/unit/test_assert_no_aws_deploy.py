@@ -872,3 +872,198 @@ def test_known_boolean_flags_are_read_one_way(
     assert [r.words for r in readings] == [
         tuple(w for w in words if not w.startswith("-"))
     ]
+
+
+# -- round 3: the JavaScript walker, Python string building and wrappers,
+# more script runners, and bounds that fail closed ---------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'const s = `${"`"}${"//"}`; execSync("npx cdk deploy --all");\n',
+        "if (1) /'/.test('x'); const u = '//'; execSync('npx cdk deploy');\n",
+        "const s = `${'a'.replace(/`/g, '')}//`; execSync('npx cdk deploy');\n",
+        "const s = 'a\\\n// '; execSync('npx cdk deploy');\n",
+        "const t = `a${`b`}//`; execSync('npx cdk deploy');\n",
+    ],
+)
+def test_the_javascript_walker_does_not_blank_real_code(
+    guard: ModuleType, text: str
+) -> None:
+    commands = guard.shell_commands(text, js=True)
+    assert any(guard.deploy_reason(c.text) for c in commands)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "const a = `${[1, 2].map((v) => `(${v}`)}`;\n",
+        "if (s) /\\(/.test(s);\n",
+        "while (x) /[)]/.exec(y);\n",
+        "const q = `${a}`; const r = (b) / 2;\n",
+    ],
+)
+def test_legitimate_javascript_is_not_a_misread(guard: ModuleType, text: str) -> None:
+    assert not guard.js_misread(text)
+
+
+def test_a_suspect_javascript_line_is_also_read_with_its_comment(
+    guard: ModuleType,
+) -> None:
+    # A comment that starts after a string or regex on its line may be one the
+    # walker misplaced, so the whole line is read too.
+    text = "const u = 'x'; // execSync('npx cdk deploy')\n"
+    assert guard._js_walk(text).suspect == frozenset({1})
+    assert any(guard.deploy_reason(c.text) for c in guard.shell_commands(text, js=True))
+    # A comment line on its own is not suspect, and is not read.
+    assert not any(
+        guard.deploy_reason(c.text)
+        for c in guard.shell_commands("// npx cdk deploy\n", js=True)
+    )
+
+
+def test_the_misread_finding_tells_the_reader_what_to_change(guard: ModuleType) -> None:
+    assert "Restructure the JavaScript" in guard.JS_MISREAD
+    assert "instead of changing this check" in guard.JS_MISREAD
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import os\nos.system("npx cdk " + "deploy --all")\n',
+        'import subprocess\nsubprocess.run("npx cdk " + "deploy", shell=True)\n',
+        'import os\nC = "npx cdk " + "deploy"\nos.system(C)\n',
+        'import os\nos.system("npx cdk %s" % "deploy")\n',
+        'import os\nos.system("npx cdk {}".format("deploy"))\n',
+        'import os\nA = "npx cdk"\nos.system(A + " deploy")\n',
+        'import subprocess\ndef sh(c):\n    subprocess.run(c, shell=True)\nsh("npx cdk deploy")\n',
+        'import subprocess\ndef sh(*a):\n    subprocess.run(a)\nsh("npx", "cdk", "deploy")\n',
+        'import subprocess\nclass R:\n    def go(self, c):\n        subprocess.run(c, shell=True)\nR().go("npx cdk deploy")\n',
+        'import subprocess\ndef a(c):\n    b(c)\ndef b(c):\n    subprocess.call(shlex.split(c))\na("terraform apply")\n',
+        'import subprocess\nsh = subprocess.check_call\nsh("npx cdk deploy", shell=True)\n',
+        'import subprocess\ngetattr(subprocess, "run")("npx cdk deploy", shell=True)\n',
+        'import subprocess\nC = {"go": "npx cdk deploy"}\nsubprocess.run(C["go"], shell=True)\n',
+        'import sh\nsh.npx("cdk", "deploy")\n',
+    ],
+)
+def test_python_string_building_and_wrappers(guard: ModuleType, source: str) -> None:
+    assert any(guard.deploy_reason(c.text) for c in guard.python_commands(source))
+
+
+def test_python_wrappers_reach_a_fixpoint(guard: ModuleType) -> None:
+    source = (
+        "import subprocess\n"
+        "def a(x, y):\n    return b(y)\n"
+        "def b(z):\n    return c(z)\n"
+        "def c(w):\n    subprocess.run(w)\n"
+    )
+    wrappers = guard.python_wrappers(source)
+    assert {p.position for p in wrappers["a"]} == {1}
+    assert {p.position for p in wrappers["b"]} == {0}
+
+
+def test_a_wrapper_defined_in_another_followed_file_is_used(
+    guard: ModuleType, tmp_path: Path
+) -> None:
+    # The caller is read before the module that defines the wrapper; the rescan
+    # reads it again once the wrapper is known.
+    _write(
+        tmp_path,
+        {
+            ".github/workflows/w.yml": WORKFLOW
+            + "      - run: python3 scripts/a.py && python3 scripts/b.py\n",
+            "scripts/a.py": 'from helpers import run_command\nrun_command("npx cdk deploy")\n',
+            "scripts/b.py": "import helpers\n",
+            "scripts/helpers.py": "import subprocess\ndef run_command(args):\n    subprocess.run(args, shell=True)\n",
+        },
+    )
+    hits, _ = guard.scan_repo(tmp_path)
+    assert [h.path for h in hits] == ["scripts/a.py"]
+
+
+@pytest.mark.parametrize(
+    ("tokens", "name"),
+    [
+        (["bun", "run", "ship"], "ship"),
+        (["bun", "ship"], "ship"),
+        (["npx", "lerna", "run", "ship", "--stream"], "ship"),
+        (["deno", "task", "ship"], "ship"),
+        (["npm", "explore", "app", "--", "npm", "run", "ship"], "ship"),
+    ],
+)
+def test_more_tools_that_run_scripts(
+    guard: ModuleType, tmp_path: Path, tokens: list[str], name: str
+) -> None:
+    assert name in guard.Follower(tmp_path).npm_scripts(tokens)
+
+
+def test_task_runners_read_npm_prefixed_names(guard: ModuleType) -> None:
+    names = guard.task_runner_names(["npx", "concurrently", "npm:ship", "yarn:lint:*"])
+    assert "ship" in names and "lint:*" in names
+
+
+def test_parser_states_are_deduplicated(guard: ModuleType) -> None:
+    # Each unknown flag here may take the next flag as its value or not, so the
+    # paths number in the billions; deduplicated, the states are about 80.
+    words = [f"--u{i}" for i in range(40)] + ["ship"]
+    readings = guard.flag_readings(words, guard.PNPM_SYNTAX)
+    assert ("ship",) in [r.words for r in readings]
+
+
+def test_a_long_tail_after_the_reading_depth_is_not_walked(
+    guard: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(guard, "MAX_FLAG_STATES", 200)
+    words = ["--u0", "v0", "--u1", "v1", *[f"w{i}" for i in range(8)]]
+    words += ["--t", "x"] * 2000
+    readings = guard.flag_readings(words, guard.PNPM_SYNTAX)
+    assert all(r.more for r in readings if len(r.words) == guard.READING_DEPTH)
+
+
+def test_too_many_argument_lists_for_one_script_fail_closed(
+    guard: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Each script passes an ambiguous flag to the next, doubling the argument
+    # lists the next is followed with.
+    levels = 14
+    scripts = {f"s{i}": f"pnpm --u s{i + 1} s{i + 1} x{i}" for i in range(levels)}
+    scripts[f"s{levels}"] = "echo"
+    _write(
+        tmp_path,
+        {
+            ".github/workflows/w.yml": WORKFLOW + "      - run: pnpm s0\n",
+            "package.json": json.dumps({"scripts": scripts}),
+        },
+    )
+    assert guard.main(["--root", str(tmp_path)]) == 1
+    assert "different argument lists" in capsys.readouterr().out
+
+
+def test_yaml_block_scalars(guard: ModuleType) -> None:
+    folded = "steps:\n  - run: >\n      npx cdk\n      deploy\n  - run: echo\n"
+    assert "npx cdk deploy" in guard.yaml_block_scalars(folded).split("\n")[2]
+    literal = "steps:\n  - run: |\n      npx cdk\n      deploy\n"
+    # A literal block is lines of shell; they stay apart.
+    assert guard.yaml_block_scalars(literal) == literal
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        '#!/bin/bash\nc() { npx cdk "$@"; }\nc deploy\n',
+        '#!/bin/bash\nfunction c {\n  npx cdk "$@"\n}\nc deploy\n',
+        "#!/bin/bash\nalias c='npx cdk'\nc deploy\n",
+        "#!/bin/bash\necho deploy | xargs npx cdk\n",
+    ],
+)
+def test_shell_functions_aliases_and_xargs(guard: ModuleType, script: str) -> None:
+    assert any(guard.deploy_reason(c.text) for c in guard.shell_commands(script))
+
+
+def test_a_comment_after_code_is_read_with_its_line(guard: ModuleType) -> None:
+    # No string or regex precedes the comment, yet a walker that misjudged a `/`
+    # earlier in the file could still have placed it wrongly, so it is read.
+    text = "go(); // execSync('npx cdk deploy')\n"
+    assert guard._js_walk(text).suspect == frozenset({1})
+    assert any(guard.deploy_reason(c.text) for c in guard.shell_commands(text, js=True))

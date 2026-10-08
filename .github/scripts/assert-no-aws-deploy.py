@@ -79,39 +79,63 @@ block itself, so the scan follows what a command executes:
     directory index).
   * `npm run <name>` (also its aliases `run-script`, `rum`, `urn`, and `pnpm
     run`, `yarn run`, `yarn <name>`, `pnpm <name>`, `yarn workspace <ws>
-    <name>`, `yarn workspaces run|foreach`, `pnpm recursive`) is mapped through
-    the `scripts` table of every package.json that defines `<name>`, with its
-    `pre<name>` and `post<name>` hooks. Flags are taken out first, each with the
+    <name>`, `yarn workspaces run|foreach`, `pnpm recursive`, `bun run <name>`,
+    `bun <name>`, `lerna run <name>`, `deno task <name>`) is mapped through the
+    `scripts` table of every package.json that defines `<name>`, and the `tasks`
+    of every deno.json / deno.jsonc, with its `pre<name>` and `post<name>`
+    hooks. Every npm-family word in a command is read, not only the first
+    (`npm explore app -- npm run ship`). Flags are taken out first, each with the
     value it takes: npm's from @npmcli/config's option definitions (`-w app`,
     `--workspace app`, `--prefix x`, `-C x`, `--loglevel warn`, ...), pnpm's and
     yarn's value and boolean flags from their `--help`. A flag whose arity is not
     known (a pnpm or yarn flag not in those lists, an npm abbreviation such as
     `--pref`) is read both with and without a value, and every reading is
     followed. The search over readings is complete: parser states are
-    deduplicated, and a command that would need more than MAX_FLAG_STATES of
-    them, or whose subcommands run past the READING_DEPTH words a reading keeps,
-    is a finding ("could not be read completely"), never a pass. `--` ends the
+    deduplicated and a reading stops walking once it holds READING_DEPTH
+    words, so the work grows with the command, not exponentially; a command that
+    would walk more than MAX_FLAG_STATES states, or whose subcommands run past
+    the READING_DEPTH words a reading keeps, is a finding ("could not be read
+    completely"), never a pass. `--` ends the
     flags. The words after the script name are appended to the script's value
     before it is scanned, as npm, yarn and pnpm pass them to it, so
-    `"tool": "npx cdk"` with `npm run tool -- deploy` is a deploy. The lifecycle
+    `"tool": "npx cdk"` with `npm run tool -- deploy` is a deploy. A script
+    followed with more than MAX_SCRIPT_ARGUMENT_SETS different argument lists
+    (each ambiguous flag in a script that runs another can double them) is a
+    finding too. The lifecycle
     commands map to the scripts npm's scripts.md lists for them: `npm ci` and a
     bare `npm install` (and their aliases) to `preinstall`, `install`,
     `postinstall`, `prepublish`, `preprepare`, `prepare`, `postprepare`; `npm
     test`, `start`, `stop`, `restart`, `install-test`, `install-ci-test`,
     `rebuild`, `pack`, `publish`, `version` and `diff` to theirs; a bare `yarn`
-    installs. The task runners `npm-run-all`, `run-s`, `run-p`, `turbo` and `nx`
-    map every word after them that is not a flag (split at `:` and `,`, with
-    npm-run-all's `*` and `**` globs) to the scripts of that name. A script value
+    installs. The task runners `npm-run-all`, `run-s`, `run-p`, `turbo`, `nx` and
+    `concurrently` map every word after them that is not a flag (split at `:` and
+    `,`, with npm-run-all's `*` and `**` globs, and concurrently's `npm:<name>`,
+    `yarn:`, `pnpm:` and `bun:` prefixes) to the scripts of that name. A script value
     is a command line, so it is scanned and followed the same way, relative to
     its package.
   * A JavaScript or TypeScript file is read as shell text after its `//` and
-    `/* */` comments are blanked (strings and regular-expression literals are
-    skipped, so neither a `//` in a URL nor a quote in a regex is misread), and
-    every multi-line array literal or call is joined onto its first line, so a
+    `/* */` comments are blanked, in one pass that tracks strings (with
+    backslash-newline continuations), template literals and the `${...}` code
+    nested in them (a stack), and regular-expression literals, so neither a `//`
+    in a URL nor a quote in a regex is misread. A `/` is a regex after an
+    operator, an opening bracket, a keyword such as `return`, or the `)` that
+    closes an `if`/`while`/`for`/`with` head, and a division otherwise. Every
+    multi-line array literal or call is joined onto its first line, so a
     `spawn("npx", [...])` argv written one word per line is one command. Joining
-    has no length cap, because it can only add words to a command. A file whose
-    strings or brackets do not balance at its end is a finding, because what was
-    joined in it is a guess.
+    has no length cap, because it can only add words to a command. Telling a
+    regex from a division is still a guess, so a line where a comment starts
+    after code on the same line is also read whole, with its comment, which can
+    only add a hit; only a comment that is alone on its line (or inside a
+    multi-line comment) is never read. A file whose strings, templates or
+    brackets do not balance at its end is a finding, and the finding says to
+    restructure that JavaScript rather than change this check.
+  * In a workflow, a folded block scalar (`run: >`) is read as the one line
+    Actions makes of it, and a `script:` block (actions/github-script) is read
+    as JavaScript, with its multi-line arrays and calls joined. A shell command
+    that calls a function or alias the same file defines (`c() { npx cdk "$@";
+    }`, `alias c='npx cdk'`) is also read with the definition in its place, and
+    a pipe into `xargs` is also read with the producer's words as its arguments
+    (`echo deploy | xargs npx cdk`).
   * A Python script is parsed rather than read as shell, because its docstrings
     and messages name the forbidden commands in prose (this file does). What it
     runs is the argv list or tuple, or the string, given to a runner:
@@ -119,11 +143,23 @@ block itself, so the scan follows what a command executes:
     `os.system`/`os.popen`, the `os.exec*`/`os.spawn*` families,
     `posix_spawn`, `pty.spawn` and asyncio's `create_subprocess_exec`/`_shell`,
     also when imported under another name (`from subprocess import run as sh`).
-    The runner's input may be a literal, a name bound to one by a plain,
-    chained or annotated assignment (`cmd = [...]`, `a = b = "..."`, `cmd:
-    list[str] = [...]`), an f-string (each `{...}` read as `$EXPR`), or any
-    other expression, whose strings are all read in source order
-    (`shlex.split("...")`, `"...".split()`, `["npx", "cdk"] + ["deploy"]`). An
+    A runner is also anything bound to one (`sh = subprocess.check_call`),
+    reached through `getattr(subprocess, "run")`, or a function that hands a
+    parameter (positional, keyword-only or `*args`) to a runner's input, found
+    to a fixpoint across every followed Python file and matched by name at its
+    call sites, so `def sh(c): subprocess.run(c, shell=True)` makes `sh("npx cdk
+    deploy")` a runner call. The sh library's `sh.<program>(...)` runs
+    `<program>`. `runpy.run_path`, `runpy.run_module`, `importlib.import_module`
+    and `exec(open(path).read())` follow the file they name. The runner's input
+    (including an `executable=` keyword) may be a literal, a name bound to one by
+    a plain, chained or annotated assignment (`cmd = [...]`, `a = b = "..."`,
+    `cmd: list[str] = [...]`), an f-string (each `{...}` read as `$EXPR`), or any
+    other expression, whose strings are all read in source order, through the
+    names they are bound from (`shlex.split("...")`, `"...".split()`, `["npx",
+    "cdk"] + ["deploy"]`, `C["go"]` with `C = {"go": "..."}`); all of an
+    argument's strings are also joined into one command line, so string building
+    (`"npx cdk " + "deploy"`, `"npx cdk %s" % x`, `"npx cdk {}".format(x)`) is
+    read as the command it builds. An
     argv may have any length, so `subprocess.run(["scripts/d.sh"])` and
     `subprocess.run([sys.executable, "scripts/d.py"])` follow the script. Its
     string words without whitespace are joined into one command; each element
@@ -147,8 +183,12 @@ KNOWN LIMITS
 A deploy assembled from variables at run time is not seen: a script named only
 through a variable (`npm run "$script"`, `bash "$HELPER"` when the env value is
 set elsewhere), a Python name reassigned or built up after it is bound (only the
-last binding of a name in the file is used), or a JavaScript argv pushed onto a
-variable (`args.push("deploy")`). An env value written as a literal path in the
+last binding of a name in the file is used), a Python value read from a file or
+the environment, or a JavaScript argv pushed onto a variable
+(`args.push("deploy")`). A Python wrapper is matched by its bare name, so one
+reached only as an object's attribute under another name, or passed around as a
+value, is not; a JavaScript function that wraps child_process is not followed
+to its callers. An env value written as a literal path in the
 same file (`HELPER: ${{ github.action_path }}/x.py`) is followed, because the path
 is a token on that line. A Python import is resolved only against the importing
 file's directory and the repository root, so a module found through another
@@ -158,10 +198,14 @@ followed either. An abbreviated npm subcommand (`npm ru`, which npm expands) is
 not followed. `make <target>` is not followed into the Makefile, and nothing in
 this repository's CI runs make. A script given by an absolute path, such as one
 a `docker run` names inside the container (`/w/x.sh`), is not mapped back to the
-repository file it was mounted from. A regular-expression literal is told from a
-division by the code before its `/`, which can misjudge unusual code; a
-misjudgment there leaves brackets unbalanced, which is reported, or keeps text a
-comment would have hidden. `kubectl` and `helm` are not refused: the operator
+repository file it was mounted from. Other script runners (wireit, nps, gulp,
+grunt, a Makefile-like task file) are not mapped to the scripts they run.
+A regular-expression literal is told from a division by the code before its
+`/`. A misjudgment that hides or invents a backtick can carry a wrong template
+state onto later lines; a line that then starts with `//` inside what is really
+a template literal is blanked. Such a file usually ends unbalanced, which is
+reported, and the text lost is template text that only matters if it is then
+run as a command. `kubectl` and `helm` are not refused: the operator
 e2e applies to a local kind cluster with them, and which cluster a context names
 is decided at run time; `aws eks update-kubeconfig` and `eksctl`, which reach a
 real cluster, are refused. The workflows that touch deploy/ call `npx cdk synth`,
@@ -176,6 +220,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import json
 import os
 import re
@@ -308,7 +353,7 @@ JS_RESOLVE_SUFFIXES = (
 
 # npm-family tools, how each reads its flags, and the package.json scripts each
 # subcommand runs.
-NPM_TOOLS = frozenset({"npm", "pnpm", "yarn"})
+NPM_TOOLS = frozenset({"npm", "pnpm", "yarn", "bun", "lerna", "deno"})
 
 
 @dataclass(frozen=True)
@@ -460,7 +505,16 @@ YARN_SYNTAX = FlagSyntax(
     ),
     short_booleans=frozenset({"s", "v", "h"}),
 )
-NPM_FLAG_SYNTAX = {"npm": NPM_SYNTAX, "pnpm": PNPM_SYNTAX, "yarn": YARN_SYNTAX}
+# bun, lerna and deno: no flag is known, so every flag is read both ways.
+UNKNOWN_SYNTAX = FlagSyntax(long_values=frozenset(), short_values=frozenset())
+NPM_FLAG_SYNTAX = {
+    "npm": NPM_SYNTAX,
+    "pnpm": PNPM_SYNTAX,
+    "yarn": YARN_SYNTAX,
+    "bun": UNKNOWN_SYNTAX,
+    "lerna": UNKNOWN_SYNTAX,
+    "deno": UNKNOWN_SYNTAX,
+}
 
 # Lifecycle scripts, from npm's docs/content/using-npm/scripts.md.
 _INSTALL = (
@@ -619,6 +673,17 @@ def deploy_reason(command: str) -> str | None:
     return None
 
 
+def line_commands(line: str) -> list[str]:
+    """The commands on one logical line: split at the separators, plus, for a pipe
+    into `xargs`, the xargs command with the producer's words as its arguments
+    (`echo deploy | xargs npx cdk` runs `npx cdk deploy`)."""
+    commands = [c for c in SEPARATORS.split(line) if c.strip()]
+    for match in re.finditer(r"\|\s*xargs\b", line):
+        consumer = SEPARATORS.split(line[match.end() :])[0]
+        commands.append(f"{consumer} {line[: match.start()]}")
+    return commands
+
+
 def scan_text(path: str, text: str) -> list[Hit]:
     hits: list[Hit] = []
     for number, line in logical_lines(text):
@@ -626,7 +691,7 @@ def scan_text(path: str, text: str) -> list[Hit]:
         if match and match.group(1).lower() in DEPLOY_ACTIONS:
             hits.append(Hit(path, number, line.strip(), f"uses {match.group(1)}"))
             continue
-        for command in SEPARATORS.split(line):
+        for command in line_commands(line):
             reason = deploy_reason(command)
             if reason:
                 hits.append(Hit(path, number, line.strip(), reason))
@@ -645,21 +710,28 @@ class Command:
 
 
 # Where a `/` starts a regular-expression literal rather than a division: after
-# one of these characters, or one of these keywords, or at the start of the text.
+# one of these characters, or one of these keywords, or at the start of the text,
+# or after the `)` that closes an `if (...)`, `while (...)`, `for (...)` or
+# `with (...)` head.
 JS_REGEX_AFTER = frozenset("(,=:[!&|?{};+-*%<>~^")
 JS_REGEX_KEYWORD = re.compile(
-    r"(?:^|[^\w$])(?:return|typeof|case|do|else|in|of|void|yield|await|delete|new)$"
+    r"(?:^|[^\w$.])(?:return|typeof|case|do|else|in|of|void|yield|await|delete|new|throw)$"
 )
+JS_CONTROL_HEAD = re.compile(r"(?:^|[^\w$.])(?:if|while|for|with)$")
 
 
-def _js_regex_end(text: str, index: int, before: str) -> int:
+def _js_regex_end(text: str, index: int, before: str, after_control: bool) -> int:
     """The index after the regular-expression literal starting at `text[index]`, or -1.
 
-    `before` is the code before it, ignoring whitespace. A literal ends at an
-    unescaped `/` outside a `[...]` class, on the same line.
+    `before` is the code before it, ignoring whitespace; `after_control` says the
+    `)` before it closes a control-statement head. A literal ends at an unescaped
+    `/` outside a `[...]` class, on the same line.
     """
     previous = before[-1:] if before else ""
-    if previous and previous not in JS_REGEX_AFTER:
+    if previous == ")":
+        if not after_control:
+            return -1
+    elif previous and previous not in JS_REGEX_AFTER:
         if not JS_REGEX_KEYWORD.search(before):
             return -1
     in_class = False
@@ -681,108 +753,182 @@ def _js_regex_end(text: str, index: int, before: str) -> int:
     return -1
 
 
-def _js_walk(text: str) -> tuple[str, list[int], str]:
-    """One pass over JavaScript `text`.
+@dataclass(frozen=True)
+class JsScan:
+    """What one pass over a JavaScript file found."""
 
-    Returns the text with `//` and `/* */` comments blanked (newlines kept, so line
-    numbers do not move, and code after a comment on its line stays), the `[` depth
-    after each line counted outside strings, comments and regular-expression
-    literals, and the quote still open at the end.
-    """
+    # The text with `//` and `/* */` comments blanked; newlines and every other
+    # character keep their places.
+    blanked: str
+    # The `(`/`[` depth after each line, counted outside strings, templates,
+    # comments and regular-expression literals.
+    depths: tuple[int, ...]
+    # The file ends inside a template literal, a `${...}` or an open bracket.
+    unbalanced: bool
+    # Lines where a comment starts after code, or after a string, template or
+    # regex decision, on the same line. A decision may be wrong, so these lines
+    # are also scanned with their comments in place (which can only add hits).
+    suspect: frozenset[int]
+
+
+def _js_walk(text: str) -> JsScan:
+    """Read JavaScript `text` once, tracking strings, template literals with their
+    nested `${...}` code (a stack), comments, regex literals and brackets."""
     out: list[str] = []
     depths: list[int] = []
-    quote = ""
+    suspect: set[int] = set()
+    # Each level is a template literal (None) or code with its open `{` count.
+    stack: list[list[int] | None] = [[0]]
+    parens: list[bool] = []  # per open `(`: is it a control-statement head
     depth = 0
-    code = ""  # code so far on this logical stretch, for the regex test
+    after_control = False
+    code = ""  # recent code, for the regex test
+    line = 1
+    decided = False
     index = 0
     length = len(text)
+
+    def newlines(segment: str) -> None:
+        nonlocal line, decided
+        for _ in range(segment.count("\n")):
+            depths.append(depth)
+            line += 1
+            decided = True  # the new line starts inside a string or comment
+
     while index < length:
         char = text[index]
+        top = stack[-1]
         if char == "\n":
-            if quote and quote != "`":
-                quote = ""  # only a template literal spans lines
             depths.append(depth)
+            line += 1
+            decided = False
             out.append(char)
             index += 1
             continue
-        if quote:
-            out.append(char)
-            if char == "\\" and index + 1 < length and text[index + 1] != "\n":
-                out.append(text[index + 1])
+        if top is None:  # inside a template literal
+            if char == "\\" and index + 1 < length:
+                pair = text[index : index + 2]
+                out.append(pair)
+                newlines(pair)
                 index += 2
                 continue
-            if char == quote:
-                quote = ""
-            index += 1
-            continue
-        if char in "'\"`":
-            quote = char
-            code += char
+            if char == "`":
+                stack.pop()
+                code += "x"
+                out.append(char)
+                index += 1
+                continue
+            if text.startswith("${", index):
+                stack.append([0])
+                out.append("${")
+                index += 2
+                continue
             out.append(char)
             index += 1
             continue
-        if text.startswith("//", index):
-            end = text.find("\n", index)
-            end = length if end < 0 else end
-            out.append(" " * (end - index))
+        if char in "'\"":
+            end = index + 1
+            while end < length:
+                if text[end] == "\\" and end + 1 < length:
+                    end += 2  # an escape, or a backslash-newline continuation
+                    continue
+                if text[end] == char:
+                    end += 1
+                    break
+                if text[end] == "\n":
+                    break  # unterminated: the string ends with its line
+                end += 1
+            segment = text[index:end]
+            out.append(segment)
+            newlines(segment)
+            decided = True
+            code += "x"
+            after_control = False
             index = end
             continue
-        if text.startswith("/*", index):
-            end = text.find("*/", index + 2)
-            end = length if end < 0 else end + 2
-            blank = re.sub(r"[^\n]", " ", text[index:end])
-            for _ in range(blank.count("\n")):
-                depths.append(depth)
-            out.append(blank)
+        if char == "`":
+            stack.append(None)
+            decided = True
+            after_control = False
+            out.append(char)
+            index += 1
+            continue
+        if text.startswith("//", index) or text.startswith("/*", index):
+            line_start = text.rfind("\n", 0, index) + 1
+            if decided or text[line_start:index].strip():
+                suspect.add(line)
+            if text[index + 1] == "/":
+                end = text.find("\n", index)
+                end = length if end < 0 else end
+            else:
+                end = text.find("*/", index + 2)
+                end = length if end < 0 else end + 2
+            segment = text[index:end]
+            out.append(re.sub(r"[^\n]", " ", segment))
+            newlines(segment)
+            decided = decided or "\n" in segment
             index = end
             continue
         if char == "/":
-            end = _js_regex_end(text, index, code.rstrip())
+            end = _js_regex_end(text, index, code.rstrip(), after_control)
             if end > 0:
                 out.append(text[index:end])
+                decided = True
                 code += "x"  # a regex is a value; a `/` after it divides
+                after_control = False
                 index = end
                 continue
+        if char == "{":
+            top[0] += 1
+        elif char == "}":
+            if top[0] == 0 and len(stack) > 1:
+                stack.pop()  # the end of a `${...}`
+                out.append(char)
+                index += 1
+                continue
+            top[0] = max(top[0] - 1, 0)
+        closing_control = False
         if char in "([":
+            if char == "(":
+                parens.append(bool(JS_CONTROL_HEAD.search(code.rstrip())))
             depth += 1
         elif char in ")]":
+            if char == ")":
+                closing_control = parens.pop() if parens else False
             depth = max(depth - 1, 0)
         if not char.isspace():
             code = (code + char)[-64:]
+            after_control = closing_control
         out.append(char)
         index += 1
     depths.append(depth)
-    return "".join(out), depths, quote
+    return JsScan(
+        "".join(out), tuple(depths), len(stack) > 1 or depth != 0, frozenset(suspect)
+    )
 
 
 def strip_js_comments(text: str) -> str:
-    """`text` with JavaScript `//` and `/* */` comments blanked, outside strings and
-    regular-expression literals."""
-    return _js_walk(text)[0]
+    """`text` with JavaScript `//` and `/* */` comments blanked, outside strings,
+    template literals and regular-expression literals."""
+    return _js_walk(text).blanked
 
 
 # The reason for a JavaScript file whose strings or brackets do not balance.
-JS_MISREAD = "its strings or array brackets do not balance, so multi-line argv arrays in it may not have been joined"
+JS_MISREAD = (
+    "its strings, template literals, regular expressions or brackets do not balance"
+    " as this scan reads them, so a multi-line command in it may not have been read"
+    " whole. Restructure the JavaScript (close each string and bracket on its line;"
+    " build a regex the scan misreads with new RegExp(...)) instead of changing"
+    " this check"
+)
 
 
 def js_misread(text: str) -> bool:
-    """Whether JavaScript `text` ends inside a template literal or an array."""
-    _, depths, quote = _js_walk(text)
-    return bool(quote) or bool(depths and depths[-1])
+    """Whether JavaScript `text` ends inside a template literal, a `${...}` or a bracket."""
+    return _js_walk(text).unbalanced
 
 
-def join_js_arrays(text: str) -> str:
-    """Comment-free JavaScript with each multi-line array literal on one line, its
-    first, so `spawn("npx", [\n "cdk",\n "deploy"\n])` reads as one command. Other
-    lines keep their numbers.
-
-    There is no length cap: joining lines only puts more words into a command, so it
-    can add a hit and never remove one. A file that ends inside an array or a
-    template literal is also reported (js_misread), because what was joined there
-    is a guess.
-    """
-    lines = text.split("\n")
-    _, depths, _ = _js_walk(text)
+def _join_by_depth(lines: list[str], depths: tuple[int, ...]) -> list[str]:
     out: list[str] = []
     pending: list[str] = []
     for line, depth in zip(lines, depths):
@@ -794,19 +940,144 @@ def join_js_arrays(text: str) -> str:
     if pending:
         out.append(" ".join(pending))
         out.extend("" for _ in pending[1:])
-    return "\n".join(out)
+    return out
 
 
-def shell_commands(text: str, js: bool = False) -> list[Command]:
-    """Every command in shell-like `text`. For JavaScript, comments are removed first."""
-    if js:
-        text = join_js_arrays(strip_js_comments(text))
-    return [
+def join_js_arrays(text: str) -> str:
+    """JavaScript with each multi-line array literal or call joined onto its first
+    line, so `spawn("npx", [\n "cdk",\n "deploy"\n])` reads as one command. Other
+    lines keep their numbers. Comments are left as they are; the bracket depths
+    come from a scan that skips them.
+
+    There is no length cap: joining lines only puts more words into a command, so it
+    can add a hit and never remove one. A file that ends unbalanced is also reported
+    (js_misread), because what was joined there is a guess.
+    """
+    return "\n".join(_join_by_depth(text.split("\n"), _js_walk(text).depths))
+
+
+def js_commands(text: str) -> list[Command]:
+    """Every command in JavaScript `text`: the comment-blanked text with multi-line
+    arrays and calls joined, plus every suspect line read with its comment."""
+    scan = _js_walk(text)
+    joined = "\n".join(_join_by_depth(scan.blanked.split("\n"), scan.depths))
+    commands = [
         Command(number, command)
-        for number, line in logical_lines(text, hash_comments=not js)
+        for number, line in logical_lines(joined, hash_comments=False)
         for command in SEPARATORS.split(line)
         if command.strip()
     ]
+    raw = text.split("\n")
+    for number in sorted(scan.suspect):
+        commands.extend(_command_lines(number, raw[number - 1]))
+    return commands
+
+
+SHELL_FUNCTION = re.compile(r"^\s*(?:function\s+)?([\w.-]+)\s*(?:\(\s*\))?\s*\{(.*)$")
+SHELL_ALIAS = re.compile(r"\balias\s+([\w.-]+)=(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
+
+
+def shell_definitions(text: str) -> dict[str, str]:
+    """Shell functions and aliases `text` defines, each with the command text it
+    stands for: `c() { npx cdk "$@"; }` and `alias c='npx cdk'` are `npx cdk`."""
+    definitions: dict[str, str] = {}
+    lines = [line for _, line in logical_lines(text)]
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        for match in SHELL_ALIAS.finditer(line):
+            definitions[match.group(1)] = next(
+                g for g in match.groups()[1:] if g is not None
+            )
+        function = SHELL_FUNCTION.match(line)
+        if (
+            function
+            and "(" in line
+            or (function and line.lstrip().startswith("function"))
+        ):
+            body = [function.group(2)]
+            depth = line.count("{") - line.count("}")
+            while depth > 0 and index + 1 < len(lines):
+                index += 1
+                body.append(lines[index])
+                depth += lines[index].count("{") - lines[index].count("}")
+            definitions[function.group(1)] = " ; ".join(body).rstrip("} ;")
+        index += 1
+    return definitions
+
+
+def shell_commands(text: str, js: bool = False) -> list[Command]:
+    """Every command in shell-like `text`; JavaScript goes through js_commands().
+
+    A command that calls a shell function or alias the text defines is also read
+    with the definition in its place and the arguments substituted for `$@`/`$*`
+    (`c deploy` after `c() { npx cdk "$@"; }`), and a pipe into `xargs` is also
+    read with the producer's words as the arguments (`echo deploy | xargs npx
+    cdk`). Both only add commands.
+    """
+    if js:
+        return js_commands(text)
+    commands: list[Command] = []
+    for number, line in logical_lines(text):
+        commands.extend(Command(number, command) for command in line_commands(line))
+    definitions = shell_definitions(text)
+    if definitions:
+        for command in list(commands):
+            tokens = command_tokens(command.text)
+            word = command_word(tokens)
+            if word not in definitions:
+                continue
+            rest = " ".join(tokens[tokens.index(word) + 1 :])
+            body = definitions[word]
+            expanded = re.sub(r'"?\$[@*]"?|"?\$\{[@*]\}"?', lambda _: rest, body)
+            if expanded == body:
+                expanded = f"{body} {rest}"
+            commands.extend(_command_lines(command.line, expanded))
+    return commands
+
+
+# A YAML key whose value is a block scalar: `run: >`, `script: |-`.
+YAML_BLOCK_SCALAR = re.compile(
+    r"^(\s*)(?:-\s+)?([\w.-]+):\s*([|>])[-+0-9]*\s*(?:#.*)?$"
+)
+
+
+def yaml_block_scalars(text: str) -> str:
+    """Workflow text with block scalars read the way Actions reads them.
+
+    A folded scalar (`run: >`) is one line: its lines are joined onto the first,
+    so `npx cdk` and `deploy` on two lines are one command, as the runner sees
+    them. A `script:` block (actions/github-script) is JavaScript, so each
+    multi-line array or call in it is joined as in a followed .js file. Other
+    lines become empty and keep their numbers.
+    """
+    lines = text.split("\n")
+    index = 0
+    while index < len(lines):
+        match = YAML_BLOCK_SCALAR.match(lines[index])
+        if not match:
+            index += 1
+            continue
+        key_indent = len(match.group(1))
+        end = index + 1
+        while end < len(lines) and (
+            not lines[end].strip()
+            or len(lines[end]) - len(lines[end].lstrip()) > key_indent
+        ):
+            end += 1
+        block = lines[index + 1 : end]
+        if match.group(3) == ">":
+            content = [line.strip() for line in block if line.strip()]
+            first = next((i for i, line in enumerate(block) if line.strip()), None)
+            if first is not None:
+                indent = block[first][: len(block[first]) - len(block[first].lstrip())]
+                block = [""] * len(block)
+                block[first] = indent + " ".join(content)
+        elif match.group(2) == "script":
+            block = _join_by_depth(block, _js_walk("\n".join(block)).depths)
+        lines[index + 1 : end] = block
+        index = end
+    return "\n".join(lines)
 
 
 def matrix_item_lines(text: str) -> set[int]:
@@ -849,8 +1120,12 @@ def _string_elements(node: ast.List | ast.Tuple) -> list[str]:
     return [v for v in (_string_value(e) for e in node.elts) if v is not None]
 
 
-def _strings_in(node: ast.AST) -> list[str]:
-    """Every string in an expression, in source order (`shlex.split("...")`, `a + b`)."""
+def _strings_in(
+    node: ast.AST, bound: dict[str, ast.expr] | None = None, depth: int = 0
+) -> list[str]:
+    """Every string in an expression, in source order (`shlex.split("...")`, `a + b`,
+    `"%s" % x`, `"{}".format(x)`), with a name bound to a value read as that value."""
+    bound = bound or {}
     # The parts of an f-string are read with it, not on their own.
     inner = {
         id(part)
@@ -859,12 +1134,27 @@ def _strings_in(node: ast.AST) -> list[str]:
         for part in ast.walk(child)
         if part is not child
     }
-    found: list[tuple[int, int, str]] = []
+    found: list[tuple[int, int, list[str]]] = []
     for child in ast.walk(node):
+        if id(child) in inner or not isinstance(child, ast.expr):
+            continue
         value = _string_value(child)
-        if value is not None and id(child) not in inner and isinstance(child, ast.expr):
-            found.append((child.lineno, child.col_offset, value))
-    return [value for _, _, value in sorted(found)]
+        if value is not None:
+            found.append((child.lineno, child.col_offset, [value]))
+        elif (
+            isinstance(child, ast.Name)
+            and child.id in bound
+            and depth < MAX_BINDING_DEPTH
+            and bound[child.id] is not node
+        ):
+            found.append(
+                (
+                    child.lineno,
+                    child.col_offset,
+                    _strings_in(bound[child.id], bound, depth + 1),
+                )
+            )
+    return [value for _, _, values in sorted(found) for value in values]
 
 
 def _command_lines(line: int, text: str) -> list[Command]:
@@ -893,16 +1183,71 @@ def _argv_commands(line: int, words: list[str], run: bool) -> list[Command]:
     return commands
 
 
-def python_commands(text: str) -> list[Command]:
-    """What a Python script runs: argv lists of strings, and command-line strings passed to a runner.
+# How far a name bound to an expression naming other names is followed.
+MAX_BINDING_DEPTH = 8
+# Keyword arguments that carry a runner's command.
+PY_COMMAND_KEYWORDS = frozenset({"args", "cmd", "argv", "executable", "command"})
+# Calls whose string argument names a Python file or module that is then run.
+PY_RUN_PATH_CALLS = frozenset({"run_path", "run_module", "import_module"})
 
-    Raises SyntaxError when the file does not parse.
-    """
-    tree = ast.parse(text)
-    # `cmd = [...]`, `cmd: list[str] = [...]`, `a = b = "..."`, `cmd = shlex.split(...)`,
-    # then `subprocess.run(cmd)`: what a name is bound to.
+
+@dataclass(frozen=True)
+class WrapperParam:
+    """A parameter of a function that reaches a runner's input."""
+
+    position: int | None  # its position at a call site; None when keyword-only
+    name: str
+    vararg: bool = False
+
+
+Wrappers = dict[str, frozenset[WrapperParam]]
+
+
+def _call_name(func: ast.expr, aliases: dict[str, str]) -> str:
+    """The name a call is made through: `x.run` is `run`, an alias is what it aliases,
+    and `getattr(subprocess, "run")` is `run`."""
+    if isinstance(func, ast.Attribute):
+        return aliases.get(func.attr, func.attr)
+    if isinstance(func, ast.Name):
+        return aliases.get(func.id, func.id)
+    if (
+        isinstance(func, ast.Call)
+        and getattr(func.func, "id", "") == "getattr"
+        and len(func.args) >= 2
+    ):
+        return _string_value(func.args[1]) or ""
+    return ""
+
+
+def _runner_inputs(
+    call: ast.Call, name: str, wrappers: Wrappers
+) -> tuple[list[ast.expr], str] | None:
+    """The arguments of `call` that carry a command, and how to read them: "shell"
+    (a command line, or an argv), "argv" (one word per argument) or None."""
+    keywords = [k.value for k in call.keywords if k.arg in PY_COMMAND_KEYWORDS]
+    if name in PY_ARGV_CALLS:
+        return list(call.args) + keywords, "argv"
+    if name in PY_SHELL_CALLS:
+        return list(call.args[:1]) + keywords, "shell"
+    params = wrappers.get(name)
+    if not params:
+        return None
+    inputs: list[ast.expr] = []
+    kind = "shell"
+    for param in params:
+        if param.vararg and param.position is not None:
+            inputs.extend(call.args[param.position :])
+            kind = "argv"
+        elif param.position is not None and param.position < len(call.args):
+            inputs.append(call.args[param.position])
+        inputs.extend(k.value for k in call.keywords if k.arg == param.name)
+    return inputs, kind
+
+
+def _bindings(tree: ast.AST) -> tuple[dict[str, ast.expr], dict[str, str]]:
+    """What each name is bound to, and which names are other names for a callable
+    (`from subprocess import run as sh`, `sh = subprocess.check_call`)."""
     bound: dict[str, ast.expr] = {}
-    # `from subprocess import run as sh`: the runner a local name is.
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):
         targets: list[ast.expr] = []
@@ -915,13 +1260,132 @@ def python_commands(text: str) -> list[Command]:
             for alias in node.names:
                 if alias.asname:
                     aliases[alias.asname] = alias.name
-        if value is not None and not isinstance(value, ast.Name):
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    bound[target.id] = value
+        if value is None:
+            continue
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            if isinstance(value, (ast.Attribute, ast.Name)):
+                aliases[target.id] = _call_name(value, {})
+            else:
+                bound[target.id] = value
+    return bound, aliases
+
+
+@functools.lru_cache(maxsize=4096)
+def _parse(text: str) -> ast.Module:
+    """`text` parsed once however often it is read; raises SyntaxError."""
+    return ast.parse(text)
+
+
+@dataclass(frozen=True)
+class _PyFunction:
+    name: str
+    params: dict[str, WrapperParam]
+    calls: tuple[ast.Call, ...]
+
+
+@dataclass(frozen=True)
+class _PyFacts:
+    """What one Python file holds, computed once per text."""
+
+    tree: ast.Module
+    bound: dict[str, ast.expr]
+    aliases: dict[str, str]
+    functions: tuple[_PyFunction, ...]
+    nodes: tuple[ast.AST, ...]
+
+
+@functools.lru_cache(maxsize=4096)
+def _facts(text: str) -> _PyFacts:
+    tree = _parse(text)
+    bound, aliases = _bindings(tree)
+    nodes = tuple(ast.walk(tree))
+    functions: list[_PyFunction] = []
+    for node in nodes:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        arguments = node.args
+        positional = [a.arg for a in arguments.posonlyargs + arguments.args]
+        offset = 1 if positional[:1] in (["self"], ["cls"]) else 0
+        params = {
+            name: WrapperParam(index - offset, name)
+            for index, name in enumerate(positional)
+            if index >= offset
+        }
+        params.update({a.arg: WrapperParam(None, a.arg) for a in arguments.kwonlyargs})
+        if arguments.vararg:
+            params[arguments.vararg.arg] = WrapperParam(
+                len(positional) - offset, arguments.vararg.arg, vararg=True
+            )
+        calls = tuple(c for c in ast.walk(node) if isinstance(c, ast.Call))
+        if params and calls:
+            functions.append(_PyFunction(node.name, params, calls))
+    return _PyFacts(tree, bound, aliases, tuple(functions), nodes)
+
+
+def python_wrappers(text: str, known: Wrappers | None = None) -> Wrappers:
+    """Functions in `text` that hand a parameter to a runner, to a fixpoint.
+
+    A function whose parameter reaches the input of a runner, or of a function
+    already found to do so, is itself one: its call sites are read as runner calls.
+    `known` holds wrappers found in other files, matched by name.
+    """
+    facts = _facts(text)
+    wrappers: Wrappers = dict(known or {})
+    changed = True
+    while changed:
+        changed = False
+        for function in facts.functions:
+            reached: set[WrapperParam] = set()
+            for call in function.calls:
+                found = _runner_inputs(
+                    call, _call_name(call.func, facts.aliases), wrappers
+                )
+                if found is None:
+                    continue
+                for expression in found[0]:
+                    for name in _names_in(expression, facts.bound):
+                        if name in function.params:
+                            reached.add(function.params[name])
+            known_params = wrappers.get(function.name, frozenset())
+            if reached and not reached <= known_params:
+                wrappers[function.name] = known_params | reached
+                changed = True
+    return wrappers
+
+
+def _names_in(node: ast.AST, bound: dict[str, ast.expr], depth: int = 0) -> set[str]:
+    """Every name an expression reads, through the names it is bound from."""
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name):
+            names.add(child.id)
+            if (
+                child.id in bound
+                and depth < MAX_BINDING_DEPTH
+                and bound[child.id] is not node
+            ):
+                names |= _names_in(bound[child.id], bound, depth + 1)
+    return names
+
+
+def python_commands(text: str, wrappers: Wrappers | None = None) -> list[Command]:
+    """What a Python script runs: argv lists of strings, and command-line strings
+    passed to a runner or to a function that hands them to one.
+
+    Raises SyntaxError when the file does not parse.
+    """
+    facts = _facts(text)
+    bound, aliases = facts.bound, facts.aliases
+    wrappers = python_wrappers(text, wrappers)
+    uses_sh = any(
+        isinstance(node, ast.Import) and any(a.name == "sh" for a in node.names)
+        for node in facts.nodes
+    )
 
     commands: list[Command] = []
-    for node in ast.walk(tree):
+    for node in facts.nodes:
         if isinstance(node, (ast.List, ast.Tuple)):
             words = _string_elements(node)
             # A tuple of prose strings is data: an argv starts with a program.
@@ -930,36 +1394,71 @@ def python_commands(text: str) -> list[Command]:
             continue
         if not isinstance(node, ast.Call):
             continue
-        func = node.func
-        if isinstance(func, ast.Attribute):
-            name = func.attr
-        else:
-            name = getattr(func, "id", "")
-            name = aliases.get(name, name)
-        if name not in PY_SHELL_CALLS and name not in PY_ARGV_CALLS:
+        name = _call_name(node.func, aliases)
+        if name in PY_RUN_PATH_CALLS and node.args:
+            # `runpy.run_path("x.py")`, `runpy.run_module("pkg.mod")`.
+            target = _string_value(node.args[0])
+            if target:
+                prefix = "" if target.endswith(".py") or "/" in target else "-m "
+                commands.append(Command(node.lineno, prefix + target))
             continue
-        args = list(node.args) + [
-            k.value for k in node.keywords if k.arg in ("args", "cmd", "argv")
-        ]
+        if name == "exec" and node.args:
+            # `exec(open("x.py").read())`: the file read is run.
+            for child in ast.walk(node.args[0]):
+                if isinstance(child, ast.Call) and _call_name(child.func, {}) == "open":
+                    target = _string_value(child.args[0]) if child.args else None
+                    if target:
+                        commands.append(Command(node.lineno, target))
+            continue
+        func = node.func
+        if (
+            uses_sh
+            and isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "sh"
+        ):
+            # The sh library runs the program its attribute names: `sh.npx("cdk")`.
+            flat = [func.attr] + [" ".join(_strings_in(a, bound)) for a in node.args]
+            commands.extend(_argv_commands(node.lineno, flat, run=True))
+            continue
+        found = _runner_inputs(node, name, wrappers)
+        if found is None:
+            continue
+        inputs, kind = found
         positional_words: list[str] = []
-        for index, arg in enumerate(args):
+        for arg in inputs:
+            # Commands from one argument are reported on one line: the list's own
+            # line for an argv list (where it is also read on its own), else the
+            # argument's line at the call.
+            line = getattr(arg, "lineno", node.lineno)
+            if isinstance(arg, ast.Starred):
+                arg = arg.value
             if isinstance(arg, ast.Name) and arg.id in bound:
                 arg = bound[arg.id]
             text_value = _string_value(arg)
             if isinstance(arg, (ast.List, ast.Tuple)):
-                commands.extend(
-                    _argv_commands(arg.lineno, _string_elements(arg), run=True)
-                )
+                line = arg.lineno
+                words = [
+                    value if value is not None else " ".join(_strings_in(e, bound))
+                    for e, value in ((e, _string_value(e)) for e in arg.elts)
+                ]
+                commands.extend(_argv_commands(line, words, run=True))
             elif text_value is not None:
-                if name in PY_ARGV_CALLS:
+                if kind == "argv":
                     # `os.execlp("npx", "npx", "cdk", "deploy")`: one word each.
                     positional_words.append(text_value)
-                elif index == 0:
-                    commands.extend(_command_lines(node.lineno, text_value))
+                else:
+                    commands.extend(_command_lines(line, text_value))
             elif not isinstance(arg, ast.Name):
                 # `shlex.split("npx cdk deploy")`, `"npx cdk deploy".split()`,
                 # `["npx", "cdk"] + ["deploy"]`: every string in the expression.
-                commands.extend(_argv_commands(node.lineno, _strings_in(arg), run=True))
+                commands.extend(_argv_commands(line, _strings_in(arg, bound), run=True))
+            # String building (`"npx cdk " + "deploy"`, `"npx cdk %s" % x`,
+            # `"npx cdk {}".format(x)`) splits one command across strings, so every
+            # string of the argument is also read as one command line.
+            joined = " ".join(_strings_in(arg, bound))
+            if joined.strip():
+                commands.extend(_command_lines(line, joined))
         commands.extend(_argv_commands(node.lineno, positional_words, run=True))
     return list(dict.fromkeys(commands))
 
@@ -981,6 +1480,10 @@ READING_DEPTH = 8
 # number grows with the command's length, not exponentially with its ambiguous
 # flags; reaching the stop is a finding, never a silent pass.
 MAX_FLAG_STATES = 20_000
+# The most distinct argument lists one package.json script is followed with. Each
+# ambiguous flag in a script that runs another script can double them, so the
+# count is bounded, and reaching the bound is a finding, not a pass.
+MAX_SCRIPT_ARGUMENT_SETS = 32
 # The reason recorded for a command the scan could not read completely.
 UNREADABLE = "could not be read completely"
 
@@ -1011,12 +1514,17 @@ def flag_readings(words: list[str], syntax: FlagSyntax) -> list[Reading]:
     readings: dict[Reading, None] = {}
     seen: set[tuple[int, tuple[int, ...], bool]] = set()
     stack: list[tuple[int, tuple[int, ...], bool]] = [(0, (), False)]
+    walked = 0
     while stack:
         state = stack.pop()
         if state in seen:
             continue
         seen.add(state)
-        if len(seen) > MAX_FLAG_STATES:
+        # The bound counts states walked, so it bounds the work as well as the
+        # readings: without the deduplication above, flags whose following words
+        # are flags would be walked exponentially many times.
+        walked += 1
+        if walked > MAX_FLAG_STATES:
             raise UnreadableCommand(
                 f"its flags can be read more than {MAX_FLAG_STATES} ways"
             )
@@ -1041,11 +1549,13 @@ def flag_readings(words: list[str], syntax: FlagSyntax) -> list[Reading]:
                     stack.append((index + 2, indices, more))
                 index += 2 if takes else 1
                 continue
-            if len(indices) < READING_DEPTH:
-                indices = indices + (index,)
-            else:
-                more = True
+            indices = indices + (index,)
             index += 1
+            if len(indices) == READING_DEPTH:
+                # Words past the depth cannot change the ones kept, so the rest
+                # of a long tail is not walked; whatever follows counts as more.
+                more = more or index < len(words)
+                break
         readings[Reading(tuple(words[i] for i in indices), indices, more)] = None
     return list(readings)
 
@@ -1074,6 +1584,13 @@ def scripts_run(tool: str, words: list[str], offset: int = 0) -> list[Invocation
         # A bare `yarn` installs; a bare `npm` or `pnpm` prints help.
         return [(name, None) for name in _INSTALL] if tool == "yarn" else []
     sub, args = words[0], words[1:]
+    if tool == "lerna":
+        # `lerna run <script>` runs it in every package; `lerna exec -- <cmd>`
+        # is a command line the scan already reads.
+        return _run_names(args, offset + 1) if sub == "run" else []
+    if tool == "deno":
+        # `deno task <name>` runs a deno.json task or a package.json script.
+        return _run_names(args, offset + 1) if sub == "task" else []
     if tool == "yarn" and sub == "workspace":
         # `yarn workspace <name> <command...>` runs `yarn <command...>` in it.
         return scripts_run(tool, args[1:], offset + 2)
@@ -1092,8 +1609,8 @@ def scripts_run(tool: str, words: list[str], offset: int = 0) -> list[Invocation
         if sub in NPM_BARE_ONLY:
             return [] if args else [(n, None) for n in NPM_LIFECYCLE[sub]]
         return [(n, offset) for n in NPM_LIFECYCLE[sub]]
-    # yarn and pnpm run a script named as the subcommand (`yarn deploy`).
-    if tool in ("yarn", "pnpm"):
+    # yarn, pnpm and bun run a script named as the subcommand (`yarn deploy`).
+    if tool in ("yarn", "pnpm", "bun"):
         return _run_names([sub], offset)
     return []
 
@@ -1102,7 +1619,12 @@ def scripts_run(tool: str, words: list[str], offset: int = 0) -> list[Invocation
 # run-p, turbo and nx. Every word after the runner that is not a flag may name a
 # script or task, so each is followed (a superset of what runs). npm-run-all reads
 # `*` as any characters but `:` and `**` as any.
-TASK_RUNNERS = frozenset({"npm-run-all", "run-s", "run-p", "turbo", "nx"})
+TASK_RUNNERS = frozenset(
+    {"npm-run-all", "npm-run-all2", "run-s", "run-p", "turbo", "nx", "concurrently"}
+)
+# concurrently (and npm-run-all, which accepts them) names a script as
+# `npm:<name>`, `yarn:<name>`, `pnpm:<name>` or `bun:<name>`.
+RUNNER_PREFIX = re.compile(r"(?:npm|yarn|pnpm|bun):(.+)")
 
 
 def task_runner_names(tokens: list[str]) -> list[str]:
@@ -1115,8 +1637,12 @@ def task_runner_names(tokens: list[str]) -> list[str]:
                 break
             if word.startswith("-"):
                 word = word.split("=", 1)[1] if "=" in word else ""
+            prefixed = RUNNER_PREFIX.fullmatch(word)
             # nx: `run project:target`, `-t build,test`.
-            for name in re.split(r"[:,]", word) + [word]:
+            pieces = re.split(r"[:,]", word) + [word]
+            if prefixed:
+                pieces.append(prefixed.group(1))
+            for name in pieces:
                 if name and name not in names:
                     names.append(name)
         return names
@@ -1140,6 +1666,21 @@ class Follower:
         self.unresolved_npm: list[str] = []
         self._seen: set[str] = set()
         self._packages: dict[Path, dict[str, str]] | None = None
+        # Python functions, in any followed file, that hand a parameter to a
+        # runner; a call to one by name in any followed file is a runner call.
+        self.py_wrappers: Wrappers = {}
+        # Followed Python files with what each was scanned for so far, so a
+        # wrapper found later re-reads them (rescan_python()).
+        self._python: dict[str, tuple[Path, tuple[str, ...], str, set[Command]]] = {}
+        self._hit_lines: dict[str, set[int]] = {}
+        # Bumped whenever py_wrappers grows; a file is re-read only after that.
+        self._wrapper_version = 0
+        self._read_at: dict[str, int] = {}
+        # Distinct pass-through word sets followed per script.
+        self._extras: dict[str, set[str]] = {}
+        # Where a script that is not a package.json script is defined
+        # (`deno.json#tasks`), by directory and name.
+        self._manifests: dict[tuple[Path, str], str] = {}
 
     # -- package.json scripts ------------------------------------------------
 
@@ -1157,7 +1698,33 @@ class Follower:
                     self._packages[path.parent] = {
                         k: v for k, v in scripts.items() if isinstance(v, str)
                     }
+            # deno.json / deno.jsonc `tasks`, which `deno task <name>` runs too; a
+            # task is a command string or an object with a `command`.
+            for name in ("deno.json", "deno.jsonc"):
+                for path in walk_files(self.root, name):
+                    try:
+                        tasks = json.loads(
+                            strip_js_comments(path.read_text(encoding="utf-8"))
+                        ).get("tasks")
+                    except (OSError, ValueError, AttributeError):
+                        continue
+                    if not isinstance(tasks, dict):
+                        continue
+                    table = self._packages.setdefault(path.parent, {})
+                    for key, task in tasks.items():
+                        command = (
+                            task.get("command") if isinstance(task, dict) else task
+                        )
+                        if isinstance(command, str) and key not in table:
+                            table[key] = command
+                            self._manifests[(path.parent, key)] = f"{name}#tasks"
         return self._packages
+
+    def manifest(self, directory: Path, script: str) -> str:
+        """`package.json#scripts.<name>`, or `deno.json#tasks.<name>`, under `directory`."""
+        where = self._manifests.get((directory, script), "package.json#scripts")
+        file, table = where.split("#")
+        return f"{self.rel(directory / file)}#{table}.{script}"
 
     def npm_invocations(self, tokens: list[str]) -> list[tuple[str, str]] | None:
         """The package.json scripts an npm-family command runs, each with the words
@@ -1168,12 +1735,15 @@ class Follower:
         from the script and its arguments (`"tool": "npx cdk"`, then
         `npm run tool -- deploy`) is seen. Raises UnreadableCommand at a bound.
         """
+        found: list[tuple[str, str]] | None = None
+        # Every npm-family word in the command, not only the first: `npm explore
+        # app -- npm run ship`, `concurrently "npm run a" "yarn b"`.
         for index, token in enumerate(tokens):
             tool = normalize_tool(token)
             if tool not in NPM_TOOLS:
                 continue
             words = tokens[index + 1 :]
-            found: list[tuple[str, str]] = []
+            found = found if found is not None else []
             for reading in flag_readings(words, NPM_FLAG_SYNTAX[tool]):
                 invocations = scripts_run(tool, list(reading.words))
                 if reading.more and invocations != scripts_run(
@@ -1190,8 +1760,7 @@ class Follower:
                     )
                     if (name, extra) not in found:
                         found.append((name, extra))
-            return found
-        return None
+        return found
 
     def npm_scripts(self, tokens: list[str]) -> list[str] | None:
         """The package.json script names an npm-family command runs, or None if it is not one."""
@@ -1326,7 +1895,7 @@ class Follower:
 
     def scan_workflow(self, path: Path) -> None:
         relative = self.rel(path)
-        text = path.read_text(encoding="utf-8")
+        text = yaml_block_scalars(path.read_text(encoding="utf-8"))
         self.hits.extend(scan_text(relative, text))
         action_dir = self.rel(path.parent) or "."
         text = WORKSPACE.sub(".", ACTION_PATH.sub(action_dir, text))
@@ -1403,7 +1972,23 @@ class Follower:
             if key in self._seen:
                 continue
             self._seen.add(key)
-            manifest = f"{self.rel(directory / 'package.json')}#scripts.{script}"
+            extras = self._extras.setdefault(f"{directory}:{script}", set())
+            extras.add(extra)
+            if len(extras) > MAX_SCRIPT_ARGUMENT_SETS:
+                if len(extras) == MAX_SCRIPT_ARGUMENT_SETS + 1:
+                    manifest = self.manifest(directory, script)
+                    self.hits.append(
+                        Hit(
+                            manifest,
+                            1,
+                            packages[directory][script],
+                            f"{UNREADABLE}: it is run with more than"
+                            f" {MAX_SCRIPT_ARGUMENT_SETS} different argument lists",
+                            via,
+                        )
+                    )
+                continue
+            manifest = self.manifest(directory, script)
             if manifest not in self.followed:
                 self.followed.append(manifest)
             value = packages[directory][script]
@@ -1440,35 +2025,83 @@ class Follower:
         imports: list[Path] = []
         if mode == "python":
             try:
-                commands = python_commands(text)
+                self._learn_wrappers(text)
+                commands = python_commands(text, self.py_wrappers)
                 imports = self.python_imports(text, path)
             except SyntaxError as error:
                 self.hits.append(
                     Hit(relative, error.lineno or 1, str(error.msg), PARSE_FAILURE, via)
                 )
                 return
+            self._python[relative] = (path, via, text, set(commands))
+            self._read_at[relative] = self._wrapper_version
         else:
             commands = shell_commands(text, js=mode == "js")
             if mode == "js":
                 imports = self.js_imports(text, path)
+        if mode == "js" and js_misread(text):
+            self.hits.append(Hit(relative, 1, "", f"{UNREADABLE}: {JS_MISREAD}", via))
+        self._scan_commands(relative, path, text, commands, via)
+        for module in imports:
+            self.follow_file(module, (*via, f"{relative} imports"), None)
+
+    def _scan_commands(
+        self,
+        relative: str,
+        path: Path,
+        text: str,
+        commands: list[Command],
+        via: tuple[str, ...],
+    ) -> None:
+        hit_lines = self._hit_lines.setdefault(relative, set())
         for command in commands:
             reason = deploy_reason(command.text)
-            if reason:
+            # One hit per line, as for a workflow line: several readings of one
+            # line (an argv, its spaced element, its joined strings) are one deploy.
+            if reason and command.line not in hit_lines:
+                hit_lines.add(command.line)
                 self.hits.append(
                     Hit(relative, command.line, command.text.strip(), reason, via)
                 )
-        if mode == "js" and js_misread(text):
-            self.hits.append(Hit(relative, 1, "", f"{UNREADABLE}: {JS_MISREAD}", via))
         self.follow_commands(
             relative, commands, self.bases(text, path.parent), via, None
         )
-        for module in imports:
-            self.follow_file(module, (*via, f"{relative} imports"), None)
+
+    def _learn_wrappers(self, text: str) -> bool:
+        """Add the wrappers `text` defines to the registry; True if it grew."""
+        grew = False
+        for name, params in python_wrappers(text, self.py_wrappers).items():
+            known = self.py_wrappers.get(name, frozenset())
+            if not params <= known:
+                self.py_wrappers[name] = known | params
+                grew = True
+        if grew:
+            self._wrapper_version += 1
+        return grew
+
+    def rescan_python(self) -> None:
+        """Re-read followed Python files until no wrapper found in one of them
+        reveals a new command in another (a fixpoint across files)."""
+        changed = True
+        while changed:
+            changed = False
+            for relative, (path, via, text, done) in list(self._python.items()):
+                if self._read_at.get(relative) == self._wrapper_version:
+                    continue
+                self._learn_wrappers(text)
+                self._read_at[relative] = self._wrapper_version
+                new = [
+                    c for c in python_commands(text, self.py_wrappers) if c not in done
+                ]
+                if new:
+                    done.update(new)
+                    self._scan_commands(relative, path, text, new, via)
+                changed = True
 
     def python_imports(self, text: str, path: Path) -> list[Path]:
         """Repository modules a Python file imports, resolved against its directory and the root."""
         found: list[Path] = []
-        for node in ast.walk(ast.parse(text)):
+        for node in ast.walk(_parse(text)):
             names: list[str] = []
             base_dirs = [path.parent, self.root]
             if isinstance(node, ast.Import):
@@ -1521,6 +2154,7 @@ def scan_repo_detailed(root: Path) -> tuple[Follower, int]:
         ):
             scanned += 1
             follower.scan_workflow(path)
+    follower.rescan_python()
     return follower, scanned
 
 
@@ -1580,6 +2214,8 @@ PLANTED_DEPLOYS = (
     # The shell joins quoted and bare pieces of a word.
     "run: cdk dep'loy'",
     'run: "c"dk de"ploy"',
+    # xargs runs its command with the producer's words.
+    "run: echo deploy | xargs npx cdk",
 )
 
 LOOK_ALIKES = (
@@ -2029,6 +2665,218 @@ PLANTED_REPOS: tuple[tuple[str, dict[str, str], tuple[tuple[str, str], ...]], ..
         (("scripts/go.js", f"{UNREADABLE}: {JS_MISREAD}"),),
     ),
     (
+        "a template literal holding a backtick and // before real code",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: node go.js\n",
+            "go.js": 'const s = `${"`"}${"//"}`; require(\'child_process\').execSync("npx cdk deploy --all");\n',
+        },
+        (("go.js", "`cdk ... deploy`"),),
+    ),
+    (
+        "a regex after a control-statement head, then a string with //",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: node go.js\n",
+            "go.js": "if (1) /'/.test('x'); const u = '//'; require('child_process').execSync('npx cdk deploy');\n",
+        },
+        (("go.js", "`cdk ... deploy`"),),
+    ),
+    (
+        "a regex holding a backtick inside a template's ${...}",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: node go.js\n",
+            "go.js": "const s = `${'a'.replace(/`/g, '')}//`; require('child_process').execSync('npx cdk deploy');\n",
+        },
+        (("go.js", "`cdk ... deploy`"),),
+    ),
+    (
+        "a string continued past a backslash-newline",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: node go.js\n",
+            "go.js": "const s = 'a\\\n// '; require('child_process').execSync('npx cdk deploy');\n",
+        },
+        (("go.js", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python command line built with +",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import os\n\nos.system("npx cdk " + "deploy --all")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python command line built with % and bound to a name",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\nC = "npx cdk %s" % "deploy"\nsubprocess.run(C, shell=True)\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python command line built with str.format",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import os\n\nos.system("npx cdk {}".format("deploy"))\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python helper hands its parameter to a runner",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef sh(c):\n    subprocess.run(c, shell=True, check=True)\n\n\nsh("npx cdk deploy --all")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python helper's varargs become an argv naming a script",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\n\ndef sh(*a):\n    subprocess.run(list(a))\n\n\nsh("scripts/d.sh")\n',
+            "scripts/d.sh": "#!/bin/sh\nnpx cdk deploy\n",
+        },
+        (("scripts/d.sh", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python helper through a helper, in another module",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: python3 scripts/s.py\n",
+            "scripts/s.py": 'from util import go\n\ngo("npx cdk destroy --force")\n',
+            "scripts/util.py": "import subprocess\n\n\ndef run(cmd):\n    return _run(cmd)\n\n\ndef _run(cmd, cwd=None):\n    subprocess.check_call(cmd, shell=True, cwd=cwd)\n\n\ndef go(cmd):\n    run(cmd)\n",
+        },
+        (("scripts/s.py", "`cdk ... destroy`"),),
+    ),
+    (
+        "a Python runner bound to a name",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\nsh = subprocess.check_call\nsh("npx cdk deploy", shell=True)\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python runner reached through getattr",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\ngetattr(subprocess, "run")("terraform apply", shell=True)\n',
+        },
+        (("s.py", "`terraform ... apply`"),),
+    ),
+    (
+        "a Python command read from a dict",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\nC = {"go": "npx cdk deploy"}\nsubprocess.run(C["go"], shell=True)\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "the sh library runs the program its attribute names",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import sh\n\nsh.npx("cdk", "deploy")\n',
+        },
+        (("s.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python executable= keyword names a script",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import subprocess\n\nsubprocess.Popen(executable="scripts/d.sh", args=[])\n',
+            "scripts/d.sh": "#!/bin/sh\nnpx cdk deploy\n",
+        },
+        (("scripts/d.sh", "`cdk ... deploy`"),),
+    ),
+    (
+        "runpy and exec(open()) run another Python file",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: python3 s.py\n",
+            "s.py": 'import runpy\n\nrunpy.run_path("scripts/x.py")\nexec(open("scripts/y.py").read())\n',
+            "scripts/x.py": 'import os\n\nos.system("cdk deploy")\n',
+            "scripts/y.py": 'import os\n\nos.system("sam deploy")\n',
+        },
+        (
+            ("scripts/x.py", "`cdk ... deploy`"),
+            ("scripts/y.py", "`sam ... deploy`"),
+        ),
+    ),
+    (
+        "bun runs a script, with the words after it",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: bun run ship && bun tool deploy\n",
+            "package.json": '{"scripts": {"ship": "cdk destroy", "tool": "npx cdk"}}',
+        },
+        (
+            ("package.json#scripts.ship", "`cdk ... destroy`"),
+            ("package.json#scripts.tool", "`cdk ... deploy`"),
+        ),
+    ),
+    (
+        "lerna run runs a script in every package",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: npx lerna run ship --stream\n",
+            "app/package.json": '{"scripts": {"ship": "cdk deploy"}}',
+        },
+        (("app/package.json#scripts.ship", "`cdk ... deploy`"),),
+    ),
+    (
+        "deno task runs a deno.json task",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: deno task ship\n",
+            "deno.json": '{"tasks": {"ship": {"command": "npx cdk deploy"}}}',
+        },
+        (("deno.json#tasks.ship", "`cdk ... deploy`"),),
+    ),
+    (
+        "concurrently runs an npm:<script>",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: npx concurrently -k npm:ship 'npm:lint'\n",
+            "package.json": '{"scripts": {"ship": "cdk deploy", "lint": "eslint ."}}',
+        },
+        (("package.json#scripts.ship", "`cdk ... deploy`"),),
+    ),
+    (
+        "npm explore runs a second npm command",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: npm explore app -- npm run ship\n",
+            "package.json": '{"scripts": {"ship": "cdk deploy"}}',
+        },
+        (("package.json#scripts.ship", "`cdk ... deploy`"),),
+    ),
+    (
+        "a shell function and an alias stand for the deploy tool",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: bash scripts/a.sh\n",
+            "scripts/a.sh": "#!/bin/bash\nshopt -s expand_aliases\nc() { npx cdk \"$@\"; }\nalias t='terraform'\nc deploy\nt apply\n",
+        },
+        (
+            ("scripts/a.sh", "`cdk ... deploy`"),
+            ("scripts/a.sh", "`terraform ... apply`"),
+        ),
+    ),
+    (
+        "a folded YAML run scalar is one command",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: >\n          npx cdk\n          deploy --all\n",
+        },
+        ((".github/workflows/w.yml", "`cdk ... deploy`"),),
+    ),
+    (
+        "actions/github-script runs a multi-line exec.exec argv",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - uses: actions/github-script@0123456789abcdef0123456789abcdef01234567\n        with:\n          script: |\n            await exec.exec('npx', [\n              'cdk',\n              'deploy'])\n",
+        },
+        ((".github/workflows/w.yml", "`cdk ... deploy`"),),
+    ),
+    (
         "a followed Python file that does not parse",
         {
             ".github/workflows/w.yml": WORKFLOW_HEAD
@@ -2085,6 +2933,15 @@ LOOK_ALIKE_REPOS: tuple[tuple[str, dict[str, str], str], ...] = (
             "scripts/ok.sh": "#!/bin/sh\necho ok\n",
         },
         "scripts/ok.sh",
+    ),
+    (
+        "nested template literals and a regex after if (...) read as balanced",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: node scripts/ok.js\n",
+            "scripts/ok.js": "const a = `${[1, 2].map((v) => `(${v}`)}`;\nif (a) /\\(/.test(a);\nconst b = 4 / 2 / 1;\nconsole.log(a, b);\n",
+        },
+        "scripts/ok.js",
     ),
     (
         "a list outside a matrix is not run",
