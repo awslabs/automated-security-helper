@@ -180,9 +180,13 @@ Building a self-contained offline bundle for your own hosts is fine, and the com
 below are the supported way to do it. The line is about what the project publishes, not
 about what the bytes are allowed to do.
 
-On a host with no reachable index, stage a wheelhouse and point the first run at it:
+On a host with no reachable index, stage a wheelhouse and point the first run at it.
+Resolve the dependencies from ASH's own wheel -- the release asset, or one built with
+`uv build` -- on a machine that can reach an index. Do NOT run
+`pip download automated-security-helper`: that name on PyPI belongs to an unrelated
+third party, not to this project.
 
-  pip download automated-security-helper==<version> -d /srv/ash-wheels
+  pip download ./automated_security_helper-<version>-py3-none-any.whl -d /srv/ash-wheels
 
   PIP_NO_INDEX=1 PIP_FIND_LINKS=/srv/ash-wheels \
     flatpak run io.github.awslabs.automated_security_helper --version

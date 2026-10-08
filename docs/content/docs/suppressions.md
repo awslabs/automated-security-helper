@@ -173,9 +173,9 @@ Symbol suppressions parse source files with
 extra:
 
 ```bash
-pip install "automated-security-helper[symbols]"
+pip install "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v4"
 # or
-uv tool install "automated-security-helper[symbols]"
+uv tool install "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v4"
 ```
 
 The ASH container image includes it. Without it, an entry that sets `symbol`

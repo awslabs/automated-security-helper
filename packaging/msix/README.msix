@@ -17,9 +17,13 @@ Building a self-contained offline package for your own machines is fine, and the
 commands below are the supported way to do it. The line is about what the project
 publishes, not about what the bytes are allowed to do.
 
-On a machine with no reachable index, stage a wheelhouse first:
+On a machine with no reachable index, stage a wheelhouse first. Resolve the
+dependencies from ASH's own wheel -- the release asset, or one built with
+`uv build` -- on a machine that can reach an index. Do NOT run
+`pip download automated-security-helper`: that name on PyPI belongs to an unrelated
+third party, not to this project.
 
-  pip download automated-security-helper==<version> -d C:\ash-wheels
+  pip download .\automated_security_helper-<version>-py3-none-any.whl -d C:\ash-wheels
   # then, before the first ashx invocation:
   setx PIP_NO_INDEX true
   setx PIP_FIND_LINKS C:\ash-wheels
