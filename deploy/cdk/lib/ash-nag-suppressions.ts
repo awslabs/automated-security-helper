@@ -579,10 +579,11 @@ export function suppressLambdaLogWildcard(scope: IConstruct): void {
 }
 
 /**
- * The EKS operator installer's role, which carries THREE distinct wildcards.
+ * The EKS operator installer's role, which carries FOUR distinct wildcards.
  *
  * It said TWO for one revision, and the count went stale in the same change that added
- * the third -- `eks:DescribeAddon` on an add-on ARN. A suppression reason that
+ * the third -- `eks:DescribeAddon` on an add-on ARN. The fourth is the X-Ray upload
+ * grant that `tracing: lambda.Tracing.ACTIVE` adds. A suppression reason that
  * under-counts what it excuses is the failure this file's header is about, and a count in
  * prose is exactly the kind of claim that rots. `ash-eks-operator-stack.test.ts` now
  * asserts that every wildcard resource in the policy is accounted for by name in this
@@ -604,7 +605,7 @@ export function suppressEksInstallerRoleWildcards(scope: IConstruct): void {
     {
       id: 'AwsSolutions-IAM5',
       reason:
-        'THREE wildcards, all resource-side and all irreducible. (1) The log-stream suffix ' +
+        'FOUR wildcards, all resource-side and all irreducible. (1) The log-stream suffix ' +
         "\":*\" on the function's OWN log group, carrying logs:CreateLogStream and " +
         'logs:PutLogEvents: Lambda creates a stream per execution environment, so the name ' +
         'is not knowable at deploy time. (2) "*" on ec2:CreateNetworkInterface, ' +
@@ -615,7 +616,9 @@ export function suppressEksInstallerRoleWildcards(scope: IConstruct): void {
         'function\'s own code from them, so only the Lambda service can use the grant. (3) The add-on ARN suffix "/*/*" on ' +
         'eks:DescribeAddon, which is the add-on name and the id EKS assigns it -- the probe ' +
         'asks about one specific add-on name and neither segment is knowable at deploy time. ' +
-        'Scoped to the named cluster, not to all clusters. The one action left is ' +
+        'Scoped to the named cluster, not to all clusters. (4) "*" on xray:PutTraceSegments ' +
+        'and xray:PutTelemetryRecords, which active tracing needs to upload the trace and ' +
+        'which IAM defines with no resource ARN. The one action left is ' +
         'eks:DescribeCluster, on the single cluster supplied in EksClusterName with no ' +
         'wildcard at all. The role grants no other AWS access; its cluster-admin reach is ' +
         'the separate access entry.',

@@ -1603,6 +1603,16 @@ export class AshEksOperatorStack extends Stack {
       // It also keeps two applies from racing against the same cluster.
       reservedConcurrentExecutions: 1,
       logGroup,
+      // Active X-Ray tracing, unlike the other stacks' custom-resource responders,
+      // which leave it off (see the AWS-0066 entries in
+      // .ash/.ash_community_plugins.yaml). This one talks to the EKS API server
+      // over a cluster endpoint that may be private and VPC-attached, so a trace
+      // of the invocation is the quickest way to tell a slow or unreachable
+      // endpoint from a slow apply. Lambda records the trace itself; the function
+      // carries no X-Ray SDK. CDK adds xray:PutTraceSegments and
+      // xray:PutTelemetryRecords on "*" to the role's default policy, the two
+      // actions Lambda needs to upload them, and neither takes a resource ARN.
+      tracing: lambda.Tracing.ACTIVE,
       // NO environment variables, deliberately. The group, version, CRD names and
       // RBAC rules used to arrive here as env vars while the rules themselves lived
       // in the Python; that split meant two sources of truth for one contract, and

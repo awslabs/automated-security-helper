@@ -892,6 +892,14 @@ global_settings:
     # templates. TracingConfig is genuinely absent rather than conditional,
     # confirmed by reading the rendered Lambda resources, so the finding is accurate
     # and the answer is the cost rather than a parser difference.
+    #
+    # AshEksOperator has no entry because its installer function traces actively,
+    # an operator decision for that one function: it reaches a cluster endpoint that
+    # may be private and VPC-attached, and a trace tells an unreachable endpoint from
+    # a slow apply. trivy 0.69.3 no longer reports AWS-0066 on that template. The
+    # functions below keep the no-tracing decision, and
+    # deploy/cdk/test/ash-eks-operator-stack.test.ts fails if any of them gains a
+    # TracingConfig.
     - rule_id: AWS-0066
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-

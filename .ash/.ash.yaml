@@ -2733,14 +2733,18 @@ global_settings:
         the interfaces do not exist when the policy is evaluated. The constraint is
         InstallerEc2CodeDeny, the guide's recommended Deny keyed on
         lambda:SourceFunctionArn, so the function's own code cannot make these calls and
-        only the Lambda service can.
+        only the Lambda service can. The same statement also carries
+        xray:PutTraceSegments and xray:PutTelemetryRecords, the uploads the
+        installer's active tracing needs; IAM defines neither with a resource ARN, so
+        "*" is the only value they accept.
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshEksOperator.template.json
       reason: >-
         One policy, InstallerRoleDefaultPolicy, whose only "*" resource is the statement
         holding the six EC2 actions the Lambda developer guide requires on all resources
-        for VPC attachment. Same reasoning as the CKV_AWS_111 entry for this file
-        immediately above, including the code-side Deny.
+        for VPC attachment, plus the two X-Ray upload actions, which take no resource
+        ARN. Same reasoning as the CKV_AWS_111 entry for this file immediately above,
+        including the code-side Deny on the EC2 actions.
     - rule_id: CFN_NAG_W58
       path: deploy/cdk/templates/AshEksOperator.template.json
       reason: >-
