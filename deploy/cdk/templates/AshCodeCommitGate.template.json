@@ -84,7 +84,13 @@
   "VpcSubnetIds": {
    "Type": "CommaDelimitedList",
    "Default": "",
-   "Description": "Subnets for the scan function, with VpcId. Empty: no VPC. Set: a 443-only SG is created; your NACLs/routes must reach CodeCommit, ECR, SSM, Logs."
+   "Description": "Subnets for the scan function, with VpcId. Empty: no VPC. Set: an SG allowing 443 to ScanEgressCidr is created; your routes must reach CodeCommit and SSM."
+  },
+  "ScanEgressCidr": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^(\\d{1,3}\\.){3}\\d{1,3}/(\\d|[12]\\d|3[0-2])$",
+   "Description": "Required with VpcId. IPv4 CIDR the scan function may reach on TCP 443: your VPC CIDR for interface endpoints (codecommit, git-codecommit, ssm) with AshOfflineMode=YES, or 0.0.0.0/0 for a NAT with online scanners."
   }
  },
  "Conditions": {
@@ -1270,7 +1276,7 @@
       "LAMBDA_INSIDE_VPC"
      ],
      "SuppressedRuleReasons": {
-      "LAMBDA_INSIDE_VPC": "Opt-in: set VpcId and VpcSubnetIds to confine egress to a 443-only SG and your NACLs. Empty (default) leaves egress open."
+      "LAMBDA_INSIDE_VPC": "Opt-in: set VpcId, VpcSubnetIds and ScanEgressCidr to confine egress to 443 on that CIDR and your NACLs. Empty (default) leaves egress open."
      }
     }
    }
@@ -1278,11 +1284,13 @@
   "ScanSecurityGroup": {
    "Type": "AWS::EC2::SecurityGroup",
    "Properties": {
-    "GroupDescription": "ASH pull-request scan function. Egress is TCP 443 only; widen it against ScanSecurityGroupId.",
+    "GroupDescription": "ASH pull-request scan function. Egress is TCP 443 to ScanEgressCidr only; widen it against ScanSecurityGroupId.",
     "SecurityGroupEgress": [
      {
-      "CidrIp": "0.0.0.0/0",
-      "Description": "CodeCommit, ECR, SSM and CloudWatch Logs over HTTPS, via your NAT.",
+      "CidrIp": {
+       "Ref": "ScanEgressCidr"
+      },
+      "Description": "CodeCommit, SSM and, online, scanner downloads over HTTPS.",
       "FromPort": 443,
       "IpProtocol": "tcp",
       "ToPort": 443
@@ -1290,16 +1298,6 @@
     ],
     "VpcId": {
      "Ref": "VpcId"
-    }
-   },
-   "Metadata": {
-    "cfn_nag": {
-     "rules_to_suppress": [
-      {
-       "id": "W5",
-       "reason": "Egress is TCP 443 to public AWS endpoints (CodeCommit, ECR, SSM, CloudWatch Logs) through the adopter NAT. No AWS-managed prefix list covers ECR or Logs, and naming them needs interface endpoints. Widen via ScanSecurityGroupId."
-      }
-     ]
     }
    },
    "Condition": "ScanFunctionInVpc"
@@ -1490,11 +1488,70 @@
      "AssertDescription": "Set VpcId and VpcSubnetIds together, or neither."
     }
    ]
+  },
+  "ScanEgressWithVpc": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Or": [
+       {
+        "Fn::And": [
+         {
+          "Fn::Equals": [
+           {
+            "Ref": "VpcId"
+           },
+           ""
+          ]
+         },
+         {
+          "Fn::Equals": [
+           {
+            "Ref": "ScanEgressCidr"
+           },
+           ""
+          ]
+         }
+        ]
+       },
+       {
+        "Fn::And": [
+         {
+          "Fn::Not": [
+           {
+            "Fn::Equals": [
+             {
+              "Ref": "VpcId"
+             },
+             ""
+            ]
+           }
+          ]
+         },
+         {
+          "Fn::Not": [
+           {
+            "Fn::Equals": [
+             {
+              "Ref": "ScanEgressCidr"
+             },
+             ""
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "Set ScanEgressCidr with VpcId, or neither: in a VPC the scan function can reach only that CIDR on TCP 443."
+    }
+   ]
   }
  },
  "Outputs": {
   "ScanSecurityGroupId": {
-   "Description": "The scan function's security group, created only when VpcId and VpcSubnetIds are set. Egress is TCP 443 only. To reach a registry on another port: aws ec2 authorize-security-group-egress --group-id <this> --protocol tcp --port 8080 --cidr <your-registry-cidr>. A missing rule shows up as a scan timing out.",
+   "Description": "The scan function's security group, created only when VpcId and VpcSubnetIds are set. Egress is TCP 443 to ScanEgressCidr. To reach a registry on another port: aws ec2 authorize-security-group-egress --group-id <this> --protocol tcp --port 8080 --cidr <your-registry-cidr>. A missing rule shows up as a scan timing out.",
    "Value": {
     "Fn::GetAtt": [
      "ScanSecurityGroup",

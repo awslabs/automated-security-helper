@@ -442,23 +442,24 @@ resource "aws_iam_role_policy" "gate" {
   policy = data.aws_iam_policy_document.gate.json
 }
 
-# Only when the function is attached to a VPC. Egress is TCP 443 only, the same
-# shape as the fargate module's task group; widen it against
-# scan_security_group_id. Mirrors the CDK stack, which creates the group rather
+# Only when the function is attached to a VPC. Egress is TCP 443 to
+# scan_egress_cidr only, the adopter's choice of destination rather than a
+# hard-coded 0.0.0.0/0; variables.tf says what the function reaches. Widen it
+# against scan_security_group_id. Mirrors the CDK stack, which creates the group rather
 # than taking adopter group ids (deploy/cdk/lib/ash-codecommit-gate-stack.ts).
 resource "aws_security_group" "gate" {
   count = local.use_vpc ? 1 : 0
 
   name_prefix = "${var.name_prefix}-"
-  description = "ASH pull-request scan function. Egress is TCP 443 only."
+  description = "ASH pull-request scan function. Egress is TCP 443 to scan_egress_cidr only."
   vpc_id      = var.vpc_id
 
   egress {
-    description = "CodeCommit, ECR, SSM and CloudWatch Logs over HTTPS, via your NAT."
+    description = "CodeCommit, SSM and, online, scanner downloads over HTTPS."
     protocol    = "tcp"
     from_port   = 443
     to_port     = 443
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.scan_egress_cidr]
   }
 
   tags = var.tags
