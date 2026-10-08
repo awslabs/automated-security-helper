@@ -352,6 +352,35 @@ variable "additional_environment_variables" {
   default     = {}
 }
 
+variable "kms_key_arn" {
+  description = <<-EOT
+    ARN of an existing symmetric customer managed KMS key for the MCP auth header
+    secret and the task log group. When null, both use their AWS managed
+    encryption, which is what this module did before the input existed.
+
+    Checked against the same pattern as the CloudFormation templates' KmsKeyArn
+    parameter: a full key ARN, not an alias or a bare key id. The module does not
+    create a key. A key it minted would answer to this module, and a customer
+    managed key is only worth having if you control its policy and rotation.
+
+    Permissions: the module adds kms:Decrypt on this key to the task role, which
+    reads the secret. Whoever runs the apply needs kms:GenerateDataKey on the key
+    to store the secret value. The key policy must admit the
+    logs.<region>.amazonaws.com service principal, or creating the log group
+    fails. See
+    https://docs.aws.amazon.com/kms/latest/developerguide/services-secrets-manager.html
+    and
+    https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/encrypt-log-data-kms.html
+  EOT
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.kms_key_arn == null || can(regex("^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-z-]{36}$", var.kms_key_arn))
+    error_message = "kms_key_arn must be a KMS key ARN (arn:<partition>:kms:<region>:<account>:key/<key-id>), not an alias or a bare key id."
+  }
+}
+
 variable "tags" {
   description = "Tags applied to every resource this module creates."
   type        = map(string)

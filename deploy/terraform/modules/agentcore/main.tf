@@ -88,16 +88,15 @@ resource "aws_secretsmanager_secret" "auth_header" {
   # re-applying, in step with the clients.
   #checkov:skip=CKV2_AWS_57:No rotation function can update the far end -- an operator-configured MCP client -- so scheduled rotation would only start rejecting callers. Rotation is done by changing mcp_auth_header_value alongside the clients.
   #
-  # CKV_AWS_149: already encrypted with the aws/secretsmanager managed key.
-  # Satisfying the rule would mean this module creating a customer managed key and
-  # every caller carrying its monthly charge, and there is no input to accept an
-  # existing one. The exposure this design does address is the comment above:
-  # keeping the value out of the runtime's environment_variables.
-  #checkov:skip=CKV_AWS_149:Already encrypted with the aws/secretsmanager managed key. Satisfying this would require the module to create a CMK and bill every caller for it; there is no input to supply an existing key, and adding one should follow a deployment that needs it.
+  # kms_key_arn encrypts this with a customer managed key when the caller supplies
+  # one. Its default is null, which leaves the aws/secretsmanager managed key; the
+  # module does not create a key of its own, because a key it minted would answer
+  # to this module and every caller would carry its monthly charge.
   count = local.manage_auth_secret ? 1 : 0
 
   name        = "${var.name_prefix}-agentcore-mcp-auth-header"
   description = "Expected value of the static MCP auth header for the ASH AgentCore runtime."
+  kms_key_id  = var.kms_key_arn
 
   tags = var.tags
 }
@@ -278,6 +277,20 @@ data "aws_iam_policy_document" "runtime" {
       effect    = "Allow"
       actions   = ["secretsmanager:GetSecretValue"]
       resources = [aws_secretsmanager_secret.auth_header[0].arn]
+    }
+  }
+
+  # The secret ARN is only useful to a reader that can also decrypt it. Present
+  # only when a customer managed key was supplied: with the aws/secretsmanager
+  # key, Secrets Manager authorizes the decrypt itself.
+  dynamic "statement" {
+    for_each = local.manage_auth_secret && var.kms_key_arn != null ? [1] : []
+
+    content {
+      sid       = "DecryptAuthHeaderSecret"
+      effect    = "Allow"
+      actions   = ["kms:Decrypt"]
+      resources = [var.kms_key_arn]
     }
   }
 

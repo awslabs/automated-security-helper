@@ -66,9 +66,11 @@
 #
 # WHAT THE CASE COUNT MEANS, AND WHY IT IS EASY TO OVERSTATE
 # ----------------------------------------------------------
-# There are 42 validation blocks across the five modules -- agentcore 4,
-# ash-image-pipeline 11, codecommit-gate 11, codepipeline-executor 8, fargate 8 --
-# and every one now has a `must` case proven to fire it.
+# There are 44 validation blocks across the five modules -- agentcore 5,
+# ash-image-pipeline 11, codecommit-gate 11, codepipeline-executor 8, fargate 9 --
+# and every one now has a `must` case proven to fire it. (42 until the two
+# kms_key_arn rules were added; the mutation note below was measured over the 42,
+# and the two new rules were mutated the same way when they landed.)
 #
 # It reached 42 from 10, and the interesting part is that it was first reported as
 # 13. Three rules were counted as covered on the strength of an error_message
@@ -258,6 +260,13 @@ AGENTCORE_BASE=(
   -var container_image_uri=example.dkr.ecr.us-east-1.amazonaws.com/ash:latest
 )
 
+# kms_key_arn's pattern requires a 12-digit account id, so a well-formed ARN has to
+# carry one. It is assembled here rather than written out, for the same reason the
+# placeholders above use 0.
+KMS_ACCOUNT="$(printf '%012d' 1)"
+KMS_KEY_ARN="arn:aws:kms:us-east-1:${KMS_ACCOUNT}:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+KMS_ALIAS_ARN="arn:aws:kms:us-east-1:${KMS_ACCOUNT}:alias/ash"
+
 # ash_version has no default, so every ash-image-pipeline case has to supply one.
 IMAGE_BASE=(
   -var ash_version=v3.6.0
@@ -318,6 +327,15 @@ run_case "desired_count negative -> refused" must \
 run_case "mcp_mount_path without a leading slash -> refused" must \
   "mcp_mount_path must begin with a forward slash" \
   "$MODULES/fargate" "${FARGATE_BASE[@]}" -var mcp_mount_path=mcp
+
+# An alias ARN is the realistic mistake: Secrets Manager would take it, but
+# CloudWatch Logs would not, and the CloudFormation templates refuse it too.
+run_case "kms_key_arn as an alias ARN -> refused" must \
+  "kms_key_arn must be a KMS key ARN" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var "kms_key_arn=$KMS_ALIAS_ARN"
+run_case "kms_key_arn as a key ARN -> allowed" mustnot \
+  "kms_key_arn must be a KMS key ARN" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var "kms_key_arn=$KMS_KEY_ARN"
 
 echo
 echo "### codepipeline-executor"
@@ -436,6 +454,12 @@ run_case "network_mode outside PUBLIC/VPC -> refused" must \
 run_case "mcp_auth_header_name starting with a digit -> refused" must \
   "mcp_auth_header_name must match AgentCore's allowlist" \
   "$MODULES/agentcore" "${AGENTCORE_BASE[@]}" -var mcp_auth_header_name=1-invalid
+run_case "kms_key_arn as a bare key id -> refused" must \
+  "kms_key_arn must be a KMS key ARN" \
+  "$MODULES/agentcore" "${AGENTCORE_BASE[@]}" -var kms_key_arn=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+run_case "kms_key_arn as a key ARN -> allowed" mustnot \
+  "kms_key_arn must be a KMS key ARN" \
+  "$MODULES/agentcore" "${AGENTCORE_BASE[@]}" -var "kms_key_arn=$KMS_KEY_ARN"
 
 echo
 echo "### codecommit-gate"
@@ -485,6 +509,34 @@ run_case "max_comment_chars below 500 -> refused" must \
 run_case "ecr_image_tag_mutability lowercase -> refused" must \
   "ecr_image_tag_mutability must be either MUTABLE or IMMUTABLE" \
   "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var ecr_image_tag_mutability=mutable
+
+# A validation rule says a value is well-formed, not that the module uses it. These
+# `terraform test` files plan each module against a mocked AWS provider and assert
+# that kms_key_arn lands on every resource that takes a key, and that the secret's
+# reader is granted kms:Decrypt on it. No credentials are involved.
+#
+# Each file is counted as one case. A missing file fails rather than passing with
+# nothing run, because `terraform test` with no test files exits 0.
+echo
+echo "### terraform test: kms_key_arn reaches the resources"
+for module in agentcore fargate; do
+  test_file="$MODULES/$module/tests/kms_key_arn.tftest.hcl"
+  label="$module: kms_key_arn wiring (tests/kms_key_arn.tftest.hcl)"
+  if [[ ! -f "$test_file" ]]; then
+    printf '  FAIL  %-58s %s\n' "$label" "test file missing"
+    FAIL=$((FAIL + 1))
+    continue
+  fi
+  if terraform -chdir="$MODULES/$module" test -no-color -filter=tests/kms_key_arn.tftest.hcl > "$LOG" 2>&1 \
+    && grep -qE '^Success! [1-9][0-9]* passed, 0 failed' "$LOG"; then
+    printf '  PASS  %-58s %s\n' "$label" "$(grep -E '^Success!' "$LOG")"
+    PASS=$((PASS + 1))
+  else
+    printf '  FAIL  %-58s %s\n' "$label" "terraform test did not pass"
+    tail -25 "$LOG"
+    FAIL=$((FAIL + 1))
+  fi
+done
 
 echo
 echo "validate-inputs: pass=$PASS fail=$FAIL"

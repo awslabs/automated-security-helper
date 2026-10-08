@@ -100,6 +100,7 @@ against the API's own pattern (`[A-Za-z][A-Za-z0-9_-]{0,255}`, max 20 entries).
 | `create_endpoint` | — | `bool` | `true` | Creates a named runtime endpoint. |
 | `endpoint_name` | — | `string` | `null` | Defaults to `DEFAULT`. |
 | `enable_bedrock_model_invocation` | — | `bool` | `false` | ASH's MCP server does not call Bedrock models. |
+| `kms_key_arn` | — | `string` | `null` | Customer managed key for the auth header secret. `null` keeps the aws/secretsmanager key. |
 | `tags` | — | `map(string)` | `{}` | Applied to everything created. |
 
 ## Outputs
