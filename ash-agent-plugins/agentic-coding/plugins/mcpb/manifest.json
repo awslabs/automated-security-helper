@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.4",
   "name": "ash",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "description": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
   "long_description": "Run ASH (Automated Security Helper) security scans directly in Claude\nDesktop. Bundles uvx-based ASH MCP server invocation; no separate\ninstall step required beyond having uvx on the user's PATH.\n",
   "author": {

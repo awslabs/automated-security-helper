@@ -64,6 +64,312 @@ def test_cli_rejects_the_wrong_exit_code(tmp_path):
     assert ao.main(["--case", "findings", "--output-dir", str(out), "--rc", "0"]) == 1
 
 
+def _findings_output(tmp_path):
+    return _write(
+        tmp_path,
+        [ao._sarif_result("detect-secrets")] * 3,
+        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+    )
+
+
+def _annotations(text):
+    return [line for line in text.splitlines() if line.lstrip().startswith("::error::")]
+
+
+def test_a_real_rejection_is_an_error_annotation(tmp_path, capsys):
+    # The control for the next test: without --expect-reject, every problem is an
+    # annotation, so a real failure still shows on the run summary.
+    out = _findings_output(tmp_path)
+    rc = ao.main(["--case", "findings", "--output-dir", str(out), "--rc", "0"])
+    printed = capsys.readouterr().out
+    assert rc == 1
+    assert _annotations(printed)
+    assert "exit code 0 (nothing actionable), expected exactly 2" in printed
+    assert "FAIL:" in printed
+
+
+def test_an_expected_rejection_prints_no_annotation(tmp_path, capsys):
+    out = _findings_output(tmp_path)
+    rc = ao.main(
+        ["--case", "findings", "--output-dir", str(out), "--rc", "0", "--expect-reject"]
+    )
+    printed = capsys.readouterr().out
+    assert rc == 1, "the flag must not change the verdict"
+    assert _annotations(printed) == []
+    # The reason is still printed, so a caller can check the control fired for it.
+    assert (
+        f"{ao.EXPECTED_REJECTION}[findings] exit code 0 (nothing actionable), "
+        "expected exactly 2" in printed
+    )
+    assert "REJECTED, as the caller expected" in printed
+
+
+def test_an_expected_rejection_that_matched_is_annotated(tmp_path, capsys):
+    # The negative control failing: it asked for a rejection and the outcome matched.
+    out = _findings_output(tmp_path)
+    rc = ao.main(
+        ["--case", "findings", "--output-dir", str(out), "--rc", "2", "--expect-reject"]
+    )
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert len(_annotations(printed)) == 1
+    assert "rejected nothing" in printed
+
+
+def _fake_scan(run_case, monkeypatch, rc, write_output):
+    class _Done:
+        returncode = rc
+
+    def fake_run(command, **kwargs):
+        if write_output is not None:
+            write_output(Path(command[command.index("--output-dir") + 1]))
+        return _Done()
+
+    monkeypatch.setattr(run_case.subprocess, "run", fake_run)
+
+
+@pytest.mark.parametrize("expect_reject", [False, True])
+def test_run_case_annotates_only_unexpected_rejections(
+    tmp_path, monkeypatch, capsys, expect_reject
+):
+    run_case = _load(RUN_CASE, "ash_e2e_run_case")
+    cli = tmp_path / "fake-ashx"
+    cli.write_text("", encoding="utf-8")
+    # A findings scan that exited 0, the shape of the --no-fail-on-findings control.
+    _fake_scan(
+        run_case,
+        monkeypatch,
+        0,
+        lambda out: _write(
+            out,
+            [ao._sarif_result("detect-secrets")] * 3,
+            {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        ),
+    )
+    argv = ["--cli", str(cli), "--case", "findings", "--work", str(tmp_path / "w")]
+    if expect_reject:
+        argv.append("--expect-reject")
+    rc = run_case.main(argv)
+    printed = capsys.readouterr().out
+    assert rc == 1
+    assert "exit code 0 (nothing actionable), expected exactly 2" in printed
+    assert bool(_annotations(printed)) is not expect_reject
+
+
+def test_run_case_annotates_an_expected_rejection_that_matched(
+    tmp_path, monkeypatch, capsys
+):
+    run_case = _load(RUN_CASE, "ash_e2e_run_case")
+    cli = tmp_path / "fake-ashx"
+    cli.write_text("", encoding="utf-8")
+    _fake_scan(
+        run_case,
+        monkeypatch,
+        2,
+        lambda out: _write(
+            out,
+            [ao._sarif_result("detect-secrets")] * 3,
+            {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        ),
+    )
+    rc = run_case.main(
+        [
+            "--cli",
+            str(cli),
+            "--case",
+            "findings",
+            "--work",
+            str(tmp_path / "w"),
+            "--expect-reject",
+        ]
+    )
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert len(_annotations(printed)) == 1
+
+
+WINDOWS_LEGS = {
+    "msix": REPO_ROOT / "packaging" / "msix" / "verify-on-windows.ps1",
+    "chocolatey": REPO_ROOT / "packaging" / "chocolatey" / "verify-on-windows.ps1",
+    "winget": REPO_ROOT / "packaging" / "winget" / "verify-on-windows.ps1",
+}
+
+
+def _asks_for_rejection(line):
+    # The flag itself, or the -ExpectReject switch of the scripts' Invoke-Case helper.
+    return "--expect-reject" in line or "-ExpectReject" in line
+
+
+@pytest.mark.parametrize("leg", sorted(WINDOWS_LEGS))
+def test_windows_negative_controls_ask_for_their_rejection(leg):
+    # Each deliberate negative on the shared verdict passes --expect-reject, and no
+    # positive case does. Counted per call: a control that dropped the flag would
+    # annotate a green run again, and a positive case that gained it would turn a real
+    # failure into a plain line.
+    text = WINDOWS_LEGS[leg].read_text(encoding="utf-8")
+    negatives = re.findall(r"^.*negative-no-fail-on-findings.*$", text, re.MULTILINE)
+    calls = [line for line in negatives if "--no-fail-on-findings" in line]
+    assert calls, f"{leg}: no --no-fail-on-findings control found"
+    for line in calls:
+        assert _asks_for_rejection(line), f"{leg}: {line.strip()}"
+    flagged = [
+        line
+        for line in text.splitlines()
+        if _asks_for_rejection(line)
+        and not line.lstrip().startswith("#")
+        # The Invoke-Case helper turning its switch into the flag.
+        and "$arguments" not in line
+    ]
+    # The only other flagged call is the clean-output-as-findings control, which runs
+    # assert_outcome.py with --expect-rc 2 on the clean case's output.
+    for line in flagged:
+        assert "negative" in line or "--expect-rc" in line or "'--expect-rc'" in line, (
+            f"{leg}: --expect-reject on a line that is not a negative control: "
+            f"{line.strip()}"
+        )
+
+
+# What a rejected exit code reads like in the verdict. Every negative control on the
+# shared verdict plants a wrong exit code, so this is the reason each must check.
+EXIT_CODE_REASON = "exit code 0 (nothing actionable), expected exactly 2"
+# How far after the call its reason check may sit. A window also ends at the next call
+# that asks for a rejection, so one control's check can never stand in for another's.
+REASON_WINDOW = 25
+# Where a call puts what it printed: `... *> $log`, or `$r = Invoke-...` (whose .Text or
+# .Log the check then reads).
+_REDIRECT = re.compile(r"\*>\s*\$(\w+)")
+_ASSIGN = re.compile(r"^\s*\$(\w+)\s*=\s*(Invoke-|&)")
+# How many lines back the assignment may start, for a call spread over continuation lines.
+_STATEMENT_LOOKBACK = 6
+
+
+def _rejection_calls(text):
+    """Line indexes of every call that passes --expect-reject (or -ExpectReject)."""
+    lines = text.splitlines()
+    return [
+        i
+        for i, line in enumerate(lines)
+        if _asks_for_rejection(line)
+        and not line.lstrip().startswith("#")
+        and "$arguments" not in line
+    ]
+
+
+def _output_of(lines, index):
+    """(kind, variable) naming where the call at `index` left its output, or None."""
+    redirect = _REDIRECT.search(lines[index])
+    if redirect:
+        return "log", redirect.group(1)
+    for back in range(index, max(index - _STATEMENT_LOOKBACK, -1), -1):
+        assigned = _ASSIGN.match(lines[back])
+        if assigned:
+            return "object", assigned.group(1)
+    return None
+
+
+def _judges(line, kind, variable):
+    """Whether `line` is a failing check of the reason in that call's own output."""
+    code = line.strip()
+    if (
+        code.startswith("#")
+        or EXIT_CODE_REASON not in code
+        or not code.startswith("if")
+    ):
+        return False
+    if kind == "log":
+        return re.search(rf"-LiteralPath \${variable}\b(?!\.)", code) is not None
+    return re.search(rf"\${variable}\.(Text|Log)\b", code) is not None
+
+
+def _unjudged_rejections(text):
+    """Calls asking for a rejection without a check of their own reason.
+
+    Under --expect-reject the problems print as plain lines, so a control that checks only
+    the exit code passes when the rejection happened for another reason (a missing report,
+    a wrong count). Each call must be followed, before the next such call, by an `if` that
+    looks for the planted exit-code reason in the output that call wrote: the log it
+    redirected to, or the .Text or .Log of the object it assigned. Mentioning the text
+    anywhere else (a Write-Host, another file) does not count.
+    """
+    lines = text.splitlines()
+    calls = _rejection_calls(text)
+    unjudged = []
+    for n, index in enumerate(calls):
+        end = index + 1 + REASON_WINDOW
+        if n + 1 < len(calls):
+            end = min(end, calls[n + 1])
+        output = _output_of(lines, index)
+        if output is None or not any(
+            _judges(line, *output) for line in lines[index + 1 : end]
+        ):
+            unjudged.append(lines[index].strip())
+    return unjudged
+
+
+@pytest.mark.parametrize("leg", sorted(WINDOWS_LEGS))
+def test_every_expected_rejection_is_judged_for_its_reason(leg):
+    text = WINDOWS_LEGS[leg].read_text(encoding="utf-8")
+    assert _rejection_calls(text), f"{leg}: no --expect-reject call found"
+    assert _unjudged_rejections(text) == []
+
+
+def _check(target):
+    """A reason check of the kind the legs write, reading `target`."""
+    return (
+        f"if (-not (Select-String -LiteralPath {target} -SimpleMatch "
+        f"'{EXIT_CODE_REASON}' -Quiet)) {{ Fail 'x' }}"
+    )
+
+
+def test_a_rejection_judged_by_exit_code_alone_is_caught():
+    # The planted negative: the shape winget's control had, rc checked and reason not.
+    planted = """
+$negative = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-x' -ExpectReject
+if ($negative.Rc -ne 1) {
+    Fail "expected 1"
+}
+"""
+    assert _unjudged_rejections(planted) == [
+        "$negative = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-x' -ExpectReject"
+    ]
+    assert _unjudged_rejections(planted + _check("$negative.Log") + "\n") == []
+
+
+def test_one_check_cannot_serve_two_rejections():
+    # Two controls and one reason check, the check after the second: the first control is
+    # unjudged even though the check is inside its 25-line window.
+    planted = "\n".join(
+        [
+            "Invoke-Harness a.py --expect-reject *> $first",
+            "if ($LASTEXITCODE -ne 1) { Fail 'x' }",
+            "Invoke-Harness b.py --expect-reject *> $second",
+            _check("$second"),
+        ]
+    )
+    assert _unjudged_rejections(planted) == [
+        "Invoke-Harness a.py --expect-reject *> $first"
+    ]
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        # Another call's log.
+        _check("$elsewhere"),
+        # The text printed rather than checked.
+        f"Write-Host '   OK: {EXIT_CODE_REASON}'",
+        # The text only in a comment.
+        f"# if (-not (Select-String -LiteralPath $first -SimpleMatch '{EXIT_CODE_REASON}'))",
+    ],
+)
+def test_a_check_of_anything_but_the_calls_own_output_does_not_count(check):
+    planted = f"Invoke-Harness a.py --expect-reject *> $first\n{check}"
+    assert _unjudged_rejections(planted) == [
+        "Invoke-Harness a.py --expect-reject *> $first"
+    ]
+    assert _unjudged_rejections(planted + "\n" + _check("$first")) == []
+
+
 def test_cli_incomplete_case_requires_the_named_scanner(tmp_path):
     out = _write(
         tmp_path,

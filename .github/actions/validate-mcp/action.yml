@@ -63,7 +63,7 @@ runs:
       if: runner.os != 'Windows'
       shell: bash
       run: |
-        echo "version=2.8.0" >> "$GITHUB_OUTPUT"
+        echo "version=2.9.0" >> "$GITHUB_OUTPUT"
         echo "npm-cache=$(npm config get cache)" >> "$GITHUB_OUTPUT"
 
     # npm's download cache for that one pinned install: third-party tarballs from

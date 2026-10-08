@@ -13,8 +13,9 @@
       2. build and sign N-1 in a scratch directory: this checkout's tree, exported with
          `git archive`, with its version lowered (3.7.0 -> 3.6.0), the same derivation
          packaging/build-test-wheels.sh uses for the deb and rpm upgrade legs;
-      3. a negative control: a copy of N with one payload byte changed must be refused by
-         Add-AppxPackage;
+      3. negative controls: the package-contents gate must refuse a copy of N with a scanner
+         binary planted in it (packaging/assert-planted-scanner-rejected.py), and a copy of
+         N with one payload byte changed must be refused by Add-AppxPackage;
       4. install N-1 fresh, bootstrap its venv, and check it reports N-1's version;
       5. upgrade to N with Add-AppxPackage, and require the installed version to move, the
          venv to be REBUILT from N's wheel, and `ashx --version` to report N;
@@ -25,6 +26,8 @@
       8. negative controls on the verdict: a findings scan run with --no-fail-on-findings must
          be rejected for its exit code, and the clean output judged as a findings outcome
          must be rejected;
+      8c. `ashx dependencies install --tool grype` through the installed package, checked
+         against the pin, and `--tool <unknown>` refused with EXIT_BAD_SELECTION;
       9. a same-version reinstall must keep the venv rather than rebuild it;
      10. uninstall, then require the package, its venv and its three aliases to be gone.
 
@@ -698,6 +701,17 @@ if ($LASTEXITCODE -ne 0) {
     Fail "packaging/assert-package-contents.py exited $LASTEXITCODE on $(Split-Path -Leaf $msix)"
 }
 
+Write-Step '2c. negative control: the gate must refuse this package with a scanner planted in it'
+# The gate's --self-test proves each check can fail on fixtures shaped like this package.
+# This proves it on the package itself: a copy of the signed .msix above with
+# assets/grype (an ELF header) added must be refused with the native-binary verdict on
+# that member, and the unmodified package must pass. The copy is written under the work
+# directory, never build/msix, which the workflow uploads.
+& uv run --script --python 3.13 (Join-Path $repoRoot 'packaging/assert-planted-scanner-rejected.py') $msix --work (Join-Path $work 'planted')
+if ($LASTEXITCODE -ne 0) {
+    Fail "NEGATIVE CONTROL: packaging/assert-planted-scanner-rejected.py exited $LASTEXITCODE on $(Split-Path -Leaf $msix); the gate did not refuse the real package with a scanner planted in it"
+}
+
 Write-Step '3. package metadata is well formed, read back out of the package'
 # An .msix is a zip. Reading the manifest back from the built artifact rather than from the
 # staged layout is the point: it proves what makeappx actually packed, the way the rpm script
@@ -953,9 +967,11 @@ Write-Step '8b. negative controls on the verdict'
 # exit code: rc 1 alone would also come from a missing report or a wrong count, and then this
 # control would control nothing about the exit-code check. The '--' is quoted because PowerShell
 # consumes a bare -- as its own end-of-parameters token when calling a function, and
-# run_case.py needs it to tell its own options from the scan's.
+# run_case.py needs it to tell its own options from the scan's. --expect-reject, here and
+# below, makes the expected rejection print as plain lines rather than as error
+# annotations on a green run; the exit code and the reason are still judged here.
 $negativeLog = Join-Path $work 'negative-no-fail-on-findings.log'
-Invoke-Harness $runCase --cli $resolved[$cliName] --case findings --work $scans --label 'msix-negative-no-fail-on-findings' '--' --no-fail-on-findings *> $negativeLog
+Invoke-Harness $runCase --cli $resolved[$cliName] --case findings --work $scans --label 'msix-negative-no-fail-on-findings' --expect-reject '--' --no-fail-on-findings *> $negativeLog
 $negativeExit = $LASTEXITCODE
 Get-Content -LiteralPath $negativeLog | ForEach-Object { Write-Host "   | $_" }
 if ($negativeExit -ne 1) {
@@ -966,15 +982,41 @@ if (-not (Select-String -LiteralPath $negativeLog -SimpleMatch 'exit code 0 (not
 }
 Write-Host '   OK: rejected for exit code 0'
 
-# The real clean output, judged as if it were a findings outcome, must be rejected.
+# The real clean output, judged as if it were a findings outcome, must be rejected, and for
+# its exit code: under --expect-reject the problems are plain lines, so an rc of 1 for some
+# other reason (an unreadable report, a wrong count) would otherwise pass unnoticed.
+$cleanNegativeLog = Join-Path $work 'negative-clean-as-findings.log'
 Invoke-Harness (Join-Path $repoRoot 'scripts/e2e/assert_outcome.py') `
     --output-dir (Join-Path $scans 'msix-clean\out') --rc 0 `
-    --expect-rc 2 --min-findings 1 --require-scanner detect-secrets --selected detect-secrets
+    --expect-rc 2 --min-findings 1 --require-scanner detect-secrets --selected detect-secrets --expect-reject *> $cleanNegativeLog
 $negativeExit = $LASTEXITCODE
+Get-Content -LiteralPath $cleanNegativeLog | ForEach-Object { Write-Host "   | $_" }
 if ($negativeExit -ne 1) {
     Fail "NEGATIVE CONTROL: assert_outcome.py returned $negativeExit on a clean output expected to hold findings; expected 1"
 }
+if (-not (Select-String -LiteralPath $cleanNegativeLog -SimpleMatch '[expect-rc 2] exit code 0 (nothing actionable), expected exactly 2' -Quiet)) {
+    Fail 'NEGATIVE CONTROL: assert_outcome.py rejected the clean output, but not for its exit code 0'
+}
 Write-Host '   OK: the clean output was rejected as a findings outcome'
+
+Write-Step '8c. select a scanner after install: ashx dependencies install --tool grype'
+# No package bundles a scanner; a user selects one after installing (README.msix).
+# scripts/e2e/assert_dependencies_install.py runs under the installed venv's interpreter,
+# with the packaged alias as the CLI: it requires nothing installed yet, the install to
+# exit 0, grype at ~\.ash\bin with a receipt recording this ASH's pinned version and
+# archive SHA-256 and the binary's own hash, `grype version` to name the pin, and
+# `--tool <unknown>` to exit EXIT_BAD_SELECTION, which is the negative control.
+#
+# As the installing user, unlike the Chocolatey leg's separate unprivileged account: an
+# MSIX package is registered per user, so another account has no `ashx` to run. That the
+# install needs no privilege is the Chocolatey leg's proof; this one proves the packaged
+# app's own process can download and place a scanner outside the package, where ~\.ash
+# lives and where package file-system virtualization does not reach.
+$venvPython = Join-Path $venv 'Scripts\python.exe'
+& $venvPython -I (Join-Path $repoRoot 'scripts/e2e/assert_dependencies_install.py') --cli $resolved[$cliName] --tool grype
+if ($LASTEXITCODE -ne 0) {
+    Fail "ashx dependencies install --tool grype through the installed package failed (assert_dependencies_install.py exit $LASTEXITCODE)"
+}
 
 Write-Step '9. a same-version reinstall keeps the venv'
 # The MSIX equivalent of the rpm script's %postun check, and the other half of step 6: the
