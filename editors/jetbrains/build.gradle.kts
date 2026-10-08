@@ -310,6 +310,8 @@ val assertTestsRan = tasks.register<Exec>("assertTestsRan") {
         // class rather than about a count.
         "--require-suite", "io.github.awslabs.ash.jetbrains.AnnotationCountTest",
         "--require-suite", "io.github.awslabs.ash.jetbrains.AshScanIntegrationTest",
+        // The parity check against ASH's own coverage verdicts. See its header.
+        "--require-suite", "io.github.awslabs.ash.jetbrains.AshCoverageParityTest",
     )
 }
 

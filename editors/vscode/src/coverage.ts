@@ -44,10 +44,11 @@
  *
  * It is a second reader of the same rule, so it can disagree with ASH. The fixtures
  * under test/fixtures/coverage-cases/ carry the verdict ASH's own `assess_coverage`
- * reaches on each one, recorded in expected.json, and two suites read that file:
- * test/coverage.test.ts asserts this module agrees, and
- * tests/unit/test_vscode_coverage_parity.py asserts ASH does. A change on
- * either side that moves a verdict fails one of them.
+ * reaches on each one, recorded in cases.json, and three suites read that file:
+ * test/coverage.test.ts asserts this module agrees,
+ * tests/unit/test_vscode_coverage_parity.py asserts ASH does, and the JetBrains
+ * plugin's AshCoverageParityTest asserts AshScannerStatus.kt does. A change on
+ * any side that moves a verdict fails one of them.
  *
  * Known narrowing: scanner statuses are read from the persisted `scanner_results`,
  * which ASH rewrites from `get_unified_scanner_metrics` before writing the file, so

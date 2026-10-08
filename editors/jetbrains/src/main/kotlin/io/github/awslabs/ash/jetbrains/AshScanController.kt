@@ -206,10 +206,12 @@ object AshScanController {
             }
 
             if (incompleteness != null) {
-                append("<br><br>$incompleteness")
+                // Escaped: scanner, converter and rule names and notification messages are the
+                // report's text, not this plugin's markup.
+                append("<br><br>${escape(incompleteness)}")
             } else if (outcome.partial) {
-                // ASH's verdict, with nothing in the status file to name. An unevaluated rule or a
-                // stale content database has no scanner row, so the console is where ASH said why.
+                // ASH's verdict, with nothing in the status file to name: the status file is
+                // missing a reason ASH printed, so the console is where ASH said why.
                 append("<br><br>The status file names no scanner that failed to complete; ")
                 append("ASH's own output gives the reason")
                 if (outcome.outputTail.isNotBlank()) {

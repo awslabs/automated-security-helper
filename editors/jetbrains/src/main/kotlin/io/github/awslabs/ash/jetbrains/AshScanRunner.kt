@@ -60,8 +60,8 @@ object AshScanRunner {
          * ASH ran and wrote a report this run, which was read.
          *
          * @param outputTail the end of ASH's own output, kept for the incomplete case: ASH prints
-         *   the reasons a scan was incomplete there, and the status file can name fewer of them
-         *   than the console does (an unevaluated rule or a stale database has no scanner row).
+         *   the reasons a scan was incomplete there, and a status file from another ASH version
+         *   can name fewer of them than the console does.
          */
         data class Completed(
             val exitCode: Int,
@@ -77,10 +77,12 @@ object AshScanRunner {
             /**
              * The same question ASH's MCP payload answers as `coverage_complete`: true only when
              * nothing names a gap. False when ASH exited 1, which is ASH's own verdict, and false
-             * when the status file names a scanner that did not complete or shows nothing reached
-             * a verdict, which catches a run made with fail_on_incomplete_scanners turned off.
-             * Also false when the status file could not be read, because an unread file is not
-             * evidence that every scanner ran.
+             * when the status file records any of the five gaps [AshScannerStatus] reads (a
+             * scanner that did not complete or lost targets, nothing reaching a verdict, a
+             * converter that did not run, an unevaluated rule, a stale content database), which
+             * catches a run made with fail_on_incomplete_scanners turned off. Also false when the
+             * status file could not be read, because an unread file is not evidence that every
+             * scanner ran. AshCoverageParityTest holds this to ASH's own verdicts.
              */
             val coverageComplete: Boolean
                 get() = !partial && scanners.describeIncompleteness() == null

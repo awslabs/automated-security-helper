@@ -80,6 +80,10 @@ on:
       - "scripts/e2e/**"
       - "packaging/cli-name.sh"
       - ".github/scripts/check-snapshot-trailers.py"
+      # AshCoverageParityTest reads the coverage cases the VS Code extension and ASH's own
+      # parity test share, and the captured results files they edit.
+      - "editors/vscode/test/fixtures/coverage-cases/**"
+      - "editors/vscode/test/fixtures/scans/**"
   pull_request:
     branches:
       - "**"
