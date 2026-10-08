@@ -524,14 +524,42 @@ def test_the_failure_message_reads_the_stderr_log_when_errors_are_empty(
     assert "Stderr: tool wrote this" in detail
 
 
-def test_a_long_stderr_is_truncated_in_the_failure_message(plugin_context):
+def test_a_long_stderr_is_shortened_in_the_failure_message(plugin_context):
     scanner = _scanner(plugin_context)
     scanner.errors = ["x" * (_STDERR_EXCERPT_LIMIT + 500)]
 
     detail = scanner._describe_scan_failure(RuntimeError("broke"), None)
 
-    assert " ...[truncated]" in detail
+    assert "characters omitted]" in detail
     assert len(detail) < _STDERR_EXCERPT_LIMIT + 500
+
+
+def test_a_long_stderr_keeps_its_last_line_in_the_failure_message(
+    plugin_context, tmp_path
+):
+    """A tool says why it failed last: trivy prints download progress, then the error.
+
+    The shape of the podman CI failure: a config line, a long progress bar, and the
+    reason at the very end. The message used to keep only the first 2000
+    characters, which ended inside the progress output.
+    """
+    scanner = _scanner(plugin_context)
+    results_file = tmp_path / "scanners" / "stub" / "results.json"
+    results_file.parent.mkdir(parents=True)
+    progress = "".join(
+        f"{n}.00 MiB / 120.19 MiB [---->____] {n}% ? p/s ?" for n in range(400)
+    )
+    reason = "FATAL Fatal error: unable to extract the vulnerability DB: no space left"
+    (results_file.parent / "StubScanner.stderr.log").write_text(
+        f'INFO Loaded file_path="/out/trivy-config.yaml"\n{progress}\n{reason}\n'
+    )
+
+    detail = scanner._describe_scan_failure(RuntimeError("broke"), results_file)
+
+    assert detail.endswith(reason)
+    assert 'Loaded file_path="/out/trivy-config.yaml"' in detail
+    assert "characters omitted]" in detail
+    assert len(detail) < _STDERR_EXCERPT_LIMIT + 400
 
 
 def test_a_short_stderr_is_not_truncated(plugin_context):

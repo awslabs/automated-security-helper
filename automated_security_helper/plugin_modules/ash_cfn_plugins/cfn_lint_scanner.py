@@ -97,6 +97,7 @@ from automated_security_helper.utils.config_trust import (
     set_by_operator,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.pre_installed_tool import (
     validate_version_constraint,
 )
@@ -683,7 +684,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             return f"cfn-lint could not be started: {response['error']}"
         code = response.get("returncode")
         if not _successful_exit(code):
-            stderr = (response.get("stderr") or "").strip()[:500]
+            stderr = head_and_tail((response.get("stderr") or "").strip(), 500)
             return f"cfn-lint exited {code}" + (f": {stderr}" if stderr else "")
         if not batch_file.is_file() or batch_file.stat().st_size == 0:
             return f"cfn-lint exited {code} without writing {batch_file.name}"

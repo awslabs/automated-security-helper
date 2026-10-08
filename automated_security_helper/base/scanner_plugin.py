@@ -42,6 +42,7 @@ from abc import abstractmethod
 # '=' and a value (e.g., --exclude="path1,path2" or --skip-path=".venv/").
 _VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?$")
 from pathlib import Path
+from automated_security_helper.utils.output_excerpt import head_and_tail
 
 # How much of a tool's stderr goes into the failure message. The full text stays
 # in the stderr log file, whose path the message names, so this bounds the
@@ -860,9 +861,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         * Reading the log is best-effort. If it cannot be read the message says
           where it looked, so the reader can tell "stderr was empty" from
           "stderr was not where we checked".
-        * stderr is truncated to keep a scanner that wrote megabytes from
-          swamping the error; the full text stays in the log file, which is
-          named.
+        * stderr is shortened to keep a scanner that wrote megabytes from
+          swamping the error. The start and the end are kept
+          (``utils/output_excerpt.head_and_tail``): a tool usually says why it
+          failed last, after any progress output. The full text stays in the log
+          file, which is named.
         """
         detail = f"{self.__class__.__name__} scan failed: {exc}"
 
@@ -891,8 +894,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 stderr_text = ""
 
         if stderr_text:
-            if len(stderr_text) > _STDERR_EXCERPT_LIMIT:
-                stderr_text = stderr_text[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
+            stderr_text = head_and_tail(stderr_text, _STDERR_EXCERPT_LIMIT)
             detail += f". Stderr: {stderr_text}"
         elif log_path is not None:
             detail += f". No stderr captured; checked {log_path.as_posix()}"
