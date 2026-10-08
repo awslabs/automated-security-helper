@@ -158,6 +158,11 @@ sandbox:
   extra_read_paths: [/opt/company-ca]
 ```
 
+`network_scanners` and `extra_read_paths` grant access, so they are honored only from
+`--config-overrides` or a config file outside the scanned tree. Set in a config file
+inside the tree, which the repository being scanned can write, they are ignored with
+a warning. `mode` is honored from either.
+
 A sandboxed scan does not install tools: installing runs a package's build code and
 writes uv's tool directory, which a sandboxed scanner may only read. Run
 `ash dependencies install` first; a scanner whose tool is missing is recorded
