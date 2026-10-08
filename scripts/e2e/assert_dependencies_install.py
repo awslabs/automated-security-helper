@@ -131,6 +131,13 @@ def version_problem(output: str, asset_version: str) -> Optional[str]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # The Windows legs run this under -I, which ignores PYTHONIOENCODING, with stdout a
+    # pipe in the cp1252 locale. The ashx output it echoes carries Rich box characters
+    # cp1252 cannot encode, so write UTF-8 whatever the locale.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

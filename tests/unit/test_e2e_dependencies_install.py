@@ -235,3 +235,28 @@ def test_the_throwaway_account_is_removed_even_when_a_check_fails():
     helper = text[text.index("function Remove-StandardUser") :]
     helper = helper[: helper.index("\n}\n")]
     assert "[string] $Name" in helper and "[ADSI]::Exists" in helper
+
+
+def test_a_box_drawing_line_reaches_a_cp1252_stdout(home, monkeypatch):
+    """The MSIX leg runs this under -I with stdout a pipe in the cp1252 locale, where
+    PYTHONIOENCODING has no effect. Rich box characters in the captured ashx output
+    used to raise UnicodeEncodeError there instead of being printed."""
+    import io
+
+    out = io.BytesIO()
+    err = io.BytesIO()
+    monkeypatch.setattr(
+        sys, "stdout", io.TextIOWrapper(out, encoding="cp1252", errors="strict")
+    )
+    monkeypatch.setattr(
+        sys, "stderr", io.TextIOWrapper(err, encoding="cp1252", errors="strict")
+    )
+
+    def boxed(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, "┏━┓ Installing grype ┃\n", "")
+
+    monkeypatch.setattr(script.subprocess, "run", boxed)
+    rc = script.main(["--cli", CLI, "--tool", "grype"])
+    sys.stdout.flush()
+    assert rc == 1
+    assert "┏━┓ Installing grype ┃".encode("utf-8") in out.getvalue()
