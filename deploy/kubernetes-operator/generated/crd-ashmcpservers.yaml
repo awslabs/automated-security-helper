@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: d1c26e7c9e2206e8
+    ash.awslabs.github.io/ash-config-schema-sha256: f585bc857fe69df3
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -893,7 +893,10 @@ spec:
                                   type: string
                                 type: array
                               offline:
-                                description: Run in offline mode, disabling policy downloads
+                                description: Run in offline mode, disabling policy downloads. When true,
+                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.
                                 type: boolean
                               frameworks:
                                 description: Specific frameworks to include with Checkov. Defaults to
@@ -1137,7 +1140,10 @@ spec:
                                   in the root of the source directory.
                                 nullable: true
                               offline:
-                                description: Run in offline mode, disabling database updates and validation
+                                description: Run in offline mode, disabling database updates and validation.
+                                  When true, this scanner runs offline even if ASH does not. ASH's own
+                                  offline mode (--offline or ASH_OFFLINE) applies whatever this is set
+                                  to; false follows it.
                                 type: boolean
                             type: object
                             description: Configure Grype scanner
@@ -1175,7 +1181,10 @@ spec:
                                   which risks a scan that never completes.
                                 nullable: true
                               offline:
-                                description: Run in offline mode, using locally cached data
+                                description: Run in offline mode, using locally cached data. When true,
+                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.
                                 type: boolean
                             type: object
                             description: Configure NpmAudit scanner
@@ -1248,7 +1257,10 @@ spec:
                                 - 'off'
                                 type: string
                               offline:
-                                description: Run in offline mode, using locally cached rules.
+                                description: Run in offline mode, using locally cached rules. When true,
+                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.
                                 type: boolean
                               patterns:
                                 description: Patterns to search for with OpenGrep.
@@ -1258,6 +1270,16 @@ spec:
                               version:
                                 description: Version of OpenGrep to use.
                                 type: string
+                              sha256:
+                                additionalProperties:
+                                  pattern: ^[0-9a-fA-F]{64}$
+                                  type: string
+                                description: SHA256 of the OpenGrep release asset for a custom `version`,
+                                  keyed by platform/arch (e.g. linux/amd64). Required for any version
+                                  other than the one ASH pins; ignored for the pinned version, whose digests
+                                  ship with ASH. Get it from GitHub's per-asset digest for the release,
+                                  or by running sha256sum on the downloaded asset.
+                                type: object
                             type: object
                             description: Configure Opengrep scanner
                             x-kubernetes-preserve-unknown-fields: true
@@ -1327,7 +1349,10 @@ spec:
                                 - 'off'
                                 type: string
                               offline:
-                                description: Run in offline mode, using locally cached rules.
+                                description: Run in offline mode, using locally cached rules. When true,
+                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.
                                 type: boolean
                               tool_version:
                                 type: string
@@ -1417,7 +1442,10 @@ spec:
                                   type: string
                                 type: array
                               offline:
-                                description: Run in offline mode, disabling update checks
+                                description: Run in offline mode, disabling update checks. When true,
+                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.
                                 type: boolean
                             type: object
                             description: Configure Syft scanner

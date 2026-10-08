@@ -3,14 +3,15 @@
   "collapsedOptionals": 69,
   "constRewrittenToEnum": 27,
   "droppedKeywords": {
-    "default": 311,
-    "title": 344
+    "default": 318,
+    "propertyNames": 1,
+    "title": 345
   },
   "exclusiveBoundsRewritten": 1,
   "referenceCycles": [
     "AshConfig"
   ],
-  "sourceSchemaSha256": "d1c26e7c9e2206e8",
+  "sourceSchemaSha256": "f585bc857fe69df3",
   "unexpressible": [
     {
       "path": "/properties/build/anyOf/0/properties/custom_scanners/items/properties/context/anyOf/0/properties/config",
