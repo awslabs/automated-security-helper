@@ -46,7 +46,7 @@ WHY THE SCAN CASES RUN OVER STREAMABLE HTTP
 `mcp-inspector --cli` is one-shot: it spawns the server, makes one request, and
 closes the transport, which ends the server process. `run_ash_scan` returns as soon
 as the scan has started and the scan runs inside that process, so over stdio the
-scan dies with it. Measured with inspector 2.8.0: the reply carried a scan id and
+scan dies with it. Measured on 2.8.0; not re-measured on 2.9.0: the reply carried a scan id and
 status "running", the process was gone a moment later, and reports/ was empty. The
 scan registry is in memory, so a second stdio launch cannot poll the first one's
 scan either.
