@@ -65,6 +65,7 @@ class ConfigValidator:
         "fail_on_findings",
         "fail_on_incomplete_scanners",
         "content_db_staleness",
+        "content_db_staleness_overrides",
         "ash_plugin_modules",
         "external_reports_to_include",
         "global_settings",

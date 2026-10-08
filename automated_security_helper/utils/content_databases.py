@@ -116,6 +116,8 @@ STALENESS_WARN = "warn"
 STALENESS_POLICIES = (STALENESS_FAIL, STALENESS_WARN)
 DEFAULT_STALENESS_POLICY = STALENESS_FAIL
 STALENESS_CONFIG_FIELD = "content_db_staleness"
+#: Per-database exceptions to ``content_db_staleness``, each with a required expiration date.
+STALENESS_OVERRIDES_CONFIG_FIELD = "content_db_staleness_overrides"
 
 
 def content_db_staleness_override(allow_stale: bool) -> str:
@@ -123,6 +125,20 @@ def content_db_staleness_override(allow_stale: bool) -> str:
     return (
         f"{STALENESS_CONFIG_FIELD}={STALENESS_WARN if allow_stale else STALENESS_FAIL}"
     )
+
+
+def content_db_staleness_flag_overrides(allow_stale: bool) -> list[str]:
+    """Every ``--config-overrides`` entry either form of the flag means.
+
+    The policy, and an empty ``content_db_staleness_overrides``: the flag decides for one
+    scan and every database, so a per-database entry in the config file cannot outrank it.
+    Without the second entry, ``--no-allow-stale-content-db`` would not restore ``fail``
+    for a database the config file relaxes.
+    """
+    return [
+        content_db_staleness_override(allow_stale),
+        f"{STALENESS_OVERRIDES_CONFIG_FIELD}=[]",
+    ]
 
 
 #: Written next to an offline ruleset when it is downloaded, holding the download time as an
