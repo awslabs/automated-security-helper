@@ -370,10 +370,14 @@ function Invoke-Case {
         $arguments += '--'
         $arguments += $Extra
     }
-    # Out-Host, so run_case.py's output is shown rather than returned alongside the
-    # exit code: a function returns everything its native commands write to stdout.
-    & python @arguments | Out-Host
-    return $LASTEXITCODE
+    # Written to a log and echoed, rather than returned alongside the exit code: a function
+    # returns everything its native commands write to stdout. The log is what a negative
+    # control reads to check WHY it was rejected (see step 7).
+    $log = Join-Path $script:work "run-case-$Label.log"
+    & python @arguments *> $log
+    $code = $LASTEXITCODE
+    Get-Content -LiteralPath $log | ForEach-Object { Write-Host "   | $_" }
+    return $code
 }
 
 function Assert-Case {
@@ -544,7 +548,13 @@ try {
     if ($code -ne 1) {
         Fail "run_case.py returned $code for a findings scan run with --no-fail-on-findings; expected 1"
     }
-    Write-Host '   OK: the leg rejects a wrong exit code'
+    # rc 1 alone would also come from a missing report or a wrong count, and under
+    # --expect-reject those problems print as plain lines, so the reason is checked here.
+    $negativeLog = Join-Path $script:work 'run-case-negative-no-fail-on-findings.log'
+    if (-not (Select-String -LiteralPath $negativeLog -SimpleMatch 'exit code 0 (nothing actionable), expected exactly 2' -Quiet)) {
+        Fail 'NEGATIVE CONTROL: run_case.py rejected the --no-fail-on-findings scan, but not for its exit code 0'
+    }
+    Write-Host '   OK: the leg rejects a wrong exit code, for that reason'
 
     Write-Step '8. winget uninstall'
     # uninstall opens the default sources to match the installed package, and the msstore

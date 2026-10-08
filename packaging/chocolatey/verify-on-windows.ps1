@@ -321,7 +321,7 @@ function New-StandardUser {
     param([Parameter(Mandatory = $true)][string] $Name)
     $computer = [ADSI] "WinNT://$env:COMPUTERNAME,computer"
     if ([ADSI]::Exists("WinNT://$env:COMPUTERNAME/$Name,user")) {
-        $computer.Delete('User', $Name)
+        $computer.Delete('User', $Name) | Out-Null
     }
     # A random password, never printed and never written anywhere; the account lives for
     # this step only. The suffix covers the complexity policy whatever the random part
@@ -330,18 +330,19 @@ function New-StandardUser {
     [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
     $plain = [Convert]::ToBase64String($bytes) + 'a1!A'
     $account = $computer.Create('User', $Name)
-    $account.SetPassword($plain)
-    $account.Put('Description', 'ASH e2e: an unprivileged user for ashx dependencies install')
+    # Out-Null on each COM call, so no return value leaks into this function's output.
+    $account.SetPassword($plain) | Out-Null
+    $account.Put('Description', 'ASH e2e: an unprivileged user for ashx dependencies install') | Out-Null
     # Not "must change password at next logon", which would refuse the logon below.
-    $account.Put('PasswordExpired', 0)
-    $account.SetInfo()
+    $account.Put('PasswordExpired', 0) | Out-Null
+    $account.SetInfo() | Out-Null
     # Users (S-1-5-32-545), by SID because the group's name is localized. It carries the
     # right to log on locally, which the logon below needs.
     $usersGroup = ([System.Security.Principal.SecurityIdentifier] 'S-1-5-32-545').Translate(
         [System.Security.Principal.NTAccount]).Value.Split('\')[-1]
     $group = [ADSI] "WinNT://$env:COMPUTERNAME/$usersGroup,group"
     if (-not $group.IsMember("WinNT://$env:COMPUTERNAME/$Name")) {
-        $group.Add("WinNT://$env:COMPUTERNAME/$Name,user")
+        $group.Add("WinNT://$env:COMPUTERNAME/$Name,user") | Out-Null
     }
     $sid = ([System.Security.Principal.NTAccount] "$env:COMPUTERNAME\$Name").Translate(
         [System.Security.Principal.SecurityIdentifier]).Value
@@ -355,7 +356,7 @@ function Remove-StandardUser {
     Get-CimInstance -ClassName Win32_UserProfile -ErrorAction SilentlyContinue |
         Where-Object { $_.SID -eq $User.Sid } |
         Remove-CimInstance -ErrorAction SilentlyContinue
-    ([ADSI] "WinNT://$env:COMPUTERNAME,computer").Delete('User', $User.Name)
+    ([ADSI] "WinNT://$env:COMPUTERNAME,computer").Delete('User', $User.Name) | Out-Null
 }
 
 # Runs one command as $User and returns its exit code and output.
@@ -581,7 +582,12 @@ $r = Invoke-Harness -Arguments @(
     '--expect-rc', '2', '--min-findings', '1', '--require-scanner', 'detect-secrets', '--selected', 'detect-secrets', '--expect-reject'
 )
 if ($r.Rc -ne 1) { Fail-Verification "NEGATIVE CONTROL: assert_outcome returned $($r.Rc) on a clean output expected to hold findings" }
-Write-Host "   OK: rejected (exit $($r.Rc))"
+# For its exit code: under --expect-reject the problems are plain lines, so an rc of 1 for
+# some other reason would otherwise pass unnoticed.
+if ($r.Text -notmatch [regex]::Escape('[expect-rc 2] exit code 0 (nothing actionable), expected exactly 2')) {
+    Fail-Verification 'NEGATIVE CONTROL: assert_outcome rejected the clean output, but not for its exit code 0'
+}
+Write-Host "   OK: rejected for exit code 0 (exit $($r.Rc))"
 
 Write-Host '   the uninstall check must fail while ASH is installed'
 $p = @(Get-AbsenceProblems)
@@ -596,48 +602,53 @@ Write-Host '== 7b. an unprivileged user selects a scanner: ashx dependencies ins
 # version and archive SHA-256 and the binary's own hash, `grype version` to name the pin,
 # and `--tool <unknown>` to exit EXIT_BAD_SELECTION. That last one is the negative control.
 $standardUser = New-StandardUser -Name 'ashe2estd'
+# The account and its directory are removed in finally, so a failed check below does not
+# leave them behind. PowerShell runs a finally block when exit leaves the try block.
 $userWork = Join-Path $env:SystemDrive 'ash-e2e-standard-user'
-if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
-New-Item -ItemType Directory -Path $userWork | Out-Null
-& icacls.exe $userWork /grant "$($standardUser.Name):(OI)(CI)M" | Out-Null
-Assert-NativeSuccess -What "icacls $userWork" -ExitCode $LASTEXITCODE
-# A copy the user can read. The checkout lives under the runner account's directories.
-$depsScript = Join-Path $userWork 'assert_dependencies_install.py'
-Copy-Item -LiteralPath (Join-Path $Repo 'scripts\e2e\assert_dependencies_install.py') -Destination $depsScript
+try {
+    if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
+    New-Item -ItemType Directory -Path $userWork | Out-Null
+    & icacls.exe $userWork /grant "$($standardUser.Name):(OI)(CI)M" | Out-Null
+    Assert-NativeSuccess -What "icacls $userWork" -ExitCode $LASTEXITCODE
+    # A copy the user can read. The checkout lives under the runner account's directories.
+    $depsScript = Join-Path $userWork 'assert_dependencies_install.py'
+    Copy-Item -LiteralPath (Join-Path $Repo 'scripts\e2e\assert_dependencies_install.py') -Destination $depsScript
 
-# Proof from the account's own token, not from the group list it was created with: a token
-# carrying BUILTIN\Administrators (S-1-5-32-544), even filtered, would make this an
-# administrator's install again.
-$r = Invoke-AsStandardUser -User $standardUser -FilePath (Join-Path $env:SystemRoot 'System32\whoami.exe') `
-    -ArgumentList @('/groups', '/fo', 'csv') -WorkingDirectory $userWork
-Assert-NativeSuccess -What "whoami /groups as $($standardUser.Name)" -ExitCode $r.Rc
-if ($r.Text -match 'S-1-5-32-544') {
-    Fail-Verification "$($standardUser.Name)'s token carries BUILTIN\Administrators, so it is not an unprivileged user"
-}
-if ($r.Text -notmatch 'S-1-5-32-545') {
-    Fail-Verification "$($standardUser.Name)'s token does not carry BUILTIN\Users; the logon is not the one intended"
-}
-Write-Host "   OK: $($standardUser.Name)'s token has Users and not Administrators"
+    # Proof from the account's own token, not from the group list it was created with: a token
+    # carrying BUILTIN\Administrators (S-1-5-32-544), even filtered, would make this an
+    # administrator's install again.
+    $r = Invoke-AsStandardUser -User $standardUser -FilePath (Join-Path $env:SystemRoot 'System32\whoami.exe') `
+        -ArgumentList @('/groups', '/fo', 'csv') -WorkingDirectory $userWork
+    Assert-NativeSuccess -What "whoami /groups as $($standardUser.Name)" -ExitCode $r.Rc
+    if ($r.Text -match 'S-1-5-32-544') {
+        Fail-Verification "$($standardUser.Name)'s token carries BUILTIN\Administrators, so it is not an unprivileged user"
+    }
+    if ($r.Text -notmatch 'S-1-5-32-545') {
+        Fail-Verification "$($standardUser.Name)'s token does not carry BUILTIN\Users; the logon is not the one intended"
+    }
+    Write-Host "   OK: $($standardUser.Name)'s token has Users and not Administrators"
 
-$r = Invoke-AsStandardUser -User $standardUser -FilePath $venvPython `
-    -ArgumentList @('-I', $depsScript, '--cli', (Join-Path $chocoBin "$cli.exe"), '--tool', 'grype') `
-    -WorkingDirectory $userWork
-if ($r.Rc -ne 0) {
-    Fail-Verification "ashx dependencies install --tool grype as the unprivileged user $($standardUser.Name) failed (assert_dependencies_install.py exit $($r.Rc))"
+    $r = Invoke-AsStandardUser -User $standardUser -FilePath $venvPython `
+        -ArgumentList @('-I', $depsScript, '--cli', (Join-Path $chocoBin "$cli.exe"), '--tool', 'grype') `
+        -WorkingDirectory $userWork
+    if ($r.Rc -ne 0) {
+        Fail-Verification "ashx dependencies install --tool grype as the unprivileged user $($standardUser.Name) failed (assert_dependencies_install.py exit $($r.Rc))"
+    }
+    $installedTool = ($r.Out.Trim() -split "`r?`n" | Select-Object -Last 1) | ConvertFrom-Json
+    # The install went to that user's home and the file is theirs, which is what makes this an
+    # unprivileged install and not the runner account's.
+    if ($installedTool.home -ieq $HOME -or -not $installedTool.binary.StartsWith($installedTool.home, [StringComparison]::OrdinalIgnoreCase)) {
+        Fail-Verification "grype landed at $($installedTool.binary), not under $($standardUser.Name)'s home $($installedTool.home)"
+    }
+    $owner = (Get-Acl -LiteralPath $installedTool.binary).Owner
+    if ($owner -notlike "*\$($standardUser.Name)") {
+        Fail-Verification "$($installedTool.binary) is owned by $owner, not by $($standardUser.Name)"
+    }
+    Write-Host "   OK: $($installedTool.tool) $($installedTool.version) at $($installedTool.binary), owned by $owner"
+} finally {
+    Remove-StandardUser -User $standardUser
+    if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
 }
-$installedTool = ($r.Out.Trim() -split "`r?`n" | Select-Object -Last 1) | ConvertFrom-Json
-# The install went to that user's home and the file is theirs, which is what makes this an
-# unprivileged install and not the runner account's.
-if ($installedTool.home -ieq $HOME -or -not $installedTool.binary.StartsWith($installedTool.home, [StringComparison]::OrdinalIgnoreCase)) {
-    Fail-Verification "grype landed at $($installedTool.binary), not under $($standardUser.Name)'s home $($installedTool.home)"
-}
-$owner = (Get-Acl -LiteralPath $installedTool.binary).Owner
-if ($owner -notlike "*\$($standardUser.Name)") {
-    Fail-Verification "$($installedTool.binary) is owned by $owner, not by $($standardUser.Name)"
-}
-Write-Host "   OK: $($installedTool.tool) $($installedTool.version) at $($installedTool.binary), owned by $owner"
-Remove-StandardUser -User $standardUser
-Remove-Item -LiteralPath $userWork -Recurse -Force
 
 Write-Host '== 8. uninstall drops the venv, the shims and the package record'
 $r = Invoke-Choco -Arguments @('uninstall', 'ash')

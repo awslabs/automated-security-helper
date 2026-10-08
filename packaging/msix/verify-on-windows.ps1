@@ -982,13 +982,20 @@ if (-not (Select-String -LiteralPath $negativeLog -SimpleMatch 'exit code 0 (not
 }
 Write-Host '   OK: rejected for exit code 0'
 
-# The real clean output, judged as if it were a findings outcome, must be rejected.
+# The real clean output, judged as if it were a findings outcome, must be rejected, and for
+# its exit code: under --expect-reject the problems are plain lines, so an rc of 1 for some
+# other reason (an unreadable report, a wrong count) would otherwise pass unnoticed.
+$cleanNegativeLog = Join-Path $work 'negative-clean-as-findings.log'
 Invoke-Harness (Join-Path $repoRoot 'scripts/e2e/assert_outcome.py') `
     --output-dir (Join-Path $scans 'msix-clean\out') --rc 0 `
-    --expect-rc 2 --min-findings 1 --require-scanner detect-secrets --selected detect-secrets --expect-reject
+    --expect-rc 2 --min-findings 1 --require-scanner detect-secrets --selected detect-secrets --expect-reject *> $cleanNegativeLog
 $negativeExit = $LASTEXITCODE
+Get-Content -LiteralPath $cleanNegativeLog | ForEach-Object { Write-Host "   | $_" }
 if ($negativeExit -ne 1) {
     Fail "NEGATIVE CONTROL: assert_outcome.py returned $negativeExit on a clean output expected to hold findings; expected 1"
+}
+if (-not (Select-String -LiteralPath $cleanNegativeLog -SimpleMatch '[expect-rc 2] exit code 0 (nothing actionable), expected exactly 2' -Quiet)) {
+    Fail 'NEGATIVE CONTROL: assert_outcome.py rejected the clean output, but not for its exit code 0'
 }
 Write-Host '   OK: the clean output was rejected as a findings outcome'
 

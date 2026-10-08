@@ -229,6 +229,69 @@ def test_windows_negative_controls_ask_for_their_rejection(leg):
         )
 
 
+# What a rejected exit code reads like in the verdict. Every negative control on the
+# shared verdict plants a wrong exit code, so this is the reason each must check.
+EXIT_CODE_REASON = "exit code 0 (nothing actionable), expected exactly 2"
+# How far after the call its reason check may sit.
+REASON_WINDOW = 25
+
+
+def _rejection_calls(text):
+    """Line indexes of every call that passes --expect-reject (or -ExpectReject)."""
+    lines = text.splitlines()
+    return [
+        i
+        for i, line in enumerate(lines)
+        if _asks_for_rejection(line)
+        and not line.lstrip().startswith("#")
+        and "$arguments" not in line
+    ]
+
+
+def _unjudged_rejections(text):
+    """Calls asking for a rejection with no check of its reason soon after.
+
+    Under --expect-reject the problems print as plain lines, so a control that checks only
+    the exit code passes when the rejection happened for another reason (a missing report,
+    a wrong count). Each call must be followed by a check that the planted exit code is
+    what was rejected.
+    """
+    lines = text.splitlines()
+    unjudged = []
+    for index in _rejection_calls(text):
+        after = lines[index + 1 : index + 1 + REASON_WINDOW]
+        if not any(
+            EXIT_CODE_REASON in line and not line.lstrip().startswith("#")
+            for line in after
+        ):
+            unjudged.append(lines[index].strip())
+    return unjudged
+
+
+@pytest.mark.parametrize("leg", sorted(WINDOWS_LEGS))
+def test_every_expected_rejection_is_judged_for_its_reason(leg):
+    text = WINDOWS_LEGS[leg].read_text(encoding="utf-8")
+    assert _rejection_calls(text), f"{leg}: no --expect-reject call found"
+    assert _unjudged_rejections(text) == []
+
+
+def test_a_rejection_judged_by_exit_code_alone_is_caught():
+    # The planted negative: the shape winget's control had, rc checked and reason not.
+    planted = """
+$code = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-x' -ExpectReject
+if ($code -ne 1) {
+    Fail "expected 1"
+}
+"""
+    assert _unjudged_rejections(planted) == [
+        "$code = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-x' -ExpectReject"
+    ]
+    judged = planted + (
+        f"if (-not (Select-String -SimpleMatch '{EXIT_CODE_REASON}' -Quiet)) {{ Fail 'x' }}\n"
+    )
+    assert _unjudged_rejections(judged) == []
+
+
 def test_cli_incomplete_case_requires_the_named_scanner(tmp_path):
     out = _write(
         tmp_path,
