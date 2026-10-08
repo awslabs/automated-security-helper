@@ -622,8 +622,14 @@ class TestTheFlag:
         "argv,expected",
         [
             ([], None),
-            (["--allow-stale-content-db"], "content_db_staleness=warn"),
-            (["--no-allow-stale-content-db"], "content_db_staleness=fail"),
+            (
+                ["--allow-stale-content-db"],
+                ["content_db_staleness=warn", "content_db_staleness_overrides=[]"],
+            ),
+            (
+                ["--no-allow-stale-content-db"],
+                ["content_db_staleness=fail", "content_db_staleness_overrides=[]"],
+            ),
         ],
     )
     def test_the_cli_flag_becomes_the_override(self, tmp_path, argv, expected):
@@ -648,12 +654,189 @@ class TestTheFlag:
         staleness_overrides = [
             o for o in overrides if o.startswith("content_db_staleness")
         ]
-        assert staleness_overrides == ([expected] if expected else [])
+        assert staleness_overrides == (expected or [])
 
     def test_a_runtime_patch_cannot_downgrade_the_policy(self):
         from automated_security_helper.config.ash_config import RuntimeOverridesConfig
 
         assert "/content_db_staleness" in RuntimeOverridesConfig().denied_paths
+
+
+# --------------------------------------------------------------------------- per database
+
+
+def _overrides(*entries: dict) -> list:
+    """Validated ``content_db_staleness_overrides`` entries, as a loaded config holds them."""
+    return AshConfig(
+        project_name="x", content_db_staleness_overrides=list(entries)
+    ).content_db_staleness_overrides
+
+
+def _relax(database: str, expiration: str = "2999-01-01", policy: str = "warn") -> dict:
+    return {
+        "database": database,
+        "policy": policy,
+        "expiration": expiration,
+        "reason": "upstream stopped publishing",
+    }
+
+
+class TestPerDatabaseOverrides:
+    def test_the_default_has_no_overrides_and_still_fails_a_stale_database(
+        self, tmp_path
+    ):
+        config = AshConfig(project_name="x")
+        assert config.content_db_staleness_overrides == []
+        assert get_default_config().content_db_staleness_overrides == []
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        records = staleness.assess_scanner(
+            scanner,
+            sarif,
+            staleness.resolve_policy(config),
+            overrides=staleness.resolve_overrides(config),
+        )
+        assert [(r.name, r.enforced, r.policy_source) for r in records] == [
+            ("trivy-db", True, None)
+        ]
+        assert "policy_source" not in records[0].to_dict()
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+
+    def test_an_override_relaxes_only_the_database_it_names(self, tmp_path):
+        overrides = _overrides(_relax("trivy-db"))
+        trivy = _trivy_case(tmp_path, _over("trivy-db"))
+        grype = _grype_case(tmp_path, _over("grype-db"))
+        trivy_sarif, grype_sarif = _sarif("trivy-repo"), _sarif("grype")
+        (trivy_record,) = staleness.assess_scanner(
+            trivy, trivy_sarif, cdb.STALENESS_FAIL, overrides=overrides
+        )
+        (grype_record,) = staleness.assess_scanner(
+            grype, grype_sarif, cdb.STALENESS_FAIL, overrides=overrides
+        )
+
+        assert trivy_record.stale and not trivy_record.enforced
+        assert trivy_record.policy == "warn"
+        assert "2999-01-01T00:00:00Z" in (trivy_record.policy_source or "")
+        assert "content_db_staleness_overrides entry" in trivy_record.message()
+        assert grype_record.stale and grype_record.enforced
+        assert grype_record.policy_source is None
+
+        # Alone, the relaxed database passes and still carries the warning.
+        relaxed = _model(trivy_sarif)
+        assert _exit_code(tmp_path, relaxed) == 0
+        notes = _notifications(_reports(relaxed)["sarif"])
+        assert [n["level"] for n in notes] == ["warning"]
+        flat = json.loads(_reports(relaxed)["flat"])["content_databases"]
+        assert [(d["name"], d["policy"], d["enforced"]) for d in flat] == [
+            ("trivy-db", "warn", False)
+        ]
+        assert "policy_source" in flat[0]
+        # Together, the database it does not name still fails the scan.
+        both = _aggregate(trivy_sarif, grype_sarif)
+        assert [r.name for r in staleness.stale_content_databases(both, True)] == [
+            "grype-db"
+        ]
+        assert _exit_code(tmp_path, both) == 1
+
+    def test_an_expired_override_is_ignored_with_a_warning(self, tmp_path, caplog):
+        overrides = _overrides(_relax("trivy-db", expiration="2020-01-01"))
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        with caplog.at_level("WARNING"):
+            (record,) = staleness.assess_scanner(
+                scanner, sarif, cdb.STALENESS_FAIL, overrides=overrides
+            )
+        assert record.enforced and record.policy_source is None
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+        assert any(
+            "expired at 2020-01-01T00:00:00Z and is ignored" in m
+            for m in caplog.messages
+        ), caplog.messages
+
+    def test_expiry_is_midnight_utc_on_the_expiration_date(self):
+        (entry,) = _overrides(_relax("trivy-db", expiration="2026-10-11"))
+        assert entry.expires_at == datetime(2026, 10, 11, tzinfo=UTC)
+        assert not entry.is_expired(datetime(2026, 10, 10, 23, 59, 59, tzinfo=UTC))
+        assert entry.is_expired(datetime(2026, 10, 11, 0, 0, 0, tzinfo=UTC))
+        assert entry.is_expired(datetime(2026, 10, 12, tzinfo=UTC))
+
+    def test_an_override_can_also_tighten(self, tmp_path):
+        overrides = _overrides(_relax("trivy-db", policy="fail"))
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_WARN, overrides=overrides
+        )
+        assert record.enforced
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+
+    @pytest.mark.parametrize(
+        "entry,needle",
+        [
+            ({**_relax("trivy-db"), "database": "trivy"}, "unknown content database"),
+            ({**_relax("trivy-db"), "expiration": "10/11/2026"}, "YYYY-MM-DD"),
+            ({**_relax("trivy-db"), "policy": "ignore"}, "policy"),
+            ({**_relax("trivy-db"), "reason": ""}, "reason"),
+            ({**_relax("trivy-db"), "until": "never"}, "until"),
+        ],
+    )
+    def test_an_invalid_entry_is_rejected(self, entry, needle):
+        with pytest.raises(ValueError) as raised:
+            _overrides(entry)
+        assert needle in str(raised.value)
+
+    @pytest.mark.parametrize("missing", ["expiration", "reason", "database", "policy"])
+    def test_every_field_is_required(self, missing):
+        entry = _relax("trivy-db")
+        del entry[missing]
+        with pytest.raises(ValueError) as raised:
+            _overrides(entry)
+        assert missing in str(raised.value)
+
+    def test_one_entry_per_database(self):
+        with pytest.raises(ValueError) as raised:
+            _overrides(_relax("trivy-db"), _relax("trivy-db", policy="fail"))
+        assert "more than one" in str(raised.value)
+
+    @pytest.mark.parametrize("allow_stale,expected", [(False, "fail"), (True, "warn")])
+    def test_either_form_of_the_flag_clears_the_overrides(self, allow_stale, expected):
+        from_file = AshConfig(
+            project_name="x",
+            content_db_staleness_overrides=[_relax("trivy-db"), _relax("grype-db")],
+        )
+        overridden = apply_config_overrides(
+            from_file, cdb.content_db_staleness_flag_overrides(allow_stale=allow_stale)
+        )
+        assert overridden.content_db_staleness_overrides == []
+        assert staleness.resolve_policy(overridden) == expected
+
+    def test_a_runtime_patch_cannot_add_an_override(self):
+        from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+
+        assert (
+            "/content_db_staleness_overrides" in RuntimeOverridesConfig().denied_paths
+        )
+
+    def test_the_config_validator_accepts_the_key(self):
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        assert (
+            "content_db_staleness_overrides" in ConfigValidator.VALID_TOP_LEVEL_FIELDS
+        )
+
+    @pytest.mark.parametrize("relaxed,exit_code", [("trivy-db", 1), ("grype-db", 0)])
+    def test_the_executor_applies_the_overrides_from_the_config(
+        self, tmp_path, offline_grype, test_plugin_context, relaxed, exit_code
+    ):
+        scanner = offline_grype(timedelta(days=10))
+        test_plugin_context.config = AshConfig(
+            project_name="x", content_db_staleness_overrides=[_relax(relaxed)]
+        )
+        model = _run_through_executor(scanner, test_plugin_context)
+        assert _exit_code(tmp_path, model) == exit_code
+        assert [r.name for r in staleness.stale_content_databases(model)] == [
+            "grype-db"
+        ]
 
 
 # --------------------------------------------------------------------------- the registry
