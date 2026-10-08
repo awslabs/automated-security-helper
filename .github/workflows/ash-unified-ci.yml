@@ -603,7 +603,7 @@ jobs:
           ASH_GHA_BUILD_CACHE_EXPORT: max
         run: |
           start=$(date +%s)
-          ash build-image --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ashx build-image --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
           echo "image build took $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Cache report: image-layers"
         if: ${{ !cancelled() }}

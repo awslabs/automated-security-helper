@@ -87,7 +87,7 @@ class TestCoverage:
         assert _missing_entries(bumped, THIRD_PARTY_LICENSES) == ["syft"]
 
     def test_opengrep_matches_the_version_the_scanner_installs(self):
-        """opengrep reaches the image through `ash dependencies install`, which
+        """opengrep reaches the image through `ashx dependencies install`, which
         installs the scanner's configured default -- not through TOOL_VERSIONS on
         every branch. The build checks `opengrep --version` too; this catches a
         default bump before an image is built."""
@@ -315,10 +315,10 @@ class TestTheDockerfileInstallsEveryEntry:
         assert declared < first_install
 
     def test_verification_runs_after_ash_dependencies_install(self):
-        """opengrep only exists once `ash dependencies install` has run."""
+        """opengrep only exists once `ashx dependencies install` has run."""
         core = _core_stage(DOCKERFILE.read_text())
         assert core.index("RUN install-pinned-tool --verify-third-party") > core.index(
-            'ash dependencies install --bin-path "${ASH_BIN_PATH}"'
+            'ashx dependencies install --bin-path "${ASH_BIN_PATH}"'
         )
 
 
@@ -429,14 +429,14 @@ class TestThePythonTools:
         lines = [
             line
             for line in DOCKERFILE.read_text().splitlines()
-            if "ash dependencies install --bin-path" in line
+            if "ashx dependencies install --bin-path" in line
             and not line.lstrip().startswith("#")
         ]
         assert len(lines) == 2, lines
         text = DOCKERFILE.read_text()
         for line in lines:
             assert line.strip() == (
-                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}'
+                'ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}'
             ), line
         assert (
             text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
@@ -447,7 +447,7 @@ class TestThePythonTools:
         staged = core.index(
             "install-pinned-tool --licenses-only bandit checkov semgrep"
         )
-        assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
+        assert core.index('ashx dependencies install --bin-path "${ASH_BIN_PATH}"') < (
             staged
         )
         assert staged < core.index("RUN install-pinned-tool --verify-third-party")

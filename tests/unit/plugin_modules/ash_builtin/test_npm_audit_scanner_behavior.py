@@ -476,7 +476,7 @@ def test_offline_mode_adds_the_offline_flag_and_disables_corepack_network(
 def test_offline_flag_set_after_config_built_reaches_npm(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
-    """``ash scan --offline`` in local mode sets ASH_OFFLINE after configs exist.
+    """``ashx scan --offline`` in local mode sets ASH_OFFLINE after configs exist.
 
     The option used to default to ``is_offline_mode()`` at construction, and
     ``ScannerConfigSegment`` constructs its defaults at import, so this order ran

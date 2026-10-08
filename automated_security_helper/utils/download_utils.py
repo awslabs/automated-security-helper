@@ -1233,7 +1233,7 @@ def find_verified_pinned_executable(
 
     Why this exists: ASH's container image installs syft, grype and trivy into
     /usr/local/bin from their pinned release assets, and then runs
-    ``ash dependencies install`` twice -- once as root, once as the non-root user
+    ``ashx dependencies install`` twice -- once as root, once as the non-root user
     -- which installed the pinned grype and syft again into ASH_BIN_PATH each time.
     Each copy is a separate image layer, 167 MB for the two tools per stage.
 
@@ -1379,7 +1379,7 @@ def pinned_install_already_satisfied(
 ) -> "Optional[VerifiedPresentTool]":
     """For an argv built by ``create_pinned_tool_install_command``: is it a no-op?
 
-    ``ash dependencies install`` runs each plugin's install commands as argv lists
+    ``ashx dependencies install`` runs each plugin's install commands as argv lists
     and only sees an exit code, so a pinned install that found its tool already
     present would read as INSTALLED. Calling this first lets the installer skip
     the subprocess and report the tool as present and verified instead, naming the

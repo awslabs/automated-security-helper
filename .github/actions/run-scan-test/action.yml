@@ -145,7 +145,7 @@ runs:
       shell: bash
       run: mkdir -p .ash/ash_output
 
-    # The python-local legs run `ash dependencies install`, which downloads the pinned
+    # The python-local legs run `ashx dependencies install`, which downloads the pinned
     # scanner release assets. Restored here, re-verified by ASH on every use, saved
     # after the scan from a push to main only. See the action for what it holds.
     - name: Restore the tool download cache

@@ -407,7 +407,7 @@ RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
 # opengrep has no release archive for install-pinned-tool to read license files from:
-# it is a bare executable that `ash dependencies install` puts in place below. So its
+# it is a bare executable that `ashx dependencies install` puts in place below. So its
 # license files are fetched on their own, each pinned by SHA256 and by the upstream
 # commit of the release the image carries. uv is not listed: `install-pinned-tool uv`
 # above already fetched its URL-pinned license files, because ASH_THIRD_PARTY_DIR was
@@ -469,7 +469,7 @@ RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
 #
 # Every bundled third-party tool has its license files, they match their pins, and
 # they describe the release actually on PATH (each tool's --version is checked).
-# After `ash dependencies install`, which is what puts opengrep in place. Writes
+# After `ashx dependencies install`, which is what puts opengrep in place. Writes
 # ${ASH_THIRD_PARTY_DIR}/index.json, the list of what the image bundles.
 #
 RUN install-pinned-tool --verify-third-party

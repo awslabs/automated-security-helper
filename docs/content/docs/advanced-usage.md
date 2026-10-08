@@ -123,15 +123,15 @@ then passes and every report names the stale database. See
 
 Offline mode is decided when each scanner runs, from these sources in order:
 
-1. ASH's offline mode: `--offline` on `ash scan`, `ASH_OFFLINE=true` in the
-   environment, or an image built with `ash build-image --offline`. It applies to
+1. ASH's offline mode: `--offline` on `ashx scan`, `ASH_OFFLINE=true` in the
+   environment, or an image built with `ashx build-image --offline`. It applies to
    every scanner, and no scanner option turns it off.
 2. A scanner's own `options.offline: true` (checkov, grype, npm-audit, opengrep,
    semgrep, syft, trivy-repo). It runs that one scanner offline while the rest of the
    scan stays online.
 
 `options.offline: false` is the default and means "follow ASH's offline mode". It does
-not put a scanner back online during an `--offline` scan; `ash config init` writes
+not put a scanner back online during an `--offline` scan; `ashx config init` writes
 `offline: false` for every scanner that has the option, so a generated config would
 otherwise undo the flag.
 
@@ -148,7 +148,7 @@ in `--offline-semgrep-rulesets` (space-separated, default `p/ci`) into
 `/deps/.semgrep` and `/deps/.opengrep` and sets both variables:
 
 ```bash
-ash build-image --offline --offline-semgrep-rulesets "p/ci p/python"
+ashx build-image --offline --offline-semgrep-rulesets "p/ci p/python"
 ```
 
 For a local scan, download the rulesets yourself while online, using the same URL the
@@ -167,7 +167,7 @@ cp "$SEMGREP_RULES_CACHE_DIR"/*.yml "$OPENGREP_RULES_CACHE_DIR/"
 date -u +%Y-%m-%dT%H:%M:%SZ | tee "$SEMGREP_RULES_CACHE_DIR/.ash-rules-fetched-at" \
   > "$OPENGREP_RULES_CACHE_DIR/.ash-rules-fetched-at"
 
-ash --mode local --offline
+ashx --mode local --offline
 ```
 
 Copy the cache directories to the air-gapped host and export the same two variables
