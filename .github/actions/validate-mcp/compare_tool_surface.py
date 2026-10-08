@@ -341,7 +341,8 @@ def capture(
     the per-tool error detail on stderr, and exits 6. So a portability error does
     not cost the golden comparison: both verdicts are reported from one spawn.
     The other three methods run without `--strict`, measured to exit 0 against
-    `ashx mcp` with inspector 2.8.0, so anything else from them is a failure.
+    `ashx mcp` with inspector 2.8.0 and again with 2.9.0, so anything else from them
+    is a failure.
 
     The pin moved to 2.9.0 because 2.8.0 pins @modelcontextprotocol/client 2.0.0,
     inside the >=2.0.0 <2.2.0 range of GHSA-6qxp-vccf-f47h. On that bump this whole comparison was run
