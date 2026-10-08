@@ -24,7 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 import yaml
@@ -840,5 +840,7 @@ def test_the_flatpak_gate_runs_the_tree_gate_and_takes_its_verdict(
     ok, detail = ra.gate_flatpak_bundle(ctx, [bundle])
     tree_calls = [c for c in calls if "--flatpak-tree" in c]
     assert len(tree_calls) == 1, calls
-    assert tree_calls[0][-1].endswith("/tree/files")
+    # PureWindowsPath splits on both separators, so this holds on every runner: the
+    # gate passes str(tree / "files"), which is backslashed on windows-latest.
+    assert PureWindowsPath(tree_calls[0][-1]).parts[-2:] == ("tree", "files")
     assert ok is (tree_rc == 0), detail
