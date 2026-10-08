@@ -19,7 +19,7 @@ from typing import Annotated, ClassVar, Dict, List, Literal, Optional, Tuple
 from pydantic import Field, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import ScannerOptionsBase, release_tag
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
@@ -90,6 +90,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
     # and the digests it is verified against cannot name different releases.
     version: Annotated[
         str,
+        release_tag("scanners.opengrep.options.version"),
         Field(description="Version of OpenGrep to use."),
     ] = TOOL_VERSIONS["opengrep"]
 

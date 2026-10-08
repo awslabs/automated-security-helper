@@ -389,3 +389,38 @@ def test_a_value_assigned_after_validation_does_not_reach_any_install_path(tmp_p
     run.assert_not_called()
     assert verdict.status == "unverifiable"
     assert verdict.requirement is None
+
+
+@pytest.mark.parametrize(
+    "value", ["v1.2/../../other/releases/download/x", "v1.2?x=1", "v1.2#x", "latest"]
+)
+def test_an_opengrep_version_that_is_not_a_release_tag_never_reaches_a_url(
+    tmp_path, value
+):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+    )
+    from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
+
+    source = tmp_path / "repo"
+    (source / ".ash").mkdir(parents=True)
+    (source / ".ash" / ".ash.yaml").write_text(
+        "project_name: scanned\nscanners:\n  opengrep:\n    options:\n"
+        f"      version: {value!r}\n"
+    )
+    config = resolve_config(source_dir=source)
+    with patch.object(UVToolRunner, "is_uv_available", return_value=False):
+        scanner = OpengrepScanner(
+            config=config.get_plugin_config("scanner", "opengrep"),
+            context=_scanner_context(source, tmp_path, config),
+        )
+    assert scanner.config.options.version == TOOL_VERSIONS["opengrep"]
+    assert value not in repr(scanner.custom_install_commands)
+
+
+def test_an_opengrep_release_tag_from_the_operator_is_kept(tmp_path):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScannerConfigOptions,
+    )
+
+    assert OpengrepScannerConfigOptions(version="v1.15.1").version == "v1.15.1"
