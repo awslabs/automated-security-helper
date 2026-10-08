@@ -155,7 +155,7 @@ jobs:
         with:
           # The same uv the container legs install (packaging/verify-lib.sh), which is
           # the floor pyproject.toml declares.
-          version: "0.12.19"
+          version: "0.12.21"
           # Stated rather than left out: the default ("auto") turns the cache on for a
           # push on a GitHub-hosted runner, a cache in this public repository is
           # readable by anyone, and .github/scripts/assert-publish-surfaces.py refuses
