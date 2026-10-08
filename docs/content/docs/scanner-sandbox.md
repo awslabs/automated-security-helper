@@ -63,8 +63,15 @@ it needs.
   `AUTH`, `CREDENTIAL`, `API_KEY` or `SESSION`, and any value carrying
   `user:password@` in a URL, is dropped unless the scanner names that exact variable
   (snyk-code names `SNYK_TOKEN`). Cloud credentials and tokens are not passed in.
-- No local IPC endpoint is reachable: not the Docker or Podman socket, the session
-  bus, `$SSH_AUTH_SOCK`, nor anything else under `/run`.
+- No local IPC endpoint is reachable, with or without a network: not the Docker or
+  Podman socket, the session bus, `$SSH_AUTH_SOCK`, the journal, nor a socket in a
+  directory the sandbox mounts, such as the Nix daemon's under `/nix`. On Linux every
+  backend refuses `socket(AF_UNIX)` and datagram `socketpair()` with a seccomp filter
+  (see Landlock below), so neither a socket path nor an abstract socket can be
+  reached. The variables that name these endpoints (`SSH_AUTH_SOCK`,
+  `DBUS_SESSION_BUS_ADDRESS`, `DOCKER_HOST`, `CONTAINER_HOST`, `XDG_RUNTIME_DIR`)
+  are not passed in. firejail sets `DBUS_SESSION_BUS_ADDRESS` itself, to a path of
+  its own that `--dbus-user=none` leaves unserved.
 - A results directory that is, or is reached through, a symlink is refused (the
   scanner is recorded `MISSING`). The default output directory is inside the source
   tree, so the scanned repository could otherwise plant one pointing anywhere.
@@ -244,8 +251,10 @@ Out of scope:
   this; review the plugin modules a repository's config names before you scan it.
 - Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
   fork until a limit stops it; the existing per-scanner `scan_timeout` bounds how long.
-- A scanner allowed a network under bwrap shares the host's network namespace, which
-  includes abstract Unix sockets bound by host processes.
+- A scanner allowed a network shares the host's network, so TCP and UDP services
+  listening on the host, loopback included, are reachable from it under every
+  backend. Abstract Unix sockets bound by host processes are not: the socket filter
+  refuses Unix sockets.
 - A scanner allowed a network can still send what it can read (the source tree)
   wherever it likes. The online allowlist is per scanner, not per host. Host-level
   filtering would need a proxy inside the sandbox, which tools can bypass unless the
@@ -283,6 +292,15 @@ network namespaces. It needs no setuid binary on distributions that allow unpriv
 user namespaces. ASH passes `--die-with-parent` and `--new-session`, so a scanner
 cannot outlive ASH or inject keystrokes into the terminal through `TIOCSTI`.
 
+bwrap's mounts hide `/run` and `$HOME`, but not a Unix socket inside a directory it
+does mount (the Nix daemon's socket is under `/nix`), and a scanner with a network
+shares the host's network namespace and every abstract Unix socket bound there. So
+the scanner is started through the Landlock wrapper in `--socket-filter` mode, which
+installs only its seccomp socket filter (described under Landlock) and then execs the
+scanner. IP sockets are left to the network namespace, so a tool can still use its own
+loopback when it has no network. ASH's probe runs the filter inside bwrap once, so an
+architecture the filter does not cover makes bwrap unavailable rather than unfiltered.
+
 Ubuntu 23.10 and later restrict unprivileged user namespaces through AppArmor
 (`kernel.apparmor_restrict_unprivileged_userns=1`). Install bubblewrap from the
 distribution (`apt install bubblewrap`); if `bwrap --unshare-all --ro-bind / / true`
@@ -308,7 +326,9 @@ makes `/` read-only, blacklists the container runtime sockets, `/run/user/<uid>`
 `$SSH_AUTH_SOCK`, whitelists inside `$HOME` (and `/tmp`) only the paths the policy
 lists, uses `--private-tmp` when the policy lists nothing under `/tmp`, and makes the
 results directory read-write. Paths outside `$HOME` that your user can read remain readable, and scanner
-caches are mounted read-write because firejail has no throwaway overlay. Use bwrap
+caches are mounted read-write because firejail has no throwaway overlay. Because
+everything outside `$HOME` stays visible, `/run` and its sockets included, the
+scanner is started through the same seccomp socket filter as under bwrap. Use bwrap
 when you can.
 
 ### Linux: Landlock
@@ -323,7 +343,10 @@ library only) that restricts itself and then `exec`s the scanner:
 - Sockets: Landlock does not mediate `connect()` on a Unix socket path, so a scanner
   that could create a Unix socket could talk to the Docker socket or the session bus
   whatever the filesystem rules say. A seccomp filter therefore refuses
-  `socket(AF_UNIX)` always (`socketpair`, used for pipes, still works), refuses
+  `socket(AF_UNIX)` always. `socketpair()` of the stream and seqpacket kinds, which
+  tools use for pipes, still works; a datagram pair is refused, because a datagram
+  socket can `sendto()` or `connect()` any datagram socket by path, such as the
+  journal's `/dev/log`, however it was created. The filter also refuses
   `socket()` for every family when the scanner has no network, which blocks UDP and
   DNS too, and refuses `io_uring_setup`, because io_uring can create sockets without
   the `socket` syscall. Landlock's own network rules (ABI 4, Linux 6.7) cover only TCP

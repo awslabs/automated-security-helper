@@ -7,12 +7,20 @@ restrictions apply to it and everything it execs, and to nothing in ASH.
 ``--abi`` prints the kernel's Landlock ABI version and exits 0, or exits 1 when
 Landlock is unavailable.
 
+``--socket-filter unix|all -- argv...`` applies only the seccomp filter (``unix``: the
+filter a scanner with a network gets; ``all``: also refuse every ``socket()``) and execs
+argv in place. The bwrap and firejail backends run the scanner through it inside
+their sandbox: their mounts hide most socket paths, but not one that sits in a mounted
+directory (the Nix daemon's socket is under /nix), and with a network the scanner shares
+the host's network namespace and with it every abstract Unix socket bound there.
+
 Filesystem: Landlock rules grant read and execute beneath ``read_only`` and full access
 beneath ``writable``; every other path is denied. Sockets: a seccomp filter makes
-``socket(AF_UNIX)`` fail with EACCES and ``io_uring_setup`` with ENOSYS always (see
-``apply_socket_seccomp``), and ``socket()`` fail for every family when the policy has
-no network. Landlock's own network rules cover TCP only, so they are added on ABI 4+
-as a second layer, not relied on. ABI 6+ also scopes abstract Unix sockets and signals.
+``socket(AF_UNIX)`` and a datagram ``socketpair()`` fail with EACCES and
+``io_uring_setup`` with ENOSYS always (see ``apply_socket_seccomp``), and ``socket()``
+fail for every family when the policy has no network. Landlock's own network rules
+cover TCP only, so they are added on ABI 4+ as a second layer, not relied on. ABI 6+
+also scopes abstract Unix sockets and signals.
 
 Any failure to apply a restriction is fatal (exit 126): this program never execs the
 scanner with less confinement than it was asked for.
@@ -28,7 +36,7 @@ import stat
 import struct
 import time
 import sys
-from typing import Any, Callable, Dict, List, NoReturn
+from typing import Any, Callable, Dict, List, NoReturn, Tuple
 
 SYS_LANDLOCK_CREATE_RULESET = 444
 SYS_LANDLOCK_ADD_RULE = 445
@@ -72,6 +80,7 @@ SECCOMP_MODE_FILTER = 2
 
 # seccomp-bpf
 BPF_LD_W_ABS = 0x20
+BPF_ALU_AND_K = 0x54
 BPF_JMP_JEQ_K = 0x15
 BPF_JMP_JGE_K = 0x35
 BPF_RET_K = 0x06
@@ -81,13 +90,20 @@ SECCOMP_RET_KILL_PROCESS = 0x80000000
 SECCOMP_DATA_NR = 0
 SECCOMP_DATA_ARCH = 4
 SECCOMP_DATA_ARG0 = 16  # low 32 bits on little-endian
+SECCOMP_DATA_ARG1 = 24
 AF_UNIX = 1
+SOCK_STREAM = 1
+SOCK_SEQPACKET = 5
+#: The type bits of socket()'s and socketpair()'s second argument, without
+#: SOCK_NONBLOCK and SOCK_CLOEXEC (the kernel's SOCK_TYPE_MASK).
+SOCK_TYPE_MASK = 0xF
 
-# (audit arch, socket nr, io_uring_setup nr, x32 bit or None)
+# (audit arch, socket nr, socketpair nr, io_uring_setup nr, x32 bit or None), from
+# the kernel's arch/x86/entry/syscalls/syscall_64.tbl and include/uapi/asm-generic/unistd.h.
 ARCHES = {
-    "x86_64": (0xC000003E, 41, 425, 0x40000000),
-    "aarch64": (0xC00000B7, 198, 425, None),
-    "arm64": (0xC00000B7, 198, 425, None),
+    "x86_64": (0xC000003E, 41, 53, 425, 0x40000000),
+    "aarch64": (0xC00000B7, 198, 199, 425, None),
+    "arm64": (0xC00000B7, 198, 199, 425, None),
 }
 
 libc = ctypes.CDLL(None, use_errno=True)
@@ -184,21 +200,26 @@ class SockFprog(ctypes.Structure):
     _fields_ = [("len", ctypes.c_ushort), ("filter", ctypes.POINTER(SockFilter))]
 
 
-def apply_socket_seccomp(network: bool) -> None:
-    """Refuse socket creation the filesystem rules cannot see.
+def socket_filter(machine: str, network: bool) -> List[Tuple[int, int, int, int]]:
+    """The seccomp program ``apply_socket_seccomp`` installs, as (code, jt, jf, k).
 
-    Landlock does not mediate connect() on a Unix-domain socket path, so a
-    sandboxed process that could create an AF_UNIX socket could talk to the Docker
+    Landlock does not mediate connect() or sendto() on a Unix-domain socket path, so
+    a sandboxed process that could create an AF_UNIX socket could talk to the Docker
     socket or the session bus whatever the filesystem rules say. socket(AF_UNIX) is
-    therefore refused always; socketpair(), which tools use for pipes, is a separate
-    syscall and stays allowed. Without a network, socket() is refused for every
-    family. io_uring_setup is refused always, because io_uring can create sockets
-    without the socket syscall.
+    therefore refused always. socketpair() is a separate syscall, and the pairs tools
+    use for pipes (stream, or seqpacket) stay allowed: they are connected to each
+    other at birth, connect() on them fails with EISCONN, and a seqpacket send
+    ignores any address. A datagram pair is refused, because a datagram socket can
+    sendto() or connect() any datagram socket by path, the journal's /dev/log
+    included, however it was created; SOCK_RAW is refused with it, as the kernel
+    makes a Unix SOCK_RAW a datagram socket. Without a network, socket() is refused
+    for every family. io_uring_setup is refused always, because io_uring can create
+    sockets without the socket syscall.
+
+    Separate from installing it so the tests can check the program for every
+    architecture in ARCHES, not only the one they run on.
     """
-    machine = platform.machine().lower()
-    if machine not in ARCHES:
-        fail(f"no seccomp socket filter for architecture {machine}")
-    audit_arch, nr_socket, nr_io_uring_setup, x32_bit = ARCHES[machine]
+    audit_arch, nr_socket, nr_socketpair, nr_io_uring_setup, x32_bit = ARCHES[machine]
     refuse = SECCOMP_RET_ERRNO | errno.EACCES
     prog = [
         (BPF_LD_W_ABS, 0, 0, SECCOMP_DATA_ARCH),
@@ -219,6 +240,17 @@ def apply_socket_seccomp(network: bool) -> None:
         (BPF_JMP_JEQ_K, 0, 1, nr_io_uring_setup),
         (BPF_RET_K, 0, 0, SECCOMP_RET_ERRNO | errno.ENOSYS),
     ]
+    # socketpair: allow a stream or seqpacket pair, refuse every other type. The
+    # accumulator still holds the syscall number on the not-socketpair branch.
+    prog += [
+        (BPF_JMP_JEQ_K, 0, 6, nr_socketpair),
+        (BPF_LD_W_ABS, 0, 0, SECCOMP_DATA_ARG1),
+        (BPF_ALU_AND_K, 0, 0, SOCK_TYPE_MASK),
+        (BPF_JMP_JEQ_K, 2, 0, SOCK_STREAM),
+        (BPF_JMP_JEQ_K, 1, 0, SOCK_SEQPACKET),
+        (BPF_RET_K, 0, 0, refuse),
+        (BPF_RET_K, 0, 0, SECCOMP_RET_ALLOW),
+    ]
     if network:
         prog += [
             (BPF_JMP_JEQ_K, 0, 3, nr_socket),
@@ -232,6 +264,15 @@ def apply_socket_seccomp(network: bool) -> None:
             (BPF_RET_K, 0, 0, refuse),
         ]
     prog += [(BPF_RET_K, 0, 0, SECCOMP_RET_ALLOW)]
+    return prog
+
+
+def apply_socket_seccomp(network: bool) -> None:
+    """Install ``socket_filter`` for this machine; see there for what it refuses."""
+    machine = platform.machine().lower()
+    if machine not in ARCHES:
+        fail(f"no seccomp socket filter for architecture {machine}")
+    prog = socket_filter(machine, network)
     filters = (SockFilter * len(prog))(*[SockFilter(*ins) for ins in prog])
     fprog = SockFprog(len(prog), filters)
     if libc.prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, ctypes.byref(fprog), 0, 0) != 0:
@@ -249,6 +290,10 @@ def main(argv: List[str]) -> int:
             return 1
         print(abi)
         return 0
+    if argv[:1] == ["--socket-filter"]:
+        if len(argv) < 4 or argv[1] not in ("unix", "all") or argv[2] != "--":
+            fail("usage: landlock_exec.py --socket-filter unix|all -- argv...")
+        exec_with_socket_filter(argv[1] == "unix", argv[3:])
     if len(argv) < 4 or argv[0] != "--policy" or argv[2] != "--":
         fail("usage: landlock_exec.py --policy JSON -- argv...")
     policy = json.loads(argv[1])
@@ -267,6 +312,24 @@ def main(argv: List[str]) -> int:
         apply_socket_seccomp(bool(policy["network"]))
 
     return run_and_reap(command, restrict)
+
+
+def exec_with_socket_filter(allow_ip: bool, command: List[str]) -> NoReturn:
+    """Apply only the socket filter, then become ``command``, searched on PATH.
+
+    For bwrap and firejail, which run this inside their sandbox. Their own
+    namespaces end the process tree and their mounts confine the filesystem, so
+    there is nothing to reap and no Landlock domain to set up; execvp, not a fork,
+    so the scanner keeps the process the sandbox started. ``allow_ip`` leaves IP
+    sockets to the sandbox's network namespace (``unix`` mode).
+    """
+    if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        fail(f"prctl(PR_SET_NO_NEW_PRIVS): {os.strerror(ctypes.get_errno())}")
+    apply_socket_seccomp(allow_ip)
+    try:
+        os.execvp(command[0], command)
+    except OSError as e:
+        fail(f"exec {command[0]}: {e}")
 
 
 def _children(pid: int = 0) -> List[int]:

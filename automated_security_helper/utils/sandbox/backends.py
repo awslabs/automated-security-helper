@@ -31,6 +31,37 @@ from automated_security_helper.utils.sandbox.policy import (
 
 PROBE_TIMEOUT_SECONDS = 20
 
+#: The Landlock wrapper, which bwrap and firejail also run inside their sandbox for
+#: its seccomp socket filter alone (``--socket-filter``).
+LANDLOCK_EXEC = Path(__file__).with_name("landlock_exec.py")
+
+
+def _with_socket_filter(argv: Sequence[str]) -> List[str]:
+    """``argv`` started through landlock_exec.py's Unix-socket filter.
+
+    For bwrap and firejail, whose namespaces and mounts leave Unix sockets
+    reachable: one in any directory they mount (the Nix daemon's socket is under
+    /nix, and firejail shows nearly everything outside $HOME, /run included), a
+    datagram socket by path from a socketpair, and, when the scanner has a
+    network, every abstract socket in the host's network namespace (X11, some
+    session buses). The filter refuses socket(AF_UNIX), datagram socketpairs and
+    io_uring, as it does under Landlock. It does not refuse IP sockets even
+    without a network: the private network namespace already confines those, so
+    a tool may keep using its own loopback.
+
+    Runs ASH's interpreter, which every policy mounts, with -I so nothing in the
+    working directory (the scanned tree) or the environment is imported.
+    """
+    return [
+        sys.executable,
+        "-I",
+        str(LANDLOCK_EXEC),
+        "--socket-filter",
+        "unix",
+        "--",
+        *argv,
+    ]
+
 
 @dataclass
 class SpawnPlan:
@@ -90,6 +121,10 @@ def _probe_run(
         return None
     detail = (result.stderr or result.stdout or "").strip().splitlines()
     return f"exit {result.returncode}: {detail[-1] if detail else 'no output'}"
+
+
+def _true() -> str:
+    return shutil.which("true") or "/bin/true"
 
 
 def _real(path: Path) -> Path:
@@ -159,6 +194,11 @@ class BwrapBackend(SandboxBackend):
                 f"bwrap cannot create a sandbox here ({failure}). Unprivileged user "
                 "namespaces may be disabled; on Ubuntu 23.10+ use the packaged bwrap, "
                 "whose AppArmor profile allows them"
+            )
+        failure = _probe_run(base + _with_socket_filter([_true()]))
+        if failure:
+            return (
+                f"bwrap cannot apply the Unix-socket filter in its sandbox ({failure})"
             )
         with tempfile.TemporaryDirectory(prefix="ash-bwrap-probe-") as tmp:
             overlay_failure = _probe_run(
@@ -257,7 +297,7 @@ class BwrapBackend(SandboxBackend):
         if policy.cwd:
             cmd.extend(["--chdir", _real(policy.cwd).as_posix()])
         cmd.append("--")
-        cmd.extend(argv)
+        cmd.extend(_with_socket_filter(argv))
         return SpawnPlan(argv=cmd, env=policy.filter_env(env))
 
 
@@ -278,7 +318,13 @@ class FirejailBackend(SandboxBackend):
         if not found:
             return "firejail is not installed"
         self._executable = found
-        return _probe_run([found, "--quiet", "--noprofile", "--net=none", "true"])
+        failure = _probe_run(
+            [found, "--quiet", "--noprofile", "--net=none", "--"]
+            + _with_socket_filter([_true()])
+        )
+        if failure:
+            return f"firejail cannot start a sandbox with the Unix-socket filter ({failure})"
+        return None
 
     def plan(
         self, argv: Sequence[str], env: Mapping[str, str], policy: SandboxPolicy
@@ -349,15 +395,13 @@ class FirejailBackend(SandboxBackend):
         for p in writable:
             cmd.append(f"--read-write={p.as_posix()}")
         cmd.append("--")
-        cmd.extend(argv)
+        cmd.extend(_with_socket_filter(argv))
         return SpawnPlan(argv=cmd, env=policy.filter_env(env))
 
 
 # ---------------------------------------------------------------------------
 # Landlock
 # ---------------------------------------------------------------------------
-
-LANDLOCK_EXEC = Path(__file__).with_name("landlock_exec.py")
 
 
 class LandlockBackend(SandboxBackend):
@@ -391,7 +435,7 @@ class LandlockBackend(SandboxBackend):
                 "--policy",
                 policy,
                 "--",
-                shutil.which("true") or "/bin/true",
+                _true(),
             ]
         )
         if failure:

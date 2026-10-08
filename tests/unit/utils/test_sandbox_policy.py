@@ -23,7 +23,10 @@ from automated_security_helper.utils.sandbox import (
 from automated_security_helper.utils.sandbox import backends as backends_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import (
+    BACKENDS,
+    LANDLOCK_EXEC,
     BwrapBackend,
+    FirejailBackend,
     SandboxExecBackend,
     SpawnPlan,
 )
@@ -256,6 +259,112 @@ class TestBwrapCommandLine:
     def test_plan_before_probe_is_refused(self, layout):
         with pytest.raises(RuntimeError, match="probe"):
             BwrapBackend().plan(["/usr/bin/true"], {}, _policy(layout))
+
+
+class TestSocketFilterWrapper:
+    """bwrap and firejail start the scanner through the seccomp socket filter.
+
+    Their mounts hide most socket paths but not one in a directory they mount, and
+    with a network they share the host's abstract Unix sockets, so the same filter
+    Landlock uses has to run inside them. Measured on bwrap before this: the Nix
+    daemon's socket under /nix answered, offline and online.
+    """
+
+    @pytest.mark.parametrize("backend_class", [BwrapBackend, FirejailBackend])
+    @pytest.mark.parametrize("network", [False, True])
+    def test_the_scanner_runs_under_the_filter(self, layout, backend_class, network):
+        backend = backend_class()
+        backend._executable = "/usr/bin/sandbox"
+        policy = _policy(layout, SandboxRequirements(network=network))
+        argv = backend.plan(["/usr/bin/true", "--flag"], {}, policy).argv
+        # The backend's own options end at its first "--"; the rest is what runs.
+        inside = argv[argv.index("--") + 1 :]
+        assert inside == [
+            sys.executable,
+            "-I",
+            str(LANDLOCK_EXEC),
+            "--socket-filter",
+            "unix",
+            "--",
+            "/usr/bin/true",
+            "--flag",
+        ]
+
+
+#: Variables that name a local IPC endpoint: the SSH agent, the session bus, the
+#: Docker and Podman sockets, and the per-user runtime directory holding them.
+IPC_ENDPOINT_VARIABLES = {
+    "SSH_AUTH_SOCK": "/run/user/1000/ssh-agent.socket",
+    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+    "DOCKER_HOST": "unix:///run/docker.sock",
+    "CONTAINER_HOST": "unix:///run/podman/podman.sock",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+}
+
+
+def _every_declared_requirement():
+    """The sandbox requirements every bundled scanner declares on its class."""
+    import importlib
+
+    found = []
+    for module in (
+        "ash_builtin",
+        "ash_snyk_plugins",
+        "ash_trivy_plugins",
+        "ash_ferret_plugins",
+    ):
+        package = importlib.import_module(
+            f"automated_security_helper.plugin_modules.{module}"
+        )
+        for scanner in package.ASH_SCANNERS:
+            declared = getattr(scanner, "sandbox_requirements", None)
+            # detect-secrets computes its own per instance; it declares no
+            # environment, only a network.
+            if isinstance(declared, SandboxRequirements):
+                found.append(declared)
+    return found
+
+
+class TestIpcEndpointVariables:
+    """None of IPC_ENDPOINT_VARIABLES reaches a scanner, on any backend.
+
+    The sockets themselves are out of reach (the escape suite asserts that under a
+    real scan); dropping the variables keeps a scanner from learning where they
+    are and from passing the address to a tool that would use it.
+    """
+
+    @pytest.mark.parametrize("network", [False, True])
+    def test_no_declared_prefix_lets_one_through(self, layout, network):
+        declared = _every_declared_requirement()
+        assert len(declared) >= 10, "too few scanners found to mean anything"
+        everything = SandboxRequirements(
+            network=network,
+            env_prefixes=tuple(p for r in declared for p in r.env_prefixes),
+            env_names=tuple(n for r in declared for n in r.env_names),
+        )
+        env = _policy(layout, everything).filter_env(
+            {"PATH": "/usr/bin", **IPC_ENDPOINT_VARIABLES}
+        )
+        assert env["PATH"] == "/usr/bin"
+        assert not set(IPC_ENDPOINT_VARIABLES) & set(env)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+    @pytest.mark.parametrize("name", sorted(BACKENDS))
+    @pytest.mark.parametrize("network", [False, True])
+    def test_no_backend_hands_one_to_the_scanner(self, layout, name, network):
+        backend = BACKENDS[name]()
+        if hasattr(backend, "_executable"):
+            # Planning needs only the path; nothing is started.
+            backend._executable = f"/usr/bin/{name}"
+        policy = _policy(layout, SandboxRequirements(network=network))
+        plan = backend.plan(
+            ["/usr/bin/true"], {"PATH": "/usr/bin", **IPC_ENDPOINT_VARIABLES}, policy
+        )
+        try:
+            assert plan.env["PATH"] == "/usr/bin"
+            assert not set(IPC_ENDPOINT_VARIABLES) & set(plan.env), name
+        finally:
+            plan.run_cleanup()
 
 
 def _context(tmp_path, mode="bwrap"):
