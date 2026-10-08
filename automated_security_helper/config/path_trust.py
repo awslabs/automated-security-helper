@@ -55,26 +55,34 @@ def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool
 
 
 def cwd_outside_scanned_tree(
-    target: Union[str, Path], *, source_dir: Union[str, Path], config: Any = None
+    target: Union[str, Path],
+    *,
+    results_dir: Union[str, Path],
+    source_dir: Union[str, Path],
+    config: Any = None,
 ) -> Path:
-    """A working directory for a tool that reads its config from its cwd.
+    """A working directory for a tool that reads its config file from its cwd.
 
     The filesystem root of ``target``: outside the scanned tree, and with every
     path relative to it absolute. When that root is inside the tree itself (a
     source directory that is a drive root, such as a ``subst`` or mapped drive on
-    Windows), a new temporary directory outside the tree is used. A tool run from
-    a cwd on another drive writes paths from the drive root, so they still read as
-    relative to ``target``'s root. Scanning a whole filesystem leaves no
-    directory outside the tree, and the root is used.
+    Windows, or a scan of a whole filesystem), an empty ``cwd`` directory under
+    ``results_dir`` is made fresh for the run instead. It holds no config file
+    whatever tree it is in, and a sandboxed tool can enter it.
     """
     root = getattr(config, "_scanned_root", None) or source_dir
     anchor = Path(Path(os.path.abspath(target)).anchor)
     if not in_scanned_tree(anchor, root):
         return anchor
-    import tempfile
+    import shutil
 
-    candidate = Path(tempfile.mkdtemp(prefix="ash-tool-cwd-"))
-    return anchor if in_scanned_tree(candidate, root) else candidate
+    fresh = Path(os.path.abspath(results_dir)) / "cwd"
+    if fresh.is_symlink() or fresh.is_file():
+        fresh.unlink()
+    elif fresh.exists():
+        shutil.rmtree(fresh)
+    fresh.mkdir(parents=True)
+    return fresh
 
 
 def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:

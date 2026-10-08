@@ -518,6 +518,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         """
         return cwd_outside_scanned_tree(
             self._scanned_target(),
+            results_dir=results_dir,
             source_dir=self.context.source_dir,
             config=getattr(self.context, "config", None),
         )

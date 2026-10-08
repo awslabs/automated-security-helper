@@ -984,6 +984,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         """
         return cwd_outside_scanned_tree(
             self._ferret_target or Path(os.path.abspath(self.context.source_dir)),
+            results_dir=results_dir,
             source_dir=self.context.source_dir,
             config=getattr(self.context, "config", None),
         )
