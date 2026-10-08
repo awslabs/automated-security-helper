@@ -259,7 +259,7 @@ def _fetchers(latest: dict[str, str]):
             raise value
         return value
 
-    return {checker.GITHUB: lookup, checker.PYPI: lookup, checker.RUBYGEMS: lookup}
+    return dict.fromkeys(checker.DEFAULT_FETCHERS, lookup)
 
 
 class TestCheckWithMockedFetchers:
@@ -297,16 +297,37 @@ class TestExitCode:
         monkeypatch.setattr(
             checker,
             "DEFAULT_FETCHERS",
-            {checker.GITHUB: lookup, checker.PYPI: lookup, checker.RUBYGEMS: lookup},
+            dict.fromkeys(checker.DEFAULT_FETCHERS, lookup),
         )
         code = checker.main(argv)
         return code, capsys.readouterr().out
 
     def _pinned_versions(self) -> dict[str, str]:
-        return {
-            p.project: p.version
-            for p in checker.enumerate_pins(checker.load_pins_module())
-        }
+        """project -> pinned value, over the module's pins and REPO_PINS both, so a
+        stub that answers with these reports every pin current."""
+        every = (
+            checker.enumerate_pins(checker.load_pins_module())
+            + checker.enumerate_repo_pins()
+        )
+        versions = {p.project: p.version for p in every}
+        assert len(versions) == len(every), "two pins share a project key"
+        return versions
+
+    def test_main_reports_the_repo_pins_too(self, monkeypatch, capsys):
+        versions = self._pinned_versions()
+        code, out = self._run(monkeypatch, capsys, versions.__getitem__, [])
+        assert code == 0, out
+        for tool in ("kind", "winget-cli", "gradle image", "debian snapshot"):
+            assert re.search(rf"^{re.escape(tool)}\s", out, re.MULTILINE), out
+
+    def test_an_outdated_repo_pin_exits_one(self, monkeypatch, capsys):
+        versions = self._pinned_versions()
+        bumped = dict(versions, **{"kubernetes-sigs/kind": "v9.0.0"})
+        code, out = self._run(
+            monkeypatch, capsys, bumped.__getitem__, ["--fail-on-outdated"]
+        )
+        assert code == 1, out
+        assert ".github/workflows/ash-kubernetes-operator.yml:" in out
 
     def test_all_current_exits_zero_with_the_flag(self, monkeypatch, capsys):
         versions = self._pinned_versions()
@@ -491,3 +512,269 @@ class TestOnlyAllowlistedHttpsUrlsAreFetched:
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         assert checker._get_json(url) == {"ok": True}
         assert opened == [url]
+
+
+# ---------------------------------------------------------------------------
+# Pins outside tool_downloads.py
+# ---------------------------------------------------------------------------
+
+_REPO_PIN_TOOLS = {
+    "kind",
+    "kubectl",
+    "cfn-guard",
+    "winget-cli",
+    "vscode",
+    "actionlint",
+    "shellcheck",
+    "uv (packaging harnesses)",
+    "gradle image",
+    "node image",
+    "python image",
+    "kind node image",
+    "debian snapshot",
+    "ubuntu snapshot",
+}
+
+
+def _site_tree(tmp_path: Path, files: dict[str, str]) -> Path:
+    for rel, text in files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+class TestRepoPins:
+    def test_every_listed_tool_is_read_from_the_tree(self):
+        pins = checker.enumerate_repo_pins()
+        assert {p.tool for p in pins} == _REPO_PIN_TOOLS
+        for pin in pins:
+            assert pin.sites, pin
+            assert all(":" in site for site in pin.sites), pin
+
+    def test_values_are_read_not_restated(self):
+        """The version comes from the file, so editing the file moves the pin."""
+        by_tool = {p.tool: p for p in checker.enumerate_repo_pins()}
+        workflow = (
+            REPO_ROOT / ".github/workflows/ash-kubernetes-operator.yml"
+        ).read_text()
+        assert f"KIND_VERSION: {by_tool['kind'].version}" in workflow
+        gradle = by_tool["gradle image"]
+        assert gradle.project.startswith("gradle:") and gradle.version.startswith(
+            "sha256:"
+        )
+
+    def test_a_site_that_stopped_matching_is_refused(self, tmp_path):
+        """NEGATIVE CONTROL: a moved or reshaped line is an error, not a skip."""
+        root = _site_tree(tmp_path, {"w.yml": "env:\n  KIND_VERSION: v0.1.0\n"})
+        table = [
+            checker.RepoPin(
+                "kind",
+                checker.GITHUB,
+                "kubernetes-sigs/kind",
+                (checker.PinSite("w.yml", r"^  KIND_VERSION: (v[0-9.]+)$"),),
+            )
+        ]
+        assert checker.enumerate_repo_pins(root, table)[0].version == "v0.1.0"
+        (root / "w.yml").write_text("env:\n  KIND_RELEASE: v0.1.0\n")
+        with pytest.raises(checker.PinEnumerationError, match="found 0"):
+            checker.enumerate_repo_pins(root, table)
+
+    def test_an_extra_match_is_refused(self, tmp_path):
+        root = _site_tree(tmp_path, {"d": "ARG V=1.0.0\nARG V=1.0.0\n"})
+        table = [
+            checker.RepoPin(
+                "t", checker.GITHUB, "o/t", (checker.PinSite("d", r"^ARG V=(\S+)$"),)
+            )
+        ]
+        with pytest.raises(checker.PinEnumerationError, match="found 2"):
+            checker.enumerate_repo_pins(root, table)
+
+    def test_sites_that_disagree_are_a_half_applied_bump(self, tmp_path):
+        root = _site_tree(tmp_path, {"a": "ARG V=1.0.0\n", "b": "V: 1.1.0\n"})
+        table = [
+            checker.RepoPin(
+                "t",
+                checker.GITHUB,
+                "o/t",
+                (
+                    checker.PinSite("a", r"^ARG V=(\S+)$"),
+                    checker.PinSite("b", r"^V: (\S+)$"),
+                ),
+            )
+        ]
+        with pytest.raises(checker.PinEnumerationError, match="half-applied"):
+            checker.enumerate_repo_pins(root, table)
+
+    def test_a_missing_file_is_refused(self, tmp_path):
+        table = [
+            checker.RepoPin(
+                "t", checker.GITHUB, "o/t", (checker.PinSite("gone", r"(x)"),)
+            )
+        ]
+        with pytest.raises(checker.PinEnumerationError, match="does not exist"):
+            checker.enumerate_repo_pins(tmp_path, table)
+
+    def test_the_harness_uv_is_the_pyproject_floor(self):
+        """The packaging harnesses install the oldest uv ASH supports."""
+        pin = {p.tool: p for p in checker.enumerate_repo_pins()}[
+            "uv (packaging harnesses)"
+        ]
+        assert pin.version == checker.pyproject_floor("uv")
+
+    def test_pyproject_floor_reads_one_bound(self, tmp_path):
+        good = tmp_path / "good.toml"
+        good.write_text(
+            'dependencies = [\n  "uv>=0.12.21,<0.13",\n  "uvicorn>=1",\n]\n'
+        )
+        assert checker.pyproject_floor("uv", good) == "0.12.21"
+        bad = tmp_path / "bad.toml"
+        bad.write_text('dependencies = ["uvicorn>=1"]\n')
+        with pytest.raises(LookupError):
+            checker.pyproject_floor("uv", bad)
+
+
+def _repo_pin(ecosystem: str, version: str, project: str = "x") -> Any:
+    return checker.Pin(
+        tool="t",
+        version=version,
+        ecosystem=ecosystem,
+        project=project,
+        pinned_in=("f",),
+        sites=("f:1",),
+    )
+
+
+class TestRepoPinComparison:
+    def test_an_image_digest_is_compared_for_equality(self):
+        pin = _repo_pin(checker.DOCKER_HUB, "sha256:" + "a" * 64, "gradle:jdk21")
+        assert checker.compare_pin(pin, "sha256:" + "a" * 64) == "current"
+        assert checker.compare_pin(pin, "sha256:" + "b" * 64) == "outdated"
+
+    def test_a_snapshot_is_compared_by_age(self):
+        pin = _repo_pin(checker.SNAPSHOT, "20260101T000000Z")
+        assert checker.compare_pin(pin, "20260301T000000Z") == "current"
+        late = f"2026{1 + (checker.SNAPSHOT_MAX_AGE_DAYS + 31) // 30:02d}01T000000Z"
+        assert checker.compare_pin(pin, late) == "outdated"
+        assert checker.compare_pin(pin, "20251201T000000Z") == "ahead"
+
+    def test_a_harness_below_the_floor_is_outdated(self):
+        pin = _repo_pin(checker.PYPROJECT_FLOOR, "0.12.19", "uv")
+        assert checker.compare_pin(pin, "0.12.21") == "outdated"
+        assert checker.compare_pin(pin, "0.12.19") == "current"
+
+    def test_docker_hub_lookup_url(self, monkeypatch):
+        seen: list[str] = []
+        monkeypatch.setattr(
+            checker,
+            "_get_json",
+            lambda url, headers=None: seen.append(url) or {"digest": "d"},
+        )
+        assert checker.latest_docker_hub_digest("gradle:jdk21") == "d"
+        assert checker.latest_docker_hub_digest("kindest/node:v1.34.0") == "d"
+        assert seen == [
+            "https://hub.docker.com/v2/namespaces/library/repositories/gradle/tags/jdk21",
+            "https://hub.docker.com/v2/namespaces/kindest/repositories/node/tags/v1.34.0",
+        ]
+
+    def test_bump_steps_name_every_site(self):
+        pin = {p.tool: p for p in checker.enumerate_repo_pins()}["vscode"]
+        steps = checker.bump_steps(None, checker.Result(pin, "9.9.9", "outdated"))
+        for site in pin.sites:
+            assert any(step.startswith(site) for step in steps), steps
+        assert len(pin.sites) == 3
+
+
+# A census of what looks like a version or image pin under the trees CI, the
+# packaging harnesses and the editor test images live in. Each hit must be a
+# REPO_PINS site or carry a reason here; a new pinned tool with neither fails.
+_CENSUS_ROOTS = (
+    ".github/workflows",
+    ".github/actions",
+    "packaging",
+    "editors",
+    "deploy",
+)
+_CENSUS_NAMES = re.compile(r"^(Dockerfile.*|.*\.(ya?ml|sh|ps1|py))$")
+_ASSIGNMENT = re.compile(
+    r"^\s*(?:ARG\s+|export\s+|\$)?([A-Za-z0-9_]*(?:_VERSION|_SNAPSHOT|ReleaseTag))"
+    r"\s*[:=]\s*[\"']?v?[0-9]",
+    re.MULTILINE,
+)
+_TAGGED_IMAGE = re.compile(
+    r"(?<![\w./-])([a-z0-9][a-z0-9._/-]*:[A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}"
+)
+
+# Name -> why it is not a tool pin this check should follow.
+_CENSUS_EXEMPT = {
+    "PYTHON_VERSION": "a Python minor series for setup-python, not a release pin",
+    "ASH_VERSION": "ASH's own version, bumped by commitizen",
+    "RUNTIME_VERSION": "the Flatpak runtime branch the manifest targets, not a tool",
+    "FIXTURE_VERSION": "a test fixture's made-up version",
+    "MANIFEST_VERSION": "the winget manifest schema version",
+    "MinimumWingetVersion": "a floor the leg asserts, not a pin it installs",
+}
+
+
+def _census() -> list[tuple[str, str]]:
+    hits = []
+    for root in _CENSUS_ROOTS:
+        for path in sorted((REPO_ROOT / root).rglob("*")):
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            if (
+                not path.is_file()
+                or "node_modules" in path.parts
+                or "/tests/unit" in f"/{rel}"
+                or not _CENSUS_NAMES.match(path.name)
+            ):
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            hits += [(rel, m.group(1)) for m in _ASSIGNMENT.finditer(text)]
+            hits += [(rel, m.group(1)) for m in _TAGGED_IMAGE.finditer(text)]
+    return hits
+
+
+class TestPinCensus:
+    def _unaccounted(self, hits: list[tuple[str, str]]) -> list[str]:
+        by_path: dict[str, list[Any]] = {}
+        for repo_pin in checker.REPO_PINS:
+            for site in repo_pin.sites:
+                by_path.setdefault(site.path, []).append(site)
+        unaccounted = []
+        for rel, name in hits:
+            if name in _CENSUS_EXEMPT:
+                continue
+            image = name.split(":", 1)[0]
+            line_matches = any(
+                name in site.pattern or (":" in name and image in site.pattern)
+                for site in by_path.get(rel, [])
+            )
+            if not line_matches:
+                unaccounted.append(f"{rel}: {name}")
+        return sorted(set(unaccounted))
+
+    def test_every_pin_shaped_line_is_followed_or_exempt(self):
+        hits = _census()
+        assert not self._unaccounted(hits), (
+            "a version or tagged-image pin is neither in REPO_PINS "
+            "(scripts/check_pinned_tool_versions.py) nor exempted with a reason:\n"
+            + "\n".join(self._unaccounted(hits))
+        )
+
+    def test_the_census_is_not_vacuous(self):
+        """Positive control: it sees the pins REPO_PINS follows."""
+        names = {name for _, name in _census()}
+        assert {"KIND_VERSION", "KUBECTL_VERSION", "CFN_GUARD_VERSION"} <= names
+        assert {"WingetReleaseTag", "DEBIAN_SNAPSHOT", "UBUNTU_SNAPSHOT"} <= names
+        assert "gradle:jdk21" in names
+
+    def test_a_new_pin_is_caught(self):
+        """NEGATIVE CONTROL: an unlisted pin in a censused file is reported."""
+        hits = _census() + [
+            (".github/workflows/ash-kubernetes-operator.yml", "HELM_VERSION"),
+            ("editors/vscode/test/visual/Dockerfile", "alpine:3.20"),
+        ]
+        assert self._unaccounted(hits) == [
+            ".github/workflows/ash-kubernetes-operator.yml: HELM_VERSION",
+            "editors/vscode/test/visual/Dockerfile: alpine:3.20",
+        ]
