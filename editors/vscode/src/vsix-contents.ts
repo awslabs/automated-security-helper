@@ -41,9 +41,44 @@
  *
  * Adding a dependency to the checker that exists to keep dependencies out would
  * be its own answer to the question. Member names live in the ZIP central
- * directory as plain bytes, so reading them needs no decompression and no
- * library: this module walks the central directory itself.
+ * directory as plain bytes, so reading them needs no library: this module walks
+ * the central directory itself. Member bodies are DEFLATE streams, and Node's
+ * built-in `zlib` inflates them, so the content check below adds no dependency
+ * either.
+ *
+ * WHY THE NAMES ARE NOT ENOUGH, AND THE CONTENT IS READ TOO
+ *
+ * A name allowlist says what a member is called, not what it is. A tarball of
+ * scanner binaries renamed `extension/out/x.js` matches OWN_OUTPUT, and so does
+ * an ELF executable; both pass a check that only reads names, and both would
+ * ship in a release asset. So every member's body is inflated and held to two
+ * rules. The first is shared with .github/scripts/assert-artifact-contents.py,
+ * the gate on the wheel and sdist: no archive or executable header in the first
+ * MAGIC_READ_BYTES bytes, and no member over MAX_MEMBER_BYTES. The second is
+ * positive and specific to this artifact: compiled output and the metadata files
+ * must be UTF-8 text with no NUL byte, package.json must parse as a JSON object,
+ * and the two container XML files must start with `<`. The denylist half catches
+ * the formats it knows; the text half catches the ones it does not, because no
+ * binary payload is valid NUL-free UTF-8 by accident.
+ *
+ * WHY A DUPLICATED NAME IS REFUSED, AND WHY THE GAPS ARE ACCOUNTED FOR
+ *
+ * A ZIP may carry two entries under one name. Every body is read through its
+ * own central-directory record here, so both copies are inspected; but which
+ * one an installer extracts is up to the installer, and a check that reads by
+ * name sees only one. The JetBrains gate had exactly that hole. A duplicated
+ * name has no legitimate use in a `.vsix`, so it is refused outright.
+ *
+ * The rules above read what a ZIP reader extracts, and a ZIP can carry bytes
+ * no reader extracts: between one entry's data and the next local header,
+ * between the last entry and the central directory, after the end record, or
+ * in the archive comment. Those bytes still ship in the release asset. So the
+ * archive must be laid out end to end: each local record starting where the
+ * previous one ended, the directory where the last record ended, the end
+ * record right after the directory, an empty comment, and nothing after it.
  */
+
+import * as zlib from 'zlib';
 
 /** Archive-root members the VSIX container format itself requires. */
 const CONTAINER_MEMBERS: readonly string[] = ['extension.vsixmanifest', '[Content_Types].xml'];
@@ -108,6 +143,33 @@ const CENTRAL_HEADER_SIGNATURE = 0x02014b50;
 const MAX_COMMENT = 0xffff;
 const EOCD_MIN_SIZE = 22;
 const CENTRAL_HEADER_MIN_SIZE = 46;
+const LOCAL_HEADER_SIGNATURE = 0x04034b50;
+const LOCAL_HEADER_MIN_SIZE = 30;
+
+/** One central-directory record: where a member's bytes are and how they are stored. */
+export interface ZipDirectoryEntry {
+  readonly name: string;
+  /** 0 is STORED, 8 is DEFLATE. Anything else is refused when the body is read. */
+  readonly method: number;
+  readonly compressedSize: number;
+  readonly uncompressedSize: number;
+  readonly localHeaderOffset: number;
+  /** General-purpose flags. Bit 3 means a data descriptor follows the body. */
+  readonly flags: number;
+  /** CRC-32 of the uncompressed body, which a data descriptor must repeat. */
+  readonly crc32: number;
+}
+
+/** Where the parts of a ZIP archive sit, as its end record and directory declare them. */
+export interface ZipStructure {
+  readonly entries: ZipDirectoryEntry[];
+  readonly directoryOffset: number;
+  readonly directorySize: number;
+  /** Where the central-directory walk actually ended. */
+  readonly directoryEnd: number;
+  readonly eocdOffset: number;
+  readonly commentLength: number;
+}
 
 /**
  * Returns every member name in a ZIP archive, in central-directory order.
@@ -118,6 +180,16 @@ const CENTRAL_HEADER_MIN_SIZE = 46;
  * against.
  */
 export function listZipMembers(buffer: Buffer): string[] {
+  return readZipDirectory(buffer).map((entry) => entry.name);
+}
+
+/** The central directory of a ZIP archive, in order. Throws on the same shapes listZipMembers does. */
+export function readZipDirectory(buffer: Buffer): ZipDirectoryEntry[] {
+  return readZipStructure(buffer).entries;
+}
+
+/** The directory of a ZIP archive and where its parts sit. Throws on the same shapes listZipMembers does. */
+export function readZipStructure(buffer: Buffer): ZipStructure {
   if (buffer.length < EOCD_MIN_SIZE) {
     throw new Error(`not a ZIP archive: ${buffer.length} bytes is shorter than an end-of-central-directory record`);
   }
@@ -153,7 +225,7 @@ export function listZipMembers(buffer: Buffer): string[] {
     );
   }
 
-  const members: string[] = [];
+  const members: ZipDirectoryEntry[] = [];
   let cursor = directoryOffset;
   for (let i = 0; i < entryCount; i += 1) {
     if (cursor + CENTRAL_HEADER_MIN_SIZE > buffer.length) {
@@ -174,11 +246,370 @@ export function listZipMembers(buffer: Buffer): string[] {
     // because a Windows-built archive that used them would otherwise turn
     // `extension\out\extension.js` into an unrecognised member and fail for the
     // wrong reason.
-    members.push(buffer.toString('utf8', nameStart, nameEnd).split('\\').join('/'));
+    members.push({
+      name: buffer.toString('utf8', nameStart, nameEnd).split('\\').join('/'),
+      method: buffer.readUInt16LE(cursor + 10),
+      compressedSize: buffer.readUInt32LE(cursor + 20),
+      uncompressedSize: buffer.readUInt32LE(cursor + 24),
+      localHeaderOffset: buffer.readUInt32LE(cursor + 42),
+      flags: buffer.readUInt16LE(cursor + 8),
+      crc32: buffer.readUInt32LE(cursor + 16),
+    });
     cursor = nameEnd + extraLength + commentLength;
   }
 
-  return members;
+  return {
+    entries: members,
+    directoryOffset,
+    directorySize,
+    directoryEnd: cursor,
+    eocdOffset: eocd,
+    commentLength: buffer.readUInt16LE(eocd + 20),
+  };
+}
+
+const FLAG_DATA_DESCRIPTOR = 0x08;
+const DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
+
+/**
+ * The length of the data descriptor at `at`, or null when it does not match `entry`.
+ *
+ * A descriptor repeats the entry's CRC and sizes, optionally behind the
+ * PK\x07\x08 signature. Skipping any 12 or 16 bytes after a body would let the
+ * flag hide that many arbitrary bytes per entry, so both forms are compared
+ * field by field. The signed form is tried first; an unsigned descriptor whose
+ * CRC happens to equal the signature value is still found by the second test.
+ */
+function descriptorLength(buffer: Buffer, at: number, entry: ZipDirectoryEntry): number | null {
+  const matches = (from: number): boolean =>
+    from + 12 <= buffer.length &&
+    buffer.readUInt32LE(from) === entry.crc32 &&
+    buffer.readUInt32LE(from + 4) === entry.compressedSize &&
+    buffer.readUInt32LE(from + 8) === entry.uncompressedSize;
+  if (at + 4 <= buffer.length && buffer.readUInt32LE(at) === DATA_DESCRIPTOR_SIGNATURE && matches(at + 4)) {
+    return 16;
+  }
+  return matches(at) ? 12 : null;
+}
+
+/**
+ * Returns every place a ZIP archive carries bytes that no reader extracts.
+ *
+ * Empty for an archive laid out end to end. Records are walked in offset
+ * order, so an archive whose directory lists them in another order is still
+ * accepted when the bytes themselves are contiguous.
+ */
+export function layoutProblems(buffer: Buffer, structure: ZipStructure = readZipStructure(buffer)): string[] {
+  const problems: string[] = [];
+  const { directoryOffset, directorySize, directoryEnd, eocdOffset, commentLength } = structure;
+  if (commentLength !== 0) {
+    problems.push(`carries a ${commentLength}-byte archive comment, bytes no reader extracts`);
+  }
+  const trailing = buffer.length - (eocdOffset + EOCD_MIN_SIZE + commentLength);
+  if (trailing > 0) {
+    problems.push(`has ${trailing} byte(s) after its end record that no reader extracts`);
+  } else if (trailing < 0) {
+    problems.push('declares an archive comment that runs past the end of the file');
+  }
+  if (directoryEnd !== directoryOffset + directorySize) {
+    problems.push(
+      `its central-directory entries end at byte ${directoryEnd}, not at the ` +
+        `${directoryOffset + directorySize} the end record declares`,
+    );
+  }
+  if (directoryOffset + directorySize !== eocdOffset) {
+    problems.push(
+      `its central directory ends at byte ${directoryOffset + directorySize} but the end record ` +
+        `is at byte ${eocdOffset}, so the bytes between them are not extracted`,
+    );
+  }
+
+  let expected = 0;
+  const ordered = [...structure.entries].sort((a, b) => a.localHeaderOffset - b.localHeaderOffset);
+  for (const entry of ordered) {
+    if (entry.localHeaderOffset !== expected) {
+      problems.push(
+        `${entry.name} starts at byte ${entry.localHeaderOffset}, but the previous record ended at ` +
+          `byte ${expected}, so ` +
+          (entry.localHeaderOffset > expected ? 'the bytes between them are not extracted' : 'two records overlap'),
+      );
+      return problems;
+    }
+    const header = entry.localHeaderOffset;
+    if (header + LOCAL_HEADER_MIN_SIZE > buffer.length || buffer.readUInt32LE(header) !== LOCAL_HEADER_SIGNATURE) {
+      problems.push(`${entry.name} has no local file header at byte ${header}`);
+      return problems;
+    }
+    expected =
+      header + LOCAL_HEADER_MIN_SIZE + buffer.readUInt16LE(header + 26) + buffer.readUInt16LE(header + 28) +
+      entry.compressedSize;
+    if ((entry.flags & FLAG_DATA_DESCRIPTOR) !== 0) {
+      const length = descriptorLength(buffer, expected, entry);
+      if (length === null) {
+        problems.push(
+          `${entry.name} sets the data-descriptor flag, but the 12 or 16 bytes after its body do not ` +
+            'repeat the CRC and sizes of its central record, so they are bytes no reader extracts',
+        );
+        return problems;
+      }
+      expected += length;
+    }
+  }
+  if (expected !== directoryOffset) {
+    problems.push(
+      `its last record ends at byte ${expected} but the central directory starts at byte ` +
+        `${directoryOffset}, so the bytes between them are not extracted`,
+    );
+  }
+  return problems;
+}
+
+// ---------------------------------------------------------------------------
+// Content shape.
+// ---------------------------------------------------------------------------
+
+/**
+ * How many bytes of each member are sniffed for a header. 512, the same as
+ * MAGIC_READ_BYTES in .github/scripts/assert-artifact-contents.py, because a
+ * tar's `ustar` identifier sits at offset 257 and one tar header block is 512
+ * bytes. An 8-byte sniff reads a renamed tarball as the ASCII file name its
+ * first header starts with, which was a live bypass in that gate.
+ */
+export const MAGIC_READ_BYTES = 512;
+
+/**
+ * Per-member size ceiling, the same value as MAX_MEMBER_BYTES in the shared
+ * gate. The largest member of a real build is under 30 KB, so this is a tripwire
+ * for bulk payload, two orders of magnitude clear of anything legitimate.
+ */
+export const MAX_MEMBER_BYTES = 4 * 1024 * 1024;
+
+export interface Magic {
+  readonly offset: number;
+  readonly bytes: Buffer;
+  readonly label: string;
+}
+
+function magic(offset: number, bytes: number[] | string, label: string): Magic {
+  return { offset, bytes: typeof bytes === 'string' ? Buffer.from(bytes, 'latin1') : Buffer.from(bytes), label };
+}
+
+/**
+ * Archive headers. Mirrors ARCHIVE_MAGICS in the shared gate entry for entry,
+ * and test/vsix-contents.test.ts reads that file's table through python3 and
+ * fails if the two differ, so a header added there cannot be missing here.
+ */
+export const ARCHIVE_MAGICS: readonly Magic[] = [
+  magic(0, 'PK\x03\x04', 'ZIP'),
+  magic(0, 'PK\x05\x06', 'ZIP (empty)'),
+  magic(0, 'PK\x07\x08', 'ZIP (spanned)'),
+  magic(0, [0x1f, 0x8b], 'gzip'),
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((level) => magic(0, `BZh${level}`, 'bzip2')),
+  magic(0, [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00], 'xz'),
+  magic(0, [0x28, 0xb5, 0x2f, 0xfd], 'zstd'),
+  magic(0, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c], '7-Zip'),
+  magic(0, 'Rar!\x1a\x07', 'RAR'),
+  magic(0, [0x04, 0x22, 0x4d, 0x18], 'LZ4'),
+  magic(0, '!<arch>', 'ar'),
+  magic(0, 'MSCF', 'Microsoft cabinet'),
+  magic(0, [0xed, 0xab, 0xee, 0xdb], 'RPM'),
+  magic(257, 'ustar', 'tar'),
+];
+
+/** Executable headers. Mirrors NATIVE_MAGICS in the shared gate, held to it the same way. */
+export const NATIVE_MAGICS: readonly Magic[] = [
+  magic(0, [0x7f, 0x45, 0x4c, 0x46], 'ELF'),
+  magic(0, [0xfe, 0xed, 0xfa, 0xce], 'Mach-O'),
+  magic(0, [0xfe, 0xed, 0xfa, 0xcf], 'Mach-O'),
+  magic(0, [0xce, 0xfa, 0xed, 0xfe], 'Mach-O'),
+  magic(0, [0xcf, 0xfa, 0xed, 0xfe], 'Mach-O'),
+  magic(0, [0xca, 0xfe, 0xba, 0xbe], 'Mach-O universal'),
+  magic(0, 'MZ', 'PE'),
+];
+
+/** The two leading signatures a ZIP artifact may start with, as ZIP_LEADING_MAGICS in the shared gate. */
+const ZIP_LEADING_MAGICS: readonly Buffer[] = [Buffer.from('PK\x03\x04', 'latin1'), Buffer.from('PK\x05\x06', 'latin1')];
+
+const METHOD_STORED = 0;
+const METHOD_DEFLATE = 8;
+
+/**
+ * Returns a member's uncompressed body.
+ *
+ * Sizes come from the central directory, not the local header: `vsce` writes
+ * its entries with a trailing data descriptor (general-purpose bit 3, measured
+ * on a real build), which leaves the local header's size fields zero.
+ *
+ * Throws when the body cannot be read faithfully, for the reason listZipMembers
+ * does: a member whose bytes were skipped is a member nobody inspected.
+ */
+export function readEntryData(buffer: Buffer, entry: ZipDirectoryEntry): Buffer {
+  const header = entry.localHeaderOffset;
+  if (header + LOCAL_HEADER_MIN_SIZE > buffer.length || buffer.readUInt32LE(header) !== LOCAL_HEADER_SIGNATURE) {
+    throw new Error(`${entry.name}: no local file header at byte ${header}`);
+  }
+  const start = header + LOCAL_HEADER_MIN_SIZE + buffer.readUInt16LE(header + 26) + buffer.readUInt16LE(header + 28);
+  const end = start + entry.compressedSize;
+  if (end > buffer.length) {
+    throw new Error(`${entry.name}: its data runs past the end of the file`);
+  }
+  if (entry.uncompressedSize > MAX_MEMBER_BYTES) {
+    // Not inflated at all. The size verdict is reported by the caller from the
+    // declared size, and inflating first would be the bulk read the ceiling
+    // exists to refuse.
+    return Buffer.alloc(0);
+  }
+  const raw = buffer.subarray(start, end);
+  let body: Buffer;
+  if (entry.method === METHOD_STORED) {
+    body = raw;
+  } else if (entry.method === METHOD_DEFLATE) {
+    // Bounded, so a header that understates the size cannot turn this into a
+    // decompression bomb. One byte over the ceiling is enough to notice a lie.
+    try {
+      body = zlib.inflateRawSync(raw, { maxOutputLength: MAX_MEMBER_BYTES + 1 });
+    } catch (inflateError) {
+      throw new Error(`${entry.name}: its DEFLATE stream does not inflate: ${(inflateError as Error).message}`);
+    }
+  } else {
+    throw new Error(`${entry.name}: compression method ${entry.method} is not STORED or DEFLATE, so its body cannot be inspected`);
+  }
+  if (body.length !== entry.uncompressedSize) {
+    throw new Error(
+      `${entry.name}: inflates to ${body.length} bytes but the central directory declares ${entry.uncompressedSize}`,
+    );
+  }
+  return body;
+}
+
+function matchesAt(data: Buffer, candidate: Magic): boolean {
+  const end = candidate.offset + candidate.bytes.length;
+  return end <= data.length && data.subarray(candidate.offset, end).equals(candidate.bytes);
+}
+
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true });
+
+function textProblem(data: Buffer): string | null {
+  if (data.includes(0)) {
+    return `carries a NUL byte at offset ${data.indexOf(0)}, so it is not text`;
+  }
+  try {
+    STRICT_UTF8.decode(data);
+  } catch {
+    return 'is not valid UTF-8, so it is not text';
+  }
+  return null;
+}
+
+/** What a member's body must look like, by the role its name gives it. */
+type Role = 'text' | 'json-object' | 'xml' | 'none';
+
+function roleOf(name: string): Role {
+  if (name === 'extension/package.json') {
+    return 'json-object';
+  }
+  if (CONTAINER_MEMBERS.includes(name)) {
+    return 'xml';
+  }
+  if (OWN_OUTPUT.test(name) || OWN_FILES.includes(name.toLowerCase())) {
+    return 'text';
+  }
+  return 'none';
+}
+
+/**
+ * Returns why a member's body does not match what its name claims, or null.
+ *
+ * Exported so the rules can be tested over a body without building an archive.
+ */
+export function shapeProblem(name: string, declaredSize: number, data: Buffer): string | null {
+  if (name.endsWith('/')) {
+    // A directory entry is allowed by name because it carries no bytes. One that
+    // does carry bytes is a payload with a name chosen to skip the allowlist.
+    return declaredSize === 0 ? null : `is a directory entry that carries ${declaredSize} byte(s)`;
+  }
+  if (declaredSize > MAX_MEMBER_BYTES) {
+    return `is ${declaredSize} bytes, over the ${MAX_MEMBER_BYTES}-byte per-member ceiling`;
+  }
+  const head = data.subarray(0, MAGIC_READ_BYTES);
+  for (const candidate of ARCHIVE_MAGICS) {
+    if (matchesAt(head, candidate)) {
+      return `carries a ${candidate.label} archive header at byte ${candidate.offset}`;
+    }
+  }
+  for (const candidate of NATIVE_MAGICS) {
+    if (matchesAt(head, candidate)) {
+      return `carries a ${candidate.label} executable header`;
+    }
+  }
+  const role = roleOf(name);
+  if (role === 'none') {
+    // Already foreign by name; the name verdict reports it.
+    return null;
+  }
+  const notText = textProblem(data);
+  if (notText !== null) {
+    return notText;
+  }
+  const text = data.toString('utf8').replace(/^\uFEFF/, '');
+  if (role === 'json-object') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return 'does not parse as JSON';
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return 'parses as JSON but not as an object, so it is not an extension manifest';
+    }
+  }
+  if (role === 'xml' && !text.trimStart().startsWith('<')) {
+    return 'does not start with `<`, so it is not XML';
+  }
+  return null;
+}
+
+export interface ShapeProblem {
+  readonly member: string;
+  readonly reason: string;
+}
+
+/**
+ * Inspects a whole `.vsix`: the member names, as inspectMembers does, and every
+ * member's body. This is what verify-vsix runs.
+ */
+export function inspectArchive(buffer: Buffer): ContentsVerdict {
+  const misshapen: ShapeProblem[] = [];
+  if (!ZIP_LEADING_MAGICS.some((leading) => buffer.subarray(0, leading.length).equals(leading))) {
+    // A ZIP reader finds the directory from the END of the file, so a ZIP
+    // appended to an executable still lists cleanly. Requiring the archive to
+    // begin with a ZIP record is what refuses that.
+    misshapen.push({ member: '(archive)', reason: 'does not begin with a ZIP record, so something precedes the archive' });
+  }
+  const structure = readZipStructure(buffer);
+  const { entries } = structure;
+  for (const reason of layoutProblems(buffer, structure)) {
+    misshapen.push({ member: '(archive)', reason });
+  }
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    counts.set(entry.name, (counts.get(entry.name) ?? 0) + 1);
+  }
+  for (const [name, count] of counts) {
+    if (count > 1) {
+      misshapen.push({
+        member: name,
+        reason: `appears ${count} times in the central directory, and an installer extracts only one of them`,
+      });
+    }
+  }
+  for (const entry of entries) {
+    const reason = shapeProblem(entry.name, entry.uncompressedSize, readEntryData(buffer, entry));
+    if (reason !== null) {
+      misshapen.push({ member: entry.name, reason });
+    }
+  }
+  return { ...inspectMembers(entries.map((entry) => entry.name)), misshapen };
 }
 
 export interface ContentsVerdict {
@@ -193,6 +624,11 @@ export interface ContentsVerdict {
    * and it deserves its own sentence in the error.
    */
   readonly bundledModules: readonly string[];
+  /**
+   * Members whose bodies do not match what their names claim. Empty from
+   * inspectMembers, which reads names only; inspectArchive fills it.
+   */
+  readonly misshapen: readonly ShapeProblem[];
 }
 
 function isAllowed(member: string): boolean {
@@ -215,6 +651,7 @@ export function inspectMembers(members: readonly string[]): ContentsVerdict {
     foreign,
     missing: REQUIRED_MEMBERS.filter((required) => !members.includes(required)),
     bundledModules: foreign.filter((member) => member.startsWith('extension/node_modules/')),
+    misshapen: [],
   };
 }
 
@@ -243,6 +680,17 @@ export function describeProblems(verdict: ContentsVerdict): string | null {
     );
     for (const member of otherForeign.slice(0, 10)) {
       lines.push(`  ${member}`);
+    }
+  }
+
+  if (verdict.misshapen.length > 0) {
+    lines.push(
+      `${verdict.misshapen.length} member(s) whose content does not match their name. A name ` +
+        'allowlist says what a member is called, not what it is, so a renamed archive or ' +
+        'executable is refused here.',
+    );
+    for (const problem of verdict.misshapen.slice(0, 10)) {
+      lines.push(`  ${problem.member} ${problem.reason}`);
     }
   }
 

@@ -16,8 +16,9 @@
  * already happened twice on this branch, to packaging/rpm/ash.spec and
  * packaging/msix/README.msix.
  *
- * No compression: the reader under test only walks the central directory, and
- * STORED entries keep this helper small enough to read.
+ * STORED by default, so a planted body sits in the archive byte for byte. An
+ * entry can ask for DEFLATE instead, which is what `vsce` writes, so the content
+ * check is also tested over bodies it has to inflate before it can read them.
  */
 
 import * as zlib from 'zlib';
@@ -25,6 +26,17 @@ import * as zlib from 'zlib';
 export interface ZipEntry {
   readonly name: string;
   readonly data?: Buffer | string;
+  /** Writes the body DEFLATE-compressed, as `vsce` does, instead of STORED. */
+  readonly deflate?: boolean;
+  /** Writes this compression method number into both headers, with the body stored as is. */
+  readonly rawMethod?: number;
+  /**
+   * Writes a trailing data descriptor and sets general-purpose bit 3, as `vsce`
+   * does: `signed` with the optional PK\x07\x08 signature, `unsigned` without.
+   */
+  readonly descriptor?: 'signed' | 'unsigned';
+  /** Writes these bytes as the descriptor instead of the CRC and sizes it should repeat. */
+  readonly descriptorBytes?: Buffer;
 }
 
 const LOCAL_SIGNATURE = 0x04034b50;
@@ -45,48 +57,94 @@ export interface WriteOptions {
   readonly extraEntryCount?: number;
   /** Corrupts the signature of the nth central-directory entry (0-based). */
   readonly corruptEntry?: number;
+  /** Bytes written before the first local header, with every offset shifted to match. */
+  readonly leading?: Buffer;
+  /** Bytes written after the first member's record, with every later offset shifted to match. */
+  readonly afterFirst?: Buffer;
+  /** Bytes written between the last record and the central directory, with the offset shifted. */
+  readonly beforeDirectory?: Buffer;
+  /** Bytes written inside the central directory after its records, counted in its declared size. */
+  readonly insideDirectory?: Buffer;
+  /** Bytes written between the central directory and the end record, with neither offset moved. */
+  readonly afterDirectory?: Buffer;
+  /** The archive comment. */
+  readonly comment?: Buffer;
+  /** Bytes written after the end record and its comment. */
+  readonly trailing?: Buffer;
+  /** Points the central record of member n (0-based) at another local-header offset. */
+  readonly centralOffsets?: Readonly<Record<number, number>>;
 }
 
 /** Builds a ZIP archive whose members are exactly `entries`, in order. */
 export function writeZip(entries: readonly ZipEntry[], options: WriteOptions = {}): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
-  let offset = 0;
+  const leading = options.leading ?? Buffer.alloc(0);
+  let offset = leading.length;
 
   entries.forEach((entry, index) => {
     const name = Buffer.from(entry.name, 'utf8');
-    const body = bodyOf(entry);
-    const crc = zlib.crc32(body);
+    const plain = bodyOf(entry);
+    const crc = zlib.crc32(plain);
+    const body = entry.deflate === true ? zlib.deflateRawSync(plain) : plain;
+    const method = entry.rawMethod ?? (entry.deflate === true ? 8 : 0);
+    const flags = entry.descriptor === undefined ? 0 : 0x08;
 
     const local = Buffer.alloc(30 + name.length);
     local.writeUInt32LE(LOCAL_SIGNATURE, 0);
     local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0, 8); // stored
+    local.writeUInt16LE(flags, 6);
+    local.writeUInt16LE(method, 8);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(body.length, 18);
-    local.writeUInt32LE(body.length, 22);
+    local.writeUInt32LE(plain.length, 22);
     local.writeUInt16LE(name.length, 26);
     name.copy(local, 30);
     locals.push(local, body);
+    let descriptor = Buffer.alloc(0);
+    if (entry.descriptor !== undefined) {
+      const signed = entry.descriptor === 'signed';
+      descriptor = Buffer.alloc(signed ? 16 : 12);
+      let at = 0;
+      if (signed) {
+        descriptor.writeUInt32LE(0x08074b50, 0);
+        at = 4;
+      }
+      descriptor.writeUInt32LE(crc, at);
+      descriptor.writeUInt32LE(body.length, at + 4);
+      descriptor.writeUInt32LE(plain.length, at + 8);
+      if (entry.descriptorBytes !== undefined) {
+        descriptor = signed
+          ? Buffer.concat([descriptor.subarray(0, 4), entry.descriptorBytes])
+          : Buffer.from(entry.descriptorBytes);
+      }
+      locals.push(descriptor);
+    }
+    const gap = index === 0 && options.afterFirst !== undefined ? options.afterFirst : Buffer.alloc(0);
+    locals.push(gap);
 
     const central = Buffer.alloc(46 + name.length);
     central.writeUInt32LE(index === options.corruptEntry ? 0xdeadbeef : CENTRAL_SIGNATURE, 0);
     central.writeUInt16LE(20, 4);
     central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0, 10); // stored
+    central.writeUInt16LE(flags, 8);
+    central.writeUInt16LE(method, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(body.length, 20);
-    central.writeUInt32LE(body.length, 24);
+    central.writeUInt32LE(plain.length, 24);
     central.writeUInt16LE(name.length, 28);
-    central.writeUInt32LE(offset, 42);
+    central.writeUInt32LE(options.centralOffsets?.[index] ?? offset, 42);
     name.copy(central, 46);
     centrals.push(central);
 
-    offset += local.length + body.length;
+    offset += local.length + body.length + descriptor.length + gap.length;
   });
 
   const localBytes = Buffer.concat(locals);
-  const centralBytes = Buffer.concat(centrals);
+  const beforeDirectory = options.beforeDirectory ?? Buffer.alloc(0);
+  const afterDirectory = options.afterDirectory ?? Buffer.alloc(0);
+  const centralBytes = Buffer.concat([...centrals, options.insideDirectory ?? Buffer.alloc(0)]);
+  const comment = options.comment ?? Buffer.alloc(0);
 
   const eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(EOCD_SIGNATURE, 0);
@@ -94,9 +152,19 @@ export function writeZip(entries: readonly ZipEntry[], options: WriteOptions = {
   eocd.writeUInt16LE(options.zip64Sentinel === true ? 0xffff : count, 8);
   eocd.writeUInt16LE(options.zip64Sentinel === true ? 0xffff : count, 10);
   eocd.writeUInt32LE(centralBytes.length, 12);
-  eocd.writeUInt32LE(localBytes.length, 16);
+  eocd.writeUInt32LE(leading.length + localBytes.length + beforeDirectory.length, 16);
+  eocd.writeUInt16LE(comment.length, 20);
 
-  return Buffer.concat([localBytes, centralBytes, eocd]);
+  return Buffer.concat([
+    leading,
+    localBytes,
+    beforeDirectory,
+    centralBytes,
+    afterDirectory,
+    eocd,
+    comment,
+    options.trailing ?? Buffer.alloc(0),
+  ]);
 }
 
 /**

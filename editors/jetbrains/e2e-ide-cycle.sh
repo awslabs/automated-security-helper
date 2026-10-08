@@ -113,7 +113,9 @@ fi
 PREV_SRC="$WORK/src-prev"
 rm -rf "$PREV_SRC"
 mkdir -p "$PREV_SRC"
-git -C "$REPO" archive "$PREV_SHA" editors/jetbrains | tar -x -C "$PREV_SRC"
+# The shared payload rules come too: assert-plugin-zip-contents.py, which buildPlugin runs,
+# imports them from .github/scripts rather than carrying a copy.
+git -C "$REPO" archive "$PREV_SHA" editors/jetbrains .github/scripts/assert-artifact-contents.py | tar -x -C "$PREV_SRC"
 PREV_DIR="$PREV_SRC/editors/jetbrains"
 PREV_BASE_VERSION="$(gradle_version "$PREV_DIR")"
 [ -n "$PREV_BASE_VERSION" ] || fail "no version line in $PREV_REF's build.gradle.kts"
