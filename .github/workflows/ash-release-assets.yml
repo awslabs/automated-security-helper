@@ -45,6 +45,8 @@ on:
       - ".github/scripts/assert-publish-surfaces.py"
       - "packaging/release-assets.py"
       - "tests/unit/test_release_assets.py"
+      - "tests/unit/test_release_workflow_references.py"
+      - "tests/unit/fixtures/pinned_action_interfaces.json"
   workflow_dispatch: {}
   workflow_call:
     inputs:
@@ -66,9 +68,13 @@ on:
       MSIX_SIGNING_PFX_PASSWORD:
         required: false
     outputs:
-      artifact:
-        description: The artifact holding the staged, gated release assets
-        value: ${{ jobs.assemble.outputs.artifact }}
+      artifact-id:
+        description: >-
+          The numeric ID of the artifact holding the staged, gated release assets, for
+          actions/download-artifact's artifact-ids input. An ID rather than a name:
+          upload-artifact declares no name output, and a name carrying run_attempt
+          would not match after "re-run failed jobs".
+        value: ${{ jobs.assemble.outputs.artifact-id }}
       version:
         description: The project version the assets were built for
         value: ${{ jobs.assemble.outputs.version }}
@@ -105,6 +111,7 @@ jobs:
         run: >-
           uv run pytest -o addopts= -p no:cacheprovider
           tests/unit/test_release_assets.py
+          tests/unit/test_release_workflow_references.py
           tests/unit/test_release_notes_workflow.py
           tests/unit/test_floating_major_tag_workflow.py
           tests/unit/test_e2e_n1_fetch.py
@@ -253,8 +260,11 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # Each `steps.<id>.outputs.<name>` here must name an output the step declares
+    # (tests/unit/test_release_workflow_references.py). upload-artifact's are
+    # artifact-id, artifact-url and artifact-digest; it has no `artifact` output.
     outputs:
-      artifact: ${{ steps.upload.outputs.artifact }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
       version: ${{ steps.version.outputs.version }}
       sums: ${{ steps.gate.outputs.sums }}
     steps:
