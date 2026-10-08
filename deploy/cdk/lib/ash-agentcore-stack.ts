@@ -356,7 +356,7 @@ export class AshAgentCoreStack extends Stack {
     // inside the build rather than as soon as the build starts.
     runtime.node.addDependency(image.bootstrap!);
 
-    suppressSecretRotation(config.authSecret);
+    suppressSecretRotation(config.mcpAuthSecret());
     /*
      * A FAMILY OF CLOUDFORMATION SPEC WARNINGS IS EXPECTED HERE. ALL FALSE POSITIVES.
      *

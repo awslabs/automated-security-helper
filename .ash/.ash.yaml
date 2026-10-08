@@ -475,12 +475,10 @@ global_settings:
         The match is the `SECRET_PLACEHOLDER` constant, the sentinel
         value stored in Secrets Manager when ASH-level header auth is disabled. The
         keyword heuristic fires on the constant's name; the string is a marker
-        meaning "no auth configured", and nothing reads it as a credential. The
-        same constant is already suppressed twice in this file for checkov's
-        CKV_SECRET_6, on the two generated templates it reaches
-        (AshCodeCommitGate and AshDistributedPipeline) -- this entry is the source
-        file those templates are synthesized from, which had no entry only because
-        it was outside the scan set.
+        meaning "no auth configured", and nothing reads it as a credential. It
+        reaches the generated templates only as the false branch of an Fn::If in
+        AshAgentCore and AshFargate, where no keyword rule matches it; the two
+        stacks that used to receive it as a literal no longer create the secret.
     # === bandit: /tmp is the only writable path under a read-only rootfs ===
     - rule_id: B108
       path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py
@@ -854,27 +852,6 @@ global_settings:
         Same mechanism as the AshAgentCore entry above, on both repositories this
         template creates, one per architecture. AshImageTag is not declared here
         because this template runs no workload; the tags are stack outputs instead.
-    # === checkov's own secret detector, same two lines as detect-secrets ===
-    #
-    # CKV_SECRET_6 fires on the identical two `"SecretString": "ash-mcp-auth-
-    # disabled"` lines that SECRET-SECRET-KEYWORD does, above. Two scanners, one
-    # cause, so the justification is the same and is not restated at length here.
-    # Listed separately because a suppression is keyed by rule id, and covering
-    # the detect-secrets rule does nothing for the checkov one -- which is exactly
-    # the mistake that left these two findings live after the first pass.
-    - rule_id: CKV_SECRET_6
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      reason: >-
-        `SECRET_PLACEHOLDER` from deploy/cdk/lib/ash-runtime-config.ts, the value
-        stored when ASH-level header auth is disabled. This stack does not serve
-        MCP, so it is built with includeMcpParameters off and nothing reads the
-        secret. See the SECRET-SECRET-KEYWORD entry for the same file above.
-    - rule_id: CKV_SECRET_6
-      path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      reason: >-
-        The second of the two placeholder lines, in the stack that runs the sharded
-        executor and likewise does not serve MCP. See the SECRET-SECRET-KEYWORD
-        entry for the same file above.
     # === bandit in the Terraform gate handler ===
     #
     # Same two unfixable subprocess rules covered for the Python tree above, on the
@@ -1919,7 +1896,7 @@ global_settings:
 
     # --- SecretsManagerRotationEnabled: rotation would break the authentication it protects ---
     #
-    # One secret in each of four templates, two packs, 8 findings. This is the
+    # One secret in each of the two MCP-serving templates, two packs, 4 findings. This is the
     # compliance-pack twin of AwsSolutions-SMG4, which these templates already suppress
     # in-band; the argument below is the one recorded there, restated because a
     # suppression is keyed by rule id and covering SMG4 does nothing for these.
@@ -1949,41 +1926,6 @@ global_settings:
         immediately above and is not restated. The entry exists because a
         suppression is keyed by rule id and the pack prefix makes this a distinct
         id, so leaving it out would keep these findings actionable.
-    - rule_id: HIPAA.Security-SecretsManagerRotationEnabled
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      reason: >-
-        ConfigMcpAuthHeaderSecret, and here the finding is emptier still: this stack
-        does not serve MCP. It is built with includeMcpParameters off and the secret
-        holds SECRET_PLACEHOLDER, the literal recorded in the CKV_SECRET_6 and
-        SECRET-SECRET-KEYWORD entries for this same file above. Nothing reads it, so
-        rotation would schedule paid KMS and Secrets Manager operations against a
-        value with no consumer. See the block comment above.
-    - rule_id: NIST.800.53.R5-SecretsManagerRotationEnabled
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      reason: >-
-        SecretsManagerRotationEnabled as the NIST 800-53 Revision 5 pack raises it,
-        against AshCodeCommitGate: the same ConfigMcpAuthHeaderSecret, holding the
-        placeholder nothing reads. The argument is the HIPAA Security entry for this
-        same file immediately above and is not restated. The entry exists because a
-        suppression is keyed by rule id and the pack prefix makes this a distinct
-        id, so leaving it out would keep these findings actionable.
-    - rule_id: HIPAA.Security-SecretsManagerRotationEnabled
-      path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      reason: >-
-        ConfigMcpAuthHeaderSecret. Like AshCodeCommitGate, this stack runs the
-        sharded executor rather than serving MCP, so it gets the placeholder secret
-        and has no consumer to rotate for. The secret exists only so the shared
-        construct keeps one shape across MCP-serving and non-MCP stacks. See the
-        block comment above.
-    - rule_id: NIST.800.53.R5-SecretsManagerRotationEnabled
-      path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      reason: >-
-        SecretsManagerRotationEnabled as the NIST 800-53 Revision 5 pack raises it,
-        against AshDistributedPipeline: the same ConfigMcpAuthHeaderSecret, holding
-        the placeholder nothing reads. The argument is the HIPAA Security entry for
-        this same file immediately above and is not restated. The entry exists
-        because a suppression is keyed by rule id and the pack prefix makes this a
-        distinct id, so leaving it out would keep these findings actionable.
     - rule_id: HIPAA.Security-SecretsManagerRotationEnabled
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
@@ -2422,17 +2364,16 @@ global_settings:
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         One record, ImageRepository, whose EncryptionConfiguration.KmsKey is an
-        Fn::If over HasKmsKey. This template's secret escapes the rule only because
-        it passes the placeholder literal rather than an Fn::If, which is the same
-        asymmetry the SECRET-SECRET-KEYWORD entries above record from the other
-        direction. The check is a minimum length of 1 on a property an unbound
-        Fn::If presents as ''. See the block comment above.
+        Fn::If over HasKmsKey. This stack serves no MCP endpoint and creates no
+        secret, so the repository is the only resource the rule reaches. The check
+        is a minimum length of 1 on a property an unbound Fn::If presents as ''.
+        See the block comment above.
     - rule_id: F3033
       path: deploy/cdk/templates/AshDistributedPipeline.template.json
       reason: >-
         One record, ImageRepository, EncryptionConfiguration.KmsKey as an Fn::If
         over HasKmsKey. Same single-resource shape as AshCodeCommitGate, and for the
-        same reason: this stack does not serve MCP, so its secret carries a literal.
+        same reason: this stack does not serve MCP, so it creates no secret.
         The check is a minimum length of 1 on a property an unbound Fn::If presents
         as ''. See the block comment above.
     - rule_id: F3033
@@ -2556,8 +2497,10 @@ global_settings:
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
         Generated `cdk synth` output, same mechanisms as AshFargate above.
-    # The two SECRET-KEYWORD matches are named individually for a sharper reason
-    # than tidiness. AshFargate and AshAgentCore render
+    # No SECRET-SECRET-KEYWORD entry covers the generated templates, and one must
+    # not be added as a glob. The only literal `"SecretString"` they ever carried
+    # was the placeholder in the two stacks that do not serve MCP, and those no
+    # longer create the secret. AshFargate and AshAgentCore render
     # `"SecretString": {"Fn::If": [...]}` and escape this rule only because a `{`
     # follows the key rather than a literal. If a later change ever resolves
     # `McpAuthHeaderValue` to a literal — a `Default:` on the parameter would do
@@ -2566,26 +2509,6 @@ global_settings:
     # that. The IaC drift gate does not cover it either: it asserts that the
     # committed template equals synth output, so a synth that emits a credential
     # passes it green.
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      reason: >-
-        The two matches are `"SecretString": "ash-mcp-auth-disabled"`, which is
-        `SECRET_PLACEHOLDER` in deploy/cdk/lib/ash-runtime-config.ts — the value
-        stored when ASH-level header auth is disabled. Both matches are in the
-        two stacks that do not serve MCP at all (AshCodeCommitGate,
-        AshDistributedPipeline); those pass the placeholder to the secret
-        directly so the construct keeps one shape, and nothing reads it. The
-        MCP-serving stacks instead emit an `Fn::If` whose true branch is
-        `{"Ref": "McpAuthHeaderValue"}`, a NoEcho parameter, so a real header
-        value never appears in a committed template.
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      reason: >-
-        The second of the two `"SecretString": "ash-mcp-auth-disabled"` matches.
-        Same mechanism as the AshCodeCommitGate entry above: this stack runs the
-        sharded executor and does not serve MCP, so it is built with
-        `includeMcpParameters` off and gets the placeholder secret that nothing
-        reads.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: deploy/cdk/test/ash-image-build.test.ts
       reason: >-
