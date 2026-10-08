@@ -1241,3 +1241,79 @@ def test_a_wrapper_call_is_read_by_its_own_strings_too(
         'sh("npx cdk deploy")\n'
     )
     assert any(guard.deploy_reason(c.text) for c in guard.python_commands(source))
+
+
+# -- round 5: bounded work in the Python reader -------------------------------
+
+
+def _chain_source(n: int) -> str:
+    calls = "".join(f"def f{i}(x):\n    return f{i + 1}(x)\n" for i in range(n))
+    return (
+        "import subprocess\n"
+        + calls
+        + f"def f{n}(x):\n    subprocess.run(['npx', 'cdk', x])\n"
+        + "f0('deploy')\n"
+    )
+
+
+def test_a_list_grown_with_its_own_length_is_read_in_linear_steps(
+    guard: ModuleType,
+) -> None:
+    # Each `cmd.append(str(len(cmd)))` names the list inside its own growth; read
+    # by re-expanding it, the work doubled with every append.
+    def steps(appends: int) -> int:
+        source = (
+            "import subprocess\ncmd = ['npx', 'cdk']\n"
+            + "cmd.append(str(len(cmd)))\n" * appends
+            + "cmd.append('deploy')\nsubprocess.run(cmd)\n"
+        )
+        assert any(guard.deploy_reason(c.text) for c in guard.python_commands(source))
+        return guard.python_steps()
+
+    assert steps(20) < 2 * steps(10) < 1000
+
+
+def test_a_reassignment_through_its_own_name_keeps_the_earlier_value(
+    guard: ModuleType,
+) -> None:
+    source = (
+        "import subprocess\ncmd = ['npx', 'cdk']\ncmd = cmd + ['deploy']\n"
+        "subprocess.run(cmd)\n"
+    )
+    assert any(guard.deploy_reason(c.text) for c in guard.python_commands(source))
+
+
+def test_a_long_wrapper_chain_is_resolved_in_linear_steps(guard: ModuleType) -> None:
+    def steps(n: int, whole: bool) -> int:
+        source = _chain_source(n)
+        if whole:
+            commands = guard.python_commands(source)
+            assert any(guard.deploy_reason(c.text) for c in commands)
+        else:
+            assert len(guard.python_wrappers(source)) == n + 1
+        return guard.python_steps()
+
+    # The fixpoint alone, and the whole reading with the call site resolved
+    # through every level: doubling the chain about doubles the steps.
+    assert steps(400, whole=False) < 2.2 * steps(200, whole=False)
+    assert steps(400, whole=True) < 2.2 * steps(200, whole=True)
+    assert steps(1000, whole=True) < 20 * 1000
+
+
+def test_the_python_step_budget_fails_closed(
+    guard: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(guard, "MAX_PYTHON_STEPS", 50)
+    _write(
+        tmp_path,
+        {
+            ".github/workflows/w.yml": WORKFLOW + "      - run: python3 s.py\n",
+            "s.py": _chain_source(30),
+        },
+    )
+    assert guard.main(["--root", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    assert "s.py" in out and "more than 50 steps" in out
