@@ -1,0 +1,14 @@
+name: vulnerable
+on:
+  pull_request_target:
+  issues:
+    types: [opened]
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: echo title
+        run: echo "${{ github.event.issue.title }}"
