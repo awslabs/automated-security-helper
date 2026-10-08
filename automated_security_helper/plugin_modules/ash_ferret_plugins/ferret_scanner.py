@@ -14,10 +14,14 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
 from urllib.parse import urljoin
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.config.path_trust import honored_path, resolved_path
+from automated_security_helper.config.path_trust import (
+    cwd_outside_scanned_tree,
+    honored_path,
+    resolved_path,
+)
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
@@ -543,6 +547,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
+    # The absolute target of the scan in progress, set by scan() and read by
+    # _subprocess_cwd.
+    _ferret_target: Optional[Path] = PrivateAttr(default=None)
+
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         env_prefixes=("FERRET_",)
     )
@@ -974,7 +982,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         does not turn a root working directory into a read grant
         (``sandbox.policy._readable_cwd``).
         """
-        return Path(Path(os.path.abspath(results_dir)).anchor)
+        return cwd_outside_scanned_tree(
+            self._ferret_target or Path(os.path.abspath(self.context.source_dir)),
+            source_dir=self.context.source_dir,
+            config=getattr(self.context, "config", None),
+        )
 
     def _empty_config_file(self) -> Path:
         """An empty ferret-scan config in this scanner's results directory."""
@@ -1104,7 +1116,13 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             return False
 
         try:
-            target_results_dir = self.results_dir.joinpath(target_type)
+            # Absolute, because ferret-scan runs from outside the source directory
+            # (_subprocess_cwd), where a relative path names something else.
+            target = Path(os.path.abspath(target))
+            self._ferret_target = target
+            target_results_dir = Path(
+                os.path.abspath(self.results_dir.joinpath(target_type))
+            )
             results_file = target_results_dir.joinpath("ferret-scan.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
 

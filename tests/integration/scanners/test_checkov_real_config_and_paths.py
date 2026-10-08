@@ -125,9 +125,10 @@ def test_a_checkov_config_in_the_scanned_tree_is_not_loaded(tmp_path, name):
     assert "CKV_AWS_20" in _rule_ids(raw)
 
 
-def test_finding_paths_match_a_run_from_the_source_directory(tmp_path):
+@pytest.mark.parametrize("parent", ["", "..odd"])
+def test_finding_paths_match_a_run_from_the_source_directory(tmp_path, parent):
     _checkov()
-    source = tmp_path / "src"
+    source = tmp_path / parent / "src" if parent else tmp_path / "src"
     for relative in ("top.tf", "a/b/nested.tf", "dir with space/x.tf"):
         path = source / relative
         path.parent.mkdir(parents=True, exist_ok=True)

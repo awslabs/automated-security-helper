@@ -202,3 +202,77 @@ def test_ferret_scan_runs_its_subprocess_from_that_cwd(tmp_path):
     ):
         scanner.scan(target=source, target_type="source")
     assert run.call_args.kwargs["cwd"] == Path("/")
+
+
+def test_a_source_under_a_directory_starting_with_dots_maps_back(tmp_path):
+    # checkov removes every "/.." from the whole path it writes, which changes
+    # an ancestor named "..odd" too. The rewrite matches checkov's form of the
+    # scanned directory instead of joining the URI to the root.
+    source = tmp_path / "..odd" / "proj"
+    source.mkdir(parents=True)
+    file_path = (source / "main.tf").as_posix()
+    written = checkov_repo_file_path(file_path, "/").lstrip("/")
+    assert "..odd" not in written  # checkov's mangling, which the rewrite undoes
+    document = _sarif(written)
+    rewrite_checkov_paths(
+        document,
+        ran_in="/",
+        source_dir=str(source),
+        scanned_dirs=[source.as_posix()],
+    )
+    assert _uris(document) == ["main.tf"]
+
+
+def test_the_cwd_falls_back_outside_the_tree_when_the_root_is_in_it(
+    tmp_path, monkeypatch
+):
+    """A source directory that is a drive root (subst, mapped drive) on Windows."""
+    from automated_security_helper.config import path_trust
+
+    source = tmp_path / "src"
+    source.mkdir()
+    real = path_trust.in_scanned_tree
+
+    def root_is_in_the_tree(path, scan_root):
+        return Path(path) == Path("/") or real(path, scan_root)
+
+    monkeypatch.setattr(path_trust, "in_scanned_tree", root_is_in_the_tree)
+    cwd = path_trust.cwd_outside_scanned_tree(source, source_dir=source)
+    assert cwd != Path("/")
+    assert cwd.is_dir() and not any(cwd.iterdir())
+    assert not root_is_in_the_tree(cwd, source)
+
+
+@pytest.mark.parametrize("which", ["checkov", "ferret-scan"])
+def test_relative_source_and_output_paths_are_made_absolute(
+    tmp_path, monkeypatch, which
+):
+    from unittest.mock import patch
+
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        FerretScanScanner,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.txt").write_text("x\n")
+    (tmp_path / "out").mkdir()
+    context = PluginContext(
+        source_dir=Path("src"), output_dir=Path("out"), config=AshConfig()
+    )
+    if which == "checkov":
+        scanner = CheckovScanner(context=context)
+        argv, results_file, _ = scanner._execute_scan(Path("src"), "source", [])
+        directory = [a for a in argv if a.startswith("--directory=")]
+        assert directory == [f"--directory={(tmp_path / 'src').as_posix()}"]
+        assert Path(results_file).is_absolute()
+        return
+    scanner = FerretScanScanner(context=context)
+    scanner.dependencies_satisfied = True
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+    ):
+        scanner.scan(target=Path("src"), target_type="source")
+    argv = run.call_args.kwargs["command"]
+    assert (tmp_path / "src").as_posix() in argv or str(tmp_path / "src") in argv

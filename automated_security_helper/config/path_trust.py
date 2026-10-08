@@ -54,6 +54,29 @@ def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool
     return any(is_within(Path(path), tree) for tree in scanned_trees(Path(scan_root)))
 
 
+def cwd_outside_scanned_tree(
+    target: Union[str, Path], *, source_dir: Union[str, Path], config: Any = None
+) -> Path:
+    """A working directory for a tool that reads its config from its cwd.
+
+    The filesystem root of ``target``: outside the scanned tree, and with every
+    path relative to it absolute. When that root is inside the tree itself (a
+    source directory that is a drive root, such as a ``subst`` or mapped drive on
+    Windows), a new temporary directory outside the tree is used. A tool run from
+    a cwd on another drive writes paths from the drive root, so they still read as
+    relative to ``target``'s root. Scanning a whole filesystem leaves no
+    directory outside the tree, and the root is used.
+    """
+    root = getattr(config, "_scanned_root", None) or source_dir
+    anchor = Path(Path(os.path.abspath(target)).anchor)
+    if not in_scanned_tree(anchor, root):
+        return anchor
+    import tempfile
+
+    candidate = Path(tempfile.mkdtemp(prefix="ash-tool-cwd-"))
+    return anchor if in_scanned_tree(candidate, root) else candidate
+
+
 def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:
     """``value`` as the tool will read it: ``~`` expanded, a relative path taken from
     ``source_dir``, and symlinks and ``..`` resolved.
@@ -97,8 +120,9 @@ def honored_path(
         _WARNED.add((key, path.as_posix()))
     if first:
         ASH_LOGGER.warning(
-            f"Ignoring {key} ({path.as_posix()}): it is inside the scanned tree. "
-            "Use a file outside the tree, set with --config-overrides or a config "
-            "file outside the tree."
+            f"Ignoring {key} ({path.as_posix()}): it is inside the scanned tree "
+            "(the outermost git checkout around the source directory, or the source "
+            "directory outside a checkout). A file there is not passed to the tool "
+            "whoever names it; name one outside that tree."
         )
     return None

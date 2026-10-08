@@ -5,12 +5,16 @@ import os
 import re
 import json
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Optional
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Sequence
 from urllib.parse import quote, unquote
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.config.path_trust import honored_path, resolved_path
+from automated_security_helper.config.path_trust import (
+    cwd_outside_scanned_tree,
+    honored_path,
+    resolved_path,
+)
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
@@ -95,7 +99,13 @@ def checkov_repo_file_path(file_path: str, cwd: str) -> str:
     return f"/{'/'.join(path.parts[1:])}"
 
 
-def rewrite_checkov_paths(document: Any, *, ran_in: str, source_dir: str) -> None:
+def rewrite_checkov_paths(
+    document: Any,
+    *,
+    ran_in: str,
+    source_dir: str,
+    scanned_dirs: Sequence[str] = (),
+) -> None:
     """Make the paths in a checkov SARIF or JSON report read as if run in source_dir.
 
     ASH runs checkov from the filesystem root (``CheckovScanner._subprocess_cwd``),
@@ -103,14 +113,27 @@ def rewrite_checkov_paths(document: Any, *, ran_in: str, source_dir: str) -> Non
     paths without the leading ``/``. They are recomputed here with the source
     directory as the working directory, which is what checkov wrote when ASH ran
     it there, so findings and the suppressions that match their paths are
-    unchanged. The JSON report's ``file_abs_path`` is used as is; a SARIF URI is
-    joined to ``ran_in``, which loses nothing because nothing is relative to it.
+    unchanged. The JSON report's ``file_abs_path`` is used as is. A SARIF URI is
+    matched against how checkov writes each of ``scanned_dirs`` (the target and
+    the source directory) from ``ran_in``, because checkov's ``/..`` removal also
+    changes an ancestor directory whose name starts with ``..``; a URI that
+    matches none is joined to ``ran_in``.
     """
     cwd = os.path.realpath(source_dir)
+    prefixes = [
+        (checkov_repo_file_path(root, ran_in).rstrip("/"), root)
+        for root in scanned_dirs
+    ]
+
+    def _absolute(uri: str) -> str:
+        written = "/" + unquote(uri)
+        for prefix, root in prefixes:
+            if written.startswith(prefix + "/"):
+                return os.path.join(root, written[len(prefix) + 1 :])
+        return os.path.join(ran_in, unquote(uri))
 
     def _uri(uri: str) -> str:
-        absolute = os.path.join(ran_in, unquote(uri))
-        return quote(checkov_repo_file_path(absolute, cwd).lstrip("/"))
+        return quote(checkov_repo_file_path(_absolute(uri), cwd).lstrip("/"))
 
     def _locations(items: Any) -> None:
         for location in items or []:
@@ -259,6 +282,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
     check_conf: str = "NOT_PROVIDED"
+
+    # The absolute target of the scan in progress, set by _execute_scan and read
+    # when the results are rewritten (see rewrite_checkov_paths).
+    _checkov_target: Optional[Path] = PrivateAttr(default=None)
 
     def model_post_init(self, context):
         if self.config is None:
@@ -447,7 +474,13 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         we point ``--output-file-path`` at the parent dir but read
         ``results_sarif.sarif`` from inside it.
         """
-        target_results_dir = self.results_dir.joinpath(target_type)
+        # Absolute, because checkov runs from the filesystem root
+        # (_subprocess_cwd), where a relative path names something else.
+        target = Path(os.path.abspath(target))
+        self._checkov_target = target
+        target_results_dir = Path(
+            os.path.abspath(self.results_dir.joinpath(target_type))
+        )
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
 
@@ -483,7 +516,15 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         longer be told apart. Every path relative to the root is absolute, so
         ``rewrite_checkov_paths`` recovers the source-relative form exactly.
         """
-        return Path(Path(os.path.abspath(results_dir)).anchor)
+        return cwd_outside_scanned_tree(
+            self._scanned_target(),
+            source_dir=self.context.source_dir,
+            config=getattr(self.context, "config", None),
+        )
+
+    def _scanned_target(self) -> Path:
+        """The target of the scan in progress, or the source directory."""
+        return self._checkov_target or Path(os.path.abspath(self.context.source_dir))
 
     def _read_results_file(self, results_file: Path) -> Optional[dict[str, Any]]:
         """Read checkov's SARIF with its paths made relative to the source directory.
@@ -491,21 +532,30 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         The JSON report, written when ``additional_formats`` asks for it, is
         rewritten the same way so it matches. CycloneDX carries no such path.
         """
-        ran_in = Path(os.path.abspath(results_file)).anchor
-        source_dir = str(self.context.source_dir)
+        target = self._scanned_target()
+        ran_in = Path(target).anchor
+        source_dir = os.path.abspath(self.context.source_dir)
+        scanned_dirs = [target.as_posix(), Path(source_dir).as_posix()]
         json_report = Path(results_file).parent / "results_json.json"
         if json_report.is_file():
             try:
                 with open(json_report, encoding="utf-8") as handle:
                     document = json.load(handle)
-                rewrite_checkov_paths(document, ran_in=ran_in, source_dir=source_dir)
+                rewrite_checkov_paths(
+                    document,
+                    ran_in=ran_in,
+                    source_dir=source_dir,
+                    scanned_dirs=scanned_dirs,
+                )
                 with open_for_write(json_report) as handle:
                     json.dump(document, handle, indent=4)
             except (OSError, ValueError) as error:
                 ASH_LOGGER.debug(f"Could not rewrite paths in {json_report}: {error}")
         raw = super()._read_results_file(results_file)
         if raw is not None:
-            rewrite_checkov_paths(raw, ran_in=ran_in, source_dir=source_dir)
+            rewrite_checkov_paths(
+                raw, ran_in=ran_in, source_dir=source_dir, scanned_dirs=scanned_dirs
+            )
         return raw
 
     def _output_dir_skip_pattern(self, target: Path) -> str | None:
