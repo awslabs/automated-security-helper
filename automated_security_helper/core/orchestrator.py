@@ -3,7 +3,6 @@
 
 import json
 import shutil
-import os
 from pathlib import Path
 from typing import Annotated, Any, Callable, Dict, List, Optional
 
@@ -254,35 +253,6 @@ class ASHScanOrchestrator(BaseModel):
         elif not isinstance(self.output_dir, Path):
             self.output_dir = Path(self.output_dir)
 
-    def _ignore_repo_sandbox_grants(self) -> None:
-        """Drop sandbox settings that grant access when they came from the scanned tree.
-
-        A config file inside the source tree belongs to the repository being
-        scanned, which the sandbox does not trust. sandbox.network_scanners and
-        sandbox.extra_read_paths from such a file are reset to their defaults;
-        --config-overrides and a config file outside the tree still set them.
-        """
-        sandbox = getattr(self.config, "sandbox", None)
-        if sandbox is None:
-            return
-        if self.config_path is not None and not Path(
-            os.path.realpath(self.config_path)
-        ).is_relative_to(Path(os.path.realpath(self.source_dir))):
-            return
-        overridden = {
-            str(o).split("=", 1)[0].rstrip("+").strip()
-            for o in (self.config_overrides or [])
-        }
-        for key, default in (("network_scanners", None), ("extra_read_paths", [])):
-            if f"sandbox.{key}" in overridden or getattr(sandbox, key) == default:
-                continue
-            ASH_LOGGER.warning(
-                f"Ignoring sandbox.{key} from a config file inside the scanned "
-                "tree: the repository being scanned cannot widen the sandbox. "
-                "Set it with --config-overrides or a config file outside the tree."
-            )
-            setattr(sandbox, key, default)
-
     def initialize(self) -> None:
         """Perform all filesystem I/O and engine setup.
 
@@ -306,8 +276,6 @@ class ASHScanOrchestrator(BaseModel):
                 config_overrides=self.config_overrides or [],
                 permit_base=self.config_base_gate,
             )
-
-        self._ignore_repo_sandbox_grants()
 
         # Surface config resolution warnings prominently
         if self.config._resolution_warnings:

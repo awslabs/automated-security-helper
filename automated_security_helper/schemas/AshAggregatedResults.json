@@ -16088,7 +16088,7 @@
       "properties": {
         "extra_read_paths": {
           "default": [],
-          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand.",
+          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Ignored when set by a config file inside the scanned tree.",
           "items": {
             "type": "string"
           },
@@ -16122,7 +16122,7 @@
             }
           ],
           "default": null,
-          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network.",
+          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside the scanned tree; set inside the tree, a list can only remove network.",
           "title": "Network Scanners"
         }
       },

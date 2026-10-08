@@ -58,7 +58,16 @@
   - an environment filtered to an allowlist, so cloud credentials and tokens are not
     passed in;
   - no network under `--offline`, and online only for the scanners that fetch rules,
-    databases or audit data.
+    databases or audit data. detect-secrets' secret verification gets a network only
+    when `sandbox.network_scanners` names it, because the settings that enable it
+    can come from the scanned repository.
+
+  `sandbox.network_scanners` and `sandbox.extra_read_paths` grant access, so a config
+  file inside the scanned tree (discovered, `--config`, an `extends` base, or
+  `ASH_CONFIG`) cannot set them; they come from `--config-overrides` or a config
+  file outside the tree. Such a file's `network_scanners` can still remove network,
+  and its `sandbox.mode` applies only when nothing trusted turned the sandbox on.
+  The tree is the enclosing checkout, not only the scanned directory.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it

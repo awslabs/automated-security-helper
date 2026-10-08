@@ -731,7 +731,9 @@ class SandboxConfig(BaseModel):
                 "Scanners allowed a network when the scan is online. Null (the default) "
                 "uses each scanner's declared need: semgrep, opengrep, grype, trivy, "
                 "npm-audit and snyk-code fetch rules, databases or audit data. A list "
-                "replaces those defaults. Under --offline no scanner gets a network."
+                "replaces those defaults. Under --offline no scanner gets a network. "
+                "Honored only from --config-overrides or a config file outside the "
+                "scanned tree; set inside the tree, a list can only remove network."
             )
         ),
     ] = None
@@ -741,10 +743,28 @@ class SandboxConfig(BaseModel):
         Field(
             description=(
                 "Additional host paths every sandboxed scanner may read, for example a "
-                "corporate CA bundle or a shared rule directory. '~' and $VARS expand."
+                "corporate CA bundle or a shared rule directory. '~' and $VARS expand. "
+                "Ignored when set by a config file inside the scanned tree."
             )
         ),
     ] = []
+
+    # Set by config/sandbox_grants.py from a network_scanners list that a config
+    # file inside the scanned tree wrote. Private, so no config file can set it.
+    _network_limit: Optional[List[str]] = PrivateAttr(default=None)
+
+    @property
+    def network_limit(self) -> Optional[List[str]]:
+        """Scanners a config file in the scanned tree allows a network, or None.
+
+        Only ever narrows: a scanner outside this list gets no network whatever
+        network_scanners says. See config/sandbox_grants.py.
+        """
+        return self._network_limit
+
+    @network_limit.setter
+    def network_limit(self, value: Optional[List[str]]) -> None:
+        self._network_limit = value
 
 
 class AshMcpConfig(BaseModel):
