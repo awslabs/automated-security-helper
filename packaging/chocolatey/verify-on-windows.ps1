@@ -10,8 +10,9 @@ The Windows counterpart of packaging/deb/verify-in-container.sh and
 packaging/rpm/verify-in-container.sh, held to the e2e bar in tests/e2e/README.md:
 
   1-3   Build the package from the wheel the build job made from this commit, assert
-        its metadata, count the bundled wheels (exactly one), and run the
-        package-contents gate on the .nupkg.
+        its metadata, count the bundled wheels (exactly one), run the
+        package-contents gate on the .nupkg, and require it to refuse a copy with a
+        scanner binary planted in it (packaging/assert-planted-scanner-rejected.py).
   3c    Build an N-1 package from E2E_PREV_REF's tree (scripts/e2e/prev_tree.py), with
         its version lowered, using that tree's own build.ps1 and install scripts, so
         the upgrade crosses a real code change and runs the new install script over a
@@ -353,6 +354,16 @@ Write-Host '== 3b. the package-contents gate'
 # to the gate the published wheel passes. The .nupkg checks are stdlib-only.
 $r = Invoke-Harness -Arguments @((Join-Path $Repo 'packaging\assert-package-contents.py'), $nupkg)
 Assert-NativeSuccess -What 'packaging/assert-package-contents.py' -ExitCode $r.Rc
+
+Write-Host '== 3b2. negative control: the gate must refuse this package with a scanner planted in it'
+# The gate's --self-test proves each check can fail on fixtures shaped like this package.
+# This proves it on the .nupkg just packed: a copy with tools/grype.exe (a native PE
+# image) added must be refused with the native-binary verdict on that member, and the
+# unmodified package must pass. The copy is written under $Work, never $OutDir.
+$r = Invoke-Harness -Arguments @((Join-Path $Repo 'packaging\assert-planted-scanner-rejected.py'), $nupkg, '--work', (Join-Path $Work 'planted'))
+if ($r.Rc -ne 0) {
+    Fail-Verification "NEGATIVE CONTROL: packaging/assert-planted-scanner-rejected.py exited $($r.Rc) on $nupkg; the gate did not refuse the real package with a scanner planted in it"
+}
 
 Write-Host "== 3c. build N-1 from $PrevRef"
 # N-1 is the older tree's own wheel, nuspec and install scripts, packed by its own

@@ -13,8 +13,9 @@
       2. build and sign N-1 in a scratch directory: this checkout's tree, exported with
          `git archive`, with its version lowered (3.7.0 -> 3.6.0), the same derivation
          packaging/build-test-wheels.sh uses for the deb and rpm upgrade legs;
-      3. a negative control: a copy of N with one payload byte changed must be refused by
-         Add-AppxPackage;
+      3. negative controls: the package-contents gate must refuse a copy of N with a scanner
+         binary planted in it (packaging/assert-planted-scanner-rejected.py), and a copy of
+         N with one payload byte changed must be refused by Add-AppxPackage;
       4. install N-1 fresh, bootstrap its venv, and check it reports N-1's version;
       5. upgrade to N with Add-AppxPackage, and require the installed version to move, the
          venv to be REBUILT from N's wheel, and `ashx --version` to report N;
@@ -696,6 +697,17 @@ Write-Step '2b. the package-contents gate, on the signed package'
 & uv run --script --python 3.13 (Join-Path $repoRoot 'packaging/assert-package-contents.py') $msix
 if ($LASTEXITCODE -ne 0) {
     Fail "packaging/assert-package-contents.py exited $LASTEXITCODE on $(Split-Path -Leaf $msix)"
+}
+
+Write-Step '2c. negative control: the gate must refuse this package with a scanner planted in it'
+# The gate's --self-test proves each check can fail on fixtures shaped like this package.
+# This proves it on the package itself: a copy of the signed .msix above with
+# assets/grype (an ELF header) added must be refused with the native-binary verdict on
+# that member, and the unmodified package must pass. The copy is written under the work
+# directory, never build/msix, which the workflow uploads.
+& uv run --script --python 3.13 (Join-Path $repoRoot 'packaging/assert-planted-scanner-rejected.py') $msix --work (Join-Path $work 'planted')
+if ($LASTEXITCODE -ne 0) {
+    Fail "NEGATIVE CONTROL: packaging/assert-planted-scanner-rejected.py exited $LASTEXITCODE on $(Split-Path -Leaf $msix); the gate did not refuse the real package with a scanner planted in it"
 }
 
 Write-Step '3. package metadata is well formed, read back out of the package'

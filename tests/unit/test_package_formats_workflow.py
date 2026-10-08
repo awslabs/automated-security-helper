@@ -14,6 +14,7 @@ into a run artifact.
 
 from __future__ import annotations
 
+import fnmatch
 from pathlib import Path
 
 import yaml
@@ -48,3 +49,23 @@ def test_empty_signing_secrets_take_the_self_signed_path():
     assert "if ($Base64) {" in text
     assert "New-SelfSignedCertificate" in text
     assert "secrets.MSIX_SIGNING_PFX_BASE64" in CALLEE.read_text(encoding="utf-8")
+
+
+def test_every_unit_test_the_caller_runs_is_in_its_paths_filter():
+    # The unit job runs a hand-written list of test files, and the push trigger has a
+    # hand-written paths filter. A test file added to the first and not the second
+    # never triggers the run that would show it failing on its own push.
+    workflow = yaml.safe_load(CALLER.read_text(encoding="utf-8"))
+    # PyYAML reads the bare `on:` key as the boolean True.
+    trigger = workflow.get("on", workflow.get(True))
+    paths = trigger["push"]["paths"]
+    commands = " ".join(
+        str(step.get("run", "")) for step in workflow["jobs"]["unit"]["steps"]
+    )
+    tests = sorted({w for w in commands.split() if w.startswith("tests/unit/")})
+    assert tests, "the unit job runs no tests/unit file"
+    for test in tests:
+        assert (REPO_ROOT / test).is_file(), f"the unit job runs {test}, which is gone"
+        assert any(fnmatch.fnmatch(test, pattern) for pattern in paths), (
+            f"{test} runs in the unit job but is not in the push paths filter"
+        )
