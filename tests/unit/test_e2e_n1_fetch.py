@@ -81,6 +81,10 @@ LEGS = {
         "scripts/e2e/homebrew.sh",
         ("Formula/ash.rb", "pyproject.toml"),
     ),
+    ("ash-e2e.yml", "mcpb"): (
+        "scripts/e2e/mcpb.sh",
+        ("pyproject.toml", "ash-agent-plugins/agentic-coding/plugins/mcpb/ash.mcpb"),
+    ),
     ("ash-jetbrains-ci.yml", "headless-real"): (
         "editors/jetbrains/e2e-ide-cycle.sh",
         (
@@ -102,6 +106,7 @@ LEG_MODES = {
     ("ash-e2e.yml", "wheel"): "latest-release",
     ("ash-e2e.yml", "container"): "latest-release",
     ("ash-e2e.yml", "homebrew"): "latest-release",
+    ("ash-e2e.yml", "mcpb"): "latest-release",
     ("ash-jetbrains-ci.yml", "headless-real"): "auto",
     ("ash-package.yml", "chocolatey"): "auto",
 }
@@ -2368,3 +2373,94 @@ def test_n1_ref_sh_fails_loudly_when_the_releases_cannot_be_listed(
     assert result.returncode == 1, result.stdout
     assert "cannot list the releases at" in result.stderr
     assert "FAIL: cannot derive N-1 from E2E_PREV_REF=latest-release" in result.stderr
+
+
+# -- --allow-unselected-missing reaches only a release N-1's scan ------------------
+
+# Every shell line that passes the allowance, and what makes it a release N-1's scan.
+# assert_outcome.py itself refuses it on any output a v4 ASH wrote
+# (tests/unit/test_e2e_assert_outcome.py); this holds the callers to it as well.
+ALLOWANCE_SITES = {
+    "scripts/e2e/wheel.sh": "--label upgrade-before --allow-unselected-missing",
+    "scripts/e2e/homebrew.sh": "--label upgrade-before --allow-unselected-missing",
+    "packaging/verify-lib.sh": "vl_assert_case findings --allow-unselected-missing",
+}
+
+
+def _allowance_lines(text: str) -> list:
+    return [
+        (number, line)
+        for number, line in enumerate(text.splitlines(), 1)
+        if "--allow-unselected-missing" in line and not line.lstrip().startswith("#")
+    ]
+
+
+def allowance_site_problems(rel: str, text: str) -> list:
+    """Why file REL's uses of the allowance are not exactly its sanctioned one."""
+    lines = _allowance_lines(text)
+    if rel not in ALLOWANCE_SITES:
+        return [f"{rel}: passes --allow-unselected-missing at {lines}"] if lines else []
+    if len(lines) != 1 or ALLOWANCE_SITES[rel] not in lines[0][1]:
+        return [f"{rel}: expected exactly one {ALLOWANCE_SITES[rel]!r}, found {lines}"]
+    rows = text.splitlines()
+    number = lines[0][0]
+    if rel == "packaging/verify-lib.sh":
+        # Inside the release user's own scan, which runs the release's `ash`.
+        body = "\n".join(rows[number - 6 : number])
+        if "vl_release_scan_findings() {" not in body or "VL_SCAN_CLI=ash" not in body:
+            return [f"{rel}: the allowance is outside vl_release_scan_findings"]
+        return []
+    # Inside the branch taken only when N-1 is a published release.
+    block = "\n".join(rows[max(0, number - 12) : number])
+    if 'if [ "${N1_IS_RELEASE:-no}" = yes ]; then' not in block:
+        return [f"{rel}: the allowance is outside the N1_IS_RELEASE branch"]
+    return []
+
+
+def test_the_allowance_is_passed_only_where_n_minus_1_is_a_release():
+    problems, seen = [], set()
+    for root in ("scripts", "packaging", "editors", ".github"):
+        for path in sorted((REPO_ROOT / root).rglob("*")):
+            if (
+                path.suffix not in (".sh", ".ps1", ".yml", ".yaml")
+                or not path.is_file()
+            ):
+                continue
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if _allowance_lines(text):
+                seen.add(rel)
+            problems += allowance_site_problems(rel, text)
+    assert problems == []
+    assert seen == set(ALLOWANCE_SITES)
+
+
+@pytest.mark.parametrize(
+    ("rel", "old", "new"),
+    [
+        (
+            "scripts/e2e/wheel.sh",
+            'run_case "$UPGRADED_CLI" findings upgrade-after',
+            (
+                'harness "$REPO/scripts/e2e/run_case.py" --cli "$UPGRADED_CLI" --case findings '
+                '--work "$WORK/scans" --label upgrade-after --allow-unselected-missing'
+            ),
+        ),
+        (
+            "scripts/e2e/homebrew.sh",
+            '    if [ "${N1_IS_RELEASE:-no}" = yes ]; then\n      # A v3 release',
+            "    if true; then\n      # A v3 release",
+        ),
+        (
+            "scripts/e2e/container.sh",
+            'run_case "$UPGRADED_CLI" "$TAG_UPGRADE" findings upgrade-after',
+            'run_case "$UPGRADED_CLI" "$TAG_UPGRADE" findings upgrade-after --allow-unselected-missing',
+        ),
+    ],
+    ids=["a-scan-of-n", "outside-the-release-branch", "an-unlisted-leg"],
+)
+def test_a_planted_allowance_on_a_scan_of_n_is_caught(rel, old, new):
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    assert text.count(old) == 1, (rel, old)
+    assert allowance_site_problems(rel, text) == []
+    assert allowance_site_problems(rel, text.replace(old, new, 1)) != []

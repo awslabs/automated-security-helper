@@ -116,6 +116,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import assert_outcome  # noqa: E402
+import release_defects  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "e2e" / "fixtures"
 
@@ -251,6 +252,7 @@ def bundle_upgrade_problems(
     head_manifest: Dict[str, Any],
     prev_version: str,
     version: str,
+    prev_exemption: Optional[str] = None,
 ) -> List[str]:
     """Why a desktop host would not see the head bundle replace the N-1 bundle.
 
@@ -264,6 +266,11 @@ def bundle_upgrade_problems(
         ("N-1", prev_manifest, prev_version),
         ("head", head_manifest, version),
     ):
+        # PREV_EXEMPTION is release_defects.mcpb_bundle_exemption()'s reason for a
+        # published release's bundle recorded there exactly (v3.7.1's reports 1.0.0 and
+        # launches v3.4.0). It never covers the head bundle.
+        if label == "N-1" and prev_exemption:
+            continue
         if manifest.get("version") != wanted:
             problems.append(
                 f"the {label} bundle's version is {manifest.get('version')!r} and it "
@@ -467,7 +474,9 @@ def case_config(case: Dict[str, Any], all_scanners: Sequence[str]) -> Dict[str, 
     return config
 
 
-def expectation_of(case: Dict[str, Any]) -> "assert_outcome.Expectation":
+def expectation_of(
+    case: Dict[str, Any], allow_unselected_missing: bool = False
+) -> "assert_outcome.Expectation":
     expected = assert_outcome.Expectation(
         expect_rc=int(case["expect_rc"]),
         findings=case.get("findings"),
@@ -475,6 +484,7 @@ def expectation_of(case: Dict[str, Any]) -> "assert_outcome.Expectation":
         require_scanner=case.get("require_scanner"),
         selected=list(case["scanners"]),
         incomplete_scanner=case.get("incomplete_scanner"),
+        allow_unselected_missing=allow_unselected_missing,
     )
     usage = expected.usage_problems()
     if usage:
@@ -483,7 +493,10 @@ def expectation_of(case: Dict[str, Any]) -> "assert_outcome.Expectation":
 
 
 def verdict_problems(
-    case: Dict[str, Any], progress: Dict[str, Any], summary: Dict[str, Any]
+    case: Dict[str, Any],
+    progress: Dict[str, Any],
+    summary: Dict[str, Any],
+    allow_unselected_missing: bool = False,
 ) -> Tuple[List[str], Optional[int]]:
     """Problems with the server's own verdict, and the exit code it implies.
 
@@ -499,14 +512,29 @@ def verdict_problems(
             f"get_scan_progress status is {status!r}, expected {want_status!r} "
             f"(error_message: {progress.get('error_message')!r})"
         )
+    rows = [r for r in progress.get("incomplete_scanners") or [] if isinstance(r, dict)]
+    if allow_unselected_missing:
+        # Only for a v3 release's server (assert_outcome --allow-unselected-missing): it
+        # reports scanners the scan was not told to run MISSING when their tools are
+        # absent, and counts them against coverage. Those rows alone are set aside.
+        chosen = {assert_outcome._norm(str(n)) for n in case["scanners"]}
+        unselected = [
+            r
+            for r in rows
+            if str(r.get("status", "MISSING")).upper() == "MISSING"
+            and assert_outcome._norm(str(r.get("scanner"))) not in chosen
+        ]
+        rows = [r for r in rows if r not in unselected]
     coverage = progress.get("coverage_complete")
-    if coverage is not (expect_rc != 1):
+    if allow_unselected_missing and coverage is False and not rows and expect_rc != 1:
+        coverage = True
+    if allow_unselected_missing and "coverage_complete" not in progress:
+        # A v3 server has no coverage_complete (v4 added it with fail_on_incomplete).
+        # Its completeness is judged from the output on disk by check_outcome instead.
+        pass
+    elif coverage is not (expect_rc != 1):
         problems.append(f"coverage_complete is {coverage!r}, expected {expect_rc != 1}")
-    incomplete = sorted(
-        assert_outcome._norm(str(row.get("scanner")))
-        for row in progress.get("incomplete_scanners") or []
-        if isinstance(row, dict)
-    )
+    incomplete = sorted(assert_outcome._norm(str(row.get("scanner"))) for row in rows)
     want_incomplete = (
         [assert_outcome._norm(case["incomplete_scanner"])] if expect_rc == 1 else []
     )
@@ -524,6 +552,11 @@ def verdict_problems(
     actionable = (
         by_severity.get("actionable") if isinstance(by_severity, dict) else None
     )
+    if actionable is None and allow_unselected_missing:
+        # A v3 server's get_scan_summary has no findings_summary; its count is
+        # summary_stats.actionable, the same number the aggregated results carry.
+        stats = summary.get("summary_stats")
+        actionable = stats.get("actionable") if isinstance(stats, dict) else None
     if status == "incomplete":
         derived: Optional[int] = 1
     elif status == "completed" and isinstance(actionable, int):
@@ -815,6 +848,7 @@ def run_case(
     label: str,
     expect_version: str,
     transport: str = "http",
+    allow_unselected_missing: bool = False,
 ) -> Path:
     """Scans one case through run_ash_scan and judges it. Returns its output dir.
 
@@ -823,7 +857,7 @@ def run_case(
     session open with StdioSession. The verdict is the same for both.
     """
     case = assert_outcome.load_case(fixtures / "cases.json", case_name)
-    expected = expectation_of(case)
+    expected = expectation_of(case, allow_unselected_missing)
     root = work / "scans" / label
     if root.exists():
         shutil.rmtree(root)
@@ -912,10 +946,18 @@ def run_case(
         summary = client.call("get_scan_summary", {"output_dir": str(output_dir)})
         if not isinstance(summary, dict):
             raise Failure(f"[{label}] get_scan_summary replied {_brief(summary)}")
-        verdict, rc = verdict_problems(case, progress, summary)
+        verdict, rc = verdict_problems(
+            case, progress, summary, allow_unselected_missing
+        )
         problems += verdict
         metadata = summary.get("metadata")
         wrote = metadata.get("ash_version") if isinstance(metadata, dict) else None
+        if wrote is None and allow_unselected_missing:
+            # A v3 server's summary names no version; the results it wrote do.
+            on_disk = json.loads(
+                (output_dir / "ash_aggregated_results.json").read_text(encoding="utf-8")
+            )
+            wrote = (on_disk.get("metadata") or {}).get("tool_version")
         if wrote != expect_version:
             problems.append(
                 f"the results were written by ASH {wrote!r}, expected {expect_version}"
@@ -978,6 +1020,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         required=True,
         help="the .mcpb the N-1 tree builds, which the head bundle must replace",
     )
+    parser.add_argument(
+        "--prev-release",
+        help=(
+            "the published release the N-1 bundle and wheel are (e.g. v3.7.1): its "
+            "recorded bundle defect is exempted (scripts/e2e/release_defects.py), and "
+            "its own scan is judged with --allow-unselected-missing"
+        ),
+    )
     parser.add_argument("--wheel", type=Path, required=True, help="the head wheel (N)")
     parser.add_argument("--prev-wheel", type=Path, required=True, help="the N-1 wheel")
     parser.add_argument(
@@ -1030,8 +1080,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         say(f"bundle {prev_manifest.get('name')} {prev_manifest.get('version')} (N-1)")
 
         say("the bundle upgrade: the bundle versions are the ASH releases and move")
+        exemption = (
+            release_defects.mcpb_bundle_exemption(args.prev_release, prev_manifest)
+            if args.prev_release
+            else None
+        )
+        if exemption:
+            say(f"   exempt for N-1 only: {exemption}")
+        if args.prev_release and release_defects.mcpb_bundle_exemption(
+            args.prev_release, manifest
+        ):
+            raise Failure("the head bundle matched a release's recorded defect")
         problems = bundle_upgrade_problems(
-            prev_manifest, manifest, prev_version, version
+            prev_manifest, manifest, prev_version, version, exemption
         )
         if problems:
             raise Failure("; ".join(problems))
@@ -1041,7 +1102,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         say("negative control: a head bundle whose version was not raised must fail it")
         stale = {**manifest, "version": prev_manifest.get("version")}
-        rejected = bundle_upgrade_problems(prev_manifest, stale, prev_version, version)
+        rejected = bundle_upgrade_problems(
+            prev_manifest, stale, prev_version, version, exemption
+        )
         if not any("not raised" in problem for problem in rejected):
             raise Failure(
                 "NEGATIVE CONTROL: a head bundle with the N-1 bundle's version passed "
@@ -1070,6 +1133,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "findings",
             "upgrade-before",
             prev_version,
+            allow_unselected_missing=bool(args.prev_release),
         )
 
         head_target = stdio_target(work, "head", head_config, harness_env)

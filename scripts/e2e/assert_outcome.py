@@ -273,6 +273,15 @@ def check_outcome(output_dir: Path, rc: int, expected: Expectation) -> List[str]
 
         incomplete = {n: s for n, s in statuses.items() if s in INCOMPLETE_STATUSES}
         if expected.allow_unselected_missing:
+            # The allowance is for a v3 release's scan, never a scan of N. The output
+            # names the ASH that wrote it, so no caller can turn it on for v4.
+            metadata = aggregated.get("metadata")
+            wrote = metadata.get("tool_version") if isinstance(metadata, dict) else None
+            if not (isinstance(wrote, str) and wrote.split(".")[0] == "3"):
+                problems.append(
+                    "--allow-unselected-missing applies only to the scan of a v3 "
+                    f"release, and this output was written by ASH {wrote!r}"
+                )
             chosen = {_norm(s) for s in expected.selected}
             incomplete = {
                 n: s
@@ -412,6 +421,7 @@ def _write_output(
     sarif_at: Path = SARIF_RELATIVE,
     write_aggregated: bool = True,
     no_runs: bool = False,
+    tool_version: Optional[str] = None,
 ) -> Path:
     (root / sarif_at).parent.mkdir(parents=True, exist_ok=True)
     runs: List[Dict[str, Any]] = [] if no_runs else [{"results": results}]
@@ -429,7 +439,10 @@ def _write_output(
             json.dumps(
                 {
                     "scanner_results": {n: {"status": s} for n, s in statuses.items()},
-                    "metadata": {"summary_stats": {"actionable": count}},
+                    "metadata": {
+                        "summary_stats": {"actionable": count},
+                        **({"tool_version": tool_version} if tool_version else {}),
+                    },
                 }
             ),
             encoding="utf-8",

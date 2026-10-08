@@ -256,9 +256,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Full history and every tag, because N-1 is derived rather than named:
+      # E2E_PREV_REF=latest-release below makes scripts/e2e/n1-ref.sh take the latest
+      # published GitHub release, whose tag this fetch brings in (prev_tree.py fetches it
+      # itself if it is missing), and the bundle that release shipped.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
       # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
@@ -280,6 +285,11 @@ jobs:
           -p no:cacheprovider -o addopts="" -v
 
       - name: Build the bundle and wheels, launch through the inspector, scan, upgrade, uninstall
+        env:
+          # N-1 is the latest published release. The token only raises the GitHub API
+          # rate limit for listing releases; the job's permissions stay contents: read.
+          E2E_PREV_REF: latest-release
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash scripts/e2e/mcpb.sh "$RUNNER_TEMP/e2e-mcpb"
 
   e2e-gate:

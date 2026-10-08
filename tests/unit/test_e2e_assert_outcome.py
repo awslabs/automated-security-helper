@@ -538,9 +538,14 @@ def test_cli_name_sources_agree():
 # -- --allow-unselected-missing: the scan of a v3 release N-1 ---------------------
 
 
-def _v3_output(tmp_path, statuses):
+def _v3_output(tmp_path, statuses, tool_version="3.7.1"):
     """A findings-shaped output (3 detect-secrets results) whose rows carry STATUSES."""
-    return _write(tmp_path, [ao._sarif_result("detect-secrets")] * 3, statuses)
+    return ao._write_output(
+        tmp_path,
+        [ao._sarif_result("detect-secrets")] * 3,
+        statuses,
+        tool_version=tool_version,
+    )
 
 
 @pytest.mark.parametrize(
@@ -585,3 +590,27 @@ def test_the_cli_flag_reaches_the_verdict(tmp_path):
     argv = ["--case", "findings", "--output-dir", str(out), "--rc", "2"]
     assert ao.main(argv) == 1
     assert ao.main([*argv, "--allow-unselected-missing"]) == 0
+
+
+@pytest.mark.parametrize(
+    "wrote", ["4.0.0", "4.1.2", None], ids=["v4", "later-v4", "unnamed"]
+)
+def test_the_allowance_never_applies_to_a_scan_of_n(tmp_path, wrote):
+    # The flag reaching a scan of N (v4), or an output that does not say which ASH wrote
+    # it, is refused by the output itself, whatever the caller passed.
+    out = _v3_output(
+        tmp_path,
+        {"detect-secrets": "FAILED", "syft": "MISSING"},
+        tool_version=wrote,  # pragma: allowlist secret
+    )
+    expected = ao.Expectation(
+        2,
+        findings=3,
+        require_scanner="detect-secrets",
+        selected=["detect-secrets"],
+        allow_unselected_missing=True,
+    )
+    problems = ao.check_outcome(out, 2, expected)
+    assert any("applies only to the scan of a v3 release" in p for p in problems), (
+        problems
+    )

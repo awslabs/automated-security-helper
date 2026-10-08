@@ -293,14 +293,33 @@ PY
   else
     fail "the N-1 install linked neither $ASH_CLI_NAME nor ash"
   fi
-  require_version_line "$prev_cli" "$prev_version"
+  local defect_rc=2
   if [ "${N1_IS_RELEASE:-no}" = yes ]; then
-    # A v3 release reports scanners it was not told to run MISSING when their tools are
-    # absent (v4: SKIPPED); only its own scan is judged with that allowance.
-    harness "$REPO/scripts/e2e/run_case.py" --cli "$prev_cli" --case findings --work "$WORK/scans" \
-      --label upgrade-before --allow-unselected-missing
+    # A release's keg may carry a defect it shipped with, recorded exactly in
+    # scripts/e2e/release_defects.py (v3.7.1's formula installs ASH without its
+    # dependencies). Exit 0 means it showed exactly that defect, 2 that the release has
+    # none recorded and must work, anything else that it failed some other way.
+    local version_rc=0
+    "$prev_cli" --version >"$WORK/n1-version.log" 2>&1 || version_rc=$?
+    cat "$WORK/n1-version.log"
+    defect_rc=0
+    harness "$REPO/scripts/e2e/release_defects.py" homebrew-version --release "${PREV_REF%% *}" \
+      --rc "$version_rc" --output "$WORK/n1-version.log" || defect_rc=$?
+    [ "$defect_rc" -eq 0 ] || [ "$defect_rc" -eq 2 ] \
+      || fail "the $PREV_REF keg did not show its recorded defect; see above"
+  fi
+  if [ "$defect_rc" -eq 0 ]; then
+    say "N-1 is the $PREV_REF keg as its users have it, which cannot start; the upgrade must repair it"
   else
-    run_case "$prev_cli" findings upgrade-before
+    require_version_line "$prev_cli" "$prev_version"
+    if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+      # A v3 release reports scanners it was not told to run MISSING when their tools
+      # are absent (v4: SKIPPED); only its own scan is judged with that allowance.
+      harness "$REPO/scripts/e2e/run_case.py" --cli "$prev_cli" --case findings --work "$WORK/scans" \
+        --label upgrade-before --allow-unselected-missing
+    else
+      run_case "$prev_cli" findings upgrade-before
+    fi
   fi
 
   use_formula "$HEAD_FORMULA" "$REPO/Formula/ash.rb"
@@ -324,6 +343,8 @@ PY
   say "upgraded $prev_version -> $VERSION; cleanup removed the old keg"
 
   run_case "$cli" findings upgrade-after
+  # The formula's own test on the upgraded keg, the check v3.7.1's keg fails.
+  brew test --verbose "$FORMULA"
   uninstall_and_check
   say "Homebrew upgrade leg passed: $prev_version ($PREV_REF $prev_sha) -> $VERSION ($HEAD_SHA)"
 }
