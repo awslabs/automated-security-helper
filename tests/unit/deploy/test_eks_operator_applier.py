@@ -93,36 +93,70 @@ def _operator_crds() -> dict:
 
 RBAC_KINDS = ("ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding")
 
-# Every top-level kind the operator's manifests may carry. A document of any other kind is
-# reported as drift, so a new kind, or a wrapper this file does not unwrap, cannot be
-# applied by `kubectl apply -f manifests/` while every comparison here skips it.
+# Every kind the operator's manifests may carry, with the top-level fields each may
+# have besides apiVersion, kind and metadata. A document of any other kind is reported,
+# and so is any other field, so a new kind, a wrapper or a field this file does not read
+# cannot be applied by `kubectl apply -f manifests/` while every comparison skips it.
+# The RBAC kinds' fields are checked in _rbac_drift, against RBAC_DOC_FIELDS.
 MANIFEST_KINDS = {
-    "ClusterRole",
-    "ClusterRoleBinding",
-    "Deployment",
-    "Namespace",
-    "NetworkPolicy",
-    "Role",
-    "RoleBinding",
-    "ServiceAccount",
+    "ClusterRole": None,
+    "ClusterRoleBinding": None,
+    "Deployment": {"spec", "status"},
+    "List": {"items"},
+    "Namespace": {"spec", "status"},
+    "NetworkPolicy": {"spec", "status"},
+    "Role": None,
+    "RoleBinding": None,
+    "ServiceAccount": {"automountServiceAccountToken", "imagePullSecrets", "secrets"},
 }
 
 
-def _expand_lists(docs: list) -> list:
-    """Every `kind: *List` flattened into its `items`, the way kubectl's builder does."""
-    out = []
-    for doc in docs:
-        kind = doc.get("kind") if isinstance(doc, dict) else None
-        if isinstance(kind, str) and kind.endswith("List"):
-            out += _expand_lists(doc.get("items") or [])
+def _walk_manifests(raw: list) -> tuple[list, list[str]]:
+    """The documents kubectl would apply, and every problem found on the way.
+
+    kubectl treats ANY object with an `items` key as a list and applies its items,
+    whatever its kind; keying on a `*List` kind let a Namespace carrying a Role and a
+    RoleBinding in `items` grant Secrets reads with every comparison green. So the kind
+    allowlist is checked on every document first, including wrappers, then any document
+    with `items` is replaced by its items, recursively. A `*List` without `items` is
+    reported rather than expanded to nothing.
+    """
+    docs: list = []
+    problems: list[str] = []
+    for doc in raw:
+        if not isinstance(doc, dict):
+            problems.append(f"manifests: not an object: {doc!r}")
+            continue
+        key, kind = _rbac_key(doc), doc.get("kind")
+        allowed = MANIFEST_KINDS.get(kind, False) if isinstance(kind, str) else False
+        if allowed is False:
+            problems.append(f"manifests: kind not in the allowlist: {key}")
+        elif allowed is not None:
+            extra = set(doc) - allowed - {"apiVersion", "kind", "metadata", "items"}
+            problems += [
+                f"manifests: unknown field on {key}: {f}" for f in sorted(extra)
+            ]
+        if "items" in doc:
+            if not (isinstance(kind, str) and kind.endswith("List")):
+                problems.append(f"manifests: items on a non-List kind: {key}")
+            items, more = _walk_manifests(doc.get("items") or [])
+            docs += items
+            problems += more
+        elif isinstance(kind, str) and kind.endswith("List"):
+            problems.append(f"manifests: List without items: {key}")
         else:
-            out.append(doc)
-    return out
+            docs.append(doc)
+    return docs, problems
 
 
 def _manifest_docs(paths: list) -> list:
-    """The documents of every manifest file, Lists expanded. YAML parses JSON too."""
-    return _expand_lists([doc for path in paths for doc in _yaml_docs(path)])
+    """The documents of every manifest file, as kubectl would apply them."""
+    return _walk_manifests([doc for path in paths for doc in _yaml_docs(path)])[0]
+
+
+def _manifest_problems(paths: list) -> list[str]:
+    """What _walk_manifests reports for these files; empty when every document is read."""
+    return _walk_manifests([doc for path in paths for doc in _yaml_docs(path)])[1]
 
 
 def _set_json(value) -> str:
@@ -203,8 +237,7 @@ def _rbac_drift(installed: list, operator: list, stack_labels: dict) -> list[str
     labels, annotations and rules or aggregationRule, or its roleRef and subjects.
     Every value is compared as structure (`_set_json`), nothing is projected or
     defaulted, and a field this function does not know is reported rather than
-    skipped. An operator document whose kind is outside MANIFEST_KINDS is reported
-    too. One function serves the real files and the planted copies below, so the
+    skipped. Unknown kinds and wrappers are reported by _walk_manifests. One function serves the real files and the planted copies below, so the
     controls exercise the comparison the real assertion makes.
     """
     drift: list[str] = []
@@ -221,11 +254,6 @@ def _rbac_drift(installed: list, operator: list, stack_labels: dict) -> list[str
                 for x in sorted({x for x in items if items.count(x) > 1})
             )
 
-    drift += [
-        f"manifests: kind not in the allowlist: {_rbac_key(d)}"
-        for d in operator
-        if not isinstance(d, dict) or d.get("kind") not in MANIFEST_KINDS
-    ]
     keyed = {}
     for side, docs in (("stack", installed), ("operator", operator)):
         rbac = [d for d in docs if isinstance(d, dict) and d.get("kind") in RBAC_KINDS]
@@ -685,6 +713,7 @@ class TestCrds:
 # Names the planted-drift controls below report, kept short so each line reads whole.
 # Keys and values the planted-drift controls below report.
 EXTRA_CR = "ClusterRole (cluster)/ash-operator-extra"
+EXTRA_SA = "ServiceAccount ash-system/ash-extra"
 CR = "ClusterRole (cluster)/ash-operator-crd-reader"
 CRB = "ClusterRoleBinding (cluster)/ash-operator-crd-reader"
 ROLE = "Role ash-system/ash-operator"
@@ -875,6 +904,7 @@ class TestRbac:
         installed = [manifest for _, manifest, _ in docs]
         operator = _manifest_docs(MANIFEST_YAMLS)
         assert RBAC_YAML in MANIFEST_YAMLS
+        assert _manifest_problems(MANIFEST_YAMLS) == []
         # Non-vacuity: two empty sides would agree.
         want = [CR, CRB, ROLE, RB]
         assert (
@@ -1080,6 +1110,79 @@ class TestRbac:
             ),
             pytest.param(
                 {
+                    "rbac.yaml": RBAC_YAML.read_text()
+                    + "\n---\n"
+                    + json.dumps(
+                        {
+                            "apiVersion": "v1",
+                            "kind": "Namespace",
+                            "metadata": {"name": "ash-system"},
+                            "items": [SECRETS_ROLE, SECRETS_BINDING],
+                        }
+                    )
+                },
+                [
+                    "manifests: items on a non-List kind: Namespace (cluster)/ash-system",
+                    "RBAC objects: only in the operator: Role ash-system/ash-secrets",
+                    "RBAC objects: only in the operator: RoleBinding ash-system/ash-secrets",
+                ],
+                id="H3-items-on-a-namespace",
+            ),
+            pytest.param(
+                {
+                    "operator.yaml": OPERATOR_YAML.read_text().replace(
+                        "kind: Namespace\nmetadata:\n  name: ash-system\n",
+                        "kind: Namespace\nmetadata:\n  name: ash-system\nitems:\n"
+                        f"  - {json.dumps(SECRETS_ROLE)}\n",
+                        1,
+                    )
+                },
+                [
+                    "manifests: items on a non-List kind: Namespace (cluster)/ash-system",
+                    "RBAC objects: only in the operator: Role ash-system/ash-secrets",
+                ],
+                id="H2-items-on-the-existing-namespace",
+            ),
+            pytest.param(
+                {
+                    "zz-sa.yaml": json.dumps(
+                        {
+                            "apiVersion": "v1",
+                            "kind": "ServiceAccount",
+                            "metadata": {
+                                "name": "ash-extra",
+                                "namespace": "ash-system",
+                            },
+                            "items": [SECRETS_ROLE],
+                        }
+                    )
+                },
+                [
+                    f"manifests: items on a non-List kind: {EXTRA_SA}",
+                    "RBAC objects: only in the operator: Role ash-system/ash-secrets",
+                ],
+                id="H-items-on-a-service-account",
+            ),
+            pytest.param(
+                {
+                    "zz-k.yaml": "apiVersion: v1\nkind: AccessList\nmetadata: {name: k}\n"
+                },
+                [
+                    "manifests: kind not in the allowlist: AccessList (cluster)/k",
+                    "manifests: List without items: AccessList (cluster)/k",
+                ],
+                id="K-list-without-items",
+            ),
+            pytest.param(
+                {
+                    "zz-ns.yaml": "apiVersion: v1\nkind: Namespace\n"
+                    "metadata: {name: other}\nfutureField: 1\n"
+                },
+                ["manifests: unknown field on Namespace (cluster)/other: futureField"],
+                id="unknown-field-on-a-non-rbac-kind",
+            ),
+            pytest.param(
+                {
                     "zz-other.yml": "apiVersion: v1\nkind: ConfigMap\n"
                     "metadata: {name: surprise, namespace: ash-system}\n"
                 },
@@ -1115,9 +1218,12 @@ class TestRbac:
             (tmp_path / path.name).write_text(path.read_text())
         for name, text in files.items():
             (tmp_path / name).write_text(text)
-        operator = _manifest_docs(_manifest_files(tmp_path))
+        files_read = _manifest_files(tmp_path)
+        operator = _manifest_docs(files_read)
         installed = [manifest for _, manifest, _ in docs]
-        assert _rbac_drift(installed, operator, applier["LABELS"]) == expected
+        drift = _manifest_problems(files_read)
+        drift += _rbac_drift(installed, operator, applier["LABELS"])
+        assert drift == expected
 
     def test_control_order_anywhere_in_rbac_yaml_is_not_drift(
         self, docs: list, applier: dict
@@ -1294,13 +1400,33 @@ class TestParityWithOperatorYaml:
 
     @staticmethod
     def _yaml_docs() -> list:
-        return [d for d in yaml.safe_load_all(OPERATOR_YAML.read_text()) if d]
+        """Every manifest kubectl applies, not operator.yaml alone.
+
+        A second Deployment or NetworkPolicy in another file is applied too, so `_one`
+        must see it and fail, rather than compare the first one it happens to read.
+        """
+        assert _manifest_problems(MANIFEST_YAMLS) == []
+        return _manifest_docs(MANIFEST_YAMLS)
 
     @staticmethod
     def _one(docs: list, kind: str) -> dict:
         found = [d for d in docs if d["kind"] == kind]
         assert len(found) == 1, f"expected one {kind}, found {len(found)}"
         return found[0]
+
+    def test_control_a_second_deployment_in_manifests_is_refused(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Planted in a copy of manifests/: two Deployments must not pass as one."""
+        for path in MANIFEST_YAMLS:
+            (tmp_path / path.name).write_text(path.read_text())
+        shipped = self._one(self._yaml_docs(), "Deployment")
+        second = copy.deepcopy(shipped)
+        second["metadata"]["name"] = "ash-operator-two"
+        (tmp_path / "zz-second.json").write_text(json.dumps(second))
+        planted = _manifest_docs(_manifest_files(tmp_path))
+        with pytest.raises(AssertionError, match="expected one Deployment, found 2"):
+            self._one(planted, "Deployment")
 
     @pytest.fixture
     def pods(self, docs: list) -> tuple[dict, dict]:
