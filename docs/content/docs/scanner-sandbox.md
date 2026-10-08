@@ -119,11 +119,16 @@ from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 
 class MyScanner(ScannerPluginBase[MyScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
-        network=True,                       # online only; never under --offline
-        read_paths=("~/.my-tool/rules",),   # extra read-only paths
-        cache_paths=("~/.cache/my-tool",),  # writable, through an overlay where possible
-        env_prefixes=("MYTOOL_",),          # variables passed through
-        env_names=("MYTOOL_TOKEN",),        # credential-shaped names it needs
+        # A network when the scan is online; never under --offline.
+        network=True,
+        # Extra read-only paths.
+        read_paths=("~/.my-tool/rules",),
+        # Writable, through an overlay where the backend has one.
+        cache_paths=("~/.cache/my-tool",),
+        # Variables passed through.
+        env_prefixes=("MYTOOL_",),
+        # Credential-shaped names it needs.
+        env_names=("MYTOOL_TOKEN",),
     )
 ```
 
