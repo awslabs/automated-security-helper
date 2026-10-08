@@ -31,7 +31,7 @@ pytestmark = [
 ]
 
 # An AWS example key from AWS's own documentation; ferret-scan reports it.
-_SECRET = 'aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"\n'
+_SECRET = 'aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"\n'  # pragma: allowlist secret
 # Limits ferret-scan to SSN detection, which hides the finding above.
 _ONLY_SSN = "defaults:\n  checks: SSN\n"
 
