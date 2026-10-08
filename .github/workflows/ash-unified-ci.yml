@@ -863,6 +863,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job uses git credentials after checkout.
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -919,6 +922,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job uses git credentials after checkout.
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -945,13 +951,16 @@ jobs:
       # --require names the scanners that must actually have run, so a scanner that
       # is MISSING in both runs cannot pass parity by being absent.
       - name: Compare every scanner with and without the sandbox
+        # The report path through the environment, not interpolated into the script,
+        # which is this repository's convention for every context value a shell reads.
         env:
           TMPDIR: ${{ runner.temp }}
+          PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox bwrap --online --ash ash \
             --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft \
-            --report "${{ runner.temp }}/sandbox-parity.json"
+            --report "$PARITY_REPORT"
       - name: Collect the parity report and scan output
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
