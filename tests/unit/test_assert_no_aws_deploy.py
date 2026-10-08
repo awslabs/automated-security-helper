@@ -312,14 +312,16 @@ def test_a_python_argv_hit_is_reported_once(guard: ModuleType) -> None:
 def test_a_follower_that_follows_nothing_fails_the_self_test(
     guard: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(guard.Follower, "follow_file", lambda self, path, via: None)
+    monkeypatch.setattr(
+        guard.Follower, "follow_file", lambda self, path, via, mode=None: None
+    )
     assert guard.self_test() == 1
 
 
 def test_an_npm_mapper_that_maps_nothing_fails_the_self_test(
     guard: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(guard.Follower, "npm_scripts", lambda self, tokens: None)
+    monkeypatch.setattr(guard.Follower, "npm_invocations", lambda self, tokens: None)
     assert guard.self_test() == 1
 
 
@@ -469,7 +471,10 @@ def test_an_npm_mapper_that_maps_nothing_fails_the_self_test(
 def test_npm_scripts(
     guard: ModuleType, tmp_path: Path, tokens: list[str], names: list[str] | None
 ) -> None:
-    assert guard.Follower(tmp_path).npm_scripts(tokens) == names
+    got = guard.Follower(tmp_path).npm_scripts(tokens)
+    assert (sorted(got) if got is not None else None) == (
+        sorted(names) if names is not None else None
+    )
 
 
 def test_a_package_script_hit_annotates_the_manifest_file(
@@ -674,14 +679,16 @@ def test_a_multi_line_javascript_argv_is_one_command(guard: ModuleType) -> None:
     assert any(c.line == 6 and "y" in c.text for c in commands)
 
 
-def test_an_unclosed_javascript_bracket_does_not_glue_the_file(
+def test_an_unclosed_javascript_bracket_joins_and_is_reported(
     guard: ModuleType,
 ) -> None:
-    # A `[` the scan cannot match (inside a regular expression, say) must not join
-    # the rest of the file into one command where `cdk` and `deploy` meet.
-    text = "const re = /[a-z/\nconst cdk = 1\n" + "x()\n" * 60 + "deploy()]\n"
+    # Joining only adds words to a command, so an unmatched `[` joins the rest of
+    # the file and can only add a hit; the file is also reported as misread.
+    text = "const re = [\nconst cdk = 1\n" + "x()\n" * 60 + "deploy()\n"
     commands = guard.shell_commands(text, js=True)
-    assert not any(guard.deploy_reason(c.text) for c in commands)
+    assert any(guard.deploy_reason(c.text) for c in commands)
+    assert guard.js_misread(text)
+    assert not guard.js_misread("const a = [\n 1,\n];\nconst q = /[\"']/;\n")
 
 
 def test_typescript_and_python_modules_are_followed(
@@ -723,3 +730,145 @@ def test_an_echoed_npm_command_is_not_noted_as_unfollowed(
     )
     assert guard.main(["--root", str(tmp_path)]) == 0
     assert "w.yml:6 runs an npm script named by a variable" in capsys.readouterr().out
+
+
+# -- round 2: complete flag readings, pass-through words, Python runner inputs --
+
+
+def test_flag_readings_are_complete_for_many_ambiguous_flags(guard: ModuleType) -> None:
+    # Each unknown pnpm flag may or may not take the word after it; with 12 of them
+    # there are 4096 ways to read the words, and the one with every flag a boolean
+    # (so `ship` is the subcommand after twelve positional values) must be among them.
+    words = [w for i in range(12) for w in (f"--u{i}", f"v{i}")] + ["ship"]
+    readings = guard.flag_readings(words, guard.PNPM_SYNTAX)
+    assert ("ship",) in [r.words for r in readings]
+    assert any(r.words[:1] == ("v0",) for r in readings)
+
+
+def test_too_many_flag_readings_fail_closed(
+    guard: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(guard, "MAX_FLAG_STATES", 3)
+    _write(
+        tmp_path,
+        {
+            ".github/workflows/w.yml": WORKFLOW
+            + "      - run: pnpm --a x --b y --c z ship\n",
+            "package.json": json.dumps({"scripts": {"ship": "tsc"}}),
+        },
+    )
+    assert guard.main(["--root", str(tmp_path)]) == 1
+    assert guard.UNREADABLE in capsys.readouterr().out
+
+
+def test_a_subcommand_chain_past_the_reading_depth_fails_closed(
+    guard: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    chain = " ".join(f"workspace w{i}" for i in range(5))
+    _write(
+        tmp_path,
+        {
+            ".github/workflows/w.yml": WORKFLOW + f"      - run: yarn {chain} ship\n",
+            "package.json": json.dumps({"scripts": {"ship": "tsc"}}),
+        },
+    )
+    assert guard.main(["--root", str(tmp_path)]) == 1
+    assert guard.UNREADABLE in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("tokens", "expected"),
+    [
+        (["npm", "run", "tool", "--", "deploy", "--all"], ("tool", "-- deploy --all")),
+        (["npm", "run", "-w", "app", "tool", "deploy"], ("tool", "deploy")),
+        (["yarn", "tool", "deploy"], ("tool", "deploy")),
+        (["yarn", "workspace", "app", "tool", "deploy"], ("tool", "deploy")),
+        (["pnpm", "--filter", "app", "run", "tool", "deploy"], ("tool", "deploy")),
+        (["npm", "test", "--", "--ci"], ("test", "-- --ci")),
+        (["npm", "ci"], ("install", "")),
+    ],
+)
+def test_npm_invocations_carry_the_pass_through_words(
+    guard: ModuleType, tmp_path: Path, tokens: list[str], expected: tuple[str, str]
+) -> None:
+    assert expected in guard.Follower(tmp_path).npm_invocations(tokens)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import os\nCMD = "npx cdk deploy --all"\nos.system(CMD)\n',
+        'import os\nCMD: str = "npx cdk deploy --all"\nos.popen(CMD)\n',
+        'import subprocess, shlex\nsubprocess.run(shlex.split("npx cdk deploy --all"))\n',
+        'import subprocess\nsubprocess.run("npx cdk deploy --all".split())\n',
+        'import subprocess\nsubprocess.run(["npx", "cdk"] + ["deploy"])\n',
+        'import subprocess\nCMD = shlex.split("terraform apply")\nsubprocess.run(CMD)\n',
+        'import os\nx = 1\nos.system(f"npx cdk --profile {x} deploy")\n',
+        'from subprocess import check_call as cc\ncc(["terraform", "apply"])\n',
+        'from os import system as sh\nsh("sam deploy")\n',
+        'import subprocess\nsubprocess.run(["ssh", "host", "npx cdk deploy"])\n',
+    ],
+)
+def test_python_runner_inputs_in_every_shape(guard: ModuleType, source: str) -> None:
+    assert any(guard.deploy_reason(c.text) for c in guard.python_commands(source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import subprocess\nA = B = ["scripts/d.sh"]\nsubprocess.run(A)\n',
+        'import subprocess\nA: list[str] = ["scripts/d.sh"]\nsubprocess.run(A)\n',
+    ],
+)
+def test_python_bound_argv_shapes_name_the_script(
+    guard: ModuleType, source: str
+) -> None:
+    assert "scripts/d.sh" in [c.text for c in guard.python_commands(source)]
+
+
+def test_javascript_comment_stripping_keeps_code_after_a_comment(
+    guard: ModuleType,
+) -> None:
+    text = "/* x */ execSync('npx cdk deploy');\nconst u = 'http://a'; // cdk deploy\n"
+    stripped = guard.strip_js_comments(text)
+    assert "execSync('npx cdk deploy')" in stripped
+    assert "http://a" in stripped and "// cdk" not in stripped
+    assert stripped.count("\n") == text.count("\n")
+
+
+def test_a_regex_literal_does_not_open_a_string(guard: ModuleType) -> None:
+    text = "const q = /^(['\"])(.*)\\1$/;\nspawnSync('npx', [\n  'cdk',\n  'deploy',\n]);\n"
+    assert not guard.js_misread(text)
+    assert any(guard.deploy_reason(c.text) for c in guard.shell_commands(text, js=True))
+    # Division is not a regex.
+    assert not guard.js_misread("const a = b / c / d;\n")
+
+
+def test_matrix_items_are_runnable_and_paths_items_are_not(guard: ModuleType) -> None:
+    text = (
+        "on:\n  push:\n    paths:\n      - a.sh\njobs:\n  j:\n    strategy:\n"
+        "      matrix:\n        s:\n          - b.sh\n    steps:\n      - run: x\n"
+    )
+    assert guard.matrix_item_lines(text) == {10}
+
+
+@pytest.mark.parametrize(
+    ("tool", "words"),
+    [
+        # A boolean before a word that is not a flag: read as a value, the word
+        # would vanish.
+        ("pnpm", ["--silent", "a", "--no-bail", "b", "--stream", "c", "-w", "ship"]),
+        ("yarn", ["--silent", "a", "--frozen-lockfile", "b", "-s", "ship"]),
+        ("npm", ["--silent", "--if-present", "-s", "run", "ship"]),
+    ],
+)
+def test_known_boolean_flags_are_read_one_way(
+    guard: ModuleType, tool: str, words: list[str]
+) -> None:
+    readings = guard.flag_readings(words, guard.NPM_FLAG_SYNTAX[tool])
+    assert [r.words for r in readings] == [
+        tuple(w for w in words if not w.startswith("-"))
+    ]
