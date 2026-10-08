@@ -77,8 +77,12 @@ class TestARealRenderIsAccepted:
     """The control: without it every rejection below could come from a judge that
     rejects everything."""
 
+    # Explicit ids: the IaC drift workflow requires these tests by node id, and a
+    # positional id (hosting0) would renumber when a case is inserted.
     @pytest.mark.parametrize(
-        "hosting, addressing", [(DOTTED, "path"), (UNDOTTED, "virtual")]
+        "hosting, addressing",
+        [(DOTTED, "path"), (UNDOTTED, "virtual")],
+        ids=["dotted-path", "undotted-virtual"],
     )
     def test_accepted(self, tmp_path, hosting, addressing):
         _, doc = _render(tmp_path, hosting)
@@ -158,6 +162,8 @@ class TestEachDefectIsRejected:
                 "fragment does not start",
             ),
         ],
+        # Explicit ids, for the same reason as test_accepted's.
+        ids=["misspelled-param", "renamed-stack", "other-region", "wrong-fragment"],
     )
     def test_a_hand_edited_link(self, tmp_path, edit, needle):
         _, doc = _render(tmp_path, UNDOTTED)
