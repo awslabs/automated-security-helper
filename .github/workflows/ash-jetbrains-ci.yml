@@ -255,9 +255,10 @@ jobs:
   # sees, plus the ashx -> ash fallback and a wrong-count control on real output.
   #
   # e2e-ide-cycle.sh installs N fresh with the IDE's own headless installer, installs N-1 (the
-  # plugin at origin/v4-capabilities with a lowered version) and replaces it with N, uninstalls,
-  # and reads what the IDE says it loaded after each step. Its header records why the upgrade is
-  # remove-then-install: the headless installer answers "already installed" to an upgrade.
+  # plugin at the commit scripts/e2e/n1-ref.sh derives, with a lowered version) and replaces it
+  # with N, uninstalls, and reads what the IDE says it loaded after each step. Its header records
+  # why the upgrade is remove-then-install: the headless installer answers "already installed"
+  # to an upgrade.
   #
   # The same image and digest as the jobs above, with --init for the same reason. Nothing is
   # published and nothing is uploaded: the wheel, the venv and both zips stay under RUNNER_TEMP,
@@ -276,12 +277,14 @@ jobs:
       run:
         shell: bash
     steps:
-      # Two commits, so HEAD's parent is here for e2e-ide-cycle.sh's fallback below: a HEAD
-      # that is not v4-capabilities but has its tree builds N-1 from HEAD^, which a
-      # one-commit checkout does not have. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
+      # Full history and every tag, because N-1 is derived from them rather than named:
+      # E2E_PREV_REF=auto below makes scripts/e2e/n1-ref.sh take the newest release tag, else
+      # the newest ancestor, that differs from HEAD and carries editors/jetbrains. Naming a
+      # development branch here would fail the fetch once that branch is merged and deleted.
+      # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       # No uv cache: the install has to be fresh, and a saved Actions cache is a publish surface
       # (.github/scripts/assert-publish-surfaces.py) this job has no reason to open. The same
@@ -299,22 +302,16 @@ jobs:
           mkdir -p "$RUNNER_TEMP/jb-real-cli" "$RUNNER_TEMP/jb-ide-cycle"
           chown -R gradle:gradle "$GITHUB_WORKSPACE" "$RUNNER_TEMP/jb-real-cli" "$RUNNER_TEMP/jb-ide-cycle"
 
-      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two commits:
-      # on a push to v4-capabilities HEAD is that ref, and e2e-ide-cycle.sh then builds N-1
-      # from HEAD's first parent instead. The same fetch as ash-e2e.yml's wheel job, but run
-      # as the checkout's owner and so after the chown above: the runner checks out as its host
-      # user, this container runs as root, and git refuses a repository root does not own
-      # ("detected dubious ownership"). actions/checkout's safe.directory entry is written to
-      # a temporary HOME and is gone once the checkout step ends.
-      - name: Fetch the N-1 ref
-        run: bash editors/jetbrains/run-unprivileged.sh git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
-
       - name: The plugin against a real ashx built from this commit
         run: bash editors/jetbrains/e2e-real-cli.sh "$RUNNER_TEMP/jb-real-cli"
 
+      # e2e-ide-cycle.sh derives N-1 as the checkout's owner, after the chown above: the runner
+      # checks out as its host user, this container runs as root, and git refuses a repository
+      # root does not own ("detected dubious ownership"). actions/checkout's safe.directory
+      # entry is written to a temporary HOME and is gone once the checkout step ends.
       - name: Install, upgrade and uninstall the plugin zip in a real IDE
         env:
-          E2E_PREV_REF: origin/v4-capabilities
+          E2E_PREV_REF: auto
         run: bash editors/jetbrains/e2e-ide-cycle.sh "$RUNNER_TEMP/jb-ide-cycle"
 
   # A changed snapshot needs a reason. Every file under a __snapshots__ directory in

@@ -79,6 +79,8 @@ jobs:
         run: >-
           uv run --group dev pytest tests/unit/test_e2e_assert_outcome.py
           tests/unit/test_e2e_container_guards.py
+          tests/unit/test_e2e_n1_fetch.py
+          tests/unit/test_e2e_prev_tree.py
           -p no:cacheprovider -o addopts="" -v
 
   wheel:
@@ -97,18 +99,15 @@ jobs:
       run:
         shell: bash
     steps:
-      # Two commits, so HEAD's parent is here for the N-1 fallback to HEAD^ described below.
-      # A HEAD that is not v4-capabilities but has its tree takes that fallback too, and a
-      # one-commit checkout has no HEAD^. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
+      # Full history and every tag, because N-1 is derived from them rather than named:
+      # E2E_PREV_REF=auto below makes scripts/e2e/n1-ref.sh take the newest release tag,
+      # else the newest ancestor, that differs from HEAD and carries the channel. Naming a
+      # development branch here would fail the fetch once that branch is merged and
+      # deleted. In a shallow clone the derivation fails and says so.
+      # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
-
-      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two
-      # commits, not one: on a push to v4-capabilities HEAD is that ref, and wheel.sh then
-      # builds N-1 from HEAD's first parent instead.
-      - name: Fetch the N-1 ref
-        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+          fetch-depth: 0
 
       # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
       # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
@@ -121,7 +120,7 @@ jobs:
       - name: Build, install, scan, upgrade, uninstall
         env:
           E2E_PYTHON: ${{ matrix.python }}
-          E2E_PREV_REF: origin/v4-capabilities
+          E2E_PREV_REF: auto
         run: |
           work="$RUNNER_TEMP/e2e-wheel"
           if command -v cygpath >/dev/null 2>&1; then work="$(cygpath -u "$work")"; fi
@@ -141,18 +140,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Two commits, so HEAD's parent is here for the N-1 fallback to HEAD^ described below.
-      # A HEAD that is not v4-capabilities but has its tree takes that fallback too, and a
-      # one-commit checkout has no HEAD^. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
+      # Full history and every tag, because N-1 is derived from them rather than named:
+      # E2E_PREV_REF=auto below makes scripts/e2e/n1-ref.sh take the newest release tag,
+      # else the newest ancestor, that differs from HEAD and carries the channel. Naming a
+      # development branch here would fail the fetch once that branch is merged and
+      # deleted. In a shallow clone the derivation fails and says so.
+      # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
-
-      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two
-      # commits, not one: on a push to v4-capabilities HEAD is that ref, and
-      # container.sh then builds N-1 from HEAD's first parent instead.
-      - name: Fetch the N-1 ref
-        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+          fetch-depth: 0
 
       # No uv cache, for the reason given in the contract job.
       - name: Install uv
@@ -175,7 +171,7 @@ jobs:
 
       - name: Build, install, scan, upgrade, uninstall
         env:
-          E2E_PREV_REF: origin/v4-capabilities
+          E2E_PREV_REF: auto
           E2E_IMAGE_TAG: ash-e2e-container:${{ github.run_id }}-${{ github.run_attempt }}
         run: bash scripts/e2e/container.sh "$RUNNER_TEMP/e2e-container"
 
@@ -201,18 +197,15 @@ jobs:
     env:
       HOMEBREW_NO_ANALYTICS: "1"
     steps:
-      # Two commits, so HEAD's parent is here for the N-1 fallback to HEAD^ described below.
-      # A HEAD that is not v4-capabilities but has its tree takes that fallback too, and a
-      # one-commit checkout has no HEAD^. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
+      # Full history and every tag, because N-1 is derived from them rather than named:
+      # E2E_PREV_REF=auto below makes scripts/e2e/n1-ref.sh take the newest release tag,
+      # else the newest ancestor, that differs from HEAD and carries the channel. Naming a
+      # development branch here would fail the fetch once that branch is merged and
+      # deleted. In a shallow clone the derivation fails and says so.
+      # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
-
-      # N-1 is built from v4-capabilities' tree, as in the wheel job, and for the same
-      # reason two commits: on a push to v4-capabilities HEAD is that ref, and
-      # homebrew.sh then takes HEAD's first parent instead.
-      - name: Fetch the N-1 ref
-        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+          fetch-depth: 0
 
       # Recorded, not assumed: the harness runs on the image's python3, never on the
       # keg's, because the uninstall checks run after the keg is gone.
@@ -225,7 +218,7 @@ jobs:
       - name: Build from head, install, scan, then ${{ matrix.leg }}
         env:
           E2E_LEG: ${{ matrix.leg }}
-          E2E_PREV_REF: origin/v4-capabilities
+          E2E_PREV_REF: auto
           E2E_HARNESS_PYTHON: python3
         run: bash scripts/e2e/homebrew.sh "$E2E_LEG" "$RUNNER_TEMP/e2e-homebrew"
 

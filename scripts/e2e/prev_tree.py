@@ -6,6 +6,7 @@
 
     prev_tree.py --repo REPO --prev-ref REF --out DIR [--require PATH ...]
     prev_tree.py --repo REPO --prev-ref auto --require PATH [--require PATH ...] --out DIR
+    prev_tree.py --repo REPO --prev-ref REF|auto [--require PATH ...] --resolve-only
 
 An upgrade leg has to cross a real code change and a real version change, or it tests
 nothing: a package upgraded to a copy of itself never runs the new install script
@@ -34,6 +35,11 @@ that packages ASH itself (Chocolatey, MSIX):
    version. Only the first `version = ` line changes, which is [project]'s.
 4. Prints one JSON object on stdout: prev_ref, prev_sha, head_sha, head_version,
    prev_base_version, prev_version and src. Progress goes to stderr.
+
+`--resolve-only` stops after step 1 and prints one line, `<sha> <label>`, for the legs
+that export and build N-1 themselves (scripts/e2e/wheel.sh, container.sh, homebrew.sh
+and editors/jetbrains/e2e-ide-cycle.sh, through scripts/e2e/n1-ref.sh). They take the
+commit from here so that every leg picks N-1 the same way.
 
 A channel that carries its own version literal (a nuspec, an AppxManifest) lowers that
 itself, in its own format. Standard library only, Python 3.9+.
@@ -253,6 +259,20 @@ def resolve_auto(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
     )
 
 
+def resolve(repo: Path, prev_ref: str, require: Sequence[str] = ()) -> Tuple[str, str]:
+    """(label, sha) of the N-1 commit: step 1 of the module docstring."""
+    if prev_ref == AUTO:
+        return resolve_auto(repo, require)
+    used_ref, prev_sha = resolve_prev(repo, prev_ref)
+    absent = missing_paths(repo, [prev_sha], require)[prev_sha]
+    if absent:
+        raise DerivationError(
+            f"{used_ref} ({prev_sha}) has no {', '.join(absent)}, so it has no "
+            "package of this channel to upgrade from"
+        )
+    return used_ref, prev_sha
+
+
 def derive(
     repo: Path, prev_ref: str, out: Path, require: Sequence[str] = ()
 ) -> Dict[str, str]:
@@ -260,16 +280,7 @@ def derive(
     head_sha = git(repo, "rev-parse", "HEAD")
     head_text = (repo / "pyproject.toml").read_text(encoding="utf-8")
     head_version = project_version(head_text, str(repo / "pyproject.toml"))
-    if prev_ref == AUTO:
-        used_ref, prev_sha = resolve_auto(repo, require)
-    else:
-        used_ref, prev_sha = resolve_prev(repo, prev_ref)
-        absent = missing_paths(repo, [prev_sha], require)[prev_sha]
-        if absent:
-            raise DerivationError(
-                f"{used_ref} ({prev_sha}) has no {', '.join(absent)}, so it has no "
-                "package of this channel to upgrade from"
-            )
+    used_ref, prev_sha = resolve(repo, prev_ref, require)
 
     out.mkdir(parents=True, exist_ok=True)
     out = out.resolve()
@@ -330,10 +341,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="PATH",
         help="a path N-1 must carry (the channel's packaging); may be repeated",
     )
-    parser.add_argument(
-        "--out", required=True, type=Path, help="scratch dir; <out>/src is replaced"
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--out", type=Path, help="scratch dir; <out>/src is replaced")
+    mode.add_argument(
+        "--resolve-only",
+        action="store_true",
+        help="print `<sha> <label>` of the N-1 commit and export nothing",
     )
     args = parser.parse_args(argv)
+    if args.resolve_only:
+        try:
+            label, sha = resolve(args.repo.resolve(), args.prev_ref, args.require)
+        except DerivationError as exc:
+            print(f"FAIL: {exc}", file=sys.stderr)
+            return 1
+        print(f"{sha} {label}")
+        return 0
     try:
         result = derive(args.repo, args.prev_ref, args.out, args.require)
     except DerivationError as exc:
