@@ -310,6 +310,8 @@ val assertTestsRan = tasks.register<Exec>("assertTestsRan") {
         // class rather than about a count.
         "--require-suite", "io.github.awslabs.ash.jetbrains.AnnotationCountTest",
         "--require-suite", "io.github.awslabs.ash.jetbrains.AshScanIntegrationTest",
+        // The parity check against ASH's own coverage verdicts. See its header.
+        "--require-suite", "io.github.awslabs.ash.jetbrains.AshCoverageParityTest",
     )
 }
 
@@ -446,6 +448,15 @@ dependencies {
     }
 }
 
+// The value of one `-D<name>=` option among a test task's JVM arguments, which must appear once.
+fun jvmOption(args: List<String>, name: String): String {
+    val values = args.filter { it.startsWith("-D$name=") }.map { it.substringAfter("=") }
+    if (values.size != 1) throw GradleException("expected one -D$name among the test JVM's arguments, found $values")
+    return values.single()
+}
+
+val pluginVersion = version.toString()
+
 // Where the resolved IDE distribution is unpacked. e2e-ide-cycle.sh installs the built plugin
 // zip into this IDE, so the IDE it tests against is the one the build compiled against.
 tasks.register("printIdePath") {
@@ -480,7 +491,105 @@ val realCliTest by intellijPlatformTesting.testIde.registering {
             events("passed", "failed", "skipped")
             exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         }
+        // AshLoadedPluginTest's expectation: this task tests the plugin the build put in its
+        // own sandbox, at this build's version.
+        doFirst {
+            systemProperty("ash.jb.expected.plugin.dir", jvmOption(allJvmArgs, "plugin.path"))
+            systemProperty("ash.jb.expected.plugin.version", pluginVersion)
+        }
     }
+}
+
+// THE SAME SUITE AGAINST THE PLUGIN AS INSTALLED FROM ITS ZIP
+//
+// realCliTest runs the plugin the build put in its own sandbox. That proves the code works and
+// says nothing about the artifact a user installs: a zip missing a class, a descriptor the
+// installer rewrites, or a jar that differs from the build's would all pass it. This task runs
+// AshLoadedPluginTest and the real-CLI findings scan against a plugin directory the IDE's own
+// installer wrote (e2e-ide-cycle.sh installs it; e2e-installed-scan.sh runs this task against
+// it), with the build's own copy removed:
+//
+//   -Pash.installed.plugin.dir      the installed plugin's directory, <plugins>/ash-jetbrains
+//   -Pash.installed.plugin.version  the version AshLoadedPluginTest must find loaded
+//
+// The IntelliJ Platform Gradle plugin starts the test IDE with -Didea.plugins.path and
+// -Dplugin.path naming its sandbox, and puts the sandbox's jars on the classpath, where a test
+// IDE loads plugin classes from. Both are rewritten at execution to the installed directory, and
+// the task fails unless the rewrite took, so it cannot fall back to the sandbox and pass.
+val installedZipTest by intellijPlatformTesting.testIde.registering {
+    task {
+        group = "verification"
+        description = "Runs a real scan through the installed plugin zip; needs ASH_JB_REAL_CLI_BIN and -Pash.installed.plugin.dir."
+        val realCliSources = sourceSets["realCliTest"]
+        testClassesDirs = realCliSources.output.classesDirs
+        classpath = realCliSources.runtimeClasspath + classpath
+        useJUnit()
+        systemProperty("java.awt.headless", "true")
+        filter {
+            includeTestsMatching("io.github.awslabs.ash.jetbrains.AshLoadedPluginTest")
+            includeTestsMatching("io.github.awslabs.ash.jetbrains.AshScanRealCliTest.testFindingsCaseExitsTwoAndHighlightsEveryFinding")
+        }
+        // The plugin under test is outside this build, so Gradle cannot fingerprint it.
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("the suite runs an installed plugin and CLI that Gradle cannot fingerprint") { true }
+        testLogging {
+            events("passed", "failed", "skipped")
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+            showStandardStreams = true
+        }
+        val installedDir = providers.gradleProperty("ash.installed.plugin.dir")
+        val installedVersion = providers.gradleProperty("ash.installed.plugin.version")
+        doFirst {
+            val dir = File(
+                installedDir.orNull
+                    ?: throw GradleException("-Pash.installed.plugin.dir names the installed plugin directory"),
+            ).canonicalFile
+            val version = installedVersion.orNull
+                ?: throw GradleException("-Pash.installed.plugin.version names the version that must be loaded")
+            val jars = dir.resolve("lib").listFiles { f -> f.name.endsWith(".jar") }.orEmpty().toList()
+            if (jars.isEmpty()) throw GradleException("$dir has no lib/*.jar; is the plugin installed there?")
+
+            val sandboxPlugins = File(jvmOption(allJvmArgs, "idea.plugins.path")).canonicalFile
+            val rewrite = { arg: String ->
+                when {
+                    arg.startsWith("-Didea.plugins.path=") -> "-Didea.plugins.path=${dir.parentFile}"
+                    arg.startsWith("-Dplugin.path=") -> "-Dplugin.path=$dir"
+                    else -> arg
+                }
+            }
+            val providedArgs = jvmArgumentProviders.toList()
+            jvmArgumentProviders.clear()
+            jvmArgumentProviders.add(CommandLineArgumentProvider { providedArgs.flatMap { it.asArguments() }.map(rewrite) })
+            jvmArgs = jvmArgs.orEmpty().map(rewrite)
+            classpath = classpath.filter { !it.canonicalFile.startsWith(sandboxPlugins) } + files(jars)
+
+            // Fail closed: exactly the installed directory, and none of the sandbox on the classpath.
+            val after = allJvmArgs
+            check(jvmOption(after, "idea.plugins.path") == dir.parentFile.path) { "idea.plugins.path was not rewritten: $after" }
+            check(jvmOption(after, "plugin.path") == dir.path) { "plugin.path was not rewritten: $after" }
+            val leftover = classpath.filter { it.canonicalFile.startsWith(sandboxPlugins) }.files
+            check(leftover.isEmpty()) { "the build's sandbox is still on the classpath: $leftover" }
+            logger.lifecycle("installedZipTest: plugin from $dir ($version), jars ${jars.map { it.name }}")
+
+            systemProperty("ash.jb.expected.plugin.dir", dir.path)
+            systemProperty("ash.jb.expected.plugin.version", version)
+        }
+    }
+}
+
+tasks.register<Exec>("assertInstalledZipTestsRan") {
+    group = "verification"
+    description = "Fails unless installedZipTest ran both of its suites, with none skipped."
+    dependsOn(installedZipTest)
+    workingDir = layout.projectDirectory.asFile
+    commandLine(
+        "python3",
+        "assert-tests-ran.py",
+        "--results", "build/test-results/installedZipTest",
+        "--test-classes", "build/classes/kotlin/realCliTest",
+        "--require-suite", "io.github.awslabs.ash.jetbrains.AshLoadedPluginTest",
+        "--require-suite", "io.github.awslabs.ash.jetbrains.AshScanRealCliTest",
+    )
 }
 
 // The real-CLI suite's census, the same check assertTestsRan applies to `test`: every compiled

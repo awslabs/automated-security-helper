@@ -102,7 +102,8 @@ python3 assert-tests-ran.py \
   --results build/test-results/test \
   --test-classes build/classes/kotlin/test \
   --require-suite io.github.awslabs.ash.jetbrains.AnnotationCountTest \
-  --require-suite io.github.awslabs.ash.jetbrains.AshScanIntegrationTest
+  --require-suite io.github.awslabs.ash.jetbrains.AshScanIntegrationTest \
+  --require-suite io.github.awslabs.ash.jetbrains.AshCoverageParityTest
 
 echo "== 6. the fixture still carries the planted secret"
 # Without it, AnnotationCountTest and AshScanIntegrationTest pass vacuously: the SARIF fixtures

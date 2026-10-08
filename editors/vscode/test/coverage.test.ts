@@ -133,14 +133,18 @@ describe('details the shared cases do not pin', () => {
     ]);
   });
 
-  it('counts a failure recorded as an object, and skips an empty one', () => {
+  it('counts a failure recorded as any value but a string or null, which ASH would reject', () => {
     const document = base('clean');
     const converters = document.converter_results as Record<string, Record<string, unknown>>;
     converters.archive.failure = { error: 'boom' };
     converters.jupyter.failure = {};
     expect(assessCoverage(document)?.incomplete_converters).toEqual([
       { converter: 'archive', reason: '{"error":"boom"}' },
+      { converter: 'jupyter', reason: '{}' },
     ]);
+    converters.archive.failure = null;
+    converters.jupyter.failure = 0;
+    expect(assessCoverage(document)?.incomplete_converters).toEqual([{ converter: 'jupyter', reason: '0' }]);
   });
 
   it('skips malformed rows and notifications instead of throwing', () => {
@@ -149,12 +153,79 @@ describe('details the shared cases do not pin', () => {
     const run = (document.sarif as { runs: Record<string, unknown>[] }).runs[0];
     (run.invocations as Record<string, unknown>[])[0].toolConfigurationNotifications = [
       { level: 'error', descriptor: { id: 'ASH-CONTENT-DB-STALE' } },
+      // Empty, so ASH cannot read it and skips it, as it skips a record with no measured_at.
       { level: 'error', descriptor: { id: 'ASH-CONTENT-DB-STALE' }, properties: { content_database: {} } },
+      {
+        level: 'error',
+        descriptor: { id: 'ASH-CONTENT-DB-STALE' },
+        properties: { content_database: { name: 'bad-built', measured_at: '2026-10-01T00:00:00Z', built: 'yesterday' } },
+      },
+      // Readable and nameless: ASH names it ''.
+      {
+        level: 'error',
+        descriptor: { id: 'ASH-CONTENT-DB-STALE' },
+        properties: { content_database: { measured_at: '2026-10-01T00:00:00Z', built: '2026-01-01T00:00:00+00:00' } },
+      },
     ];
     expect(assessCoverage(document)).toMatchObject({
       incomplete_converters: [],
       stale_content_databases: [''],
     });
+  });
+
+  it('reads every timestamp form ASH accepts', () => {
+    const forms: Record<string, string> = {
+      basic: '20261001T000000Z',
+      'hour-only': '2026-10-01T00+00:00',
+      comma: '2026-10-01 00:00:00,5+0530',
+      week: '2026-W40-4T12:30-05',
+      'any-separator': '2026-10-01\u{1F600}00:00:00.123456789+00:00:00.5',
+      'z-separator': '2026-10-01Z00:00Z',
+      mixed: '2026-10-01T00:0000Z',
+      'date-only': '2026-10-01',
+    };
+    const document = base('clean');
+    const run = (document.sarif as { runs: Record<string, unknown>[] }).runs[0];
+    (run.invocations as Record<string, unknown>[])[0].toolConfigurationNotifications = Object.entries(forms).map(
+      ([name, at]) => ({
+        level: 'error',
+        descriptor: { id: 'ASH-CONTENT-DB-STALE' },
+        properties: { content_database: { name, measured_at: at } },
+      }),
+    );
+    expect(assessCoverage(document)?.stale_content_databases).toEqual([
+      'any-separator',
+      'basic',
+      'comma',
+      'hour-only',
+      'week',
+    ]);
+  });
+
+  it('coerces converter fields as pydantic does', () => {
+    const document = base('clean');
+    document.converter_results = {
+      'excluded-one': { failure: 'raised', excluded: 1 },
+      'excluded-junk': { failure: 'raised', excluded: 'maybe' },
+      'deps-zero': { dependencies_satisfied: 0 },
+      'deps-two': { dependencies_satisfied: 2 },
+      'deps-object': { dependencies_satisfied: {} },
+      'cand-false': { dependencies_satisfied: false, candidate_inputs: false },
+      'cand-true': { dependencies_satisfied: false, candidate_inputs: true },
+      'cand-half': { dependencies_satisfied: false, candidate_inputs: 0.5 },
+      'cand-blank': { dependencies_satisfied: false, candidate_inputs: ' ' },
+      'cand-object': { dependencies_satisfied: false, candidate_inputs: {} },
+    };
+    expect(assessCoverage(document)?.incomplete_converters.map((row) => row.converter)).toEqual([
+      'excluded-junk',
+      'deps-zero',
+      'deps-two',
+      'deps-object',
+      'cand-true',
+      'cand-half',
+      'cand-blank',
+      'cand-object',
+    ]);
   });
 
   it('cannot tell from a document that is not a results object', () => {

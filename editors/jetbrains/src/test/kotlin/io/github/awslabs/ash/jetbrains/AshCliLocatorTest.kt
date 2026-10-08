@@ -83,6 +83,41 @@ class AshCliLocatorTest {
         assertTrue("must say the plugin bundles nothing", notFound.reason.contains("does not bundle"))
     }
 
+    /**
+     * A bare `pip install automated-security-helper`, in any of its spellings. That name on PyPI
+     * belongs to an unrelated third-party project, not to ASH, so a hint naming it installs a
+     * stranger's package on the user's machine. ASH is installed from its git repository.
+     */
+    private val barePypiInstall = Regex(
+        """(pipx|pip3?|uv\s+tool|uv\s+pip)\s+install\s+(-\S+\s+)*['"]?automated-security-helper(\[[^\]]*])?(['"\s),.]|$)""",
+    )
+
+    @Test
+    fun theBarePypiPredicateCatchesEverySpellingAndSparesTheGitInstall() {
+        // The planted negatives: each must be flagged, or the assertion below is vacuous.
+        for (planted in listOf(
+            "'pipx install automated-security-helper'",
+            "uv tool install automated-security-helper",
+            "pip install --upgrade \"automated-security-helper[symbols]\"",
+            "uv pip install automated-security-helper, then",
+        )) {
+            assertTrue("not flagged: $planted", barePypiInstall.containsMatchIn(planted))
+        }
+        assertFalse(barePypiInstall.containsMatchIn("pipx install git+https://github.com/awslabs/automated-security-helper.git"))
+        assertFalse(barePypiInstall.containsMatchIn("set this to `automated-security-helper`, which ASH installs"))
+    }
+
+    @Test
+    fun theNotFoundHintInstallsAshFromItsRepositoryNeverFromPypi() {
+        val notFound = AshCliLocator.resolve(configured = null, pathValue = "/usr/bin", isExecutable = { false })
+            as AshCliLocator.Outcome.NotFound
+        assertFalse("names a bare PyPI install: ${notFound.reason}", barePypiInstall.containsMatchIn(notFound.reason))
+        assertTrue(
+            notFound.reason,
+            notFound.reason.contains("pipx install git+https://github.com/awslabs/automated-security-helper.git"),
+        )
+    }
+
     @Test
     fun emptyOrUnsetPathIsItsOwnDiagnosis() {
         for (pathValue in listOf(null, "", "   ")) {
