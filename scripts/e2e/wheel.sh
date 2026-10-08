@@ -7,9 +7,11 @@
 #   scripts/e2e/wheel.sh <work-dir>
 #
 #   E2E_PYTHON    the interpreter version for the venvs (default 3.12)
-#   E2E_PREV_REF  the git ref the N-1 wheel is built from (default origin/v4-capabilities).
-#                 When it names a commit with HEAD's tree, as on a push to that branch,
-#                 HEAD's first parent is used instead, so the upgrade still crosses a code
+#   E2E_PREV_REF  the git ref the N-1 wheel is built from (default auto: the newest
+#                 release tag, else the newest ancestor of HEAD, that differs from HEAD
+#                 and carries this script and pyproject.toml; scripts/e2e/n1-ref.sh).
+#                 A named ref with HEAD's tree, as on a push to the branch it names,
+#                 falls back to HEAD's first parent, so the upgrade still crosses a code
 #                 change.
 #
 # 1. Builds the head wheel and an N-1 wheel, from `git archive` exports so the build
@@ -39,10 +41,12 @@ set -euo pipefail
 WORK="${1:?usage: wheel.sh <work-dir>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON="${E2E_PYTHON:-3.12}"
-PREV_REF="${E2E_PREV_REF:-origin/v4-capabilities}"
+PREV_REF="${E2E_PREV_REF:-auto}"
 
 # shellcheck source=packaging/cli-name.sh
 . "$REPO/packaging/cli-name.sh"
+# shellcheck source=scripts/e2e/n1-ref.sh
+. "$REPO/scripts/e2e/n1-ref.sh"
 
 # Every console script the wheel declares. Uninstall must remove all of them.
 ENTRY_POINTS=("$ASH_CLI_NAME" ash ashv3 automated-security-helper)
@@ -117,26 +121,16 @@ harness "$REPO/scripts/e2e/assert_outcome.py" --self-test
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO/pyproject.toml" | head -n 1)"
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
 
-HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
-PREV_SHA="$(git -C "$REPO" rev-parse --verify --quiet "$PREV_REF^{commit}")" \
-  || fail "E2E_PREV_REF $PREV_REF does not name a commit"
-tree_of() { git -C "$REPO" rev-parse "$1^{tree}"; }
-# On a push to the N-1 branch itself, N-1 and HEAD are the same tree and the upgrade
-# would cross no code change. Step back to HEAD's first parent; the workflow fetches
-# enough history for it to exist.
-if [ "$(tree_of "$PREV_SHA")" = "$(tree_of HEAD)" ]; then
-  say "$PREV_REF has HEAD's tree; using HEAD's first parent as N-1"
-  PREV_REF="HEAD^"
-  PREV_SHA="$(git -C "$REPO" rev-parse --verify --quiet "HEAD^1^{commit}")" \
-    || fail "HEAD has no parent in this clone; fetch at least one more commit of history"
-  [ "$(tree_of "$PREV_SHA")" != "$(tree_of HEAD)" ] \
-    || fail "HEAD's first parent has HEAD's tree too; there is no code change to upgrade across"
-fi
+HEAD_SHA="$(n1_head_sha)"
+# N-1 differs from HEAD's tree, so the upgrade crosses a code change. It must carry this
+# script: a release from before the wheel leg existed was never held to the cases this
+# leg scans N-1 with.
+n1_resolve scripts/e2e/wheel.sh pyproject.toml
 
 rm -rf "$WORK/src-head" "$WORK/src-prev" "$WORK/dist-head" "$WORK/dist-prev"
 mkdir -p "$WORK/src-head" "$WORK/src-prev"
-git -C "$REPO" archive HEAD | tar -x -C "$WORK/src-head"
-git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"
+n1_export HEAD "$WORK/src-head"
+n1_export "$PREV_SHA" "$WORK/src-prev"
 
 PREV_BASE_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$WORK/src-prev/pyproject.toml" | head -n 1)"
 [ -n "$PREV_BASE_VERSION" ] || fail "no [project] version in $PREV_REF's pyproject.toml"

@@ -10,8 +10,10 @@
 #                       It is never the keg's Python: the uninstall checks have to run
 #                       after the keg is gone.
 #   E2E_PREV_REF        the git ref the N-1 formula and tarball come from (default
-#                       origin/v4-capabilities). When it names a commit with HEAD's tree,
-#                       HEAD's first parent is used instead, as in scripts/e2e/wheel.sh.
+#                       auto: the newest release tag, else the newest ancestor of HEAD,
+#                       that differs from HEAD and carries this script and
+#                       Formula/ash.rb; scripts/e2e/n1-ref.sh). A named ref with HEAD's
+#                       tree falls back to HEAD's first parent, as in scripts/e2e/wheel.sh.
 #
 # Formula/ash.rb builds from the release tag on its `url` line, so installing it
 # verbatim tests the last release. Every leg here installs a copy written by
@@ -43,7 +45,7 @@ LEG="${1:?usage: homebrew.sh fresh|upgrade|negative <work-dir>}"
 WORK="${2:?usage: homebrew.sh fresh|upgrade|negative <work-dir>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HARNESS_PYTHON="${E2E_HARNESS_PYTHON:-python3}"
-PREV_REF="${E2E_PREV_REF:-origin/v4-capabilities}"
+PREV_REF="${E2E_PREV_REF:-auto}"
 
 case "$LEG" in
   fresh | upgrade | negative) ;;
@@ -52,6 +54,8 @@ esac
 
 # shellcheck source=packaging/cli-name.sh
 . "$REPO/packaging/cli-name.sh"
+# shellcheck source=scripts/e2e/n1-ref.sh
+. "$REPO/scripts/e2e/n1-ref.sh"
 
 # Every console script the wheel declares; Homebrew links each into its bin.
 ENTRY_POINTS=("$ASH_CLI_NAME" ash ashv3 automated-security-helper)
@@ -158,7 +162,7 @@ use_formula() {
 # A tarball of a tree, with the one top-level directory Homebrew expects to cd into.
 tarball_of_head() {
   local version="$1" out="$2"
-  git -C "$REPO" archive --format=tar.gz --prefix="automated-security-helper-$version/" -o "$out" HEAD
+  n1_tarball HEAD "automated-security-helper-$version/" "$out"
 }
 
 render() {
@@ -176,7 +180,7 @@ assert_uninstalled || fail "leftovers from an earlier install; a fresh-install l
 
 VERSION="$(version_of "$REPO")"
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
-HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+HEAD_SHA="$(n1_head_sha)"
 HEAD_TARBALL="$WORK/automated-security-helper-$VERSION.tar.gz"
 tarball_of_head "$VERSION" "$HEAD_TARBALL"
 HEAD_FORMULA="$WORK/formula-head/ash.rb"
@@ -234,22 +238,15 @@ leg_fresh() {
 
 leg_upgrade() {
   local prev_sha
-  tree_of() { git -C "$REPO" rev-parse "$1^{tree}"; }
-  prev_sha="$(git -C "$REPO" rev-parse --verify --quiet "$PREV_REF^{commit}")" \
-    || fail "E2E_PREV_REF $PREV_REF does not name a commit"
-  if [ "$(tree_of "$prev_sha")" = "$(tree_of HEAD)" ]; then
-    say "$PREV_REF has HEAD's tree; using HEAD's first parent as N-1"
-    PREV_REF="HEAD^"
-    prev_sha="$(git -C "$REPO" rev-parse --verify --quiet "HEAD^1^{commit}")" \
-      || fail "HEAD has no parent in this clone; fetch at least one more commit of history"
-    [ "$(tree_of "$prev_sha")" != "$(tree_of HEAD)" ] \
-      || fail "HEAD's first parent has HEAD's tree too; there is no code change to upgrade across"
-  fi
+  # N-1 must carry this script as well as its own formula: a release from before this
+  # leg existed was never held to the cases the leg scans N-1 with.
+  n1_resolve scripts/e2e/homebrew.sh Formula/ash.rb pyproject.toml
+  prev_sha="$PREV_SHA"
 
   local prev_root="$WORK/src-prev" base_version prev_version
   rm -rf "$prev_root"
   mkdir -p "$prev_root/tree"
-  git -C "$REPO" archive "$prev_sha" | tar -x -C "$prev_root/tree"
+  n1_export "$prev_sha" "$prev_root/tree"
   base_version="$(version_of "$prev_root/tree")"
   [ -n "$base_version" ] || fail "no [project] version in $PREV_REF's pyproject.toml"
   # The last non-zero component decremented, the derivation scripts/e2e/wheel.sh and

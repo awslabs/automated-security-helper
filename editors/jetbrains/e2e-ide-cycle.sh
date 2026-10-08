@@ -6,9 +6,11 @@
 #
 #   bash editors/jetbrains/e2e-ide-cycle.sh <work-dir>
 #
-#   E2E_PREV_REF  the git ref N-1 is built from (default origin/v4-capabilities). When it has
-#                 HEAD's tree, as on a push to that branch, HEAD's first parent is used, the
-#                 same rule scripts/e2e/wheel.sh follows.
+#   E2E_PREV_REF  the git ref N-1 is built from (default auto: the newest release tag, else
+#                 the newest ancestor of HEAD, that differs from HEAD and carries this script
+#                 and the plugin's build.gradle.kts; scripts/e2e/n1-ref.sh). A named ref with
+#                 HEAD's tree, as on a push to the branch it names, falls back to HEAD's
+#                 first parent, the same rule scripts/e2e/wheel.sh follows.
 #
 # The IDE is the IntelliJ IDEA distribution the build resolved (printIdePath), started with
 # its own launcher, bin/idea.sh, against a private config, system, plugins and log
@@ -56,7 +58,7 @@ set -euo pipefail
 WORK="${1:?usage: e2e-ide-cycle.sh <work-dir>}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-PREV_REF="${E2E_PREV_REF:-origin/v4-capabilities}"
+PREV_REF="${E2E_PREV_REF:-auto}"
 
 # Never as root, for the reason verify-in-container.sh gives; Gradle builds both zips here.
 if [ "$(id -u)" = 0 ]; then
@@ -65,6 +67,9 @@ fi
 
 say() { printf '== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+harness() { python3 "$@"; }
+# shellcheck source=scripts/e2e/n1-ref.sh
+. "$REPO/scripts/e2e/n1-ref.sh"
 
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
@@ -99,26 +104,24 @@ say "build N ($HEAD_VERSION) from this checkout"
 HEAD_ZIP="$HERE/build/distributions/ash-jetbrains-$HEAD_VERSION.zip"
 [ -f "$HEAD_ZIP" ] || fail "buildPlugin wrote no $HEAD_ZIP"
 
-HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
-PREV_SHA="$(git -C "$REPO" rev-parse --verify --quiet "$PREV_REF^{commit}")" \
-  || fail "E2E_PREV_REF $PREV_REF does not name a commit"
-tree_of() { git -C "$REPO" rev-parse "$1^{tree}"; }
-if [ "$(tree_of "$PREV_SHA")" = "$(tree_of HEAD)" ]; then
-  say "$PREV_REF has HEAD's tree; using HEAD's first parent as N-1"
-  PREV_REF="HEAD^"
-  PREV_SHA="$(git -C "$REPO" rev-parse --verify --quiet "HEAD^1^{commit}")" \
-    || fail "HEAD has no parent in this clone; fetch at least one more commit of history"
-fi
-if git -C "$REPO" diff --quiet "$PREV_SHA" HEAD -- editors/jetbrains; then
+HEAD_SHA="$(n1_head_sha)"
+# N-1 is built from its own editors/jetbrains, so it has to have one; and this script, so
+# that it is a plugin this cycle was already run against.
+n1_resolve editors/jetbrains/e2e-ide-cycle.sh editors/jetbrains/build.gradle.kts
+if n1_unchanged editors/jetbrains; then
   say "editors/jetbrains is unchanged between $PREV_REF and HEAD; the upgrade crosses a version change only"
 fi
 
 PREV_SRC="$WORK/src-prev"
 rm -rf "$PREV_SRC"
 mkdir -p "$PREV_SRC"
+n1_export "$PREV_SHA" "$PREV_SRC" editors/jetbrains
 # The shared payload rules come too: assert-plugin-zip-contents.py, which buildPlugin runs,
-# imports them from .github/scripts rather than carrying a copy.
-git -C "$REPO" archive "$PREV_SHA" editors/jetbrains .github/scripts/assert-artifact-contents.py | tar -x -C "$PREV_SRC"
+# imports them from .github/scripts rather than carrying a copy. Only an N-1 whose plugin
+# tree names that file has it to import; an older N-1 carries its own copy and no import.
+if grep -rqF assert-artifact-contents.py "$PREV_SRC/editors/jetbrains"; then
+  n1_export "$PREV_SHA" "$PREV_SRC" .github/scripts/assert-artifact-contents.py
+fi
 PREV_DIR="$PREV_SRC/editors/jetbrains"
 PREV_BASE_VERSION="$(gradle_version "$PREV_DIR")"
 [ -n "$PREV_BASE_VERSION" ] || fail "no version line in $PREV_REF's build.gradle.kts"

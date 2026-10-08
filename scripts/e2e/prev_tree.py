@@ -6,6 +6,7 @@
 
     prev_tree.py --repo REPO --prev-ref REF --out DIR [--require PATH ...]
     prev_tree.py --repo REPO --prev-ref auto --require PATH [--require PATH ...] --out DIR
+    prev_tree.py --repo REPO --prev-ref REF|auto [--require PATH ...] --resolve-only
 
 An upgrade leg has to cross a real code change and a real version change, or it tests
 nothing: a package upgraded to a copy of itself never runs the new install script
@@ -18,11 +19,15 @@ that packages ASH itself (Chocolatey, MSIX):
    `--prev-ref auto` names no branch at all, so it keeps working after the branch an
    explicit ref would name is merged and deleted. It takes the newest release tag
    reachable from HEAD (`git describe --tags --match 'v[0-9]*'`), which is the version
-   a user actually upgrades from, and otherwise the newest ancestor of HEAD in
-   `--date-order`. Either one must differ from HEAD's tree and carry every --require
-   path: an ancestor that predates a channel has no package of that channel to upgrade
-   from, so it is passed over rather than built. On a pull request's merge commit that
-   walks past the base branch's side when the base predates the channel, and finds the
+   a user actually upgrades from, then HEAD's first parent, then the newest ancestor
+   of HEAD in `--date-order`. Each must differ from HEAD's tree and carry every
+   --require path: an ancestor that predates a channel has no package of that channel
+   to upgrade from, and one with HEAD's tree would upgrade a package to a copy of
+   itself, so either is passed over rather than built. The first parent comes before
+   the walk because on a pull request's merge commit it is the base branch, which is
+   what the pull request is upgraded from; by date alone the walk would usually take
+   the pull request's own tip, whose tree is HEAD's when the pull request is up to
+   date. When the base predates the channel it is passed over and the walk finds the
    pull request's own side. When nothing qualifies it fails and says whether the clone
    was too shallow to look (fetch with fetch-depth 0) or the history has no such
    commit.
@@ -34,6 +39,11 @@ that packages ASH itself (Chocolatey, MSIX):
    version. Only the first `version = ` line changes, which is [project]'s.
 4. Prints one JSON object on stdout: prev_ref, prev_sha, head_sha, head_version,
    prev_base_version, prev_version and src. Progress goes to stderr.
+
+`--resolve-only` stops after step 1 and prints one line, `<sha> <label>`, for the legs
+that export and build N-1 themselves (scripts/e2e/wheel.sh, container.sh, homebrew.sh
+and editors/jetbrains/e2e-ide-cycle.sh, through scripts/e2e/n1-ref.sh). They take the
+commit from here so that every leg picks N-1 the same way.
 
 A channel that carries its own version literal (a nuspec, an AppxManifest) lowers that
 itself, in its own format. Standard library only, Python 3.9+.
@@ -185,9 +195,11 @@ def missing_paths(
 
 
 def resolve_auto(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
-    """The newest release tag, else the newest ancestor, that can be an N-1.
+    """The first commit that can be an N-1: the newest release tag, then HEAD's first
+    parent, then the newest ancestor in --date-order.
 
     Qualifies when its tree differs from HEAD's and it carries every REQUIRE path.
+    Each commit is considered once, under the first of those labels it gets.
     """
     if not require:
         raise DerivationError(
@@ -196,7 +208,15 @@ def resolve_auto(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
         )
     head_sha = git(repo, "rev-parse", "HEAD")
     head_tree = git(repo, "rev-parse", "HEAD^{tree}")
-    candidates: List[Tuple[str, str, str]] = []  # (label, sha, tree)
+    # (label, sha, tree), in order of preference, each commit once under its first label.
+    candidates: List[Tuple[str, str, str]] = []
+    seen = {head_sha}
+
+    def add(label: str, sha: str, tree: str) -> None:
+        if sha not in seen:
+            seen.add(sha)
+            candidates.append((label, sha, tree))
+
     try:
         tag = git(
             repo, "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD"
@@ -205,20 +225,27 @@ def resolve_auto(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
         tag = ""
     if tag:
         tag_sha = git(repo, "rev-parse", f"{tag}^{{commit}}")
-        candidates.append(
-            (
-                f"{tag} (newest release tag)",
-                tag_sha,
-                git(repo, "rev-parse", f"{tag_sha}^{{tree}}"),
-            )
+        add(
+            f"{tag} (newest release tag)",
+            tag_sha,
+            git(repo, "rev-parse", f"{tag_sha}^{{tree}}"),
+        )
+    try:
+        parent = git(repo, "rev-parse", "--verify", "--quiet", "HEAD^1^{commit}")
+    except DerivationError:
+        parent = ""  # a root commit, or a shallow clone that stops at HEAD
+    if parent:
+        add(
+            f"HEAD^ {parent[:12]} (first parent)",
+            parent,
+            git(repo, "rev-parse", f"{parent}^{{tree}}"),
         )
     log = git(
         repo, "log", "--date-order", f"-n{AUTO_WALK_LIMIT}", "--format=%H %T", "HEAD"
     )
     for line in log.splitlines():
         sha, tree = line.split()
-        if sha != head_sha:
-            candidates.append((f"ancestor {sha[:12]}", sha, tree))
+        add(f"ancestor {sha[:12]}", sha, tree)
     absent = missing_paths(repo, [c[1] for c in candidates], require)
     passed_over: List[str] = []
     for label, sha, tree in candidates:
@@ -253,6 +280,20 @@ def resolve_auto(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
     )
 
 
+def resolve(repo: Path, prev_ref: str, require: Sequence[str] = ()) -> Tuple[str, str]:
+    """(label, sha) of the N-1 commit: step 1 of the module docstring."""
+    if prev_ref == AUTO:
+        return resolve_auto(repo, require)
+    used_ref, prev_sha = resolve_prev(repo, prev_ref)
+    absent = missing_paths(repo, [prev_sha], require)[prev_sha]
+    if absent:
+        raise DerivationError(
+            f"{used_ref} ({prev_sha}) has no {', '.join(absent)}, so it has no "
+            "package of this channel to upgrade from"
+        )
+    return used_ref, prev_sha
+
+
 def derive(
     repo: Path, prev_ref: str, out: Path, require: Sequence[str] = ()
 ) -> Dict[str, str]:
@@ -260,16 +301,7 @@ def derive(
     head_sha = git(repo, "rev-parse", "HEAD")
     head_text = (repo / "pyproject.toml").read_text(encoding="utf-8")
     head_version = project_version(head_text, str(repo / "pyproject.toml"))
-    if prev_ref == AUTO:
-        used_ref, prev_sha = resolve_auto(repo, require)
-    else:
-        used_ref, prev_sha = resolve_prev(repo, prev_ref)
-        absent = missing_paths(repo, [prev_sha], require)[prev_sha]
-        if absent:
-            raise DerivationError(
-                f"{used_ref} ({prev_sha}) has no {', '.join(absent)}, so it has no "
-                "package of this channel to upgrade from"
-            )
+    used_ref, prev_sha = resolve(repo, prev_ref, require)
 
     out.mkdir(parents=True, exist_ok=True)
     out = out.resolve()
@@ -330,10 +362,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="PATH",
         help="a path N-1 must carry (the channel's packaging); may be repeated",
     )
-    parser.add_argument(
-        "--out", required=True, type=Path, help="scratch dir; <out>/src is replaced"
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--out", type=Path, help="scratch dir; <out>/src is replaced")
+    mode.add_argument(
+        "--resolve-only",
+        action="store_true",
+        help="print `<sha> <label>` of the N-1 commit and export nothing",
     )
     args = parser.parse_args(argv)
+    if args.resolve_only:
+        try:
+            label, sha = resolve(args.repo.resolve(), args.prev_ref, args.require)
+        except DerivationError as exc:
+            print(f"FAIL: {exc}", file=sys.stderr)
+            return 1
+        print(f"{sha} {label}")
+        return 0
     try:
         result = derive(args.repo, args.prev_ref, args.out, args.require)
     except DerivationError as exc:
