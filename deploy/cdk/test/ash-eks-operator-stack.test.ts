@@ -989,6 +989,7 @@ describe('the CRD and ServiceAccount contract', () => {
       'Phase',
       'Shards',
       'Actionable',
+      'Coverage',
       'Incomplete',
       'Age',
     ]);

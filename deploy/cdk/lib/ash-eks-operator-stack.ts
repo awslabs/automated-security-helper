@@ -352,6 +352,7 @@ export const ASH_OPERATOR_CRDS: AshCrd[] = [
       { name: 'Phase', type: 'string', jsonPath: '.status.phase' },
       { name: 'Shards', type: 'integer', jsonPath: '.status.shardCount' },
       { name: 'Actionable', type: 'integer', jsonPath: '.status.findings.actionable' },
+      { name: 'Coverage', type: 'boolean', jsonPath: '.status.coverageComplete' },
       { name: 'Incomplete', type: 'string', jsonPath: '.status.incompleteScanners' },
       { name: 'Age', type: 'date', jsonPath: '.metadata.creationTimestamp' },
     ],

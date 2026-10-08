@@ -59,7 +59,7 @@ EXPECTED_CRDS = {
         "singular": "ashscan",
         "shortNames": ["ashscan"],
         "required": ["image", "shardCount", "source"],
-        "columns": ["Phase", "Shards", "Actionable", "Incomplete", "Age"],
+        "columns": ["Phase", "Shards", "Actionable", "Coverage", "Incomplete", "Age"],
     },
     "ashmcpservers": {
         "kind": "AshMcpServer",
