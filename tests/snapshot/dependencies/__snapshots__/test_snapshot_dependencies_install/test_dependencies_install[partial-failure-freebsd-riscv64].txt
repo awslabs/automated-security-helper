@@ -7,7 +7,7 @@ $ ash dependencies install --bin-path bin
 Getting platform and architecture
 Installing dependencies for platform: unknown, architecture: unknown
 [<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
-Installing dependencies for converter plugin: ArchiveConverter
+Installing dependencies for converter plugin: archive
 Installing dependencies for converter plugin: jupyter
 Running command: uv tool install nbconvert>=7.16.0,<8.0.0
 Command succeeded with exit code: 0
