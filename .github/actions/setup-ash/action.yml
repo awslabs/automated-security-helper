@@ -13,12 +13,17 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # uv's cache: restored on every ref, saved from a push to main only, the same
+    # split as pip's cache below. A pull request restores its base branch's entry,
+    # so the entries it used to save were read by nobody but itself and spent the
+    # repository's cache quota.
     - name: Install uv
       id: setup-uv
       uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       with:
         version: "0.11.4"
         enable-cache: true
+        save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
     - name: "Cache report: uv"
       if: ${{ !cancelled() && steps.setup-uv.outcome == 'success' }}
@@ -93,6 +98,14 @@ runs:
       shell: bash
       run: pip install .
 
+    # GITHUB_PATH stays here. `pip install .` on Windows puts ash.exe in the user
+    # scheme's Scripts directory, which is not on PATH, and every caller step that
+    # runs `ash` afterwards, in bash or pwsh, needs it there. A step output cannot
+    # stand in: `env:` cannot prepend to PATH, because the expression context does
+    # not hold the runner's PATH, so each consumer would have to edit PATH in its
+    # own script, in two shell dialects, and one that forgot would find no `ash`, or
+    # on a leg with the MSYS2 toolchain would run its Almquist shell instead. The
+    # value is a runner path ($env:APPDATA), not anything from the event.
     - name: Install ASH package (Windows)
       if: inputs.install-ash == 'true' && runner.os == 'Windows'
       shell: pwsh

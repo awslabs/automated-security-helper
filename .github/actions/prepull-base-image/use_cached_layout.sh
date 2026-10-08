@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The cache-hit half of .github/actions/prepull-base-image: verify the restored OCI layout,
-# place it where this runtime's build will read it, and tell the build through GITHUB_ENV.
+# place it where this runtime's build will read it, and hand the build its location as the
+# step output `oci-layout`.
 # The action's header explains the design and the per-runtime table; this file only carries it
 # out.
 #
@@ -59,8 +60,9 @@ if [ -z "${base}" ] || [ -z "${pin}" ]; then
   not_used "${DOCKERFILE} has no ARG BASE_IMAGE or ARG BASE_IMAGE_DIGEST line"
 fi
 
-# GITHUB_ENV is line-oriented, and this value goes into it. runner.temp never carries anything
-# outside this set; if it ever did, refusing is cheaper than reasoning about what it injects.
+# GITHUB_OUTPUT is line-oriented, and this value goes into it. runner.temp never carries
+# anything outside this set; if it ever did, refusing is cheaper than reasoning about what it
+# injects.
 case "${LAYOUT_DIR}" in
   '' | *[!a-zA-Z0-9._/-]*) not_used "the layout path '${LAYOUT_DIR}' has characters this step will not export" ;;
 esac
@@ -117,11 +119,9 @@ case "${runtime}" in
     ;;
 esac
 
-if [ -n "${GITHUB_ENV:-}" ]; then
-  printf '%s\n' "ASH_BASE_OCI_LAYOUT=${LAYOUT_DIR}@${manifest}" >> "${GITHUB_ENV}"
-fi
+set_output "oci-layout=${LAYOUT_DIR}@${manifest}"
 echo "::notice::the base image came from the Actions cache, verified against ${pin}; no \
-registry was contacted for it. ASH_BASE_OCI_LAYOUT=${LAYOUT_DIR}@${manifest}"
+registry was contacted for it. Handed to the build as oci-layout=${LAYOUT_DIR}@${manifest}"
 
 # THE ZERO-CONTACT ASSERTION
 #

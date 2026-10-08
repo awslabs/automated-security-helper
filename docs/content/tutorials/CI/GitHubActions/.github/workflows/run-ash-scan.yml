@@ -5,6 +5,11 @@
 # This will build the ASH container image, run the scan using the built image,
 # and publish the scan results as a build artifact.
 #
+# Every `uses:` is pinned to a full commit SHA, with the release it was taken
+# from in the trailing comment. A tag such as `@v6` can be moved to any commit
+# after you copy this file; a commit SHA cannot. With Dependabot version updates
+# enabled for GitHub Actions, it updates the SHA and the comment together.
+#
 name: ASH SAST Scan
 
 on:
@@ -23,25 +28,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout ASH
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           path: ./automated-security-helper
           repository: awslabs/automated-security-helper
           ref: v1.3.3
+          # Neither checkout needs to push, so neither leaves the job's token in
+          # .git/config, where a later step or an uploaded artifact could read it.
+          persist-credentials: false
       - name: Checkout app repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           path: ./repo
+          persist-credentials: false
       - name: Run ASH scan against repo
         run: |
-          export PATH="$(pwd)/automated-security-helper:$PATH"
+          PATH="$(pwd)/automated-security-helper:$PATH"
+          export PATH
 
           ashx \
             --source-dir "$(pwd)/repo" \
             --output-dir "${{ env.ASH_OUTPUT_PATH }}"
 
       - name: Publish ${{ env.ASH_OUTPUT_PATH }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: success() || failure()
         with:
           name: ${{ env.ASH_OUTPUT_PATH }}

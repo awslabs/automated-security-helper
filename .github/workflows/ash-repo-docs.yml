@@ -38,10 +38,39 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # uv's cache is restored here and saved by deploy-docs on a push to main, the
+      # only job in this workflow that runs there. setup-uv's own `enable-cache:
+      # true` restored on every event and saved from every ref, pull requests
+      # included; this job now writes nothing to the cache. The `if:` above admits
+      # tag pushes too (a tag ref is not refs/heads/main), so the restore is
+      # skipped on a tag push: a tag run reads no cache entry.
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          enable-cache: true
+          enable-cache: false
+
+      - name: Restore the uv cache
+        id: uv-cache
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}
+
+      - name: "Cache report: uv"
+        if: ${{ !cancelled() && steps.uv-cache.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: uv-docs
+          CACHE_HIT: ${{ steps.uv-cache.outputs.cache-hit }}
+          CACHE_MATCHED: ${{ steps.uv-cache.outputs.cache-matched-key }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -103,10 +132,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # No cache restore in this job. It publishes the site with `contents: write`,
+      # on main and on tag pushes, so nothing a cache entry carries may reach it.
+      # It still saves uv's and the privacy plugin's caches on a push to main, for
+      # build-docs to restore: what it saves is what its own `uv sync` and build
+      # just resolved and fetched.
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          enable-cache: true
+          enable-cache: false
+
+      # lookup-only reports whether the entry exists and downloads nothing, so the
+      # save below can skip an entry main already wrote.
+      - name: Look up the uv cache entry (main only)
+        id: uv-cache-lookup
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}
+          lookup-only: true
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -116,36 +161,19 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      # mkdocs-material's privacy plugin downloads every external asset the site
-      # references (mermaid, twemoji, the star-history badge) and logs a failed fetch
-      # as a WARNING, which --strict turns into a failed build. Caching its download
-      # directory means a transient fetch failure only matters on a cold cache. The
-      # key rolls with the lockfile and mkdocs.yml, which is where the asset set
-      # changes; restore-keys reuse the last cache when only one of them moved.
-      #
-      # This job is the cache's only writer, from a push to main; see build-docs.
-      - name: Restore the privacy plugin's downloaded assets
-        id: privacy-cache
+      # The privacy plugin's download cache follows the same rule as uv's above: this
+      # job publishes with `contents: write`, so it restores nothing and builds the
+      # site from fresh downloads. It is the cache's only writer, on a push to main,
+      # and what it saves is what this build just fetched; build-docs restores it.
+      # lookup-only lets the save skip an entry main already wrote.
+      - name: Look up the privacy plugin's cache entry (main only)
+        id: privacy-cache-lookup
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/plugin/privacy
           key: mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}
-          restore-keys: |
-            mkdocs-privacy-
-
-      - name: "Cache report: mkdocs-privacy"
-        if: ${{ !cancelled() && steps.privacy-cache.outcome == 'success' }}
-        env:
-          CACHE_NAME: mkdocs-privacy
-          CACHE_HIT: ${{ steps.privacy-cache.outputs.cache-hit }}
-          CACHE_MATCHED: ${{ steps.privacy-cache.outputs.cache-matched-key }}
-        run: |
-          # One line per cache per job, same shape everywhere, so hit rates can be
-          # counted across runs from job summaries.
-          if [ "${CACHE_HIT}" = "true" ]; then result=hit
-          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
-          else result=miss; fi
-          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
+          lookup-only: true
 
       # Strict here too, so a warning that reached main without the pull request
       # build (a ruleset bypass) stops the deploy instead of publishing it.
@@ -156,8 +184,18 @@ jobs:
         if: >-
           github.event_name == 'push'
           && github.ref == 'refs/heads/main'
-          && steps.privacy-cache.outputs.cache-hit != 'true'
+          && steps.privacy-cache-lookup.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/plugin/privacy
           key: mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}
+
+      - name: Save the uv cache (main only)
+        if: >-
+          steps.uv-cache-lookup.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}

@@ -17,11 +17,45 @@ description: "Restore or save the digest-pinned release assets `ashx dependencie
 #
 # Keyed on the pin table's hash plus OS and arch, so a version bump re-keys it.
 # Restored everywhere, saved from a push to main only.
+#
+# HOW A CALLER USES IT
+#
+#   - id: tool-cache
+#     uses: ./.github/actions/tool-download-cache
+#     with: { mode: restore }
+#   - run: ash dependencies install
+#     env:
+#       ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
+#   - uses: ./.github/actions/tool-download-cache
+#     with:
+#       mode: save
+#       cache-hit: ${{ steps.tool-cache.outputs.cache-hit }}
+#
+# The directory and the hit flag are outputs, not GITHUB_ENV. GITHUB_ENV would put them in
+# every later step of the caller's job, and zizmor's github-env audit reports a composite
+# action that writes it. Each step that runs ASH maps `dir` itself;
+# tests/unit/test_build_handoffs_reach_every_consumer.py fails when one does not.
 
 inputs:
   mode:
     description: "restore or save"
     required: true
+  cache-hit:
+    description: >-
+      Save mode only: the restore invocation's `cache-hit` output. 'true' skips the save,
+      because the entry already exists.
+    required: false
+    default: ""
+
+outputs:
+  dir:
+    description: >-
+      Restore mode: the directory ASH reads cached release assets from. Map it to
+      ASH_TOOL_DOWNLOAD_CACHE in the env of every step that runs ASH.
+    value: ${{ steps.dir.outputs.dir }}
+  cache-hit:
+    description: "Restore mode: actions/cache/restore's cache-hit output."
+    value: ${{ steps.restore.outputs.cache-hit }}
 
 runs:
   using: "composite"
@@ -35,10 +69,11 @@ runs:
         echo "::error::tool-download-cache mode is '${MODE}', expected restore or save"
         exit 1
 
-    - name: "Point ASH at the tool download cache"
+    - name: "Name the tool download cache directory"
+      id: dir
       if: inputs.mode == 'restore'
       shell: bash
-      run: echo "ASH_TOOL_DOWNLOAD_CACHE=${RUNNER_TEMP}/ash-tool-downloads" >> "$GITHUB_ENV"
+      run: echo "dir=${RUNNER_TEMP}/ash-tool-downloads" >> "$GITHUB_OUTPUT"
 
     - name: "Restore the tool download cache"
       id: restore
@@ -62,13 +97,11 @@ runs:
         elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
         else result=miss; fi
         echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
-        # Carried to the save invocation, which is a separate use of this action.
-        echo "ASH_TOOL_DOWNLOAD_CACHE_HIT=${CACHE_HIT}" >> "$GITHUB_ENV"
 
     - name: "Save the tool download cache (main only)"
       if: >-
         inputs.mode == 'save'
-        && env.ASH_TOOL_DOWNLOAD_CACHE_HIT != 'true'
+        && inputs.cache-hit != 'true'
         && github.event_name == 'push'
         && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

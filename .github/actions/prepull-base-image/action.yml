@@ -162,11 +162,12 @@ description: >-
 # So the fix changes what `FROM` ASKS FOR rather than trying to satisfy the old ask out of a
 # store the builder may not consult. On the fallback path the step writes
 #
-#     ASH_BASE_IMAGE_OVERRIDE=<fallback repo>@<pin>
+#     base-image-override=<fallback repo>@<pin>
 #
-# to GITHUB_ENV, and each of the build entrypoints -- run_ash_container.py's
-# `_build_image` and utils/ash_helpers.ps1 -- passes it through as
-# `--build-arg BASE_IMAGE=...`. That is uniform across every runtime and every builder
+# as this action's `base-image-override` output. Each caller maps it into the `env:` of
+# every step that builds, as ASH_BASE_IMAGE_OVERRIDE, and each of the build
+# entrypoints -- run_ash_container.py's `_build_image` and utils/ash_helpers.ps1 --
+# passes it through as `--build-arg BASE_IMAGE=...`. That is uniform across every runtime and every builder
 # driver, because no runtime has any say in which reference a build-arg names.
 #
 # The digest interaction is favourable rather than awkward. `FROM ${BASE_IMAGE}` accepts a
@@ -216,14 +217,15 @@ description: >-
 # would work, and only for the BuildKit runtimes -- buildah has no equivalent -- so it is a
 # possible second layer, never the fix.
 #
-# Rejected: a composite-action `outputs:` value instead of GITHUB_ENV. The consumer is not the
-# workflow YAML; it is a build several layers inside two different entrypoints, reached by
-# `ashx build-image`, `ashx scan --mode container` and a PowerShell function. An output
-# would have to be threaded through every caller's argv, at six `uses:` sites across two
-# actions, each one a place to forget. GITHUB_ENV reaches every later step in the job whatever
-# the entrypoint, and it is already this repository's idiom for the same handoff --
-# run-scan-test exports ACTIONS_RUNTIME_TOKEN the same way, and ASH's build reads it from the
-# environment.
+# The hand-off used to be GITHUB_ENV, on the argument that an output "would have to be
+# threaded through every caller's argv, at six `uses:` sites across two actions, each one a
+# place to forget". The first half was wrong: nothing goes on an argv. The entrypoints read the
+# environment, and a step's `env:` can map an output into it. The second half is real, and it
+# is now a test rather than a hope: tests/unit/test_build_handoffs_reach_every_consumer.py fails
+# when a step after a use of this action invokes an ASH build without mapping both outputs.
+# GITHUB_ENV was dropped because it puts the value into every later step of the caller's job,
+# whatever that step is, and zizmor's github-env audit reports a composite action that writes
+# it. An output reaches only the steps that name it.
 #
 # WHY THE DIGEST PIN IS THE LOAD-BEARING PART
 #
@@ -430,8 +432,9 @@ description: >-
 #       pull policy is `missing`, which returns before any registry I/O on a local hit (see
 #       tests/unit/test_local_base_image_resolution_is_not_defeated.py).
 #
-# The hand-off is ASH_BASE_OCI_LAYOUT=<layout dir>@<arch manifest digest> in GITHUB_ENV, read
-# by the same three entrypoints that read ASH_BASE_IMAGE_OVERRIDE. Only this action sets it.
+# The hand-off is this action's `oci-layout` output, <layout dir>@<arch manifest digest>,
+# mapped by each caller to ASH_BASE_OCI_LAYOUT and read by the same three entrypoints that read
+# ASH_BASE_IMAGE_OVERRIDE. Only this action produces it.
 #
 # PROOF, NOT A GREEN LEG: on a hit this action also points the registry hosts at 0.0.0.0 in
 # /etc/hosts -- and inside a running buildx builder container, which has its own -- for the
@@ -490,6 +493,18 @@ outputs:
       'true' when the build was handed a verified base image from the Actions cache and this
       action made no registry call.
     value: ${{ steps.hit.outputs.used }}
+  oci-layout:
+    description: >-
+      On a verified cache hit, <layout dir>@<arch manifest digest> of the base image as an OCI
+      layout; empty otherwise. Map it to ASH_BASE_OCI_LAYOUT in the env of every step that
+      builds ASH's image.
+    value: ${{ steps.hit.outputs.oci-layout }}
+  base-image-override:
+    description: >-
+      When the base image came from the fallback registry, <fallback repo>@<pinned digest>;
+      empty otherwise. Map it to ASH_BASE_IMAGE_OVERRIDE in the env of every step that builds
+      ASH's image.
+    value: ${{ steps.pull.outputs.base-image-override }}
 
 runs:
   using: "composite"
@@ -924,27 +939,28 @@ runs:
             # more pinned than the primary path it is standing in for.
             override="${repo}@${pin}"
 
-            # GITHUB_ENV's `NAME=value` form is line-oriented, so a value carrying a newline
-            # would let this step inject an arbitrary second variable into the job. Neither
+            # GITHUB_OUTPUT's `name=value` form is line-oriented, so a value carrying a newline
+            # would let this step inject an arbitrary second output. Neither
             # component can carry one today -- `pin` is matched against
             # ^sha256:[0-9a-f]{64}$ above and `repo` is derived from a single sed-extracted
             # Dockerfile line with `*@*` already rejected -- so this guard has no reachable
             # trigger. It is here anyway: the cost is three lines, and the thing on the other
-            # side of it is writing attacker-shaped text into the environment of every later
-            # step in the job.
+            # side of it is writing attacker-shaped text into the environment of the steps
+            # that build.
             case "${override}" in
               *[!a-zA-Z0-9._:/@-]*)
-                echo "::error::refusing to export ASH_BASE_IMAGE_OVERRIDE='${override}': it \
-        contains a character that is not valid in an image reference. GITHUB_ENV is \
+                echo "::error::refusing to hand the build base-image-override='${override}': it \
+        contains a character that is not valid in an image reference. GITHUB_OUTPUT is \
         line-oriented, so this step will not write an unexpected value into it."
                 exit 1
                 ;;
             esac
 
-            if [ -n "${GITHUB_ENV:-}" ]; then
-              printf '%s\n' "ASH_BASE_IMAGE_OVERRIDE=${override}" >> "${GITHUB_ENV}"
+            if [ -n "${GITHUB_OUTPUT:-}" ]; then
+              printf '%s\n' "base-image-override=${override}" >> "${GITHUB_OUTPUT}"
               echo "::notice::sourced ${base} from ${repo} at ${pin}. The build is told to \
-        ask for ${override} directly, through ASH_BASE_IMAGE_OVERRIDE in the job environment, \
+        ask for ${override} directly, through this action's base-image-override output, which \
+        the caller maps to ASH_BASE_IMAGE_OVERRIDE in the env of each step that builds, \
         and that is what keeps it off ${primary_repo}. ${base} is also tagged locally as a \
         second layer, which every builder here reads except a docker-container one -- that \
         driver is a separate container with its own image-store-less worker, so the override \
@@ -954,7 +970,7 @@ runs:
               # legitimate way to use it. But it is the exact state the retag alone used to
               # be mistaken for, so it says what breaks rather than that something is unset.
               echo "::warning::sourced ${base} from ${repo} at ${pin} and tagged it locally, \
-        but GITHUB_ENV is not set, so the build cannot be told which registry answered. The \
+        but GITHUB_OUTPUT is not set, so the build cannot be told which registry answered. The \
         local tag alone is enough on plain \`docker build\`, podman, finch, and a nerdctl whose \
         buildkitd runs the containerd worker -- but \`docker buildx\` on a docker-container \
         driver will go back to ${primary_repo} and be refused again, and so will any buildkitd \

@@ -182,11 +182,18 @@ class TestEveryBuildEntrypointIsCovered:
     def test_the_prepull_is_the_only_thing_that_sets_it(self):
         """A reader who greps for the variable has to land on the one place that writes it."""
         action = PREPULL.read_text(encoding="utf-8")
-        assert f"{OVERRIDE}=${{override}}" in action, (
-            "the pre-pull action must be what exports the variable; if this moved, the "
+        assert (
+            'printf \'%s\\n\' "base-image-override=${override}" >> "${GITHUB_OUTPUT}"'
+            in action
+        ), (
+            "the pre-pull action must be what produces the value; if this moved, the "
             "entrypoints above are reading something nothing sets"
         )
-        assert "GITHUB_ENV" in action, (
-            "the handoff is through GITHUB_ENV, which is what reaches every later step in the "
-            "job regardless of which entrypoint the job then uses"
+        assert "steps.pull.outputs.base-image-override" in action, (
+            "the action exposes the pull step's value as its base-image-override output, "
+            "which callers map to the variable in each build step's env; "
+            "tests/unit/test_build_handoffs_reach_every_consumer.py checks the mappings"
+        )
+        assert f"{OVERRIDE}=" not in action, (
+            "the action writes the variable itself again; the hand-off is an output now"
         )

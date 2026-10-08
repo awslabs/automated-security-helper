@@ -1,0 +1,11 @@
+{
+  "command": [
+    "pnpm",
+    "audit",
+    "--json"
+  ],
+  "pnpm_version": "12.10.1",
+  "returncode": 0,
+  "stderr": "",
+  "stdout": "{\n  \"advisories\": {},\n  \"metadata\": {\n    \"vulnerabilities\": {\n      \"info\": 0,\n      \"low\": 0,\n      \"moderate\": 0,\n      \"high\": 0,\n      \"critical\": 0\n    },\n    \"dependencies\": 1,\n    \"devDependencies\": 0,\n    \"optionalDependencies\": 0,\n    \"totalDependencies\": 1\n  }\n}\n"
+}

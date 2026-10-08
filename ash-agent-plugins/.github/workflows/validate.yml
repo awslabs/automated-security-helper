@@ -61,9 +61,19 @@ jobs:
         with:
           enable-cache: true
 
+      # The matrix values reach the shell through env, never through `${{ }}`
+      # inside `run:`. A template expansion is pasted into the script text before
+      # bash parses it, so a quote or `$(...)` in a value would become script.
+      # install_cmd is a shell command by design (cli_tools.py, same commit; some
+      # are `curl ... | bash`), so `eval` runs it as the expansion did. backend is
+      # now one quoted argument rather than script text.
       - name: Install ${{ matrix.cli }} (pinned)
         if: matrix.install_cmd != '' && matrix.headless
-        run: ${{ matrix.install_cmd }}
+        env:
+          INSTALL_CMD: ${{ matrix.install_cmd }}
+        run: eval "$INSTALL_CMD"
 
       - name: Smoke-test ${{ matrix.backend }} (validator=${{ matrix.cli }})
-        run: uv run --project agentic-coding/transpiler agentic-plugins smoke-test ${{ matrix.backend }}
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: uv run --project agentic-coding/transpiler agentic-plugins smoke-test "$BACKEND"

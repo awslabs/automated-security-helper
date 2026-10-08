@@ -81,9 +81,12 @@ artifact four steps downstream, not a shadowed binary.
 
 ``setup-ash`` puts ASH's console scripts on ``PATH`` via ``GITHUB_PATH`` before
 this action runs, and setup-ruby adds MSYS2 later; since the runner reverses the
-accumulated list, later wins. So the fix is to re-add ASH's scripts directory
-after setup-ruby, which promotes it above MSYS2 without evicting MSYS2 -- sh, make
-and gcc keep coming from the one coherent tree psych needs. Promoting Git Bash
+accumulated list, later wins. So the fix is to put ASH's scripts directory back
+in front after setup-ruby, above MSYS2 without evicting MSYS2 -- sh, make and gcc
+keep coming from the one coherent tree psych needs. The promote step finds the
+directory and hands it over as its `dirs` output; the two steps that call `ash`
+prepend it to their own PATH. (It was a GITHUB_PATH write until zizmor's
+github-env audit reported it.) Promoting Git Bash
 there instead would break the gem build for the 18e5cba9 reason, which is what
 ``test_git_bash_precedence_is_restored_after_the_windows_scan`` already forbids.
 """
@@ -290,6 +293,35 @@ def test_every_windows_ash_invocation_follows_the_promotion(steps):
         f"found {callers}. If this is zero the detector stopped matching and the "
         "assertion above is vacuous."
     )
+    # The promotion is the promote step's `dirs` output, so it reaches only a step
+    # that maps it and puts it at the front of its own PATH before calling `ash`.
+    promote_id = steps[promote].get("id")
+    assert promote_id, f"{PROMOTE_STEP!r} has no id, so nothing can read its output"
+    for step in steps[promote + 1 : _index(steps, RESTORE_STEP)]:
+        if not (
+            _runs_on_windows_python_local(step)
+            and ASH_INVOCATION.search(str(step.get("run", "")))
+        ):
+            continue
+        mapped = str((step.get("env") or {}).get("ASH_ENTRY_POINT_DIRS", ""))
+        assert f"steps.{promote_id}.outputs.dirs" in mapped, (
+            f"{step.get('name')!r} calls `ash` but does not map the promotion's output"
+        )
+        assert '$env:PATH = "$env:ASH_ENTRY_POINT_DIRS;$env:PATH"' in step["run"], (
+            f"{step.get('name')!r} maps the promotion but does not prepend it to PATH"
+        )
+    # And nothing after the Git Bash restore may call `ash` on this leg: the
+    # promotion does not persist past the two steps that apply it.
+    late = [
+        step.get("name")
+        for step in steps[_index(steps, RESTORE_STEP) + 1 :]
+        if _runs_on_windows_python_local(step)
+        and ASH_INVOCATION.search(str(step.get("run", "")))
+    ]
+    assert not late, (
+        f"these steps call `ash` after {RESTORE_STEP!r}, where the promotion no longer "
+        f"applies and MSYS2's or Git's Almquist shell can win: {late}"
+    )
 
 
 def test_the_promotion_does_not_hand_precedence_to_git_bash(steps):
@@ -307,9 +339,15 @@ def test_the_promotion_does_not_hand_precedence_to_git_bash(steps):
         "leaves MSYS2's `ash` first and puts Git's sh ahead of MSYS2's for the "
         "psych compile in the next step."
     )
-    assert "GITHUB_PATH" in body, (
-        f"{PROMOTE_STEP!r} no longer writes GITHUB_PATH, so it changes no PATH "
-        "for the steps that follow it and the promotion silently does nothing."
+    assert "dirs=" in body and "GITHUB_OUTPUT" in body, (
+        f"{PROMOTE_STEP!r} no longer writes its `dirs` output, so the steps that "
+        "invoke `ash` have nothing to put ahead of MSYS2 and the promotion silently "
+        "does nothing."
+    )
+    assert "GITHUB_PATH" not in body, (
+        f"{PROMOTE_STEP!r} writes GITHUB_PATH again. The promotion is a step output "
+        "that the two `ash` steps prepend themselves, so it does not reach every later "
+        "step of the caller's job; zizmor's github-env audit reports the write."
     )
 
 
