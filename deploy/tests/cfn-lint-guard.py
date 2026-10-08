@@ -24,6 +24,17 @@ cfn-guard to ignore something is itself a failure (`find_suppressions`): the
 point is to fix the template, not to quiet the tool. The W3005 warnings CDK used
 to produce are fixed in the stacks; see deploy/cdk/lib/ash-implied-dependencies.ts.
 
+One exception, and it cannot reach this gate's own rules. ASH's cfn-guard scanner
+runs the AWS Guard Rules Registry over the same templates, and main approved
+per-resource `Metadata.guard.SuppressedRules` for three registry rules (#761),
+pinned resource by resource in deploy/cdk/test/ash-guard-suppressions.test.ts.
+cfn-guard skips a resource only for the rule names it lists, so those entries
+leave every rule in ash-deploy.guard checking that resource. They are accepted
+here only for the rule names in ACCEPTED_REGISTRY_SUPPRESSIONS, only with a
+SuppressedRuleReasons entry for each, and never for a name this gate's rules
+file defines; self-test fails if the two sets ever share a name. A cfn-lint
+suppression is still never accepted.
+
 cfn-guard: any rule reported non-compliant for any template. Also a failure: a
 rule that no template exercises. cfn-guard reports a rule with no matching
 resources as not applicable, which reads exactly like a pass, so a rule whose
@@ -92,6 +103,25 @@ EXPECTED_UNEXERCISED = {
     "EKS_CLUSTER_ENDPOINT_NOT_OPEN": (
         "No stack creates an EKS cluster: AshEksOperator installs into one the adopter already runs. "
         "The rule is kept so a stack that does create one cannot ship an endpoint open to the internet."
+    ),
+}
+
+# Guard Rules Registry rules that a committed template may suppress on a resource,
+# each with the reason main approved it. Which resources may carry each one is
+# pinned in deploy/cdk/test/ash-guard-suppressions.test.ts; this list only bounds
+# the rule names, so a suppression of any other rule, including every rule in
+# ash-deploy.guard, still fails the gate.
+ACCEPTED_REGISTRY_SUPPRESSIONS = {
+    "LAMBDA_INSIDE_VPC": (
+        "The image-bootstrap custom-resource responder has no inbound path, and the "
+        "gate's scan function is placed in a VPC only when the adopter opts in."
+    ),
+    "S3_BUCKET_SSL_REQUESTS_ONLY": (
+        "enforceSSL already denies non-TLS access; the rule matches only a literal "
+        'Principal "*", Resource "*" statement, which CDK does not emit.'
+    ),
+    "NO_UNRESTRICTED_ROUTE_TO_IGW": (
+        "The NAT gateway's egress route, the only resource in its public subnet."
     ),
 }
 
@@ -246,8 +276,24 @@ def find_suppressions(template: Template) -> list[str]:
             found.append(f"{logical_id} Metadata.cfn-lint")
         guard = meta.get("guard")
         if isinstance(guard, dict) and "SuppressedRules" in guard:
-            found.append(f"{logical_id} Metadata.guard.SuppressedRules")
+            if not _accepted_guard_suppression(guard):
+                found.append(f"{logical_id} Metadata.guard.SuppressedRules")
     return found
+
+
+def _accepted_guard_suppression(guard: dict[str, Any]) -> bool:
+    """True when every suppressed rule is an accepted registry rule with a reason."""
+    rules = guard.get("SuppressedRules")
+    reasons = guard.get("SuppressedRuleReasons")
+    if not isinstance(rules, list) or not rules or not isinstance(reasons, dict):
+        return False
+    return all(
+        isinstance(rule, str)
+        and rule in ACCEPTED_REGISTRY_SUPPRESSIONS
+        and isinstance(reasons.get(rule), str)
+        and reasons[rule].strip() != ""
+        for rule in rules
+    )
 
 
 def config_files(directories: list[Path]) -> list[Path]:
@@ -768,16 +814,45 @@ def self_test(
                 "Metadata": {"guard": {"SuppressedRules": ["S3_BUCKET_ENCRYPTED"]}},
             },
             "C": {"Type": "AWS::SQS::Queue", "Metadata": {"aws:cdk:path": "x"}},
+            # An accepted registry rule with no reason: still a suppression.
+            "D": {
+                "Type": "AWS::SQS::Queue",
+                "Metadata": {"guard": {"SuppressedRules": ["LAMBDA_INSIDE_VPC"]}},
+            },
+            # The accepted shape, which must NOT be flagged, so the count below
+            # also fails if the detector starts flagging everything.
+            "E": {
+                "Type": "AWS::SQS::Queue",
+                "Metadata": {
+                    "guard": {
+                        "SuppressedRules": ["LAMBDA_INSIDE_VPC"],
+                        "SuppressedRuleReasons": {"LAMBDA_INSIDE_VPC": "reason"},
+                    }
+                },
+            },
         },
     }
     found = find_suppressions(planted_template)
-    if len(found) != 3:
+    expected = [
+        "template Metadata.cfn-lint",
+        "A Metadata.cfn-lint",
+        "B Metadata.guard.SuppressedRules",
+        "D Metadata.guard.SuppressedRules",
+    ]
+    if found != expected:
         problems.append(
-            f"suppression detector found {found} in a template with exactly three planted suppressions"
+            f"suppression detector found {found} in a template planted with exactly {expected}"
         )
     else:
         print(
-            "negative control ok: suppression detector flags all three planted suppressions"
+            "negative control ok: suppression detector flags all four planted suppressions "
+            "and accepts the reasoned registry one"
+        )
+    shared = sorted(set(ACCEPTED_REGISTRY_SUPPRESSIONS) & set(rule_names(rules_file)))
+    if shared:
+        problems.append(
+            f"ACCEPTED_REGISTRY_SUPPRESSIONS names {shared}, which {rules_file.name} also "
+            "defines; a template could then suppress this gate's own rule"
         )
     return problems
 

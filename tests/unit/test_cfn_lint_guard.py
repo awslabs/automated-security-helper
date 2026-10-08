@@ -311,6 +311,72 @@ def test_suppression_detector_ignores_ordinary_metadata(gate: ModuleType) -> Non
     )
 
 
+def _guard_meta(rules: list[str], reasons: dict[str, str] | None) -> dict:
+    guard: dict = {"SuppressedRules": rules}
+    if reasons is not None:
+        guard["SuppressedRuleReasons"] = reasons
+    return {"Resources": {"R": {"Type": "x", "Metadata": {"guard": guard}}}}
+
+
+def test_a_reasoned_registry_suppression_is_accepted(gate: ModuleType) -> None:
+    # The shape main's per-resource cfn-guard suppressions take (#761).
+    rule = "LAMBDA_INSIDE_VPC"
+    assert gate.find_suppressions(_guard_meta([rule], {rule: "why"})) == []
+
+
+@pytest.mark.parametrize(
+    ("rules", "reasons"),
+    [
+        # A rule this gate itself enforces is never suppressible.
+        (["S3_BUCKET_ENCRYPTED"], {"S3_BUCKET_ENCRYPTED": "why"}),
+        # A registry rule nobody approved.
+        (["SOME_OTHER_REGISTRY_RULE"], {"SOME_OTHER_REGISTRY_RULE": "why"}),
+        # An approved rule with no reason, an empty reason, or no reasons map.
+        (["LAMBDA_INSIDE_VPC"], {}),
+        (["LAMBDA_INSIDE_VPC"], {"LAMBDA_INSIDE_VPC": "  "}),
+        (["LAMBDA_INSIDE_VPC"], None),
+        # One unapproved rule riding along with an approved one.
+        (
+            ["LAMBDA_INSIDE_VPC", "S3_BUCKET_ENCRYPTED"],
+            {"LAMBDA_INSIDE_VPC": "why", "S3_BUCKET_ENCRYPTED": "why"},
+        ),
+        # An empty list asks for nothing and is still not the accepted shape.
+        ([], {}),
+    ],
+)
+def test_any_other_guard_suppression_fails(
+    gate: ModuleType, rules: list[str], reasons: dict[str, str] | None
+) -> None:
+    assert gate.find_suppressions(_guard_meta(rules, reasons)) == [
+        "R Metadata.guard.SuppressedRules"
+    ]
+
+
+def test_no_accepted_registry_rule_shares_a_name_with_a_gate_rule(
+    gate: ModuleType,
+) -> None:
+    shipped = set(gate.rule_names(gate.RULES_FILE))
+    assert shipped, "no rules parsed from the shipped rules file"
+    assert set(gate.ACCEPTED_REGISTRY_SUPPRESSIONS).isdisjoint(shipped)
+
+
+def test_the_committed_templates_do_carry_registry_suppressions(
+    gate: ModuleType,
+) -> None:
+    # Non-vacuity for test_committed_templates_carry_no_suppression: the templates
+    # do hold guard metadata, so that test passing means each entry was accepted,
+    # not that there was nothing to look at.
+    carrying = [
+        logical_id
+        for path in gate.committed_templates(gate.TEMPLATE_DIR)
+        for logical_id, resource in json.loads(path.read_text(encoding="utf-8"))[
+            "Resources"
+        ].items()
+        if "guard" in (resource.get("Metadata") or {})
+    ]
+    assert carrying
+
+
 # --------------------------------------------------------------------------- #
 # The shipped rules, mutants and templates line up
 # --------------------------------------------------------------------------- #
