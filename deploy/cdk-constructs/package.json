@@ -61,13 +61,13 @@
     ]
   },
   "peerDependencies": {
-    "aws-cdk-lib": "^2.267.0",
+    "aws-cdk-lib": "^2.273.0",
     "constructs": "^10.8.1"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^22.19.0",
-    "aws-cdk-lib": "2.267.0",
+    "aws-cdk-lib": "2.273.0",
     "constructs": "10.8.1",
     "jest": "^30.5.0",
     "jsii": "^6.0.11",

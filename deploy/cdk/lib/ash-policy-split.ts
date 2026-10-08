@@ -122,7 +122,7 @@ import { Construct } from 'constructs';
  *
  * and only then computes the path hash, so a component named `Default`
  * contributes to neither the human-readable prefix nor the hash. Verified against
- * the pinned aws-cdk-lib 2.267.0. A construct at `<Parent>/Thing/Default/Resource`
+ * the pinned aws-cdk-lib 2.273.0. A construct at `<Parent>/Thing/Default/Resource`
  * therefore gets byte-for-byte the logical id it had at
  * `<Parent>/Thing/Resource`, and so does every one of its descendants.
  *
