@@ -328,10 +328,51 @@ def run_commands(dockerfile: str) -> list[str]:
     return [shlex.join(words) for body in run_bodies(dockerfile) for words in split_commands(body)]
 
 
+# Commands that run the command after them. Stripped so `env pip install x` is read as
+# `pip install x`; anything they wrap that is still not recognized meets the text check.
+WRAPPERS = frozenset({"env", "sudo", "exec", "nice", "nohup", "time", "command", "xargs", "doas"})
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+# pip options naming where packages come from. A remote value means a download, which
+# --no-index does not stop, so it is unlocked whatever else the command says.
+SOURCE_OPTIONS = frozenset(
+    {"-f", "--find-links", "-i", "--index-url", "--extra-index-url", "--trusted-host"}
+)
+
+
+def unwrap(words: list[str]) -> list[str]:
+    """*words* with leading VAR=value, env/sudo/xargs-style wrappers and python -m removed."""
+    while words:
+        name = Path(words[0]).name
+        if ASSIGNMENT.fullmatch(words[0]):
+            words = words[1:]
+        elif name in WRAPPERS:
+            words = words[1:]
+            # The wrapper's own options (env -i, sudo -u root, xargs -n1), up to the command.
+            while words and (words[0].startswith("-") or ASSIGNMENT.fullmatch(words[0])):
+                takes_value = words[0] in ("-u", "-g", "-n", "-P", "-I", "-L", "-C")
+                words = words[2:] if takes_value else words[1:]
+        elif name.startswith("python"):
+            # python [-I -u -E -X opt ...] -m pip ...
+            rest = words[1:]
+            while rest and rest[0].startswith("-") and rest[0] != "-m":
+                rest = rest[2:] if rest[0] in ("-X", "-W") else rest[1:]
+            if rest[:2] == ["-m", "pip"]:
+                return ["pip", *rest[2:]]
+            return words
+        else:
+            return words
+    return words
+
+
+def is_remote(value: str) -> bool:
+    return "://" in value and not value.startswith("file://")
+
+
 def classify(words: list[str]) -> str | None:
     """'locked', 'unlocked', or None when *words* is not an installer command."""
-    if len(words) >= 3 and Path(words[0]).name.startswith("python") and words[1:3] == ["-m", "pip"]:
-        words = ["pip", *words[3:]]
+    words = unwrap(words)
+    if not words:
+        return None
     tool = Path(words[0]).name
     if not INSTALLER.fullmatch(tool):
         return None
@@ -339,6 +380,12 @@ def classify(words: list[str]) -> str | None:
         return "unlocked"
     if words[1:2] not in (["install"], ["wheel"], ["download"]):
         return "locked"  # pip check, pip --version, pip list: nothing is fetched
+    values = {words[i + 1] for i, w in enumerate(words[:-1]) if w in SOURCE_OPTIONS}
+    values |= {
+        w.split("=", 1)[1] for w in words if w.split("=", 1)[0] in SOURCE_OPTIONS and "=" in w
+    }
+    if any(is_remote(v) for v in values) or any(is_remote(w) for w in words[2:]):
+        return "unlocked"
     if "--no-index" in words:
         return "locked"
     files = [words[i + 1] for i, w in enumerate(words[:-1]) if w in ("-r", "--requirement")]
@@ -351,13 +398,25 @@ def classify(words: list[str]) -> str | None:
 
 
 def unlocked_installs(dockerfile: str) -> list[str]:
-    """Commands that could fetch a package from an index without a hash check."""
+    """Commands that could fetch a package from an index without a hash check.
+
+    Three kinds are reported: an installer command that is not hash-locked or offline;
+    any command the parser could not classify whose own text still reads like an
+    install (so wrapping one does not hide it); and a RUN with a heredoc, whose body
+    this parser does not read at all.
+    """
     bad = []
     for body in run_bodies(dockerfile):
-        verdicts = [(classify(words), words) for words in split_commands(body)]
-        bad += [shlex.join(words) for verdict, words in verdicts if verdict == "unlocked"]
-        if INSTALL_TEXT.search(body) and not any(verdict for verdict, _ in verdicts):
-            bad.append(f"unrecognised install in RUN {body[:160]}")
+        if "<<" in body:
+            bad.append(f"heredoc RUN is not read: {body[:160]}")
+            continue
+        for words in split_commands(body):
+            verdict = classify(words)
+            command = shlex.join(words)
+            if verdict == "unlocked":
+                bad.append(command)
+            elif verdict is None and INSTALL_TEXT.search(command):
+                bad.append(f"unrecognised install: {command[:160]}")
     return bad
 
 
@@ -393,6 +452,17 @@ class TestNoInstallBypassesTheLocks:
             "RUN --mount=type=cache,target=/root/.cache pip install kopf",
             'RUN eval "pip install kopf"',
             "RUN uvx --from bandit bandit --version",
+            "RUN env pip install kopf && pip check",
+            "RUN PIP_NO_CACHE_DIR=1 pip install kopf && pip check",
+            "RUN sudo -u root pip install kopf && pip check",
+            "RUN echo kopf | xargs pip install && pip check",
+            "RUN python3 -I -m pip install kopf && pip check",
+            "RUN nohup some-wrapper pip install kopf && pip check",
+            "RUN <<EOF\npip install kopf\nEOF",
+            "RUN pip install --no-index --find-links http://mirror.example/simple kopf",
+            "RUN pip install --no-index --find-links=https://mirror.example/simple kopf",
+            "RUN pip install --require-hashes -r a.txt --index-url http://mirror.example/simple",
+            "RUN pip install --no-deps --no-index https://example.com/kopf-1.0-py3-none-any.whl",
         ],
     )
     def test_a_planted_unlocked_install_is_found(self, planted):
@@ -406,6 +476,9 @@ class TestNoInstallBypassesTheLocks:
             "RUN pip wheel --no-deps --no-build-isolation --no-index --wheel-dir /w .",
             'RUN ["pip", "install", "--require-hashes", "-r", "/locks/a.txt"]',
             'RUN sh -c "pip install --require-hashes -r /locks/a.txt && pip check"',
+            "RUN env PIP_NO_CACHE_DIR=1 pip install --require-hashes -r /locks/a.txt",
+            "RUN python3 -I -m pip install --no-index --find-links /wheels kopf",
+            "RUN pip install --no-index --find-links file:///wheels kopf && pip check",
         ],
     )
     def test_a_locked_or_offline_install_is_not_flagged(self, allowed):
