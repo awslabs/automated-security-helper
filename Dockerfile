@@ -429,6 +429,25 @@ ARG TRIVY_VERSION="v0.75.0"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
+# trivy's cache, shared by the trivy and trivy-repo scanners and writable by the
+# non-root user, as GRYPE_DB_CACHE_DIR is for grype. An offline image downloads the
+# vulnerability database into it here; trivy is a default scanner, and offline with no
+# database it is MISSING, which fails the scan. ASH holds that database to trivy's own
+# 24-hour bound (utils/content_databases.py), so an offline image's trivy scans need a
+# rebuild, or `content_db_staleness: warn`, once the database is a day old. The
+# artifact is checked rather than OFFLINE re-tested, for the reason given above.
+ENV TRIVY_CACHE_DIR="/deps/.trivy"
+RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}" && chmod 777 "${TRIVY_CACHE_DIR}"; \
+    if [ "${OFFLINE}" = "YES" ]; then \
+        with-retry "trivy image --download-db-only --no-progress --cache-dir ${TRIVY_CACHE_DIR}" && \
+        chmod -R 777 "${TRIVY_CACHE_DIR}" && \
+        if [ -z "$(ls -A "${TRIVY_CACHE_DIR}/db" 2>/dev/null)" ]; then \
+            echo "OFFLINE=YES but ${TRIVY_CACHE_DIR}/db is empty: the trivy database was not downloaded." >&2; \
+            exit 1; \
+        fi; \
+        echo "offline provisioning verified: trivy database present"; \
+    fi
+
 # cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
 # templates against. The binary comes from its pinned release asset like the three
 # above. The rules archive is pinned the same way (RULES_BUNDLES in

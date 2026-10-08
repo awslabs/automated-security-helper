@@ -228,11 +228,15 @@
                   || echo "ash: grype database download FAILED; grype will report ERROR" >&2
               fi
 
+              # Refreshed on every entry, not only the first: nix mode scans offline,
+              # and ASH holds trivy's database to trivy's own 24-hour bound, so a
+              # database seeded once would fail every scan a day later. trivy returns
+              # at once when its database is current.
               if [ -z "$(ls -A "$TRIVY_CACHE_DIR" 2>/dev/null)" ]; then
-                echo "ash: seeding trivy vulnerability database (one time, needs network)" >&2
-                trivy image --download-db-only --cache-dir "$TRIVY_CACHE_DIR" >/dev/null 2>&1 \
-                  || echo "ash: trivy database download FAILED; trivy will report MISSING" >&2
+                echo "ash: seeding trivy vulnerability database (needs network)" >&2
               fi
+              trivy image --download-db-only --cache-dir "$TRIVY_CACHE_DIR" >/dev/null 2>&1 \
+                || echo "ash: trivy database update FAILED; trivy uses what is cached, or reports MISSING" >&2
 
               if [ -z "$(ls -A "$ASH_CFN_GUARD_RULES_DIR" 2>/dev/null)" ]; then
                 echo "ash: seeding the AWS Guard Rules Registry for cfn-guard (one time, needs network)" >&2

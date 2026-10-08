@@ -27,8 +27,11 @@ so both config classes satisfy it without sharing a base.
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import subprocess  # nosec B404 - spawn_run below is the sandbox choke point
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, Generic, Optional, TypeVar
+from typing import Annotated, Any, ClassVar, Dict, Generic, List, Optional, TypeVar
 
 from pydantic import Field, model_validator
 
@@ -50,7 +53,12 @@ from automated_security_helper.utils.config_trust import (
     inside_scanned_tree,
     set_by_operator,
 )
+from automated_security_helper.utils.file_lock import exclusive_lock
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_excerpt import head_and_tail
+from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.scope import cache_writes_reach_the_host
+from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.package_identity import (
     NpmLockIndex,
@@ -81,6 +89,13 @@ OFFLINE_FLAGS = (
 )
 
 
+#: The lock file in trivy's cache directory that serializes its database update.
+UPDATE_LOCK_NAME = ".ash-trivy-update.lock"
+
+#: How long one update command (database or checks bundle) may take.
+UPDATE_TIMEOUT_SECONDS = 900
+
+
 class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     """Shared trivy behaviour. Not registered: only its subclasses are scanners."""
 
@@ -102,6 +117,118 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # when offline mode is active. Kept on the instance so concurrent scanners
     # do not race on os.environ.
     extra_env: Annotated[Dict[str, str], Field(default_factory=dict)]
+
+    def _trivy_cache_dir(self) -> Path:
+        """trivy's cache directory, as trivy resolves it on Linux.
+
+        Used only to place the update lock; trivy itself is never given a
+        ``--cache-dir``, so where it reads and writes stays its own choice.
+        """
+        raw = self.extra_env.get("TRIVY_CACHE_DIR") or os.environ.get("TRIVY_CACHE_DIR")
+        if raw:
+            return Path(raw).expanduser()
+        base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+        return Path(base) / "trivy"
+
+    def _run_subprocess(
+        self, command: List[str], *args: Any, **kwargs: Any
+    ) -> Dict[str, str]:
+        """Bring trivy's shared caches up to date first, then run ``command``.
+
+        ``command`` gains the flags that skip the update, in place, so the
+        invocation ASH records is the one that ran.
+        """
+        flags = self._shared_update_flags(command, kwargs.get("results_dir"))
+        if flags:
+            command[2:2] = flags
+        return super()._run_subprocess(command, *args, **kwargs)
+
+    def _shared_update_flags(
+        self, command: List[str], results_dir: Path | str | None
+    ) -> List[str]:
+        """Update trivy's database (and checks bundle) once, under a lock.
+
+        Why: trivy and trivy-repo run concurrently and share trivy's cache. Each
+        downloads the vulnerability database when it is out of date, and one can
+        read ``metadata.json``, or the memory-mapped ``trivy.db``, while the other
+        rewrites it. Seen in CI as ``failed to update downloaded_at: unable to get
+        metadata: json decode error: unexpected EOF``, and reproduced locally as a
+        SIGBUS inside bbolt, in 1 run of 5 against an empty shared cache. So the
+        update runs here, serialized across threads and processes by a lock in
+        the cache directory, and the scan is told to skip it: ``--skip-db-update``,
+        and ``--skip-check-update`` when ``misconfig`` needs the checks bundle.
+        The second scanner to take the lock finds the database current, and
+        trivy's update command returns at once. The scan-time staleness check
+        (``utils/content_db_staleness.py``) still measures the database after.
+
+        Not done offline, where ``OFFLINE_FLAGS`` already skip every update, nor
+        when the sandbox mounts trivy's cache through a throwaway overlay: then
+        each spawn writes its own copy, nothing is shared, and an update made in
+        one spawn would be gone before the scan's spawn starts.
+        """
+        if self._offline() or not cache_writes_reach_the_host():
+            return []
+        options: Any = self.config.options  # type: ignore[union-attr]
+        wants_checks = "misconfig" in (options.scanners or [])
+        executable = find_executable(command[0]) or command[0]
+        config_args = [a for a in command if a.startswith("--config=")]
+        env = {**snapshot_environ(), **self.extra_env}
+        with exclusive_lock(self._trivy_cache_dir() / UPDATE_LOCK_NAME):
+            self._run_update(
+                [
+                    executable,
+                    "image",
+                    "--download-db-only",
+                    "--no-progress",
+                    *config_args,
+                ],
+                env,
+                "its vulnerability database",
+            )
+            if wants_checks:
+                # trivy has no command that only fetches the checks bundle; a
+                # misconfiguration scan of an empty directory fetches it. ``trivy
+                # config`` takes no --no-progress; its output is captured anyway.
+                empty = (
+                    Path(results_dir or self.results_dir or ".") / "trivy-checks-update"
+                )
+                if empty.is_symlink() or empty.is_file():
+                    empty.unlink()
+                elif empty.is_dir():
+                    shutil.rmtree(empty)
+                empty.mkdir(parents=True)
+                self._run_update(
+                    [
+                        executable,
+                        "config",
+                        *config_args,
+                        empty.as_posix(),
+                    ],
+                    env,
+                    "its checks bundle",
+                )
+        return ["--skip-db-update", *(["--skip-check-update"] if wants_checks else [])]
+
+    def _run_update(self, argv: List[str], env: Dict[str, str], what: str) -> None:
+        """Run one trivy update command; raise ScannerError naming its stderr."""
+        try:
+            proc = spawn_run(  # nosec B603 - resolved trivy binary, list arguments
+                argv,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=UPDATE_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ScannerError(
+                f"trivy did not finish updating {what} within {UPDATE_TIMEOUT_SECONDS}s"
+            ) from exc
+        if proc.returncode != 0:
+            detail = head_and_tail((proc.stderr or proc.stdout or "").strip(), 2000)
+            raise ScannerError(
+                f"trivy could not update {what} (exit {proc.returncode}): {detail}"
+            )
 
     def _operator_path(
         self, option: str, value: Path | str, why: str

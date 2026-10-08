@@ -956,6 +956,7 @@ def test_trivy_repo_passes_its_own_config_and_an_empty_modules_dir(
     assert planted.resolve().as_posix() not in " ".join(argv)
     # Both flags precede the target, which trivy reads as its last positional.
     assert argv.index(f"--config={config.as_posix()}") < argv.index(str(source))
+    assert argv.index(f"--module-dir={modules.as_posix()}") < argv.index(str(source))
 
 
 def test_trivy_repo_empties_a_modules_dir_left_in_the_output(tmp_path, monkeypatch):
@@ -1020,3 +1021,194 @@ def test_trivy_repo_honors_an_override_for_its_config(tmp_path, monkeypatch):
     )
 
     assert _flag(argv, "--config") == chosen.resolve()
+
+
+# --------------------------------------------------------------------------- #
+# trivy and trivy-repo share trivy's cache and run concurrently, so the database
+# update happens once, under a lock, and the scans skip it.
+# --------------------------------------------------------------------------- #
+
+import threading  # noqa: E402
+import time  # noqa: E402
+
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (  # noqa: E402
+    _trivy_scanner_base as trivy_base,
+)
+
+
+class _FakeTrivy:
+    """Stands in for spawn_run (the update commands) and records overlaps."""
+
+    def __init__(self, returncode=0, stderr="", hold=0.0):
+        self.calls = []
+        self.returncode = returncode
+        self.stderr = stderr
+        self.hold = hold
+        self.active = 0
+        self.max_active = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, argv, **kwargs):
+        with self._lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.calls.append(list(argv))
+        time.sleep(self.hold)
+        with self._lock:
+            self.active -= 1
+        import subprocess as sp
+
+        return sp.CompletedProcess(argv, self.returncode, "", self.stderr)
+
+
+def _update_env(tmp_path, monkeypatch, fake):
+    monkeypatch.setattr(trivy_base, "spawn_run", fake)
+    monkeypatch.setattr(trivy_base, "find_executable", lambda name: f"/bin/{name}")
+    monkeypatch.setenv("TRIVY_CACHE_DIR", str(tmp_path / "trivy-cache"))
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    ran = []
+
+    def fake_base_run(self, command, *args, **kwargs):
+        ran.append(list(command))
+        return {"returncode": 0}
+
+    monkeypatch.setattr(
+        trivy_base.ScannerPluginBase, "_run_subprocess", fake_base_run, raising=True
+    )
+    return ran
+
+
+def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
+    fake = _FakeTrivy()
+    ran = _update_env(tmp_path, monkeypatch, fake)
+    scanner = _scanner(tmp_path)
+    command = ["trivy", "fs", "--config=/r/trivy-config.yaml", "/t"]
+
+    scanner._run_subprocess(command=command, results_dir=tmp_path / "results")
+
+    assert fake.calls == [
+        [
+            "/bin/trivy",
+            "image",
+            "--download-db-only",
+            "--no-progress",
+            "--config=/r/trivy-config.yaml",
+        ]
+    ]
+    (final,) = ran
+    assert final[:3] == ["trivy", "fs", "--skip-db-update"]
+    assert "--skip-check-update" not in final
+    # In place, so the invocation ASH records is the one that ran.
+    assert command == final
+
+
+def test_misconfig_also_fetches_the_checks_bundle_and_skips_it(tmp_path, monkeypatch):
+    fake = _FakeTrivy()
+    ran = _update_env(tmp_path, monkeypatch, fake)
+    scanner = _repo_scanner(tmp_path)  # vuln, secret, misconfig, license
+    command = ["trivy", "repository", "--config=/r/c.yaml", "/t"]
+
+    scanner._run_subprocess(command=command, results_dir=tmp_path / "results")
+
+    assert [c[1] for c in fake.calls] == ["image", "config"]
+    assert fake.calls[1][2:] == [
+        "--config=/r/c.yaml",
+        (tmp_path / "results" / "trivy-checks-update").as_posix(),
+    ]
+    assert ran[0][2:4] == ["--skip-db-update", "--skip-check-update"]
+
+
+def test_two_concurrent_scanners_never_update_at_the_same_time(tmp_path, monkeypatch):
+    fake = _FakeTrivy(hold=0.2)
+    _update_env(tmp_path, monkeypatch, fake)
+    scanners = [_scanner(tmp_path), _repo_scanner(tmp_path)]
+    errors = []
+
+    def run(scanner, name):
+        try:
+            scanner._run_subprocess(
+                command=["trivy", name, "/t"], results_dir=tmp_path / name
+            )
+        except Exception as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=run, args=(s, n))
+        for s, n in zip(scanners, ("fs", "repository"))
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert len([c for c in fake.calls if c[1] == "image"]) == 2
+    assert fake.max_active == 1, "two trivy updates overlapped"
+    assert (tmp_path / "trivy-cache" / trivy_base.UPDATE_LOCK_NAME).exists()
+
+
+def test_offline_runs_no_update(tmp_path, monkeypatch):
+    fake = _FakeTrivy()
+    ran = _update_env(tmp_path, monkeypatch, fake)
+    scanner = _scanner(tmp_path, offline=True)
+
+    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
+
+    assert fake.calls == []
+    assert ran == [["trivy", "fs", "/t"]]
+
+
+def test_a_throwaway_cache_overlay_runs_no_update(tmp_path, monkeypatch):
+    """Under bwrap's overlay each spawn has its own cache copy: nothing is shared."""
+    fake = _FakeTrivy()
+    ran = _update_env(tmp_path, monkeypatch, fake)
+    monkeypatch.setattr(trivy_base, "cache_writes_reach_the_host", lambda: False)
+    scanner = _scanner(tmp_path)
+
+    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
+
+    assert fake.calls == []
+    assert ran == [["trivy", "fs", "/t"]]
+
+
+def test_a_failed_update_fails_the_scan_with_trivys_reason(tmp_path, monkeypatch):
+    fake = _FakeTrivy(
+        returncode=1, stderr="progress...\nFATAL could not reach the registry"
+    )
+    ran = _update_env(tmp_path, monkeypatch, fake)
+    scanner = _scanner(tmp_path)
+
+    with pytest.raises(ScannerError, match="could not reach the registry"):
+        scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
+    assert ran == []
+
+
+# The operator rule on its own: a path outside the tree, set by the tree's config.
+def test_an_outside_trivy_config_set_by_the_scanned_tree_is_not_passed(tmp_path):
+    outside = tmp_path / "elsewhere" / "trivy.yaml"
+    outside.parent.mkdir()
+    outside.write_text(_MODULE_CONFIG, encoding="utf-8")
+    scanner = _scanner(tmp_path, config_file=str(outside))
+
+    argv = _argv(scanner, scanner.context.source_dir)
+
+    assert outside.resolve().as_posix() not in " ".join(argv)
+
+
+def test_outside_trivy_repo_paths_set_by_the_scanned_tree_are_not_passed(
+    tmp_path, monkeypatch
+):
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "modules").mkdir(parents=True)
+    (elsewhere / "trivy.yaml").write_text("", encoding="utf-8")
+
+    _, _, argv = _repo_scan_argv(
+        tmp_path,
+        monkeypatch,
+        config_file=str(elsewhere / "trivy.yaml"),
+        module_dir=str(elsewhere / "modules"),
+    )
+
+    assert _flag(argv, "--config").name == "trivy-config.yaml"
+    assert _flag(argv, "--module-dir").name == "trivy-modules"
+    assert elsewhere.resolve().as_posix() not in " ".join(argv)
