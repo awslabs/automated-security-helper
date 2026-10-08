@@ -11,10 +11,11 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 import logging
 import os
 import platform
-from typing import Annotated, List, Literal
+from typing import Annotated, List, Literal, ClassVar
 
 from pydantic import Field
 
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
@@ -96,6 +97,12 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        network=True,
+        cache_paths=("~/.semgrep",),
+        env_prefixes=("SEMGREP_",),
+    )
 
     def model_post_init(self, context):
         if self.config is None:

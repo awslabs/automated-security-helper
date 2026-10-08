@@ -219,14 +219,14 @@
       ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
       │ --cli-json-input: unknown key 'output_dirr' in params.json. Valid keys are the parameter names   │
       │ source_dir, output_dir, scanners, exclude_scanners, ash_plugin_modules, config_overrides,        │
-      │ offline, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, inspect, │
-      │ use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, config,  │
-      │ verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners, allow_stale_content_db,    │
-      │ simple, ignore_suppressions, min_severity, compact_report, changed_files_only, base_ref,         │
-      │ shard_index, shard_count, workspace, workspace_config, allow_missing_projects, dry_run, build,   │
-      │ run, force, oci_runner, build_target, container_uid, container_gid, ash_revision_to_install,     │
-      │ custom_containerfile, custom_build_arg; each option's long flag spelling is accepted as well.    │
-      │ Run with --generate-cli-skeleton for a template.                                                 │
+      │ offline, sandbox, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, │
+      │ inspect, use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, │
+      │ config, verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners,                    │
+      │ allow_stale_content_db, simple, ignore_suppressions, min_severity, compact_report,               │
+      │ changed_files_only, base_ref, shard_index, shard_count, workspace, workspace_config,             │
+      │ allow_missing_projects, dry_run, build, run, force, oci_runner, build_target, container_uid,     │
+      │ container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg; each option's    │
+      │ long flag spelling is accepted as well. Run with --generate-cli-skeleton for a template.         │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   
     ''',

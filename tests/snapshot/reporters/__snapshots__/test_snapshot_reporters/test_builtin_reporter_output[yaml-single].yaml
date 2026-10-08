@@ -148,6 +148,8 @@ ash_config:
         - /fail_on_incomplete_scanners
         - /content_db_staleness
         - /content_db_staleness_overrides
+        - /sandbox
+        - /sandbox/**
         - /global_settings/ignore_paths
         - /global_settings/suppressions
         - /reporters/bedrock-summary-reporter/options/aws_*
@@ -293,6 +295,10 @@ ash_config:
       extension: yaml
       name: yaml
       options: {}
+  sandbox:
+    extra_read_paths: []
+    mode: 'off'
+    network_scanners: null
   scanners:
     bandit:
       enabled: true

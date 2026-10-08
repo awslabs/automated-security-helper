@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import platform
 import struct
-import subprocess  # nosec B404 — required for opengrep --version detection
 import sys
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Optional, Tuple
+from typing import Annotated, ClassVar, Dict, List, Literal, Optional, Tuple
 
 from pydantic import Field, model_validator
 
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -35,7 +35,7 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
 
@@ -172,6 +172,12 @@ def _refuse_unverified_install_command(
 class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
 
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        network=True,
+        cache_paths=("~/.opengrep",),
+        env_prefixes=("OPENGREP_", "SEMGREP_"),
+    )
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = OpengrepScannerConfig()
@@ -291,7 +297,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
     def _get_opengrep_version(self) -> tuple[int, int, int] | None:
         try:
-            result = subprocess.run(  # nosec B603 — list args, executable from find_executable()
+            result = spawn_run(  # nosec B603 — list args, executable from find_executable()
                 [self.command, "--version"],
                 capture_output=True,
                 text=True,

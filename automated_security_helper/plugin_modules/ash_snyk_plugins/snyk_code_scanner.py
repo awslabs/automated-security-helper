@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, List, Literal
 from pydantic import Field
 
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
@@ -49,6 +50,14 @@ class SnykCodeScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     """Example scanner plugin that demonstrates the decorator pattern."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        network=True,
+        # The token file alone: configstore is shared with other npm tools' settings.
+        read_paths=("~/.config/configstore/snyk.json",),
+        env_prefixes=("SNYK_",),
+        env_names=("SNYK_TOKEN",),
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
 

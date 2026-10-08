@@ -2,7 +2,6 @@ import logging
 
 """Module containing the detect-secrets security scanner implementation."""
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from importlib.metadata import version
 import json
 import multiprocessing
@@ -12,6 +11,7 @@ import sys
 from typing import Annotated, Any, ClassVar, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
@@ -43,6 +43,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
 
@@ -84,6 +85,13 @@ def _detect_secrets_api():
     from detect_secrets.settings import transient_settings
 
     return SecretsCollection, transient_settings, get_mapping_from_secret_type_to_class
+
+
+#: The detect-secrets filter that verifies candidate secrets against their issuer's
+#: API over the network. See DetectSecretsScanner.sandbox_requirements.
+_VERIFICATION_FILTER_PATH = (
+    "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
+)
 
 
 class DetectSecretsScanSettingsPluginsUsed(BaseModel):
@@ -191,6 +199,32 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             except Exception:  # pragma: no cover - depends on install shape
                 self.tool_version = None
         super().model_post_init(context)
+
+    @property
+    def sandbox_requirements(self) -> SandboxRequirements:
+        """What the sandbox must allow this scanner, from its effective settings.
+
+        The scan runs in ``utils/detect_secrets_worker.py``, a subprocess of the same
+        interpreter, which the baseline policy already exposes (ASH's package and
+        ``sys.prefix``), so no extra paths are needed.
+
+        A network is needed only when the settings enable detect-secrets'
+        verification filter. That filter calls each plugin's ``verify()``, which
+        sends a candidate secret to the issuer's API (AWS, Slack, Stripe, ...) and
+        drops the ones the issuer rejects; ``detect-secrets scan`` writes the filter
+        into every baseline it generates. Without a network every verification
+        reads as unverified, nothing is dropped, and the sandboxed scan reports
+        more findings than the unsandboxed one. A property rather than a class
+        attribute because only the instance knows its settings, which
+        ``_process_config_options`` has already merged from the baseline by the
+        time the executor asks. Under --offline no scanner gets a network, so
+        there the extra, unverified findings are reported.
+        """
+        verifying = any(
+            item.path == _VERIFICATION_FILTER_PATH
+            for item in self.config.options.scan_settings.filters_used
+        )
+        return SandboxRequirements(network=verifying)
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -395,6 +429,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def _ensure_fork_multiprocessing() -> None:
         """Ensure multiprocessing uses 'fork' start method on Linux.
 
+        The scan itself now runs in ``utils/detect_secrets_worker.py``, which
+        applies this same rule in its own process before calling scan_files; it
+        cannot call this method because it must not import the plugin registry.
+
         detect-secrets' scan_files() uses multiprocessing.Pool internally.
         On macOS with Python 3.13+, the default start method is 'spawn',
         which causes recursive process creation (fork bomb) when called
@@ -410,6 +448,115 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             except RuntimeError:
                 # Already set — this is fine
                 pass
+
+    @staticmethod
+    def _worker_command(request_file: Path, output_file: Path) -> List[str]:
+        """The command that runs one scan in ``utils/detect_secrets_worker.py``.
+
+        The same interpreter as ASH, so the worker sees the same detect-secrets.
+        A separate method so tests can substitute the worker.
+        """
+        return [
+            sys.executable,
+            "-m",
+            "automated_security_helper.utils.detect_secrets_worker",
+            str(request_file),
+            str(output_file),
+        ]
+
+    def _scan_in_worker(
+        self,
+        *,
+        baseline: Dict[str, Any] | None,
+        scan_paths: List[str],
+        scan_settings_dict: Dict[str, Any],
+        work_dir: Path,
+        scan_timeout: float | None,
+    ) -> Any:
+        """Scan ``scan_paths`` in a subprocess; return the resulting collection.
+
+        detect-secrets runs out of the ASH process so that ``--sandbox`` can wrap it:
+        the spawn goes through ``run_command_with_output_handling``, the choke point
+        every sandboxed scanner subprocess passes through. The worker does what this
+        method used to do in-process -- load the baseline, set ``root``, scan under
+        ``transient_settings`` -- and this method rebuilds the same
+        ``SecretsCollection`` from its output, so everything downstream reads
+        ``self._secrets_collection`` exactly as before.
+
+        Returns None when the worker was killed at ``scan_timeout``. The caller then
+        keeps the collection it already holds (the parsed baseline, or empty). This
+        differs from the in-process scan, which kept whatever it had found before
+        the cutoff: a killed worker's partial results are not recoverable. The scan
+        is reported as timed out either way, so a partial result was never a
+        complete one.
+
+        Raises:
+            ScannerError: the worker failed, or exited 0 without writing results.
+        """
+        from detect_secrets.core.potential_secret import PotentialSecret
+
+        from automated_security_helper.utils.subprocess_utils import (
+            run_command_with_output_handling,
+        )
+
+        secrets_collection_cls, _, _ = _detect_secrets_api()
+        root = self._secrets_collection.root
+        # Absolute, because the worker runs in a different working directory and
+        # output_dir may be relative for a library caller.
+        work_dir = Path(work_dir).absolute()
+        worker_cwd = Path(self.results_dir or work_dir).absolute()
+        request_file = work_dir.joinpath("detect-secrets-worker-request.json")
+        output_file = work_dir.joinpath("detect-secrets-worker-output.json")
+        output_file.unlink(missing_ok=True)
+        with open_for_write(request_file) as fp:
+            json.dump(
+                {
+                    "root": str(root),
+                    "baseline": baseline,
+                    "settings": scan_settings_dict,
+                    "paths": scan_paths,
+                },
+                fp,
+            )
+        try:
+            # cwd is the scanner's results directory, which ASH empties at the
+            # start of each run: `python -m` puts the working directory first on
+            # sys.path, so running from the scanned tree would let a repository's
+            # own `detect_secrets/` package replace the library.
+            response = run_command_with_output_handling(
+                command=self._worker_command(request_file, output_file),
+                stdout_preference="return",
+                stderr_preference="return",
+                cwd=worker_cwd,
+                encoding="utf-8",
+                errors="replace",
+                timeout=scan_timeout,
+            )
+            if response.get("timed_out"):
+                self._plugin_log(
+                    f"detect-secrets scan timed out after {scan_timeout}s",
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
+                return None
+            if response.get("returncode") != 0 or not output_file.exists():
+                detail = (response.get("stderr") or response.get("error") or "").strip()
+                raise ScannerError(
+                    f"detect-secrets worker exited {response.get('returncode')}"
+                    + (f": {detail}" if detail else " without writing results")
+                )
+            with open(output_file, encoding="utf-8") as fp:
+                scanned = json.load(fp)
+        finally:
+            request_file.unlink(missing_ok=True)
+            output_file.unlink(missing_ok=True)
+
+        collection = secrets_collection_cls()
+        collection.root = root
+        for key, secrets in scanned:
+            for secret in secrets:
+                collection.data[key].add(PotentialSecret.load_secret_from_dict(secret))
+        return collection
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — DetectSecrets overrides scan() directly; this is unreachable."""
@@ -500,27 +647,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ASH_LOGGER.debug(f"config: {config}")
 
         try:
-            (
-                secrets_collection_cls,
-                transient_settings,
-                _,
-            ) = _detect_secrets_api()
+            secrets_collection_cls, _, _ = _detect_secrets_api()
             self._secrets_collection = secrets_collection_cls()
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
             self._resolve_arguments(target=target, results_file=target_results_dir)
 
+            # The baseline is read here and handed to the worker as data rather than
+            # as a path: the worker may run in a sandbox that cannot see a baseline
+            # outside the source tree. It is also loaded here, which only parses it,
+            # so that a scan killed at its timeout still reports the baseline's
+            # entries, as the in-process scan did.
+            baseline_document = None
             if (
                 target_type == "source"
                 and self.config.options.baseline_file is not None
             ):
                 with open(self.config.options.baseline_file, "r") as f:
-                    self._secrets_collection = (
-                        secrets_collection_cls.load_from_baseline(
-                            baseline=json.load(f),
-                        )
-                    )
+                    baseline_document = json.load(f)
+                self._secrets_collection = secrets_collection_cls.load_from_baseline(
+                    baseline=baseline_document,
+                )
 
             # ``root`` has to be set for every scan, not only for the baseline
             # case above. SecretsCollection.scan_files() has two branches: a
@@ -682,11 +830,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 target_type=target_type,
             )
 
-            # Ensure multiprocessing uses 'fork' start method to avoid spawn-related
-            # issues in containerized environments (CodeBuild, Docker) where 'spawn'
-            # can cause recursive process creation and significant overhead.
-            self._ensure_fork_multiprocessing()
-
             scan_timeout = self.config.options.scan_timeout
 
             # Refuse to scan with no detectors rather than reporting clean.
@@ -714,35 +857,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     "default plugin set."
                 )
 
-            with transient_settings(scan_settings_dict) as settings:
-                ASH_LOGGER.debug(f"Settings: {settings}")
-                executor = ThreadPoolExecutor(max_workers=1)
-                # scan_files() reads each name as os.path.join(self.root, name),
-                # which is only a no-op for absolute names. ``source_dir`` may be
-                # relative: the CLI absolutizes it in run_ash_scan, but a library
-                # caller reaches ASHScanOrchestrator directly and
-                # model_post_init only coerces a str to Path -- it does not
-                # anchor it -- so source_dir="./sub" arrives relative and the
-                # scan set inherits that. Absolutize here: with a relative name a
-                # non-empty root would send detect-secrets looking for
-                # <root>/<root>/<file> and quietly find nothing. Kept separate
-                # from ``scannable`` so the baseline exclude patterns above still
-                # match against the paths they were written for.
-                scan_paths = [str(Path(item).absolute()) for item in scannable]
-                future = executor.submit(
-                    self._secrets_collection.scan_files, *scan_paths
-                )
-                try:
-                    future.result(timeout=scan_timeout)
-                except FuturesTimeoutError:
-                    future.cancel()
-                    self._plugin_log(
-                        f"detect-secrets scan timed out after {scan_timeout}s",
-                        level=logging.WARNING,
-                        append_to_stream="stderr",
-                    )
-                finally:
-                    executor.shutdown(wait=False, cancel_futures=True)
+            # scan_files() reads each name as os.path.join(self.root, name),
+            # which is only a no-op for absolute names. ``source_dir`` may be
+            # relative: the CLI absolutizes it in run_ash_scan, but a library
+            # caller reaches ASHScanOrchestrator directly and
+            # model_post_init only coerces a str to Path -- it does not
+            # anchor it -- so source_dir="./sub" arrives relative and the
+            # scan set inherits that. Absolutize here: with a relative name a
+            # non-empty root would send detect-secrets looking for
+            # <root>/<root>/<file> and quietly find nothing. Kept separate
+            # from ``scannable`` so the baseline exclude patterns above still
+            # match against the paths they were written for.
+            scan_paths = [str(Path(item).absolute()) for item in scannable]
+            ASH_LOGGER.debug(f"Settings: {scan_settings_dict}")
+            scanned = self._scan_in_worker(
+                baseline=baseline_document,
+                scan_paths=scan_paths,
+                scan_settings_dict=scan_settings_dict,
+                work_dir=target_results_dir,
+                scan_timeout=scan_timeout,
+            )
+            if scanned is not None:
+                self._secrets_collection = scanned
 
             self._post_scan(
                 target=target,
@@ -835,7 +971,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
                 ],
             )
-            with open(results_file, mode="w", encoding="utf-8") as fp:
+            with open_for_write(results_file) as fp:
                 report_str = sarif_report.model_dump_json(
                     exclude_none=True,
                     exclude_unset=True,

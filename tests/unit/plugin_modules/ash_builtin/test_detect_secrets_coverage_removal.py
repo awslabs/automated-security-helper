@@ -36,13 +36,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.detect_secrets_worker import (
+    capturing_worker_command,
+    read_capture,
+)
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-    detect_secrets_scanner,
-)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
@@ -187,30 +189,19 @@ def test_transient_settings_receives_a_nonempty_plugin_list(tmp_path, monkeypatc
         scan_settings=DetectSecretsScanSettings(version="1.5.0"),
     )
 
-    captured: dict = {}
-
-    # Re-pointed at the moved seam, not weakened. ``transient_settings`` is no
-    # longer a module-level name: it is imported inside ``_detect_secrets_api()`` so
-    # that a missing detect-secrets records a reason and reports MISSING instead of
-    # taking the whole plugin registry down at import time. Patching the accessor
-    # captures the same dict at the same point in the scan, so the assertion below
-    # is unchanged -- it is still the value handed to detect-secrets, which is where
-    # the empty list was being dropped.
-    _collection, real_transient_settings, _mapping = (
-        detect_secrets_scanner._detect_secrets_api()
-    )
-
-    def capturing(settings):
-        captured["settings"] = settings
-        return real_transient_settings(settings)
-
+    # Re-pointed at the worker seam, not weakened. The scan runs in a worker
+    # subprocess (utils/detect_secrets_worker.py), which hands request["settings"]
+    # to transient_settings unchanged, so the captured request is still the value
+    # handed to detect-secrets -- which is where the empty list was being dropped.
+    capture_file = output_dir / "captured-request.json"
     monkeypatch.setattr(
-        detect_secrets_scanner,
-        "_detect_secrets_api",
-        lambda: (_collection, capturing, _mapping),
+        DetectSecretsScanner,
+        "_worker_command",
+        staticmethod(capturing_worker_command(capture_file)),
     )
 
     report = scanner.scan(target=source_dir, target_type="source")
+    captured = read_capture(capture_file)
 
     assert captured["settings"].get("plugins_used"), (
         "transient_settings was handed no plugins_used, so detect-secrets had "

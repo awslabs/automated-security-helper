@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
 from automated_security_helper.utils.process_env import snapshot_environ
 
+from automated_security_helper.utils.subprocess_utils import spawn_run
+
 
 # How often the install progress monitor calls back while an attempt is running.
 # Named rather than inline because it is the monitor's only cadence knob, and the
@@ -96,7 +98,7 @@ class UVToolRunner:
             return self._uv_available_cache
 
         try:
-            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
+            result = spawn_run(  # nosec B603 — list args, validated uv executable path
                 [self.uv_executable, "--version"],
                 capture_output=True,
                 text=True,
@@ -118,7 +120,7 @@ class UVToolRunner:
             raise UVToolRunnerError("UV is not available")
 
         try:
-            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
+            result = spawn_run(  # nosec B603 — list args, validated uv executable path
                 [self.uv_executable, "tool", "list"],
                 capture_output=True,
                 text=True,
@@ -244,7 +246,7 @@ class UVToolRunner:
                     )
 
                 command.extend([tool_name, "--version"])
-                result = subprocess.run(  # nosec B603 — list args, validated uv executable path
+                result = spawn_run(  # nosec B603 — list args, validated uv executable path
                     command,
                     capture_output=True,
                     text=True,
@@ -318,6 +320,20 @@ class UVToolRunner:
         if self.is_tool_installed(tool_name):
             # Tool already exists, no need to reinstall
             return True
+
+        from automated_security_helper.utils.sandbox.scope import active_scope
+
+        if active_scope() is not None:
+            # Installing runs the package's build code and writes uv's tool
+            # directory, which a sandboxed scanner may only read. Refused rather
+            # than run outside the sandbox the operator asked for.
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.error(
+                f"{tool_name} is not installed, and a sandboxed scan does not install "
+                "tools. Run `ash dependencies install` first."
+            )
+            return False
 
         # Check if tool executable exists but is broken (e.g., broken symlink)
         # This can happen if UV tool was uninstalled but symlinks remain
@@ -467,7 +483,7 @@ class UVToolRunner:
         for attempt in range(attempts):
             progress_stop, progress_thread = start_progress_monitor(attempt)
             try:
-                subprocess.run(  # nosec B603 — list args, validated uv executable path
+                spawn_run(  # nosec B603 — list args, validated uv executable path
                     cmd,
                     capture_output=True,
                     text=True,
@@ -696,7 +712,7 @@ class UVToolRunner:
 
         # Fallback to original subprocess.run for backward compatibility
         try:
-            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
+            result = spawn_run(  # nosec B603 — list args, validated uv executable path
                 command,
                 cwd=cwd,
                 capture_output=capture_output,
@@ -783,7 +799,7 @@ class UVToolRunner:
     def get_cache_info(self) -> Dict[str, Any]:
         """Get UV cache information for optimization purposes."""
         try:
-            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
+            result = spawn_run(  # nosec B603 — list args, validated uv executable path
                 [self.uv_executable, "cache", "dir"],
                 capture_output=True,
                 text=True,
@@ -825,7 +841,7 @@ class UVToolRunner:
     def clean_cache(self) -> bool:
         """Clean UV cache to free up space."""
         try:
-            subprocess.run(  # nosec B603 — list args, validated uv executable path
+            spawn_run(  # nosec B603 — list args, validated uv executable path
                 [self.uv_executable, "cache", "clean"],
                 capture_output=True,
                 text=True,
@@ -1138,7 +1154,7 @@ def get_uv_tool_command(
                 probe_env = snapshot_environ()
                 probe_env["UV_OFFLINE"] = "1"
             try:
-                probe = subprocess.run(  # nosec B603 — fixed list of trusted strings
+                probe = spawn_run(  # nosec B603 — fixed list of trusted strings
                     probe_command,
                     capture_output=True,
                     text=True,

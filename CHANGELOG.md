@@ -46,6 +46,37 @@
 
 ## Unreleased
 
+### Features
+
+- **Opt-in OS sandboxing for scanners: `--sandbox auto|bwrap|firejail|landlock|sandbox-exec|off`**,
+  or `sandbox.mode` in the config file. Off by default. With a sandbox, every scanner
+  subprocess, including version probes and the detect-secrets and cdk-nag workers,
+  runs with:
+  - the source tree read-only, and only its own `<output>/scanners/<name>/`
+    directory writable;
+  - a private, empty `$HOME` and `/tmp`;
+  - an environment filtered to an allowlist, so cloud credentials and tokens are not
+    passed in;
+  - no network under `--offline`, and online only for the scanners that fetch rules,
+    databases or audit data.
+
+  If a sandbox was requested and cannot be provided, the scanner is recorded
+  `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
+  unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and
+  sandbox-exec on macOS. There is no Windows backend: use WSL2 or container mode.
+  Container mode ignores the setting, because the container is the boundary.
+
+  Two timeout behaviors change with the worker move, sandbox or not. cdk-nag now
+  honors `scanners.cdk-nag.options.scan_timeout` (1800 seconds by default) for the
+  whole batch of templates; it had no timeout before, and templates not evaluated by
+  the cutoff are reported as failed targets. A detect-secrets scan that times out
+  now keeps only its baseline's entries, where the in-process scan kept whatever it
+  had found before the cutoff; either way the scan is reported as timed out. See
+  `docs/content/docs/scanner-sandbox.md` for the threat model and per-scanner
+  policy. Two scanners that ran inside the ASH process now run as worker
+  subprocesses so the sandbox can cover them: detect-secrets and cdk-nag. Their
+  findings are unchanged.
+
 ### Behavior changes
 
 - **`ash dependencies install --tool` selects the archive converter as `archive`.**

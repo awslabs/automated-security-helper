@@ -524,6 +524,8 @@
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
               '/content_db_staleness_overrides',
+              '/sandbox',
+              '/sandbox/**',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
               '/reporters/bedrock-summary-reporter/options/aws_*',
@@ -686,6 +688,12 @@
           'options': dict({
           }),
         }),
+      }),
+      'sandbox': dict({
+        'extra_read_paths': list([
+        ]),
+        'mode': 'off',
+        'network_scanners': None,
       }),
       'scanners': dict({
         'bandit': dict({
@@ -903,6 +911,8 @@
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
               '/content_db_staleness_overrides',
+              '/sandbox',
+              '/sandbox/**',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
               '/reporters/bedrock-summary-reporter/options/aws_*',
@@ -1065,6 +1075,12 @@
           'options': dict({
           }),
         }),
+      }),
+      'sandbox': dict({
+        'extra_read_paths': list([
+        ]),
+        'mode': 'off',
+        'network_scanners': None,
       }),
       'scanners': dict({
         'bandit': dict({
@@ -1282,6 +1298,8 @@
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
               '/content_db_staleness_overrides',
+              '/sandbox',
+              '/sandbox/**',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
               '/reporters/bedrock-summary-reporter/options/aws_*',
@@ -1444,6 +1462,12 @@
           'options': dict({
           }),
         }),
+      }),
+      'sandbox': dict({
+        'extra_read_paths': list([
+        ]),
+        'mode': 'off',
+        'network_scanners': None,
       }),
       'scanners': dict({
         'bandit': dict({

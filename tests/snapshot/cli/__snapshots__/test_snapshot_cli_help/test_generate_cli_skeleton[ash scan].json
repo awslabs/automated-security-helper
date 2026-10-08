@@ -6,6 +6,7 @@
   "ash_plugin_modules": null,
   "config_overrides": null,
   "offline": false,
+  "sandbox": null,
   "offline_semgrep_rulesets": "p/ci",
   "strategy": "parallel",
   "progress": true,
