@@ -55,6 +55,7 @@ import json
 import re
 import ssl
 import sys
+import tempfile
 import threading
 import types
 from pathlib import Path
@@ -422,9 +423,19 @@ def without_the_scan_crd(refusals, harness):
     assert len(applier.CRDS) == 1, applier.CRDS
     observed = {"response": invoke(applier, "Create", harness["sink"])}
     observed["scan_crd_present"] = present("crd", CRD_NAMES[0])
-    observed["apply"] = kubectl(
-        "apply", "-f", "-", stdin=yaml.safe_dump(ASHSCAN_PROBE), check=False
-    )
+    # A fresh discovery cache, so kubectl asks the API server which kinds it serves.
+    # With the cache an earlier module left, it maps AshScan from memory, POSTs, and the
+    # refusal reads as a 404 on the URL instead of naming the missing kind.
+    with tempfile.TemporaryDirectory(prefix="ash-eks-kubectl-cache-") as cache:
+        observed["apply"] = kubectl(
+            "--cache-dir",
+            cache,
+            "apply",
+            "-f",
+            "-",
+            stdin=yaml.safe_dump(ASHSCAN_PROBE),
+            check=False,
+        )
     remove_everything_the_stack_created()
     return observed
 
@@ -472,7 +483,11 @@ def stack_deleted(stack_scan, installed_by_the_stack, harness):
     wait_for(namespaced_gone, timeout=300, what="the stack delete's namespaced objects to go")
     observed["cluster_scoped"] = {f"{k}/{n}": present(k, n) for k, n in CLUSTER_SCOPED}
     observed["scan_kept"] = present("ashscan", "eks-findings")
-    observed["scan_phase"] = scan_status("eks-findings").get("phase")
+    # Read only if it survived: a delete that took the CRD took every AshScan with it,
+    # and that is the failure the tests below name.
+    observed["scan_phase"] = (
+        scan_status("eks-findings").get("phase") if observed["scan_kept"] else None
+    )
     return observed
 
 
