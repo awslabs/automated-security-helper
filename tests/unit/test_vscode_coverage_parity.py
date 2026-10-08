@@ -13,8 +13,8 @@ TypeScript, and that makes it a second reader of one rule, which can drift.
 
 editors/vscode/test/fixtures/coverage-cases/cases.json is what holds the two together. Each case is
 a results file captured from a real ``ashx scan`` plus a few edits, and the verdict expected of
-it. The extension's jest suite asserts coverage.ts reaches each verdict; this file asserts ASH
-does. A change to ASH's coverage rules that moves a verdict fails here, and the fix is to
+it. The extension's jest suite asserts coverage.ts reaches each verdict, the JetBrains plugin's
+AshCoverageParityTest asserts AshScannerStatus.kt does, and this file asserts ASH does. A change to ASH's coverage rules that moves a verdict fails here, and the fix is to
 update cases.json and coverage.ts together. A change to coverage.ts alone fails jest.
 
 What this does not check

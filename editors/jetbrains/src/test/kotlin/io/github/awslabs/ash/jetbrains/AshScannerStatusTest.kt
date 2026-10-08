@@ -152,17 +152,20 @@ class AshScannerStatusTest {
     }
 
     @Test
-    fun anExcludedScannerIsNotReportedAsAProblem() {
-        // Excluded means deliberately switched off by configuration. Reporting it would train the
-        // user to ignore this warning, which is worse than not showing it.
+    fun anExcludedScannerThatDidNotCompleteIsStillAGap() {
+        // ASH's incomplete_scanners does not read `excluded`, and neither does this. An excluded
+        // scanner is recorded SKIPPED; one recorded MISSING or ERROR anyway did not complete, and
+        // ASH's assess_coverage counts it. Hiding it would show an INFORMATION "finished" over a
+        // file ASH calls incomplete. The shared coverage cases hold the same verdict.
         val report = AshScannerStatus.parse(
             """{"scanner_results": {
                  "bandit": {"status": "PASSED", "excluded": false},
-                 "grype":  {"status": "MISSING", "excluded": true}}}""",
+                 "grype":  {"status": "MISSING", "excluded": true},
+                 "cfn-nag": {"status": "SKIPPED", "excluded": true}}}""",
         )
         assertTrue(report.available)
-        assertEquals("an excluded scanner is not an incompleteness", emptyList<String>(), report.incomplete.map { it.name })
-        assertNull(report.describeIncompleteness())
+        assertEquals(listOf("grype"), report.incomplete.map { it.name })
+        assertTrue(report.describeIncompleteness()!!.contains("grype (MISSING)"))
     }
 
     @Test

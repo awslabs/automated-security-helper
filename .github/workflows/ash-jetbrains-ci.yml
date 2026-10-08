@@ -82,6 +82,10 @@ on:
       - ".github/scripts/check-snapshot-trailers.py"
       # assert-plugin-zip-contents.py imports its payload tables from this file.
       - ".github/scripts/assert-artifact-contents.py"
+      # AshCoverageParityTest reads the coverage cases the VS Code extension and ASH's own
+      # parity test share, and the captured results files they edit.
+      - "editors/vscode/test/fixtures/coverage-cases/**"
+      - "editors/vscode/test/fixtures/scans/**"
   pull_request:
     branches:
       - "**"
@@ -318,6 +322,13 @@ jobs:
         env:
           E2E_PREV_REF: origin/v4-capabilities
         run: bash editors/jetbrains/e2e-ide-cycle.sh "$RUNNER_TEMP/jb-ide-cycle"
+
+      # A real scan through the plugin as the IDE's installer unpacked it, not the build's
+      # sandbox copy: the findings case through the fresh install the step above left, after the
+      # same task pointed at its separate N-1 install has failed on the loaded version.
+      # e2e-installed-scan.sh's header has the detail.
+      - name: Scan through the plugin as installed from its zip
+        run: bash editors/jetbrains/e2e-installed-scan.sh "$RUNNER_TEMP/jb-ide-cycle" "$RUNNER_TEMP/jb-real-cli"
 
   # A changed snapshot needs a reason. Every file under a __snapshots__ directory in
   # editors/jetbrains (the structural suite's text and the visual suite's PNGs) must be changed

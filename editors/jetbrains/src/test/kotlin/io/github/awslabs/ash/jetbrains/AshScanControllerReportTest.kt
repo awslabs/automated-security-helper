@@ -111,4 +111,25 @@ class AshScanControllerReportTest {
         assertEquals("ASH scan incomplete", message.title)
         assertTrue(message.body, message.body.contains("Scanner completeness is unknown: no status file at x"))
     }
+
+    @Test
+    fun pathsInTheReportAreEscaped() {
+        val outcome = completed(0).copy(sarifPath = "/p/R&D <tmp>/reports/ash.sarif")
+        val body = AshScanController.report(outcome).body
+        assertTrue(body, body.contains("Report: /p/R&amp;D &lt;tmp&gt;/reports/ash.sarif"))
+        assertFalse(body, body.contains("<tmp>"))
+    }
+
+    @Test
+    fun pathEntriesInTheNotFoundMessageAreEscaped() {
+        val notFound = AshCliLocator.resolve(
+            configured = null,
+            pathValue = "/opt/a&b:/opt/<x>",
+            pathSeparator = ":",
+            isExecutable = { false },
+        ) as AshCliLocator.Outcome.NotFound
+        val body = AshScanController.notFound(notFound).body
+        assertTrue(body, body.contains("including: /opt/a&amp;b, /opt/&lt;x&gt;"))
+        assertFalse(body, body.contains("<x>"))
+    }
 }

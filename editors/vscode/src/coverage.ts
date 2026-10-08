@@ -34,7 +34,8 @@
  *                            unless every notApplicable result for its rule is
  *                            suppressed.
  *   stale_content_databases  an error-level `ASH-CONTENT-DB-STALE`
- *                            `toolConfigurationNotifications` entry.
+ *                            `toolConfigurationNotifications` entry whose
+ *                            `content_database` record ASH can read.
  *
  * gate=True on purpose, matching `assess_coverage`: an operator who turned
  * `fail_on_incomplete_scanners` off has accepted the gap, not asked to be told
@@ -44,10 +45,11 @@
  *
  * It is a second reader of the same rule, so it can disagree with ASH. The fixtures
  * under test/fixtures/coverage-cases/ carry the verdict ASH's own `assess_coverage`
- * reaches on each one, recorded in expected.json, and two suites read that file:
- * test/coverage.test.ts asserts this module agrees, and
- * tests/unit/test_vscode_coverage_parity.py asserts ASH does. A change on
- * either side that moves a verdict fails one of them.
+ * reaches on each one, recorded in cases.json, and three suites read that file:
+ * test/coverage.test.ts asserts this module agrees,
+ * tests/unit/test_vscode_coverage_parity.py asserts ASH does, and the JetBrains
+ * plugin's AshCoverageParityTest asserts AshScannerStatus.kt does. A change on
+ * any side that moves a verdict fails one of them.
  *
  * Known narrowing: scanner statuses are read from the persisted `scanner_results`,
  * which ASH rewrites from `get_unified_scanner_metrics` before writing the file, so
@@ -108,6 +110,65 @@ function asCount(value: unknown): number | undefined {
 /** `getattr(level, "value", level)` for a JSON value: the string, or undefined. */
 function asText(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * pydantic's lax bool, which is what a `ConverterStatusInfo` field holds once ASH has
+ * loaded the file: a boolean, 0 or 1, or one of its accepted words in any case.
+ * Undefined for anything else, a value pydantic would reject.
+ */
+function asPydanticBool(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value === 0 ? false : value === 1 ? true : undefined;
+  }
+  if (typeof value === 'string') {
+    const word = value.toLowerCase();
+    if (['0', 'off', 'f', 'false', 'n', 'no'].includes(word)) {
+      return false;
+    }
+    if (['1', 'on', 't', 'true', 'y', 'yes'].includes(word)) {
+      return true;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * pydantic's lax int: a whole number written as an integer, a float or a numeric
+ * string, or a boolean as 1 or 0. Undefined for anything else.
+ */
+function asPydanticInt(value: unknown): number | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
+  const number =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value.trim())
+        : Number.NaN;
+  return Number.isInteger(number) ? number : undefined;
+}
+
+/**
+ * A timestamp ASH's `parse_timestamp` accepts: `datetime.fromisoformat` after every
+ * `Z` becomes `+00:00`, refused without a zone. The union of the forms Python 3.10
+ * through 3.14 accept, measured by running ASH's own function under each interpreter
+ * over 16,642 generated strings; the JetBrains plugin's AshScannerStatus.TIMESTAMP is
+ * the same pattern. Field ranges are not checked, so an hour of 25, which ASH refuses
+ * and skips, is counted here, toward a gap.
+ */
+const CLOCK = String.raw`\d{2}(:\d{2}(:\d{2})?|\d{2}(\d{2})?)?([.,]\d+)?`;
+const TIMESTAMP = new RegExp(
+  String.raw`^(\d{4}-\d{2}-\d{2}|\d{8}|\d{4}-W\d{2}(-\d)?|\d{4}W\d{2}\d?)[^Z]` + `${CLOCK}(Z|[+-]${CLOCK})$`,
+  'u',
+);
+
+function isTimestamp(value: unknown): boolean {
+  return typeof value === 'string' && TIMESTAMP.test(value.trim());
 }
 
 /**
@@ -175,7 +236,12 @@ function staleDatabases(sarif: unknown): string[] {
         }
         const properties = isRecord(notification.properties) ? notification.properties : {};
         const record = properties.content_database;
-        if (!isRecord(record)) {
+        // A record ASH cannot read is skipped, as `stale_content_databases` skips it:
+        // empty, no `measured_at` timestamp, or a `built` that is not one.
+        if (!isRecord(record) || Object.keys(record).length === 0 || !isTimestamp(record.measured_at)) {
+          continue;
+        }
+        if (isTruthy(record.built) && !isTimestamp(record.built)) {
           continue;
         }
         names.add(asText(record.name) ?? '');
@@ -229,17 +295,23 @@ function incompleteConverters(converterResults: unknown): IncompleteConverter[] 
     return listed;
   }
   for (const [name, row] of Object.entries(converterResults)) {
-    if (!isRecord(row) || row.excluded === true) {
+    // Read as pydantic coerces a `ConverterStatusInfo` row: `"true"` is excluded, a
+    // whitespace-only failure is none, and `"0"` or `0.0` candidate inputs exempt.
+    if (!isRecord(row) || asPydanticBool(row.excluded) === true) {
       continue;
     }
-    const failure = row.failure;
-    if (isTruthy(failure)) {
+    // A failure that is not a string or null, or a dependencies_satisfied that is not a
+    // pydantic bool, makes the file one ASH's model rejects: read toward a gap.
+    const failure = typeof row.failure === 'string' ? row.failure.trim() : row.failure;
+    const unsatisfied =
+      'dependencies_satisfied' in row && asPydanticBool(row.dependencies_satisfied) !== true;
+    if (typeof failure === 'string' ? failure !== '' : failure !== undefined && failure !== null) {
       listed.push({
         converter: name,
         reason: typeof failure === 'string' ? failure : JSON.stringify(failure),
       });
-    } else if (row.dependencies_satisfied === false) {
-      if (asCount(row.candidate_inputs) === 0) {
+    } else if (unsatisfied) {
+      if (asPydanticInt(row.candidate_inputs) === 0) {
         continue;
       }
       listed.push({ converter: name, reason: 'dependencies unavailable, so it never ran' });
