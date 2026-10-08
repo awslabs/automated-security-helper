@@ -79,8 +79,8 @@ _INSTALLED_BY_THE_SCRIPT = sorted(
 )
 
 
-# The pinned SHA256 of the syft executable inside syft_1.42.4_linux_amd64.tar.gz.
-_SYFT_LINUX_AMD64_EXECUTABLE = "04db0f882928929381ab5503bcb25ea0a062e487481483b8a8a60c9f6c4af353"  # pragma: allowlist secret
+# The pinned SHA256 of the syft executable inside syft_1.54.1_linux_amd64.tar.gz.
+_SYFT_LINUX_AMD64_EXECUTABLE = "dbf75864e7a7ff9e1fbf00552c31483f693188632a9f68f343cd7653dac513d6"  # pragma: allowlist secret
 
 
 def _pins_dir(tmp_path: Path, digest_overrides: dict | None = None) -> Path:
@@ -336,7 +336,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": "0"  # pragma: allowlist secret
+                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": "0"  # pragma: allowlist secret
                 * 64
             },
         )
@@ -376,7 +376,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": real_digest,  # pragma: allowlist secret
+                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": real_digest,  # pragma: allowlist secret
                 # The executable digest too: the fixture's member is not the real
                 # syft, and the installer checks the member against its own pin.
                 _SYFT_LINUX_AMD64_EXECUTABLE: hashlib.sha256(payload).hexdigest(),
@@ -414,7 +414,7 @@ class TestABareExecutableAsset:
         pins = _pins_dir(
             tmp_path,
             {
-                "c4f6aab1edc8130c7a46e8f5e5215763420740fb94198fc9301215135a372900": hashlib.sha256(  # pragma: allowlist secret
+                "a66aa3278457f02b287b985a45b6762aebcaba5000f2689245fd1ed86d1456c7": hashlib.sha256(  # pragma: allowlist secret
                     payload
                 ).hexdigest()
             },
@@ -467,7 +467,7 @@ class TestTheExecutableDigestIsChecked:
         pins = _pins_dir(
             tmp_path,
             {
-                "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f": archive_digest,  # pragma: allowlist secret
+                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": archive_digest,  # pragma: allowlist secret
                 _SYFT_LINUX_AMD64_EXECUTABLE: executable_digest
                 or hashlib.sha256(payload).hexdigest(),
             },
@@ -702,9 +702,9 @@ from automated_security_helper.utils.tool_downloads import (  # noqa: E402
     THIRD_PARTY_LICENSES,
 )
 
-_SYFT_ARCHIVE_DIGEST = "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f"  # pragma: allowlist secret
-_TRIVY_ARCHIVE_DIGEST = "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75"  # pragma: allowlist secret
-_TRIVY_LINUX_AMD64_EXECUTABLE = "8266084a71d2e6a2333bc2c69b91c93c26dee9ef39ac2587ace2df54cc9b746b"  # pragma: allowlist secret
+_SYFT_ARCHIVE_DIGEST = "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47"  # pragma: allowlist secret
+_TRIVY_ARCHIVE_DIGEST = "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"  # pragma: allowlist secret
+_TRIVY_LINUX_AMD64_EXECUTABLE = "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e"  # pragma: allowlist secret
 
 # The fixture archives below hold a shell script, not the real syft or trivy, and the
 # installer checks the extracted member against its own executable pin. Re-pinning
@@ -897,7 +897,7 @@ class TestLicenseFilesTravelWithTheBinary:
         pins = _pins_dir(
             tmp_path,
             {
-                'version="v1.42.4",\n        license="Apache-2.0",\n'
+                'version="v1.54.1",\n        license="Apache-2.0",\n'
                 '        repository="https://github.com/anchore/syft"': (
                     'version="v1.0.0",\n        license="Apache-2.0",\n'
                     '        repository="https://github.com/anchore/syft"'
@@ -1095,8 +1095,8 @@ class TestVerifyThirdParty:
     def test_an_executable_reporting_another_version(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
         exe = Path(path) / "grype"
-        exe.write_text('#!/bin/sh\necho "grype 0.110.0"\n')
-        self._fails(pins, third_party, path, "does not report 0.111.0")
+        exe.write_text('#!/bin/sh\necho "grype 0.119.0"\n')
+        self._fails(pins, third_party, path, "does not report 0.120.1")
 
     def test_an_executable_missing_from_path(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
@@ -1145,7 +1145,7 @@ class TestVerifyThirdParty:
         pins, third_party, path = self._tree(tmp_path)
         second = tmp_path / "second-bin"
         second.mkdir()
-        (second / "grype").write_text('#!/bin/sh\necho "grype 0.110.0"\n')
+        (second / "grype").write_text('#!/bin/sh\necho "grype 0.119.0"\n')
         (second / "grype").chmod(0o755)
         searched = os.pathsep.join([path, str(second)])
         self._fails(pins, third_party, searched, "second-bin/grype --version")
