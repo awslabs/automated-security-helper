@@ -583,7 +583,7 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "Command name or path of pyflakes, which actionlint runs on "
+                "Command name or absolute path of pyflakes, which actionlint runs on "
                 "'shell: python' steps. Unset (the default) disables the integration. "
                 "Any config may set 'pyflakes', looked up on PATH. Another program, or "
                 f"a path that resolves outside the scanned tree: {SET_BY_THE_OPERATOR} "

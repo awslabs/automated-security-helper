@@ -332,6 +332,13 @@
   only while `honor_ignore_files` is on (the default); `--no-honor-ignore-files`
   scans those files with them too.
 
+  Options that name something a tool executes or loads are not taken from a config
+  file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only
+  their own names there, and cfn-lint's and trivy's `config_file` (a `.cfnlintrc`
+  can import Python rules, a `trivy.yaml` can load WASM modules) are honored only
+  from `--config-overrides` or a config file outside the tree, for a file outside
+  it. cfn-lint's and zizmor's `tool_version` must be a version constraint.
+
   ASH does not deduplicate across scanners, so overlapping pairs (gitleaks and
   detect-secrets, trivy and grype or trivy-repo, zizmor and actionlint) report a
   shared finding once per scanner; each scanner page says where.

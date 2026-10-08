@@ -2238,6 +2238,15 @@ def resolve_config(
             trusted=None,
             client_overrides=client_supplied_overrides,
         )
+    # What scanners consult before honoring an option that names code to run
+    # (utils/config_trust.py): the same trusted base, with the overrides replayed
+    # per section when a scanner asks.
+    record_provenance(
+        config,
+        in_tree=in_tree,
+        trusted=trusted.model_copy(deep=True),
+        config_overrides=config_overrides,
+    )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
     # section they write into. Only the OPERATOR's overrides are replayed: an
