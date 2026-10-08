@@ -12,6 +12,7 @@ Exit code 0 if all checks pass, exit code 1 with a detailed report if any fail.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -944,10 +945,24 @@ _PLACEHOLDER = {"version": r"[0-9][0-9A-Za-z.+-]*", "arch": r"[A-Za-z0-9_]+"}
 # with ".git", and a PEP 508 direct reference (`name[extra] @ git+https://...`) names
 # where to fetch from rather than asking an index.
 _INDEX_NAME_INSTALL = re.compile(
-    r"\b(?:pip3?\s+(?:download|install)|pipx\s+install|uv\s+(?:tool|pip)\s+install)"
-    r"\b[^#\n]*?(?<![\w./-])automated-security-helper(?![\w.-])"
+    r"\b(?:pip3?\s+(?:download|install)|pipx\s+(?:install|run)|uvx|"
+    r"uv\s+(?:tool\s+(?:install|run)|pip\s+install|add|run\s+--with))"
+    r"(?![\w-])[^#\n]*?(?<![\w./-])automated-security-helper(?![\w.-])"
     r"(?!(?:\[[^\]]*\])?\s*@)"
 )
+
+# The same mistake in prose a program prints: "install automated-security-helper[x]"
+# with no command in front of it. Only applied to string literals in Python source,
+# where the text is a message to a user, never to docs, which legitimately say "the
+# name automated-security-helper on PyPI ...".
+_MESSAGE_NAME_INSTALL = re.compile(
+    r"\binstall\b\W{0,3}automated-security-helper(?![\w.-])(?!(?:\[[^\]]*\])?\s*@)",
+    re.IGNORECASE,
+)
+
+# Python trees whose string literals are user-facing. tests/ is excluded because it
+# plants these strings on purpose.
+_PYTHON_MESSAGE_ROOTS = ("automated_security_helper", "scripts", "packaging", ".github")
 
 
 def _code_lines(path: Path) -> list[tuple[int, str]]:
@@ -1099,16 +1114,10 @@ def check_native_package_docs() -> list[str]:
     ash`, `choco install ash` with no `--source`, `flatpak install flathub ...` for
     ASH) is a wrong instruction, not a shortcut.
 
-    Two rules here are repository-wide rather than page-specific, because they are
-    the same defect wherever it appears:
-
-    * No copyable command runs a bare `ash`. It is a deprecated alias that no native
-      package installs, and on MSYS2, Git for Windows, Alpine and BusyBox it is the
-      Almquist shell.
-    * No copyable command installs or downloads `automated-security-helper` by NAME
-      from an index. That PyPI name belongs to an unrelated third party; the
-      packaging READMEs carried `pip download automated-security-helper==<version>`
-      as their offline recipe until this check was written.
+    No copyable command on these pages runs a bare `ash`. It is a deprecated alias
+    that no native package installs, and on MSYS2, Git for Windows, Alpine and
+    BusyBox it is the Almquist shell. Installing ASH by its PyPI name is the
+    repository-wide check_no_index_name_install, not this one.
     """
     failures: list[str] = []
     try:
@@ -1233,7 +1242,128 @@ def check_native_package_docs() -> list[str]:
                     f"identity name is {facts['appx_name']!r}"
                 )
 
-    # Repository-wide: the deprecated `ash` as a command, and ASH installed by name.
+    # The deprecated `ash` as a command on any install page.
+    for path in pages:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        for number, line in _code_lines(path):
+            stripped = line.strip()
+            if re.match(r"^(?:\$\s*|PS[^>]*>\s*)?ash(?:\.exe)?(?:\s|$)", stripped) or (
+                re.search(r"--command=ash(?:\s|$)", stripped)
+            ):
+                failures.append(
+                    f"{rel}:{number}: runs `ash`, which no native package installs; "
+                    "the command is `ashx`"
+                )
+
+    return failures
+
+
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    """ids of the string constants that are docstrings, which no user is shown."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            body = getattr(node, "body", [])
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                found.add(id(body[0].value))
+    return found
+
+
+def _python_messages(path: Path) -> list[tuple[int, str]]:
+    """Every string literal in a Python file except docstrings, f-strings rendered.
+
+    An f-string's interpolations become ``{}``, so
+    ``f"install automated-security-helper[{EXTRA}]"`` reads as
+    ``install automated-security-helper[{}]``. Adjacent literals are one node after
+    parsing, so a message split across lines is checked whole. Comments are not
+    strings and are never read.
+    """
+    tree = ast.parse(read_text(path), filename=str(path))
+    docstrings = _docstring_nodes(tree)
+    inside_fstring: set[int] = set()
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            parts = []
+            for value in node.values:
+                inside_fstring.add(id(value))
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    parts.append(value.value)
+                else:
+                    parts.append("{}")
+            out.append((node.lineno, "".join(parts)))
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and id(node) not in inside_fstring
+        ):
+            out.append((node.lineno, node.value))
+    return out
+
+
+_BARE_ASH_REQUIREMENT = re.compile(r"^automated-security-helper(?:\[[^\]]*\])?$")
+
+
+def _argv_installs(path: Path) -> list[int]:
+    """Lines where a list or tuple literal is an install argv naming ASH bare.
+
+    ``["pip", "install", "automated-security-helper[cdk]"]`` is how the cdk-nag
+    scanner's install command was built. No single string in it reads as an
+    instruction, so the message rule cannot see it; the argv shape can.
+    """
+    tree = ast.parse(read_text(path), filename=str(path))
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.List, ast.Tuple)):
+            continue
+        words = [
+            e.value
+            for e in node.elts
+            if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        ]
+        if {"install", "download"} & set(words) and any(
+            _BARE_ASH_REQUIREMENT.match(w) for w in words
+        ):
+            lines.append(node.lineno)
+    return lines
+
+
+def check_no_index_name_install() -> list[str]:
+    """Nothing a user reads may tell them to install ASH by its PyPI name.
+
+    Why this check exists
+    ---------------------
+    ASH installs from git. The name ``automated-security-helper`` on PyPI belongs to
+    an unrelated third party, so any instruction that resolves that name from an
+    index installs someone else's package. The instruction has been written at least
+    six times: the MSIX, Chocolatey and Flatpak READMEs' offline recipes, the
+    suppressions page, a `uvx automated-security-helper` example, the symbols-extra
+    hints in symbol_spans.py and config_linter.py, the cdk-nag scanner's own install
+    command, and an MCP reinstall hint. Each was fixed by hand and nothing stopped the
+    next one.
+
+    Three surfaces are read:
+
+    * copyable lines in every doc and template (fenced code in Markdown);
+    * indented command lines in the packaging READMEs, which are plain text;
+    * every non-docstring string literal in ASH's own Python, the gate scripts and
+      the packaging scripts, which is where a printed hint lives, and every list or
+      tuple literal there that is an install argv naming ASH without a URL.
+
+    Fetching ASH by its own wheel file, its git URL, or a PEP 508 direct reference to
+    the git URL is fine and is not reported. Prose that names the command to warn
+    against it is not on a copyable line, so it is not reported either.
+    """
+    failures: list[str] = []
     readmes = sorted(
         p
         for p in PACKAGING_DIR.glob("**/README*")
@@ -1247,17 +1377,37 @@ def check_native_package_docs() -> list[str]:
                     f"{rel}:{number}: installs automated-security-helper by name from "
                     "an index; that PyPI name belongs to an unrelated third party"
                 )
-        if path.is_relative_to(NATIVE_PACKAGES_DOCS_DIR):
-            for number, line in _code_lines(path):
-                stripped = line.strip()
-                if re.match(
-                    r"^(?:\$\s*|PS[^>]*>\s*)?ash(?:\.exe)?(?:\s|$)", stripped
-                ) or (re.search(r"--command=ash(?:\s|$)", stripped)):
-                    failures.append(
-                        f"{rel}:{number}: runs `ash`, which no native package installs; "
-                        "the command is `ashx`"
-                    )
 
+    for root in _PYTHON_MESSAGE_ROOTS:
+        base = REPO_ROOT / root
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            if _EXCLUDED_MD_DIRS.intersection(path.parts):
+                continue
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            try:
+                messages = _python_messages(path)
+                argv_lines = _argv_installs(path)
+            except SyntaxError as exc:
+                failures.append(f"{rel}: does not parse ({exc.msg})")
+                continue
+            for number, text in messages:
+                if _INDEX_NAME_INSTALL.search(text) or _MESSAGE_NAME_INSTALL.search(
+                    text
+                ):
+                    failures.append(
+                        f"{rel}:{number}: a message sends the user to ASH's PyPI "
+                        "name, which belongs to an unrelated third party. Use "
+                        "ash_git_requirement() / ash_extra_install_command() from "
+                        "core.constants, or the git URL"
+                    )
+            for number in argv_lines:
+                failures.append(
+                    f"{rel}:{number}: builds an install command for "
+                    "automated-security-helper by name, which resolves to an unrelated "
+                    "third party's package on PyPI"
+                )
     return failures
 
 
@@ -1272,6 +1422,7 @@ def main() -> int:
         ("Suppression field name", check_suppression_field_name),
         ("Plugin options in docs exist and validate", check_plugin_option_keys),
         ("Native package install pages match packaging", check_native_package_docs),
+        ("Nothing installs ASH by its PyPI name", check_no_index_name_install),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []

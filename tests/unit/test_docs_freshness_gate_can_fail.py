@@ -80,6 +80,7 @@ NON_VACUITY_COVERAGE = {
     "Suppression field name": "test_suppression_check_can_fail",
     "Plugin options in docs exist and validate": "test_plugin_options_check_can_fail",
     "Native package install pages match packaging": "test_native_package_docs_check_can_fail",
+    "Nothing installs ASH by its PyPI name": "test_index_name_install_check_can_fail",
 }
 
 
@@ -836,22 +837,6 @@ def test_native_package_docs_check_can_fail(gate, native_tree):
             ),
             "runs `ash`, which no native package installs",
         ),
-        (
-            "ASH downloaded by name in a packaging README",
-            lambda: _append_text(
-                packaging / "msix" / "README.msix",
-                "\n  pip download automated-security-helper==0.0.0 -d C:\\w\n",
-            ),
-            "README.msix",
-        ),
-        (
-            "ASH installed by name with an extra, in a doc",
-            lambda: _append_fence(
-                pages / "index.md",
-                'uv tool install "automated-security-helper[symbols]"',
-            ),
-            "installs automated-security-helper by name from an index",
-        ),
     ]
     for label, plant, expected in cases:
         reset()
@@ -861,12 +846,131 @@ def test_native_package_docs_check_can_fail(gate, native_tree):
             f"{label}: no failure containing {expected!r}; got {failures}"
         )
 
-    # Controls for the name rule: what it must NOT flag.
-    reset()
-    _append_fence(
-        pages / "index.md",
-        "\n".join(_NAME_RULE_MUST_NOT_FLAG),
+
+@pytest.fixture
+def name_rule_tree(gate, tmp_path, monkeypatch):
+    """An empty repository shape for the PyPI-name rule: one doc, one README, one module."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "packaging" / "msix").mkdir(parents=True)
+    (tmp_path / "automated_security_helper").mkdir()
+    (tmp_path / "docs" / "page.md").write_text("# Page\n", encoding="utf-8")
+    (tmp_path / "packaging" / "msix" / "README.msix").write_text(
+        "Title\n=====\n", encoding="utf-8"
     )
-    with (pages / "index.md").open("a", encoding="utf-8") as handle:
-        handle.write("\nDo not run `pip download automated-security-helper`.\n")
-    assert gate.check_native_package_docs() == []
+    (tmp_path / "automated_security_helper" / "mod.py").write_text(
+        '"""Module."""\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "PACKAGING_DIR", tmp_path / "packaging")
+    monkeypatch.setattr(
+        gate, "collect_md_files", lambda: sorted((tmp_path / "docs").glob("*.md"))
+    )
+    return tmp_path
+
+
+def test_index_name_install_check_can_fail(gate, name_rule_tree):
+    """Each surface rejects an instruction that fetches ASH by its PyPI name.
+
+    The name belongs to an unrelated third party. Every planted case is one the
+    repository actually shipped before this check existed, in the shape it shipped:
+    an offline recipe in a README, a doc example, a `uvx` run, an f-string hint and a
+    message split across adjacent literals.
+    """
+    import shutil
+
+    doc = name_rule_tree / "docs" / "page.md"
+    readme = name_rule_tree / "packaging" / "msix" / "README.msix"
+    module = name_rule_tree / "automated_security_helper" / "mod.py"
+    pristine = name_rule_tree.parent / (name_rule_tree.name + "-pristine")
+    shutil.copytree(name_rule_tree, pristine)
+
+    def reset() -> None:
+        shutil.rmtree(name_rule_tree)
+        shutil.copytree(pristine, name_rule_tree)
+
+    assert gate.check_no_index_name_install() == []
+
+    by_name = "installs automated-security-helper by name from an index"
+    in_message = "a message sends the user to ASH's PyPI name"
+    cases = [
+        (
+            "pip download in a README's indented command",
+            lambda: _append_text(
+                readme, "\n  pip download automated-security-helper==0.0.0 -d C:\\w\n"
+            ),
+            "README.msix:4: " + by_name,
+        ),
+        (
+            "uv tool install with an extra, in a doc",
+            lambda: _append_fence(
+                doc, 'uv tool install "automated-security-helper[x]"'
+            ),
+            by_name,
+        ),
+        (
+            "uvx by name, in a doc",
+            lambda: _append_fence(doc, "uvx automated-security-helper --mode local"),
+            by_name,
+        ),
+        (
+            "an f-string hint naming the extra",
+            lambda: _append_text(
+                module,
+                'EXTRA = "x"\nHINT = f"install automated-security-helper[{EXTRA}]"\n',
+            ),
+            "mod.py:3: " + in_message,
+        ),
+        (
+            "a reinstall hint split across adjacent literals",
+            lambda: _append_text(
+                module,
+                'REASON = ("reinstall ASH (`pip install --force-reinstall "\n'
+                '    "automated-security-helper`)")\n',
+            ),
+            in_message,
+        ),
+        (
+            "a capitalized hint with no command in front",
+            lambda: _append_text(
+                module, 'MSG = "Install automated-security-helper first"\n'
+            ),
+            in_message,
+        ),
+        (
+            "an install argv, the shape the cdk-nag scanner shipped",
+            lambda: _append_text(
+                module,
+                'CMD = [sys.executable, "-m", "pip", "install", '
+                '"automated-security-helper[cdk]"]\n',
+            ),
+            "mod.py:2: builds an install command for automated-security-helper by name",
+        ),
+    ]
+    for label, plant, expected in cases:
+        reset()
+        plant()
+        failures = gate.check_no_index_name_install()
+        assert any(expected in f for f in failures), (
+            f"{label}: no failure containing {expected!r}; got {failures}"
+        )
+
+    # What the rule must accept: ASH's own wheel, its git URL, a direct reference to
+    # it, prose that warns against the name, and docstrings and comments that
+    # explain the history.
+    reset()
+    _append_fence(doc, "\n".join(_NAME_RULE_MUST_NOT_FLAG))
+    _append_text(doc, "\nDo not run `pip download automated-security-helper`.\n")
+    _append_text(
+        readme,
+        "\nDo NOT run `pip download automated-security-helper`: it is not ASH.\n",
+    )
+    _append_text(
+        module,
+        "def f():\n"
+        '    """This used to install ``automated-security-helper[cdk]``."""\n'
+        "    # it used to say: pip install automated-security-helper\n"
+        f"    return {_NAME_RULE_MUST_NOT_FLAG[0]!r}\n"
+        'GITLAB_ID = {"id": "automated-security-helper"}\n'
+        'ARGV = ["pip", "install", "automated-security-helper @ git+https://example.invalid"]\n',
+    )
+    assert gate.check_no_index_name_install() == []
