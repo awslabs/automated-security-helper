@@ -62,6 +62,29 @@ from automated_security_helper.workspace.resolver import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _acme_is_installed(tmp_path_factory, monkeypatch):
+    """Make the ``acme.*`` names these tests use importable from outside the workspace.
+
+    A project's config is inside the scanned workspace, and an ``ash_plugin_modules``
+    entry from such a file is kept only when it names an installed module outside
+    the tree (config/plugin_module_trust.py). The names here are stand-ins: the
+    package defines nothing, and only the module lists are compared.
+    """
+    site = tmp_path_factory.mktemp("site")
+    package = site / "acme"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    for name in ("plugins", "one", "two", "from_cli"):
+        (package / f"{name}.py").write_text("", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(site))
+    yield
+    import sys
+
+    for name in [n for n in sys.modules if n == "acme" or n.startswith("acme.")]:
+        del sys.modules[name]
+
+
 def _project(root: Path, key: str, *, modules=None, extra: str = "") -> None:
     (root / key / "src").mkdir(parents=True, exist_ok=True)
     (root / key / "src" / "app.py").write_text("print('x')\n", encoding="utf-8")
