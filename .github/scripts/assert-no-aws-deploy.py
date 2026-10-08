@@ -203,7 +203,13 @@ its own file and in the files that import it directly, so one reached through a
 re-export (a package `__init__` that imports it from a submodule), passed around
 as a value, or renamed by assignment in another file is not; a wrapper keeps at
 most MAX_WRAPPER_INPUTS runner inputs, past which its calls are read only by
-their own joined strings. A JavaScript function that wraps child_process is not
+their own joined strings. A name met again inside its own value
+(`cmd.append(str(len(cmd)))`) is not re-read there, and a reassignment through
+its own name (`cmd = cmd + [...]`) reads the earlier value in its place. The
+reading of one Python file is bounded at MAX_PYTHON_STEPS steps (resolving a
+chain of N wrappers takes about 6N), and a file that needs more, or whose
+expressions nest past Python's recursion limit, is a finding ("could not be read
+completely"), never a pass. A JavaScript function that wraps child_process is not
 followed to its callers. An env value written as a literal path in the
 same file (`HELPER: ${{ github.action_path }}/x.py`) is followed, because the path
 is a token on that line. A Python import is resolved only against the importing
@@ -236,6 +242,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import collections
+import copy
 import functools
 import json
 import os
@@ -1163,6 +1171,58 @@ Env = dict[str, tuple[ast.expr, ...]]
 Chain = tuple[Env, ...]
 
 
+# The most evaluation steps one Python file's analysis may take. Bindings and
+# wrappers can be built to multiply the work (a list appended to with its own
+# length, a chain of a thousand wrappers); reaching this is a finding, not a pass.
+MAX_PYTHON_STEPS = 2_000_000
+_BUDGET = {"steps": 0, "depth": 0, "last": 0}
+
+
+class _Analysis:
+    """The span of one top-level Python analysis, over which steps are counted."""
+
+    def __enter__(self) -> None:
+        if _BUDGET["depth"] == 0:
+            _BUDGET["steps"] = 0
+        _BUDGET["depth"] += 1
+
+    def __exit__(self, *_: object) -> None:
+        _BUDGET["depth"] -= 1
+        if _BUDGET["depth"] == 0:
+            _BUDGET["last"] = _BUDGET["steps"]
+
+
+def _spend(steps: int = 1) -> None:
+    _BUDGET["steps"] += steps
+    if _BUDGET["steps"] > MAX_PYTHON_STEPS:
+        raise UnreadableCommand(
+            f"reading what it runs takes more than {MAX_PYTHON_STEPS} steps"
+        )
+
+
+def python_steps() -> int:
+    """The steps the last top-level Python analysis took."""
+    return _BUDGET["last"]
+
+
+def _resolve(node: ast.expr, chain: Chain) -> list[tuple[ast.expr, Chain]]:
+    """`node` with every name a call site gives a value replaced by that value,
+    followed without recursion, so a chain of a thousand wrappers is a loop."""
+    out: list[tuple[ast.expr, Chain]] = []
+    stack: list[tuple[ast.expr, Chain]] = [(node, chain)]
+    while stack:
+        current, scope = stack.pop()
+        _spend()
+        if isinstance(current, ast.Name):
+            found = _lookup(current.id, scope)
+            if found is not None:
+                values, rest = found
+                stack.extend((v, rest) for v in reversed(values))
+                continue
+        out.append((current, scope))
+    return out
+
+
 def _lookup(name: str, chain: Chain) -> tuple[tuple[ast.expr, ...], Chain] | None:
     for index, env in enumerate(chain):
         if name in env:
@@ -1174,15 +1234,15 @@ def _strings_in(
     node: ast.AST,
     bound: dict[str, ast.expr] | None = None,
     chain: Chain = (),
-    depth: int = 0,
+    active: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Every string in an expression, in source order (`shlex.split("...")`, `a + b`,
     `"%s" % x`, `"{}".format(x)`). A name a wrapper's call site gives a value, or
     one bound in the file, is read as that value (a binding inside a wrapper is
-    read with the call site's arguments); an f-string's `{name}` too."""
+    read with the call site's arguments); an f-string's `{name}` too. A name met
+    again inside its own value (`cmd.append(str(len(cmd)))`) is not re-read."""
     bound = bound or {}
-    if depth > MAX_BINDING_DEPTH:
-        return []
+    _spend()
     if isinstance(node, ast.Constant):
         return [node.value] if isinstance(node.value, str) else []
     if isinstance(node, ast.JoinedStr):
@@ -1192,47 +1252,53 @@ def _strings_in(
                 parts.append(str(part.value))
             else:
                 value = part.value if isinstance(part, ast.FormattedValue) else part
-                inner = _strings_in(value, bound, chain, depth + 1)
+                inner = _strings_in(value, bound, chain, active)
                 parts.append(" ".join(inner) if inner else "$EXPR")
         return ["".join(parts)]
     if isinstance(node, ast.Name):
-        found = _lookup(node.id, chain)
-        if found is not None:
-            values, rest = found
-            return [s for v in values for s in _strings_in(v, bound, rest, depth + 1)]
-        if node.id in bound:
-            return _strings_in(bound[node.id], bound, chain, depth + 1)
+        if _lookup(node.id, chain) is not None:
+            return [
+                s
+                for v, scope in _resolve(node, chain)
+                for s in _strings_in(v, bound, scope, active)
+            ]
+        if node.id in bound and node.id not in active:
+            return _strings_in(bound[node.id], bound, chain, active | {node.id})
         return []
     out: list[str] = []
     for child in ast.iter_child_nodes(node):
-        out.extend(_strings_in(child, bound, chain, depth))
+        out.extend(_strings_in(child, bound, chain, active))
     return out
 
 
 def _expr_words(
-    node: ast.expr, bound: dict[str, ast.expr], chain: Chain = (), depth: int = 0
+    node: ast.expr,
+    bound: dict[str, ast.expr],
+    chain: Chain = (),
+    active: frozenset[str] = frozenset(),
 ) -> list[str]:
     """The argv words an expression gives a runner: a list's elements one word each
     (`*xs` spread), a name through its value, anything else its strings as one."""
-    if depth > MAX_BINDING_DEPTH:
-        return []
+    _spend()
     if isinstance(node, ast.Starred):
-        return _expr_words(node.value, bound, chain, depth)
+        return _expr_words(node.value, bound, chain, active)
     if isinstance(node, ast.Name):
-        found = _lookup(node.id, chain)
-        if found is not None:
-            values, rest = found
-            return [w for v in values for w in _expr_words(v, bound, rest, depth + 1)]
-        if node.id in bound:
-            return _expr_words(bound[node.id], bound, chain, depth + 1)
+        if _lookup(node.id, chain) is not None:
+            return [
+                w
+                for v, scope in _resolve(node, chain)
+                for w in _expr_words(v, bound, scope, active)
+            ]
+        if node.id in bound and node.id not in active:
+            return _expr_words(bound[node.id], bound, chain, active | {node.id})
         return []
     if isinstance(node, (ast.List, ast.Tuple)):
         words: list[str] = []
         for element in node.elts:
-            if isinstance(element, ast.Starred) or isinstance(element, ast.Name):
-                words.extend(_expr_words(element, bound, chain, depth + 1))
+            if isinstance(element, (ast.Starred, ast.Name)):
+                words.extend(_expr_words(element, bound, chain, active))
             else:
-                text = " ".join(_strings_in(element, bound, chain, depth + 1))
+                text = " ".join(_strings_in(element, bound, chain, active))
                 if text:
                     words.append(text)
         return words
@@ -1241,8 +1307,8 @@ def _expr_words(
         and getattr(node.func, "id", "") in ("list", "tuple")
         and len(node.args) == 1
     ):
-        return _expr_words(node.args[0], bound, chain, depth + 1)
-    text = " ".join(_strings_in(node, bound, chain, depth))
+        return _expr_words(node.args[0], bound, chain, active)
+    text = " ".join(_strings_in(node, bound, chain, active))
     return [text] if text else []
 
 
@@ -1272,8 +1338,6 @@ def _argv_commands(line: int, words: list[str], run: bool) -> list[Command]:
     return commands
 
 
-# How far a name bound to an expression naming other names is followed.
-MAX_BINDING_DEPTH = 8
 # The most runner inputs one wrapper keeps; a wrapper of wrappers of wrappers can
 # multiply them, and past this the rest are read only by name, as before.
 MAX_WRAPPER_INPUTS = 64
@@ -1360,19 +1424,8 @@ def _runner_inputs(
     """The inputs a call hands a runner, read in its own scope, or None if the call
     is not to a runner or a wrapper."""
     keywords = [k.value for k in call.keywords if k.arg in PY_COMMAND_KEYWORDS]
-    # A function under a runner's name (`def run(*argv): ...`) is what a bare
-    # call to that name, `self.run(...)` or `helpers.run(...)` reaches;
-    # `subprocess.run(...)` and `os.system(...)` keep meaning the runner.
-    wrapper = wrappers.get(name)
-    if wrapper is not None and (
-        isinstance(call.func, ast.Name)
-        or (
-            isinstance(call.func, ast.Attribute)
-            and isinstance(call.func.value, ast.Name)
-            and call.func.value.id not in PY_RUNNER_MODULES
-        )
-        or (name not in PY_ARGV_CALLS and name not in PY_SHELL_CALLS)
-    ):
+    wrapper = _wrapper_called(call, name, wrappers)
+    if wrapper is not None:
         return _wrapper_inputs(call, wrapper)
     if name in PY_ARGV_CALLS:
         return [
@@ -1384,6 +1437,27 @@ def _runner_inputs(
             RunnerInput(a, "shell", (), getattr(a, "lineno", call.lineno))
             for a in list(call.args[:1]) + keywords
         ]
+    return None
+
+
+def _wrapper_called(call: ast.Call, name: str, wrappers: Wrappers) -> Wrapper | None:
+    """The wrapper `call` reaches, if any.
+
+    A function under a runner's name (`def run(*argv): ...`) is what a bare call to
+    that name, `self.run(...)` or `helpers.run(...)` reaches; `subprocess.run(...)`
+    and `os.system(...)` keep meaning the runner.
+    """
+    wrapper = wrappers.get(name)
+    if wrapper is not None and (
+        isinstance(call.func, ast.Name)
+        or (
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id not in PY_RUNNER_MODULES
+        )
+        or (name not in PY_ARGV_CALLS and name not in PY_SHELL_CALLS)
+    ):
+        return wrapper
     return None
 
 
@@ -1480,9 +1554,24 @@ def _bindings(tree: ast.AST) -> tuple[dict[str, ast.expr], dict[str, str]]:
                 aliases[target.id] = _call_name(value, {})
             elif _partial_runner(value) is not None:
                 aliases[target.id] = _partial_runner(value) or ""
+            elif target.id in bound and any(
+                isinstance(n, ast.Name) and n.id == target.id for n in ast.walk(value)
+            ):
+                # `cmd = cmd + ["deploy"]`: the name inside is the earlier value.
+                bound[target.id] = _ReplaceName(target.id, bound[target.id]).visit(
+                    copy.deepcopy(value)
+                )
             else:
                 bound[target.id] = value
     return bound, aliases
+
+
+class _ReplaceName(ast.NodeTransformer):
+    def __init__(self, name: str, value: ast.expr) -> None:
+        self.name, self.value = name, value
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        return self.value if node.id == self.name else node
 
 
 def _partial_runner(value: ast.expr) -> str | None:
@@ -1531,6 +1620,9 @@ class _PyFacts:
     # The name of every call in the file, for knowing when a wrapper found in
     # another file can change what this one runs.
     called: frozenset[str]
+    # Calls inside a function that pass that function's own parameters and
+    # nothing else, by node id.
+    forwarding: frozenset[int]
 
 
 def _function_params(arguments: ast.arguments) -> dict[str, WrapperParam]:
@@ -1576,29 +1668,69 @@ def _facts(text: str) -> _PyFacts:
     called = frozenset(
         _call_name(n.func, aliases) for n in nodes if isinstance(n, ast.Call)
     )
-    return _PyFacts(tree, bound, aliases, tuple(functions), nodes, called)
+    forwarding: set[int] = set()
+    for scope_calls, scope_params in _function_scopes(tree):
+        for call in scope_calls:
+            passed = [
+                a.value if isinstance(a, ast.Starred) else a
+                for a in [*call.args, *(k.value for k in call.keywords)]
+            ]
+            if passed and all(
+                isinstance(a, ast.Name) and a.id in scope_params for a in passed
+            ):
+                forwarding.add(id(call))
+    return _PyFacts(
+        tree, bound, aliases, tuple(functions), nodes, called, frozenset(forwarding)
+    )
+
+
+def _function_scopes(tree: ast.AST) -> list[tuple[list[ast.Call], set[str]]]:
+    """Each function's own calls (not those of functions nested in it) with its
+    parameter names."""
+    scopes: list[tuple[list[ast.Call], set[str]]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        arguments = node.args
+        params = {
+            a.arg
+            for a in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
+        }
+        if arguments.vararg:
+            params.add(arguments.vararg.arg)
+        calls: list[ast.Call] = []
+        stack: list[ast.AST] = list(ast.iter_child_nodes(node))
+        while stack:
+            child = stack.pop()
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(child, ast.Call):
+                calls.append(child)
+            stack.extend(ast.iter_child_nodes(child))
+        scopes.append((calls, params))
+    return scopes
 
 
 def _free_names(
-    node: ast.AST, bound: dict[str, ast.expr], chain: Chain, depth: int = 0
+    node: ast.AST,
+    bound: dict[str, ast.expr],
+    chain: Chain,
+    active: frozenset[str] = frozenset(),
 ) -> set[str]:
     """The names an expression reads that its chain does not give a value, through
     the names they are bound from."""
     names: set[str] = set()
-    if depth > MAX_BINDING_DEPTH:
-        return names
     for child in ast.walk(node):
+        _spend()
         if not isinstance(child, ast.Name):
             continue
-        found = _lookup(child.id, chain)
-        if found is not None:
-            values, rest = found
-            for value in values:
-                names |= _free_names(value, bound, rest, depth + 1)
+        if _lookup(child.id, chain) is not None:
+            for value, scope in _resolve(child, chain):
+                names |= _free_names(value, bound, scope, active)
             continue
         names.add(child.id)
-        if child.id in bound and bound[child.id] is not node:
-            names |= _free_names(bound[child.id], bound, chain, depth + 1)
+        if child.id in bound and child.id not in active:
+            names |= _free_names(bound[child.id], bound, chain, active | {child.id})
     return names
 
 
@@ -1638,53 +1770,91 @@ def python_wrappers(text: str, known: Wrappers | None = None) -> Wrappers:
     (`def cdk(a): run(["npx", "cdk", a])` then `cdk("deploy")` is `npx cdk
     deploy`). `known` holds wrappers found in other files, matched by name.
     """
+    with _Analysis():
+        try:
+            return _python_wrappers(text, known)
+        except RecursionError as error:
+            raise UnreadableCommand(
+                "its expressions nest too deeply to read"
+            ) from error
+
+
+def _python_wrappers(text: str, known: Wrappers | None) -> Wrappers:
     facts = _facts(text)
     wrappers: Wrappers = dict(known or {})
-    changed = True
-    while changed:
-        changed = False
-        for function in facts.functions:
-            names_called = [_call_name(c.func, facts.aliases) for c in function.calls]
-            if not any(
-                n in PY_SHELL_CALLS or n in PY_ARGV_CALLS or n in wrappers
-                for n in names_called
-            ):
-                continue
-            reached: dict[str, WrapperParam] = {}
-            inputs: list[RunnerInput] = []
-            for call, call_name in zip(function.calls, names_called):
-                found = _runner_inputs(call, call_name, wrappers)
-                if not found:
-                    continue
-                for runner_input in found:
-                    names = _free_names(
-                        runner_input.expression, facts.bound, runner_input.chain
+    functions = facts.functions
+    names_called = [
+        [_call_name(c.func, facts.aliases) for c in f.calls] for f in functions
+    ]
+    # Which functions call each name: when a wrapper changes, only its callers
+    # are read again, so a chain of N wrappers is read in about N steps.
+    callers: dict[str, list[int]] = {}
+    for index, names in enumerate(names_called):
+        for name in dict.fromkeys(names):
+            callers.setdefault(name, []).append(index)
+    pending = collections.deque(range(len(functions)))
+    queued = set(pending)
+    while pending:
+        index = pending.popleft()
+        queued.discard(index)
+        function = functions[index]
+        _spend()
+        if not any(
+            n in PY_SHELL_CALLS or n in PY_ARGV_CALLS or n in wrappers
+            for n in names_called[index]
+        ):
+            continue
+        reached: dict[str, WrapperParam] = {}
+        inputs: list[RunnerInput] = []
+        for call, call_name in zip(function.calls, names_called[index]):
+            wrapper = _wrapper_called(call, call_name, wrappers)
+            if wrapper is not None:
+                # Through a wrapper: this function's parameters reach it where they
+                # appear in the arguments its own reached parameters take. Only
+                # those arguments are read here, not the wrapper's whole chain, so
+                # a chain of N wrappers costs about N steps to resolve.
+                env = _call_env(call, wrapper.params)
+                free: set[str] = set()
+                for values in env.values():
+                    for value in values:
+                        free |= _free_names(value, facts.bound, ())
+                hit = [function.params[n] for n in sorted(free) if n in function.params]
+                if hit:
+                    reached.update((p.name, p) for p in hit)
+                    inputs.extend(
+                        RunnerInput(i.expression, i.kind, (*i.chain, env), call.lineno)
+                        for i in wrapper.inputs
                     )
-                    hit = [
-                        function.params[n]
-                        for n in sorted(names)
-                        if n in function.params
-                    ]
-                    if hit:
-                        reached.update((p.name, p) for p in hit)
-                        inputs.append(runner_input)
-            if not reached:
                 continue
-            old = wrappers.get(function.name)
-            params = tuple(
-                sorted(
-                    {*(old.params if old else ()), *reached.values()}, key=_param_order
+            found = _runner_inputs(call, call_name, wrappers)
+            if not found:
+                continue
+            for runner_input in found:
+                free = _free_names(
+                    runner_input.expression, facts.bound, runner_input.chain
                 )
-            )
-            merged = _merge_inputs(old.inputs if old else (), inputs)
-            new = Wrapper(params, merged)
-            if (
-                old is None
-                or new.params != old.params
-                or len(new.inputs) != len(old.inputs)
-            ):
-                wrappers[function.name] = new
-                changed = True
+                hit = [function.params[n] for n in sorted(free) if n in function.params]
+                if hit:
+                    reached.update((p.name, p) for p in hit)
+                    inputs.append(runner_input)
+        if not reached:
+            continue
+        old = wrappers.get(function.name)
+        params = tuple(
+            sorted({*(old.params if old else ()), *reached.values()}, key=_param_order)
+        )
+        merged = _merge_inputs(old.inputs if old else (), inputs)
+        new = Wrapper(params, merged)
+        if (
+            old is None
+            or new.params != old.params
+            or len(new.inputs) != len(old.inputs)
+        ):
+            wrappers[function.name] = new
+            for caller in callers.get(function.name, []):
+                if caller not in queued:
+                    queued.add(caller)
+                    pending.append(caller)
     return wrappers
 
 
@@ -1714,8 +1884,21 @@ def python_commands(
     """What a Python script runs: argv lists of strings, and command-line strings
     passed to a runner or to a function that hands them to one.
 
-    Raises SyntaxError when the file does not parse.
+    Raises SyntaxError when the file does not parse, and UnreadableCommand when
+    reading it would take more than MAX_PYTHON_STEPS steps.
     """
+    with _Analysis():
+        try:
+            return _python_commands(text, wrappers, resolved)
+        except RecursionError as error:
+            raise UnreadableCommand(
+                "its expressions nest too deeply to read"
+            ) from error
+
+
+def _python_commands(
+    text: str, wrappers: Wrappers | None, resolved: bool
+) -> list[Command]:
     facts = _facts(text)
     bound, aliases = facts.bound, facts.aliases
     # `resolved`: `wrappers` already holds this file's own wrappers.
@@ -1765,6 +1948,11 @@ def python_commands(
             # The sh library runs the program its attribute names: `sh.npx("cdk")`.
             flat = [func.attr] + [" ".join(_strings_in(a, bound)) for a in node.args]
             commands.extend(_argv_commands(node.lineno, flat, run=True))
+            continue
+        if id(node) in facts.forwarding and _wrapper_called(node, name, wrappers):
+            # A wrapper calling another with only its own parameters adds no
+            # words of its own; its callers are read through the whole chain,
+            # so reading it here too would make a chain of N wrappers cost N^2.
             continue
         found = _runner_inputs(node, name, wrappers)
         if found is None:
@@ -2363,6 +2551,9 @@ class Follower:
                     Hit(relative, error.lineno or 1, str(error.msg), PARSE_FAILURE, via)
                 )
                 return
+            except UnreadableCommand as error:
+                self.hits.append(Hit(relative, 1, "", f"{UNREADABLE}: {error}", via))
+                return
             self._python[relative] = (path, via, text, set(commands))
             self._read_at[relative] = self._wrapper_version
         else:
@@ -2447,12 +2638,17 @@ class Follower:
                 ):
                     continue
                 self._read_at[relative] = self._wrapper_version
-                self._learn_wrappers(relative, text)
-                new = [
-                    c
-                    for c in python_commands(text, self.view(relative), resolved=True)
-                    if c not in done
-                ]
+                try:
+                    self._learn_wrappers(relative, text)
+                    found = python_commands(text, self.view(relative), resolved=True)
+                except UnreadableCommand as error:
+                    del self._python[relative]
+                    self.hits.append(
+                        Hit(relative, 1, "", f"{UNREADABLE}: {error}", via)
+                    )
+                    changed = True
+                    continue
+                new = [c for c in found if c not in done]
                 if new:
                     done.update(new)
                     self._scan_commands(relative, path, text, new, via)
