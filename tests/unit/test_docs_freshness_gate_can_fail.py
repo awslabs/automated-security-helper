@@ -632,6 +632,9 @@ _GIT_REF = "git+https://github.com/awslabs/automated-security-helper" + ".git@ma
 _NAME_RULE_MUST_NOT_FLAG = (
     f'pip install "automated-security-helper[symbols] @ {_GIT_REF}"',
     f"pip install {_GIT_REF}",
+    'uv pip install "automated-security-helper@https://example.invalid/ash.tar.gz"',
+    'pip install "automated-security-helper @ file:///srv/wheels/ash.whl"',
+    f"uvx --from {_GIT_REF} ashx --version",
     "pip download ./automated_security_helper-0.0.0-py3-none-any.whl -d wheels",
 )
 
@@ -906,6 +909,39 @@ def test_index_name_install_check_can_fail(gate, name_rule_tree):
                 doc, 'uv tool install "automated-security-helper[x]"'
             ),
             by_name,
+        ),
+        (
+            "uvx with an index version after @",
+            lambda: _append_fence(
+                doc, "uvx automated-security-helper@latest --version"
+            ),
+            by_name,
+        ),
+        (
+            "uv tool install with a pinned index version after @",
+            lambda: _append_fence(
+                doc, "uv tool install automated-security-helper@4.0.0"
+            ),
+            by_name,
+        ),
+        (
+            "poetry add by name",
+            lambda: _append_fence(doc, 'poetry add "automated-security-helper[cdk]"'),
+            by_name,
+        ),
+        (
+            "an @ followed by something that is not a URL",
+            lambda: _append_fence(
+                doc, 'pip install "automated-security-helper @ 4.0.0"'
+            ),
+            by_name,
+        ),
+        (
+            "a message with an index version after @",
+            lambda: _append_text(
+                module, 'MSG = "install automated-security-helper@latest"\n'
+            ),
+            in_message,
         ),
         (
             "uvx by name, in a doc",

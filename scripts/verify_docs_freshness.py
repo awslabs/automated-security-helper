@@ -943,12 +943,16 @@ _PLACEHOLDER = {"version": r"[0-9][0-9A-Za-z.+-]*", "arch": r"[A-Za-z0-9_]+"}
 # downloads someone else's package. Installing ASH from its own wheel file or its git
 # URL does not match: the wheel's filename uses underscores, the git URL continues
 # with ".git", and a PEP 508 direct reference (`name[extra] @ git+https://...`) names
-# where to fetch from rather than asking an index.
+# where to fetch from rather than asking an index. An `@` alone is not enough: uv reads
+# `automated-security-helper@latest` and `@4.0.0` as an index version, so only an `@`
+# followed by a git, http(s) or file URL counts as a direct reference.
+_DIRECT_REFERENCE = r"(?!(?:\[[^\]]*\])?\s*@\s*(?:git\+|https?://|file:))"
 _INDEX_NAME_INSTALL = re.compile(
-    r"\b(?:pip3?\s+(?:download|install)|pipx\s+(?:install|run)|uvx|"
-    r"uv\s+(?:tool\s+(?:install|run)|pip\s+install|add|run\s+--with))"
+    r"\b(?:pip3?\s+(?:download|install)|pipx\s+(?:install|run|inject)|uvx|"
+    r"uv\s+(?:tool\s+(?:install|run)|pip\s+install|add|run\s+--with)|"
+    r"poetry\s+add|pdm\s+add)"
     r"(?![\w-])[^#\n]*?(?<![\w./-])automated-security-helper(?![\w.-])"
-    r"(?!(?:\[[^\]]*\])?\s*@)"
+    + _DIRECT_REFERENCE
 )
 
 # The same mistake in prose a program prints: "install automated-security-helper[x]"
@@ -956,7 +960,7 @@ _INDEX_NAME_INSTALL = re.compile(
 # where the text is a message to a user, never to docs, which legitimately say "the
 # name automated-security-helper on PyPI ...".
 _MESSAGE_NAME_INSTALL = re.compile(
-    r"\binstall\b\W{0,3}automated-security-helper(?![\w.-])(?!(?:\[[^\]]*\])?\s*@)",
+    r"\binstall\b\W{0,3}automated-security-helper(?![\w.-])" + _DIRECT_REFERENCE,
     re.IGNORECASE,
 )
 
