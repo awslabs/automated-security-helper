@@ -63,6 +63,9 @@ FILE_ONLY_RIGHTS = (
 
 PR_SET_NO_NEW_PRIVS = 38
 PR_SET_CHILD_SUBREAPER = 36
+#: How long the wrapper keeps reaping after its scanner exits. Below ASH's
+#: SANDBOX_STOP_GRACE_SECONDS (10), so the wrapper finishes before ASH gives up on it.
+REAP_DEADLINE_SECONDS = 5.0
 # prctl(PR_SET_SECCOMP) rather than seccomp(2): the syscall number differs per arch.
 PR_SET_SECCOMP = 22
 SECCOMP_MODE_FILTER = 2
@@ -266,8 +269,8 @@ def main(argv: List[str]) -> int:
     return run_and_reap(command, restrict)
 
 
-def _children() -> List[int]:
-    """Processes whose parent is this one.
+def _children(pid: int = 0) -> List[int]:
+    """Processes whose parent is ``pid`` (this process when 0).
 
     /proc/self/task/*/children when the kernel provides it (CONFIG_PROC_CHILDREN),
     which costs one read per thread; otherwise every /proc/<pid>/stat, which on a
@@ -277,14 +280,15 @@ def _children() -> List[int]:
     """
     found: List[int] = []
     try:
-        tasks = os.listdir("/proc/self/task")
+        base = f"/proc/{pid}" if pid else "/proc/self"
+        tasks = os.listdir(f"{base}/task")
         for tid in tasks:
-            with open(f"/proc/self/task/{tid}/children", "rb") as f:
+            with open(f"{base}/task/{tid}/children", "rb") as f:
                 found += [int(pid) for pid in f.read().split()]
         return found
     except OSError:
         pass
-    me = str(os.getpid()).encode()
+    me = str(pid or os.getpid()).encode()
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
@@ -295,6 +299,16 @@ def _children() -> List[int]:
             continue
         if len(fields) > 1 and fields[1] == me:
             found.append(int(entry))
+    return found
+
+
+def _descendants() -> List[int]:
+    """Every process below this one, at any depth, breadth first."""
+    found: List[int] = []
+    frontier = _children()
+    while frontier:
+        found += frontier
+        frontier = [grandchild for child in frontier for grandchild in _children(child)]
     return found
 
 
@@ -351,9 +365,13 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
             continue
     # An orphan is reparented here only once its own parent has exited, which can
     # trail the scanner's exit, so "no children" has to hold for a short while.
+    # Every pass kills the whole remaining tree at once, so depth costs nothing;
+    # bounded by time rather than by a pass count, and well inside the grace ASH
+    # gives a stopping process before it SIGKILLs this wrapper.
     quiet = 0
-    for _ in range(2000):
-        leftovers = _children()
+    deadline = time.monotonic() + REAP_DEADLINE_SECONDS
+    while time.monotonic() < deadline:
+        leftovers = _descendants()
         if not leftovers:
             quiet += 1
             if quiet >= 5:

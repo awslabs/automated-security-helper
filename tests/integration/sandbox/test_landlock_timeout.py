@@ -175,3 +175,28 @@ def test_a_scanner_cannot_kill_its_wrapper_to_escape_reaping(tmp_path):
     assert response.get("timed_out") is True, response
     assert elapsed < 20, elapsed
     assert not late.exists()
+
+
+def test_the_reaper_sees_the_whole_tree_not_only_direct_children():
+    """One reap pass must reach every level, so a deep tree dies in one pass."""
+    import subprocess  # nosec B404 - starts a short-lived process tree to inspect
+
+    from automated_security_helper.utils.sandbox import landlock_exec
+
+    tree = subprocess.Popen(  # nosec B603 - fixed argv
+        ["/bin/sh", "-c", "sh -c 'sh -c \"sleep 30\" & wait' & wait"]
+    )
+    try:
+        time.sleep(1)
+        direct = landlock_exec._children()
+        everything = landlock_exec._descendants()
+        assert tree.pid in direct
+        assert len(everything) >= 3, everything
+        assert set(direct) < set(everything)
+    finally:
+        for pid in reversed(landlock_exec._descendants()):
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+        tree.wait()
