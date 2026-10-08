@@ -1,0 +1,127 @@
+{
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "cfn-lint",
+          "rules": [
+            {
+              "id": "W2001",
+              "fullDescription": {
+                "text": "Making sure the parameters defined are used"
+              },
+              "helpUri": "https://github.com/aws-cloudformation/cfn-lint",
+              "shortDescription": {
+                "text": "Check if Parameters are Used"
+              }
+            },
+            {
+              "id": "E3002",
+              "fullDescription": {
+                "text": "Making sure that resources properties are properly configured"
+              },
+              "helpUri": "https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/cfn-schema-specification.md#properties",
+              "shortDescription": {
+                "text": "Resource properties are invalid"
+              }
+            },
+            {
+              "id": "E2533",
+              "fullDescription": {
+                "text": "Check if an EOL Lambda Runtime is specified and you cannot update the function"
+              },
+              "helpUri": "https://docs.aws.amazon.com/lambda/latest/dg/runtime-support-policy.html",
+              "shortDescription": {
+                "text": "Check if Lambda Function Runtimes are updatable"
+              }
+            }
+          ],
+          "version": "1.57.1",
+          "informationUri": "https://github.com/aws-cloudformation/cfn-lint",
+          "shortDescription": {
+            "text": "Validates AWS CloudFormation templates against the resource specification and additional checks."
+          }
+        }
+      },
+      "results": [
+        {
+          "message": {
+            "text": "Parameter UnusedName not used."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "endColumn": 13,
+                  "endLine": 4,
+                  "startColumn": 3,
+                  "startLine": 4
+                },
+                "artifactLocation": {
+                  "uri": "templates/insecure.yaml",
+                  "uriBaseId": "EXECUTIONROOT"
+                }
+              }
+            }
+          ],
+          "ruleId": "W2001"
+        },
+        {
+          "message": {
+            "text": "Additional properties are not allowed ('BucketNam' was unexpected. Did you mean 'BucketName'?)"
+          },
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "endColumn": 16,
+                  "endLine": 10,
+                  "startColumn": 7,
+                  "startLine": 10
+                },
+                "artifactLocation": {
+                  "uri": "templates/insecure.yaml",
+                  "uriBaseId": "EXECUTIONROOT"
+                }
+              }
+            }
+          ],
+          "ruleId": "E3002"
+        },
+        {
+          "message": {
+            "text": "Runtime 'python2.7' was deprecated on '2021-07-15'. Creation was disabled on '2021-07-15' and update on '2022-05-30'. Please consider updating to 'python3.14'"
+          },
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "endColumn": 14,
+                  "endLine": 14,
+                  "startColumn": 7,
+                  "startLine": 14
+                },
+                "artifactLocation": {
+                  "uri": "templates/insecure.yaml",
+                  "uriBaseId": "EXECUTIONROOT"
+                }
+              }
+            }
+          ],
+          "ruleId": "E2533"
+        }
+      ],
+      "originalUriBaseIds": {
+        "EXECUTIONROOT": {
+          "description": {
+            "text": "The directory in which cfn-lint was run."
+          }
+        }
+      }
+    }
+  ],
+  "version": "2.1.0",
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/cos02/schemas/sarif-schema-2.1.0.json"
+}
