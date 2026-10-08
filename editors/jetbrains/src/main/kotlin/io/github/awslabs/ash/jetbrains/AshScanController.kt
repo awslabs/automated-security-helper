@@ -94,7 +94,7 @@ object AshScanController {
             messages += Message(
                 NotificationType.INFORMATION,
                 "ASH: using '${AshCliLocator.FALLBACK_NAME}'",
-                notice.message(located.path),
+                escape(notice.message(located.path)),
             )
         }
 
@@ -107,7 +107,7 @@ object AshScanController {
             messages += Message(
                 NotificationType.ERROR,
                 "ASH scan not started",
-                "Could not create the output directory under ${sourceDir.resolve(".ash")}: ${e.message}",
+                escape("Could not create the output directory under ${sourceDir.resolve(".ash")}: ${e.message}"),
             )
             return messages
         }
@@ -122,7 +122,7 @@ object AshScanController {
                 messages += Message(
                     NotificationType.ERROR,
                     "ASH scan failed",
-                    outcome.summary + (outcome.detail?.let { "<br><br><pre>${escape(it)}</pre>" } ?: ""),
+                    escape(outcome.summary) + (outcome.detail?.let { "<br><br><pre>${escape(it)}</pre>" } ?: ""),
                 )
             }
 
@@ -149,16 +149,16 @@ object AshScanController {
         return messages
     }
 
-    private fun notFound(located: AshCliLocator.Outcome.NotFound) = Message(
+    internal fun notFound(located: AshCliLocator.Outcome.NotFound) = Message(
         NotificationType.ERROR,
         "ASH CLI not found",
         buildString {
-            append(located.reason)
+            append(escape(located.reason))
             if (located.searched.isNotEmpty()) {
                 append("<br><br>Searched ${located.searched.size} PATH entr")
                 append(if (located.searched.size == 1) "y" else "ies")
                 append(", including: ")
-                append(located.searched.take(6).joinToString(", "))
+                append(located.searched.take(6).joinToString(", ") { escape(it) })
                 if (located.searched.size > 6) append(", ...")
             }
         },
@@ -229,7 +229,7 @@ object AshScanController {
                 append("suppressed by the report.")
             }
             append("<br>${escape(outcome.versionLine)}, exit code ${outcome.exitCode}. ")
-            append("Report: ${outcome.sarifPath}")
+            append("Report: ${escape(outcome.sarifPath)}")
             // A result that fell out of every bucket is a counting bug in this plugin, not a
             // property of the scan, so it is reported as such rather than silently absorbed.
             if (!results.accountsForEveryResult) {
@@ -255,7 +255,11 @@ object AshScanController {
         }
     }
 
-    /** Notification bodies are HTML, and ASH's output and SARIF text are not. */
+    /**
+     * Notification bodies are HTML, and nothing interpolated into them is: ASH's output, SARIF
+     * text, file paths and PATH entries are all plain text, and a path may contain `&` or `<`.
+     * Every interpolation goes through this; only the markup written here is left raw.
+     */
     private fun escape(text: String): String =
         text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
