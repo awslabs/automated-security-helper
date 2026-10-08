@@ -28,6 +28,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from tests.utils.posix_bash import bash_path, run_bash, write_lf
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "packaging" / "flatpak" / "verify-in-container.sh"
 RUN_CASE = REPO_ROOT / "scripts" / "e2e" / "run_case.py"
@@ -96,13 +98,11 @@ def test_the_sandbox_control_asserts_its_exit_code_message_and_report_paths() ->
 
 
 def _run_version_check(reported: str, expected: str) -> int:
-    import subprocess
-
     text = _script()
     start = text.index("assert_reports_version() {")
     end = text.index("\n}\n", start) + 3
     script = text[start:end] + f'assert_reports_version "{reported}" "{expected}"\n'
-    return subprocess.run(["bash", "-c", script], capture_output=True).returncode
+    return run_bash(script).returncode
 
 
 @pytest.mark.parametrize(
@@ -236,22 +236,19 @@ def test_the_runtime_is_pinned_by_a_full_commit_and_read_back() -> None:
 def test_the_runtime_commit_check_rejects_any_other_commit(
     tmp_path: Path, installed: str, pinned: str, rc: int
 ) -> None:
-    import subprocess
-
-    stub = tmp_path / "flatpak"
-    stub.write_text(f"#!/bin/sh\nprintf '%s\\n' '{installed}'\n", encoding="utf-8")
-    stub.chmod(0o755)
+    write_lf(
+        tmp_path / "flatpak",
+        f"#!/bin/sh\nprintf '%s\\n' '{installed}'\n",
+        executable=True,
+    )
+    # The stub goes first on the PATH bash already has, so the host's own tools stay.
     script = (
+        f'PATH="{bash_path(tmp_path)}:$PATH"\n'
         "RUNTIME_VERSION=24.08\n"
         + _function("assert_runtime_commit")
         + f'assert_runtime_commit "{pinned}"\n'
     )
-    result = subprocess.run(
-        ["bash", "-c", script],
-        env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-    )
+    result = run_bash(script)
     assert result.returncode == rc, result.stderr
 
 
@@ -260,3 +257,9 @@ def test_n_minus_1_is_built_with_its_own_packaging() -> None:
     assert 'PREV_BUNDLE="$("$PREV_SRC/packaging/flatpak/build.sh" "$PREV_WHEEL"' in text
     assert '"$REPO/packaging/flatpak/build.sh" "$PREV_WHEEL"' not in text
     assert '[ "$N1_SHA" != "$N1_HEAD" ]' in text
+
+
+def test_the_runtime_pin_is_checked_again_after_the_app_update() -> None:
+    text = _script()
+    update = text.index('flatpak update -y --system --noninteractive "$APP_ID"')
+    assert text.find('assert_runtime_commit "$RUNTIME_COMMIT"', update) > update

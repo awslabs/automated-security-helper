@@ -33,6 +33,8 @@ from typing import Any, Dict
 import pytest
 import yaml
 
+from tests.utils.posix_bash import bash_path, run_bash, write_lf
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-native-packages.yml"
 GATE_SCRIPT = REPO_ROOT / ".github" / "scripts" / "assert-workflow-gate.py"
@@ -295,12 +297,10 @@ def test_every_install_and_upgrade_is_checked_for_alternatives(family: str) -> N
 
 def _check_scripts(text: str) -> subprocess.CompletedProcess:
     script = (
-        f'REPO="{REPO_ROOT}"; . "$REPO/packaging/verify-lib.sh"; '
+        f'REPO="{bash_path(REPO_ROOT)}"; . "$REPO/packaging/verify-lib.sh"; '
         'vl_check_maintainer_scripts "planted"'
     )
-    return subprocess.run(
-        ["bash", "-c", script], input=text, capture_output=True, text=True, check=False
-    )
+    return run_bash(script, stdin=text)
 
 
 def _real_scripts() -> str:
@@ -398,22 +398,18 @@ def _run_selection(tmp_path: Path, plant: str) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     for d in (bindir, venv, home):
         d.mkdir(parents=True, exist_ok=True)
-    (bindir / "ashx").write_text(_FAKE_ASHX, encoding="utf-8")
-    (venv / "python").write_text(_FAKE_PYTHON, encoding="utf-8")
-    for exe in (bindir / "ashx", venv / "python"):
-        exe.chmod(0o755)
+    write_lf(bindir / "ashx", _FAKE_ASHX, executable=True)
+    write_lf(venv / "python", _FAKE_PYTHON, executable=True)
     # su and id stand-ins: the user is the test's own, its HOME the scratch home.
     script = f"""
-REPO="{REPO_ROOT}"; . "$REPO/packaging/verify-lib.sh"
-ASH_VENV="{tmp_path / "venv"}"
-DEPS_LOG="{tmp_path / "deps.log"}"
+REPO="{bash_path(REPO_ROOT)}"; . "$REPO/packaging/verify-lib.sh"
+ASH_VENV="{bash_path(tmp_path / "venv")}"
+DEPS_LOG="{bash_path(tmp_path / "deps.log")}"
 id() {{ return 0; }}
-su() {{ shift 4; HOME="{home}" PATH="{bindir}:$PATH" PLANT="{plant}" bash -c "$1"; }}
+su() {{ shift 4; HOME="{bash_path(home)}" PATH="{bash_path(bindir)}:$PATH" PLANT="{plant}" bash -c "$1"; }}
 vl_assert_dependency_selection
 """
-    return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, check=False
-    )
+    return run_bash(script)
 
 
 def test_the_selection_check_passes_on_the_real_behavior(tmp_path: Path) -> None:
@@ -525,8 +521,25 @@ def n1_derivers(scripts: Dict[str, str]) -> set:
     return derivers - set(_NO_HISTORY_NEEDED)
 
 
+def _step_run_text(steps: list, seen: set) -> str:
+    """Every `run:` the steps execute, including through local composite actions."""
+    parts = []
+    for step in steps or []:
+        parts.append(str(step.get("run", "")))
+        uses = str(step.get("uses", ""))
+        if uses.startswith("./") and uses not in seen:
+            seen.add(uses)
+            root = REPO_ROOT / uses[2:]
+            for name in ("action.yml", "action.yaml"):
+                if (root / name).is_file():
+                    action = yaml.safe_load((root / name).read_text(encoding="utf-8"))
+                    runs = (action or {}).get("runs") or {}
+                    parts.append(_step_run_text(runs.get("steps") or [], seen))
+    return " ".join(parts)
+
+
 def _runs_a_deriver(job: Dict[str, Any], derivers: set) -> bool:
-    runs = " ".join(str(s.get("run", "")) for s in job.get("steps") or [])
+    runs = _step_run_text(job.get("steps") or [], set())
     return any(re.search(_path_pattern(d) + r"\b", runs) for d in derivers)
 
 
@@ -620,3 +633,96 @@ def test_the_no_history_exemptions_are_still_true() -> None:
         assert re.search(r"n1-source\.sh", scripts[rel]), (
             f"{rel} is exempted but no longer reaches the derivation"
         )
+
+
+def test_a_deriver_reached_through_a_composite_action_is_seen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    action = tmp_path / ".github" / "actions" / "n1-leg"
+    action.mkdir(parents=True)
+    (action / "action.yml").write_text(
+        "runs:\n  using: composite\n  steps:\n"
+        "    - shell: bash\n      run: bash packaging/build-test-wheels.sh out\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "REPO_ROOT", tmp_path)
+    workflow = (
+        "jobs:\n  leg:\n    runs-on: ubuntu-latest\n    steps:\n"
+        "      - uses: actions/checkout@0000000000000000000000000000000000000000\n"
+        "      - uses: ./.github/actions/n1-leg\n"
+    )
+    derivers = {"packaging/build-test-wheels.sh"}
+    assert shallow_n1_jobs({"w.yml": workflow}, derivers) == [("w.yml", "leg")]
+    deep = workflow.replace(
+        "0000000000000000000000000000000000000000\n",
+        "0000000000000000000000000000000000000000\n        with:\n          fetch-depth: 0\n",
+    )
+    assert shallow_n1_jobs({"w.yml": deep}, derivers) == []
+
+
+def _host_check(dpkg_divert_output: str, tmp_path: Path) -> subprocess.CompletedProcess:
+    out = tmp_path / "divert.txt"
+    write_lf(out, dpkg_divert_output)
+    script = (
+        f'REPO="{bash_path(REPO_ROOT)}"; . "$REPO/packaging/verify-lib.sh"\n'
+        f'dpkg-divert() {{ cat "{bash_path(out)}"; }}\n'
+        "vl_assert_no_alternatives\n"
+    )
+    return run_bash(script)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "local diversion of /bin/ash to /bin/ash.distrib",
+        "local diversion of /usr/bin/ash to /usr/bin/ash.real",
+        "diversion of /usr/share/x to /usr/share/x.orig by automated-security-helper",
+        "diversion of /bin/ash to /bin/ash.orig by someone-else",
+    ],
+)
+def test_the_host_check_refuses_a_diversion_of_ash_or_by_the_package(
+    tmp_path: Path, line: str
+) -> None:
+    result = _host_check(line + "\n", tmp_path)
+    assert result.returncode == 1, result.stdout
+    assert "records a diversion this package must not make" in result.stderr
+
+
+def test_the_host_check_ignores_other_packages_diversions(tmp_path: Path) -> None:
+    result = _host_check(
+        "diversion of /usr/share/man/man1/sh.1.gz to /usr/share/man/man1/sh.distrib.1.gz by dash\n",
+        tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("same", "expected"), [(True, "byte-identical"), (False, "differ")]
+)
+def test_the_script_delta_is_reported_either_way(
+    tmp_path: Path, same: bool, expected: str
+) -> None:
+    prev = tmp_path / "prev" / "packaging" / "deb" / "debian"
+    prev.mkdir(parents=True)
+    real = (REPO_ROOT / "packaging" / "deb" / "debian" / "postinst").read_bytes()
+    (prev / "postinst").write_bytes(real if same else real + b"# changed\n")
+    script = (
+        f'REPO="{bash_path(REPO_ROOT)}"; . "$REPO/packaging/verify-lib.sh"\n'
+        f'PREV_SRC="{bash_path(tmp_path / "prev")}"\n'
+        "vl_report_script_delta packaging/deb/debian/postinst\n"
+    )
+    result = run_bash(script)
+    assert result.returncode == 0, result.stderr
+    assert expected in result.stdout
+
+
+def test_the_refused_branch_of_the_alternatives_control_requires_its_reason() -> None:
+    for family, log in (
+        ("deb", "/tmp/apt-install.log"),
+        ("rpm", "/tmp/dnf-install.log"),
+    ):
+        text = (REPO_ROOT / "packaging" / family / "verify-in-container.sh").read_text(
+            encoding="utf-8"
+        )
+        neg = text[text.index("negative-alternatives") :]
+        assert f"alternatives {log}" in neg, family

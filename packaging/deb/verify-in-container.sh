@@ -282,7 +282,10 @@ if [ "$MODE" = negative-alternatives ]; then
   deb_install "$ALT" 2>/tmp/variant-install.err || rc=$?
   if [ "$rc" -ne 0 ]; then
     tail -n 5 /tmp/variant-install.err | sed 's/^/   /'
-    echo "   OK: the install was refused"
+    # Refused counts only if the planted call is what failed, not anything else.
+    grep -qF update-alternatives /tmp/apt-install.log \
+      || vl_fail "NEGATIVE CONTROL: the install failed, but not in the planted update-alternatives call"
+    echo "   OK: the install was refused in the planted update-alternatives call"
   else
     rc=0
     vl_assert_no_alternatives || rc=$?
@@ -325,6 +328,7 @@ if [ "$MODE" = upgrade ]; then
   dpkg --compare-versions "$(pkg_version "$PREV_VERSION" deb)" lt "$(pkg_version "$VERSION" deb)" \
     || vl_fail "the N-1 wheel ($PREV_VERSION) does not sort below N ($VERSION)"
   vl_load_n1
+  vl_report_script_delta packaging/deb/debian/postinst packaging/deb/debian/prerm packaging/deb/build.sh
   PREV_DEB="$("$PREV_SRC/packaging/deb/build.sh" "$PREV_WHEEL" "$OUT/prev")"
   echo "   built N-1 with N-1's own packaging/deb/build.sh: $PREV_DEB"
   vl_payload_gate_n1 "$PREV_DEB"

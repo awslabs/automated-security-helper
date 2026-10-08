@@ -672,6 +672,11 @@ echo "   venvs after the update (the N-1 one lingers by design; README.flatpak):
 ls -d "$DATA_ROOT"/automated_security_helper-* | sed 's/^/     /'
 run_case --cli "$SHIM" --case findings --work "$E2E/scans" --label upgrade-to-n
 
+# `flatpak update APP` may pull runtime updates too; the build input must still be the
+# pinned commit after it.
+assert_runtime_commit "$RUNTIME_COMMIT"
+echo "   runtime still at the pinned commit after the update"
+
 uninstall_delete_data upgrade
 flatpak remote-delete --system "$E2E_REMOTE"
 echo "   removed the local remote $E2E_REMOTE"
