@@ -31,6 +31,7 @@ from automated_security_helper.cli.dependencies import (
     EXIT_OK,
     dependencies_app,
 )
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 
 runner = CliRunner()
 
@@ -188,9 +189,13 @@ def test_the_warning_reaches_a_real_stderr(tmp_path):
     The in-process tests pin both consoles to buffers, which proves what was
     printed but not where it went.
     """
-    ash = shutil.which("ash")
+    # The canonical name, not the deprecated `ash`, whose own deprecation line would
+    # share stderr with the warning under test.
+    ash = shutil.which(CANONICAL_CLI_NAME)
     if ash is None:
-        pytest.skip("the `ash` console script is not on PATH in this environment")
+        pytest.skip(
+            f"the `{CANONICAL_CLI_NAME}` console script is not on PATH in this environment"
+        )
     old_name, new_key = ALIASES[0]
     proc = subprocess.run(
         [

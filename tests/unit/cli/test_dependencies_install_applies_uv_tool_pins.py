@@ -2,8 +2,8 @@
 
 The Dockerfile pins bandit, checkov and semgrep by passing the output of
 ``install-pinned-tool --uv-tool-pins`` (``--config-overrides
-scanners.<tool>.options.tool_version===<version>``) to ``ash dependencies install``.
-The overrides reached the resolved ``AshConfig``, but ``ash dependencies install``
+scanners.<tool>.options.tool_version===<version>``) to ``ashx dependencies install``.
+The overrides reached the resolved ``AshConfig``, but ``ashx dependencies install``
 built every plugin from its context alone, without its section of that config, so
 each scanner fell back to its own default range. The image then installed whatever
 PyPI had that day: semgrep 1.180.0 against a license entry for v1.179.0, which the
@@ -26,11 +26,15 @@ from typer.testing import CliRunner
 
 from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 from automated_security_helper.cli.dependencies import dependencies_app
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils.tool_downloads import THIRD_PARTY_LICENSES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "automated_security_helper" / "assets" / "install-pinned-tool.py"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+# The command the Dockerfile runs, spelled with the CLI's canonical name so the
+# match follows a rename instead of silently finding no install step.
+DEPS_INSTALL = f"{CANONICAL_CLI_NAME} dependencies install"
 
 # Every third-party entry installed from PyPI, which is to say by `uv tool install`.
 PYTHON_TOOLS = sorted(
@@ -86,7 +90,7 @@ def _uv_tool_install_specs(ran: "list[list[str]]") -> "dict[str, str]":
 
 @pytest.fixture
 def recorded_install(tmp_path, monkeypatch):
-    """Run `ash dependencies install` for the Python tools; return what it would run."""
+    """Run `ashx dependencies install` for the Python tools; return what it would run."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
     # The version probe runs `uv` per scanner and says nothing about what gets
@@ -177,14 +181,12 @@ class TestTheOverridesReachTheInstallCommand:
 class TestTheDockerfileInstallsOnlyThroughThePins:
     def test_every_ash_dependencies_install_passes_the_pins(self):
         installs = [
-            run
-            for run in _dockerfile_run_instructions()
-            if "ash dependencies install" in run
+            run for run in _dockerfile_run_instructions() if DEPS_INSTALL in run
         ]
-        assert installs, "the Dockerfile no longer runs `ash dependencies install`"
+        assert installs, f"the Dockerfile no longer runs `{DEPS_INSTALL}`"
         for run in installs:
             assert 'pins="$(install-pinned-tool --uv-tool-pins)" &&' in run, run
-            assert re.search(r"ash dependencies install [^;&|]*\$\{pins\}", run), run
+            assert re.search(re.escape(DEPS_INSTALL) + r" [^;&|]*\$\{pins\}", run), run
 
     def test_no_other_step_installs_a_python_tool(self):
         """A bare `uv tool install semgrep` or `pip install checkov` would float."""
@@ -202,9 +204,7 @@ class TestTheDockerfileInstallsOnlyThroughThePins:
     def test_the_license_step_follows_the_pinned_install_and_covers_every_tool(self):
         runs = _dockerfile_run_instructions()
         license_steps = [i for i, run in enumerate(runs) if "--licenses-only" in run]
-        install_steps = [
-            i for i, run in enumerate(runs) if "ash dependencies install" in run
-        ]
+        install_steps = [i for i, run in enumerate(runs) if DEPS_INSTALL in run]
         python_license_step = next(
             i for i in license_steps if all(t in runs[i] for t in PYTHON_TOOLS)
         )
