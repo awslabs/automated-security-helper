@@ -15,8 +15,11 @@ homebrew.sh to calling it where it runs: bash parses each script without running
 which drops comments, and heredoc bodies are dropped after it. A call has to be a whole
 command at the top level of the script or of the leg function the top level dispatches
 to (not commented out, not under an if, not behind `false &&`), under `set -euo
-pipefail`, with no exit or return ahead of it. On Windows the parse runs in Git for
-Windows' bash, since `bash` on a runner's PATH is the WSL stub.
+pipefail`. Ahead of it, at any depth or in a function called there (transitively),
+there may be no `set +e` and no exit or return that could end the leg green: a bare
+one, status 0, or a variable status. A nonzero literal status is a failure path and is
+allowed. Calls made inside `$(...)` or quoted text are not followed. On Windows the
+parse runs in Git for Windows' bash, since `bash` on a runner's PATH is the WSL stub.
 """
 
 from __future__ import annotations
@@ -202,9 +205,14 @@ _ALIAS_CALLS = {
 _ALIAS_ASSERT_LINE = (
     'ALIAS_ASSERT="$REPO/.github/actions/validate-install/assert-deprecated-alias.sh"'
 )
-# A command that leaves the scope before the call, outside quoted text: a bare
-# exit/return, or one behind `&&`. One behind `||` is a failure path and stays.
-_LEAVES = re.compile(r"(?:^|&&)\s*(?:exit|return)\b")
+# Where a command can start on a parsed line, once quoted text is gone.
+_AT_COMMAND = r"(?:^|[;&|({]|\b(?:then|else|do)\b)\s*"
+# An exit or return that can end the leg before the call. Only one with a nonzero
+# literal status is a failure path (fail's `exit 1`, the usage check's `exit 3`): a bare
+# one, `exit 0` or `exit $rc` could end the leg green without running the check.
+_LEAVE = re.compile(_AT_COMMAND + r"(exit|return)\b[ \t]*([^\s;&|)}]*)")
+# `set +e` (or +o errexit) lets a failed bare self-test line through.
+_ERREXIT_OFF = re.compile(_AT_COMMAND + r"set\s+(?:\+\w*e\w*|\+o\s+errexit)\b")
 _QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"' + r"|'[^']*'")
 _HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)(\w+)\2")
 
@@ -229,20 +237,29 @@ def _bash() -> str:
     pytest.skip(f"no Git for Windows bash.exe above {git}; the WSL stub cannot run")
 
 
-def _parse(text: str) -> list:
-    """The script as bash parses it, wrapped in a function so nothing runs.
+# bash reads the script from stdin, drops every CR (Git for Windows bash keeps them in
+# an eval string and in `$(cat)`, where they break the parse), and prints it back as the
+# body of a function it never calls.
+_DECLARE = (
+    "src=$(cat); src=${src//$'\\r'/}; eval \"__e2e() {\n$src\n}\" && declare -f __e2e"
+)
 
-    The text goes in on stdin: a script is longer than a Windows command line allows.
-    """
-    done = subprocess.run(
-        [_bash(), "-c", 'eval "__e2e() {\n$(cat)\n}" && declare -f __e2e'],
-        input=text.replace("\r\n", "\n"),
-        capture_output=True,
-        text=True,
-        check=False,
+
+def _declare(data: bytes) -> subprocess.CompletedProcess:
+    """Run _DECLARE on raw bytes. Bytes, not text: in text mode Windows turns each LF
+    written to stdin into CRLF. stdin, not argv: a script is longer than a Windows
+    command line allows."""
+    return subprocess.run(
+        [_bash(), "-c", _DECLARE], input=data, capture_output=True, check=False
     )
-    assert done.returncode == 0, done.stderr
-    return _without_heredocs(done.stdout.replace("\r\n", "\n").splitlines())
+
+
+def _parse(text: str) -> list:
+    """The script as bash parses it, wrapped in a function so nothing runs."""
+    done = _declare(text.replace("\r\n", "\n").encode("utf-8"))
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+    out = done.stdout.decode("utf-8").replace("\r\n", "\n")
+    return _without_heredocs(out.splitlines())
 
 
 def _without_heredocs(lines: list) -> list:
@@ -268,20 +285,65 @@ def _command(line: str, indent: int):
     return line[indent:].rstrip().removesuffix(";").rstrip()
 
 
+def _functions(lines: list) -> dict:
+    """Each top-level function: name -> the line numbers of its body."""
+    found = {}
+    for start, line in enumerate(lines):
+        match = re.fullmatch(r"    function (\S+) \(\) ", line)
+        if not match:
+            continue
+        assert lines[start + 1] == "    { ", lines[start + 1]
+        for end in range(start + 2, len(lines)):
+            if lines[end].rstrip().removesuffix(";") == "    }":
+                found[match.group(1)] = range(start + 2, end)
+                break
+        else:
+            raise AssertionError(f"{match.group(1)} has no end")
+    return found
+
+
+def _numbered_scope(lines: list, name: str) -> list:
+    """(line number, command) for the commands at the top level of the script, or of
+    one function in it."""
+    if not name:
+        rows = range(len(lines))
+        indent = 4
+    else:
+        rows = _functions(lines)[name]
+        indent = 8
+    pairs = ((i, _command(lines[i], indent)) for i in rows)
+    return [(i, c) for i, c in pairs if c is not None]
+
+
 def _scope(lines: list, name: str) -> list:
     """The commands at the top level of the script, or of one function in it."""
-    if not name:
-        return [c for c in (_command(line, 4) for line in lines) if c is not None]
-    start = lines.index(f"    function {name} () ")
-    assert lines[start + 1] == "    { ", lines[start + 1]
-    body = []
-    for line in lines[start + 2 :]:
-        if line.rstrip().removesuffix(";") == "    }":
-            return body
-        command = _command(line, 8)
-        if command is not None:
-            body.append(command)
-    raise AssertionError(f"{name} has no end")
+    return [c for _, c in _numbered_scope(lines, name)]
+
+
+def _leaving(lines: list, rows, functions: dict, returns: bool) -> list:
+    """What, on these lines (at any depth) or in a function they call, can end the leg
+    or switch errexit off: [(line, why)]. A return only leaves when `returns` (the
+    scope is a function, or the top level of a sourced file); a called function's
+    return just ends that function."""
+    found, seen, todo = [], set(), [(r, returns) for r in rows]
+    while todo:
+        row, leaves_on_return = todo.pop(0)
+        code = _QUOTED.sub('""', lines[row].strip())
+        for match in _LEAVE.finditer(code):
+            kind, status = match.groups()
+            if kind == "return" and not leaves_on_return:
+                continue
+            if not re.fullmatch(r"[1-9][0-9]*", status):
+                found.append((lines[row].strip(), f"{kind} {status}".strip()))
+        if _ERREXIT_OFF.search(code):
+            found.append((lines[row].strip(), "errexit switched off"))
+        for name, body in functions.items():
+            if name not in seen and re.search(
+                _AT_COMMAND + re.escape(name) + r"\b", code
+            ):
+                seen.add(name)
+                todo.extend((r, False) for r in body)
+    return found
 
 
 def _case_arms(lines: list, word: str) -> list:
@@ -302,13 +364,16 @@ def _case_arms(lines: list, word: str) -> list:
 def _alias_call_problems(rel: str, text: str) -> list:
     lines = _parse(text)
     top = _scope(lines, "")
+    functions = _functions(lines)
+    in_a_function = {row for body in functions.values() for row in body}
     problems = []
     first_call = None
     if _ALIAS_ASSERT_LINE not in top:
         problems.append("ALIAS_ASSERT is not set to the validate-install assert script")
     for scope, after, starts, tokens in _ALIAS_CALLS[rel]:
         where = scope or "top level"
-        commands = top if not scope else _scope(lines, scope)
+        numbered = _numbered_scope(lines, scope)
+        commands = [c for _, c in numbered]
         at = [
             i
             for i, c in enumerate(commands)
@@ -323,9 +388,13 @@ def _alias_call_problems(rel: str, text: str) -> list:
             first = [i for i, c in enumerate(commands) if c.startswith(after)]
             if not first or first[0] > at[0]:
                 problems.append(f"{where}: {starts!r} runs before {after!r}")
-        leaving = [c for c in commands[: at[0]] if _LEAVES.search(_QUOTED.sub("", c))]
-        if leaving:
-            problems.append(f"{where}: {leaving[0]!r} leaves before {starts!r}")
+        call_row = numbered[at[0]][0]
+        if scope:
+            before = range(functions[scope].start, call_row)
+        else:
+            before = [r for r in range(call_row) if r not in in_a_function]
+        for line, why in _leaving(lines, before, functions, returns=bool(scope)):
+            problems.append(f"{where}: {line!r} ({why}) comes before {starts!r}")
         if scope:
             # The function has to be what the top level dispatches to, for a leg the
             # usage check lets through.
@@ -337,9 +406,10 @@ def _alias_call_problems(rel: str, text: str) -> list:
             ):
                 problems.append(f"the usage check does not accept the {leg} leg")
             # ...and nothing at the top level may leave before that dispatch.
-            leaving = [c for c in top[:-1] if _LEAVES.search(_QUOTED.sub("", c))]
-            if leaving:
-                problems.append(f"top level: {leaving[0]!r} leaves before {scope}")
+            dispatch = _numbered_scope(lines, "")[-1][0]
+            before = [r for r in range(dispatch) if r not in in_a_function]
+            for line, why in _leaving(lines, before, functions, returns=False):
+                problems.append(f"top level: {line!r} ({why}) comes before {scope}")
     # A bare self-test line only stops the leg when it fails under `set -e`.
     errexit = [i for i, c in enumerate(top) if c == "set -euo pipefail"]
     if not errexit or (first_call is not None and errexit[0] > first_call):
@@ -476,11 +546,12 @@ def test_alias_check_self_test_survives_a_notice_with_shell_characters(tmp_path)
             planted.as_posix(),
         ],
         capture_output=True,
-        text=True,
         check=False,
     )
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.replace("\r\n", "\n").count("   OK: ") == 6, done.stdout
+    out = done.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    err = done.stderr.decode("utf-8", "replace")
+    assert done.returncode == 0, out + err
+    assert out.count("   OK: ") == 6, out
 
 
 def _top_level_exit_before_the_check(text: str) -> str:
@@ -612,3 +683,71 @@ def test_bash_on_windows_is_gits_not_the_wsl_stub(tmp_path, monkeypatch):
     found.pop("git")
     with pytest.raises(pytest.skip.Exception, match="no git on PATH"):
         _bash()
+
+
+def _insert_after_alias_assert(text: str, *new: str) -> str:
+    # Right after ALIAS_ASSERT= is ahead of every alias call and of the leg dispatch.
+    lines = text.splitlines()
+    at = next(i for i, line in enumerate(lines) if line.startswith("ALIAS_ASSERT="))
+    lines[at + 1 : at + 1] = list(new)
+    return "\n".join(lines) + "\n"
+
+
+_NESTED_LEAVES = {
+    "if-exit": ("if true; then", "  exit 0", "fi"),
+    "group-exit": ("{ exit 0; }",),
+    "function-that-exits": ("skip_all() { exit 0; }", "skip_all"),
+    "function-calling-one-that-exits": (
+        "skip_all() { exit; }",
+        "skip_some() { skip_all; }",
+        "skip_some",
+    ),
+    "or-exit-0": ("true || exit 0",),
+    "exit-a-variable": ('rc=0; [ -n "$REPO" ] || exit "$rc"',),
+    "set-plus-e": ("set +e",),
+    "set-plus-o-errexit": ("set +o errexit",),
+}
+
+
+@pytest.mark.parametrize("rel", sorted(_ALIAS_CALLS))
+@pytest.mark.parametrize("plant", sorted(_NESTED_LEAVES))
+def test_e2e_alias_guard_rejects_a_nested_exit_before_the_call(rel, plant):
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    planted = _insert_after_alias_assert(text, *_NESTED_LEAVES[plant])
+    assert _alias_call_problems(rel, planted) != []
+
+
+def test_e2e_alias_guard_rejects_a_nested_return_in_leg_fresh():
+    rel = "scripts/e2e/homebrew.sh"
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    old = '  brew test --verbose "$FORMULA"\n'
+    assert old in text
+    planted = text.replace(old, old + "  if true; then return; fi\n", 1)
+    assert _alias_call_problems(rel, planted) != []
+
+
+@pytest.mark.parametrize("rel", sorted(_ALIAS_CALLS))
+def test_e2e_alias_guard_accepts_failure_paths_and_uncalled_exits(rel):
+    # A nonzero exit fails the leg loudly, an exit in a function nothing calls never
+    # runs, and a called function's return only ends that function.
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    edited = _insert_after_alias_assert(
+        text,
+        '[ -f "$ALIAS_ASSERT" ] || { printf "no assert\\n" >&2; exit 1; }',
+        "never_called() { exit 0; }",
+        "done_early() { return 0; }",
+        "done_early",
+    )
+    assert _alias_call_problems(rel, edited) == []
+
+
+@pytest.mark.parametrize("rel", sorted(_ALIAS_CALLS))
+def test_bash_parses_a_crlf_script_from_raw_bytes(rel):
+    # What a Windows checkout or a text-mode pipe hands bash: CRLF bytes on stdin. The
+    # shell side has to drop the CRs itself and print what the LF script gives.
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    lf = _declare(text.encode("utf-8"))
+    crlf = _declare(text.replace("\n", "\r\n").encode("utf-8"))
+    assert lf.returncode == 0, lf.stderr
+    assert crlf.returncode == 0, crlf.stderr
+    assert crlf.stdout == lf.stdout
