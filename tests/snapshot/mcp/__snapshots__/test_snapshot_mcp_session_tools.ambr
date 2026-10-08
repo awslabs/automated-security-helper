@@ -365,8 +365,8 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
@@ -374,8 +374,8 @@
               relative:   web
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone
               label:      gone
@@ -383,8 +383,8 @@
               relative:   gone
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
         Nothing has been scanned. This is a resolution and validation pass only.
       ''',
@@ -399,16 +399,22 @@
           'project': 'api',
           'relative_path': 'api',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'MEDIUM',
           'skip_detail': None,
@@ -426,16 +432,22 @@
           'project': 'web',
           'relative_path': 'web',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'HIGH',
           'skip_detail': None,
@@ -453,16 +465,22 @@
           'project': 'gone',
           'relative_path': 'gone',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'MEDIUM',
           'skip_detail': None,
@@ -510,8 +528,8 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
@@ -519,8 +537,8 @@
               relative:   web
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-              pins:       bandit >=1.7.0,<2.0.0
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone  [skipped: error]
               label:      gone
@@ -541,16 +559,22 @@
           'project': 'api',
           'relative_path': 'api',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'MEDIUM',
           'skip_detail': None,
@@ -568,16 +592,22 @@
           'project': 'web',
           'relative_path': 'web',
           'scanners': list([
+            'actionlint',
             'bandit',
             'cdk-nag',
+            'cfn-guard',
+            'cfn-lint',
             'cfn-nag',
             'checkov',
             'detect-secrets',
+            'gitleaks',
             'grype',
             'npm-audit',
             'opengrep',
             'semgrep',
             'syft',
+            'trivy',
+            'zizmor',
           ]),
           'severity_threshold': 'HIGH',
           'skip_detail': None,

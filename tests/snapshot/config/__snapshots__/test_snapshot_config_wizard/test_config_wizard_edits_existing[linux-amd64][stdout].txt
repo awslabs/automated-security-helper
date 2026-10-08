@@ -9,27 +9,39 @@ Scanner configuration
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Currently enabled ┃
 ┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ actionlint     │        yes        │
 │ bandit         │        no         │
 │ cdk-nag        │        yes        │
+│ cfn-guard      │        yes        │
+│ cfn-lint       │        yes        │
 │ cfn-nag        │        yes        │
 │ checkov        │        yes        │
 │ detect-secrets │        yes        │
+│ gitleaks       │        yes        │
 │ grype          │        yes        │
 │ npm-audit      │        yes        │
 │ opengrep       │        yes        │
 │ semgrep        │        yes        │
 │ syft           │        yes        │
+│ trivy          │        yes        │
+│ zizmor         │        yes        │
 └────────────────┴───────────────────┘
+  Enable actionlint? [Y/n]:
   Enable bandit? [y/N]:
   Enable cdk-nag? [Y/n]:
+  Enable cfn-guard? [Y/n]:
+  Enable cfn-lint? [Y/n]:
   Enable cfn-nag? [Y/n]:
   Enable checkov? [Y/n]: n
   Enable detect-secrets? [Y/n]:
+  Enable gitleaks? [Y/n]:
   Enable grype? [Y/n]: n
   Enable npm-audit? [Y/n]:
   Enable opengrep? [Y/n]:
   Enable semgrep? [Y/n]:
   Enable syft? [Y/n]:
+  Enable trivy? [Y/n]:
+  Enable zizmor? [Y/n]:
 
 Output format configuration
               Output Formats

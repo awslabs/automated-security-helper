@@ -1,18 +1,26 @@
 $ ash plugin list
-[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 16 scanners, and 15 reporters
 ASH Scanners
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Enabled ┃ Class                ┃ Module                         ┃ Plugin Config ┃
 ┡━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ actionlint     │ True    │ ActionlintScanner    │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ bandit         │ True    │ BanditScanner        │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ cdk-nag        │ True    │ CdkNagScanner        │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
+│ cfn-guard      │ True    │ CfnGuardScanner      │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
+│ cfn-lint       │ True    │ CfnLintScanner       │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ cfn-nag        │ True    │ CfnNagScanner        │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ checkov        │ True    │ CheckovScanner       │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ detect-secrets │ True    │ DetectSecretsScanner │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
+│ gitleaks       │ True    │ GitleaksScanner      │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ grype          │ True    │ GrypeScanner         │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
@@ -23,6 +31,10 @@ ASH Scanners
 │ semgrep        │ False   │ SemgrepScanner       │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ syft           │ True    │ SyftScanner          │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
+│ trivy          │ True    │ TrivyScanner         │ automated_security_helper.plu… │               │
+├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
+│ zizmor         │ True    │ ZizmorScanner        │ automated_security_helper.plu… │               │
 └────────────────┴─────────┴──────────────────────┴────────────────────────────────┴───────────────┘
 ASH Converters
 ┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓

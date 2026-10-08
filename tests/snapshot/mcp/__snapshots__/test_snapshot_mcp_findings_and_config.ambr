@@ -698,6 +698,17 @@
         'network_scanners': None,
       }),
       'scanners': dict({
+        'actionlint': dict({
+          'enabled': True,
+          'name': 'actionlint',
+          'options': dict({
+            'config_file': None,
+            'pyflakes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'shellcheck': None,
+          }),
+        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -729,6 +740,36 @@
             }),
             'scan_timeout': 1800,
             'severity_threshold': None,
+          }),
+        }),
+        'cfn_guard': dict({
+          'enabled': True,
+          'name': 'cfn-guard',
+          'options': dict({
+            'rule_sets': list([
+              'wa-Security-Pillar',
+            ]),
+            'rules_paths': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'cfn_lint': dict({
+          'enabled': True,
+          'name': 'cfn-lint',
+          'options': dict({
+            'config_file': None,
+            'ignore_checks': list([
+            ]),
+            'include_checks': list([
+            ]),
+            'install_timeout': 300,
+            'regions': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.43.3,<2.0.0',
           }),
         }),
         'cfn_nag': dict({
@@ -780,6 +821,17 @@
             'scan_timeout': 1800,
             'severity_threshold': None,
             'skip_generated_lockfiles': True,
+          }),
+        }),
+        'gitleaks': dict({
+          'enabled': True,
+          'name': 'gitleaks',
+          'options': dict({
+            'baseline_path': None,
+            'config_file': None,
+            'max_target_megabytes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
           }),
         }),
         'grype': dict({
@@ -859,6 +911,37 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
+          }),
+        }),
+        'trivy': dict({
+          'enabled': True,
+          'name': 'trivy',
+          'options': dict({
+            'config_file': None,
+            'disable_telemetry': True,
+            'ignore_file': None,
+            'ignore_unfixed': False,
+            'license_full': False,
+            'offline': False,
+            'scan_timeout': 1800,
+            'scanners': list([
+              'vuln',
+            ]),
+            'secret_config_file': None,
+            'severity_threshold': None,
+          }),
+        }),
+        'zizmor': dict({
+          'enabled': True,
+          'name': 'zizmor',
+          'options': dict({
+            'config_file': None,
+            'install_timeout': 300,
+            'online_audits': False,
+            'persona': 'regular',
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.29.0,<2.0.0',
           }),
         }),
       }),
@@ -1087,6 +1170,17 @@
         'network_scanners': None,
       }),
       'scanners': dict({
+        'actionlint': dict({
+          'enabled': True,
+          'name': 'actionlint',
+          'options': dict({
+            'config_file': None,
+            'pyflakes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'shellcheck': None,
+          }),
+        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1118,6 +1212,36 @@
             }),
             'scan_timeout': 1800,
             'severity_threshold': None,
+          }),
+        }),
+        'cfn_guard': dict({
+          'enabled': True,
+          'name': 'cfn-guard',
+          'options': dict({
+            'rule_sets': list([
+              'wa-Security-Pillar',
+            ]),
+            'rules_paths': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'cfn_lint': dict({
+          'enabled': True,
+          'name': 'cfn-lint',
+          'options': dict({
+            'config_file': None,
+            'ignore_checks': list([
+            ]),
+            'include_checks': list([
+            ]),
+            'install_timeout': 300,
+            'regions': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.43.3,<2.0.0',
           }),
         }),
         'cfn_nag': dict({
@@ -1169,6 +1293,17 @@
             'scan_timeout': 1800,
             'severity_threshold': None,
             'skip_generated_lockfiles': True,
+          }),
+        }),
+        'gitleaks': dict({
+          'enabled': True,
+          'name': 'gitleaks',
+          'options': dict({
+            'baseline_path': None,
+            'config_file': None,
+            'max_target_megabytes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
           }),
         }),
         'grype': dict({
@@ -1248,6 +1383,37 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
+          }),
+        }),
+        'trivy': dict({
+          'enabled': True,
+          'name': 'trivy',
+          'options': dict({
+            'config_file': None,
+            'disable_telemetry': True,
+            'ignore_file': None,
+            'ignore_unfixed': False,
+            'license_full': False,
+            'offline': False,
+            'scan_timeout': 1800,
+            'scanners': list([
+              'vuln',
+            ]),
+            'secret_config_file': None,
+            'severity_threshold': None,
+          }),
+        }),
+        'zizmor': dict({
+          'enabled': True,
+          'name': 'zizmor',
+          'options': dict({
+            'config_file': None,
+            'install_timeout': 300,
+            'online_audits': False,
+            'persona': 'regular',
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.29.0,<2.0.0',
           }),
         }),
       }),
@@ -1476,6 +1642,17 @@
         'network_scanners': None,
       }),
       'scanners': dict({
+        'actionlint': dict({
+          'enabled': True,
+          'name': 'actionlint',
+          'options': dict({
+            'config_file': None,
+            'pyflakes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'shellcheck': None,
+          }),
+        }),
         'bandit': dict({
           'enabled': True,
           'name': 'bandit',
@@ -1507,6 +1684,36 @@
             }),
             'scan_timeout': 1800,
             'severity_threshold': None,
+          }),
+        }),
+        'cfn_guard': dict({
+          'enabled': True,
+          'name': 'cfn-guard',
+          'options': dict({
+            'rule_sets': list([
+              'wa-Security-Pillar',
+            ]),
+            'rules_paths': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+          }),
+        }),
+        'cfn_lint': dict({
+          'enabled': True,
+          'name': 'cfn-lint',
+          'options': dict({
+            'config_file': None,
+            'ignore_checks': list([
+            ]),
+            'include_checks': list([
+            ]),
+            'install_timeout': 300,
+            'regions': list([
+            ]),
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.43.3,<2.0.0',
           }),
         }),
         'cfn_nag': dict({
@@ -1558,6 +1765,17 @@
             'scan_timeout': 1800,
             'severity_threshold': None,
             'skip_generated_lockfiles': True,
+          }),
+        }),
+        'gitleaks': dict({
+          'enabled': True,
+          'name': 'gitleaks',
+          'options': dict({
+            'baseline_path': None,
+            'config_file': None,
+            'max_target_megabytes': None,
+            'scan_timeout': 1800,
+            'severity_threshold': None,
           }),
         }),
         'grype': dict({
@@ -1637,6 +1855,37 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
+          }),
+        }),
+        'trivy': dict({
+          'enabled': True,
+          'name': 'trivy',
+          'options': dict({
+            'config_file': None,
+            'disable_telemetry': True,
+            'ignore_file': None,
+            'ignore_unfixed': False,
+            'license_full': False,
+            'offline': False,
+            'scan_timeout': 1800,
+            'scanners': list([
+              'vuln',
+            ]),
+            'secret_config_file': None,
+            'severity_threshold': None,
+          }),
+        }),
+        'zizmor': dict({
+          'enabled': True,
+          'name': 'zizmor',
+          'options': dict({
+            'config_file': None,
+            'install_timeout': 300,
+            'online_audits': False,
+            'persona': 'regular',
+            'scan_timeout': 1800,
+            'severity_threshold': None,
+            'tool_version': '>=1.29.0,<2.0.0',
           }),
         }),
       }),
@@ -1765,7 +2014,7 @@
       }),
       'trivy': dict({
         'dependencies_satisfied': True,
-        'enabled': False,
+        'enabled': True,
         'name': 'trivy',
         'offline_strategy': 'cache_flags',
         'version': None,

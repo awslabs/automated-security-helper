@@ -42,6 +42,14 @@ converters:
       tool_version: '>=7.16.0,<8.0.0'
       install_timeout: 300
 scanners:
+  actionlint:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      config_file: null
+      shellcheck: null
+      pyflakes: null
   bandit:
     enabled: true
     options:
@@ -66,6 +74,25 @@ scanners:
         NIST80053R5Checks: false
         PCIDSS321Checks: false
       include_compliant_checks: false
+  cfn-guard:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      rule_sets:
+      - wa-Security-Pillar
+      rules_paths: []
+  cfn-lint:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      config_file: null
+      regions: []
+      ignore_checks: []
+      include_checks: []
+      tool_version: '>=1.43.3,<2.0.0'
+      install_timeout: 300
   cfn-nag:
     enabled: true
     options:
@@ -100,6 +127,14 @@ scanners:
         filters_used: []
         results: {}
       skip_generated_lockfiles: true
+  gitleaks:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      config_file: null
+      baseline_path: null
+      max_target_megabytes: null
   grype:
     enabled: true
     options:
@@ -154,6 +189,30 @@ scanners:
       additional_outputs:
       - syft-table
       offline: false
+  trivy:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      scanners:
+      - vuln
+      license_full: false
+      ignore_unfixed: false
+      disable_telemetry: true
+      config_file: null
+      ignore_file: null
+      secret_config_file: null
+      offline: false
+  zizmor:
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      config_file: null
+      persona: regular
+      online_audits: false
+      tool_version: '>=1.29.0,<2.0.0'
+      install_timeout: 300
 reporters:
   csv:
     enabled: true
