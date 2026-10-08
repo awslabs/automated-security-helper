@@ -577,6 +577,7 @@ jobs:
       # Same hand-off, with the same masking, as run-scan-test's step of this name;
       # its comment carries the trade-off.
       - name: Expose the Actions cache credentials to ASH's build
+        id: cache-creds
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -584,7 +585,7 @@ jobs:
               const value = process.env[name]
               if (value) {
                 core.setSecret(value)
-                core.exportVariable(name, value)
+                core.setOutput(name, value)
               } else {
                 core.info(`${name} is not set on this runner; skipping`)
               }
@@ -593,6 +594,7 @@ jobs:
       # so the warm build has to as well, or its layers key differently and nothing
       # it exports is ever reused.
       - name: Pre-pull the base image
+        id: prepull
         uses: ./.github/actions/prepull-base-image
         with:
           oci-runner: docker
@@ -601,6 +603,11 @@ jobs:
         shell: bash
         env:
           ASH_GHA_BUILD_CACHE_EXPORT: max
+          ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
+          ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
+          ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
+          ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+          ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
         run: |
           start=$(date +%s)
           ash build-image --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
@@ -613,13 +620,6 @@ jobs:
           total=$(grep -cE '^#[0-9]+ \[' "$log" || true)
           cached=$(grep -cE '^#[0-9]+ CACHED' "$log" || true)
           echo "cache image-layers: ${cached}/${total} build steps cached" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Revoke the Actions cache credentials from the job environment
-        if: always()
-        shell: bash
-        run: |
-          for name in ACTIONS_RUNTIME_TOKEN ACTIONS_CACHE_URL ACTIONS_RESULTS_URL; do
-            echo "${name}=" >> "$GITHUB_ENV"
-          done
 
   # ---------------------------------------------------------------------------
   # Scan validation: method x platform (matches ash-repo-scan-validation.yml)
@@ -790,15 +790,19 @@ jobs:
       # log rather than surfacing as "none of the scanners this gate asserts on
       # ran". On the Windows runner only bandit and checkov are available at all, so
       # a single failed install is the difference between green and a confusing red.
-      - uses: ./.github/actions/tool-download-cache
+      - id: tool-cache
+        uses: ./.github/actions/tool-download-cache
         with:
           mode: restore
       - name: Install scanner dependencies
         shell: bash
+        env:
+          ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         run: ash dependencies install
       - uses: ./.github/actions/tool-download-cache
         with:
           mode: save
+          cache-hit: ${{ steps.tool-cache.outputs.cache-hit }}
       # One shell for both platforms, so there is one command to reason about.
       # The path is relative, so Git Bash on Windows does not rewrite it.
       # --timeout is passed explicitly so it sits next to timeout-minutes above.
@@ -815,6 +819,7 @@ jobs:
           TMPDIR: ${{ runner.temp }}
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
+          ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         run: python scripts/verify_external_target_scan.py --timeout 1200
       # The gate keeps its fixture and scan output on disk when it fails, and its
       # failure messages tell the reader to go and look at them. Upload them so a
@@ -875,15 +880,19 @@ jobs:
       # bandit is the only producer this gate asserts on. Installing it here means
       # an install flake fails as a failed install step with its own log, rather
       # than surfacing as "the fixture produced zero findings".
-      - uses: ./.github/actions/tool-download-cache
+      - id: tool-cache
+        uses: ./.github/actions/tool-download-cache
         with:
           mode: restore
       - name: Install scanner dependencies
         shell: bash
+        env:
+          ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         run: ash dependencies install
       - uses: ./.github/actions/tool-download-cache
         with:
           mode: save
+          cache-hit: ${{ steps.tool-cache.outputs.cache-hit }}
       - name: Verify a workspace scan keeps its projects apart
         shell: bash
         # The gate builds its workspace with tempfile.mkdtemp(). Pointing the temp
@@ -896,6 +905,7 @@ jobs:
           TMPDIR: ${{ runner.temp }}
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
+          ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         run: python scripts/verify_multi_project_attribution.py --timeout 1200
       - name: Collect the kept workspace and scan output
         if: failure()

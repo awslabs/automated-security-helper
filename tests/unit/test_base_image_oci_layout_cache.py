@@ -604,7 +604,16 @@ def _run_hit(
             line.split("=", 1) for line in path.read_text().splitlines() if line
         )
 
-    return HitResult(proc, calls, parse(github_env), parse(github_output), work)
+    # The hand-off is the step output `oci-layout`, which the action exposes for callers to
+    # map into ASH_BASE_OCI_LAYOUT. GITHUB_ENV is still supplied, as Actions does, so a
+    # regression that went back to writing it is seen rather than silently skipped.
+    assert github_env.read_text() == "", (
+        f"the hit step wrote GITHUB_ENV; the hand-off is a step output now\n"
+        f"{github_env.read_text()}"
+    )
+    outputs = parse(github_output)
+    exported = {k: v for k, v in outputs.items() if k == "oci-layout"}
+    return HitResult(proc, calls, exported, outputs, work)
 
 
 _REQUIRES_BASH = pytest.mark.skipif(
@@ -629,7 +638,7 @@ class TestTheHitStep:
         state = json.loads((result.work / "state.json").read_text())
         assert state[BASE] == image.config_digest(), result.describe()
         mdigest = ol.verify(writable, image.pin, "X64")
-        assert result.exported == {"ASH_BASE_OCI_LAYOUT": f"{writable}@{mdigest}"}
+        assert result.exported == {"oci-layout": f"{writable}@{mdigest}"}
 
     def test_podman_imports_through_the_oci_transport_and_tags(
         self, tmp_path, writable, image
@@ -639,7 +648,7 @@ class TestTheHitStep:
         assert result.calls[0] == f"pull -q oci:{writable}:index", result.describe()
         assert result.calls[1].startswith("tag "), result.describe()
         assert result.calls[1].endswith(f" {BASE}"), result.describe()
-        assert "ASH_BASE_OCI_LAYOUT" in result.exported
+        assert "oci-layout" in result.exported
 
     @pytest.mark.parametrize("runtime", ["nerdctl", "finch"])
     def test_nerdctl_and_finch_are_handed_the_layout_and_touch_no_store(
@@ -648,7 +657,7 @@ class TestTheHitStep:
         result = _run_hit(tmp_path, writable, image.pin, runtime)
         assert result.outputs.get("used") == "true", result.describe()
         assert result.calls == [], "the build reads the layout; nothing is imported"
-        assert "ASH_BASE_OCI_LAYOUT" in result.exported
+        assert "oci-layout" in result.exported
 
     @pytest.mark.parametrize("runtime", ["docker", "podman", "nerdctl"])
     def test_a_tampered_entry_is_discarded_and_the_pull_path_runs(
@@ -762,6 +771,18 @@ class TestTheActionWiring:
     def test_the_action_reports_whether_the_cache_was_used(self):
         doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
         assert doc["outputs"]["cache-used"]["value"] == "${{ steps.hit.outputs.used }}"
+
+    def test_the_action_hands_both_references_to_its_callers(self):
+        """The build reads these from its env; callers map them from these outputs."""
+        doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+        assert (
+            doc["outputs"]["oci-layout"]["value"]
+            == "${{ steps.hit.outputs.oci-layout }}"
+        )
+        assert (
+            doc["outputs"]["base-image-override"]["value"]
+            == "${{ steps.pull.outputs.base-image-override }}"
+        )
 
     def test_the_block_is_on_by_default(self):
         doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))

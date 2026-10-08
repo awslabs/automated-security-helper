@@ -103,9 +103,13 @@ runs:
     # registry, and entries are scoped to this repository and readable only with the
     # run's own token.
     #
-    # Trade-off, stated plainly: exporting ACTIONS_RUNTIME_TOKEN into the job
-    # environment makes it visible to later steps in the job, including the scanners
-    # ASH runs over the checked-out code. What that token grants is read and write
+    # They are handed over as this step's outputs, and only the steps that build map
+    # them into their `env:`. They used to be exported to GITHUB_ENV, which put them
+    # in every later step of the caller's job until a revoke step wrote them back
+    # empty; zizmor's github-env audit reports that write in a composite action.
+    #
+    # Trade-off, stated plainly: a build step that holds ACTIONS_RUNTIME_TOKEN runs
+    # ASH, and ASH runs scanners over the checked-out code, so they can see it. What that token grants is read and write
     # access to this repository's Actions cache - not code, not secrets, not package
     # publishing.
     #
@@ -113,14 +117,14 @@ runs:
     # careless with a JWT in a public repository:
     #
     # 1. core.setSecret registers the value with the runner's log filter before it is
-    #    exported. Values written to GITHUB_ENV are NOT masked automatically, so
-    #    without this any later step that echoed its environment - a stray printenv,
-    #    a tool that logs its own env on error - would put the token into a log that
-    #    anyone can read on a public repository.
-    # 2. The companion step after the scan clears these back out, so the token is
-    #    live for the build and scan only and is gone before the report, artifact
-    #    upload and PR-comment steps run.
+    #    set as an output. Step outputs are NOT masked automatically, so without this
+    #    a step that echoed its environment - a stray printenv, a tool that logs its
+    #    own env on error - would put the token into a log that anyone can read on a
+    #    public repository.
+    # 2. Only the build steps map it. The report, artifact upload and PR-comment
+    #    steps never have it, which the revoke step used to arrange after the fact.
     - name: Expose the Actions cache credentials to ASH's build
+      id: cache-creds
       if: >-
         contains(inputs.os, 'ubuntu')
         && inputs.method != 'python-local'
@@ -135,7 +139,7 @@ runs:
               // and masking all three is simpler than reasoning about which is which
               // every time this list changes.
               core.setSecret(value)
-              core.exportVariable(name, value)
+              core.setOutput(name, value)
             } else {
               core.info(`${name} is not set on this runner; skipping`)
             }
@@ -149,6 +153,7 @@ runs:
     # scanner release assets. Restored here, re-verified by ASH on every use, saved
     # after the scan from a push to main only. See the action for what it holds.
     - name: Restore the tool download cache
+      id: tool-cache
       if: inputs.method == 'python-local'
       uses: ./.github/actions/tool-download-cache
       with:
@@ -159,6 +164,7 @@ runs:
     # Skipped for python-local, which builds no image. See the action for what it will and
     # will not retry, and for the verified base-image cache that makes a warm run pull nothing.
     - name: Pre-pull the base image for the container legs
+      id: prepull
       if: inputs.method != 'python-local'
       uses: ./.github/actions/prepull-base-image
       with:
@@ -196,6 +202,7 @@ runs:
       if: inputs.config-file == 'community'
       shell: bash
       env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
         echo "Installing tools needed for community plugins..."
@@ -276,6 +283,8 @@ runs:
     - name: Install trivy through ASH for the community plugin legs
       if: inputs.config-file == 'community' && inputs.method == 'python-local'
       shell: bash
+      env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
       run: |
         # No `trivy --version` follow-up on purpose. ASH installs into ASH_BIN_PATH,
         # which is not on the shell PATH, and ASH finds it there rather than through
@@ -291,6 +300,7 @@ runs:
       if: contains(inputs.method, 'python')
       shell: bash
       env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
@@ -367,9 +377,15 @@ runs:
     # Re-adding ASH's scripts directory promotes it without removing MSYS2, so
     # sh, make and gcc still all come from the one coherent tree psych needs,
     # and the Git Bash restore below stays where it is for the `shell: bash`
-    # steps that follow it. GITHUB_PATH promotes rather than duplicates an entry
-    # already present; see that step's comment for the runner source.
+    # steps that follow it.
+    #
+    # The directory goes out as this step's `dirs` output, and the two steps that
+    # invoke `ash` put it at the front of their own PATH. Nothing after them on
+    # this leg invokes `ash`, so no later step needs the promotion. It used to be a
+    # GITHUB_PATH write, which zizmor's github-env audit reports in a composite
+    # action and which reached every later step of the caller's job.
     - name: Put ASH's entry point ahead of the MSYS2 toolchain (Windows)
+      id: ash-entry-point
       if: inputs.method == 'python-local' && runner.os == 'Windows'
       shell: pwsh
       run: |
@@ -388,15 +404,22 @@ runs:
           exit 1
         }
         foreach ($dir in $found) {
-          Write-Host "Promoting $dir ahead of the MSYS2 toolchain"
-          Add-Content -Path $env:GITHUB_PATH -Value $dir
+          Write-Host "Promoting $dir ahead of the MSYS2 toolchain in the steps that invoke ash"
         }
+        # ';' is PATH's separator on Windows and cannot occur inside one entry.
+        "dirs=$($found -join ';')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
     # Python Container scan
     - name: Validate ASH using Python + Container
       if: inputs.method == 'python-container'
       shell: bash
       env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+        ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
+        ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
+        ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
         SNYK_TOKEN: ${{ inputs.snyk-token }}
         ASH_TEST_OS: ${{ inputs.os }}
         ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
@@ -451,6 +474,8 @@ runs:
     - name: Validate No Plugin Errors (Python Container)
       if: inputs.method == 'python-container'
       shell: bash
+      env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
       run: |
         echo "Checking for plugin execution errors..."
         export PATH="$HOME/.local/bin:$PATH"
@@ -485,11 +510,16 @@ runs:
       if: inputs.method == 'python-local' && runner.os == 'Windows'
       shell: pwsh
       env:
+        ASH_ENTRY_POINT_DIRS: ${{ steps.ash-entry-point.outputs.dirs }}
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         SNYK_TOKEN: ${{ inputs.snyk-token }}
         ASH_TEST_OS: ${{ inputs.os }}
         ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
+        # ASH's scripts directory ahead of MSYS2's, which ships an `ash` of its own.
+        # See "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)".
+        $env:PATH = "$env:ASH_ENTRY_POINT_DIRS;$env:PATH"
         Write-Host "Testing ASH using Python (Local) on $env:ASH_TEST_OS ($env:ASH_TEST_PLATFORM) with config: $env:ASH_TEST_CONFIG_FILE"
         # Assert that 'ash' is ASH before using it six times. MSYS2 and Git for
         # Windows each ship an Almquist shell of the same name, and when one
@@ -520,7 +550,12 @@ runs:
     - name: Validate No Plugin Errors (Python Local Windows)
       if: inputs.method == 'python-local' && runner.os == 'Windows'
       shell: pwsh
+      env:
+        ASH_ENTRY_POINT_DIRS: ${{ steps.ash-entry-point.outputs.dirs }}
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
       run: |
+        # See "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)".
+        $env:PATH = "$env:ASH_ENTRY_POINT_DIRS;$env:PATH"
         Write-Host "Checking for plugin execution errors..."
         # Printed for a human reading a failure, not parsed. Select-String "ERROR"
         # used to be the check, and it is case-insensitive by default, so any
@@ -564,9 +599,9 @@ runs:
 
     # Hand PATH precedence back to Git Bash now that psych is built. MSYS2 has to be
     # first while the gem compiles and must not still be first for the `shell: bash`
-    # steps below it -- "Revoke the Actions cache credentials from the job
-    # environment" and "Validate GitLab SAST Report Schema Compliance" both run on
-    # this leg and both expect Git Bash.
+    # steps below it -- "Validate GitLab SAST Report Schema Compliance" and
+    # "Validate all selected scanners completed" both run on this leg and both
+    # expect Git Bash.
     #
     # Re-adding the directory is enough to move it, rather than merely duplicating
     # it. GITHUB_PATH lines accumulate in a list that the runner reverses before
@@ -575,6 +610,13 @@ runs:
     # PrependPath.Reverse<string>()), and each line is removed from the list before
     # being appended (src/Runner.Worker/FileCommandManager.cs, RemoveAll then Add),
     # so an entry already present is promoted instead of repeated.
+    #
+    # This one stays a GITHUB_PATH write. What it changes is which `bash.exe` the
+    # runner launches for a later `shell: bash` step, and the runner resolves that
+    # from PATH before the step's script starts, so nothing inside the step, and no
+    # `env:` mapping of an output, can do it. `shell:` takes no expression, so a
+    # step shared with Linux and macOS cannot name Git's bash by absolute path
+    # either. The value is a literal.
     - name: Restore Git Bash precedence after the Ruby toolchain (Windows)
       if: inputs.method == 'python-local' && runner.os == 'Windows'
       shell: pwsh
@@ -585,6 +627,7 @@ runs:
       if: inputs.method == 'python-local' && runner.os != 'Windows'
       shell: bash
       env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
         SNYK_TOKEN: ${{ inputs.snyk-token }}
         ASH_TEST_OS: ${{ inputs.os }}
         ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
@@ -604,6 +647,8 @@ runs:
     - name: Validate No Plugin Errors (Python Local Unix)
       if: inputs.method == 'python-local' && runner.os != 'Windows'
       shell: bash
+      env:
+        ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
       run: |
         echo "Checking for plugin execution errors..."
         # Still printed, because it is what a human reads when this step fails.
@@ -618,6 +663,11 @@ runs:
       if: inputs.method == 'powershell'
       shell: pwsh
       env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+        ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
+        ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
+        ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
         SNYK_TOKEN: ${{ inputs.snyk-token }}
         ASH_TEST_OS: ${{ inputs.os }}
         ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
@@ -661,6 +711,11 @@ runs:
       if: inputs.method == 'bash'
       shell: bash
       env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+        ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
+        ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
+        ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
         SNYK_TOKEN: ${{ inputs.snyk-token }}
         ASH_TEST_OS: ${{ inputs.os }}
         ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
@@ -677,6 +732,12 @@ runs:
     - name: Validate No Plugin Errors (Bash)
       if: inputs.method == 'bash'
       shell: bash
+      env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+        ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
+        ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
+        ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
       run: |
         echo "Checking for plugin execution errors..."
         # Still printed, because it is what a human reads when this step fails.
@@ -691,28 +752,7 @@ runs:
       uses: ./.github/actions/tool-download-cache
       with:
         mode: save
-
-    # Companion to "Expose the Actions cache credentials to ASH's build". The build
-    # is done by now, so clear the credentials back out rather than leaving them in
-    # the environment for the artifact upload, the PR comment and anything else a
-    # caller adds after this action.
-    #
-    # Writing an empty value to GITHUB_ENV is how a composite action unsets a
-    # variable for subsequent steps; there is no delete verb. `always()` so the
-    # cleanup still happens when a scan fails, which is exactly when extra debug
-    # output is most likely to be flowing.
-    - name: Revoke the Actions cache credentials from the job environment
-      if: >-
-        always()
-        && contains(inputs.os, 'ubuntu')
-        && inputs.method != 'python-local'
-        && inputs.oci-runner == 'docker'
-      shell: bash
-      run: |
-        for name in ACTIONS_RUNTIME_TOKEN ACTIONS_CACHE_URL ACTIONS_RESULTS_URL; do
-          echo "${name}=" >> "$GITHUB_ENV"
-        done
-        echo "Cleared the buildx cache credentials from the job environment"
+        cache-hit: ${{ steps.tool-cache.outputs.cache-hit }}
 
     # Common post-scan validation
     - name: Collect ASH output artifact
@@ -892,6 +932,9 @@ runs:
     - name: Snapshot the container-runtime output
       if: ${{ !cancelled() && inputs.method != 'python-local' }}
       shell: bash
+      env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
       run: |
         uv run --extra cdk pytest \
           tests/snapshot/container/runtime/test_snapshot_container_runtime.py \

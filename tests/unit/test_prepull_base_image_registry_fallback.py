@@ -370,8 +370,10 @@ class Result:
         self.calls = calls
         self.sleeps = sleeps
         self.present = present
-        # What the step wrote to $GITHUB_ENV, which is how it hands the build the reference to
-        # resolve. Parsed as `NAME=value` per line, the only form the step emits.
+        # What the step wrote to $GITHUB_OUTPUT as its base-image hand-off, which the action
+        # exposes as `base-image-override` for callers to map into the build's env. Parsed as
+        # `name=value` per line, the only form the step emits. The registry names the step
+        # also writes for the cache-layout step are not part of the hand-off and are left out.
         self.exported = exported
 
     @property
@@ -418,7 +420,7 @@ class Result:
             f"exit={self.proc.returncode}\n"
             "runtime calls:\n  " + ("\n  ".join(self.calls) or "(none)") + "\n"
             f"sleeps: {self.sleeps or '(none)'}\n"
-            f"exported to GITHUB_ENV: {self.exported or '(nothing)'}\n"
+            f"handed to the build via GITHUB_OUTPUT: {self.exported or '(nothing)'}\n"
             f"output:\n{self.output}"
         )
 
@@ -438,7 +440,7 @@ def _run(
     blank_ids: bool = False,
     dockerfile_text: str | None = None,
     digest_inspect: str = "docker",
-    github_env: bool = True,
+    github_output: bool = True,
 ) -> Result:
     """Run the action's shell against the stub runtime.
 
@@ -447,7 +449,7 @@ def _run(
     reference to the image id the runtime reports for it; anything absent reports the pinned
     id, so a test only has to name the reference it wants to diverge. ``digest_inspect``
     selects which runtime's answer to a digest-bearing inspect argument the stub gives:
-    ``docker``, ``nerdctl`` or ``neither``. ``github_env=False`` runs with ``GITHUB_ENV``
+    ``docker``, ``nerdctl`` or ``neither``. ``github_output=False`` runs with ``GITHUB_OUTPUT``
     unset, which is a hand-run of the script outside Actions and the one configuration in
     which the step cannot tell the build which registry answered.
     """
@@ -513,13 +515,13 @@ def _run(
         "STUB_BLANK_IDS": "1" if blank_ids else "0",
         "STUB_DIGEST_INSPECT": digest_inspect,
     }
-    # Actions always sets GITHUB_ENV for a composite `run:` step and the file already exists,
+    # Actions always sets GITHUB_OUTPUT for a composite `run:` step and the file already exists,
     # so the harness supplies both rather than letting the step create the file -- a test that
     # passed only because `>>` created a missing path would not be measuring production.
-    github_env_file = work / "github_env"
-    github_env_file.write_text("", encoding="utf-8")
-    if github_env:
-        env["GITHUB_ENV"] = str(github_env_file)
+    github_output_file = work / "github_output"
+    github_output_file.write_text("", encoding="utf-8")
+    if github_output:
+        env["GITHUB_OUTPUT"] = str(github_output_file)
     # The shell Actions gives a composite `shell: bash` step. `-e` in particular is not
     # optional: the script relies on it, so a harness without it would be running a more
     # forgiving shell than production.
@@ -531,10 +533,12 @@ def _run(
         timeout=120,
     )
     exported: dict[str, str] = {}
-    for line in github_env_file.read_text(encoding="utf-8").splitlines():
+    for line in github_output_file.read_text(encoding="utf-8").splitlines():
         if not line:
             continue
         name, _, value = line.partition("=")
+        if name in ("primary-repo", "fallback-repo"):
+            continue
         exported[name] = value
 
     return Result(
@@ -596,7 +600,7 @@ class TestThePrimaryRegistryIsUnchanged:
         assert result.pulls(PRIMARY_TAG_REF), (
             f"positive evidence first: the step must have pulled\n{result.describe()}"
         )
-        assert "ASH_BASE_IMAGE_OVERRIDE" not in result.exported, (
+        assert "base-image-override" not in result.exported, (
             "the primary answered, so the Dockerfile's own ARG BASE_IMAGE default is correct "
             f"and nothing should redirect it\n{result.describe()}"
         )
@@ -787,7 +791,7 @@ class TestTheFallbackReachesTheBuild:
 
     def test_the_build_is_told_which_registry_answered(self, result: Result):
         assert result.ok, f"{result.describe()}"
-        assert result.exported.get("ASH_BASE_IMAGE_OVERRIDE") == FALLBACK_PIN_REF, (
+        assert result.exported.get("base-image-override") == FALLBACK_PIN_REF, (
             "the fallback has to reach the build by changing what FROM asks for, because the "
             "BuildKit runtimes never consult the local store; expected "
             f"ASH_BASE_IMAGE_OVERRIDE={FALLBACK_PIN_REF}\n{result.describe()}"
@@ -801,7 +805,7 @@ class TestTheFallbackReachesTheBuild:
         can hand the build content rather than a name, and exporting the fallback's *tag*
         would throw that away for nothing.
         """
-        override = result.exported.get("ASH_BASE_IMAGE_OVERRIDE", "")
+        override = result.exported.get("base-image-override", "")
         assert override.endswith(f"@{BASE_IMAGE_DIGEST}"), (
             "the exported reference must carry the pinned digest, so that a Docker Hub tag "
             f"moving between the check and the build cannot change the base image\n"
@@ -882,7 +886,7 @@ class TestTheFallbackReachesTheBuild:
             f"that offered the wrong content\n{result.describe()}"
         )
 
-    def test_without_github_env_the_degradation_is_announced(self, tmp_path: Path):
+    def test_without_github_output_the_degradation_is_announced(self, tmp_path: Path):
         """A hand-run outside Actions cannot export, and must say what that costs.
 
         Not an error: running this script directly is a legitimate way to use it. But it is
@@ -892,13 +896,13 @@ class TestTheFallbackReachesTheBuild:
         result = _run(
             tmp_path,
             rules={PRIMARY_TAG_REF: "datalimit", PRIMARY_PIN_REF: "datalimit"},
-            github_env=False,
+            github_output=False,
         )
 
         assert result.ok, (
             f"the image was sourced and tagged; that is still a success\n{result.describe()}"
         )
-        assert "::warning::" in result.output and "GITHUB_ENV" in result.output, (
+        assert "::warning::" in result.output and "GITHUB_OUTPUT" in result.output, (
             "the step could not tell the build which registry answered, which is the failure "
             f"mode this whole change exists to remove; it has to say so\n{result.describe()}"
         )
@@ -909,15 +913,15 @@ class TestTheFallbackReachesTheBuild:
             )
 
     def test_the_exported_line_cannot_carry_a_second_variable(self, tmp_path: Path):
-        """GITHUB_ENV is line-oriented, so one value per line is a property worth pinning."""
+        """GITHUB_OUTPUT is line-oriented, so one value per line is a property worth pinning."""
         result = _run(
             tmp_path,
             rules={PRIMARY_TAG_REF: "datalimit", PRIMARY_PIN_REF: "datalimit"},
         )
 
-        assert list(result.exported) == ["ASH_BASE_IMAGE_OVERRIDE"], (
-            "the step must write exactly one variable; anything else means a value carried a "
-            f"newline into an environment every later step in the job reads\n"
+        assert list(result.exported) == ["base-image-override"], (
+            "the step must write exactly one output; anything else means a value carried a "
+            f"newline into the hand-off the build steps read\n"
             f"{result.describe()}"
         )
 
@@ -1473,8 +1477,8 @@ class TestTheHarnessCanFail:
         """
         script = _prepull_script()
         mutant, subs = re.subn(
-            r'printf \'%s\\n\' "ASH_BASE_IMAGE_OVERRIDE=\$\{override\}" '
-            r'>> "\$\{GITHUB_ENV\}"',
+            r'printf \'%s\\n\' "base-image-override=\$\{override\}" '
+            r'>> "\$\{GITHUB_OUTPUT\}"',
             ":",
             script,
         )
@@ -1492,10 +1496,10 @@ class TestTheHarnessCanFail:
             f"was invisible; if it fails outright the control proves nothing\n"
             f"{weakened.describe()}"
         )
-        assert "ASH_BASE_IMAGE_OVERRIDE" not in weakened.exported, (
+        assert "base-image-override" not in weakened.exported, (
             f"the mutation is supposed to remove the export\n{weakened.describe()}"
         )
-        assert real.exported.get("ASH_BASE_IMAGE_OVERRIDE") == FALLBACK_PIN_REF, (
+        assert real.exported.get("base-image-override") == FALLBACK_PIN_REF, (
             "and the shipped script must export it -- that gap is the whole assertion, and it "
             f"is the difference between a green step and a build that works\n"
             f"{real.describe()}"
