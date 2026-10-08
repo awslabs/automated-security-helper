@@ -472,13 +472,26 @@ RUN with-retry 'install-pinned-tool cfn-guard -b /usr/local/bin' && \
 RUN cfn-guard --version && \
     test -s "${ASH_CFN_GUARD_RULES_DIR}/aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard"
 
-# opengrep has no release archive for install-pinned-tool to read license files from:
-# it is a bare executable that `ash dependencies install` puts in place below. So its
+# None of these has license files in a release archive install-pinned-tool reads:
+# opengrep is a bare executable that `ash dependencies install` puts in place below,
+# and pygit2 and the libraries its wheel bundles (libgit2, libssh2, OpenSSL and PCRE,
+# in pygit2.libs), and the OpenSSL 1.1 the yara-python wheel bundles
+# (yara_python.libs), arrive in GuardDog's uv tool environment, also below. So their
 # license files are fetched on their own, each pinned by SHA256 and by the upstream
 # commit of the release the image carries. uv is not listed: `install-pinned-tool uv`
 # above already fetched its URL-pinned license files, because ASH_THIRD_PARTY_DIR was
 # set by then.
-RUN with-retry 'install-pinned-tool --licenses-only opengrep'
+RUN with-retry 'install-pinned-tool --licenses-only libgit2 libssh2 opengrep openssl openssl-1.1 pcre pygit2'
+
+# pygit2 (GPL-2.0-only with a linking exception) bundles libgit2 and is a GuardDog
+# dependency. Held to the release its license entry describes, so the files above are
+# the ones for the copy that ships; --verify-third-party below reads both versions
+# back from GuardDog's environment. A constraint, not a requirement: it changes
+# nothing for a uv install that does not pull pygit2 in. ENV, so the non-root
+# stage's own `ash dependencies install` resolves the same pygit2.
+ARG PYGIT2_VERSION="1.18.2"
+RUN mkdir -p /etc/ash && printf 'pygit2==%s\n' "${PYGIT2_VERSION}" > /etc/ash/uv-constraints.txt
+ENV UV_CONSTRAINT="/etc/ash/uv-constraints.txt"
 
 #
 # Setting default WORKDIR to /src
@@ -535,11 +548,11 @@ ENV _ASH_EXEC_MODE="local"
 # out of the layer.
 #
 # The community plugin modules that ship with ASH and bring tools of their own are
-# loaded for this install only (ASH_COMMUNITY_PLUGIN_MODULES), so those tools are
-# installed and pinned too, and the image carries them; a scan in the image still
-# loads a module only when it is listed. trivy-repo, snyk and ferret are not in the
-# list: their tools come another way.
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_hadolint_plugins"
+# loaded for this install only (ASH_COMMUNITY_PLUGIN_MODULES), so those tools
+# (GuardDog's uv tool among them) are installed and pinned too, and the image carries
+# them; a scan in the image still loads a module only when it is listed. trivy-repo,
+# snyk and ferret are not in the list: their tools come another way.
+ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
@@ -551,11 +564,20 @@ ENV PATH="${ASH_BIN_PATH}:$PATH"
 # The Python tools' license files, read from each installed wheel's dist-info and,
 # for semgrep, whose wheel carries none, fetched from its repository at the pinned
 # commit and checked against their SHA256.
-RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov semgrep zizmor'
+RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov guarddog semgrep zizmor'
 
 # zizmor (builtin scanner) is installed by the line above through `uv tool install`
 # within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.
 RUN zizmor --version
+
+#
+# GuardDog (community scanner). Installed by `ash dependencies install` above through
+# uv, with the version and interpreter the scanner pins
+# (GUARDDOG_DEFAULT_VERSION_CONSTRAINT, GUARDDOG_PYTHON_REQUEST in
+# guarddog_scanner.py). Checked here so a failed install fails the build instead
+# of the first scan that enables the scanner.
+#
+RUN guarddog --version
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and
@@ -641,13 +663,15 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Python tools are installed again here and would otherwise float. The same community
 # modules are loaded for it; an ARG does not reach a stage built FROM another, so it
 # is declared again (a unit test keeps the two equal).
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_hadolint_plugins"
+ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
     --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
+# GuardDog again, for the non-root user's own uv tool install.
+RUN guarddog --version
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD ["/bin/sh", "-c", "command -v ash || exit 1"]

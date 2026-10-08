@@ -5,9 +5,10 @@
 
 Why this exists
 ---------------
-snyk-code, ferret-scan, trivy-repo and hadolint live in community plugin modules
-(``plugin_modules/ash_*_plugins``). Listing a module is the opt-in: a run that does
-not list it never loads its scanners. Two things follow, and are tested here:
+snyk-code, ferret-scan, trivy-repo, GuardDog and hadolint live in community plugin
+modules (``plugin_modules/ash_*_plugins``). Listing a module is the opt-in: a run
+that does not list it never loads its scanners. Two things follow, and are tested
+here:
 
 * ``--scanners snyk-code`` without ``ash_snyk_plugins`` listed names a scanner ASH
   has but did not load. It is refused with the module to add, rather than read as
@@ -128,6 +129,7 @@ def _scan(context, plugins, enabled_scanners: List[str]) -> AshAggregatedResults
     "scanner,module",
     [
         ("ferret-scan", "ash_ferret_plugins"),
+        ("guarddog", "ash_guarddog_plugins"),
         ("hadolint", "ash_hadolint_plugins"),
         ("snyk-code", "ash_snyk_plugins"),
         ("trivy-repo", "ash_trivy_plugins"),
@@ -278,6 +280,7 @@ def test_with_the_module_loaded_its_scanner_resolves_and_runs(tmp_path):
 @pytest.mark.parametrize(
     "module,scanners",
     [
+        ("ash_guarddog_plugins", {"guarddog"}),
         ("ash_hadolint_plugins", {"hadolint"}),
     ],
 )

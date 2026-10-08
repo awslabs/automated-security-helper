@@ -95,7 +95,19 @@ def _uv_tool_install_specs(ran: "list[list[str]]") -> "dict[str, str]":
         ]:
             continue
         start = 3 if argv[0] == "uv" else 4
-        requirement = next(a for a in argv[start:] if not a.startswith("-"))
+        # `--python <request>` (GuardDog pins its interpreter) takes a value; the
+        # requirement is the first argument that is neither an option nor its value.
+        requirement = None
+        skip_value = False
+        for arg in argv[start:]:
+            if skip_value:
+                skip_value = False
+            elif arg in ("--python", "--with"):
+                skip_value = True
+            elif not arg.startswith("-"):
+                requirement = arg
+                break
+        assert requirement, f"no requirement in {argv}"
         name = re.match(r"[A-Za-z0-9_.-]+", requirement).group(0).lower()
         specs[name] = requirement
     return specs
@@ -177,11 +189,21 @@ class TestTheOverridesReachTheInstallCommand:
         overrides doing anything, and the Dockerfile's reliance on them is untested.
         """
         specs = recorded_install([])
+        ranged = 0
         for tool in PYTHON_TOOLS:
             entry = THIRD_PARTY_LICENSES[tool]
-            assert not specs[entry.distribution].endswith(
-                "==" + entry.version.lstrip("v")
-            ), specs[entry.distribution]
+            pinned = "==" + entry.version.lstrip("v")
+            requirement = specs[entry.distribution]
+            if "==" in re.sub(r"\[[^\]]*\]", "", requirement):
+                # A scanner whose own default is already an exact pin (GuardDog's
+                # GUARDDOG_DEFAULT_VERSION_CONSTRAINT) needs no override, and that
+                # default must then be the license entry's version.
+                assert requirement.endswith(pinned), requirement
+                continue
+            ranged += 1
+            assert not requirement.endswith(pinned), requirement
+        # The control has to cover at least the tools the image pins only by override.
+        assert ranged >= 3, specs
 
     def test_a_single_override_pins_only_its_tool(self, recorded_install):
         specs = recorded_install(

@@ -143,12 +143,16 @@ non-root `USER` in your own Dockerfile if you need one.
 
 The image bundles third-party programs that ASH installs from their upstream
 releases: actionlint, cfn-guard (with the AWS Guard Rules Registry it reads),
-gitleaks, grype, hadolint, opengrep, syft, trivy and uv today, and the Python
-scanners bandit, checkov, cfn-lint, semgrep and zizmor (installed with `uv tool
-install`). Each one's license and notice files are in the image under `/usr/share/doc/ash/third-party/<tool>/`, taken from the
+gitleaks, grype, hadolint, opengrep, syft, trivy and uv today, the Python scanners
+bandit, checkov, cfn-lint, GuardDog, semgrep and zizmor (installed with `uv tool
+install`), plus pygit2, which GuardDog depends on, and the libraries its wheel
+bundles: libgit2, libssh2, OpenSSL and PCRE, and the OpenSSL 1.1 the yara-python
+wheel bundles. Each one's license and notice files
+are in the image under `/usr/share/doc/ash/third-party/<tool>/`, taken from the
 exact release the image carries. Beside them, a `SOURCE` file names the upstream
-repository, release tag and commit. For a copyleft tool (opengrep is LGPL-2.1,
-hadolint GPL-3.0), that file also says where the corresponding source is.
+repository, release tag and commit. For a copyleft component (opengrep is
+LGPL-2.1, hadolint GPL-3.0, pygit2 and libgit2 GPL-2.0 with a linking exception),
+that file also says where the corresponding source is.
 
 `/usr/share/doc/ash/third-party/index.json` lists every bundled tool with its version,
 license expression, repository, commit and files. The image build writes it only
@@ -163,3 +167,9 @@ If you redistribute the image, these are the files that go with those programs.
 Packages installed from Debian carry their own copyright files under
 `/usr/share/doc/<package>/`, and Python packages carry their license metadata in
 their `.dist-info` directories.
+
+The image also sets `UV_CONSTRAINT=/etc/ash/uv-constraints.txt`, which holds pygit2 to
+the release its license files describe (`pygit2==1.18.2`, GuardDog's dependency). It is
+an image-wide `ENV`, so every `uv` command run in the container, including in an image
+built `FROM` this one, applies the same constraint. Unset it, or point it at your own
+file, for installs that should resolve pygit2 freely.

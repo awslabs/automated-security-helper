@@ -291,11 +291,14 @@ runs:
         # PATH. The installer's own post-install sweep already resolves the binary
         # and exits non-zero if it cannot -- a PATH-dependent version check here
         # would fail for a working install and pass for none.
-        # hadolint, a community scanner whose module that config lists, comes the
-        # same way: its pinned binary, checked against its SHA256.
+        # GuardDog and hadolint, community scanners whose modules that config lists,
+        # come the same way: hadolint's pinned binary, checked against its SHA256, and
+        # GuardDog's uv tool at its declared constraint. GuardDog is skipped on
+        # Windows, where it cannot be installed and its scanner reports SKIPPED.
         ash dependencies install \
           --config .ash/.ash_community_plugins.yaml \
           --tool trivy-repo \
+          --tool guarddog \
           --tool hadolint
 
     # Validate config

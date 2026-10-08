@@ -153,7 +153,8 @@ runs:
         #
         # hadolint is a community scanner, so the scan above lists its module with
         # --ash-plugin-modules; otherwise it would be absent from the report and this
-        # list could not check that the flake supplies it.
+        # list could not check that the flake supplies it. The GuardDog module is not
+        # listed: nixpkgs has no GuardDog package, so the flake does not supply it.
         flake_supplied = [
             "actionlint",
             "bandit",

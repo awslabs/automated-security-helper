@@ -91,6 +91,7 @@ These ship with ASH and run when their plugin module is listed in `ash_plugin_mo
 
 | Scanner | Module | Type | Targets |
 |---------|--------|------|---------|
+| [GuardDog](https://github.com/DataDog/guarddog) | `ash_guarddog_plugins` | Malware | PyPI, npm, Go, GitHub Actions, RubyGems and crates packages |
 | [hadolint](https://github.com/hadolint/hadolint) | `ash_hadolint_plugins` | IaC | Dockerfile, Containerfile |
 
 ## Prerequisites

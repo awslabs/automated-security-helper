@@ -494,6 +494,7 @@ runs:
           --output-dir /tmp/ash-selftest/output \
           --simple \
           --fail-on-incomplete-scanners \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_guarddog_plugins \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --phases scan \
           --phases report
@@ -600,9 +601,9 @@ runs:
         # by default, so the scan above runs the image's copy of each, and each is listed
         # here so a missing binary fails this check.
         #
-        # hadolint is a community scanner, so the scan above lists its module with
-        # --ash-plugin-modules; otherwise it would be absent from the report and this
-        # list could not check that the image ships it.
+        # GuardDog and hadolint are community scanners, so the scan above lists their
+        # modules with --ash-plugin-modules; otherwise they would be absent from the
+        # report and this list could not check that the image ships them.
         image_supplied = [
             "actionlint",
             "bandit",
@@ -614,6 +615,7 @@ runs:
             "detect-secrets",
             "gitleaks",
             "grype",
+            "guarddog",
             "hadolint",
             "npm-audit",
             "opengrep",

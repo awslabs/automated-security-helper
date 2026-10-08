@@ -157,6 +157,16 @@
   digest-verified; `ash dependencies install --tool hadolint`, with the module
   loaded, installs the same build locally; nix mode supplies it. See
   [hadolint Plugin](docs/content/docs/plugins/community/hadolint-plugin.md).
+- **A GuardDog community plugin, `ash_guarddog_plugins`.** It runs GuardDog 3.2.0
+  over every PyPI, npm, Go, GitHub Action, RubyGems and crates package root,
+  looking for malicious-package heuristics, when the module is listed in
+  `ash_plugin_modules` (or passed with `--ash-plugin-modules`), and is on by
+  default then. Local scans run offline; `options.verify` is refused in offline
+  mode. Not available on Windows, where it is SKIPPED with the reason. The
+  container image installs it as a uv tool at the pinned version, and
+  `ash dependencies install --tool guarddog`, with the module loaded, installs the
+  same version locally. See
+  [GuardDog Plugin](docs/content/docs/plugins/community/guarddog-plugin.md).
 - **`--scanners` names the module to add for a community scanner that is not loaded.**
   `--scanners snyk-code` without `ash_snyk_plugins` listed is refused with a message
   naming the module, rather than reading as a typo; a selection in which other names
@@ -165,10 +175,17 @@
 - **The container image ships license files for the new scanners' tools.**
   actionlint, gitleaks, cfn-guard with the Guard Rules Registry bundle it reads, and
   hadolint (GPL-3.0, with its upstream ThirdPartyNotices and a corresponding-source
-  pointer) get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0) and
-  zizmor, read from each installed wheel's dist-info and checked against its RECORD. Every
-  uv install in the image now runs with `UV_NO_CACHE=1`, so uv's cache is no longer
-  kept in any layer.
+  pointer) get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0),
+  GuardDog and zizmor, read from each installed wheel's dist-info and checked
+  against its RECORD. pygit2 and the libgit2 it bundles (GPL-2.0 with a linking
+  exception), which GuardDog depends on, get the same directory, and so do the three
+  other libraries the pygit2 wheel bundles in `pygit2.libs`: libssh2 1.11.1
+  (BSD-3-Clause), OpenSSL 3.3.3 (Apache-2.0) and PCRE 8.42 (BSD-3-Clause), and the
+  OpenSSL 1.1.1w the yara-python wheel bundles in `yara_python.libs` (the dual
+  OpenSSL and SSLeay license). The image
+  holds pygit2 to the release those files describe with a uv constraint, and the
+  build reads each version back from GuardDog's environment. Every uv install in the
+  image now runs with `UV_NO_CACHE=1`, so uv's cache is no longer kept in any layer.
 
 ### Behavior changes
 

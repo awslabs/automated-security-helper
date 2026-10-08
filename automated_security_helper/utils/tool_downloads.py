@@ -694,9 +694,16 @@ PERMISSIVE_SPDX = frozenset(
         "ISC",
         "MIT",
         "MIT-0",
+        "OpenSSL",
         "Unlicense",
     }
 )
+
+# License exceptions an expression may name after WITH. An exception only adds
+# permissions to the license it modifies, so it is not classified on its own: the
+# license before WITH decides whether the entry is copyleft. Listed so an unknown
+# token after WITH still fails the tests instead of passing as an exception.
+SPDX_EXCEPTIONS = frozenset({"GCC-exception-2.0"})
 
 _SPDX_OPERATORS = frozenset({"AND", "OR", "WITH"})
 
@@ -732,10 +739,11 @@ class ThirdPartyLicense:
     ASH dependency from PyPI, at whatever version pyproject's range resolves to,
     and that copy carries its own license metadata in its dist-info.
 
-    ``version_probe`` is for a component that is not an executable on PATH, such
-    as a rules bundle another tool reads. When set, the PATH and ``--version``
-    checks are replaced by running this argv, whose output must report
-    ``version``.
+    ``version_probe`` is for a component that is not an executable on PATH: a
+    rules bundle another tool reads, or a native library inside a uv tool's
+    environment. When set, the PATH and ``--version`` checks are replaced by
+    running this argv, whose output must report ``version``. ``{uv_tool_dir}`` in
+    an argument is replaced with what ``uv tool dir`` prints.
 
     ``distribution`` is set for a tool ``ash dependencies install`` installs with
     ``uv tool install``: the PyPI name of the distribution, whose installed
@@ -756,15 +764,34 @@ class ThirdPartyLicense:
     # binary also carries code from outside its own repository (a statically
     # linked binary's library dependencies), saying where that source is.
     source_note: "str | None" = None
+    # The upstream tag when it is not spelled like ``version`` (OpenSSL's
+    # "OpenSSL_1_1_1w"), or "" when the release has no tag (PCRE1).
+    tag: "str | None" = None
+    # Set for a library another wheel bundles: what bundles it, for SOURCE. Its version
+    # is that wheel's choice, so the pin checker lists it without looking it up.
+    bundled_in: "str | None" = None
 
     @property
     def executable_names(self) -> tuple[str, ...]:
         return self.executables or (self.tool,)
 
     @property
-    def spdx_identifiers(self) -> list[str]:
+    def spdx_tokens(self) -> list[str]:
+        """Every identifier in ``license``: licenses and exceptions alike."""
         tokens = self.license.replace("(", " ").replace(")", " ").split()
         return [t for t in tokens if t not in _SPDX_OPERATORS]
+
+    @property
+    def spdx_exceptions(self) -> list[str]:
+        """The identifiers that follow WITH: exceptions, not licenses."""
+        tokens = self.license.replace("(", " ").replace(")", " ").split()
+        return [b for a, b in zip(tokens, tokens[1:]) if a == "WITH"]
+
+    @property
+    def spdx_identifiers(self) -> list[str]:
+        """The license identifiers in ``license``, without operators or exceptions."""
+        exceptions = self.spdx_exceptions
+        return [t for t in self.spdx_tokens if t not in exceptions]
 
     @property
     def copyleft(self) -> bool:
@@ -780,6 +807,12 @@ class ThirdPartyLicense:
             f"git -C {directory} submodule update --init --recursive",
         ]
 
+    @property
+    def _release_tag(self) -> str:
+        if self.tag is None:
+            return self.version
+        return self.tag or "none (the repository has no tag for it; see Commit)"
+
     def source_notice(self, installed_from: "str | None" = None) -> str:
         """The text of the ``SOURCE`` file written beside the license files."""
         lines = [
@@ -790,18 +823,23 @@ class ThirdPartyLicense:
             ),
             "",
             f"Upstream repository: {self.repository}",
-            f"Release tag:         {self.version}",
+            f"Release tag:         {self._release_tag}",
             f"Commit:              {self.commit}",
         ]
         if installed_from:
             lines.append(f"Installed from:      {installed_from}")
-        lines += [
-            "",
-            (
+        if self.bundled_in:
+            statement = (
+                f"ASH ships this library as {self.bundled_in} bundles it, unmodified. "
+                "The binary was built for that wheel, not published by the project "
+                "above; the commit above is the upstream source of this release."
+            )
+        else:
+            statement = (
                 "ASH bundles this program unmodified, as published by its upstream "
                 "project."
-            ),
-        ]
+            )
+        lines += ["", statement]
         if self.copyleft:
             lines += [
                 "",
@@ -869,12 +907,27 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "grype commit": "6f8d854af29d3a3086b11a84afa51554a2a245fe",  # pragma: allowlist secret
+    "guarddog commit": "3da172679cb58b1c9a780f9f5d640f855be016dc",  # pragma: allowlist secret
     "hadolint commit": "2eece55955ced00200be9729e9728cb7dacca505",  # pragma: allowlist secret
     "hadolint/LICENSE": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",  # pragma: allowlist secret
     "hadolint/ThirdPartyNotices.txt": "424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27",  # pragma: allowlist secret
+    "libgit2 commit": "0060d9cf5666f015b1067129bd874c6cc4c9c7ac",  # pragma: allowlist secret
+    "libgit2/AUTHORS": "126ed06438e488d71f5232b39436b3a1dffccb9c2697e3a332fbe868975cd55f",  # pragma: allowlist secret
+    "libgit2/COPYING": "e3712465634e97cfd850822a4eb5ac7d2f8a10f753189366d5a2060046f28288",  # pragma: allowlist secret
+    "libssh2 commit": "a312b43325e3383c865a87bb1d26cb52e3292641",  # pragma: allowlist secret
+    "libssh2/COPYING": "f7f9633cf9ff2f1333f3d7ce46973a8716a4d2a2815ad56f30d437d5fea7bafe",  # pragma: allowlist secret
     "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
+    "openssl commit": "42768eafab40d3e2f0851caa84aa9801139c74ab",  # pragma: allowlist secret
+    "openssl-1.1 commit": "e04bd3433fd84e1861bf258ea37928d9845e6a86",  # pragma: allowlist secret
+    "openssl-1.1/LICENSE": "c32913b33252e71190af2066f08115c69bc9fddadf3bf29296e20c835389841c",  # pragma: allowlist secret
+    "openssl/LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",  # pragma: allowlist secret
+    "pcre commit": "c8dd39955982faaf63176bedc456746e5cf43e2f",  # pragma: allowlist secret
+    "pcre/LICENCE": "f998c0f52eb704eff28f503580cfca3f2547280aa212994f6cf2d8e317587c1c",  # pragma: allowlist secret
+    "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
+    "pygit2/AUTHORS.md": "4ecad3164600b3c7a216cdd636288d1434afd6307737cfeba8fc1372dc04ba20",  # pragma: allowlist secret
+    "pygit2/COPYING": "3f2a642de5f24ed216404873b875e9d1c5dd112a4e0ae27a42f7303583f69683",  # pragma: allowlist secret
     "semgrep commit": "a35fe8306115b3e55274969098cc46f8451d6b4d",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
@@ -895,6 +948,36 @@ def _from_source(tool: str, repository: str, name: str) -> LicenseFile:
         url=_source_file(repository, _THIRD_PARTY_HASHES[f"{tool} commit"], name),
         sha256=_THIRD_PARTY_HASHES[f"{tool}/{name}"],
     )
+
+
+def _bundled_library_probe(
+    module: str, libs_dir: str, parents: int, glob: str, pattern: bytes, prefix: str
+) -> "tuple[str, ...]":
+    """A version_probe for a shared library a wheel in GuardDog's environment bundles.
+
+    auditwheel copies the shared libraries a wheel links against into
+    ``site-packages/<project>.libs`` under hashed names, and none of them can be
+    asked for its version, so the probe reads the version string each one embeds.
+    ``module`` is imported with GuardDog's own interpreter to find
+    site-packages, ``parents`` levels up from its ``__file__``. No matching file,
+    or no match in it, raises, so the image build fails rather than vouching for a
+    library that is not there.
+    """
+    code = (
+        f"import pathlib, re, {module}; "
+        f"d = pathlib.Path({module}.__file__).resolve(){'.parent' * parents} / {libs_dir!r}; "
+        f"b = b''.join(p.read_bytes() for p in sorted(d.glob({glob!r}))); "
+        f"m = re.search({pattern!r}, b); "
+        f"print({prefix!r} + m.group(1).decode())"
+    )
+    return ("{uv_tool_dir}/guarddog/bin/python", "-c", code)
+
+
+def _pygit2_bundled_library_probe(
+    glob: str, pattern: bytes, prefix: str
+) -> "tuple[str, ...]":
+    """A probe for a library the pygit2 wheel bundles in ``pygit2.libs``."""
+    return _bundled_library_probe("pygit2", "pygit2.libs", 2, glob, pattern, prefix)
 
 
 # Alphabetical, one entry per tool.
@@ -1011,6 +1094,21 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["grype commit"],
         files=(LicenseFile("LICENSE"),),
     ),
+    # The GuardDog community scanner's uv tool. The wheel's dist-info carries
+    # licenses/LICENSE, licenses/NOTICE and licenses/LICENSE-3rdparty.csv.
+    "guarddog": ThirdPartyLicense(
+        tool="guarddog",
+        version="v3.2.0",
+        license="Apache-2.0",
+        repository="https://github.com/DataDog/guarddog",
+        commit=_THIRD_PARTY_HASHES["guarddog commit"],
+        files=(
+            LicenseFile("LICENSE"),
+            LicenseFile("NOTICE"),
+            LicenseFile("LICENSE-3rdparty.csv"),
+        ),
+        distribution="guarddog",
+    ),
     # The asset is the executable itself, so both files come from the repository.
     # LICENSE: GPL version 3, with no "or later" grant in the repository.
     # ThirdPartyNotices.txt is upstream's report of the libraries linked into the
@@ -1037,6 +1135,44 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             "file gives."
         ),
     ),
+    # Compiled into the pygit2 wheel GuardDog depends on (pygit2.libs/libgit2-*.so),
+    # in GuardDog's uv tool environment. COPYING carries the linking exception and
+    # the notices of the code libgit2 itself bundles. The version is whatever the
+    # pinned pygit2 wheel bundles, read from pygit2 in that environment.
+    "libgit2": ThirdPartyLicense(
+        tool="libgit2",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        version="v1.9.1",
+        license="GPL-2.0-only WITH GCC-exception-2.0",
+        repository="https://github.com/libgit2/libgit2",
+        commit=_THIRD_PARTY_HASHES["libgit2 commit"],
+        files=(
+            _from_source("libgit2", "https://github.com/libgit2/libgit2", "COPYING"),
+            _from_source("libgit2", "https://github.com/libgit2/libgit2", "AUTHORS"),
+        ),
+        version_probe=(
+            "{uv_tool_dir}/guarddog/bin/python",
+            "-c",
+            "import pygit2; print(pygit2.LIBGIT2_VERSION)",
+        ),
+    ),
+    # Bundled in the pygit2 wheel (pygit2.libs/libssh2-*.so) for libgit2's SSH
+    # transport; libgit2's COPYING does not cover it. 1.11.1 in both the x86_64
+    # and the aarch64 manylinux wheels of pygit2 1.18.2.
+    "libssh2": ThirdPartyLicense(
+        tool="libssh2",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        version="libssh2-1.11.1",
+        license="BSD-3-Clause",
+        repository="https://github.com/libssh2/libssh2",
+        commit=_THIRD_PARTY_HASHES["libssh2 commit"],
+        files=(
+            _from_source("libssh2", "https://github.com/libssh2/libssh2", "COPYING"),
+        ),
+        version_probe=_pygit2_bundled_library_probe(
+            "libssh2-*", rb"SSH-2\.0-libssh2_([0-9.]+)", "libssh2-"
+        ),
+    ),
     # Installed by `ash dependencies install`, which publishes a bare executable
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
@@ -1052,6 +1188,93 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             _from_source(
                 "opengrep", "https://github.com/opengrep/opengrep", "COPYRIGHT"
             ),
+        ),
+    ),
+    # Bundled in the pygit2 wheel (pygit2.libs/libcrypto-*.so.3 and libssl-*.so.3)
+    # for libssh2 and libgit2's HTTPS transport. OpenSSL 3.3.3 in both manylinux
+    # wheels of pygit2 1.18.2. Apache-2.0; the release has no NOTICE file. Only
+    # libcrypto is probed: libssl embeds no "OpenSSL x.y.z" string, and the two are
+    # one OpenSSL build (same release, grafted together by auditwheel).
+    "openssl": ThirdPartyLicense(
+        tool="openssl",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        version="openssl-3.3.3",
+        license="Apache-2.0",
+        repository="https://github.com/openssl/openssl",
+        commit=_THIRD_PARTY_HASHES["openssl commit"],
+        files=(
+            _from_source(
+                "openssl", "https://github.com/openssl/openssl", "LICENSE.txt"
+            ),
+        ),
+        version_probe=_pygit2_bundled_library_probe(
+            "libcrypto-*", rb"OpenSSL ([0-9]+\.[0-9]+\.[0-9]+)", "openssl-"
+        ),
+    ),
+    # Bundled in the yara-python wheel GuardDog depends on
+    # (yara_python.libs/libcrypto-*.so.1.1), for libyara's hash and PE modules:
+    # OpenSSL 1.1.1w, which auditwheel grafted in. A second OpenSSL beside the
+    # pygit2 one above, and a different license: the 1.1 series is under the dual
+    # OpenSSL and SSLeay license (SPDX "OpenSSL"), not 3.x's Apache-2.0. Upstream
+    # ended support for 1.1.1 in September 2023.
+    "openssl-1.1": ThirdPartyLicense(
+        tool="openssl-1.1",
+        bundled_in="the yara-python manylinux wheel GuardDog depends on",
+        tag="OpenSSL_1_1_1w",
+        version="1.1.1w",
+        license="OpenSSL",
+        repository="https://github.com/openssl/openssl",
+        commit=_THIRD_PARTY_HASHES["openssl-1.1 commit"],
+        files=(
+            _from_source(
+                "openssl-1.1", "https://github.com/openssl/openssl", "LICENSE"
+            ),
+        ),
+        version_probe=_bundled_library_probe(
+            "yara",
+            "yara_python.libs",
+            1,
+            "libcrypto-*.so.1.1",
+            rb"OpenSSL (1\.1\.1[a-z]?) ",
+            "",
+        ),
+    ),
+    # Bundled in the pygit2 wheel (pygit2.libs/libpcre-*.so) for libgit2's regex
+    # support: the manylinux build image's system PCRE 8.42, which auditwheel
+    # grafted in. PCRE1 has no release tags; the commit is "Final file tidies for
+    # 8.42." in the project's archived PCRE1 repository.
+    "pcre": ThirdPartyLicense(
+        tool="pcre",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        tag="",
+        version="8.42",
+        license="BSD-3-Clause",
+        repository="https://github.com/PCRE2Project/pcre1",
+        commit=_THIRD_PARTY_HASHES["pcre commit"],
+        files=(
+            _from_source("pcre", "https://github.com/PCRE2Project/pcre1", "LICENCE"),
+        ),
+        version_probe=_pygit2_bundled_library_probe(
+            "libpcre-*", rb"([0-9]+\.[0-9]+) [0-9]{4}-[0-9]{2}-[0-9]{2}", ""
+        ),
+    ),
+    # A GuardDog dependency, in GuardDog's uv tool environment. Its version is held
+    # to this one in the image by the uv constraint the Dockerfile writes
+    # (PYGIT2_VERSION), so these files describe the copy that ships.
+    "pygit2": ThirdPartyLicense(
+        tool="pygit2",
+        version="v1.18.2",
+        license="GPL-2.0-only WITH GCC-exception-2.0",
+        repository="https://github.com/libgit2/pygit2",
+        commit=_THIRD_PARTY_HASHES["pygit2 commit"],
+        files=(
+            _from_source("pygit2", "https://github.com/libgit2/pygit2", "COPYING"),
+            _from_source("pygit2", "https://github.com/libgit2/pygit2", "AUTHORS.md"),
+        ),
+        version_probe=(
+            "{uv_tool_dir}/guarddog/bin/python",
+            "-c",
+            "import pygit2; print(pygit2.__version__)",
         ),
     ),
     # The wheel's dist-info holds no license file, only METADATA's
