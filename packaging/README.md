@@ -173,9 +173,12 @@ symlink, so the previous version keeps working.
 No maintainer script registers an alternative or a diversion either: a postinst that
 ran `update-alternatives --install /usr/bin/ash ash /usr/bin/<cli> 100`, or a
 `dpkg-divert` of `/usr/bin/ash`, would take the shell's name without shipping the path.
-`vl_assert_no_alternatives` is the guard: after every install and upgrade it reads
-`/etc/alternatives`, the alternatives databases and `dpkg-divert --list` for anything
-pointing into the package or diverting `/bin/ash`. `vl_check_maintainer_scripts` is a
+`vl_assert_no_alternatives` is the guard for those two mechanisms: after every install
+and upgrade it reads `/etc/alternatives`, the alternatives databases and `dpkg-divert
+--list` for anything pointing into the package or diverting `/bin/ash`. It does not
+look for a `/usr/bin/ash` a script writes directly, as a file or a symlink; that is
+`vl_assert_shell_intact`'s job, and `vl_check_command_paths` catches one the package
+ships. `vl_check_maintainer_scripts` is a
 pre-filter in front of it that refuses any call to `update-alternatives`,
 `alternatives` or `dpkg-divert` in a built package's scripts (`dpkg-deb -e`, `rpm -qp
 --scripts --triggerscripts`); being a grep, it cannot see a command name built from
