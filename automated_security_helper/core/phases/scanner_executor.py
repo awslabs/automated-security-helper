@@ -268,13 +268,19 @@ class ScannerExecutor:
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
         from automated_security_helper.utils.content_db_staleness import (
             assess_scanner,
+            resolve_overrides,
             resolve_policy,
         )
 
         if not isinstance(raw_results, SarifReport):
             return
-        policy = resolve_policy(getattr(self.plugin_context, "config", None))
-        assess_scanner(scanner_plugin, raw_results, policy)
+        config = getattr(self.plugin_context, "config", None)
+        assess_scanner(
+            scanner_plugin,
+            raw_results,
+            resolve_policy(config),
+            overrides=resolve_overrides(config),
+        )
 
     # ------------------------------------------------------------------
     # Single-scanner execution
