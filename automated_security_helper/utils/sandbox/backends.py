@@ -525,7 +525,9 @@ class SandboxExecBackend(SandboxBackend):
             for p in list(policy.writable) + list(policy.cache) + [private_tmp]
         )
         # TEMPORARY (diagnostic): log every Mach lookup and exec the profile allows,
-        # so CI can record what the builtin scanners actually use.
+        # so CI can record what the builtin scanners actually use. "open-files" also
+        # lifts every file restriction, so scanners that the file rules stop early
+        # run to the end and their full Mach and exec use is recorded.
         report = os.environ.get("ASH_SANDBOX_EXEC_REPORT", "")
         if report == "prefix":
             exec_rule = "(allow (with report) process-exec)"
@@ -574,6 +576,8 @@ class SandboxExecBackend(SandboxBackend):
                 '(allow network-outbound (literal "/private/var/run/mDNSResponder"))',
             ]
         # Without a network nothing is allowed: (deny default) covers every socket.
+        if report == "open-files":
+            lines.append("(allow file-read* file-write*)")
         return "\n".join(lines)
 
     def plan(

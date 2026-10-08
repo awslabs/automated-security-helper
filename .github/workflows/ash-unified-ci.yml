@@ -985,7 +985,11 @@ jobs:
           PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
           SANDBOX: ${{ matrix.sandbox }}
           DIAG_DIR: ${{ runner.temp }}/sandbox-exec-diag
+          # TEMPORARY (diagnostic): lift the file rules so every scanner runs to the
+          # end and its whole Mach and exec use is reported.
+          ASH_SANDBOX_EXEC_REPORT: ${{ runner.os == 'macOS' && 'open-files' || '' }}
         run: |
+          set -o pipefail
           mkdir -p "$DIAG_DIR"
           python -u scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ash \
