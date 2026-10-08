@@ -168,6 +168,38 @@ class TestTheOverridesReachTheInstallCommand:
                 "==" + entry.version.lstrip("v")
             ), specs[entry.distribution]
 
+    def test_without_the_pins_no_install_argv_carries_an_exact_pin(
+        self, recorded_install, monkeypatch
+    ):
+        """Stronger than the test above: no `==` anywhere in the unpinned argv.
+
+        The test above only says each install does not end in its license entry's
+        version, which a pin to some OTHER version would also satisfy. Without
+        overrides the scanners' own ranges must be installed, so no `uv tool
+        install` argument may name an exact version at all.
+        """
+        argvs: "list[list[str]]" = []
+        real = _uv_tool_install_specs
+
+        def capture(ran):
+            argvs.extend(
+                shlex.split(cmd) if isinstance(cmd, str) else list(cmd) for cmd in ran
+            )
+            return real(ran)
+
+        monkeypatch.setattr(f"{__name__}._uv_tool_install_specs", capture, raising=True)
+        specs = recorded_install([])
+        installs = [
+            argv
+            for argv in argvs
+            if argv[:3] == ["uv", "tool", "install"] or argv[1:4] == ["tool", "install"]
+        ]
+        for tool in PYTHON_TOOLS:
+            assert THIRD_PARTY_LICENSES[tool].distribution in specs, specs
+        assert installs, "no `uv tool install` was recorded"
+        for argv in installs:
+            assert not any("==" in arg for arg in argv), argv
+
     def test_a_single_override_pins_only_its_tool(self, recorded_install):
         specs = recorded_install(
             ["--config-overrides", "scanners.semgrep.options.tool_version===1.2.3"]
