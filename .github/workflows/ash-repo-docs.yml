@@ -51,6 +51,20 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # mkdocs-material's privacy plugin downloads every external asset the site
+      # references (mermaid, twemoji, the star-history badge) and logs a failed fetch
+      # as a WARNING, which --strict turns into a failed build. Caching its download
+      # directory means a transient fetch failure only matters on a cold cache. The
+      # key rolls with the lockfile and mkdocs.yml, which is where the asset set
+      # changes; restore-keys reuse the last cache when only one of them moved.
+      - name: Cache the privacy plugin's downloaded assets
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/plugin/privacy
+          key: mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}
+          restore-keys: |
+            mkdocs-privacy-
+
       # --strict turns every mkdocs warning into a failure: a link to a file outside
       # docs_dir, a nav entry naming a missing page, an unknown anchor. Without it the
       # build reported success over a broken link in docs/mcp/streamable-http.md, and
@@ -82,6 +96,20 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
+
+      # mkdocs-material's privacy plugin downloads every external asset the site
+      # references (mermaid, twemoji, the star-history badge) and logs a failed fetch
+      # as a WARNING, which --strict turns into a failed build. Caching its download
+      # directory means a transient fetch failure only matters on a cold cache. The
+      # key rolls with the lockfile and mkdocs.yml, which is where the asset set
+      # changes; restore-keys reuse the last cache when only one of them moved.
+      - name: Cache the privacy plugin's downloaded assets
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/plugin/privacy
+          key: mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}
+          restore-keys: |
+            mkdocs-privacy-
 
       # Strict here too, so a warning that reached main without the pull request
       # build (a ruleset bypass) stops the deploy instead of publishing it.
