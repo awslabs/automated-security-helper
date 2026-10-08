@@ -139,7 +139,12 @@ def _walk_manifests(raw: list) -> tuple[list, list[str]]:
         if "items" in doc:
             if not (isinstance(kind, str) and kind.endswith("List")):
                 problems.append(f"manifests: items on a non-List kind: {key}")
-            items, more = _walk_manifests(doc.get("items") or [])
+            if not isinstance(doc["items"], list):
+                # kubectl refuses this at decode time; say so rather than read nothing.
+                problems.append(f"manifests: items is not a list: {key}")
+            items, more = _walk_manifests(
+                doc["items"] if isinstance(doc["items"], list) else []
+            )
             docs += items
             problems += more
         elif isinstance(kind, str) and kind.endswith("List"):
@@ -743,6 +748,18 @@ SECRETS_BINDING = {
 }
 
 
+def _with_namespace_items(item: dict) -> str:
+    """operator.yaml with `items` added to its Namespace, planted on the parsed documents.
+
+    Structural, so no line of operator.yaml has to stay as it is for the plant to land.
+    """
+    docs = _yaml_docs(OPERATOR_YAML)
+    namespaces = [d for d in docs if d.get("kind") == "Namespace"]
+    assert len(namespaces) == 1, "expected one Namespace in operator.yaml"
+    namespaces[0]["items"] = [item]
+    return "\n---\n".join(json.dumps(d) for d in docs)
+
+
 def _find(docs: list, kind: str, name: str) -> dict:
     found = [d for d in docs if d.get("kind") == kind and d["metadata"]["name"] == name]
     assert len(found) == 1, f"expected one {kind}/{name}"
@@ -1129,19 +1146,26 @@ class TestRbac:
                 id="H3-items-on-a-namespace",
             ),
             pytest.param(
-                {
-                    "operator.yaml": OPERATOR_YAML.read_text().replace(
-                        "kind: Namespace\nmetadata:\n  name: ash-system\n",
-                        "kind: Namespace\nmetadata:\n  name: ash-system\nitems:\n"
-                        f"  - {json.dumps(SECRETS_ROLE)}\n",
-                        1,
-                    )
-                },
+                {"operator.yaml": _with_namespace_items(SECRETS_ROLE)},
                 [
                     "manifests: items on a non-List kind: Namespace (cluster)/ash-system",
                     "RBAC objects: only in the operator: Role ash-system/ash-secrets",
                 ],
                 id="H2-items-on-the-existing-namespace",
+            ),
+            pytest.param(
+                {
+                    "zz-m.json": json.dumps(
+                        {
+                            "apiVersion": "v1",
+                            "kind": "List",
+                            "metadata": {"name": "m"},
+                            "items": SECRETS_ROLE,
+                        }
+                    )
+                },
+                ["manifests: items is not a list: List (cluster)/m"],
+                id="M-items-not-a-list",
             ),
             pytest.param(
                 {
