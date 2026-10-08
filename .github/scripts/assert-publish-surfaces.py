@@ -91,9 +91,18 @@ KNOWN LIMITATIONS
     so a condition it cannot read is reported rather than trusted. Entries
     without `required_condition` are still keyed on WHAT only, and a job-level
     `if:` is not read.
-  * Release assets (`softprops/action-gh-release` and friends) are out of scope.
-    A release is a deliberate, human-triggered publication with a human on the
-    button, which is the opposite of the accidental case this guards.
+  * Release assets are censused too, as kind `release-asset`: a `run:` line that
+    calls `gh release create` or `gh release upload`, keyed on the positional
+    arguments after the tag (the files it attaches), and the release-publishing
+    actions (`softprops/action-gh-release`, `ncipollo/release-action`,
+    `actions/upload-release-asset`), keyed on their file inputs. A release has a
+    human on the button, but which files it attaches is decided in YAML, and a
+    second attach site or a widened glob is the same mistake as a second upload.
+    The set of files a glob matches is not this script's business:
+    packaging/release-assets.py holds the staged directory to a fixed list before
+    the one allowlisted site attaches it. A `gh` call built at run time (a
+    variable holding "release", an alias, a script file) is invisible here, the
+    same limit as the `run:` steps described below.
   * Expressions are compared as source text. Two spellings of the same artifact
     name are two different keys, which costs a false failure on a pure
     refactor -- the cheaper direction to be wrong in.
@@ -118,6 +127,7 @@ import argparse
 import contextlib
 import io
 import re
+import shlex
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -140,6 +150,31 @@ KIND_BUILTIN_CACHE = "builtin-cache"
 # much is exported.
 KIND_CACHE_ACCESS_HANDOFF = "cache-access-handoff"
 KIND_LAYER_CACHE = "layer-cache"
+# Files attached to a GitHub Release. See KNOWN LIMITATIONS.
+KIND_RELEASE_ASSET = "release-asset"
+_GH_RELEASE = re.compile(r"(?:^|[\s;&|(])gh\s+release\s+(create|upload)\b(.*)$")
+# gh release flags that take a value, so the value is not read as a file to attach.
+_GH_RELEASE_VALUE_FLAGS = frozenset(
+    {
+        "--repo",
+        "-R",
+        "--target",
+        "--title",
+        "-t",
+        "--notes",
+        "-n",
+        "--notes-file",
+        "-F",
+        "--discussion-category",
+        "--notes-start-tag",
+    }
+)
+# Actions that attach files to a release, and the inputs that name the files.
+_RELEASE_ACTIONS: dict[str, tuple[str, ...]] = {
+    "action-gh-release": ("files",),
+    "release-action": ("artifacts",),
+    "upload-release-asset": ("asset_path", "asset_name"),
+}
 _LAYER_CACHE_ENV = "ASH_GHA_BUILD_CACHE_EXPORT"
 _LAYER_CACHE_ACTION = "ash build (buildx type=gha)"
 
@@ -294,7 +329,24 @@ _GRYPE_DB_CACHE_REASON = (
     "content_databases.py), so no restored copy is older than that bound."
 )
 
+
 ALLOWLIST: tuple[Entry, ...] = (
+    # -- GitHub Release attachments ----------------------------------------
+    Entry(
+        file=".github/workflows/ash-tag-on-merge.yml",
+        kind=KIND_RELEASE_ASSET,
+        action="gh release create",
+        publishes=(
+            "assets=${NOTES_ARGS[@]+${NOTES_ARGS[@]}}|dist/*.whl|dist/*.tar.gz|dist/*.mcpb"
+        ),
+        reason=(
+            "THE RELEASE. The one place files are attached to a GitHub Release, in "
+            "the job that runs only when a chore(release): pull request merges. The "
+            "wheel, sdist and .mcpb are built, gated and attested in that same job "
+            "before this step. NOTES_ARGS expands to --notes and the changelog text, "
+            "never a file."
+        ),
+    ),
     # -- Digest-pinned scanner release assets (maintainer decision) ----------
     Entry(
         file=".github/actions/tool-download-cache/action.yml",
@@ -1028,6 +1080,14 @@ def _classify(step: dict) -> tuple[str, str] | None:
     with_block = step.get("with")
     inputs = with_block if isinstance(with_block, dict) else {}
 
+    # A release-publishing action. Keyed on the inputs that name the files.
+    if segments[-1] in _RELEASE_ACTIONS:
+        rendered = " ".join(
+            f"{name}={_flatten(inputs.get(name)) or '(unset)'}"
+            for name in _RELEASE_ACTIONS[segments[-1]]
+        )
+        return KIND_RELEASE_ASSET, rendered
+
     # An artifact upload, by any owner. Keyed on `name` and `path` because those
     # two decide what appears at the download URL.
     if segments[-1].startswith("upload-artifact"):
@@ -1121,6 +1181,56 @@ def _layer_cache_sites(document: object):
                 )
 
 
+def _gh_release_attachments(script: str) -> list[tuple[str, str]]:
+    """(verb, publishes) for each `gh release create|upload` in a run: script.
+
+    Continuation lines are joined first, so a command spread over several lines is
+    one command. A line that is wholly a shell comment is skipped, so prose can
+    name the command. The positional arguments after the tag are the files; a flag
+    that takes a value has its value skipped, and anything dynamic (a variable, an
+    array expansion) stays in the key verbatim, because it could add files.
+    """
+    joined = re.sub(r"\\\n", " ", script)
+    sites: list[tuple[str, str]] = []
+    for line in joined.splitlines():
+        if line.strip().startswith("#"):
+            continue
+        match = _GH_RELEASE.search(line)
+        if match is None:
+            continue
+        verb, rest = match.group(1), match.group(2)
+        try:
+            tokens = shlex.split(rest, comments=True)
+        except ValueError:
+            tokens = rest.split()
+        positional: list[str] = []
+        skip_next = False
+        for token in tokens:
+            if skip_next:
+                skip_next = False
+                continue
+            if token in {";", "&&", "||", "|"}:
+                break
+            if token.startswith("-"):
+                if "=" not in token and token in _GH_RELEASE_VALUE_FLAGS:
+                    skip_next = True
+                continue
+            positional.append(token)
+        files = positional[1:]
+        sites.append((verb, f"assets={'|'.join(files) or '(none)'}"))
+    return sites
+
+
+def _release_sites(document: object):
+    """(mapping, kind, action, publishes) for every gh release attach in run: text."""
+    for node in _walk_mappings(document):
+        text = node.get("run")
+        if not isinstance(text, str) or "gh" not in text:
+            continue
+        for verb, publishes in _gh_release_attachments(text):
+            yield node, KIND_RELEASE_ASSET, f"gh release {verb}", publishes
+
+
 def _walk_steps(node: object):
     """Yield every mapping that carries a `uses:`, wherever it sits.
 
@@ -1164,7 +1274,10 @@ def scan_text(rel_path: str, text: str) -> list[Found]:
                     condition=_flatten(step.get("if")),
                 )
             )
-        for node, kind, action, publishes in _layer_cache_sites(document):
+        for node, kind, action, publishes in (
+            *_layer_cache_sites(document),
+            *_release_sites(document),
+        ):
             name = node.get("name")
             found.append(
                 Found(
@@ -1317,6 +1430,7 @@ def _report_failures(
             KIND_BUILTIN_CACHE: "enables an action's built-in cache",
             KIND_CACHE_ACCESS_HANDOFF: "hands the Actions cache token to later steps",
             KIND_LAYER_CACHE: "sets ASH's image layer-cache export",
+            KIND_RELEASE_ASSET: "attaches files to a GitHub Release",
         }[surface.kind]
         print(
             f"::error file={surface.file},line={item.line}::New publicly-downloadable surface: {surface.file} step '{item.step}' {headline} ({surface.publishes}) and is not allowlisted"
@@ -1377,6 +1491,28 @@ def _report_failures(
 
 _SELF_TEST_ALLOWED_FILE = "fixture/allowed.yml"
 _SELF_TEST_CLEAN_FILE = "fixture/clean.yml"
+_SELF_TEST_RELEASE_FILE = "fixture/release.yml"
+
+# The allowlisted release attach is spread over continuation lines and preceded by a
+# comment that names the command, so the clean baseline already proves the joiner
+# reads one command and the comment rule keeps prose out of the census.
+_SELF_TEST_RELEASE_YAML = """
+name: fixture release
+on: [pull_request]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish
+        run: |
+          set -euo pipefail
+          # gh release create v9 everything/* would be wrong here
+          gh release create "$TAG" \\
+            --repo "$GITHUB_REPOSITORY" \\
+            --title "$TAG" \\
+            --generate-notes \\
+            dist/*.whl
+"""
 
 _SELF_TEST_ALLOWED_YAML = """
 name: fixture
@@ -1436,6 +1572,13 @@ _SELF_TEST_ALLOWLIST: tuple[Entry, ...] = (
         publishes="enable-cache=true",
         reason="self-test fixture",
     ),
+    Entry(
+        file=_SELF_TEST_RELEASE_FILE,
+        kind=KIND_RELEASE_ASSET,
+        action="gh release create",
+        publishes="assets=dist/*.whl",
+        reason="self-test fixture",
+    ),
 )
 
 
@@ -1452,7 +1595,36 @@ def self_test() -> int:
     baseline = {
         _SELF_TEST_ALLOWED_FILE: _SELF_TEST_ALLOWED_YAML,
         _SELF_TEST_CLEAN_FILE: _SELF_TEST_CLEAN_YAML,
+        _SELF_TEST_RELEASE_FILE: _SELF_TEST_RELEASE_YAML,
     }
+
+    # (h) a second place that attaches files to a release, through gh.
+    release_upload = dict(baseline)
+    release_upload[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Attach the image to the release too
+        run: gh release upload "v${VERSION}" image.tar --clobber
+"""
+    )
+
+    # (h1) the same through a release action instead of gh.
+    release_action = dict(baseline)
+    release_action[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Release with an action
+        uses: softprops/action-gh-release@0000000000000000000000000000000000000000 # v2
+        with:
+          files: dist/*
+"""
+    )
+
+    # (h2) the allowlisted attach widened to more files.
+    release_widened = dict(baseline)
+    release_widened[_SELF_TEST_RELEASE_FILE] = _SELF_TEST_RELEASE_YAML.replace(
+        "dist/*.whl", "dist/*.whl build/*"
+    )
 
     # (a) a new upload in a file that has none today.
     new_file_upload = dict(baseline)
@@ -1658,6 +1830,9 @@ def self_test() -> int:
         ("(f3) failure() negated", widened_negated, 0, 0, 1),
         ("(f4) failure() inside a negated group", widened_grouped, 0, 0, 1),
         ("(g) bare if: failure() still holds", bare_failure, 0, 0, 0),
+        ("(h) a second gh release attach", release_upload, 1, 0, 0),
+        ("(h1) a release action attaching files", release_action, 1, 0, 0),
+        ("(h2) the allowed release attach widened", release_widened, 1, 1, 0),
     ]
 
     failures = 0
