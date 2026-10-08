@@ -449,3 +449,174 @@ def test_the_assert_leg_runs_the_selection_check(family: str) -> None:
     )
     assert_part = text[text.index('echo "== 4. the three e2e cases') :]
     assert "vl_assert_dependency_selection" in assert_part
+
+
+# -- every job that derives N-1 checks out the full history ------------------------
+#
+# prev_tree.py --prev-ref auto chooses N-1 from the release tags and ancestors, and in a
+# shallow clone it fails ("fetch the full history"). A job that reaches it, directly or
+# through a script that sources n1-source.sh or n1-ref.sh, therefore needs
+# `fetch-depth: 0` on its checkout. Found by reading the scripts, not by a list, so a
+# new leg that starts deriving N-1 is held to it without being named here.
+
+WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+_HELPERS = ("n1-source.sh", "n1-ref.sh")
+# A direct call: the script path followed by its --repo argument, in bash or in a
+# PowerShell argument array ('...prev_tree.py'), '--repo', ...).
+_DIRECT_CALL = re.compile(r"""prev_tree\.py['")]*\s*,?\s*['"]?--repo\b""")
+# Scripts that reach the derivation but never read the checkout's history, each with
+# the reason. Checked for staleness below.
+_NO_HISTORY_NEEDED = {
+    "packaging/test-n1-source.sh": (
+        "builds its own throwaway git histories and points n1_export at them"
+    ),
+}
+
+
+def _code_lines(text: str) -> str:
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def _scripts() -> Dict[str, str]:
+    found: Dict[str, str] = {}
+    for root in ("packaging", "scripts", "editors", ".github/scripts"):
+        for suffix in ("*.sh", "*.ps1", "*.psm1"):
+            for path in (REPO_ROOT / root).rglob(suffix):
+                if "node_modules" in path.parts or "build" in path.parts:
+                    continue
+                rel = path.relative_to(REPO_ROOT).as_posix()
+                found[rel] = _code_lines(path.read_text(encoding="utf-8"))
+    return found
+
+
+def _path_pattern(rel: str) -> str:
+    """rel as it appears in a script or a run step, with / or \\ separators."""
+    return r"[/\\]".join(re.escape(part) for part in rel.split("/"))
+
+
+def _invokes(code: str, rel: str) -> bool:
+    """Whether code sources or runs rel: `. "$REPO/rel"`, `bash rel`, `& ...rel`."""
+    return bool(
+        re.search(
+            r"(?:^|[\s;&|(])(?:\.|source|bash|sh|&|pwsh)\s+[\"']?[^\s\"']*"
+            + _path_pattern(rel)
+            + r"\b",
+            code,
+            re.MULTILINE,
+        )
+    )
+
+
+def n1_derivers(scripts: Dict[str, str]) -> set:
+    """Scripts that run the N-1 derivation over the checkout, transitively."""
+    derivers = {rel for rel in scripts if rel.rsplit("/", 1)[-1] in _HELPERS}
+    derivers |= {rel for rel, code in scripts.items() if _DIRECT_CALL.search(code)}
+    while True:
+        more = {
+            rel
+            for rel, code in scripts.items()
+            if rel not in derivers and any(_invokes(code, d) for d in derivers)
+        }
+        if not more:
+            break
+        derivers |= more
+    return derivers - set(_NO_HISTORY_NEEDED)
+
+
+def _runs_a_deriver(job: Dict[str, Any], derivers: set) -> bool:
+    runs = " ".join(str(s.get("run", "")) for s in job.get("steps") or [])
+    return any(re.search(_path_pattern(d) + r"\b", runs) for d in derivers)
+
+
+def shallow_n1_jobs(workflow_texts: Dict[str, str], derivers: set) -> list:
+    """(workflow, job) pairs that run a deriver without a fetch-depth 0 checkout."""
+    hits = []
+    for workflow, text in sorted(workflow_texts.items()):
+        for name, job in (yaml.safe_load(text).get("jobs") or {}).items():
+            if not _runs_a_deriver(job, derivers):
+                continue
+            checkouts = [
+                s
+                for s in job.get("steps") or []
+                if str(s.get("uses", "")).startswith("actions/checkout@")
+            ]
+            depths = [
+                str((s.get("with") or {}).get("fetch-depth", "1")) for s in checkouts
+            ]
+            if not checkouts or any(d != "0" for d in depths):
+                hits.append((workflow, name))
+    return hits
+
+
+def _workflow_texts() -> Dict[str, str]:
+    return {
+        p.name: p.read_text(encoding="utf-8") for p in sorted(WORKFLOWS.glob("*.yml"))
+    }
+
+
+def test_the_derivers_are_found_by_reading_the_scripts() -> None:
+    derivers = n1_derivers(_scripts())
+    # The ones this tree has today; finding fewer means the scan went blind.
+    assert {
+        "packaging/n1-source.sh",
+        "packaging/build-test-wheels.sh",
+        "packaging/chocolatey/verify-on-windows.ps1",
+    } <= derivers
+    # Same basenames, different scripts: neither derives N-1.
+    assert "packaging/msix/verify-on-windows.ps1" not in derivers
+    assert "packaging/verify-lib.sh" not in derivers
+
+
+def test_every_job_that_derives_n_minus_1_checks_out_the_full_history() -> None:
+    derivers = n1_derivers(_scripts())
+    texts = _workflow_texts()
+    assert shallow_n1_jobs(texts, derivers) == []
+    # And the scan saw the jobs it is about, so an empty result is not vacuous.
+    covered = [
+        (workflow, name)
+        for workflow, text in texts.items()
+        for name, job in (yaml.safe_load(text).get("jobs") or {}).items()
+        if _runs_a_deriver(job, derivers)
+    ]
+    assert ("ash-package.yml", "flatpak") in covered
+    assert ("ash-native-packages.yml", "package") in covered
+    assert ("ash-package.yml", "chocolatey") in covered
+
+
+@pytest.mark.parametrize(
+    ("workflow", "job"),
+    [("ash-package.yml", "flatpak"), ("ash-native-packages.yml", "package")],
+)
+def test_a_shallow_checkout_in_a_deriving_job_is_caught(
+    workflow: str, job: str
+) -> None:
+    texts = _workflow_texts()
+    parsed = yaml.safe_load(texts[workflow])
+    for step in parsed["jobs"][job]["steps"]:
+        if str(step.get("uses", "")).startswith("actions/checkout@"):
+            step["with"].pop("fetch-depth")
+    planted = {**texts, workflow: yaml.safe_dump(parsed)}
+    assert (workflow, job) in shallow_n1_jobs(planted, n1_derivers(_scripts()))
+
+
+def test_a_new_script_that_sources_the_helper_is_a_deriver() -> None:
+    scripts = {**_scripts(), "packaging/new-leg.sh": '. "$REPO/packaging/n1-source.sh"'}
+    assert "packaging/new-leg.sh" in n1_derivers(scripts)
+    scripts["packaging/calls-it.sh"] = 'bash "$REPO/packaging/new-leg.sh"'
+    assert "packaging/calls-it.sh" in n1_derivers(scripts)
+    # A mention in a comment is not a call.
+    scripts["packaging/mentions.sh"] = "# see packaging/n1-source.sh"
+    assert "packaging/mentions.sh" not in n1_derivers(
+        {k: _code_lines(v) for k, v in scripts.items()}
+    )
+
+
+def test_the_no_history_exemptions_are_still_true() -> None:
+    scripts = _scripts()
+    for rel in _NO_HISTORY_NEEDED:
+        assert rel in scripts, f"{rel} is exempted but no longer exists"
+        assert re.search(r"n1-source\.sh", scripts[rel]), (
+            f"{rel} is exempted but no longer reaches the derivation"
+        )
