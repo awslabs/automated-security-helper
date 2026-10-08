@@ -22,7 +22,9 @@ CloudFormation template for cfn-nag and cdk-nag, a pinned old Python dependency 
 grype, an npm lockfile for npm-audit, the actionlint and zizmor fixture workflows,
 the cfn-lint/cfn-guard insecure template, and the gitleaks fixture's fabricated
 tokens (materialized under ``secrets/``, where its ``.gitleaks.toml`` is not the
-root config), so each builtin scanner has something to find.
+root config), so each builtin scanner has something to find. For the hadolint and
+GuardDog community scanners it adds GuardDog's fixture packages under
+``packages/``; hadolint reads the snapshot fixture's Dockerfile.
 ``--ash-plugin-modules`` loads community modules in both runs, and
 ``--config-override`` passes ``--config-overrides`` to both, for a scanner that is
 off by default. Both runs use --offline as well, unless --online is passed, in which
@@ -62,6 +64,7 @@ WORKFLOWS = {
     / "workflows"
     / "vulnerable.yml",
 }
+GUARDDOG_PACKAGES = SCANNER_DATA / "guarddog" / "fixture_repo"
 CFN_LINT_GUARD_TEMPLATE = (
     SCANNER_DATA / "cfn_lint_guard" / "repo" / "templates" / "insecure.yaml"
 )
@@ -114,6 +117,7 @@ def build_fixture(root: Path) -> Path:
     from tests.utils.gitleaks_fixture import materialize
 
     materialize(source / "secrets")
+    shutil.copytree(GUARDDOG_PACKAGES, source / "packages")
     return source
 
 

@@ -201,11 +201,11 @@ scanners:
 - GuardDog's `extension` ecosystem (editor extensions) is not offered: its manifest is an
   ordinary `package.json` and cannot be told apart from an npm package.
 - A file reached only through a symlink is not scanned.
-- The staging copy is made of hard links when the temporary directory (`TMPDIR`) is on
-  the same filesystem as the source, and of copies otherwise. In the container, where
-  the source is a bind mount, that means a copy of each package root's files; for a
-  repository with a root `pyproject.toml` or `package.json` that is most of the
-  repository.
+- The staging copy goes in GuardDog's results directory under ASH's output directory,
+  so that a sandboxed GuardDog can read it, and is removed after the scan. It is a copy
+  of each package root's files, never hard links, because that directory is writable
+  inside the sandbox. For a repository with a root `pyproject.toml` or `package.json`
+  that is most of the repository.
 - `verify` findings are located on the first manifest line naming the dependency, because
   GuardDog's JSON does not record where a dependency is declared.
 - When any invocation fails, the scanner's findings appear in its own SARIF file but not

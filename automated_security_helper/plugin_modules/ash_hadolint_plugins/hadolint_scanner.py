@@ -149,6 +149,8 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -254,6 +256,11 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     # With --no-fail, 0 is the only status hadolint gives a run that completed.
     success_exit_codes: ClassVar[Set[int]] = {0}
+    # The strict default: no network, and no variables or paths beyond the baseline.
+    # The HADOLINT_* policy variables and the user-level config are not passed into
+    # a sandbox yet; grants derived from the environment or options wait for the
+    # sandbox's grant gates.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -366,7 +373,8 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 "hadolint-no-config.yaml"
             )
             stub.parent.mkdir(parents=True, exist_ok=True)
-            stub.write_text("{}\n", encoding="utf-8")
+            with open_for_write(stub) as handle:
+                handle.write("{}\n")
             return stub.resolve()
         return None
 
@@ -617,12 +625,12 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                     level=logging.ERROR,
                     append_to_stream="stderr",
                 )
-            results_file.write_text(
-                sarif_report.model_dump_json(
-                    exclude_none=True, exclude_unset=True, by_alias=True
-                ),
-                encoding="utf-8",
-            )
+            with open_for_write(results_file) as handle:
+                handle.write(
+                    sarif_report.model_dump_json(
+                        exclude_none=True, exclude_unset=True, by_alias=True
+                    )
+                )
 
             driver = sarif_report.runs[0].tool.driver
             if driver.version:

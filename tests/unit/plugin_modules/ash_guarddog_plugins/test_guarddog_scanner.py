@@ -1533,3 +1533,41 @@ def test_windows_is_an_unsupported_platform_with_no_install_command(
     assert scanner.validate_plugin_dependencies() is False
     monkeypatch.setattr(module.platform, "system", lambda: "Linux")
     assert scanner.unsupported_platform_reason() is None
+
+
+def test_staging_is_inside_the_results_directory(tmp_path, fake):
+    """Under --sandbox GuardDog can read the results directory but not $TMPDIR.
+
+    Staged under the system temp directory, the sandboxed GuardDog was handed a path
+    that did not exist for it, took it for a package name and tried to download it,
+    so the sandbox parity run reported GuardDog ERROR (bwrap) or PASSED with no
+    findings (landlock) where the unsandboxed run reported 9 findings.
+    """
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go", "npm"])
+
+    scanner.scan(target=repo, target_type="source")
+
+    results_dir = Path(scanner.results_dir).resolve()
+    assert fake.staged_dirs
+    for staged in fake.staged_dirs:
+        assert staged.resolve().is_relative_to(results_dir), staged
+
+
+def test_a_write_to_a_staged_file_does_not_reach_the_source(tmp_path):
+    """The staging tree is sandbox-writable, so it must not share inodes with the source."""
+    root = tmp_path / "pkg"
+    root.mkdir()
+    original = root / "setup.py"
+    original.write_text("print('original')\n")
+    before = original.stat()
+    staging = tmp_path / "results" / "staging-x"
+    staging.mkdir(parents=True)
+
+    GuardDogScanner._stage(root, [original], staging)
+    (staging / "setup.py").write_text("print('changed through the staging tree')\n")
+
+    assert original.read_text() == "print('original')\n"
+    after = original.stat()
+    assert (after.st_ino, after.st_nlink) == (before.st_ino, before.st_nlink)
+    assert (staging / "setup.py").stat().st_ino != before.st_ino
