@@ -14,39 +14,17 @@ name: ASH Kubernetes operator
 # registry login and no push, and tests/test_no_image_publish.py fails the unit
 # suite if either appears in this file or in the e2e harness.
 
+# No paths filter on push or pull_request. lint-and-unit, crd-drift and e2e-kind are
+# required checks, and a required check whose workflow a paths filter skipped never
+# reports, so its rule is never satisfied. Every push runs all three. A paths filter
+# added back fails tests/unit/test_required_checks_run_on_every_push.py.
 on:
   push:
     branches:
       - "**"
-    paths:
-      - "deploy/kubernetes-operator/**"
-      - "automated_security_helper/**"
-      - "pyproject.toml"
-      # The shared e2e contract the kind job scans and judges with.
-      - "tests/e2e/**"
-      - "scripts/e2e/**"
-      # The EKS stack's inline applier, which e2e-kind runs against the cluster
-      # (tests/e2e/test_e2e_eks_applier.py), and the lock the e2e ASH image's
-      # runtime is exported from.
-      - "deploy/cdk/templates/AshEksOperator.template.json"
-      - "uv.lock"
-      - ".github/workflows/ash-kubernetes-operator.yml"
   pull_request:
-    paths:
-      - "deploy/kubernetes-operator/**"
-      - "automated_security_helper/**"
-      - "pyproject.toml"
-      # The shared e2e contract the kind job scans and judges with.
-      - "tests/e2e/**"
-      - "scripts/e2e/**"
-      # The EKS stack's inline applier, which e2e-kind runs against the cluster
-      # (tests/e2e/test_e2e_eks_applier.py), and the lock the e2e ASH image's
-      # runtime is exported from.
-      - "deploy/cdk/templates/AshEksOperator.template.json"
-      - "uv.lock"
-      - ".github/workflows/ash-kubernetes-operator.yml"
   # A merge queue runs every required check on the merged result, and accepts no
-  # paths filter, so this one is unfiltered.
+  # paths filter.
   merge_group:
   workflow_dispatch:
 
@@ -54,8 +32,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Pushes are keyed by commit, as in ash-e2e.yml and ash-jetbrains-ci.yml. Keyed by ref,
+  # a second push to a branch would cancel the first push's lint-and-unit, crd-drift and
+  # e2e-kind, and that commit would carry three cancelled required checks. Only
+  # pull_request runs may be cancelled; a merge_group run must finish or the queue loses
+  # its verdict.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   OPERATOR_DIR: deploy/kubernetes-operator

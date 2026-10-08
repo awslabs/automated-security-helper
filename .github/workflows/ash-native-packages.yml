@@ -105,74 +105,16 @@ name: ASH - Native Packages (deb, rpm)
 # artifacts, which on this public repository anyone can download, and are allowlisted as
 # such in .github/scripts/assert-publish-surfaces.py. Nothing here creates a release.
 
+# No paths filter on push or pull_request. `native-packages: gate` is a required check,
+# and a required check whose workflow a paths filter skipped never reports, so the rule
+# it belongs to is never satisfied. Every push runs every leg. A paths filter added back
+# here fails tests/unit/test_required_checks_run_on_every_push.py.
 on:
   push:
     branches: ["**"]
-    paths:
-      - ".github/workflows/ash-native-packages.yml"
-      - ".github/scripts/assert-artifact-contents.py"
-      - ".github/scripts/assert-required-checks-census.py"
-      - ".github/scripts/assert-workflow-gate.py"
-      - "tests/unit/test_native_packages_workflow.py"
-      - "tests/unit/test_posix_bash_helper.py"
-      - "tests/utils/posix_bash.py"
-      - "packaging/*.py"
-      - "packaging/*.sh"
-      - "packaging/deb/**"
-      - "packaging/rpm/**"
-      # The e2e cases and verdict every leg runs.
-      - "tests/e2e/**"
-      - "scripts/e2e/**"
-      - "automated_security_helper/**"
-      - "pyproject.toml"
-      - "hatch_build.py"
-      # Wheel inputs outside the package tree: the hook copies Dockerfile into the
-      # wheel, README.md is its METADATA, LICENSE and NOTICE are its license files
-      # (pyproject's license-files names exactly these two), and hatchling leaves out
-      # every file .gitignore ignores.
-      # packaging/assert-paths-filter.py measures this list against a wheel it
-      # builds under an audit hook.
-      - "Dockerfile"
-      - "README.md"
-      - "LICENSE"
-      - "NOTICE"
-      - ".gitignore"
   # `["**"]` so a PR stacked on a nested branch name still runs, as in ash-package.yml.
-  # The paths filter matches push's, so a PR that touches none of these files does not
-  # start twenty container legs. That cannot leave a required check pending: the
-  # required `required-checks` job lives in ash-unified-ci.yml and does not depend on
-  # this workflow. Keep the two lists identical.
   pull_request:
     branches: ["**"]
-    paths:
-      - ".github/workflows/ash-native-packages.yml"
-      - ".github/scripts/assert-artifact-contents.py"
-      - ".github/scripts/assert-required-checks-census.py"
-      - ".github/scripts/assert-workflow-gate.py"
-      - "tests/unit/test_native_packages_workflow.py"
-      - "tests/unit/test_posix_bash_helper.py"
-      - "tests/utils/posix_bash.py"
-      - "packaging/*.py"
-      - "packaging/*.sh"
-      - "packaging/deb/**"
-      - "packaging/rpm/**"
-      # The e2e cases and verdict every leg runs.
-      - "tests/e2e/**"
-      - "scripts/e2e/**"
-      - "automated_security_helper/**"
-      - "pyproject.toml"
-      - "hatch_build.py"
-      # Wheel inputs outside the package tree: the hook copies Dockerfile into the
-      # wheel, README.md is its METADATA, LICENSE and NOTICE are its license files
-      # (pyproject's license-files names exactly these two), and hatchling leaves out
-      # every file .gitignore ignores.
-      # packaging/assert-paths-filter.py measures this list against a wheel it
-      # builds under an audit hook.
-      - "Dockerfile"
-      - "README.md"
-      - "LICENSE"
-      - "NOTICE"
-      - ".gitignore"
   # merge_group takes no paths filter, so a queued entry always gets a verdict.
   merge_group:
     types: [checks_requested]
@@ -235,8 +177,9 @@ jobs:
           uv run --no-project python packaging/assert-package-payload.py --self-test
           --artifact-gate .github/scripts/assert-artifact-contents.py
 
-      # A wheel input missing from the paths filters is a change that reaches the
-      # packages with every leg below skipped. The checker builds the wheel itself,
+      # The workflow has no paths filter today, which the checker reads as covering
+      # every file. If one is added back, a wheel input missing from it is a change
+      # that reaches the packages with every leg below skipped. The checker builds the wheel itself,
       # in-process under an audit hook, and records every repository file the build
       # opens. Without `--isolated`, `--with hatchling` adds nothing when the
       # interpreter uv picks already has a hatchling, whatever its version: a .venv
@@ -246,12 +189,16 @@ jobs:
       # checker still refuses to measure if the installed hatchling does not satisfy
       # that requirement, so a stale one turns this step red rather than measuring a
       # different build.
-      - name: The paths filters cover every input to the wheel
+      - name: The paths filters here and in ash-package-formats.yml cover every input to the wheel
         shell: bash
         run: |
           set -euo pipefail
           uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py --self-test
           uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py
+          # ash-package-formats.yml wraps the same wheel and keeps a push paths filter,
+          # so its list must cover the same measured inputs. This workflow runs on every
+          # push, so a drift there turns this step red even when that one is skipped.
+          uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py --workflow .github/workflows/ash-package-formats.yml --event push
 
       # Toolchain-free: the name check runs before either build looks for its tool.
       - name: The deb and rpm builds refuse the same names, and the docs follow them

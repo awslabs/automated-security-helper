@@ -37,10 +37,16 @@ name: JetBrains plugin CI
 # verdict, and the plugin's own settings page quotes the entry-point contract that lives
 # elsewhere in the tree.
 #
-# The cost is stated plainly: this runs on every pull request, and the first run on a cold
-# cache resolves an IDE distribution of roughly a gigabyte from JetBrains' CDN.
+# The cost is stated plainly: this runs on every push and every pull request, and the first
+# run on a cold cache resolves an IDE distribution of roughly a gigabyte from JetBrains' CDN.
+#
+# The push trigger carries no paths filter either. It used to, on the argument that a push run
+# is a branch signal rather than a merge gate. That stopped being true when the five jobs here
+# became required checks: a required check whose workflow a paths filter skipped never reports,
+# so its rule is never satisfied. A paths filter added back on push or pull_request fails
+# tests/unit/test_required_checks_run_on_every_push.py.
 
-# WHY THERE IS A push TRIGGER DESPITE THE ABOVE
+# WHY THERE IS A push TRIGGER
 #
 # `workflow_dispatch` alone does not make a new workflow reachable. GitHub resolves a
 # dispatch by filename against the DEFAULT branch, so a workflow that has never run
@@ -48,44 +54,12 @@ name: JetBrains plugin CI
 # v4-capabilities` answers `HTTP 404: workflow not found on the default branch`. That
 # is measured, not inferred: it is what happened on this branch, while
 # ash-vscode-extension.yml -- new in the same merge -- dispatched fine because its
-# push trigger had already run it once and registered it.
-#
-# So on a long-lived feature branch with no pull request open, this workflow had no
-# trigger it could fire on at all. The push filter below is narrow enough that it
-# costs nothing on unrelated pushes and wide enough to give the branch a signal.
-#
-# A paths filter IS used on push, unlike on pull_request, and the asymmetry is
-# deliberate rather than an oversight. The argument above against filtering is about
-# a gate's verdict: a filtered pull_request leg plus an unfiltered merge_group leg
-# gives two different answers to "did this pass". A push run is not a merge gate --
-# it is a branch signal - so no verdict depends on it and there is nothing for the
-# asymmetry to make inconsistent. What it avoids is resolving a gigabyte of IDE
-# distribution on every push to a branch that did not touch the plugin.
-#
-# The headless-real job tests the plugin against the ASH CLI built from the same commit, so
-# a change to the CLI or to the shared e2e contract changes its verdict. The push filter
-# therefore also lists the CLI's sources and the e2e files it reads. "**" covers
-# v4-capabilities and v4/**, which is where the e2e legs are required to run.
+# push trigger had already run it once and registered it. "**" covers v4-capabilities
+# and v4/**, which is where the e2e legs are required to run.
 on:
   push:
     branches:
       - "**"
-    paths:
-      - "editors/jetbrains/**"
-      - ".github/workflows/ash-jetbrains-ci.yml"
-      - "automated_security_helper/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "tests/e2e/**"
-      - "scripts/e2e/**"
-      - "packaging/cli-name.sh"
-      - ".github/scripts/check-snapshot-trailers.py"
-      # assert-plugin-zip-contents.py imports its payload tables from this file.
-      - ".github/scripts/assert-artifact-contents.py"
-      # AshCoverageParityTest reads the coverage cases the VS Code extension and ASH's own
-      # parity test share, and the captured results files they edit.
-      - "editors/vscode/test/fixtures/coverage-cases/**"
-      - "editors/vscode/test/fixtures/scans/**"
   pull_request:
     branches:
       - "**"

@@ -39,8 +39,9 @@ on:
     paths:
       - "packaging/**"
       - "Formula/**"
-      # Every input to the wheel the packages wrap, the same set ash-native-packages.yml
-      # names and packaging/assert-paths-filter.py measures there. Without these a push
+      # Every input to the wheel the packages wrap. packaging/assert-paths-filter.py
+      # --event push measures this list against the wheel's inputs, run from
+      # ash-native-packages.yml's self-tests job on every push. Without these a push
       # that changes only ASH's code rebuilds no package, so a Flatpak, MSIX, Chocolatey
       # or winget regression in that code goes unseen until a pull request.
       - "automated_security_helper/**"
