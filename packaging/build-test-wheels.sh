@@ -5,25 +5,32 @@
 # Builds the two wheels the native-package verifications consume, and gates both:
 #
 #   <outdir>/dist/       the wheel for this tree (N)
-#   <outdir>/dist-prev/  the same tree with a LOWER version (N-1), for the upgrade legs
+#   <outdir>/dist-prev/  the wheel for N-1: the previous commit (packaging/n1-source.sh)
+#                        with its version lowered, built from that commit's own tree
+#   <outdir>/prev/src/   that commit's tree, whose packaging/ the upgrade legs build
+#                        the N-1 package with
+#   <outdir>/n1.env      N1_SHA, N1_REF, N1_HEAD and N1_VERSION, for the legs' logs
 #
 #   packaging/build-test-wheels.sh <outdir>
 #
 # Run inside the target container, from a checkout at $REPO (default: this script's
-# repository). The source is copied out with `git archive` first, because the build
-# hook writes into the tree it builds and the checkout may be read-only.
+# repository) with its full history: N-1 is derived from the history, and a shallow
+# clone fails the derivation and says so. The sources are exported with `git archive`
+# first, because the build hook writes into the tree it builds and the checkout may be
+# read-only.
 #
 # WHY THE WHEELS ARE BUILT IN EACH LEG RATHER THAN ONCE AND DOWNLOADED
 #
 # A shared build job would have to upload the wheels as a workflow artifact, and on a
 # public repository an artifact is downloadable by anyone. The N-1 wheel in particular
-# is this tree's code labeled with a version it is not, which must never be something
-# a stranger can download. Building per leg costs a few seconds of `uv build` and
-# publishes nothing. The wheel is built the way ash-package.yml builds the gated one,
-# and is gated here by the same check before anything packages it.
+# carries a version it is not, which must never be something a stranger can download.
+# Building per leg costs a few seconds of `uv build` and publishes nothing. The wheel is
+# built the way ash-package.yml builds the gated one, and is gated here by the same
+# check before anything packages it.
 #
-# N-1 is the last non-zero component of N decremented (3.7.0 -> 3.6.0). It is not a
-# real release; it exists so the maintainer scripts run across a real version change.
+# N-1's version is its own [project] version with the last non-zero component
+# decremented (4.0.0 -> 3.0.0). It is not a real release; it makes the upgrade cross a
+# real version change as well as a real code change.
 set -euo pipefail
 
 OUTDIR="${1:?usage: build-test-wheels.sh <outdir>}"
@@ -39,8 +46,7 @@ command -v git >/dev/null || vl_fail "git is required to export the tree"
 # commitizen table's `version` is never read.
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p;T;q' "$REPO/pyproject.toml")"
 [ -n "$VERSION" ] || vl_fail "no [project] version in $REPO/pyproject.toml"
-PREV_VERSION="$(vl_lower_version "$VERSION")" || vl_fail "cannot derive a lower version from $VERSION"
-vl_say "== building N=$VERSION and N-1=$PREV_VERSION"
+vl_say "== building N=$VERSION, and N-1 from the history"
 
 export_tree() {
   local dest="$1"
@@ -50,23 +56,37 @@ export_tree() {
   git -c safe.directory="$REPO" -C "$REPO" archive HEAD | tar -x -C "$dest"
 }
 
-rm -rf "$OUTDIR/dist" "$OUTDIR/dist-prev"
+# shellcheck source=packaging/n1-source.sh
+. "$REPO/packaging/n1-source.sh"
+
+rm -rf "$OUTDIR/dist" "$OUTDIR/dist-prev" "$OUTDIR/prev" "$OUTDIR/n1.env"
 TREE="$(mktemp -d)"
 export_tree "$TREE/n"
 uv build --quiet --wheel --out-dir "$OUTDIR/dist" "$TREE/n"
-
-export_tree "$TREE/prev"
-# Only [project]'s version line: commitizen's would otherwise change too.
-sed -i "0,/^version = \"${VERSION}\"\$/s//version = \"${PREV_VERSION}\"/" "$TREE/prev/pyproject.toml"
-grep -q "^version = \"${PREV_VERSION}\"\$" "$TREE/prev/pyproject.toml" \
-  || vl_fail "could not set the N-1 version in the exported pyproject.toml"
-uv build --quiet --wheel --out-dir "$OUTDIR/dist-prev" "$TREE/prev"
 rm -rf "$TREE"
 
+n1_export "$OUTDIR/prev"
+# The export is kept: the upgrade legs build N-1's package with its own packaging/.
+# Its wheel is built from a copy, for the same reason N's is.
+TREE="$(mktemp -d)"
+cp -R "$N1_SRC" "$TREE/prev"
+uv build --quiet --wheel --out-dir "$OUTDIR/dist-prev" "$TREE/prev"
+rm -rf "$TREE"
+{
+  printf 'N1_SHA=%s\n' "$N1_SHA"
+  printf 'N1_REF=%s\n' "$N1_REF"
+  printf 'N1_HEAD=%s\n' "$N1_HEAD"
+  printf 'N1_VERSION=%s\n' "$N1_VERSION"
+} >"$OUTDIR/n1.env"
+
 N_WHEEL="$OUTDIR/dist/automated_security_helper-${VERSION}-py3-none-any.whl"
-PREV_WHEEL="$OUTDIR/dist-prev/automated_security_helper-${PREV_VERSION}-py3-none-any.whl"
+PREV_WHEEL="$OUTDIR/dist-prev/automated_security_helper-${N1_VERSION}-py3-none-any.whl"
 [ -f "$N_WHEEL" ] || vl_fail "uv build did not write $N_WHEEL"
 [ -f "$PREV_WHEEL" ] || vl_fail "uv build did not write $PREV_WHEEL"
 
-vl_say "== gating both wheels with the artifact-contents check"
-vl_gate_python "$REPO/.github/scripts/assert-artifact-contents.py" "$N_WHEEL" "$PREV_WHEEL"
+# Each wheel by its own tree's gate. N-1's tree is older code, and a commit that
+# tightens the gate together with what it ships would otherwise fail N-1 for a rule
+# N-1 was never written against.
+vl_say "== gating each wheel with its own tree's artifact-contents check"
+vl_gate_python "$REPO/.github/scripts/assert-artifact-contents.py" "$N_WHEEL"
+vl_gate_python "$N1_SRC/.github/scripts/assert-artifact-contents.py" "$PREV_WHEEL"

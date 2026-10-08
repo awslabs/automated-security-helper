@@ -187,6 +187,73 @@ vl_assert_shell_intact() {
   vl_say "   /usr/bin/ash -> $resolved ($owner) runs \$((6 * 7)) = 42; ash on PATH is $found"
 }
 
+# --------------------------------------------------------------------------
+# No alternatives, no diversions.
+# --------------------------------------------------------------------------
+#
+# The file-list check above sees only files the package ships. A maintainer script can
+# still put a second name on PATH, or take /usr/bin/ash, without shipping either path:
+# `update-alternatives --install /usr/bin/ash ash /usr/bin/ashx 100` in a postinst, or
+# `dpkg-divert --rename /usr/bin/ash`. The package carries neither, so both are refused
+# twice: statically in the built package's scripts, and on the installed host.
+VL_FORBIDDEN_SCRIPT_COMMANDS='update-alternatives|alternatives|dpkg-divert'
+
+# Reads a package's maintainer scripts on stdin, as `rpm -qp --scripts` prints them or
+# as the concatenated files from `dpkg-deb -e`, and fails on any command word above.
+# Comment lines are skipped, so a script may explain why it does not do this. $1
+# labels the scripts in messages. Returns non-zero rather than exiting, so the
+# negative control can observe it firing.
+vl_check_maintainer_scripts() {
+  local label="$1" text hits
+  text="$(cat)"
+  if [ -z "$text" ]; then
+    printf 'FAIL: %s: no maintainer scripts were read, so nothing could be checked\n' "$label" >&2
+    return 1
+  fi
+  hits="$(grep -vE '^[[:space:]]*#' <<<"$text" \
+    | grep -nE "(^|[^A-Za-z0-9_.-])(${VL_FORBIDDEN_SCRIPT_COMMANDS})([^A-Za-z0-9_.-]|\$)" || true)"
+  if [ -n "$hits" ]; then
+    printf 'FAIL: %s call a command that registers an alternative or a diversion:\n%s\n' "$label" "$hits" >&2
+    return 1
+  fi
+  vl_say "   $label: no update-alternatives, alternatives or dpkg-divert call"
+}
+
+# The same property on the host: no alternative anywhere resolves into this package,
+# no alternatives database entry names its files, and (on dpkg) no diversion belongs to
+# it. Read from the databases rather than through the tools, so a host whose tools
+# were never installed is still read. Returns non-zero rather than exiting.
+vl_assert_no_alternatives() {
+  local rc=0 link target db hits diversions
+  for link in /etc/alternatives/*; do
+    [ -L "$link" ] || continue
+    target="$(readlink -f "$link")"
+    case "$target" in
+      "/usr/bin/$ASH_CLI_NAME" | "$ASH_LIB"/*)
+        printf 'FAIL: the alternative %s resolves to %s, a file of %s\n' "$link" "$target" "$ASH_PKG_NAME" >&2
+        rc=1
+        ;;
+    esac
+  done
+  for db in /var/lib/dpkg/alternatives /var/lib/alternatives; do
+    [ -d "$db" ] || continue
+    hits="$(grep -rlF -e "/usr/bin/$ASH_CLI_NAME" -e "$ASH_LIB/" "$db" 2>/dev/null || true)"
+    if [ -n "$hits" ]; then
+      printf 'FAIL: the alternatives database names a file of %s in:\n%s\n' "$ASH_PKG_NAME" "$hits" >&2
+      rc=1
+    fi
+  done
+  if command -v dpkg-divert >/dev/null 2>&1; then
+    diversions="$(dpkg-divert --list 2>/dev/null | grep -F -e "by $ASH_PKG_NAME" -e "/usr/bin/ash " || true)"
+    if [ -n "$diversions" ]; then
+      printf 'FAIL: dpkg records a diversion this package must not make:\n%s\n' "$diversions" >&2
+      rc=1
+    fi
+  fi
+  [ "$rc" -eq 0 ] && vl_say "   no alternative, alternatives entry or diversion points into $ASH_PKG_NAME"
+  return "$rc"
+}
+
 # The coexistence check: the shell intact AND the package's command working beside it.
 vl_assert_shell_coexists() {
   vl_assert_shell_intact "$1" || return 1
@@ -357,6 +424,90 @@ vl_scan_and_assert() {
 }
 
 # --------------------------------------------------------------------------
+# Scanner selection after install.
+# --------------------------------------------------------------------------
+#
+# The package ships ASH and no third-party scanner (the payload gate above enforces
+# that). A user selects scanners after installing, with
+# `ashx dependencies install --tool NAME`, which downloads the tool's pinned release
+# and refuses it unless its SHA-256 matches the digest ASH carries. That is the v4
+# meaning of "optional components selected at install time" (packaging/README.md), so
+# it is exercised here from the installed package, as the unprivileged user, the way a
+# user runs it:
+#
+#   1. `--tool grype` exits 0, the summary names grype as verified on PATH, and the
+#      binary it installed runs and reports the version ASH pins.
+#   2. The same command again runs nothing and reports grype "already present,
+#      verified against the pinned digest": the digest check, read back.
+#   3. `--tool nonexistent` exits EXIT_BAD_SELECTION, read from the installed CLI's own
+#      module rather than restated, and names the unknown tool.
+#
+# Step 1 downloads from GitHub, so a failed attempt is retried twice; the retry lives
+# here in the harness, never in the product. A corrupted digest is covered by
+# tests/unit/utils/test_pinned_tool_downloads.py, not by planting one here.
+
+# Runs `ashx dependencies install ARGS...` as $SCAN_USER, sets DEPS_RC, writes $DEPS_LOG.
+# COLUMNS is wide so rich does not wrap the summary lines read below.
+DEPS_LOG=/tmp/ash-deps.log
+vl_deps_install() {
+  local args
+  args="$(printf ' %q' "$@")"
+  set +e
+  su -s /bin/bash "$SCAN_USER" -c \
+    "cd /tmp && COLUMNS=200 $ASH_CLI_NAME dependencies install --no-color$args" >"$DEPS_LOG" 2>&1
+  DEPS_RC=$?
+  set -e
+  vl_say "   $ASH_CLI_NAME dependencies install$args: rc=$DEPS_RC"
+}
+
+# Python from the installed venv, for facts the installed CLI defines.
+vl_venv_python() {
+  "$ASH_VENV/bin/python" -c "$1"
+}
+
+vl_assert_dependency_selection() {
+  local attempt bad_selection pinned bin out
+  id -u "$SCAN_USER" >/dev/null 2>&1 || useradd --create-home "$SCAN_USER"
+  bad_selection="$(vl_venv_python 'from automated_security_helper.cli.dependencies import EXIT_BAD_SELECTION as e; print(e)')" \
+    || vl_fail "cannot read EXIT_BAD_SELECTION from the installed CLI"
+  pinned="$(vl_venv_python 'from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS as v; print(v["grype"].lstrip("v"))')" \
+    || vl_fail "cannot read grype's pinned version from the installed CLI"
+
+  for attempt in 1 2 3; do
+    vl_deps_install --tool grype
+    [ "$DEPS_RC" -ne 0 ] || break
+    tail -n 15 "$DEPS_LOG" >&2
+    vl_say "   attempt $attempt of 3 failed"
+  done
+  [ "$DEPS_RC" -eq 0 ] || vl_fail "$ASH_CLI_NAME dependencies install --tool grype exited $DEPS_RC three times"
+  # Tested with -q, then printed: a `grep | sed` pipeline takes sed's status.
+  grep -qE 'Tools verified on PATH: *1 -- grype' "$DEPS_LOG" \
+    || { cat "$DEPS_LOG" >&2; vl_fail "the install exited 0 without naming grype as verified on PATH"; }
+  grep -E 'Tools verified on PATH' "$DEPS_LOG" | sed 's/^[^A-Za-z]*/   /'
+  bin="$(su -s /bin/sh "$SCAN_USER" -c 'printf %s "$HOME/.ash/bin/grype"')"
+  [ -x "$bin" ] || vl_fail "grype is not at $bin after the install"
+  out="$(su -s /bin/sh "$SCAN_USER" -c "'$bin' version" 2>&1)" || vl_fail "$bin version failed: $out"
+  grep -qE "^Version: *$pinned\$" <<<"$out" \
+    || vl_fail "$bin reports '$(grep -m1 '^Version' <<<"$out")', not the pinned $pinned"
+  vl_say "   $bin runs and reports the pinned version $pinned"
+
+  vl_deps_install --tool grype
+  [ "$DEPS_RC" -eq 0 ] || { cat "$DEPS_LOG" >&2; vl_fail "the second --tool grype exited $DEPS_RC"; }
+  grep -qE 'Already present, verified against the pinned digest: *1 -- grype' "$DEPS_LOG" \
+    || { cat "$DEPS_LOG" >&2; vl_fail "the second run did not verify grype against its pinned digest"; }
+  grep -E 'Already present' "$DEPS_LOG" | sed 's/^[^A-Za-z]*/   /'
+  grep -qE 'Commands run: *0 ' "$DEPS_LOG" \
+    || { cat "$DEPS_LOG" >&2; vl_fail "the second run downloaded again instead of verifying what is installed"; }
+
+  vl_deps_install --tool nonexistent
+  [ "$DEPS_RC" -eq "$bad_selection" ] \
+    || { cat "$DEPS_LOG" >&2; vl_fail "--tool nonexistent exited $DEPS_RC, not EXIT_BAD_SELECTION ($bad_selection)"; }
+  grep -qF 'Unknown tool(s): nonexistent' "$DEPS_LOG" \
+    || { cat "$DEPS_LOG" >&2; vl_fail "--tool nonexistent exited $bad_selection without naming the unknown tool"; }
+  vl_say "   OK: --tool nonexistent was refused with EXIT_BAD_SELECTION ($bad_selection)"
+}
+
+# --------------------------------------------------------------------------
 # Negative controls: each check above must be seen failing on a real install.
 # --------------------------------------------------------------------------
 
@@ -432,6 +583,37 @@ vl_blackhole_index() {
 vl_restore_index() {
   cp /tmp/hosts.verify-backup /etc/hosts
   rm -f /tmp/hosts.verify-backup
+}
+
+# The N-1 tree packaging/build-test-wheels.sh exported, and the record of where it came
+# from. The upgrade legs build N-1's package with N-1's OWN packaging scripts from that
+# tree and gate it with N-1's own payload checker, so an upgrade runs N's maintainer
+# scripts over an install an older package's scripts made. Sets PREV_SRC and prints the
+# two commits, which must differ.
+vl_load_n1() {
+  local root
+  root="$(cd "$(dirname "$PREV_DIST")" && pwd)"
+  PREV_SRC="${PREV_SRC:-$root/prev/src}"
+  local env_file="${N1_ENV:-$root/n1.env}"
+  [ -f "$env_file" ] || vl_fail "no $env_file: build the wheels with packaging/build-test-wheels.sh"
+  # Read field by field rather than sourced: it is data, not a script.
+  N1_SHA="$(sed -n 's/^N1_SHA=//p' "$env_file")"
+  N1_REF="$(sed -n 's/^N1_REF=//p' "$env_file")"
+  N1_HEAD="$(sed -n 's/^N1_HEAD=//p' "$env_file")"
+  N1_VERSION="$(sed -n 's/^N1_VERSION=//p' "$env_file")"
+  [ -n "$N1_SHA" ] && [ -n "$N1_HEAD" ] || vl_fail "$env_file names no N1_SHA or no N1_HEAD"
+  [ "$N1_HEAD" = "$(git -c safe.directory="$REPO" -C "$REPO" rev-parse HEAD)" ] \
+    || vl_fail "$env_file was written for HEAD $N1_HEAD, not for this checkout"
+  [ "$N1_SHA" != "$N1_HEAD" ] || vl_fail "N-1 and N are the same commit ($N1_SHA)"
+  [ -d "$PREV_SRC/packaging" ] || vl_fail "no N-1 packaging tree at $PREV_SRC"
+  vl_say "   N-1: $N1_SHA ($N1_REF), version $N1_VERSION, packaged by its own $PREV_SRC/packaging"
+  vl_say "   N:   $N1_HEAD"
+}
+
+# The payload gate as N-1's tree defines it, for the N-1 package.
+vl_payload_gate_n1() {
+  vl_gate_python "$PREV_SRC/packaging/assert-package-payload.py" \
+    --artifact-gate "$PREV_SRC/.github/scripts/assert-artifact-contents.py" "$1"
 }
 
 # The lower version for the N-1 package: the last non-zero component of N decremented
