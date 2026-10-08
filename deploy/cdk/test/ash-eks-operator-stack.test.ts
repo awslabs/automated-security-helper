@@ -785,30 +785,74 @@ function loadYamlDocs(path: string): K8sDoc[] {
 }
 
 /**
- * Every top-level kind the operator's manifests may carry. A document of any other kind
- * is reported as drift, so a new kind, or a wrapper this suite does not unwrap, cannot be
- * applied by `kubectl apply -f manifests/` while every comparison here skips it.
+ * Every kind the operator's manifests may carry, with the top-level fields each may have
+ * besides apiVersion, kind and metadata (`null`: checked in contractDrift against
+ * RBAC_DOC_FIELDS). A document of any other kind is reported, and so is any other
+ * field, so a new kind, a wrapper or a field this suite does not read cannot be applied
+ * by `kubectl apply -f manifests/` while every comparison here skips it.
  */
-const MANIFEST_KINDS = [
-  'ClusterRole',
-  'ClusterRoleBinding',
-  'Deployment',
-  'Namespace',
-  'NetworkPolicy',
-  'Role',
-  'RoleBinding',
-  'ServiceAccount',
-];
+const MANIFEST_KINDS: Record<string, string[] | null> = {
+  ClusterRole: null,
+  ClusterRoleBinding: null,
+  Deployment: ['spec', 'status'],
+  List: ['items'],
+  Namespace: ['spec', 'status'],
+  NetworkPolicy: ['spec', 'status'],
+  Role: null,
+  RoleBinding: null,
+  ServiceAccount: ['automountServiceAccountToken', 'imagePullSecrets', 'secrets'],
+};
 
 /**
- * A manifest file's documents with every `kind: *List` flattened into its `items`, the
- * way kubectl's resource builder does. YAML is a superset of JSON, so one parser reads
- * all three file types.
+ * The documents kubectl would apply from these parsed documents, and every problem found.
+ *
+ * kubectl treats ANY object with an `items` key as a list and applies its items, whatever
+ * its kind. Keying on a `*List` kind let a Namespace carrying a Role and a RoleBinding in
+ * `items` grant Secrets reads with every comparison green, measured on a real cluster. So
+ * the kind allowlist is checked on every document first, wrappers included, then any
+ * document with `items` is replaced by its items, recursively. A `*List` without `items`
+ * is reported rather than expanded to nothing.
  */
+function walkManifests(raw: unknown[]): { docs: K8sDoc[]; problems: string[] } {
+  const docs: K8sDoc[] = [];
+  const problems: string[] = [];
+  for (const value of raw) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      problems.push(`manifests: not an object: ${JSON.stringify(value)}`);
+      continue;
+    }
+    const doc = value as any;
+    const key = rbacKey(doc);
+    const kind = typeof doc.kind === 'string' ? doc.kind : undefined;
+    const allowed = kind !== undefined && Object.prototype.hasOwnProperty.call(MANIFEST_KINDS, kind)
+      ? MANIFEST_KINDS[kind]
+      : undefined;
+    if (allowed === undefined) {
+      problems.push(`manifests: kind not in the allowlist: ${key}`);
+    } else if (allowed !== null) {
+      const known = [...allowed, 'apiVersion', 'kind', 'metadata', 'items'];
+      for (const f of Object.keys(doc).filter((k) => !known.includes(k)).sort()) {
+        problems.push(`manifests: unknown field on ${key}: ${f}`);
+      }
+    }
+    const isList = kind?.endsWith('List') ?? false;
+    if ('items' in doc) {
+      if (!isList) problems.push(`manifests: items on a non-List kind: ${key}`);
+      const inner = walkManifests(Array.isArray(doc.items) ? doc.items : []);
+      docs.push(...inner.docs);
+      problems.push(...inner.problems);
+    } else if (isList) {
+      problems.push(`manifests: List without items: ${key}`);
+    } else {
+      docs.push(doc as K8sDoc);
+    }
+  }
+  return { docs, problems };
+}
+
+/** A manifest file as kubectl would apply it. YAML is a superset of JSON. */
 function loadManifestDocs(path: string): K8sDoc[] {
-  const expand = (doc: any): K8sDoc[] =>
-    typeof doc?.kind === 'string' && doc.kind.endsWith('List') ? (doc.items ?? []).flatMap(expand) : [doc];
-  return loadYamlDocs(path).flatMap(expand);
+  return walkManifests(loadYamlDocs(path)).docs;
 }
 
 /** The one document of `kind` named `name`; anything else is a parse problem, not drift. */
@@ -824,8 +868,10 @@ function only(docs: K8sDoc[], kind: string, name: string): K8sDoc {
 interface OperatorContract {
   /** Every Role, ClusterRole, RoleBinding and ClusterRoleBinding in the operator's manifests. */
   readonly rbac: K8sDoc[];
-  /** `Kind namespace/name` of every manifest document whose kind is not in MANIFEST_KINDS. */
-  readonly unexpectedKinds: string[];
+  /** What walkManifests reported: unknown kinds and fields, wrappers, Lists without items. */
+  readonly problems: string[];
+  /** Every Deployment in the operator's manifests. */
+  readonly deployments: K8sDoc[];
   readonly serviceAccounts: string[];
   readonly crds: Array<{
     readonly group: string;
@@ -835,11 +881,13 @@ interface OperatorContract {
 }
 
 function loadOperatorContract(manifestPaths: string[], crdPaths: string[]): OperatorContract {
-  const rbac = manifestPaths.flatMap(loadManifestDocs);
+  const walked = walkManifests(manifestPaths.flatMap(loadYamlDocs));
+  const rbac = walked.docs;
   const crds = crdPaths.flatMap(loadYamlDocs).filter((d) => d.kind === 'CustomResourceDefinition');
   return {
     rbac: rbac.filter((d) => RBAC_KINDS.includes(d.kind)),
-    unexpectedKinds: rbac.filter((d) => !MANIFEST_KINDS.includes(d?.kind)).map((d) => rbacKey(d)),
+    problems: walked.problems,
+    deployments: rbac.filter((d) => d.kind === 'Deployment'),
     serviceAccounts: rbac
       .filter((d) => d.kind === 'ServiceAccount')
       .map((d) => d.metadata.name)
@@ -1168,7 +1216,16 @@ function contractDrift(op: OperatorContract): string[] {
       }
     }
   };
-  for (const key of op.unexpectedKinds) drift.push(`manifests: kind not in the allowlist: ${key}`);
+  drift.push(...op.problems);
+  // The Deployment's identity and account. The pytest suite compares the pod spec whole;
+  // this keeps the account the operator runs as from drifting with only that suite red.
+  const deploymentId = (d: K8sDoc) =>
+    setJson({ name: d.metadata.name, serviceAccountName: d.spec?.template?.spec?.serviceAccountName ?? null });
+  diffSets(
+    'deployments',
+    INSTALLED.filter((d) => d.kind === 'Deployment').map(deploymentId),
+    op.deployments.map(deploymentId),
+  );
   const ours = new Map(INSTALLED_RBAC.map((d) => [rbacKey(d), d]));
   const theirs = new Map(op.rbac.map((d) => [rbacKey(d), d]));
   // Two documents with one key would collapse in the maps and hide each other.
@@ -1399,6 +1456,103 @@ describe("the stack's operator contract equals the operator's own files", () => 
     expect(contractDrift(planted)).toEqual([
       'RBAC objects: only in the operator: Role ash-system/ash-secrets',
       'RBAC objects: only in the operator: RoleBinding ash-system/ash-secrets',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: items on a Namespace are applied, so they are read (H3)', () => {
+    // Measured on a real cluster: kubectl created this Role and RoleBinding, and the
+    // operator's account could then list Secrets.
+    const planted = plantedManifestsDir((dir) =>
+      writeFileSync(
+        join(dir, 'rbac.yaml'),
+        `${readFileSync(OPERATOR_RBAC_YAML, 'utf8')}\n---\n` +
+          JSON.stringify({
+            apiVersion: 'v1',
+            kind: 'Namespace',
+            metadata: { name: 'ash-system' },
+            items: [SECRETS_ROLE, SECRETS_BINDING],
+          }),
+      ),
+    );
+    expect(contractDrift(planted)).toEqual([
+      'manifests: items on a non-List kind: Namespace (cluster)/ash-system',
+      'RBAC objects: only in the operator: Role ash-system/ash-secrets',
+      'RBAC objects: only in the operator: RoleBinding ash-system/ash-secrets',
+    ]);
+  });
+
+  test("NEGATIVE CONTROL: items on operator.yaml's own Namespace are read (H2)", () => {
+    const planted = plantedManifestsDir((dir) => {
+      const file = join(dir, 'operator.yaml');
+      const text = readFileSync(file, 'utf8');
+      const from = 'kind: Namespace\nmetadata:\n  name: ash-system\n';
+      expect(text).toContain(from);
+      writeFileSync(file, text.replace(from, `${from}items:\n  - ${JSON.stringify(SECRETS_ROLE)}\n`));
+    });
+    expect(contractDrift(planted)).toEqual([
+      'manifests: items on a non-List kind: Namespace (cluster)/ash-system',
+      'RBAC objects: only in the operator: Role ash-system/ash-secrets',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: items on a ServiceAccount are read (H)', () => {
+    const planted = plantedManifestsDir((dir) =>
+      writeFileSync(
+        join(dir, 'zz-sa.yaml'),
+        JSON.stringify({
+          apiVersion: 'v1',
+          kind: 'ServiceAccount',
+          metadata: { name: 'ash-extra', namespace: 'ash-system' },
+          items: [SECRETS_ROLE],
+        }),
+      ),
+    );
+    expect(contractDrift(planted)).toEqual([
+      'manifests: items on a non-List kind: ServiceAccount ash-system/ash-extra',
+      'RBAC objects: only in the operator: Role ash-system/ash-secrets',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: a *List without items is reported, not expanded to nothing (K)', () => {
+    const planted = plantedManifestsDir((dir) =>
+      writeFileSync(join(dir, 'zz-k.yaml'), 'apiVersion: v1\nkind: AccessList\nmetadata: {name: k}\n'),
+    );
+    expect(contractDrift(planted)).toEqual([
+      'manifests: kind not in the allowlist: AccessList (cluster)/k',
+      'manifests: List without items: AccessList (cluster)/k',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: an unknown field on a non-RBAC kind is reported', () => {
+    const planted = plantedManifestsDir((dir) =>
+      writeFileSync(join(dir, 'zz-ns.yaml'), 'apiVersion: v1\nkind: Namespace\nmetadata: {name: other}\nfutureField: 1\n'),
+    );
+    expect(contractDrift(planted)).toEqual(['manifests: unknown field on Namespace (cluster)/other: futureField']);
+  });
+
+  test("NEGATIVE CONTROL: the Deployment's serviceAccountName changed is reported (J)", () => {
+    const planted = plantedManifestsDir((dir) => {
+      const file = join(dir, 'operator.yaml');
+      const text = readFileSync(file, 'utf8');
+      expect(text).toContain('serviceAccountName: ash-operator\n');
+      writeFileSync(file, text.replace('serviceAccountName: ash-operator\n', 'serviceAccountName: ash-scan\n'));
+    });
+    expect(contractDrift(planted)).toEqual([
+      `deployments: only in the stack: ${setJson({ name: 'ash-operator', serviceAccountName: 'ash-operator' })}`,
+      `deployments: only in the operator: ${setJson({ name: 'ash-operator', serviceAccountName: 'ash-scan' })}`,
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: a second Deployment in manifests/ is reported', () => {
+    const planted = plantedManifestsDir((dir) => {
+      const shipped = OPERATOR.deployments[0] as any;
+      writeFileSync(
+        join(dir, 'zz-second.json'),
+        JSON.stringify({ ...shipped, metadata: { ...shipped.metadata, name: 'ash-operator-two' } }),
+      );
+    });
+    expect(contractDrift(planted)).toEqual([
+      `deployments: only in the operator: ${setJson({ name: 'ash-operator-two', serviceAccountName: 'ash-operator' })}`,
     ]);
   });
 
