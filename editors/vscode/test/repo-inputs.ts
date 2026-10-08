@@ -65,6 +65,10 @@ export const REPO_INPUTS: readonly RepoInput[] = [
     readBy: 'snapshot-policy.test.ts reads it to confirm the update-flag forms it mirrors',
   },
   {
+    pattern: '.github/scripts/assert-artifact-contents.py',
+    readBy: "vsix-contents.test.ts holds src/vsix-contents.ts's payload tables to this file's",
+  },
+  {
     pattern: '.github/**',
     readBy: 'snapshot-policy.test.ts scans every file under .github/ for a snapshot update flag',
     exemptFrom: {
