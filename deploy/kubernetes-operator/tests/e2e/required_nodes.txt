@@ -1,0 +1,71 @@
+# The e2e tests a run must report as PASSED, one pytest node id per line.
+#
+# The e2e step in .github/workflows/ash-kubernetes-operator.yml runs
+# `python -m tests.e2e.require_nodes e2e.log` after the suite, and fails unless the log
+# has an exact `PASSED <node id>` line for every id here. Without it, deleting or
+# renaming a test leaves a green run that no longer tests what it did.
+#
+# Every test marked @pytest.mark.negative_control must be listed, and every id listed
+# must still be collected: tests/test_e2e_required_nodes.py checks both in the unit job,
+# with no cluster. Remove an id only together with the test it names, on purpose.
+
+# The shared contract cases, through the operator.
+tests/e2e/test_e2e_contract.py::TestSharedCase::test_the_shared_verdict_accepts_it[findings]
+tests/e2e/test_e2e_contract.py::TestSharedCase::test_the_shared_verdict_accepts_it[clean]
+tests/e2e/test_e2e_contract.py::TestSharedCase::test_the_shared_verdict_accepts_it[incomplete]
+
+# Uninstall, N-1 to N, uninstall again.
+tests/e2e/test_e2e_lifecycle.py::TestUninstallTheFreshInstall::test_nothing_the_operator_created_is_left
+tests/e2e/test_e2e_lifecycle.py::TestAfterUpgrade::test_the_inflight_scan_was_merged_by_heads_operator
+tests/e2e/test_e2e_lifecycle.py::TestAfterUpgrade::test_the_finished_scan_was_not_touched
+tests/e2e/test_e2e_lifecycle.py::TestAfterUpgrade::test_the_finished_scans_report_is_unchanged
+tests/e2e/test_e2e_lifecycle.py::TestAfterUpgrade::test_the_upgraded_operator_meets_the_case_exactly
+tests/e2e/test_e2e_lifecycle.py::TestUninstallTheUpgradedInstall::test_nothing_the_operator_created_is_left
+
+# The EKS stack's applier, run against kind.
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstall::test_the_create_response_reports_every_object
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstall::test_the_operator_runs_the_image_the_stack_was_given
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstall::test_the_image_is_one_the_template_would_accept
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstall::test_the_crds_are_the_stacks_own
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstall::test_an_update_with_the_same_properties_converges
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstall::test_the_only_aws_calls_were_the_two_eks_reads
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstall::test_the_template_defaults_the_namespace_this_harness_uses
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstalledOperatorScans::test_the_findings_case_meets_the_shared_verdict
+tests/e2e/test_e2e_eks_applier.py::TestTheStackInstalledOperatorScans::test_the_phase_and_exit_code_agree_with_the_case
+tests/e2e/test_e2e_eks_applier.py::TestTheStackDelete::test_the_delete_response_is_success
+tests/e2e/test_e2e_eks_applier.py::TestTheStackDelete::test_the_crds_namespace_and_cluster_rbac_are_kept
+tests/e2e/test_e2e_eks_applier.py::TestTheStackDelete::test_a_scan_outlives_the_stack
+
+# Negative controls: every test marked negative_control.
+tests/e2e/test_e2e_contract.py::TestTheVerdictCanFail::test_a_mismatched_case_is_rejected[findings-clean-exit code 2]
+tests/e2e/test_e2e_contract.py::TestTheVerdictCanFail::test_a_mismatched_case_is_rejected[clean-findings-exit code 0]
+tests/e2e/test_e2e_contract.py::TestTheVerdictCanFail::test_a_mismatched_case_is_rejected[incomplete-findings-exit code 1]
+tests/e2e/test_e2e_contract.py::TestTheVerdictCanFail::test_a_mismatched_case_is_rejected[findings-incomplete-exit code 2]
+tests/e2e/test_e2e_contract.py::TestTheVerdictCanFail::test_a_missing_sarif_report_is_rejected
+tests/e2e/test_e2e_image_locks.py::TestATamperedLockIsRefused::test_the_build_stops_at_the_hash_check[operator]
+tests/e2e/test_e2e_image_locks.py::TestATamperedLockIsRefused::test_the_build_stops_at_the_hash_check[ash]
+tests/e2e/test_e2e_kind.py::TestCleanFixtureNegativeControl::test_it_is_clean
+tests/e2e/test_e2e_kind.py::TestCleanFixtureNegativeControl::test_it_reports_zero_actionable_findings
+tests/e2e/test_e2e_kind.py::TestCleanFixtureNegativeControl::test_the_merge_exit_code_is_zero
+tests/e2e/test_e2e_kind.py::TestCleanFixtureNegativeControl::test_the_scanners_still_ran
+tests/e2e/test_e2e_kind.py::TestCleanFixtureNegativeControl::test_the_merge_still_consumed_every_index
+tests/e2e/test_e2e_kind.py::TestAPartialScanIsIncomplete::test_the_phase_is_incomplete_not_clean_or_findings
+tests/e2e/test_e2e_kind.py::TestAPartialScanIsIncomplete::test_ash_merge_exited_one
+tests/e2e/test_e2e_kind.py::TestAPartialScanIsIncomplete::test_the_gap_is_named
+tests/e2e/test_e2e_kind.py::TestAPartialScanIsIncomplete::test_the_partial_results_are_kept
+tests/e2e/test_e2e_kind.py::TestAMissingShardIsRefused::test_the_collector_exits_non_zero
+tests/e2e/test_e2e_kind.py::TestAMissingShardIsRefused::test_the_refusal_names_the_missing_index
+tests/e2e/test_e2e_kind.py::TestAMissingShardIsRefused::test_the_refusal_explains_the_consequence_not_just_the_rule
+tests/e2e/test_e2e_kind.py::TestAMissingShardIsRefused::test_no_merged_report_was_produced
+tests/e2e/test_e2e_kind.py::TestProvenanceAbsentIsRefused::test_the_run_is_refused
+tests/e2e/test_e2e_kind.py::TestProvenanceAbsentIsRefused::test_the_roster_field_records_the_absence
+tests/e2e/test_e2e_kind.py::TestProvenanceAbsentIsRefused::test_the_refusal_explains_what_cannot_be_checked
+tests/e2e/test_e2e_kind.py::TestProvenanceAbsentIsRefused::test_the_shards_really_did_run_and_merge
+tests/e2e/test_e2e_kind.py::TestProvenanceAbsentIsRefused::test_the_patched_image_differs_only_in_that_field
+tests/e2e/test_e2e_lifecycle.py::TestCrdUpgrade::test_the_comparison_detects_a_removed_field
+tests/e2e/test_e2e_lifecycle.py::TestCrdUpgrade::test_the_api_server_refuses_dropping_the_stored_version
+tests/e2e/test_e2e_eks_applier.py::TestTheApplierCanFail::test_a_ca_that_did_not_sign_the_api_server_is_refused
+tests/e2e/test_e2e_eks_applier.py::TestTheApplierCanFail::test_a_token_the_cluster_did_not_issue_is_refused
+tests/e2e/test_e2e_eks_applier.py::TestTheApplierCanFail::test_neither_refused_install_created_anything
+tests/e2e/test_e2e_eks_applier.py::TestTheApplierCanFail::test_an_applier_without_the_scan_crd_installs_one_object_fewer
+tests/e2e/test_e2e_eks_applier.py::TestTheApplierCanFail::test_an_applier_without_the_scan_crd_cannot_take_a_scan

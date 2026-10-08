@@ -1,0 +1,11 @@
+# The scanner the e2e ASH image installs beside ASH itself, with the extras and the
+# version range ASH's bandit scanner asks for (BanditScannerConfigOptions.tool_version
+# and _get_tool_package_extras). With all of them present, ASH runs the bandit on PATH
+# instead of fetching one through `uv tool run`.
+#
+# detect-secrets is not here: it is an ASH runtime dependency, locked in uv.lock.
+#
+# scanner-requirements.txt is resolved against ASH's locked runtime and leaves out every
+# package that runtime already pins. Regenerate it with deploy/kubernetes-operator/relock.sh,
+# never by hand.
+bandit[sarif,toml]>=1.7.0,<2.0.0

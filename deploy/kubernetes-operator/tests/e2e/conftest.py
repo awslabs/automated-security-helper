@@ -26,6 +26,7 @@ from tests.e2e.helpers import (
     OPERATOR_DIR,
     OPERATOR_IMAGE,
     run,
+    stage_ash_locks,
     stage_ash_source,
 )
 from tests.e2e.lifecycle import install_operator
@@ -57,7 +58,7 @@ def pytest_report_header(config):
 def require_tooling():
     if not E2E_ENABLED:
         pytest.skip("ASH_OPERATOR_E2E is not 1")
-    missing = [tool for tool in ("kind", "kubectl", "docker") if shutil.which(tool) is None]
+    missing = [tool for tool in ("kind", "kubectl", "docker", "uv") if shutil.which(tool) is None]
     if missing:
         pytest.fail(
             f"the e2e was enabled but {missing} are not on PATH. Failing rather than "
@@ -78,6 +79,7 @@ def ash_image(require_tooling) -> str:
         context_dir = Path(ctx)
         shutil.copy(E2E_DIR / "Dockerfile.ash", context_dir / "Dockerfile")
         stage_ash_source(context_dir / "ash-source")
+        stage_ash_locks(context_dir / "locks")
         run(
             [
                 "docker",
@@ -164,10 +166,17 @@ def installed(cluster):
 
 
 # The lifecycle module uninstalls the operator and reinstalls it from N-1, so it has
-# to run after every module that relies on the session's fresh install. Ordered here
-# rather than by file name, which a rename would silently change.
+# to run after every module that relies on the session's fresh install. The EKS
+# applier module installs the operator the way the EKS stack does, CRDs and cluster
+# RBAC included, so it needs the cluster the lifecycle module's last uninstall leaves:
+# none of the operator's objects at all. Ordered here rather than by file name, which
+# a rename would silently change; every other module keeps its collected order.
 LIFECYCLE_MODULE = "test_e2e_lifecycle.py"
+EKS_APPLIER_MODULE = "test_e2e_eks_applier.py"
+RUN_LAST = (LIFECYCLE_MODULE, EKS_APPLIER_MODULE)
 
 
 def pytest_collection_modifyitems(session, config, items):
-    items.sort(key=lambda item: item.path.name == LIFECYCLE_MODULE)
+    items.sort(
+        key=lambda item: RUN_LAST.index(item.path.name) + 1 if item.path.name in RUN_LAST else 0
+    )
