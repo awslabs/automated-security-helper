@@ -11,7 +11,7 @@ Installing dependencies for platform: windows, architecture: arm64
                       cfn-nag's `psych` dependency publishes no precompiled gem for this Ruby ABI,
                       so it has to build from source. It will be reported as having no install path
                       on this machine rather than failing the install of every other scanner.
-Installing dependencies for converter plugin: ArchiveConverter
+Installing dependencies for converter plugin: archive
 Installing dependencies for converter plugin: jupyter
 Running command: uv tool install nbconvert>=7.16.0,<8.0.0
 Command succeeded with exit code: 0
