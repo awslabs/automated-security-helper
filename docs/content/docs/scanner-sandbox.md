@@ -167,9 +167,12 @@ sandbox:
 config was built from is inside the tree, both settings are taken from the defaults
 plus `--config-overrides`, and ASH logs a warning naming the file. That covers the
 discovered `.ash/.ash.yaml`, a `--config` path, an `extends` base, and the file
-`ASH_CONFIG` names. The tree is the whole checkout: the nearest directory at or
+`ASH_CONFIG` names. The tree is the whole checkout: the outermost directory at or
 above the scanned directory (in workspace mode, the workspace root) that holds a
-`.git` entry, or the scanned directory itself outside a repository. A symlink, a `..`
+`.git` entry, or the scanned directory itself outside a repository. Outermost, so a
+submodule's `.git` file can't make the superproject's config look outside. The
+checkout is looked up from the scanned directory as given and from its resolved
+path, so a scanned directory that is a symlink still counts the checkout it sits in. A symlink, a `..`
 segment, or a case-only difference on a case-insensitive filesystem doesn't change
 the answer, because ASH compares the files themselves, not their path strings. An
 in-tree `network_scanners` list still takes network away: a scanner it doesn't name
@@ -177,7 +180,17 @@ gets none, so a repository can keep its own scan offline with `network_scanners:
 
 `mode` follows the same rule. When `--sandbox`, `ASH_CONFIG`, or the operator's
 config file turns the sandbox on, an in-tree config can't turn it off or switch it
-to another backend. When none of them does, an in-tree `mode` applies, because a
+to another backend. A mode set by a file outside the tree comes first. When no file
+outside the tree sets one, the operator's mode still holds even if the operator's
+file is itself inside the tree, for example under a home directory that is a git
+checkout: its grants are dropped, but its mode stays, because a mode other than
+`off` grants nothing. Only `--sandbox off` or a `sandbox.mode` override turns it off.
+
+The checkout is also looked up from the shell's working directory (`$PWD`), so
+`cd vendor && ash scan`, where `vendor` is a symlink out of the checkout, still
+counts the checkout. A bind mount of a directory inside a checkout can't be traced
+back to it; scan the checkout itself, or keep its config out of the grants with
+`--config-overrides`. When none of them does, an in-tree `mode` applies, because a
 sandbox the repository asks for only takes access away. In workspace mode, the
 operator's `--config` decides for a project that has its own config file, the same
 as for one that doesn't.
