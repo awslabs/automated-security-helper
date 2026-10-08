@@ -77,6 +77,21 @@ comfortably fit there. Ceiling: 8 KB, the Advanced-tier maximum, which is valida
 in a task definition or an AgentCore environment map, both of which are readable
 by anyone able to describe the resource.
 
+### Encryption at rest: a different default from CloudFormation
+
+The CloudFormation stacks each create a customer managed KMS key for CodeBuild
+output, and take an optional `KmsKeyArn` for everything else. The Terraform modules
+create no key. Each one takes an optional key ARN instead (`kms_key_arn`, or
+`ecr_kms_key_arn` for the ECR repositories) and falls back to AWS managed
+encryption when it is null. So with nothing set, a CloudFormation deployment has a
+customer managed key and a Terraform deployment does not. Set the inputs to the
+same key you would give `KmsKeyArn` to close the difference.
+
+In `agentcore` and `fargate`, `kms_key_arn` covers the auth header secret, plus
+the task log group on Fargate, and grants the secret's reader `kms:Decrypt` on the
+key. The key must be a symmetric key ARN, not an alias. For Fargate its key policy
+must also admit the `logs.<region>.amazonaws.com` service principal.
+
 ## Which target to use
 
 **AgentCore** — you want ASH available to agents over MCP and want the platform to

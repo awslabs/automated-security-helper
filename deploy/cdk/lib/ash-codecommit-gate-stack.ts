@@ -78,7 +78,7 @@ import {
   rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
-import { suppressLambdaLogWildcard, suppressSecretRotation } from './ash-nag-suppressions';
+import { suppressLambdaLogWildcard } from './ash-nag-suppressions';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
 export class AshCodeCommitGateStack extends Stack {
@@ -284,7 +284,6 @@ export class AshCodeCommitGateStack extends Stack {
       ],
     });
 
-    suppressSecretRotation(config.authSecret);
     suppressLambdaLogWildcard(scanRole);
 
     new CfnOutput(this, 'ScanFunctionRoleArn', {

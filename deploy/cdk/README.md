@@ -591,9 +591,11 @@ here rather than to a variant.
   VPC and puts nothing in it but the ASH tasks, so that rule would admit a range
   with no clients in it while still widening access. Real consumers arrive from a
   peered VPC, a VPN or a transit gateway, none of which fall inside it.
-- **An unused Secrets Manager secret is created even with auth disabled.** The
-  alternative was a CloudFormation Condition gating the resource, which makes every
-  IAM grant that mentions its ARN an invalid template. Costs a few cents a month.
+- **AshAgentCore and AshFargate create a Secrets Manager secret even with auth
+  disabled.** The alternative was a CloudFormation Condition gating the resource,
+  which makes every IAM grant that mentions its ARN an invalid template. Costs a few
+  cents a month. AshCodeCommitGate and AshDistributedPipeline serve no MCP endpoint,
+  so they create no secret and grant no read on one.
 - **ECR repositories and buckets are `RETAIN`.** `autoDeleteObjects` and
   `emptyOnDelete` synthesize asset-backed custom resources, which need a staging
   bucket and therefore `cdk bootstrap`, and these templates are meant to launch from

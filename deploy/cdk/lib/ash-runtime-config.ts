@@ -13,8 +13,8 @@
  *    the resource's own configuration. Handing over the ARN and resolving it
  *    inside the container is the only way to keep it out of both.
  *
- * WHY BOTH RESOURCES ARE CREATED UNCONDITIONALLY
- * ----------------------------------------------
+ * WHY BOTH RESOURCES ARE CREATED UNCONDITIONALLY ON THE MCP TARGETS
+ * ----------------------------------------------------------------
  * The obvious shape is a CloudFormation Condition that creates the SSM parameter
  * only when the adopter supplied a config. That was tried and rejected: a `Ref`
  * to a conditional resource is only legal inside an `Fn::If` guarded by the same
@@ -27,6 +27,12 @@
  * The cost of that choice is one unused Secrets Manager secret (a few cents a
  * month) in deployments that do not enable ASH-level auth. Stated here so nobody
  * has to rediscover why it is there.
+ *
+ * "Unconditionally" is per deployment, not per target. The secret exists only
+ * on targets that serve MCP (`includeMcpParameters: true`: AgentCore and
+ * Fargate). The sharded executor and the pull-request gate never hand the ARN to
+ * anything, so they get no secret and no grant to read one. That decision is
+ * made in TypeScript at synth time, which is why it needs no Condition.
  */
 
 import { CfnCondition, CfnParameter, Fn, RemovalPolicy, SecretValue, Stack } from 'aws-cdk-lib';
@@ -72,7 +78,11 @@ export interface AshMcpRuntimeConfigProps {
  */
 export class AshRuntimeConfig extends Construct {
   public readonly configParameter: ssm.StringParameter;
-  public readonly authSecret: secretsmanager.Secret;
+  /**
+   * The `McpAuthHeaderValue` secret. Undefined on targets that do not serve MCP;
+   * use `mcpAuthSecret()` where the secret is required.
+   */
+  public readonly authSecret?: secretsmanager.Secret;
 
   /** `AshBaseConfigYaml`, declared once and reused by callers for outputs. */
   public readonly baseConfigYaml: CfnParameter;
@@ -84,7 +94,6 @@ export class AshRuntimeConfig extends Construct {
 
   private readonly hasConfig: CfnCondition;
   private readonly customerKey: AshCustomerKey;
-  private readonly includeMcpParameters: boolean;
   /** Created on the first `grantRead`; see `grantCustomerKeyDecrypt`. */
   private customerKeyAccess?: iam.Policy;
   /**
@@ -100,7 +109,6 @@ export class AshRuntimeConfig extends Construct {
     super(scope, id);
     const stack = Stack.of(this);
     this.customerKey = props.customerKey;
-    this.includeMcpParameters = props.includeMcpParameters;
 
     this.baseConfigYaml = ashBaseConfigYaml(stack);
     this.hasConfig = new CfnCondition(this, 'HasBaseConfig', {
@@ -126,8 +134,8 @@ export class AshRuntimeConfig extends Construct {
     });
 
     if (!props.includeMcpParameters) {
-      // Still create the secret so the class has one shape, but nothing reads it.
-      this.authSecret = this.createAuthSecret(SecretValue.unsafePlainText(SECRET_PLACEHOLDER));
+      // No secret. Nothing on these targets could hand its ARN to a reader, so it
+      // would be a resource plus an IAM read grant on a value no code path uses.
       return;
     }
 
@@ -212,7 +220,14 @@ export class AshRuntimeConfig extends Construct {
    * `McpAllowedHost`, not by the bind address.
    */
   public mcpEnvironment(): Record<string, string> {
-    if (!this.statelessHttp || !this.mountPath || !this.allowedHost || !this.authHeaderName || !this.headerAuthCondition) {
+    if (
+      !this.statelessHttp ||
+      !this.mountPath ||
+      !this.allowedHost ||
+      !this.authHeaderName ||
+      !this.headerAuthCondition ||
+      !this.authSecret
+    ) {
       throw new Error('mcpEnvironment() requires includeMcpParameters: true.');
     }
     return {
@@ -233,6 +248,18 @@ export class AshRuntimeConfig extends Construct {
   }
 
   /**
+   * The `McpAuthHeaderValue` secret, for callers that attach nag suppressions or
+   * grants to it. Throws on a target built with `includeMcpParameters: false`,
+   * which has no secret, so a caller that assumed one fails at synth.
+   */
+  public mcpAuthSecret(): secretsmanager.Secret {
+    if (!this.authSecret) {
+      throw new Error('mcpAuthSecret() requires includeMcpParameters: true.');
+    }
+    return this.authSecret;
+  }
+
+  /**
    * The SSM parameter name, or an empty string when no config was supplied.
    *
    * The entrypoint keys off empty rather than off a missing variable so that a
@@ -247,41 +274,27 @@ export class AshRuntimeConfig extends Construct {
   }
 
   /**
-   * Let a principal read the config parameter and the auth secret.
+   * Let a principal read the config parameter and, on MCP targets, the auth secret.
    *
-   * The first two grants are unconditional even when the corresponding value is a
-   * placeholder. That is the price of keeping the resources unconditional, and it
-   * grants nothing an adopter did not deploy: the principal can read one
-   * parameter and one secret that this stack owns.
+   * The parameter grant is unconditional even when its value is a placeholder.
+   * That is the price of keeping the resource unconditional, and it grants
+   * nothing an adopter did not deploy: the principal can read one parameter this
+   * stack owns.
    *
-   * The third is narrower than the other two, in both dimensions: it exists only
-   * when `KmsKeyArn` was set, and only on the targets that actually READ the
-   * secret. See `grantCustomerKeyDecrypt`.
+   * The secret grants exist only where the secret does, on the targets that serve
+   * MCP. The ARN reaches a container through exactly one path, `mcpEnvironment()`,
+   * which throws unless `includeMcpParameters` is true. The sharded executor and
+   * the pull-request gate therefore have no secret, no `GetSecretValue` grant and
+   * no `kms:Decrypt` grant. If a future change gives one of those targets the
+   * secret ARN, it must move to `includeMcpParameters: true` to get all three.
+   *
+   * The decrypt grant is narrower again: it exists only when `KmsKeyArn` was set.
+   * See `grantCustomerKeyDecrypt`.
    */
   public grantRead(grantee: iam.IGrantable): void {
     this.configParameter.grantRead(grantee);
-    this.authSecret.grantRead(grantee);
-
-    /*
-     * The decrypt grant follows the secret ARN, not the secret.
-     *
-     * A principal can only need `kms:Decrypt` here if something hands it the ARN and
-     * it calls `GetSecretValue`. The ARN reaches a container through exactly one
-     * path, `mcpEnvironment()`, which throws unless `includeMcpParameters` is true.
-     * So on the sharded executor and the pull-request gate the secret is the
-     * placeholder nothing reads, and a decrypt grant there would be permission on a
-     * value no code path touches. Verified against the synthesized templates:
-     * neither AshCodeCommitGate nor AshDistributedPipeline mentions
-     * `ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN` anywhere.
-     *
-     * The `GetSecretValue` grant above IS still unconditional, and that asymmetry is
-     * deliberate rather than an oversight - it is the existing cost of keeping this
-     * construct one shape, documented at the top of this file. The consequence to
-     * know: if a future change gives one of those two targets the secret ARN, it
-     * must also move to `includeMcpParameters: true`, or `GetSecretValue` will
-     * succeed and the KMS decrypt behind it will not.
-     */
-    if (this.includeMcpParameters) {
+    if (this.authSecret) {
+      this.authSecret.grantRead(grantee);
       this.grantCustomerKeyDecrypt(grantee);
     }
   }

@@ -18,8 +18,11 @@ data "aws_region" "current" {}
 
 locals {
   manage_auth_secret = nonsensitive(var.mcp_auth_header_value != null)
-  use_auth_header    = var.mcp_auth_header_name != null
-  use_base_config    = var.base_config_ssm_parameter_name != null
+  # ECS Exec sessions are encrypted with kms_key_arn only on a cluster this
+  # module creates; a cluster passed in through cluster_arn is the caller's.
+  exec_uses_kms_key = var.enable_execute_command && var.kms_key_arn != null && local.create_cluster
+  use_auth_header   = var.mcp_auth_header_name != null
+  use_base_config   = var.base_config_ssm_parameter_name != null
 
   use_tls       = var.certificate_arn != null
   listener_port = coalesce(var.listener_port, local.use_tls ? 443 : 80)
@@ -76,20 +79,18 @@ resource "aws_secretsmanager_secret" "auth_header" {
   # re-applying, in step with the clients.
   #checkov:skip=CKV2_AWS_57:No rotation function can update the far end -- an operator-configured MCP client -- so scheduled rotation would only start rejecting callers. Rotation is done by changing mcp_auth_header_value alongside the clients.
   #
-  # CKV_AWS_149: Secrets Manager encrypts this with the aws/secretsmanager
-  # managed key already. Satisfying the rule would mean this module creating a
-  # customer managed key, whose per-key monthly charge every caller would then
-  # carry, and the module has no CMK input to accept an existing one. Adding that
-  # input is a reasonable request from a deployment with a CMK requirement; it is
-  # not something to infer from a scanner default. What this design does address
-  # is exposure through the runtime: the value is held here rather than in the
-  # task definition's environment, where anyone able to describe the service
-  # could read it.
-  #checkov:skip=CKV_AWS_149:Already encrypted with the aws/secretsmanager managed key. Satisfying this would require the module to create a CMK and bill every caller for it; there is no input to supply an existing key, and adding one should follow a deployment that needs it.
+  # kms_key_arn encrypts this with a customer managed key when the caller supplies
+  # one. Its default is null, which leaves the aws/secretsmanager managed key; the
+  # module does not create a key of its own, because a key it minted would answer
+  # to this module and every caller would carry its monthly charge. What this
+  # design addresses either way is exposure through the runtime: the value is held
+  # here rather than in the task definition's environment, where anyone able to
+  # describe the service could read it.
   count = local.manage_auth_secret ? 1 : 0
 
   name        = "${var.name_prefix}-mcp-auth-header"
   description = "Expected value of the static MCP auth header for the ASH Fargate service."
+  kms_key_id  = var.kms_key_arn
 
   tags = var.tags
 }
@@ -269,6 +270,21 @@ resource "aws_ecs_cluster" "this" {
     value = "enabled"
   }
 
+  # ECS Exec session data is encrypted with kms_key_arn when the caller supplies
+  # a key and turns ECS Exec on. Without both, the block is absent and the
+  # cluster is unchanged from before the input existed. A cluster passed in
+  # through cluster_arn is the caller's to configure.
+  dynamic "configuration" {
+    for_each = local.exec_uses_kms_key ? [1] : []
+
+    content {
+      execute_command_configuration {
+        kms_key_id = var.kms_key_arn
+        logging    = "DEFAULT"
+      }
+    }
+  }
+
   tags = var.tags
 }
 
@@ -297,10 +313,12 @@ data "aws_iam_policy_document" "task_assume_role" {
 }
 
 resource "aws_cloudwatch_log_group" "task" {
-  #checkov:skip=CKV_AWS_158:CloudWatch Logs already encrypts at rest with an AWS managed key, and a customer managed key carries a recurring per-key cost this module should not impose on every caller.
+  # kms_key_arn sets a customer managed key when supplied; the null default keeps
+  # CloudWatch Logs' own encryption.
   #checkov:skip=CKV_AWS_338:A one-year floor is a per-deployment compliance posture rather than a property of these records, which exist to diagnose a task that failed or refused a request. Callers with a retention requirement set log_retention_days.
   name              = "/aws/ecs/${var.name_prefix}"
   retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_arn
 
   tags = var.tags
 }
@@ -363,6 +381,22 @@ data "aws_iam_policy_document" "task" {
       effect    = "Allow"
       actions   = ["secretsmanager:GetSecretValue"]
       resources = [aws_secretsmanager_secret.auth_header[0].arn]
+    }
+  }
+
+  # One kms:Decrypt grant on kms_key_arn serves both readers of the key: the
+  # auth header secret, whose ARN is only useful to a reader that can also
+  # decrypt it, and ECS Exec, whose session data the task decrypts with the
+  # cluster's key. Absent without a customer managed key: with the
+  # aws/secretsmanager key, Secrets Manager authorizes the decrypt itself.
+  dynamic "statement" {
+    for_each = var.kms_key_arn != null && (local.manage_auth_secret || local.exec_uses_kms_key) ? [1] : []
+
+    content {
+      sid       = "DecryptWithKmsKeyArn"
+      effect    = "Allow"
+      actions   = ["kms:Decrypt"]
+      resources = [var.kms_key_arn]
     }
   }
 

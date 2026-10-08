@@ -579,7 +579,7 @@ export class AshFargateStack extends Stack {
       deregistrationDelay: Duration.seconds(30),
     });
 
-    suppressSecretRotation(config.authSecret);
+    suppressSecretRotation(config.mcpAuthSecret());
     /*
      * `suppressLogBucketSelfLogging` used to sit here, on `accessLogsBucket`.
      *
