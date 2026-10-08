@@ -66,9 +66,14 @@ run "key_supplied_reaches_every_encryptable_resource" {
   assert {
     condition = anytrue([
       for s in data.aws_iam_policy_document.task.statement :
-      s.sid == "DecryptAuthHeaderSecret" && s.actions == toset(["kms:Decrypt"]) && s.resources == toset([var.kms_key_arn])
+      s.sid == "DecryptWithKmsKeyArn" && s.actions == toset(["kms:Decrypt"]) && s.resources == toset([var.kms_key_arn])
     ])
     error_message = "The task role is not granted kms:Decrypt on kms_key_arn, so it could not read the secret."
+  }
+
+  assert {
+    condition     = length(aws_ecs_cluster.this[0].configuration) == 0
+    error_message = "With ECS Exec off, a supplied key should not add an execute command configuration to the cluster."
   }
 }
 
@@ -87,7 +92,7 @@ run "no_key_leaves_aws_managed_encryption" {
 
   assert {
     condition = alltrue([
-      for s in data.aws_iam_policy_document.task.statement : s.sid != "DecryptAuthHeaderSecret"
+      for s in data.aws_iam_policy_document.task.statement : s.sid != "DecryptWithKmsKeyArn"
     ])
     error_message = "With kms_key_arn unset, no kms:Decrypt statement should be granted."
   }
@@ -109,9 +114,16 @@ run "key_and_ecs_exec_encrypt_exec_sessions" {
   assert {
     condition = anytrue([
       for s in data.aws_iam_policy_document.task.statement :
-      s.sid == "DecryptEcsExecSession" && s.actions == toset(["kms:Decrypt"]) && s.resources == toset([var.kms_key_arn])
+      s.sid == "DecryptWithKmsKeyArn" && s.actions == toset(["kms:Decrypt"]) && s.resources == toset([var.kms_key_arn])
     ])
     error_message = "The task role is not granted kms:Decrypt on kms_key_arn, so ECS Exec sessions could not open."
+  }
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.task.statement : s if contains(s.actions, "kms:Decrypt")
+    ]) == 1
+    error_message = "The auth header secret and ECS Exec share one key, so the task role should carry one kms:Decrypt statement, not one per reader."
   }
 }
 
@@ -129,8 +141,56 @@ run "ecs_exec_without_key_leaves_the_cluster_unchanged" {
 
   assert {
     condition = alltrue([
-      for s in data.aws_iam_policy_document.task.statement : s.sid != "DecryptEcsExecSession"
+      for s in data.aws_iam_policy_document.task.statement : s.sid != "DecryptWithKmsKeyArn"
     ])
     error_message = "With kms_key_arn unset, no ECS Exec kms:Decrypt statement should be granted."
+  }
+}
+
+run "key_and_ecs_exec_without_auth_secret_still_grant_decrypt" {
+  command = plan
+
+  variables {
+    mcp_auth_header_name   = null
+    mcp_auth_header_value  = null
+    enable_execute_command = true
+    kms_key_arn            = "arn:aws:kms:us-east-1:${format("%012d", 1)}:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret.auth_header) == 0
+    error_message = "With no auth header value, the module should create no secret."
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.task.statement :
+      s.sid == "DecryptWithKmsKeyArn" && s.resources == toset([var.kms_key_arn])
+    ])
+    error_message = "ECS Exec alone needs kms:Decrypt on kms_key_arn, with or without the auth header secret."
+  }
+}
+
+run "external_cluster_keeps_exec_configuration_with_the_caller" {
+  command = plan
+
+  variables {
+    cluster_arn            = "arn:aws:ecs:us-east-1:${format("%012d", 1)}:cluster/existing"
+    mcp_auth_header_name   = null
+    mcp_auth_header_value  = null
+    enable_execute_command = true
+    kms_key_arn            = "arn:aws:kms:us-east-1:${format("%012d", 1)}:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  }
+
+  assert {
+    condition     = length(aws_ecs_cluster.this) == 0
+    error_message = "With cluster_arn supplied, the module should not create a cluster."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.task.statement : s.sid != "DecryptWithKmsKeyArn"
+    ])
+    error_message = "With an external cluster and no auth header secret, nothing in the module uses the key, so no kms:Decrypt should be granted."
   }
 }

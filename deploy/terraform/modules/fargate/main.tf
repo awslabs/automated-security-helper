@@ -18,8 +18,11 @@ data "aws_region" "current" {}
 
 locals {
   manage_auth_secret = nonsensitive(var.mcp_auth_header_value != null)
-  use_auth_header    = var.mcp_auth_header_name != null
-  use_base_config    = var.base_config_ssm_parameter_name != null
+  # ECS Exec sessions are encrypted with kms_key_arn only on a cluster this
+  # module creates; a cluster passed in through cluster_arn is the caller's.
+  exec_uses_kms_key = var.enable_execute_command && var.kms_key_arn != null && local.create_cluster
+  use_auth_header   = var.mcp_auth_header_name != null
+  use_base_config   = var.base_config_ssm_parameter_name != null
 
   use_tls       = var.certificate_arn != null
   listener_port = coalesce(var.listener_port, local.use_tls ? 443 : 80)
@@ -272,7 +275,7 @@ resource "aws_ecs_cluster" "this" {
   # cluster is unchanged from before the input existed. A cluster passed in
   # through cluster_arn is the caller's to configure.
   dynamic "configuration" {
-    for_each = var.enable_execute_command && var.kms_key_arn != null ? [1] : []
+    for_each = local.exec_uses_kms_key ? [1] : []
 
     content {
       execute_command_configuration {
@@ -381,14 +384,16 @@ data "aws_iam_policy_document" "task" {
     }
   }
 
-  # The secret ARN is only useful to a reader that can also decrypt it. Present
-  # only when a customer managed key was supplied: with the aws/secretsmanager
-  # key, Secrets Manager authorizes the decrypt itself.
+  # One kms:Decrypt grant on kms_key_arn serves both readers of the key: the
+  # auth header secret, whose ARN is only useful to a reader that can also
+  # decrypt it, and ECS Exec, whose session data the task decrypts with the
+  # cluster's key. Absent without a customer managed key: with the
+  # aws/secretsmanager key, Secrets Manager authorizes the decrypt itself.
   dynamic "statement" {
-    for_each = local.manage_auth_secret && var.kms_key_arn != null ? [1] : []
+    for_each = var.kms_key_arn != null && (local.manage_auth_secret || local.exec_uses_kms_key) ? [1] : []
 
     content {
-      sid       = "DecryptAuthHeaderSecret"
+      sid       = "DecryptWithKmsKeyArn"
       effect    = "Allow"
       actions   = ["kms:Decrypt"]
       resources = [var.kms_key_arn]
@@ -410,19 +415,6 @@ data "aws_iam_policy_document" "task" {
       ]
 
       resources = ["*"]
-    }
-  }
-
-  # The task decrypts ECS Exec session data with the cluster's key, so the grant
-  # follows the configuration block on aws_ecs_cluster.this.
-  dynamic "statement" {
-    for_each = var.enable_execute_command && var.kms_key_arn != null && local.create_cluster ? [1] : []
-
-    content {
-      sid       = "DecryptEcsExecSession"
-      effect    = "Allow"
-      actions   = ["kms:Decrypt"]
-      resources = [var.kms_key_arn]
     }
   }
 }
