@@ -389,6 +389,17 @@ describe('isSuppressed', () => {
     expect(isSuppressed({ suppressions: [{ status: null, state: 'rejected' }] })).toBe(false);
   });
 
+  // JetBrains reads `status` only when it is a string, so a non-string `status`
+  // falls through to `state`. Aligned here: it can only show a finding that
+  // `state` says to show, never hide one.
+  it('falls back to `state` when `status` is not a string', () => {
+    expect(isSuppressed({ suppressions: [{ status: 7, state: 'rejected' }] })).toBe(false);
+    expect(isSuppressed({ suppressions: [{ status: { x: 1 }, state: 'underReview' }] })).toBe(false);
+    expect(isSuppressed({ suppressions: [{ status: 7, state: 'accepted' }] })).toBe(true);
+    // Neither readable: still the unreadable-means-suppressed rule, in both IDEs.
+    expect(isSuppressed({ suppressions: [{ status: 7 }] })).toBe(true);
+  });
+
   it('honors a suppression it cannot read, at either depth', () => {
     expect(isSuppressed({ suppressions: [12345] })).toBe(true);
     expect(isSuppressed({ suppressions: [{ state: 12345 }] })).toBe(true);
