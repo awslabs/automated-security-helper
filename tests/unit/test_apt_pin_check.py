@@ -333,18 +333,19 @@ class TestMain:
         monkeypatch.setattr(
             checker, "APT_INDEX_FETCHER", lambda url: recorded(url, overrides)
         )
+        # main() checks the tool pins and REPO_PINS before the apt pins, so every one
+        # of them is answered with its own value, keeping the exit code the apt pins'
+        # alone. Answering only the module's pins left each REPO_PINS lookup failing,
+        # which exits 2 whatever the apt pins say.
+        pinned = {
+            p.project: p.version
+            for p in checker.enumerate_pins(checker.load_pins_module())
+            + checker.enumerate_repo_pins()
+        }
         monkeypatch.setattr(
             checker,
             "DEFAULT_FETCHERS",
-            {
-                eco: (
-                    lambda project: {
-                        p.project: p.version
-                        for p in checker.enumerate_pins(checker.load_pins_module())
-                    }[project]
-                )
-                for eco in (checker.GITHUB, checker.PYPI, checker.RUBYGEMS)
-            },
+            dict.fromkeys(checker.DEFAULT_FETCHERS, pinned.__getitem__),
         )
         code = checker.main(list(argv))
         return code, capsys.readouterr().out
