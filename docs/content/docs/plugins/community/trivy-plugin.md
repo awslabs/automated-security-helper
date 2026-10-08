@@ -1,11 +1,10 @@
 # Trivy Plugin
 
-> This module also holds a second trivy scanner, `trivy`, which runs `trivy fs` with
-> only the `vuln` scanner by default. See [Trivy filesystem scanner](trivy-fs-plugin.md).
-> `trivy` is off by default, so a config that lists this module for `trivy-repo`
-> keeps its findings; turn it on with `scanners.trivy.enabled: true`. With both on,
-> trivy runs twice and each finding is reported once per scanner. `trivy-repo` is
-> unchanged.
+> ASH also has a builtin trivy scanner, `trivy`, which runs `trivy fs` with only the
+> `vuln` scanner by default and is on in every scan. See
+> [Trivy filesystem scanner](../builtin/trivy.md). Listing this module for `trivy-repo`
+> therefore runs trivy twice, and each finding is reported once per scanner; set
+> `scanners.trivy.enabled: false` to keep only `trivy-repo`.
 
 **Description**: The Trivy plugin integrates Aquasec's Trivy CLI tool to provide comprehensive repository scanning for vulnerabilities, misconfigurations, secrets, and license issues. This plugin extends ASH's security scanning capabilities with Trivy's advanced detection algorithms and extensive vulnerability database.
 
@@ -111,6 +110,10 @@ scanners:
 | `ignore_unfixed`     | bool      | `false`                                      | Ignore vulnerabilities without available fixes                          |
 | `license_full`       | bool      | `false`                                      | Enable full license scanning (more comprehensive but slower)            |
 | `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection                                 |
+| `config_file`        | str       | `null`                                       | A trivy config file, passed as `--config`; see below                    |
+| `module_dir`         | str       | `null`                                       | A directory of trivy modules, passed as `--module-dir`; see below       |
+
+trivy-repo always passes `--config` and `--module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. Unset, they name an empty config file and an empty directory ASH creates in the scanner's results directory. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside the scanned tree, and only for paths outside that tree; otherwise they are ignored with a warning. A configured path that does not exist fails the scan.
 
 ### Scanner Types
 

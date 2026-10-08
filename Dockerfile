@@ -338,14 +338,13 @@ ARG GRYPE_VERSION="v0.120.1"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
-# actionlint backs the actionlint community scanner, installed here so listing its module
-# in a container scan needs no download. Same pinned-asset path as syft and grype.
+# actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and
+# grype.
 ARG ACTIONLINT_VERSION="v1.7.12"
 RUN with-retry 'install-pinned-tool actionlint -b /usr/local/bin'
 RUN actionlint --version
 
-# gitleaks backs the gitleaks community scanner. Installed here even though the scanner
-# runs only when its module is listed, so listing it in a container needs no network.
+# gitleaks backs the builtin gitleaks scanner, which runs beside detect-secrets.
 ARG GITLEAKS_VERSION="v8.30.1"
 RUN with-retry 'install-pinned-tool gitleaks -b /usr/local/bin'
 RUN gitleaks --version
@@ -430,7 +429,7 @@ ARG TRIVY_VERSION="v0.75.0"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
-# cfn-guard, a community scanner, and the AWS Guard Rules Registry it evaluates
+# cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
 # templates against. The binary comes from its pinned release asset like the three
 # above. The rules archive is pinned the same way (RULES_BUNDLES in
 # utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan
@@ -475,7 +474,7 @@ COPY --from=uv-reqs /src/dist/*.whl .
 # Without it every such suppression matches nothing, so the image ships it.
 # UV_NO_CACHE on every uv install in this file: uv's download and wheel cache is
 # only useful to a later install on the same machine, and in an image layer it is
-# dead weight -- measured, it was most of the growth the community scanners' uv tool
+# dead weight -- measured, it was most of the growth the new scanners' uv tool
 # environments added. Set per RUN rather than as an ENV so a scan inside the
 # container that installs a tool still gets uv's normal caching. The
 # `ash dependencies install` RUNs below also give that install a TMPDIR of its own
@@ -497,25 +496,17 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-# bandit, checkov and semgrep are installed with `uv tool install`, and each scanner's
+# bandit, checkov, semgrep, cfn-lint and zizmor are installed with `uv tool install`, and each scanner's
 # own default is a version range, so on its own this would install whatever release
 # PyPI had on the day. `--uv-tool-pins` prints the --config-overrides that pin each to
 # the version of its THIRD_PARTY_LICENSES entry, so the license files and the source
 # commit below describe the release in the image. Assigned first so a failure stops
 # the build rather than leaving the install unpinned. UV_NO_CACHE=1 keeps uv's cache
 # out of the layer.
-#
-# The community plugin modules that ship with ASH are loaded for this install only
-# (ASH_COMMUNITY_PLUGIN_MODULES), so the uv tools their scanners use (cfn-lint,
-# zizmor) are installed and pinned too, and the image carries every
-# community tool; a scan in the image still loads a module only when it is listed.
-# trivy-repo, snyk and ferret are not in the list: their tools come another way.
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_actionlint_plugins,automated_security_helper.plugin_modules.ash_cfn_plugins,automated_security_helper.plugin_modules.ash_gitleaks_plugins,automated_security_helper.plugin_modules.ash_zizmor_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
-    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
-    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
@@ -524,7 +515,7 @@ ENV PATH="${ASH_BIN_PATH}:$PATH"
 # commit and checked against their SHA256.
 RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov semgrep zizmor'
 
-# zizmor (community scanner) is installed by the line above through `uv tool install`
+# zizmor (builtin scanner) is installed by the line above through `uv tool install`
 # within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.
 RUN zizmor --version
 
@@ -609,15 +600,11 @@ ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Pinned as in the core stage: this user's uv tool directory starts empty, so the
-# Python tools are installed again here and would otherwise float. The same community
-# modules are loaded for it; an ARG does not reach a stage built FROM another, so it
-# is declared again (a unit test keeps the two equal).
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_actionlint_plugins,automated_security_helper.plugin_modules.ash_cfn_plugins,automated_security_helper.plugin_modules.ash_gitleaks_plugins,automated_security_helper.plugin_modules.ash_zizmor_plugins"
+# Python tools are installed again here and would otherwise float.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
-    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
-    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \

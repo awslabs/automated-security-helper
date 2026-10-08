@@ -39,7 +39,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import AshSuppression
-from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
     TrivyScanner,
     TrivyScannerConfig,
     TrivyScannerConfigOptions,
@@ -188,9 +188,8 @@ def _online(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def test_trivy_is_off_by_default_beside_trivy_repo():
-    """The module already held trivy-repo, so listing it must not add trivy."""
-    assert TrivyScannerConfig().enabled is False
+def test_trivy_is_a_builtin_on_by_default_beside_the_community_trivy_repo():
+    assert TrivyScannerConfig().enabled is True
     assert TrivyRepoScannerConfig().enabled is True
 
 
@@ -862,7 +861,7 @@ def test_an_assessment_that_cannot_ask_trivy_repo_still_records_trivy_db():
 )
 def test_skip_dirs_values_are_escaped_as_trivy_reads_them(name, expected):
     """Each expected value was checked against trivy 0.69.3: it skips that directory."""
-    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
         skip_dirs_value,
     )
 
@@ -892,3 +891,132 @@ def test_two_severity_tags_give_no_verdict(tmp_path):
     report = _parse(_scanner(tmp_path), raw)
     found = next(r for r in report.get_all_results() if r.ruleId == "CVE-2018-18074")
     assert getattr(found.properties, "issue_severity", None) is None
+
+
+# --------------------------------------------------------------------------- #
+# trivy-repo always names its config file and modules directory, so trivy does
+# not load a trivy.yaml from the directory it runs in.
+# --------------------------------------------------------------------------- #
+
+_PLANTED_TRIVY_YAML = "severity: [CRITICAL]\nmodule:\n  dir: ./trivy-modules-in-tree\n"
+
+
+def _repo_scan_argv(
+    tmp_path, monkeypatch, *, operator=False, overrides=(), **options
+) -> tuple:
+    from automated_security_helper.base import scanner_plugin
+
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: f"/bin/{name}")
+    scanner = _repo_scanner(tmp_path, offline=True, **options)
+    source = Path(scanner.context.source_dir)
+    record_provenance(
+        scanner.context.config,
+        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+        config_overrides=list(overrides),
+    )
+    scanner.dependencies_satisfied = True
+    calls = []
+
+    def fake_run(command, results_dir, env=None, timeout=None, **kwargs):
+        calls.append(list(command))
+        out = Path(command[command.index("--output") + 1])
+        out.write_text(VULN_SARIF.read_text(encoding="utf-8"), encoding="utf-8")
+        scanner.exit_code = 0
+        return {"returncode": 0}
+
+    monkeypatch.setattr(scanner, "_pre_scan", lambda **kw: True)
+    monkeypatch.setattr(scanner, "_run_subprocess", fake_run)
+    scanner.scan(target=source, target_type="source")
+    (argv,) = calls
+    return scanner, source, argv
+
+
+def _flag(argv, name):
+    (value,) = [a.split("=", 1)[1] for a in argv if a.startswith(f"{name}=")]
+    return Path(value)
+
+
+def test_trivy_repo_passes_its_own_config_and_an_empty_modules_dir(
+    tmp_path, monkeypatch
+):
+    probe = _repo_scanner(tmp_path)
+    planted = Path(probe.context.source_dir) / "trivy.yaml"
+    planted.write_text(_PLANTED_TRIVY_YAML, encoding="utf-8")
+
+    scanner, source, argv = _repo_scan_argv(tmp_path, monkeypatch)
+
+    results = Path(scanner.results_dir) / "source"
+    config = _flag(argv, "--config")
+    modules = _flag(argv, "--module-dir")
+    assert config == (results / "trivy-config.yaml").resolve()
+    assert config.read_text() == ""
+    assert modules == (results / "trivy-modules").resolve()
+    assert list(modules.iterdir()) == []
+    assert planted.resolve().as_posix() not in " ".join(argv)
+    # Both flags precede the target, which trivy reads as its last positional.
+    assert argv.index(f"--config={config.as_posix()}") < argv.index(str(source))
+
+
+def test_trivy_repo_empties_a_modules_dir_left_in_the_output(tmp_path, monkeypatch):
+    probe = _repo_scanner(tmp_path)
+    left = Path(probe.results_dir) / "source" / "trivy-modules"
+    left.mkdir(parents=True)
+    (left / "planted.wasm").write_bytes(b"\0asm")
+
+    _, _, argv = _repo_scan_argv(tmp_path, monkeypatch)
+
+    assert list(_flag(argv, "--module-dir").iterdir()) == []
+
+
+def test_trivy_repo_ignores_a_config_file_the_scanned_tree_sets(
+    tmp_path, monkeypatch, caplog
+):
+    probe = _repo_scanner(tmp_path)
+    planted = Path(probe.context.source_dir) / "trivy.yaml"
+    planted.write_text(_PLANTED_TRIVY_YAML, encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        scanner, _, argv = _repo_scan_argv(
+            tmp_path, monkeypatch, config_file="trivy.yaml", module_dir="."
+        )
+
+    assert _flag(argv, "--config").name == "trivy-config.yaml"
+    assert _flag(argv, "--module-dir").name == "trivy-modules"
+    assert planted.resolve().as_posix() not in " ".join(argv)
+    assert "scanners.trivy-repo.options.config_file" in caplog.text
+    assert "scanners.trivy-repo.options.module_dir" in caplog.text
+
+
+def test_trivy_repo_uses_an_operator_config_and_modules_outside_the_tree(
+    tmp_path, monkeypatch
+):
+    operator = tmp_path / "operator"
+    (operator / "modules").mkdir(parents=True)
+    (operator / "trivy.yaml").write_text("", encoding="utf-8")
+
+    _, _, argv = _repo_scan_argv(
+        tmp_path,
+        monkeypatch,
+        operator=True,
+        config_file=str(operator / "trivy.yaml"),
+        module_dir=str(operator / "modules"),
+    )
+
+    assert _flag(argv, "--config") == (operator / "trivy.yaml").resolve()
+    assert _flag(argv, "--module-dir") == (operator / "modules").resolve()
+
+
+def test_trivy_repo_honors_an_override_for_its_config(tmp_path, monkeypatch):
+    chosen = tmp_path / "operator" / "trivy.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text("", encoding="utf-8")
+
+    _, _, argv = _repo_scan_argv(
+        tmp_path,
+        monkeypatch,
+        overrides=(f"scanners.trivy-repo.options.config_file={chosen}",),
+        config_file=str(chosen),
+    )
+
+    assert _flag(argv, "--config") == chosen.resolve()

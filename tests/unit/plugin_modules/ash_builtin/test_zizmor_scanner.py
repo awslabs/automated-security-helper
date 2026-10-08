@@ -24,10 +24,10 @@ from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.plugin_modules.ash_zizmor_plugins import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     zizmor_scanner as zizmor_module,
 )
-from automated_security_helper.plugin_modules.ash_zizmor_plugins.zizmor_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
     GITHUB_TOKEN_ENV_VARS,
     ZIZMOR_DEFAULT_VERSION_CONSTRAINT,
     ZizmorScanner,
@@ -170,7 +170,7 @@ def _summarize(report: SarifReport):
 # --------------------------------------------------------------------------- #
 
 
-def test_zizmor_is_on_by_default_once_its_module_is_listed():
+def test_zizmor_is_on_by_default():
     assert ZizmorScannerConfig().enabled is True
     assert ZizmorScanner.offline_strategy == OfflineStrategy.BUNDLED
     options = ZizmorScannerConfigOptions()

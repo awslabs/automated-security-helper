@@ -1,29 +1,16 @@
-# Trivy filesystem scanner (`trivy`, in the Trivy plugin)
+# Trivy filesystem scanner (`trivy`)
 
 [trivy](https://github.com/aquasecurity/trivy) matches the packages in your dependency manifests and lockfiles against its vulnerability database. ASH runs it as `trivy fs` over each scan target.
 
 ## Enabling it
 
-The `trivy` scanner, in the Trivy plugin beside `trivy-repo`, is a community plugin that ships with ASH. Its plugin module is loaded only when you list it, so a scan that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
-
-```yaml
-# .ash/.ash.yaml
-ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_trivy_plugins
-```
-
-```bash
-# For one run
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_trivy_plugins
-```
-
-Unlike the other community scanners, `trivy` is off by default even with the module listed, because the module already holds `trivy-repo`: a config that lists it for `trivy-repo` must not start running trivy a second time. Turn it on with `scanners.trivy.enabled: true` (or `--config-overrides 'scanners.trivy.enabled=true'`). The module listed but `trivy` not enabled, it is recorded `SKIPPED`, like any disabled scanner. `--scanners trivy` without the module listed is refused, with a message naming the module to add. If the binary is not installed, an enabled `trivy` is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+The `trivy` scanner is a builtin scanner, enabled by default: a default scan runs it. `scanners.trivy.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 ## Installing trivy
 
 - Container image: included. The image installs the pinned release (currently v0.75.0).
 - Local mode: `ash dependencies install` downloads the pinned release asset from GitHub and checks it against the SHA256 recorded in `automated_security_helper/utils/tool_downloads.py` before installing it.
-- Nix mode: the flake supplies nixpkgs' `trivy`, but not its vulnerability database. Nix mode always runs offline, and the nix shell does not download the database (it is about 120 MB to fetch and 1.4 GB on disk, and trivy is a community plugin). So an enabled trivy under `--mode nix` is reported `MISSING`, with a reason saying it has no vulnerability database, until you provide one; see [Offline and air-gapped use](#offline-and-air-gapped-use).
+- Nix mode: the flake supplies nixpkgs' `trivy`, but not its vulnerability database. Nix mode always runs offline, and the nix shell does not download the database (it is about 120 MB to fetch and 1.4 GB on disk, and the nix shell does not fetch scanner databases). So trivy under `--mode nix` is reported `MISSING`, with a reason saying it has no vulnerability database, until you provide one; see [Offline and air-gapped use](#offline-and-air-gapped-use).
 - A `trivy` already on `PATH` is used as is. ASH is tested against the pinned version.
 
 ## What it scans by default, and why
@@ -82,7 +69,7 @@ A relative path is anchored on the source directory. A configured file that does
 
 `config_file` is held to more than that, because a `trivy.yaml` can point trivy at a directory of WASM modules (`module.dir`) and enable them, which runs them during the scan. It is honored only when the operator sets it, through `--config-overrides` or a config file outside the scanned tree, and only for a file outside the scanned tree. Otherwise it is ignored with a warning and trivy gets ASH's empty config. `ignore_file` and `secret_config_file` hold patterns, not code, and are honored from the repository's config as shown above.
 
-To accept a finding, prefer an ASH suppression, which is recorded in the reports. The community `trivy-repo` plugin still reads the repository's files, as it always has.
+To accept a finding, prefer an ASH suppression, which is recorded in the reports. The community `trivy-repo` plugin passes its own config file and modules directory the same way; see its `config_file` and `module_dir` options.
 
 ## Severity
 
@@ -119,6 +106,6 @@ and point the offline scan at the same `TRIVY_CACHE_DIR`. In nix mode, export `T
 
 ## Running it alongside the trivy-repo community plugin
 
-The community `trivy-repo` plugin (enabled through `ash_plugin_modules`) is unchanged: same name, same defaults (all four trivy scanners, unfixed vulnerabilities dropped), same findings and outputs. The two share their implementation but are separate scanners.
+The community `trivy-repo` plugin (enabled through `ash_plugin_modules`) keeps its name, its defaults (all four trivy scanners, unfixed vulnerabilities dropped) and its outputs. It names its own config file and modules directory, so a `trivy.yaml` in the scanned repository is not loaded. The two share their implementation but are separate scanners.
 
-If both are enabled, trivy runs twice and each finding is reported once per scanner, under that scanner's name. Both read the same database, which is measured once for each. The rule ids are the same, so one suppression by `rule_id` and `path` covers both. To avoid the duplicate, enable one of them.
+`trivy` is on by default, so listing the Trivy plugin for `trivy-repo` runs trivy twice, and each finding is reported once per scanner, under that scanner's name. Both read the same database, which is measured once for each. The rule ids are the same, so one suppression by `rule_id` and `path` covers both. To avoid the duplicate, keep one: set `scanners.trivy.enabled: false`, or stop listing the plugin.

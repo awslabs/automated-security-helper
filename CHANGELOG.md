@@ -92,42 +92,38 @@
   policy. Two scanners that ran inside the ASH process now run as worker
   subprocesses so the sandbox can cover them: detect-secrets and cdk-nag. Their
   findings are unchanged.
-- **Five community scanners ship with ASH: actionlint, the CloudFormation pair
-  cfn-lint and cfn-guard, gitleaks and zizmor, plus a second trivy scanner, `trivy`,
-  in the existing Trivy plugin.** Each is a community plugin module under
-  `automated_security_helper/plugin_modules`, loaded only when it is listed in
-  `ash_plugin_modules` (or passed with `--ash-plugin-modules`), the same way the
-  Trivy, Snyk and Ferret plugins are; a scan that lists none of them is unchanged. A
-  listed module's scanners run by default, except `trivy`, which stays off beside
-  `trivy-repo` until `scanners.trivy.enabled: true`, so a config that lists the Trivy
-  plugin for `trivy-repo` keeps its results. `--scanners gitleaks` without its module
-  listed is refused with a message naming the module to add, and a selection that also
-  names scanners that did load warns with the same advice and runs those, as any
-  partly unresolved `--scanners` list does. The container image ships every tool,
-  pinned, digest-verified and with its license files, and `ash dependencies install
-  --tool <name>` installs the same pinned build locally. Under `--sandbox` each gets
-  what it declares, listed in `docs/content/docs/scanner-sandbox.md`. See [Community
-  Plugins](docs/content/docs/plugins/community/index.md).
-  - `ash_actionlint_plugins`: actionlint 1.7.12 on `.github/workflows` files. Script
+- **Six new builtin scanners: actionlint, cfn-lint, cfn-guard, gitleaks, trivy (`trivy
+  fs`) and zizmor.** They live with the other builtins in
+  `automated_security_helper/plugin_modules/ash_builtin/scanners`, have declared
+  entries in the config schema, and are enabled by default (see Behavior changes).
+  `scanners.<name>.enabled: false` turns one off. The container image ships every
+  tool, pinned, digest-verified and with its license files; `ash dependencies install`
+  installs the same pinned builds locally; and nix mode supplies them (cfn-guard from
+  its pinned release asset, its rules and trivy's database seeded by the shell on first
+  entry). A tool that is absent is MISSING, as for every builtin scanner. Under
+  `--sandbox` each gets what it declares, listed in
+  `docs/content/docs/scanner-sandbox.md`. See
+  [Built-in Scanners](docs/content/docs/plugins/builtin/scanners.md).
+  - actionlint 1.7.12 on `.github/workflows` files. Script
     injection from untrusted event data and hard-coded container credentials are
     HIGH, always-true `if:` conditions, invalid `permissions:` and
     `set-env`/`add-path` MEDIUM, other lint findings LOW. Its shellcheck and pyflakes
     integrations are off unless configured, so results do not depend on the host.
-  - `ash_cfn_plugins`: cfn-lint (`>=1.43.3,<2.0.0`, uv tool; E to MEDIUM, W to LOW,
+  - cfn-lint (`>=1.43.3,<2.0.0`, uv tool; E to MEDIUM, W to LOW,
     I to INFO) and cfn-guard 3.2.1 against the AWS Guard Rules Registry 1.0.2,
     default rule set `wa-Security-Pillar`, every violation HIGH. Both read the
     templates cfn-nag reads, and neither needs the network.
-  - `ash_gitleaks_plugins`: gitleaks 8.30.1 (`gitleaks dir`, working tree only),
+  - gitleaks 8.30.1 (`gitleaks dir`, working tree only),
     CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,
-    which stays on by default and unchanged. `.gitleaks.toml`, `.gitleaksignore`,
+    which stays on and unchanged. `.gitleaks.toml`, `.gitleaksignore`,
     `gitleaks:allow` and `options.baseline_path` apply alongside ASH suppressions.
-  - `ash_zizmor_plugins`: zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
+  - zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
     actions, run with `--offline`; GitHub tokens are withheld unless
     `options.online_audits` is true.
-  - `ash_trivy_plugins` `trivy`: `trivy fs` (0.75.0), `vuln` only by default, held to
+  - trivy: `trivy fs` (0.75.0), `vuln` only by default, held to
     the trivy database's 24h bound; offline with no database it is MISSING with the
-    reason. Unlike `trivy-repo` it does not read a `trivy.yaml` or `.trivyignore`
-    from the scanned repository.
+    reason. It does not read a `trivy.yaml` or `.trivyignore` from the scanned
+    repository.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only
@@ -138,8 +134,13 @@
 
   ASH does not deduplicate across scanners, so overlapping pairs (gitleaks and
   detect-secrets, trivy and grype or trivy-repo, zizmor and actionlint) report a
-  shared finding once per scanner; each plugin page says where.
-- **The container image ships license files for the community plugins' tools.**
+  shared finding once per scanner; each scanner page says where.
+- **`--scanners` names the module to add for a community scanner that is not loaded.**
+  `--scanners snyk-code` without `ash_snyk_plugins` listed is refused with a message
+  naming the module, rather than reading as a typo; a selection in which other names
+  resolved warns with the same advice and runs those, as any partly unresolved
+  `--scanners` list does. `ash dependencies install --tool <name>` gives the same hint.
+- **The container image ships license files for the new scanners' tools.**
   actionlint, gitleaks, and cfn-guard with the Guard Rules Registry bundle it reads
   get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0) and zizmor,
   read from each installed wheel's dist-info and checked against its RECORD. Every
@@ -148,6 +149,23 @@
 
 ### Behavior changes
 
+- **A default scan runs six more scanners.** actionlint, cfn-lint, cfn-guard,
+  gitleaks, trivy and zizmor are builtin and on by default, so a scan with an existing
+  config now reports their findings too, and a run whose host lacks one of their tools
+  records it MISSING, which fails the incomplete-scan gate (exit 1) exactly as a
+  missing grype or semgrep does. Run `ash dependencies install`, use the container
+  image, or set `scanners.<name>.enabled: false` for any you do not want. trivy reads
+  its vulnerability database, so online it downloads it, and offline it needs the
+  database in its cache (`TRIVY_CACHE_DIR`). Configs that list the community Trivy
+  plugin for `trivy-repo` now run trivy twice; set `scanners.trivy.enabled: false` to
+  keep only `trivy-repo`.
+- **trivy-repo names its own config file and modules directory.** It always passes
+  `--config` and `--module-dir`: by default an empty config file and an empty
+  directory in its results directory, so trivy does not load a `trivy.yaml` from the
+  scanned repository. New options `scanners.trivy-repo.options.config_file` and
+  `module_dir` name others; they are honored when set through `--config-overrides`
+  or a config file outside the scanned tree, for paths outside that tree, and are
+  ignored with a warning otherwise.
 - **A config file inside the scanned tree can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`:

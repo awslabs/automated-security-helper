@@ -14,9 +14,8 @@ workflow files itself, and runs::
 
 with the scan target as the working directory.
 
-A community plugin: it is loaded only when ``ash_actionlint_plugins`` is listed in
-``ash_plugin_modules`` (or passed with ``--ash-plugin-modules``), so a scan that does
-not list the module is unchanged by its existence. Listed, it runs by default.
+A builtin scanner, enabled by default; ``scanners.actionlint.enabled: false`` turns
+it off.
 
 Decisions, and why
 ------------------

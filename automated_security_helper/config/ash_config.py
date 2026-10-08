@@ -78,6 +78,24 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+    ActionlintScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
+    CfnGuardScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+    CfnLintScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+    GitleaksScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+    ZizmorScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -351,6 +369,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
 
+    actionlint: Annotated[
+        ActionlintScannerConfig,
+        Field(description="Configure the options for actionlint"),
+    ] = ActionlintScannerConfig()
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
     ] = BanditScannerConfig()
@@ -358,6 +380,14 @@ class ScannerConfigSegment(_PluginConfigSegment):
         CdkNagScannerConfig,
         Field(description="Configure the options for CdkNag", alias="cdk-nag"),
     ] = CdkNagScannerConfig()
+    cfn_guard: Annotated[
+        CfnGuardScannerConfig,
+        Field(description="Configure the options for cfn-guard", alias="cfn-guard"),
+    ] = CfnGuardScannerConfig()
+    cfn_lint: Annotated[
+        CfnLintScannerConfig,
+        Field(description="Configure the options for cfn-lint", alias="cfn-lint"),
+    ] = CfnLintScannerConfig()
     cfn_nag: Annotated[
         CfnNagScannerConfig,
         Field(description="Configure the options for CfnNag", alias="cfn-nag"),
@@ -372,6 +402,9 @@ class ScannerConfigSegment(_PluginConfigSegment):
             alias="detect-secrets",
         ),
     ] = DetectSecretsScannerConfig()
+    gitleaks: Annotated[
+        GitleaksScannerConfig, Field(description="Configure the options for Gitleaks")
+    ] = GitleaksScannerConfig()
     grype: Annotated[
         GrypeScannerConfig, Field(description="Configure the options for Grype")
     ] = GrypeScannerConfig()
@@ -388,6 +421,13 @@ class ScannerConfigSegment(_PluginConfigSegment):
     syft: Annotated[
         SyftScannerConfig, Field(description="Configure the options for Syft")
     ] = SyftScannerConfig()
+    trivy: Annotated[
+        TrivyScannerConfig,
+        Field(description="Configure the options for Trivy (trivy fs)"),
+    ] = TrivyScannerConfig()
+    zizmor: Annotated[
+        ZizmorScannerConfig, Field(description="Configure the options for zizmor")
+    ] = ZizmorScannerConfig()
 
 
 class ReporterConfigSegment(_PluginConfigSegment):

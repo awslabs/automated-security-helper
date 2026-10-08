@@ -967,17 +967,10 @@ jobs:
         run: |
           pip install ".[cdk]"
           ash dependencies install
-          # The community scanners this job compares too. Their names are tools only
-          # once their module is loaded, hence the community config.
-          ash dependencies install --config .ash/.ash_community_plugins.yaml \
-            --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks \
-            --tool zizmor --tool trivy
       # Every scanner runs twice over one fixture, with --sandbox off and under the
       # backend, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that
-      # is MISSING in both runs cannot pass parity by being absent. The community
-      # modules are loaded in both runs, and trivy, off by default beside
-      # trivy-repo, is turned on.
+      # is MISSING in both runs cannot pass parity by being absent.
       - name: Compare every scanner with and without the sandbox
         # The report path through the environment, not interpolated into the script,
         # which is this repository's convention for every context value a shell reads.
@@ -988,8 +981,6 @@ jobs:
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ash \
-            --ash-plugin-modules automated_security_helper.plugin_modules.ash_actionlint_plugins,automated_security_helper.plugin_modules.ash_cfn_plugins,automated_security_helper.plugin_modules.ash_gitleaks_plugins,automated_security_helper.plugin_modules.ash_zizmor_plugins,automated_security_helper.plugin_modules.ash_trivy_plugins \
-            --config-override scanners.trivy.enabled=true \
             --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
@@ -1271,20 +1262,13 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync --extra cdk --extra symbols
-      # Community scanners are not installed by default anywhere a default scan would
-      # notice, so the integration suite installs the ones it runs for real. Their
-      # names are tools only once their module is loaded, hence the community config.
-      - name: Install community scanner binaries for the integration suite
-        run: uv run ash dependencies install --config .ash/.ash_community_plugins.yaml --tool actionlint
-      # cfn-lint and cfn-guard are community scanners, so nothing else in this job installs
-      # them, and tests/integration/scanners/test_cfn_lint_and_cfn_guard_real.py runs
-      # both for real. This is the installer users run, so it also exercises the pinned
-      # cfn-guard download and the rules-bundle install. ASH_REQUIRE_CFN_TOOLS below
-      # makes a missing tool fail those tests instead of skipping them.
-      - name: Install cfn-lint and cfn-guard
-        run: |
-          uv run ash dependencies install --config .ash/.ash_community_plugins.yaml \
-            --tool cfn-lint --tool cfn-guard
+      # The integration suite runs actionlint, cfn-lint and cfn-guard for real, and
+      # nothing else in this job installs them. This is the installer users run, so it
+      # also exercises the pinned downloads and the cfn-guard rules-bundle install.
+      # ASH_REQUIRE_ACTIONLINT and ASH_REQUIRE_CFN_TOOLS below make a missing tool fail
+      # those tests instead of skipping them.
+      - name: Install the scanners the integration suite runs for real
+        run: uv run ash dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,

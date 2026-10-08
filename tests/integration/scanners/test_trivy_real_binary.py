@@ -45,7 +45,7 @@ import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
     TrivyScanner,
     TrivyScannerConfig,
     TrivyScannerConfigOptions,
@@ -297,7 +297,7 @@ def _command_lines(data: dict) -> list:
     ]
 
 
-# trivy is off by default beside trivy-repo, so every run here turns it on.
+# trivy is on by default; set here so these tests do not depend on that default.
 CONFIG = {
     "project_name": "trivy-e2e",
     "fail_on_findings": True,
@@ -513,3 +513,55 @@ def test_the_scanned_repos_secret_config_cannot_disable_rules(tmp_path, trivy_en
         secret_config_file=repo_rules_file,
     )
     assert _pairs(opted) < _pairs(baseline)
+
+
+def _repo_pairs(output: Path) -> set:
+    data = _aggregated(output)
+    return {
+        (
+            r.get("ruleId"),
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+        )
+        for run in data["sarif"]["runs"]
+        for r in run.get("results") or []
+        if (r.get("properties") or {}).get("scanner_name") == "trivy-repo"
+    }
+
+
+def test_trivy_repo_does_not_load_the_scanned_repos_trivy_yaml(tmp_path, trivy_env):
+    """The pinned binary, through ``ash scan``: a cwd trivy.yaml changes nothing."""
+    source = _copy_fixture(tmp_path)
+    config = {
+        "project_name": "trivy-repo-e2e",
+        "ash_plugin_modules": [
+            "automated_security_helper.plugin_modules.ash_trivy_plugins"
+        ],
+        "scanners": {"trivy-repo": {"options": {"scanners": ["vuln"]}}},
+    }
+    proc, log = _run_ash(
+        source, tmp_path / "out0", config, trivy_env, "--scanners", "trivy-repo"
+    )
+    baseline = _repo_pairs(tmp_path / "out0")
+    assert baseline, log
+    (source / "trivy.yaml").write_text("severity:\n  - CRITICAL\n", encoding="utf-8")
+
+    proc, log = _run_ash(
+        source, tmp_path / "out1", config, trivy_env, "--scanners", "trivy-repo"
+    )
+
+    assert _repo_pairs(tmp_path / "out1") == baseline, log
+    # The control: the same file, named by the operator from outside the tree, does
+    # filter, so the comparison above can see a trivy.yaml take effect.
+    operator_config = tmp_path / "operator-trivy.yaml"
+    operator_config.write_text("severity:\n  - CRITICAL\n", encoding="utf-8")
+    proc, log = _run_ash(
+        source,
+        tmp_path / "out2",
+        config,
+        trivy_env,
+        "--scanners",
+        "trivy-repo",
+        "--config-overrides",
+        f"scanners.trivy-repo.options.config_file={operator_config.as_posix()}",
+    )
+    assert _repo_pairs(tmp_path / "out2") < baseline, log

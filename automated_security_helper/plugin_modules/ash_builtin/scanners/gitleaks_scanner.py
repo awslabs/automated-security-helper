@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The gitleaks secret scanner, as a community scanner plugin.
+"""The gitleaks secret scanner, as a builtin scanner.
 
 What it runs
 ------------
@@ -169,14 +169,12 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # gitleaks' rules are compiled into the binary and it makes no network calls.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
-    # No network. GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML pass through, because
-    # _resolve_config_file leaves config resolution to gitleaks when either is set,
-    # and GITLEAKS_CONFIG's file is mounted read-only: the operator's environment
-    # names it, not the scanned tree.
-    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
-        read_paths=("$GITLEAKS_CONFIG",),
-        env_prefixes=("GITLEAKS_",),
-    )
+    # The strict default: no network, and no variables or paths beyond the
+    # baseline. GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML are not passed into a
+    # sandbox, and neither config_file nor baseline_path outside the tree is
+    # mounted: grants derived from the environment or options wait for the
+    # sandbox's grant gates.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:

@@ -41,7 +41,7 @@ import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.plugin_modules.ash_gitleaks_plugins.gitleaks_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
     REDACTED,
     GitleaksScanner,
     GitleaksScannerConfig,
@@ -270,8 +270,6 @@ def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
         [
             _ash(),
             "scan",
-            "--ash-plugin-modules",
-            "automated_security_helper.plugin_modules.ash_gitleaks_plugins",
             "--mode",
             "local",
             "--source-dir",

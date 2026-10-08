@@ -96,11 +96,6 @@ runs:
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_actionlint_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_cfn_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_gitleaks_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins \
-          --config-overrides 'scanners.cfn-guard.enabled=false' \
           --simple
         rc=$?
         set -e
@@ -148,16 +143,13 @@ runs:
         # goes MISSING or leaves a target unevaluated fails the step before this
         # assertion runs.
         #
-        # actionlint, cfn-lint, gitleaks and zizmor are community scanners, so
-        # the scan above lists their modules with --ash-plugin-modules; otherwise they
-        # would be absent from the report and this list could not check that the flake
-        # supplies them. cfn-guard shares ash_cfn_plugins with cfn-lint and is turned
-        # off there, and the trivy module is not listed: the flake does not supply
-        # either by design (cfn-guard has no nixpkgs package, and trivy has no
-        # vulnerability database under nix; see docs/plugins/community/trivy-fs-plugin.md).
+        # cfn-guard comes from nix/cfn-guard.nix (nixpkgs has no package), with the Guard
+        # Rules Registry seeded by the shellHook; trivy's vulnerability database is
+        # seeded the same way. Without the seeding both would be MISSING here.
         flake_supplied = [
             "actionlint",
             "bandit",
+            "cfn-guard",
             "cfn-lint",
             "cfn-nag",
             "checkov",
@@ -168,6 +160,7 @@ runs:
             "opengrep",
             "semgrep",
             "syft",
+            "trivy",
             "zizmor",
         ]
 
@@ -190,14 +183,14 @@ runs:
         print(f"PASS: all {len(flake_supplied)} flake-supplied scanners participated")
         PY
 
-    # === community scanner: zizmor ===
+    # === zizmor, on its own ===
     #
     # zizmor also runs in the scan above, whose participation check says only that
     # it was not MISSING. This runs it alone with --scanners against a workflow that
     # has a known template injection, and requires a FAILED status with that finding: MISSING or ERROR would mean the
     # flake does not supply a working zizmor, and PASSED would mean it ran
     # but its output was lost.
-    - name: "nix: zizmor (community plugin) runs and reports"
+    - name: "nix: zizmor runs and reports"
       shell: bash
       env:
         # The flake under review, for the reason given on the scan step above.
@@ -222,7 +215,6 @@ runs:
           --mode nix \
           --source-dir /tmp/ash-zizmor-selftest \
           --output-dir /tmp/ash-zizmor-selftest/output \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_zizmor_plugins \
           --scanners zizmor \
           --no-fail-on-findings \
           --fail-on-incomplete-scanners \

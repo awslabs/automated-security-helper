@@ -20,11 +20,9 @@ directory input would make zizmor walk the tree itself and skip ASH's ignore
 rules. A target holding neither kind of file completes with zero findings and
 never starts zizmor.
 
-Community plugin
-----------------
-Loaded only when ``ash_zizmor_plugins`` is listed in ``ash_plugin_modules`` (or
-passed with ``--ash-plugin-modules``): a scan that does not list it is unchanged by
-its existence. Listed, it runs by default, like every community scanner.
+Builtin, enabled by default
+---------------------------
+``scanners.zizmor.enabled: false`` turns it off.
 
 Network and credentials
 -----------------------
@@ -431,19 +429,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         self.args = ToolArgs()
         super().model_post_init(context)
 
-    @property
-    def sandbox_requirements(self) -> SandboxRequirements:
-        """A network and a GitHub token only when ``online_audits`` is true.
-
-        Offline (the default) zizmor runs with ``--offline`` and ``_child_env``
-        removes the token variables, so it needs neither. With ``online_audits``
-        its online audits call the GitHub API with the token, which the sandbox
-        would otherwise drop as credential-shaped. Under --offline the sandbox
-        grants no network whatever this says, and ``_online`` runs zizmor offline.
-        """
-        if not self._options.online_audits:
-            return SandboxRequirements()
-        return SandboxRequirements(network=True, env_names=GITHUB_TOKEN_ENV_VARS)
+    # The strict default. zizmor runs with --offline unless online_audits is true,
+    # and the network and GitHub token those audits need are option-derived grants,
+    # which wait for the sandbox's grant gates: under --sandbox, online audits get
+    # neither.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
     @property
     def _options(self) -> ZizmorScannerConfigOptions:

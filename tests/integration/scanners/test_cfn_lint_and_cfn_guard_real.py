@@ -98,7 +98,6 @@ def _scan(
     scanners: str,
     config: dict | None = None,
     env=None,
-    list_module: bool = True,
 ):
     source = tmp_path / "repo"
     if not source.exists():
@@ -115,14 +114,6 @@ def _scan(
         [
             _ash(),
             "scan",
-            *(
-                [
-                    "--ash-plugin-modules",
-                    "automated_security_helper.plugin_modules.ash_cfn_plugins",
-                ]
-                if list_module
-                else []
-            ),
             "--mode",
             "local",
             "--source-dir",
@@ -264,12 +255,23 @@ def test_missing_rules_are_missing_and_the_scan_is_incomplete(tmp_path):
     )
 
 
-def test_without_the_module_listed_they_leave_no_trace(tmp_path):
-    """The module not listed: not run, not SKIPPED, not MISSING, absent."""
-    proc, output, log = _scan(tmp_path, "cfn-nag", list_module=False)
+def test_disabled_in_config_they_do_not_run(tmp_path):
+    """Builtin and on by default, so the off switch is the config: SKIPPED, no findings."""
+    proc, output, log = _scan(
+        tmp_path,
+        "cfn-nag,cfn-lint,cfn-guard",
+        config={
+            "scanners": {
+                "cfn-lint": {"enabled": False},
+                "cfn-guard": {"enabled": False},
+            }
+        },
+    )
     assert (output / "ash_aggregated_results.json").exists(), log
     results = _scanner_results(output)
-    assert "cfn-lint" not in results and "cfn-guard" not in results, sorted(results)
+    for name in ("cfn-lint", "cfn-guard"):
+        assert results[name]["status"] == "SKIPPED", (name, results[name])
+        assert not results[name].get("finding_count"), (name, results[name])
 
 
 # --------------------------------------------------------------------------- #
@@ -311,9 +313,6 @@ def _scan_with_tree_config(tmp_path: Path, tree_config: dict, *extra: str):
         yaml.safe_dump(
             {
                 "project_name": "scanned",
-                "ash_plugin_modules": [
-                    "automated_security_helper.plugin_modules.ash_cfn_plugins"
-                ],
                 **tree_config,
             }
         ),
@@ -324,8 +323,6 @@ def _scan_with_tree_config(tmp_path: Path, tree_config: dict, *extra: str):
         [
             _ash(),
             "scan",
-            "--ash-plugin-modules",
-            "automated_security_helper.plugin_modules.ash_cfn_plugins",
             "--mode",
             "local",
             "--source-dir",

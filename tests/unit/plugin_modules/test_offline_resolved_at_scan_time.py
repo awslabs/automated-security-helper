@@ -53,7 +53,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
     SyftScannerConfig,
     SyftScannerConfigOptions,
 )
-from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
     TrivyScanner,
     TrivyScannerConfig,
     TrivyScannerConfigOptions,

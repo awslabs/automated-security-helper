@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""cfn-guard: policy-as-code checks on CloudFormation templates, as a community scanner.
+"""cfn-guard: policy-as-code checks on CloudFormation templates, as a builtin scanner.
 
 The tool and the rules
 ----------------------

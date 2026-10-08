@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""cfn-guard scanner: rule selection, result normalization, exit codes, opt-in defaults.
+"""cfn-guard scanner: rule selection, result normalization, exit codes, defaults.
 
 The SARIF parsed here is real cfn-guard 3.2.1 output against the registry's
 ``wa-Security-Pillar.guard`` (aws-guard-rules-registry 1.0.2), captured from the
@@ -31,7 +31,7 @@ from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.plugin_modules.ash_cfn_plugins.cfn_guard_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
     DEFAULT_RULE_SET,
     VIOLATION_LEVEL,
     VIOLATION_SEVERITY,
@@ -281,7 +281,7 @@ class TestDependencies:
         _fake_bundle(rules_root)
         scanner = _scanner(repo)
         with patch(
-            "automated_security_helper.plugin_modules.ash_cfn_plugins."
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
             "cfn_guard_scanner.find_executable",
             return_value=None,
         ):
@@ -292,7 +292,7 @@ class TestDependencies:
     def test_missing_rules_are_missing_with_a_reason(self, repo, rules_root):
         scanner = _scanner(repo)
         with patch(
-            "automated_security_helper.plugin_modules.ash_cfn_plugins."
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
             "cfn_guard_scanner.find_executable",
             return_value="/usr/local/bin/cfn-guard",
         ):
@@ -317,8 +317,8 @@ def test_the_documented_mapping_is_high_error():
     assert (VIOLATION_SEVERITY, VIOLATION_LEVEL) == ("HIGH", "error")
 
 
-class TestCommunityPlugin:
-    def test_scanner_is_on_by_default_once_its_module_is_listed(self):
+class TestBuiltin:
+    def test_scanner_is_on_by_default(self):
         assert CfnGuardScannerConfig().enabled is True
 
 

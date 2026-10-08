@@ -41,10 +41,10 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
-from automated_security_helper.plugin_modules.ash_actionlint_plugins import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     actionlint_scanner as module,
 )
-from automated_security_helper.plugin_modules.ash_actionlint_plugins.actionlint_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
     ACTIONLINT_FORMAT,
     KIND_SEVERITY,
     ActionlintScanner,
@@ -186,11 +186,11 @@ def _run(scanner, monkeypatch, stdout, returncode, **extra) -> FakeRun:
 
 
 # --------------------------------------------------------------------------- #
-# A community plugin: on once its module is listed
+# A builtin scanner, on by default
 # --------------------------------------------------------------------------- #
 
 
-def test_the_scanner_is_on_by_default_once_its_module_is_listed():
+def test_the_scanner_is_on_by_default():
     assert ActionlintScannerConfig().enabled is True
     assert ActionlintScannerConfig().name == "actionlint"
 

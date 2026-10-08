@@ -11,15 +11,6 @@ The Trivy plugin enables ASH to leverage Trivy's powerful scanning capabilities 
 - **Secret Detection**: Finds hardcoded secrets and sensitive information
 - **License Scanning**: Analyzes software licenses and compliance issues
 
-## Two scanners
-
-This module holds two trivy scanners:
-
-- `trivy-repo` (this README): all four trivy scanners, on by default once the module is listed. Unchanged.
-- `trivy`: `trivy fs`, the `vuln` scanner only by default, held to the trivy database's 24h bound. It is off by default even with the module listed, so a config that lists this module for `trivy-repo` keeps its results; turn it on with `scanners.trivy.enabled: true`. See [docs/content/docs/plugins/community/trivy-fs-plugin.md](../../../docs/content/docs/plugins/community/trivy-fs-plugin.md).
-
-With both on, trivy runs twice and each finding is reported once per scanner.
-
 ## Prerequisites
 
 ### Install Trivy CLI
@@ -103,6 +94,11 @@ scanners:
       ignore_file: /etc/ash/trivyignore  # Passed as --ignorefile; must be outside the scanned tree
       secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as --secret-config; same rule
 ```
+
+trivy-repo always passes `--config` and `--module-dir`: an empty config file and an
+empty modules directory of ASH's, unless `config_file` and `module_dir` are set
+through `--config-overrides` or a config file outside the scanned tree, for paths
+outside that tree.
 
 trivy-repo always passes `--ignorefile` and `--secret-config`, so a `.trivyignore` or
 `trivy-secret.yaml` committed to the scanned repository is not read. Without the

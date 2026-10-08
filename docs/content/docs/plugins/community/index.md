@@ -6,15 +6,9 @@ This section is dedicated to community-developed plugins for ASH. Community plug
 
 ### Security Scanners
 
-- **[actionlint Plugin](actionlint-plugin.md)** (`ash_actionlint_plugins`) - Lints GitHub Actions workflows with actionlint: script injection, expression types, hard-coded credentials
-- **[CloudFormation Plugin](cfn-plugin.md)** (`ash_cfn_plugins`) - cfn-lint template validation and cfn-guard policy checks against the AWS Guard Rules Registry
 - **[Ferret Scan Plugin](ferret-scan-plugin.md)** - Integrates Ferret Scan for comprehensive sensitive data detection (credit cards, passports, SSNs, API keys, secrets, and more)
-- **[Gitleaks Plugin](gitleaks-plugin.md)** (`ash_gitleaks_plugins`) - Finds committed credentials with gitleaks, beside detect-secrets
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
-- **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning (`trivy-repo`), plus the [Trivy filesystem scanner](trivy-fs-plugin.md) (`trivy`, off by default)
-- **[zizmor Plugin](zizmor-plugin.md)** (`ash_zizmor_plugins`) - Static analysis of GitHub Actions workflows and composite actions
-
-Each ships with ASH. List a plugin's module in `ash_plugin_modules` (or pass it with `--ash-plugin-modules`) to load it; a scan that does not list a module is unchanged by it.
+- **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 
 ## Contributing a Community Plugin
 

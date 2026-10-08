@@ -22,7 +22,7 @@ import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.plugin_modules.ash_zizmor_plugins.zizmor_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
     ZizmorScanner,
     ZizmorScannerConfig,
 )
@@ -195,9 +195,6 @@ def test_ash_scan_with_zizmor_applies_rule_path_and_line_suppressions(source):
                 },
             ]
         },
-        "ash_plugin_modules": [
-            "automated_security_helper.plugin_modules.ash_zizmor_plugins"
-        ],
         "scanners": {"zizmor": {"enabled": True}},
     }
     config_path = source / ".ash" / ".ash.yaml"

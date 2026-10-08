@@ -5,10 +5,11 @@
 
 Why this exists
 ---------------
-A community scanner (gitleaks, cfn-lint, ...) is a plugin only once its module is
-listed, so `ash dependencies install --tool gitleaks` without the module refuses the
-name and exits 2. Two CI steps did exactly that after the scanners moved into
-community modules; nothing ran them before the change reached CI. This reads every
+A community scanner (trivy-repo, snyk-code, ferret-scan, ...) is a plugin only once
+its module is listed, so `ash dependencies install --tool trivy-repo` without the
+module refuses the name and exits 2. Two CI steps once did exactly that for scanners
+that were community plugins at the time, and nothing ran them before the change
+reached CI. This reads every
 `ash dependencies install` in the workflows, composite actions and Dockerfile and
 fails if one names a community tool without loading its module, either through a
 `--config` whose `ash_plugin_modules` lists it or a
@@ -97,33 +98,33 @@ def test_every_community_tool_install_loads_its_module():
 
 
 def test_the_scan_finds_the_installs_it_is_meant_to_check():
-    """Control: the walk sees the CI installs that name community tools."""
+    """Control: the walk sees the CI install that names a community tool."""
     named = [
         command
         for _, script in _scripts()
         for command in _install_commands(script)
-        if "--tool actionlint" in command or "--tool cfn-lint" in command
+        if "--tool trivy-repo" in command
     ]
-    assert len(named) >= 2, named
+    assert named, "no CI install of a community tool found; the check is vacuous"
 
 
-_GITLEAKS = "automated_security_helper.plugin_modules.ash_gitleaks_plugins"
-_CFN = "automated_security_helper.plugin_modules.ash_cfn_plugins"
+_TRIVY = "automated_security_helper.plugin_modules.ash_trivy_plugins"
+_SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 _COMMUNITY = "--config .ash/.ash_community_plugins.yaml"
 
 
 @pytest.mark.parametrize(
     "command,bad",
     [
-        ("ash dependencies install --tool gitleaks", True),
-        ("ash dependencies install --tool grype", False),
-        (f"ash dependencies install {_COMMUNITY} --tool gitleaks", False),
+        ("ash dependencies install --tool trivy-repo", True),
+        ("ash dependencies install --tool gitleaks", False),
+        (f"ash dependencies install {_COMMUNITY} --tool trivy-repo", False),
         (
-            f'ash dependencies install --config-overrides "ash_plugin_modules+=[{_GITLEAKS}]" --tool gitleaks',
+            f'ash dependencies install --config-overrides "ash_plugin_modules+=[{_TRIVY}]" --tool trivy-repo',
             False,
         ),
         (
-            f'ash dependencies install --config-overrides "ash_plugin_modules+=[{_CFN}]" --tool gitleaks',
+            f'ash dependencies install --config-overrides "ash_plugin_modules+=[{_SNYK}]" --tool trivy-repo',
             True,
         ),
     ],

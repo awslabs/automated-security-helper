@@ -1,27 +1,14 @@
-# CloudFormation plugin: cfn-lint and cfn-guard (community plugin)
+# cfn-lint and cfn-guard
 
-`ash_cfn_plugins` holds two CloudFormation scanners. Both read the same templates cfn-nag reads, and neither needs network access to scan.
+cfn-lint and cfn-guard are two builtin CloudFormation scanners. Both read the same templates cfn-nag reads, and neither needs network access to scan.
 
 ## Enabling it
 
-The CloudFormation plugin is a community plugin that ships with ASH. Its plugin module is loaded only when you list it, so a scan that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
-
-```yaml
-# .ash/.ash.yaml
-ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_cfn_plugins
-```
-
-```bash
-# For one run
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_cfn_plugins
-```
-
-With the module listed, `cfn-lint` and `cfn-guard` run by default, like every other scanner. `scanners.cfn-lint.enabled: false` turns one off again, and `--scanners` and `--exclude-scanners` select them as they select any scanner. `--scanners cfn-lint` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan runs them. `scanners.cfn-lint.enabled: false` in the ASH config turns one off, and `--scanners` and `--exclude-scanners` select them as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 ## cfn-lint
 
-[cfn-lint](https://github.com/aws-cloudformation/cfn-lint) validates AWS CloudFormation templates against the CloudFormation resource schemas and its own rule set: misspelled or invalid properties, values a service rejects, end-of-life Lambda runtimes, unused parameters and similar problems. It checks that a template is correct, not that it is secure, which is why ASH ships it as a community companion to cfn-nag, cfn-guard and checkov rather than a default scanner.
+[cfn-lint](https://github.com/aws-cloudformation/cfn-lint) validates AWS CloudFormation templates against the CloudFormation resource schemas and its own rule set: misspelled or invalid properties, values a service rejects, end-of-life Lambda runtimes, unused parameters and similar problems. It checks that a template is correct, not that it is secure, which is why its severities sit below the security scanners' (see the mapping below).
 
 ### Installation
 

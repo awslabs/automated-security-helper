@@ -36,7 +36,7 @@ TRIVY_DATA = REPO_ROOT / "tests" / "test_data" / "scanners" / "trivy"
 def trivy_scan(pinned_clock, tmp_path: Path):
     """(model, context) for a scan whose only scanner is trivy, enabled."""
     from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
         TrivyScanner,
         TrivyScannerConfig,
         TrivyScannerConfigOptions,

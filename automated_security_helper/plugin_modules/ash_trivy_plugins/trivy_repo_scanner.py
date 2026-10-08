@@ -4,15 +4,16 @@
 import json
 import os
 import shlex
+import shutil
 import logging
 from pathlib import Path
-from typing import Annotated, Any, List, Literal, Set
+from typing import Annotated, Any, List, Literal, Optional, Set
 from pydantic import Field, PrivateAttr
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
-from automated_security_helper.plugin_modules.ash_trivy_plugins._trivy_scanner_base import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
     TrivyScannerBase,
 )
 from automated_security_helper.core.enums import ScannerToolType
@@ -25,7 +26,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.path_trust import honored_path
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.content_db_refresh import (
@@ -35,6 +35,7 @@ from automated_security_helper.utils.content_db_refresh import (
     scan_id_for,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
 
 class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
@@ -74,6 +75,30 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
             default=False,
         ),
     ]
+    config_file: Annotated[
+        Path | str | None,
+        Field(
+            description=(
+                "A trivy config file (trivy.yaml), passed as --config. Unset, ASH "
+                "passes an empty one, so trivy does not load a trivy.yaml from the "
+                "directory it runs in. Honored only when set by --config-overrides "
+                "or a config file outside the scanned tree, for a file outside that "
+                "tree; otherwise ignored with a warning. A path that does not exist "
+                "fails the scan."
+            ),
+        ),
+    ] = None
+    module_dir: Annotated[
+        Path | str | None,
+        Field(
+            description=(
+                "A directory of trivy modules, passed as --module-dir. Unset, ASH "
+                "passes an empty directory of its own. Honored under the same rule "
+                "as config_file. A path that is not a directory fails the scan."
+            ),
+        ),
+    ] = None
+
     ignore_file: Annotated[
         str | None,
         Field(
@@ -235,6 +260,62 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             handle.write(ash_content)
         return written.as_posix()
 
+    def _pinned_config_args(self, results_dir: Path) -> List[str]:
+        """``--config`` and ``--module-dir``, so trivy loads neither from where it runs.
+
+        trivy runs with the scan target as its working directory and loads a
+        ``trivy.yaml`` from there unless ``--config`` names another, and loads the
+        modules in ``--module-dir`` (or the config's ``module.dir``). Both are
+        always passed: the operator's, when ``_operator_path`` accepts them, and
+        otherwise an empty config file and an empty modules directory that ASH
+        creates in this run's results directory.
+        """
+        options = self.config.options
+        config_file: Optional[Path] = None
+        if options.config_file:
+            config_file = self._operator_path(
+                "config_file",
+                options.config_file,
+                "trivy-repo runs with ASH's empty config instead.",
+            )
+            if config_file is not None and not config_file.is_file():
+                raise ScannerError(
+                    f"scanners.trivy-repo.options.config_file is "
+                    f"{str(options.config_file)!r}, which is not a file (resolved to "
+                    f"{config_file.as_posix()}). Fix the path or unset the option."
+                )
+        if config_file is None:
+            config_file = results_dir / "trivy-config.yaml"
+            with open_for_write(config_file) as handle:
+                handle.write("")
+        module_dir: Optional[Path] = None
+        if options.module_dir:
+            module_dir = self._operator_path(
+                "module_dir",
+                options.module_dir,
+                "trivy-repo runs with an empty modules directory instead.",
+            )
+            if module_dir is not None and not module_dir.is_dir():
+                raise ScannerError(
+                    f"scanners.trivy-repo.options.module_dir is "
+                    f"{str(options.module_dir)!r}, which is not a directory "
+                    f"(resolved to {module_dir.as_posix()}). Fix the path or unset "
+                    "the option."
+                )
+        if module_dir is None:
+            module_dir = results_dir / "trivy-modules"
+            # Fresh and empty every run: the output directory usually sits inside
+            # the scanned tree, so whatever is already at this path is not ASH's.
+            if module_dir.is_symlink() or module_dir.is_file():
+                module_dir.unlink()
+            elif module_dir.is_dir():
+                shutil.rmtree(module_dir)
+            module_dir.mkdir()
+        return [
+            f"--config={config_file.resolve().as_posix()}",
+            f"--module-dir={module_dir.resolve().as_posix()}",
+        ]
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — TrivyRepoScanner overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -307,6 +388,19 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 target=target,
                 results_file=results_file,
             )
+            # Before the target, which _resolve_arguments places after the options;
+            # trivy also accepts flags after it, so they are appended when the
+            # target is not found as given.
+            pinned = self._pinned_config_args(target_results_dir)
+            final_args = list(final_args)
+            for spelling in (str(target), Path(target).as_posix()):
+                if spelling in final_args:
+                    target_index = final_args.index(spelling)
+                    final_args[target_index:target_index] = pinned
+                    break
+            else:
+                final_args.extend(pinned)
+
             # Right after `trivy repository`, which needs no knowledge of how the
             # target is spelled further on; trivy takes flags in any position.
             head = [self.command, *self.subcommands]
