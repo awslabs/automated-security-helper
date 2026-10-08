@@ -327,11 +327,12 @@ class UVToolRunner:
             # Installing runs the package's build code and writes uv's tool
             # directory, which a sandboxed scanner may only read. Refused rather
             # than run outside the sandbox the operator asked for.
+            from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
             from automated_security_helper.utils.log import ASH_LOGGER
 
             ASH_LOGGER.error(
                 f"{tool_name} is not installed, and a sandboxed scan does not install "
-                "tools. Run `ash dependencies install` first."
+                f"tools. Run `{CANONICAL_CLI_NAME} dependencies install` first."
             )
             return False
 

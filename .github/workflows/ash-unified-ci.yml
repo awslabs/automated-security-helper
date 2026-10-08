@@ -946,7 +946,7 @@ jobs:
       - name: Install ASH with the cdk extra, and every scanner
         run: |
           pip install ".[cdk]"
-          ash dependencies install
+          ashx dependencies install
       # Every scanner runs twice over one fixture, with --sandbox off and --sandbox
       # bwrap, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that
@@ -959,7 +959,7 @@ jobs:
           PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
-            --sandbox bwrap --online --ash ash \
+            --sandbox bwrap --online --ash ashx \
             --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft \
             --report "$PARITY_REPORT"
       - name: Collect the parity report and scan output

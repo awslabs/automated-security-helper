@@ -13,10 +13,10 @@ inputs:
 outputs:
   scripts-dir:
     description: >-
-      Directory holding the installed `ash` entry point (ash.exe on Windows). Empty
+      Directory holding the installed `ashx` entry point (ashx.exe on Windows). Empty
       when install-ash is false. setup-ash does not edit PATH: the directory is the
       interpreter's scripts directory, which setup-python already puts on PATH, and
-      the action fails if `ash` on PATH resolves anywhere else.
+      the action fails if `ashx` on PATH resolves anywhere else.
     value: ${{ steps.entry-point.outputs.scripts-dir }}
 
 runs:
@@ -123,10 +123,10 @@ runs:
       shell: pwsh
       run: pip install .
 
-    # The contract callers rely on: after this action, `ash` on PATH is the ASH that
+    # The contract callers rely on: after this action, `ashx` on PATH is the ASH that
     # was just installed. Checked here so a runner image that installs console
     # scripts somewhere setup-python did not put on PATH fails in this step, by
-    # name, rather than as "ash: command not found" in some caller step later. The
+    # name, rather than as "ashx: command not found" in some caller step later. The
     # directory is also this action's `scripts-dir` output. pwsh rather than bash so
     # the check sees the runner's PATH and not one Git Bash has rearranged.
     - name: Locate ASH's entry point

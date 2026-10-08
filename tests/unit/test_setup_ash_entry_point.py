@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""setup-ash's entry-point check: `ash` on PATH must be the ASH just installed.
+"""setup-ash's entry-point check: `ashx` on PATH must be the ASH just installed.
 
 Why this file exists
 --------------------
@@ -32,7 +32,9 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTION_DIR = REPO_ROOT / ".github" / "actions" / "setup-ash"
 SCRIPT = ACTION_DIR / "locate_entry_point.py"
-EXE = "ash.exe" if os.name == "nt" else "ash"
+# v4's canonical command; test_the_checked_name_is_the_canonical_cli_name pins it.
+CLI_NAME = "ashx"
+EXE = f"{CLI_NAME}.exe" if os.name == "nt" else CLI_NAME
 
 
 @pytest.fixture
@@ -60,7 +62,7 @@ def test_found_and_on_path_writes_the_output(locate, tmp_path, monkeypatch, caps
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert locate.main() == 0
     assert output.read_text(encoding="utf-8") == f"scripts-dir={scripts}\n"
-    assert "ash resolves to" in capsys.readouterr().out
+    assert f"{CLI_NAME} resolves to" in capsys.readouterr().out
 
 
 def test_nothing_installed_fails_by_name(locate, tmp_path, monkeypatch, capsys):
@@ -123,3 +125,31 @@ def test_the_action_runs_the_check_and_exposes_its_output():
     assert "exit $LASTEXITCODE" in step["run"]
     value = action["outputs"]["scripts-dir"]["value"]
     assert value == f"${{{{ steps.{step['id']}.outputs.scripts-dir }}}}"
+
+
+def test_the_checked_name_is_the_canonical_cli_name(locate):
+    """setup-ash's callers run `ashx`; a check for the deprecated `ash` would pass
+    over a broken `ashx`, and on Windows `ash` is what MSYS2's shell is called."""
+    import json
+
+    from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
+
+    cli_name = json.loads(
+        (REPO_ROOT / "scripts" / "e2e" / "cli_name.json").read_text(encoding="utf-8")
+    )["cli_name"]
+    assert locate.CLI_NAME == CANONICAL_CLI_NAME == cli_name == CLI_NAME
+
+
+def test_a_deprecated_ash_alone_does_not_satisfy_the_check(
+    locate, tmp_path, monkeypatch, capsys
+):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    old = scripts / ("ash.exe" if os.name == "nt" else "ash")
+    old.write_text("#!/bin/sh\n", encoding="utf-8")
+    old.chmod(old.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(locate, "candidate_dirs", lambda: [str(scripts)])
+    monkeypatch.setenv("PATH", str(scripts))
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    assert locate.main() == 1
+    assert "::error::" in capsys.readouterr().out

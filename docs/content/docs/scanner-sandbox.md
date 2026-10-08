@@ -6,8 +6,8 @@ scanners run as ordinary child processes with your user's full access: they can 
 scanner subprocess inside an OS-level sandbox instead. It is off by default.
 
 ```bash
-ash scan --sandbox auto            # best sandbox this machine has
-ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
+ashx scan --sandbox auto            # best sandbox this machine has
+ashx scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
 ```
 
 or in `.ash/.ash.yaml`:
@@ -188,7 +188,7 @@ the grants with `--config-overrides` in that layout.
 
 A sandboxed scan does not install tools: installing runs a package's build code and
 writes uv's tool directory, which a sandboxed scanner may only read. Run
-`ash dependencies install` first; a scanner whose tool is missing is recorded
+`ashx dependencies install` first; a scanner whose tool is missing is recorded
 `MISSING`.
 
 ## Threat model
