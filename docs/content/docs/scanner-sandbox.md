@@ -180,10 +180,17 @@ gets none, so a repository can keep its own scan offline with `network_scanners:
 
 `mode` follows the same rule. When `--sandbox`, `ASH_CONFIG`, or the operator's
 config file turns the sandbox on, an in-tree config can't turn it off or switch it
-to another backend. That holds even when the operator's file is itself inside the
-tree, for example under a home directory that is a git checkout: its grants are
-dropped, but its mode stays, because a mode other than `off` grants nothing. Only
-`--sandbox off` or a `sandbox.mode` override turns it off. When none of them does, an in-tree `mode` applies, because a
+to another backend. A mode set by a file outside the tree comes first. When no file
+outside the tree sets one, the operator's mode still holds even if the operator's
+file is itself inside the tree, for example under a home directory that is a git
+checkout: its grants are dropped, but its mode stays, because a mode other than
+`off` grants nothing. Only `--sandbox off` or a `sandbox.mode` override turns it off.
+
+The checkout is also looked up from the shell's working directory (`$PWD`), so
+`cd vendor && ash scan`, where `vendor` is a symlink out of the checkout, still
+counts the checkout. A bind mount of a directory inside a checkout can't be traced
+back to it; scan the checkout itself, or keep its config out of the grants with
+`--config-overrides`. When none of them does, an in-tree `mode` applies, because a
 sandbox the repository asks for only takes access away. In workspace mode, the
 operator's `--config` decides for a project that has its own config file, the same
 as for one that doesn't.

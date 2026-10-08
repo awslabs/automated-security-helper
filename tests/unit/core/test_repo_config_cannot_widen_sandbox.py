@@ -816,3 +816,68 @@ def test_withholding_a_settings_derived_need_is_logged(tmp_path, monkeypatch, ca
         and "sandbox.network_scanners" in record.getMessage()
         for record in caplog.records
     )
+
+
+def _vendor_link_out(tmp_path: Path):
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".ash").mkdir()
+    ci = checkout / ".ash" / "ci.yaml"
+    ci.write_text(REPO_CONFIG)
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "sub").mkdir(parents=True)
+    _symlink(checkout / "vendor", elsewhere)
+    return checkout, ci
+
+
+def test_scanning_the_working_directory_inside_a_symlink_counts_the_checkout(
+    tmp_path, monkeypatch
+):
+    # `cd checkout/vendor && ash scan`: the operating system reports the physical
+    # directory, outside the checkout; only $PWD still says where the shell is.
+    checkout, ci = _vendor_link_out(tmp_path)
+    monkeypatch.chdir(checkout / "vendor")
+    monkeypatch.setenv("PWD", str(checkout / "vendor"))
+    for root in (Path("."), Path.cwd(), Path.cwd() / "sub", Path("sub")):
+        sandbox = resolve_config(config_path=ci, source_dir=root).sandbox
+        assert sandbox.network_scanners is None, root
+        assert sandbox.extra_read_paths == [], root
+
+
+def test_a_pwd_that_names_another_directory_is_not_used(tmp_path, monkeypatch):
+    checkout, ci = _vendor_link_out(tmp_path)
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    # Points into the checkout, but is not the working directory.
+    monkeypatch.setenv("PWD", str(checkout))
+    assert sandbox_grants._logical_paths(Path(".")) == []
+
+
+def test_a_relative_scan_root_from_a_subdirectory_counts_the_checkout(
+    tmp_path, monkeypatch
+):
+    checkout, ci = _vendor_link_out(tmp_path)
+    (checkout / "a").mkdir()
+    _symlink(checkout / "a" / "vendor", tmp_path / "elsewhere")
+    monkeypatch.chdir(checkout / "a")
+    monkeypatch.delenv("PWD", raising=False)
+    sandbox = resolve_config(config_path=ci, source_dir=Path("vendor")).sandbox
+    assert sandbox.network_scanners is None
+    assert sandbox.extra_read_paths == []
+
+
+def test_ash_config_in_a_checkout_found_only_through_the_resolved_root(
+    tmp_path, monkeypatch
+):
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".ash").mkdir()
+    rogue = checkout / ".ash" / "rogue.yaml"
+    rogue.write_text(REPO_CONFIG)
+    (checkout / "src" / ".ash").mkdir(parents=True)
+    (checkout / "src" / ".ash" / ".ash.yaml").write_text("project_name: src\n")
+    link = tmp_path / "link"
+    _symlink(link, checkout / "src")
+    monkeypatch.setenv("ASH_CONFIG", str(rogue))
+    sandbox = resolve_config(source_dir=link).sandbox
+    assert sandbox.network_scanners is None
+    assert sandbox.extra_read_paths == []

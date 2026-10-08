@@ -24,9 +24,10 @@ can't add network.
 
 ``sandbox.mode`` follows the same rule. When ``--sandbox``, ``ASH_CONFIG`` or the
 operator's config file turns the sandbox on, an in-tree file can't turn it off or
-switch it to another backend. The operator's mode is honored wherever that file
-lives, even inside the tree, because a mode other than ``off`` never grants access;
-only ``--sandbox off`` or an override turns it back off. When no operator source
+switch it to another backend. A mode from a file outside the tree comes first; when
+none sets one, the operator's mode is honored even if its file is inside the tree,
+because a mode other than ``off`` never grants access. Only ``--sandbox off`` or an
+override turns it back off. When no operator source
 turns the sandbox on, an in-tree mode applies, because a sandbox the repository asks
 for only takes access away.
 
@@ -35,8 +36,12 @@ The scanned tree is the outermost directory at or above the scan root that holds
 scan root itself outside a repository. Outermost, so a ``.git`` file inside the
 repository can't make the superproject look like it is outside. The repository being
 scanned controls all of it, not only the part being scanned. The root is looked up
-from the scan root as given and from its resolved path, so a scan root that is a
-symlink out of the repository still counts the repository. The check looks for the
+from the scan root as given, from its resolved path, and, when the scan root is the
+working directory or below it, from the shell's logical working directory
+(``$PWD``). That way a scan root that is a symlink out of the repository still counts
+the repository, including after ``cd vendor && ash scan``, where the operating system
+reports only the physical directory. ``$PWD`` is used only when it names the working
+directory, and it can only add a tree, never remove one. The check looks for the
 entry on disk and does not run git, which reads configuration from the repository.
 
 Whether a file is in the tree is decided with ``os.path.samefile`` on each of the
@@ -79,12 +84,36 @@ def _outermost_checkout(start: Path) -> Path:
     return found
 
 
+def _logical_paths(scan_root: Path) -> List[Path]:
+    """``scan_root`` as the shell names it, when it is the working directory or below."""
+    pwd = os.environ.get("PWD")
+    if not pwd or not os.path.isabs(pwd):
+        return []
+    try:
+        if not os.path.samefile(pwd, os.getcwd()):
+            return []
+    except OSError:
+        return []
+    if not os.path.isabs(scan_root):
+        return [Path(os.path.normpath(os.path.join(pwd, scan_root)))]
+    real_cwd = os.path.realpath(os.getcwd())
+    real_root = os.path.realpath(scan_root)
+    try:
+        if os.path.commonpath([real_cwd, real_root]) != real_cwd:
+            return []
+    except ValueError:  # different drives on Windows
+        return []
+    relative = os.path.relpath(real_root, real_cwd)
+    return [Path(os.path.normpath(os.path.join(pwd, relative)))]
+
+
 def scanned_trees(scan_root: Path) -> List[Path]:
-    """The trees the scanned repository controls, from the root as given and resolved."""
+    """The trees the scanned repository controls, from every name the scan root has."""
     trees = []
     for start in (
         Path(os.path.abspath(scan_root)),
         Path(os.path.realpath(scan_root)),
+        *_logical_paths(scan_root),
     ):
         tree = _outermost_checkout(start)
         if tree not in trees:

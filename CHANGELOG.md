@@ -68,7 +68,10 @@
   file outside the tree. Such a file's `network_scanners` can still remove network,
   and its `sandbox.mode` applies only when nothing trusted turned the sandbox on.
   The tree is the outermost enclosing checkout, not only the scanned directory, and
-  the operator's sandbox mode holds even when the operator's own file is in the tree.
+  when nothing outside the tree sets a sandbox mode, the operator's mode holds even
+  when the operator's own file is in the tree. In workspace mode, an operator
+  `--config` that does not validate is now refused (exit 3) even for projects that
+  have their own config file, because the sandbox mode is read from it.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
