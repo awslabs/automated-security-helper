@@ -187,7 +187,7 @@ class StubScanner:
     def content_databases_in_use(self):
         if self._entries is not None:
             return self._entries
-        return [e for e in cdb.CONTENT_DATABASES if e.scanner == self.config.name]
+        return [e for e in cdb.CONTENT_DATABASES if self.config.name in e.readers]
 
     def content_database_probe_context(self):
         return self._ctx
@@ -923,7 +923,7 @@ class TestNoScannerReadsAnUndeclaredDatabase:
         return found
 
     def test_every_cache_scanner_is_declared_or_explained(self):
-        declared = {e.scanner for e in cdb.CONTENT_DATABASES}
+        declared = {name for e in cdb.CONTENT_DATABASES for name in e.readers}
         explained = set(cdb.SCANNERS_WITHOUT_CONTENT_DATABASE)
         assert not declared & explained
         undeclared = sorted(set(self._cache_scanners()) - declared - explained)
@@ -935,7 +935,7 @@ class TestNoScannerReadsAnUndeclaredDatabase:
 
     def test_every_declared_scanner_exists(self):
         scanners = self._cache_scanners()
-        for name in {e.scanner for e in cdb.CONTENT_DATABASES} | set(
+        for name in {n for e in cdb.CONTENT_DATABASES for n in e.readers} | set(
             cdb.SCANNERS_WITHOUT_CONTENT_DATABASE
         ):
             assert name in scanners, name
@@ -943,7 +943,7 @@ class TestNoScannerReadsAnUndeclaredDatabase:
     def test_the_gate_can_fail(self):
         """A CACHE_FLAGS scanner nobody declared would be reported."""
         scanners = set(self._cache_scanners()) | {"a-new-db-scanner"}
-        declared = {e.scanner for e in cdb.CONTENT_DATABASES}
+        declared = {name for e in cdb.CONTENT_DATABASES for name in e.readers}
         explained = set(cdb.SCANNERS_WITHOUT_CONTENT_DATABASE)
         assert sorted(scanners - declared - explained) == ["a-new-db-scanner"]
 

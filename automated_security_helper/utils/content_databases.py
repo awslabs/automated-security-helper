@@ -59,6 +59,9 @@ trivy's vulnerability database
     ``trivy version --format json``. Online, trivy replaces a database past ``NextUpdate``
     before scanning and fails if it cannot; offline, ``--skip-db-update`` bypasses the rule
     entirely (db.go:145-151), which is the case ASH's check exists for.
+    Two scanners of the Trivy plugin read it: ``trivy-repo``, which the entry is declared
+    for, and ``trivy``, named in ``also_read_by``. Both are held to the same bound and
+    measured the same way, each under its own name.
 
 semgrep and opengrep offline rulesets
     Downloaded into the image at build time when ``OFFLINE=YES`` (Dockerfile, the
@@ -176,6 +179,16 @@ class ContentDatabase:
     # A declared max age alone is not enough: it bounds what a SCAN accepts, not what a cache
     # hands out, and the drift gate refuses a CI cache of anything not marked here.
     cacheable_in_ci: bool = False
+    # Other scanners that read the same database, by config name. ``scanner`` is the one
+    # the database is declared for; a scanner named here is held to the same bound, and
+    # its measurements are recorded under its own name. The trivy database is read by
+    # both scanners of the Trivy plugin, ``trivy-repo`` and ``trivy``.
+    also_read_by: tuple[str, ...] = ()
+
+    @property
+    def readers(self) -> tuple[str, ...]:
+        """Every scanner config name that reads this database, ``scanner`` first."""
+        return (self.scanner, *self.also_read_by)
 
     @property
     def cacheable(self) -> bool:
@@ -242,6 +255,7 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
     ContentDatabase(
         name="trivy-db",
         scanner="trivy-repo",
+        also_read_by=("trivy",),
         cache_path="~/.cache/trivy",
         max_age=TRIVY_DB_MAX_AGE,
         bound_source=(

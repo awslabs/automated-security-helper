@@ -60,6 +60,7 @@ from automated_security_helper.utils.tool_downloads import (
     _ASSET_TABLES,
     _DIGESTS,
     _EXECUTABLE_DIGESTS,
+    RULES_BUNDLES,
     TOOL_VERSIONS,
     downloadable_tools,
     get_tool_asset,
@@ -1147,9 +1148,18 @@ class TestReceiptDirectoryPermissions:
 
 class TestAssetResolution:
     def test_downloadable_tools(self):
-        assert downloadable_tools() == ["grype", "opengrep", "syft", "trivy", "uv"]
+        assert downloadable_tools() == [
+            "actionlint",
+            "cfn-guard",
+            "gitleaks",
+            "grype",
+            "opengrep",
+            "syft",
+            "trivy",
+            "uv",
+        ]
 
-    @pytest.mark.parametrize("tool", ["grype", "opengrep", "syft", "trivy"])
+    @pytest.mark.parametrize("tool", ["gitleaks", "grype", "opengrep", "syft", "trivy"])
     def test_linux_and_darwin_are_provisionable_on_both_arches(self, tool):
         pairs = supported_platforms(tool)
         for target in [
@@ -1208,7 +1218,17 @@ class TestAssetResolution:
         referenced = {
             filename for table in _ASSET_TABLES.values() for filename in table.values()
         }
+        # A rules bundle's digest lives in the same table, so the one suppression
+        # range covers every published checksum; it is referenced by its URL.
+        referenced |= {
+            bundle.url.rsplit("/", 1)[-1] for bundle in RULES_BUNDLES.values()
+        }
         assert sorted(set(_DIGESTS) - referenced) == []
+
+    def test_every_rules_bundle_digest_is_the_table_entry(self):
+        for bundle in RULES_BUNDLES.values():
+            assert bundle.sha256 == _DIGESTS[bundle.url.rsplit("/", 1)[-1]]
+            assert bundle.version in bundle.url
 
     def test_pinned_versions_appear_in_their_asset_filenames(self):
         """A version bump has to move every digest lookup with it.
