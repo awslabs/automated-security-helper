@@ -123,7 +123,11 @@
   - trivy: `trivy fs` (0.75.0), `vuln` only by default, held to
     the trivy database's 24h bound; offline with no database it is MISSING with the
     reason. It does not read a `trivy.yaml` or `.trivyignore` from the scanned
-    repository.
+    repository. trivy and trivy-repo share trivy's cache and run at the same time, so
+    online ASH updates the database once per scan, under a lock in that cache, and
+    both scanners then run with `--skip-db-update` (and `--skip-check-update` when
+    `misconfig` is on). An image built with `OFFLINE=YES` ships the database, and the
+    nix shell updates it on every entry.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only

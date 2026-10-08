@@ -10,7 +10,7 @@ The `trivy` scanner is a builtin scanner, enabled by default: a default scan run
 
 - Container image: included. The image installs the pinned release (currently v0.75.0).
 - Local mode: `ash dependencies install` downloads the pinned release asset from GitHub and checks it against the SHA256 recorded in `automated_security_helper/utils/tool_downloads.py` before installing it.
-- Nix mode: the flake supplies nixpkgs' `trivy`, but not its vulnerability database. Nix mode always runs offline, and the nix shell does not download the database (it is about 120 MB to fetch and 1.4 GB on disk, and the nix shell does not fetch scanner databases). So trivy under `--mode nix` is reported `MISSING`, with a reason saying it has no vulnerability database, until you provide one; see [Offline and air-gapped use](#offline-and-air-gapped-use).
+- Nix mode: the flake supplies nixpkgs' `trivy`, and the nix shell keeps its vulnerability database in `TRIVY_CACHE_DIR` (default `~/.cache/ash/trivy`), updating it on every entry; trivy returns at once when the database is current. Nix mode scans offline, so when the shell had no network and nothing is cached, trivy is reported `MISSING` with the reason; see [Offline and air-gapped use](#offline-and-air-gapped-use).
 - A `trivy` already on `PATH` is used as is. ASH is tested against the pinned version.
 
 ## What it scans by default, and why
@@ -106,6 +106,6 @@ and point the offline scan at the same `TRIVY_CACHE_DIR`. In nix mode, export `T
 
 ## Running it alongside the trivy-repo community plugin
 
-The community `trivy-repo` plugin (enabled through `ash_plugin_modules`) keeps its name, its defaults (all four trivy scanners, unfixed vulnerabilities dropped) and its outputs. It names its own config file and modules directory, so a `trivy.yaml` in the scanned repository is not loaded. The two share their implementation but are separate scanners.
+The community `trivy-repo` plugin (enabled through `ash_plugin_modules`) keeps its name and its defaults (all four trivy scanners, unfixed vulnerabilities dropped). It names its own config file and modules directory, so a `trivy.yaml` in the scanned repository is not loaded, and settings that file made no longer apply. The two share their implementation but are separate scanners.
 
 `trivy` is on by default, so listing the Trivy plugin for `trivy-repo` runs trivy twice, and each finding is reported once per scanner, under that scanner's name. Both read the same database, which is measured once for each. The rule ids are the same, so one suppression by `rule_id` and `path` covers both. To avoid the duplicate, keep one: set `scanners.trivy.enabled: false`, or stop listing the plugin.

@@ -315,7 +315,11 @@ def test_ash_scan_runs_trivy_and_records_its_database(tmp_path, trivy_env):
     records = [r for r in _content_db_records(data) if r["name"] == "trivy-db"]
     assert records and {r["scanner"] for r in records} == {"trivy"}, records
     assert not any(r["stale"] for r in records), records
-    assert not any("--skip-db-update" in c for c in _command_lines(data))
+    # Online: ASH updated the database first, under its lock, so the scan itself
+    # skipped the update; it is not an offline scan.
+    lines = _command_lines(data)
+    assert any("--skip-db-update" in c for c in lines), lines
+    assert not any("--offline-scan" in c for c in lines), lines
 
 
 def test_ash_scan_offline_uses_the_cached_database(tmp_path, trivy_env):
@@ -565,3 +569,49 @@ def test_trivy_repo_does_not_load_the_scanned_repos_trivy_yaml(tmp_path, trivy_e
         f"scanners.trivy-repo.options.config_file={operator_config.as_posix()}",
     )
     assert _repo_pairs(tmp_path / "out2") < baseline, log
+
+
+def test_trivy_and_trivy_repo_share_an_empty_cache_without_racing(
+    tmp_path, trivy_bin_dir
+):
+    """Both scanners, concurrently, against an empty shared cache, three times.
+
+    Each used to download the vulnerability database itself, and one could read
+    metadata.json or the mapped trivy.db while the other rewrote it ("unable to get
+    metadata: json decode error: unexpected EOF" in CI, a SIGBUS in bbolt locally).
+    The race does not fire every time, so one clean round proves little; three
+    empty-cache rounds with both scanners ERROR-free is the regression guard.
+    """
+    source = _copy_fixture(tmp_path)
+    config = {
+        "project_name": "trivy-race",
+        "ash_plugin_modules": [
+            "automated_security_helper.plugin_modules.ash_trivy_plugins"
+        ],
+        "scanners": {
+            "trivy": {"enabled": True},
+            "trivy-repo": {"options": {"scanners": ["vuln"]}},
+        },
+    }
+    for round_ in range(3):
+        cache = tmp_path / f"cache-{round_}"
+        cache.mkdir()
+        env = {
+            **os.environ,
+            "PATH": f"{trivy_bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "TRIVY_CACHE_DIR": str(cache),
+        }
+        env.pop("ASH_OFFLINE", None)
+        output = tmp_path / f"out-{round_}"
+        proc, log = _run_ash(
+            source, output, config, env, "--scanners", "trivy,trivy-repo"
+        )
+        statuses = {
+            name: info.get("status")
+            for name, info in _aggregated(output)["scanner_results"].items()
+        }
+        assert statuses.get("trivy") not in (None, "ERROR", "MISSING"), (round_, log)
+        assert statuses.get("trivy-repo") not in (None, "ERROR", "MISSING"), (
+            round_,
+            log,
+        )

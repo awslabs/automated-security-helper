@@ -299,6 +299,20 @@ def outside_scanner_sandbox() -> Iterator[None]:
         _ACTIVE.reset(previous)
 
 
+def cache_writes_reach_the_host() -> bool:
+    """Whether what the active scanner writes to its declared caches persists.
+
+    True outside a sandbox, and under a backend that mounts caches read-write. False
+    under one that mounts them through a throwaway overlay (bwrap, where the kernel
+    allows it): each spawn then writes its own copy, so two spawns cannot see each
+    other's writes, and an update one makes is gone before the next starts.
+    """
+    scope = _ACTIVE.get()
+    if not isinstance(scope, SandboxScope):
+        return True
+    return not scope.backend.caches_are_throwaway
+
+
 def prepare_spawn(
     argv: Sequence[str],
     env: Optional[Mapping[str, str]],
