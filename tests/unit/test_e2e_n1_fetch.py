@@ -364,6 +364,41 @@ def test_a_leg_derives_n_minus_1_and_runs_its_script(key):
 LEG_OVERRIDES = {("ash-package.yml", "chocolatey"): ("PrevRef",)}
 
 
+def _ps1_argument_problems(run: str, overrides) -> list:
+    """For a leg whose script takes overrides as parameters: every argument named.
+
+    PowerShell binds an unambiguous prefix (-Prev for -PrevRef) and binds bare words
+    by position, so a parameter that is a prefix of an override, and any positional
+    argument, are refused.
+    """
+    problems = []
+    if not overrides:
+        return problems
+    for line in run.splitlines():
+        match = re.search(r"\S+\.ps1\b(.*)$", line)
+        if not match:
+            continue
+        try:
+            words = shlex.split(match.group(1), posix=False)
+        except ValueError:
+            problems.append(f"cannot read the script arguments: {line.strip()}")
+            continue
+        expect_value = False
+        for word in words:
+            if expect_value:
+                expect_value = False
+                continue
+            if word.startswith("-"):
+                param = word[1:].split(":", 1)[0]
+                for name in overrides:
+                    if len(param) > 1 and name.lower().startswith(param.lower()):
+                        problems.append(f"passes {word}, which binds -{name}")
+                expect_value = ":" not in word
+                continue
+            problems.append(f"passes {word} by position")
+    return problems
+
+
 def workflow_leg_problems(workflow: dict, job_name: str, overrides=None) -> list:
     """How an N-1 job could hand its script an N-1 other than `auto`.
 
@@ -391,6 +426,7 @@ def workflow_leg_problems(workflow: dict, job_name: str, overrides=None) -> list
         )
     names = ("E2E_PREV_REF", *overrides)
     for index, step in enumerate(job.get("steps") or []):
+        problems += _ps1_argument_problems(str(step.get("run", "")), overrides)
         # With quotes removed too, so a name split by quoting ("E2E_PREV""_REF") is seen.
         raw = str(step.get("run", ""))
         run = raw + "\n" + re.sub(r"[\"'`]", "", raw)
@@ -534,8 +570,11 @@ def writes_to(name: str, text: str) -> list:
     Not covered, and banned outright by shell_leg_problems instead: eval.
     """
     q = r"""["']?"""
+    # An assignment is one only where a command starts (a message that says
+    # "prev_sha=..." is not one), after any declare/local/export/readonly/typeset.
+    declarers = r"(?:(?:declare|local|export|readonly|typeset)(?:\s+-\w+)*\s+)?"
     forms = [
-        rf"(?<![\w$]){q}{name}{q}\s*\+?=",
+        _COMMAND_START + declarers + rf"{q}{name}{q}\s*\+?=",
         rf"\$\{{{name}:?=",
         rf"\b(?:read|mapfile|readarray)\b[^\n;|&]*\s{q}{name}{q}(?![\w])",
         rf"\bprintf\s+(?:-\S+\s+)*-v\s*{q}{name}{q}(?![\w])",
@@ -551,20 +590,75 @@ def writes_to(name: str, text: str) -> list:
     ]
 
 
-# A write whose target name is itself an expansion: read "$n", printf -v "$n",
-# export "$n=...", declare -n r="$n". The name it writes cannot be known from the text.
-_DYNAMIC_WRITE = re.compile(
-    r"""\b(?:read|mapfile|readarray)\b[^\n;|&]*\s["']?\$"""
-    r"""|\bprintf\s+(?:-\S+\s+)*-v\s*["']?\$"""
-    r"""|\b(?:export|declare|local|typeset|readonly)\s+(?:-\w+\s+)*["']?\$\{?\w+\}?="""
-    r"""|\b(?:declare|local|typeset)\s+(?:-\w+\s+)*-\w*n\w*\s+\w+=["']?\$"""
-)
+# Options of the variable-writing builtins that take the next word as their value.
+_WRITER_VALUE_OPTIONS = {
+    "read": {"-d", "-i", "-n", "-N", "-p", "-t", "-u"},
+    "mapfile": {"-d", "-n", "-O", "-s", "-u", "-C", "-c"},
+    "readarray": {"-d", "-n", "-O", "-s", "-u", "-C", "-c"},
+}
+
+
+def dynamic_write_problems(text: str) -> list:
+    """Writes whose target NAME is itself an expansion, so the name cannot be read.
+
+    read "$n", mapfile "$n", printf -v "$n", export "$n=...", declare -n r="$n". Only the
+    builtin in command position counts, and only its NAME operands: `say "cannot read
+    $f"` is a message, and in `read -r A B <<< "$x"` only the here-string is expanded.
+    """
+    problems = []
+    builtins = r"(read|mapfile|readarray|printf|export|declare|local|typeset|readonly)"
+    pattern = re.compile(_COMMAND_START + builtins + r"\b([^|;&)\n]*)")
+    for number, line in _code_lines(text):
+        for match in pattern.finditer(line):
+            builtin, rest = match.group(1), match.group(2)
+            try:
+                words = shlex.split(rest)
+            except ValueError:
+                words = rest.split()
+            names, skip = [], False
+            for index, word in enumerate(words):
+                if skip:
+                    skip = False
+                    continue
+                if _REDIRECT.match(word) or word.startswith("<("):
+                    break
+                if builtin == "printf":
+                    if word == "-v" and index + 1 < len(words):
+                        names.append(words[index + 1])
+                    elif word.startswith("-v") and len(word) > 2:
+                        names.append(word[2:])
+                    continue
+                if word.startswith("-") and len(word) > 1:
+                    if builtin in _WRITER_VALUE_OPTIONS and word == "-a":
+                        continue  # read -a NAME: the next word is still a name
+                    skip = word in _WRITER_VALUE_OPTIONS.get(builtin, set())
+                    continue
+                if builtin in ("read", "mapfile", "readarray"):
+                    names.append(word)
+                else:
+                    name, _, value = word.partition("=")
+                    names.append(name)
+                    if re.search(r"(?:^|\s)-\w*n", rest) and "$" in value:
+                        names.append(value)  # declare -n r="$n": the target is $n
+            dynamic = [name for name in names if "$" in name]
+            if dynamic:
+                problems.append(
+                    f"line {number}: {builtin} writes a variable named by "
+                    f"an expansion: {', '.join(dynamic)}"
+                )
+    return problems
 
 
 def _code_lines(text: str) -> list:
     """(first line number, code): comment lines dropped, backslash-continued lines joined."""
-    lines, pending, first = [], "", 0
+    lines, pending, first, heredoc = [], "", 0, None
     for number, line in enumerate(text.splitlines(), 1):
+        # The body of a <<'X' heredoc is data (here, Python), never shell; an unquoted
+        # <<X body still expands $(...), so it is read as code.
+        if heredoc is not None:
+            if line.strip() == heredoc:
+                heredoc = None
+            continue
         if not pending and line.lstrip().startswith("#"):
             continue
         if not pending:
@@ -573,23 +667,93 @@ def _code_lines(text: str) -> list:
             pending += line[:-1] + " "
             continue
         lines.append((first, pending + line))
+        quoted = re.search(r"""<<-?\s*(['"])(\w+)\1""", pending + line)
+        if quoted:
+            heredoc = quoted.group(2)
         pending = ""
     if pending:
         lines.append((first, pending))
     return lines
 
 
-# A command word: at the start of a command, after a wrapper that runs its argument as
-# one (command, exec, xargs, env ...), never a word inside a message.
+# A command word: at the start of a command (after ;, |, ||, &, &&, (, {, $(, `, a
+# keyword or !), past any VAR=value prefixes and any wrapper that runs its argument as a
+# command (command, env VAR=x, nice -n N, timeout N, xargs ...), never a word inside a
+# message. Whatever this misses is caught by _live_git_words below, which fails closed.
+_ASSIGNMENTS = r"""(?:\w+=(?:"[^"]*"|'[^']*'|[^\s;|&])*\s+)*"""
+_WRAPPERS = (
+    r"(?:(?:command|builtin|exec|xargs|env|time|nice|nohup|timeout|stdbuf|sudo|ionice)"
+    r"(?:\s+(?:-\S+|\w+=\S*|\d[\w.]*))*\s+)*"
+)
 _COMMAND_START = (
-    r"(?:^|\$\(|`|\||&&|;|\b(?:if|then|elif|else|do|while|until)\b|!)\s*"
-    r"(?:(?:command|builtin|exec|xargs|env|time|nice|nohup)\s+(?:-\S+\s+)*)*"
+    r"(?:^|\$\(|`|\|\|?|&&?|;|(?<!\$)\(|(?<!\$)\{"
+    r"|\b(?:if|then|elif|else|do|while|until)\b|!)\s*" + _ASSIGNMENTS + _WRAPPERS
 )
 _GIT_CALL = re.compile(_COMMAND_START + r"\\?(git\s[^|;&)`\n]*)")
 # Any command word, to catch git spelled so that the pattern above does not see it.
 _COMMAND_WORD = re.compile(_COMMAND_START + r"([^\s;|&)`]+)")
 # A redirection: >x, 2>x, &>x, <x, 2>&1, or the bare operator with its target next.
 _REDIRECT = re.compile(r"^(?:\d*|&)[<>]{1,2}&?")
+
+
+def _live_git_words(line: str) -> list:
+    """Offsets of every `git` word bash would run as code: outside quotes, or inside a
+    $(...) or `...` within double quotes. A message ("... git archive ...") is not."""
+    offsets, stack, index = [], ["code"], 0
+    while index < len(line):
+        here, char = stack[-1], line[index]
+        if here == "sq":
+            if char == "'":
+                stack.pop()
+        elif char == "\\":
+            index += 1
+        elif here == "dq":
+            if char == '"':
+                stack.pop()
+            elif line.startswith("$(", index):
+                stack.append("sub")
+                index += 1
+            elif char == "`":
+                stack.append("tick")
+        else:  # code, sub or tick
+            if char == "'":
+                stack.append("sq")
+            elif char == '"':
+                stack.append("dq")
+            elif line.startswith("$(", index):
+                stack.append("sub")
+                index += 1
+            elif char == ")" and here == "sub":
+                stack.pop()
+            elif char == "`":
+                if here == "tick":
+                    stack.pop()
+                else:
+                    stack.append("tick")
+            elif char == "#" and (index == 0 or line[index - 1] in " \t;"):
+                break
+            elif (
+                line.startswith("git", index)
+                and (index == 0 or line[index - 1] in " \t;|&({`!\\")
+                and (index + 3 == len(line) or line[index + 3] in " \t;|&)}`")
+            ):
+                offsets.append(index)
+        index += 1
+    return offsets
+
+
+def _allowed_revision(rev: str) -> bool:
+    # ${PREV_SHA} is $PREV_SHA, a peel (^{commit}) names the same commit, a range's
+    # ends and a rev:path's rev must each be allowed (an empty range end is HEAD).
+    rev = re.sub(r"\$\{(\w+)\}", r"$\1", rev)
+    if ".." in rev:
+        return all(
+            _allowed_revision(end or "HEAD") for end in re.split(r"\.{2,3}", rev)
+        )
+    if ":" in rev:
+        rev = rev.split(":", 1)[0]
+    rev = re.sub(r"\^\{(?:commit|tree)\}$", "", rev)
+    return rev in ALLOWED_REVISIONS
 
 
 def git_revision_problems(text: str) -> list:
@@ -602,6 +766,13 @@ def git_revision_problems(text: str) -> list:
     """
     problems = []
     for number, line in _code_lines(text):
+        parsed = {match.start(1) for match in _GIT_CALL.finditer(line)}
+        for offset in _live_git_words(line):
+            if offset not in parsed:
+                problems.append(
+                    f"line {number}: git at column {offset + 1} is not a call this "
+                    f"can read: {line.strip()!r}"
+                )
         for match in _GIT_CALL.finditer(line):
             call = match.group(1).strip()
             try:
@@ -653,10 +824,7 @@ def git_revision_problems(text: str) -> list:
             if not revisions and sub == "archive":
                 problems.append(f"line {number}: git archive with no revision {call!r}")
             for rev in revisions:
-                # ${PREV_SHA} is $PREV_SHA, and a peel (^{commit}) names the same commit.
-                rev = re.sub(r"^\$\{(\w+)\}", r"$\1", rev)
-                rev = re.sub(r"\^\{(?:commit|tree)\}$", "", rev)
-                if rev not in ALLOWED_REVISIONS:
+                if not _allowed_revision(rev):
                     problems.append(f"line {number}: git {sub} is given {rev!r}")
     return problems
 
@@ -721,9 +889,7 @@ def shell_leg_problems(text: str, require) -> list:
     shas = writes_to("PREV_SHA", text)
     if any(line != SANCTIONED_SHA for line in shas):
         problems.append(f"the N-1 commit is set outside n1_resolve: {shas}")
-    dynamic = [line.strip() for line in code if _DYNAMIC_WRITE.search(line)]
-    if dynamic:
-        problems.append(f"writes a variable whose name is an expansion: {dynamic}")
+    problems += dynamic_write_problems(text)
     if any(re.search(r"\beval\b", line) for line in code):
         problems.append("uses eval, which can write any variable unseen")
     if any(re.search(r"\bn1_resolve\s*\(\)", line) for line in code):
@@ -828,6 +994,42 @@ _REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
             "an archive of some paths",
             'git -C "$REPO" archive "$PREV_SHA"',
             'git -C "$REPO" archive "$PREV_SHA" pyproject.toml src',
+        ),
+        (
+            "a message that shows prev_sha=",
+            _REAL_CALL,
+            _REAL_CALL + 'say "N-1: prev_sha=$PREV_SHA"\n',
+        ),
+        (
+            "a message that says cannot read (mJ)",
+            _REAL_CALL,
+            _REAL_CALL + 'say "cannot read $WORK/list"\n',
+        ),
+        (
+            "read into fixed names from a here-string (mK)",
+            _REAL_CALL,
+            _REAL_CALL + 'read -r A B <<< "$WORK x"\n',
+        ),
+        (
+            "a read loop over a file",
+            _REAL_CALL,
+            _REAL_CALL
+            + 'while IFS= read -r line; do say "$line"; done < "$WORK/list"\n',
+        ),
+        (
+            "a range from the chosen commit to HEAD",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" log --oneline "$PREV_SHA..HEAD"\n',
+        ),
+        (
+            "a file of the chosen commit",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" show "$PREV_SHA:pyproject.toml" >/dev/null\n',
+        ),
+        (
+            "an env prefix on an allowed call",
+            _REAL_CALL,
+            _REAL_CALL + 'LC_ALL=C git -C "$REPO" log -1 --oneline "$PREV_SHA"\n',
         ),
         (
             "git in a comment",
@@ -1076,13 +1278,85 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
             "a write to a name held in a variable",
             _REAL_CALL,
             _REAL_CALL + 'n=PREV_SHA; printf -v "$n" %s "$other"\n',
-            "whose name is an expansion",
+            "named by an expansion",
         ),
         (
             "a name split by quoting",
             _REAL_CALL,
             _REAL_CALL + 'declare PREV_"SHA"="$other"\n',
             "set outside n1_resolve",
+        ),
+        (
+            "an env prefix before git, on an extra line (mG2)",
+            'git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"\n',
+            (
+                'git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"\n'
+                'LC_ALL=C git -C "$REPO" archive HEAD~1 | tar -x -C "$WORK/src-prev"\n'
+            ),
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git in a subshell, on an extra line (mH3)",
+            'git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"\n',
+            (
+                'git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"\n'
+                '(git -C "$REPO" archive HEAD~1) | tar -x -C "$WORK/src-prev"\n'
+            ),
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "an env prefix with a value",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'TZ=UTC git -C "$REPO" archive HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git in a brace group",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            '{ git -C "$REPO" archive HEAD~1; }',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git after ||",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'false || git -C "$REPO" archive HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git behind env VAR=x",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'env GIT_PAGER=cat git -C "$REPO" archive HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git behind nice -n N",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'nice -n 10 git -C "$REPO" archive HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git behind timeout N",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'timeout 60 git -C "$REPO" archive HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git behind a wrapper this cannot read",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'sudo -u builder git -C "$REPO" archive HEAD~1',
+            "is not a call this can read",
+        ),
+        (
+            "a range that leaves the chosen commit",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" log --oneline "HEAD~3..HEAD"\n',
+            "git log is given 'HEAD~3..HEAD'",
+        ),
+        (
+            "a rev:path of another commit",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" show "HEAD~1:pyproject.toml"\n',
+            "git show is given 'HEAD~1:pyproject.toml'",
         ),
         (
             "the helper not called",
@@ -1122,7 +1396,9 @@ def ps1_leg_problems(text: str, require) -> list:
         line
         for line in lines
         if re.search(
-            r"(?i)\$PrevRef\s*(?:[-+*/]?=)(?!=)|Set-Variable\b.*\bPrevRef\b|\[ref\]\s*\$PrevRef",
+            r"(?i)\$(?:script:|global:|local:|private:|using:)?\{?PrevRef\}?\s*(?:[-+*/]?=)(?!=)"
+            r"|Set-Variable\b.*\bPrevRef\b|New-Variable\b.*\bPrevRef\b"
+            r"|\[ref\]\s*\$\{?PrevRef",
             line,
         )
     ]
@@ -1133,12 +1409,21 @@ def ps1_leg_problems(text: str, require) -> list:
     reads = [line for line in lines if re.search(r"(?i)E2E_PREV_REF", line)]
     if reads != [PS1_DEFAULT_LINE]:
         problems.append(f"E2E_PREV_REF is used other than by the default line: {reads}")
+    # prev_tree.py's --prev-ref appears exactly once, in exactly the form
+    # '--prev-ref', $PrevRef: neither another value nor a one-word --prev-ref=... .
+    body = "\n".join(lines)
+    uses = re.findall(r"(?i)--prev-ref", body)
+    sanctioned = re.findall(r"'--prev-ref',\s*\$PrevRef(?![\w:])", body)
+    if len(uses) != 1 or len(sanctioned) != 1:
+        others = [line for line in lines if re.search(r"(?i)--prev-ref", line)]
+        problems.append(
+            "--prev-ref is passed other than exactly once as '--prev-ref', $PrevRef: "
+            f"{others}"
+        )
+    # The script runs no git itself; prev_tree.py does, and is what these tests hold.
     for line in lines:
-        for match in re.finditer(r"(?i)['\"]--prev-ref['\"]\s*,\s*([^,)]+)", line):
-            if match.group(1).strip().lower() != "$prevref":
-                problems.append(f"--prev-ref is handed {match.group(1).strip()}")
-    if len(re.findall(r"(?i)--prev-ref", code)) != 1:
-        problems.append("--prev-ref is passed other than exactly once")
+        if re.search(r"(?i)(?:^|[;|({]\s*|&\s*)(?:\S*[\\/])?git(?:\.exe)?\b", line):
+            problems.append(f"runs git itself: {line}")
     for path in require:
         if f"'--require', '{path}'" not in code:
             problems.append(f"does not require {path}")
@@ -1198,16 +1483,46 @@ _PS1_CALL = "'--prev-ref', $PrevRef,"
             "E2E_PREV_REF is used",
         ),
         (
+            "--prev-ref=value in one word (mI2)",
+            _PS1_CALL,
+            '"--prev-ref=$env:N1_REF",',
+            "--prev-ref is passed other than exactly once",
+        ),
+        (
+            "--prev-ref=literal in one word",
+            _PS1_CALL,
+            "'--prev-ref=HEAD~1',",
+            "--prev-ref is passed other than exactly once",
+        ),
+        (
+            "a script-scoped write",
+            PS1_DEFAULT_LINE + "\n",
+            PS1_DEFAULT_LINE + "\n$script:PrevRef = $Other\n",
+            "$PrevRef is assigned",
+        ),
+        (
+            "a braced write",
+            PS1_DEFAULT_LINE + "\n",
+            PS1_DEFAULT_LINE + "\n${PrevRef} = $Other\n",
+            "$PrevRef is assigned",
+        ),
+        (
+            "git run by the script",
+            PS1_DEFAULT_LINE + "\n",
+            PS1_DEFAULT_LINE + "\n& git -C $Repo archive HEAD~1 -o x.tar\n",
+            "runs git itself",
+        ),
+        (
             "another value for --prev-ref",
             _PS1_CALL,
             "'--prev-ref', $Other,",
-            "--prev-ref is handed $Other",
+            "--prev-ref is passed other than exactly once",
         ),
         (
             "a literal for --prev-ref",
             _PS1_CALL,
             "'--prev-ref', 'HEAD~1',",
-            "--prev-ref is handed 'HEAD~1'",
+            "--prev-ref is passed other than exactly once",
         ),
     ],
 )
@@ -1217,6 +1532,25 @@ def test_a_planted_bypass_in_the_chocolatey_script_is_caught(label, old, new, ex
     assert text.count(old) == 1, label
     problems = ps1_leg_problems(text.replace(old, new), require)
     assert any(expect in problem for problem in problems), (label, problems)
+
+
+@pytest.mark.parametrize(
+    ("planted", "expect"),
+    [
+        (' -PrevRef "${{ vars.N1_REF }}"', "mentions PrevRef"),
+        (" -prevref $ref", "mentions PrevRef"),
+        (" -Prev $ref", "binds -PrevRef"),
+        (" -Pr:$ref", "binds -PrevRef"),
+        (' "$ref"', "by position"),
+    ],
+)
+def test_an_override_of_the_chocolatey_step_is_caught(planted, expect):
+    workflow = yaml.safe_load((WORKFLOWS / CHOCO[0]).read_text(encoding="utf-8"))
+    assert workflow_leg_problems(workflow, CHOCO[1]) == []
+    step = _prev_ref_steps(workflow["jobs"][CHOCO[1]]["steps"])[0][1]
+    step["run"] = step["run"].rstrip() + planted
+    problems = workflow_leg_problems(workflow, CHOCO[1])
+    assert any(expect in problem for problem in problems), problems
 
 
 def test_a_prevref_parameter_in_the_chocolatey_step_is_caught():
