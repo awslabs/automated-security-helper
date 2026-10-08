@@ -3,6 +3,8 @@
 
 import logging
 import os
+import re
+import sys
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -17,6 +19,27 @@ ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
 
 
+#: A version string that can name a release tag: starts with a digit and holds only
+#: the characters PEP 440 versions use. get_version() returns "unknown" when it cannot
+#: read one, and a tag built from that would be ``vunknown``.
+_TAGGABLE_VERSION = re.compile(r"^[0-9][0-9A-Za-z.+!-]*$")
+
+#: Appended to a hint whose version could not be read, so the reader knows the
+#: command no longer pins the ASH they are running.
+UNPINNED_INSTALL_NOTE = (
+    "(note: ASH could not read its own version, so this installs the repository's "
+    "default branch, which may not be the version you are running)"
+)
+
+
+def _running_tag() -> Optional[str]:
+    """``v<running version>``, or None when the version cannot name a tag."""
+    from automated_security_helper import __version__
+
+    version = str(__version__ or "")
+    return f"v{version}" if _TAGGABLE_VERSION.match(version) else None
+
+
 def ash_git_requirement(extra: str = "") -> str:
     """ASH as a PEP 508 direct reference to its own repository, at the running version.
 
@@ -29,18 +52,45 @@ def ash_git_requirement(extra: str = "") -> str:
     resolves to the default branch, so on a v4 install it silently replaced ASH with
     an older release. Before a version's tag exists the pinned form fails to resolve,
     which is loud, and the release creates the tag.
-    """
-    from automated_security_helper import __version__
 
+    When the version cannot be read (get_version() returns "unknown"), the reference
+    is untagged rather than ``@vunknown``, which names no tag at all. The command
+    builders below say so in the hint.
+    """
     name = (
         f"automated-security-helper[{extra}]" if extra else "automated-security-helper"
     )
-    return f"{name} @ git+{ASH_REPO_URL}.git@v{__version__}"
+    tag = _running_tag()
+    ref = f"@{tag}" if tag else ""
+    return f"{name} @ git+{ASH_REPO_URL}.git{ref}"
+
+
+def _running_python() -> str:
+    """The interpreter running ASH, as a command word.
+
+    A hint that says ``pip install`` reaches whatever pip is first on PATH. Inside
+    the MSIX, Chocolatey and Flatpak packages ASH runs from its own virtualenv, so
+    that pip installs into some other environment and the hint does nothing for ASH.
+    ``<this python> -m pip`` installs into the environment that is running. The path
+    is double-quoted when it contains a space or a shell metacharacter, which cmd,
+    POSIX shells and PowerShell's argument mode all accept (PowerShell needs a
+    leading ``&`` to run a quoted path as a command).
+    """
+    executable = sys.executable or "python"
+    if re.search(r"[\s&()^%!;'`$|<>*?]", executable):
+        return f'"{executable}"'
+    return executable
+
+
+def _with_note(command: str) -> str:
+    return command if _running_tag() else f"{command} {UNPINNED_INSTALL_NOTE}"
 
 
 def ash_reinstall_command() -> str:
     """The command that reinstalls the running version of ASH from its repository."""
-    return f'pip install --force-reinstall "{ash_git_requirement()}"'
+    return _with_note(
+        f'{_running_python()} -m pip install --force-reinstall "{ash_git_requirement()}"'
+    )
 
 
 def ash_extra_install_command(extra: str) -> str:
@@ -50,9 +100,11 @@ def ash_extra_install_command(extra: str) -> str:
     ``automated-security-helper`` on PyPI belongs to an unrelated third party. So a
     hint like ``pip install automated-security-helper[symbols]`` installs a
     stranger's package. This names ASH's own repository as a PEP 508 direct
-    reference instead.
+    reference instead, installed with the interpreter that is running ASH.
     """
-    return f'pip install "{ash_git_requirement(extra)}"'
+    return _with_note(
+        f'{_running_python()} -m pip install "{ash_git_requirement(extra)}"'
+    )
 
 
 ASH_REPO_LATEST_REVISION = (
