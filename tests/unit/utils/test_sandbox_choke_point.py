@@ -30,6 +30,7 @@ EXEMPT = {
     "interactions/run_ash_nix.py": "re-executes ASH itself inside nix develop",
     "cli/mcp/source_delivery.py": "git clone and checkout for MCP source delivery",
     "plugin_modules/ash_builtin/converters/jupyter_converter.py": "converter, runs before any scanner",
+    "assets/install-pinned-tool.py": "standalone script run during the container image build",
 }
 
 GUARDED = sorted(
