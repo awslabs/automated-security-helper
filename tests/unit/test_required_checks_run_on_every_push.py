@@ -166,6 +166,13 @@ _EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}")
 _TOKEN = re.compile(r"\s*(github\.[a-z_]+|'[^']*'|==|!=|&&|\|\||\(|\))")
 
 
+def _equal(left: object, right: object) -> bool:
+    """GitHub's ==: two strings compare ignoring case."""
+    if isinstance(left, str) and isinstance(right, str):
+        return left.casefold() == right.casefold()
+    return left == right
+
+
 def _evaluate(expression: str, context: dict[str, str]) -> str:
     """One `${{ }}` body: github.<x> lookups, '...' literals, ==, !=, && and ||,
     with GitHub's short-circuit semantics (an operator returns an operand)."""
@@ -198,7 +205,8 @@ def _evaluate(expression: str, context: dict[str, str]) -> str:
         while index < len(tokens) and tokens[index] in ("==", "!="):
             op = tokens[index]
             right, index = operand(index + 1)
-            left = (left == right) if op == "==" else (left != right)
+            same = _equal(left, right)
+            left = same if op == "==" else not same
         return left, index
 
     def conjunction(index: int) -> tuple[object, int]:
@@ -239,7 +247,11 @@ def _push(sha: str) -> dict[str, str]:
 
 
 def concurrency_problems(text: str) -> list[str]:
-    """Concurrency groups two pushes to one branch would share; empty when none."""
+    """Concurrency that can cost a push its verdict; empty when there is none.
+
+    Two pushes to one branch must land in different groups, and a push run must not
+    be cancellable: the same commit pushed to two branches shares a sha-keyed group,
+    and with cancel-in-progress the second push would cancel the first's checks."""
     workflow = _load(text)
     scopes = [("the workflow", workflow.get("concurrency"))] + [
         (f"job {job_id!r}", job.get("concurrency"))
@@ -261,6 +273,24 @@ def concurrency_problems(text: str) -> list[str]:
         if first == second:
             problems.append(
                 f"{where}: two pushes to one branch share concurrency group {first!r}"
+            )
+        cancel = (
+            concurrency.get("cancel-in-progress", False)
+            if isinstance(concurrency, dict)
+            else False
+        )
+        if isinstance(cancel, bool):
+            rendered = "true" if cancel else "false"
+        else:
+            try:
+                rendered = _render(str(cancel), _push("a" * 40))
+            except ValueError as error:
+                problems.append(f"{where}: {error}")
+                continue
+        if rendered != "false":
+            problems.append(
+                f"{where}: cancel-in-progress is {rendered!r} on push, so a push run "
+                "can be cancelled"
             )
     return problems
 
@@ -414,11 +444,18 @@ def test_the_expression_reader_follows_github_semantics() -> None:
     pull = {**_push("abc"), "event_name": "pull_request", "ref": "refs/pull/1/merge"}
     assert _render(group, pull) == "a workflow-refs/pull/1/merge"
     assert _render("${{ github.event_name == 'pull_request' }}", pull) == "true"
+    # GitHub compares strings ignoring case.
+    assert _render("${{ github.event_name == 'PUSH' }}", _push("abc")) == "true"
+    assert _render("${{ github.event_name != 'Push' }}", _push("abc")) == "false"
     assert (
         _render("x-${{ github.event_name == 'push' && github.sha || '' }}", pull)
         == "x-"
     )
 
+
+CANCELLABLE_ON_PUSH = (
+    "the workflow: cancel-in-progress is 'true' on push, so a push run can be cancelled"
+)
 
 BASE_KEYING = (
     "concurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n"
@@ -441,8 +478,26 @@ def test_ref_keyed_workflow_concurrency_is_refused(workflow: str) -> None:
         (
             "the workflow: two pushes to one branch share concurrency group "
             "'a workflow-refs/heads/v4-capabilities'"
-        )
+        ),
+        CANCELLABLE_ON_PUSH,
     ]
+
+
+@pytest.mark.parametrize("workflow", sorted(REQUIRED_CHECKS))
+@pytest.mark.parametrize(
+    "cancel", ["true", "${{ github.event_name != 'pull_request' }}"]
+)
+def test_a_cancellable_push_run_is_refused(workflow: str, cancel: str) -> None:
+    text = _text(workflow)
+    planted, count = re.subn(
+        r"^  cancel-in-progress: .*$",
+        f"  cancel-in-progress: {cancel}",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert count == 1, f"{workflow} has no workflow-level cancel-in-progress"
+    assert concurrency_problems(planted) == [CANCELLABLE_ON_PUSH]
 
 
 def test_ref_keyed_job_concurrency_is_refused() -> None:

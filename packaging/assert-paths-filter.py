@@ -575,8 +575,90 @@ ATTRIBUTED_COMMANDS = {
 _recording: list[tuple[Any, ...]] | None = None
 _hook_installed = False
 
+# While a measured build runs: the checkout's real path, and what each file in it
+# the build writes, renames or removes held before the build first touched it
+# (None for a file that did not exist), plus the directories it created. The
+# build hook writes generated files into the checkout (ASH_INSTALLED_REVISION,
+# assets/Dockerfile and the staged modules); measuring must leave the checkout as
+# it found it, so these are put back afterwards.
+_restore_root: str | None = None
+_saved: dict[str, tuple[bytes, int] | None] = {}
+_created_dirs: list[str] = []
+_saving = False
+
+_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+
+def _opened_for_writing(mode: object, flags: object) -> bool:
+    if isinstance(flags, int) and flags & _WRITE_FLAGS:
+        return True
+    return isinstance(mode, str) and any(c in mode for c in "wax+")
+
+
+def _in_checkout(raw: object, dir_fd: object = None) -> str | None:
+    """The real path of `raw` when it is a path in the checkout being measured."""
+    root = _restore_root
+    # The os.* audit events report "no dir_fd" as -1.
+    if root is None or raw is None or isinstance(raw, int) or dir_fd not in (None, -1):
+        return None
+    resolved = os.path.realpath(os.path.join(os.getcwd(), os.fsdecode(raw)))
+    return resolved if _inside(resolved, root) and resolved != root else None
+
+
+def _save(path: str | None) -> None:
+    """Records what `path` holds now, the first time the build is about to change it."""
+    global _saving
+    if path is None or path in _saved or os.path.isdir(path):
+        return
+    _saving = True
+    try:
+        if os.path.lexists(path):
+            with open(path, "rb") as handle:
+                _saved[path] = (handle.read(), os.stat(path).st_mode)
+        else:
+            _saved[path] = None
+    finally:
+        _saving = False
+
+
+def _restore_checkout() -> None:
+    """Puts back every file _save recorded and removes the directories the build made."""
+    global _saving
+    _saving = True
+    try:
+        for path, before in _saved.items():
+            if before is None:
+                if os.path.lexists(path) and not os.path.isdir(path):
+                    os.remove(path)
+                continue
+            content, mode = before
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as handle:
+                handle.write(content)
+            os.chmod(path, mode & 0o7777)
+        for directory in sorted(_created_dirs, key=len, reverse=True):
+            if os.path.isdir(directory) and not os.listdir(directory):
+                os.rmdir(directory)
+    finally:
+        _saving = False
+        _saved.clear()
+        _created_dirs.clear()
+
 
 def _audit(event: str, args: tuple[Any, ...]) -> None:
+    if _saving:
+        return
+    if event == "open" and _opened_for_writing(args[1], args[2]):
+        _save(_in_checkout(args[0]))
+    elif event == "os.rename":
+        _save(_in_checkout(args[0], args[2]))
+        _save(_in_checkout(args[1], args[3]))
+    elif event == "os.remove":
+        _save(_in_checkout(args[0], args[1]))
+    elif event == "os.mkdir":
+        made = _in_checkout(args[0], args[2])
+        if made is not None and not os.path.exists(made):
+            _created_dirs.append(made)
     events = _recording
     if events is None:
         return
@@ -687,7 +769,7 @@ def measured_build(
     """Builds the wheel in-process under the audit hook; returns its path, the
     open and spawn events recorded while the build ran, and the real path of the
     git found on PATH before the build, which the build cannot have changed."""
-    global _recording, _hook_installed
+    global _recording, _hook_installed, _restore_root
     check_build_backend(read_pyproject(repo))
     import hatchling.build
 
@@ -704,6 +786,7 @@ def measured_build(
     # paths resolve there, as they do under `uv build`.
     os.chdir(repo)
     sys.dont_write_bytecode = True
+    _restore_root = os.path.realpath(repo)
     try:
         with contextlib.redirect_stdout(sys.stderr), _recording_fork_exec(events):
             _recording = events
@@ -712,6 +795,8 @@ def measured_build(
             finally:
                 _recording = None
     finally:
+        _restore_root = None
+        _restore_checkout()
         sys.dont_write_bytecode = dont_write_bytecode
         os.chdir(cwd)
     return os.path.join(out_dir, name), events, git
@@ -843,6 +928,12 @@ def check(
     wraps the same wheel and triggers on push only, so it is checked with
     events=("push",)."""
     problems: list[str] = []
+    for event in EVENTS:
+        if event in filters and event not in events:
+            problems.append(
+                f"the workflow triggers on {event} but the check leaves {event} out, "
+                f"so its {event} filter would go unmeasured"
+            )
     for event in events:
         if event not in filters:
             problems.append(
@@ -1103,6 +1194,42 @@ def unit_checks(scratch: str) -> list[tuple[str, bool]]:
     return results
 
 
+# A build hook that writes into the checkout the way hatch_build.py does (a new
+# generated file, an overwritten one, new directories) and renames a file.
+_CHECKOUT_WRITES = (
+    '(ASH_ASSETS_PATH / "ASH_INSTALLED_REVISION").write_text("rev"); '
+    'ASH_REPO_ROOT.joinpath("automated_security_helper", "__init__.py")'
+    '.write_text("changed"); '
+    'os.makedirs(ASH_REPO_ROOT / "made" / "deep"); '
+    '(ASH_REPO_ROOT / "made" / "deep" / "f").write_text("x"); '
+    'os.replace(ASH_REPO_ROOT / "VERSION", ASH_REPO_ROOT / "VERSION.moved")'
+)
+
+
+def checkout_restored(root: str) -> list[str]:
+    """Builds a fixture whose hook writes into the checkout; returns what the
+    measured build left changed there (empty when it put everything back)."""
+    run_fixture(root, layers=MEASURED, build_extra=_CHECKOUT_WRITES)
+    left = []
+    for name in (
+        "automated_security_helper/assets/ASH_INSTALLED_REVISION",
+        "made",
+        "VERSION.moved",
+    ):
+        if os.path.lexists(os.path.join(root, *name.split("/"))):
+            left.append(f"{name} is still there")
+    for name, text in (
+        ("automated_security_helper/__init__.py", ""),
+        ("VERSION", "1.0\n"),
+    ):
+        path = os.path.join(root, *name.split("/"))
+        if not os.path.isfile(path):
+            left.append(f"{name} is gone")
+        elif open(path, encoding="utf-8").read() != text:
+            left.append(f"{name} was not restored")
+    return left
+
+
 def without(*entries: str) -> list[str]:
     return [e for e in FIXTURE_FILTER if e not in entries]
 
@@ -1217,6 +1344,13 @@ def self_test() -> int:
             push_only,
             {"a/b"},
             EVENTS,
+            True,
+        ),
+        (
+            "--event push on a workflow that also triggers on pull_request",
+            good,
+            {"a/b", "README.md"},
+            ("push",),
             True,
         ),
     ]:
@@ -1892,7 +2026,15 @@ def self_test() -> int:
                 print(f"  FAILED {label}: expected {expected}, got {got}")
             else:
                 print(f"  ok {label} ({got.split(':', 1)[0]})")
-    total = len(cases) + 2 + 3 + len(units) + len(wheel_cases)
+        restored = checkout_restored(os.path.join(scratch, "restore"))
+        if restored:
+            failures += 1
+            print(
+                f"  FAILED the measured build leaves the checkout as it found it: {restored}"
+            )
+        else:
+            print("  ok the measured build leaves the checkout as it found it")
+    total = len(cases) + 2 + 4 + len(units) + len(wheel_cases) + 1
     print("self-test " + ("FAILED" if failures else f"OK ({total} cases)"))
     return 1 if failures else 0
 
