@@ -18,22 +18,25 @@ ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
 
 
 def ash_git_requirement(extra: str = "") -> str:
-    """ASH as a PEP 508 direct reference to its own repository, at the running version.
+    """ASH as a PEP 508 direct reference to its own repository.
 
     ASH is installed from git, not from a package index, and the name
     ``automated-security-helper`` on PyPI belongs to an unrelated third party, so a
     requirement that names ASH without a URL resolves to a stranger's package.
-    """
-    from automated_security_helper import __version__
 
+    The reference is untagged. Pinning it to ``v<running version>`` was tried and
+    rejected: a build of an unreleased version names a tag that does not exist yet,
+    so the hint fails exactly where a developer reads it. The JetBrains plugin's
+    install hint uses the same untagged URL.
+    """
     name = (
         f"automated-security-helper[{extra}]" if extra else "automated-security-helper"
     )
-    return f"{name} @ git+{ASH_REPO_URL}.git@v{__version__}"
+    return f"{name} @ git+{ASH_REPO_URL}.git"
 
 
 def ash_reinstall_command() -> str:
-    """The command that reinstalls the running version of ASH from its repository."""
+    """The command that reinstalls ASH from its repository."""
     return f'pip install --force-reinstall "{ash_git_requirement()}"'
 
 
@@ -44,8 +47,7 @@ def ash_extra_install_command(extra: str) -> str:
     ``automated-security-helper`` on PyPI belongs to an unrelated third party. So a
     hint like ``pip install automated-security-helper[symbols]`` installs a
     stranger's package. This names ASH's own repository as a PEP 508 direct
-    reference, pinned to the tag of the version that is running, so following it
-    adds the extra without changing which ASH is installed.
+    reference instead.
     """
     return f'pip install "{ash_git_requirement(extra)}"'
 
