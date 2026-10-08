@@ -29,6 +29,10 @@ SECRET_SCANNED = (
     "packaging/flatpak/verify-in-container.sh",
     "tests/unit/test_release_notes_workflow.py",
     "tests/unit/test_native_packages_workflow.py",
+    # The train-j self-scan: a fixture path whose length and alphabet read as base64,
+    # and literal scanner-name dict keys the keyword plugin reads as assignments.
+    "packaging/assert-paths-filter.py",
+    "tests/unit/test_e2e_assert_outcome.py",
 )
 
 # bandit's hardcoded_tmp_directory default list.

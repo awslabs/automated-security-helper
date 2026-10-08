@@ -1194,11 +1194,15 @@ def unit_checks(scratch: str) -> list[tuple[str, bool]]:
     return results
 
 
+# The generated file the build hook writes into the package's assets, named once for
+# the hook below and for the check after it.
+_REVISION_FILE = "ASH_INSTALLED_REVISION"
+
 # A build hook that writes into the checkout the way hatch_build.py does (a new
 # generated file, an overwritten one, new directories) and renames a file.
 _CHECKOUT_WRITES = (
-    '(ASH_ASSETS_PATH / "ASH_INSTALLED_REVISION").write_text("rev"); '
-    'ASH_REPO_ROOT.joinpath("automated_security_helper", "__init__.py")'
+    f'(ASH_ASSETS_PATH / "{_REVISION_FILE}").write_text("rev"); '
+    f'ASH_REPO_ROOT.joinpath("{PACKAGE_DIR}", "__init__.py")'
     '.write_text("changed"); '
     'os.makedirs(ASH_REPO_ROOT / "made" / "deep"); '
     '(ASH_REPO_ROOT / "made" / "deep" / "f").write_text("x"); '
@@ -1212,14 +1216,14 @@ def checkout_restored(root: str) -> list[str]:
     run_fixture(root, layers=MEASURED, build_extra=_CHECKOUT_WRITES)
     left = []
     for name in (
-        "automated_security_helper/assets/ASH_INSTALLED_REVISION",
+        f"{PACKAGE_DIR}/assets/{_REVISION_FILE}",
         "made",
         "VERSION.moved",
     ):
         if os.path.lexists(os.path.join(root, *name.split("/"))):
             left.append(f"{name} is still there")
     for name, text in (
-        ("automated_security_helper/__init__.py", ""),
+        (f"{PACKAGE_DIR}/__init__.py", ""),
         ("VERSION", "1.0\n"),
     ):
         path = os.path.join(root, *name.split("/"))

@@ -36,6 +36,11 @@ def _load(path=SCRIPT, name="ash_e2e_assert_outcome"):
 
 ao = _load()
 
+# The scanner the findings cases are built around, named once. Written out as a
+# literal dict key next to a status string, its name reads to detect-secrets' keyword
+# plugin as a secret assignment, and every such line needed an allowlist marker.
+SCANNER = "detect-secrets"
+
 
 def _write(root: Path, results, statuses, actionable=None):
     return ao._write_output(root, results, statuses, actionable=actionable)
@@ -49,8 +54,8 @@ def test_self_test_passes(capsys):
 def test_cli_findings_case_accepts_a_matching_output(tmp_path):
     out = _write(
         tmp_path,
-        [ao._sarif_result("detect-secrets")] * 3,
-        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        [ao._sarif_result(SCANNER)] * 3,
+        {SCANNER: "FAILED"},
     )
     assert ao.main(["--case", "findings", "--output-dir", str(out), "--rc", "2"]) == 0
 
@@ -58,8 +63,8 @@ def test_cli_findings_case_accepts_a_matching_output(tmp_path):
 def test_cli_rejects_the_wrong_exit_code(tmp_path):
     out = _write(
         tmp_path,
-        [ao._sarif_result("detect-secrets")] * 3,
-        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        [ao._sarif_result(SCANNER)] * 3,
+        {SCANNER: "FAILED"},
     )
     assert ao.main(["--case", "findings", "--output-dir", str(out), "--rc", "0"]) == 1
 
@@ -67,8 +72,8 @@ def test_cli_rejects_the_wrong_exit_code(tmp_path):
 def _findings_output(tmp_path):
     return _write(
         tmp_path,
-        [ao._sarif_result("detect-secrets")] * 3,
-        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        [ao._sarif_result(SCANNER)] * 3,
+        {SCANNER: "FAILED"},
     )
 
 
@@ -142,8 +147,8 @@ def test_run_case_annotates_only_unexpected_rejections(
         0,
         lambda out: _write(
             out,
-            [ao._sarif_result("detect-secrets")] * 3,
-            {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+            [ao._sarif_result(SCANNER)] * 3,
+            {SCANNER: "FAILED"},
         ),
     )
     argv = ["--cli", str(cli), "--case", "findings", "--work", str(tmp_path / "w")]
@@ -168,8 +173,8 @@ def test_run_case_annotates_an_expected_rejection_that_matched(
         2,
         lambda out: _write(
             out,
-            [ao._sarif_result("detect-secrets")] * 3,
-            {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+            [ao._sarif_result(SCANNER)] * 3,
+            {SCANNER: "FAILED"},
         ),
     )
     rc = run_case.main(
@@ -373,14 +378,14 @@ def test_a_check_of_anything_but_the_calls_own_output_does_not_count(check):
 def test_cli_incomplete_case_requires_the_named_scanner(tmp_path):
     out = _write(
         tmp_path,
-        [ao._sarif_result("detect-secrets")] * 3,
-        {"detect-secrets": "FAILED", "opengrep": "PASSED"},  # pragma: allowlist secret
+        [ao._sarif_result(SCANNER)] * 3,
+        {SCANNER: "FAILED", "opengrep": "PASSED"},
     )
     assert ao.main(["--case", "incomplete", "--output-dir", str(out), "--rc", "1"]) == 1
 
 
 def test_cli_refuses_exit_one_without_a_named_scanner(tmp_path):
-    out = _write(tmp_path, [], {"detect-secrets": "PASSED"})  # pragma: allowlist secret
+    out = _write(tmp_path, [], {SCANNER: "PASSED"})
     rc = ao.main(
         [
             "--output-dir",
@@ -392,7 +397,7 @@ def test_cli_refuses_exit_one_without_a_named_scanner(tmp_path):
             "--findings",
             "0",
             "--selected",
-            "detect-secrets",
+            SCANNER,
         ]
     )
     assert rc == 3
@@ -401,8 +406,8 @@ def test_cli_refuses_exit_one_without_a_named_scanner(tmp_path):
 def test_flags_override_the_case(tmp_path):
     out = _write(
         tmp_path,
-        [ao._sarif_result("detect-secrets")] * 2,
-        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        [ao._sarif_result(SCANNER)] * 2,
+        {SCANNER: "FAILED"},
     )
     assert (
         ao.main(
@@ -424,12 +429,12 @@ def test_flags_override_the_case(tmp_path):
 def test_no_sarif_fallback(tmp_path):
     out = ao._write_output(
         tmp_path,
-        [ao._sarif_result("detect-secrets")] * 3,
-        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        [ao._sarif_result(SCANNER)] * 3,
+        {SCANNER: "FAILED"},
         sarif_at=Path("ash.sarif"),
     )
     problems = ao.check_outcome(
-        out, 2, ao.Expectation(2, findings=3, selected=["detect-secrets"])
+        out, 2, ao.Expectation(2, findings=3, selected=[SCANNER])
     )
     assert any("no SARIF report at" in p for p in problems)
 
@@ -542,7 +547,7 @@ def _v3_output(tmp_path, statuses, tool_version="3.7.1"):
     """A findings-shaped output (3 detect-secrets results) whose rows carry STATUSES."""
     return ao._write_output(
         tmp_path,
-        [ao._sarif_result("detect-secrets")] * 3,
+        [ao._sarif_result(SCANNER)] * 3,
         statuses,
         tool_version=tool_version,
     )
@@ -553,18 +558,18 @@ def _v3_output(tmp_path, statuses, tool_version="3.7.1"):
     [
         # v3.7.1 on a clean host: unselected scanners whose tools are absent are MISSING.
         (
-            {"detect-secrets": "FAILED", "grype": "MISSING", "cdk-nag": "MISSING"},
+            {SCANNER: "FAILED", "grype": "MISSING", "cdk-nag": "MISSING"},
             False,
             True,
         ),
         (
-            {"detect-secrets": "FAILED", "grype": "MISSING", "cdk-nag": "MISSING"},
+            {SCANNER: "FAILED", "grype": "MISSING", "cdk-nag": "MISSING"},
             True,
             False,
         ),
         # The allowance is for unselected MISSING only.
-        ({"detect-secrets": "MISSING"}, True, True),
-        ({"detect-secrets": "FAILED", "grype": "ERROR"}, True, True),
+        ({SCANNER: "MISSING"}, True, True),
+        ({SCANNER: "FAILED", "grype": "ERROR"}, True, True),
     ],
     ids=["v3-without-flag", "v3-with-flag", "selected-missing", "unselected-error"],
 )
@@ -575,8 +580,8 @@ def test_unselected_missing_is_allowed_only_when_asked(
     expected = ao.Expectation(
         2,
         findings=3,
-        require_scanner="detect-secrets",
-        selected=["detect-secrets"],
+        require_scanner=SCANNER,
+        selected=[SCANNER],
         allow_unselected_missing=allow,
     )
     problems = ao.check_outcome(out, 2, expected)
@@ -584,9 +589,7 @@ def test_unselected_missing_is_allowed_only_when_asked(
 
 
 def test_the_cli_flag_reaches_the_verdict(tmp_path):
-    out = _v3_output(
-        tmp_path, {"detect-secrets": "FAILED", "syft": "MISSING"}
-    )  # pragma: allowlist secret
+    out = _v3_output(tmp_path, {SCANNER: "FAILED", "syft": "MISSING"})
     argv = ["--case", "findings", "--output-dir", str(out), "--rc", "2"]
     assert ao.main(argv) == 1
     assert ao.main([*argv, "--allow-unselected-missing"]) == 0
@@ -600,14 +603,14 @@ def test_the_allowance_never_applies_to_a_scan_of_n(tmp_path, wrote):
     # it, is refused by the output itself, whatever the caller passed.
     out = _v3_output(
         tmp_path,
-        {"detect-secrets": "FAILED", "syft": "MISSING"},
-        tool_version=wrote,  # pragma: allowlist secret
+        {SCANNER: "FAILED", "syft": "MISSING"},
+        tool_version=wrote,
     )
     expected = ao.Expectation(
         2,
         findings=3,
-        require_scanner="detect-secrets",
-        selected=["detect-secrets"],
+        require_scanner=SCANNER,
+        selected=[SCANNER],
         allow_unselected_missing=True,
     )
     problems = ao.check_outcome(out, 2, expected)
