@@ -4,6 +4,6 @@ progress:
 notification group=ASH type=ERROR
 title: ASH CLI not found
 body:
-Neither 'ashx' nor 'ash' was found on PATH. This plugin runs the ASH CLI you installed; it does not bundle one. Install ASH (for example 'pipx install automated-security-helper' or 'uv tool install automated-security-helper'), or set the full path to it in Settings | Tools | ASH. An IDE started from a desktop launcher does not always inherit the PATH a terminal has, so a full path is the reliable fix.<br>
+Neither 'ashx' nor 'ash' was found on PATH. This plugin runs the ASH CLI you installed; it does not bundle one. Install ASH from its repository (for example 'pipx install git+https://github.com/awslabs/automated-security-helper.git' or 'uv tool install git+https://github.com/awslabs/automated-security-helper.git'; the README names the release tag to pin), or set the full path to it in Settings | Tools | ASH. An IDE started from a desktop launcher does not always inherit the PATH a terminal has, so a full path is the reliable fix.<br>
 <br>
 Searched 8 PATH entries, including: <BIN>/d1, <BIN>/d2, <BIN>/d3, <BIN>/d4, <BIN>/d5, <BIN>/d6, ...

@@ -104,13 +104,24 @@ object AshCliLocator {
         return Outcome.NotFound(
             entries,
             "Neither '$PRIMARY_NAME' nor '$FALLBACK_NAME' was found on PATH. This plugin runs " +
-                "the ASH CLI you installed; it does not bundle one. Install ASH (for example " +
-                "'pipx install automated-security-helper' or 'uv tool install " +
-                "automated-security-helper'), or set the full path to it in Settings | Tools | " +
-                "ASH. An IDE started from a desktop launcher does not always inherit the PATH " +
+                "the ASH CLI you installed; it does not bundle one. Install ASH from its " +
+                "repository (for example 'pipx install $INSTALL_SOURCE' or 'uv tool install " +
+                "$INSTALL_SOURCE'; the README names the release tag to pin), or set the full " +
+                "path to it in Settings | Tools | ASH. An IDE started from a desktop launcher does not always inherit the PATH " +
                 "a terminal has, so a full path is the reliable fix.",
         )
     }
+
+    /**
+     * Where ASH installs from: its git repository, as the README and docs install it, and as the
+     * MCP server's reinstall hint names it.
+     *
+     * NEVER the bare package name. `automated-security-helper` on PyPI is an unrelated
+     * third-party project, so `pipx install automated-security-helper` installs a stranger's
+     * package. AshCliLocatorTest fails on a hint that names it. No release tag here: the plugin
+     * pins no ASH version (see build.gradle.kts), and a tag in this string would go stale.
+     */
+    const val INSTALL_SOURCE = "git+https://github.com/awslabs/automated-security-helper.git"
 
     /** What Windows uses when PATHEXT is unset or blank. */
     private const val DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD"
