@@ -1515,7 +1515,9 @@ class TestResponseBound:
     def test_the_cap_is_declared(self, applier: dict) -> None:
         assert applier["RESPONSE_MAX_BYTES"] == 4096
 
-    def test_a_pathological_reason_is_truncated_to_fit(self, applier: dict) -> None:
+    def test_a_pathological_reason_is_truncated_to_fit(
+        self, applier: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Non-ASCII is the case that matters.
 
         A character slice plus `ensure_ascii=True` turned 1,000 characters into 6,000
@@ -1535,7 +1537,9 @@ class TestResponseBound:
 
             return _Response()
 
-        applier["urllib"].request.urlopen = fake_urlopen
+        # The applier's urllib is the process-wide module, so a plain assignment would
+        # leave every later test in this worker calling the fake. monkeypatch restores it.
+        monkeypatch.setattr(applier["urllib"].request, "urlopen", fake_urlopen)
         event = {
             "StackId": "arn:aws:cloudformation:us-east-1:123456789012:stack/s/"
             + "u" * 36,
