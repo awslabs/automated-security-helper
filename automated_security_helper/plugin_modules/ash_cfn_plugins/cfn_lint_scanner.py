@@ -93,6 +93,8 @@ from automated_security_helper.utils.cfn_template_discovery import (
     display_path,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 #: cfn-lint's rule-id letter, mapped to an ASH severity and the SARIF level that
@@ -250,6 +252,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     """Validates CloudFormation templates with cfn-lint."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+    # The strict default, declared so the choice is visible: cfn-lint is a uv tool,
+    # whose directories and cache the baseline already exposes, and it reads the
+    # templates and ASH's empty config, both mounted. Its resource specs ship in the
+    # package. An operator's config_file outside the tree needs extra_read_paths.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -328,12 +335,14 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         args: List[str] = []
         if not options.config_file:
             empty = Path(results_dir).joinpath("ash-empty.cfnlintrc")
-            # Unlinked and recreated exclusively rather than overwritten, so a
-            # symlink left at this path (the output directory usually sits inside
-            # the scanned tree) is replaced instead of written through.
+            # Unlinked and recreated rather than overwritten, so a symlink left at
+            # this path (the output directory usually sits inside the scanned tree)
+            # is replaced instead of written through. open_for_write also refuses
+            # to follow a link created after the unlink inside a sandbox's
+            # writable directory.
             if empty.is_symlink() or empty.exists():
                 empty.unlink()
-            with open(empty, "x", encoding="utf-8") as handle:
+            with open_for_write(empty) as handle:
                 handle.write("{}\n")
             args.append(f"--config-file={empty.resolve().as_posix()}")
         else:
@@ -598,10 +607,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     ),
                 )
             ]
-            results_dir.joinpath("cfn-lint.sarif").write_text(
-                report.model_dump_json(exclude_none=True, exclude_unset=True),
-                encoding="utf-8",
-            )
+            with open_for_write(results_dir.joinpath("cfn-lint.sarif")) as handle:
+                handle.write(
+                    report.model_dump_json(exclude_none=True, exclude_unset=True)
+                )
             return report
         except ScannerError:
             raise

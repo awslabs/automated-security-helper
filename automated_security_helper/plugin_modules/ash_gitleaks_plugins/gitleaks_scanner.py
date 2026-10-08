@@ -103,6 +103,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 
 #: The text gitleaks writes in place of a secret under ``--redact``.
 REDACTED = "REDACTED"
@@ -168,6 +169,14 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # gitleaks' rules are compiled into the binary and it makes no network calls.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
+    # No network. GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML pass through, because
+    # _resolve_config_file leaves config resolution to gitleaks when either is set,
+    # and GITLEAKS_CONFIG's file is mounted read-only: the operator's environment
+    # names it, not the scanned tree.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        read_paths=("$GITLEAKS_CONFIG",),
+        env_prefixes=("GITLEAKS_",),
+    )
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:

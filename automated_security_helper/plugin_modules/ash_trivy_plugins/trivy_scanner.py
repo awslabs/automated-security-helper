@@ -117,6 +117,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins._trivy_scanner_b
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     SarifReport,
@@ -405,7 +406,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             raise ScannerError("TrivyScanner has no results directory")
         empty = self.results_dir.joinpath(ash_name)
         empty.parent.mkdir(parents=True, exist_ok=True)
-        empty.write_text(ash_content, encoding="utf-8")
+        with open_for_write(empty) as handle:
+            handle.write(ash_content)
         return empty.resolve().as_posix()
 
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
