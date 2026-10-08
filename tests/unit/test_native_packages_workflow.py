@@ -767,8 +767,8 @@ def test_the_script_delta_fails_loudly_with_no_hash_tool(tmp_path: Path) -> None
 
 def test_the_refused_branch_of_the_alternatives_control_requires_its_reason() -> None:
     for family, log in (
-        ("deb", "/tmp/apt-install.log"),
-        ("rpm", "/tmp/dnf-install.log"),
+        ("deb", "/tmp/apt-install.log"),  # nosec B108 - a path inside the build container, never opened here
+        ("rpm", "/tmp/dnf-install.log"),  # nosec B108 - a path inside the build container, never opened here
     ):
         text = (REPO_ROOT / "packaging" / family / "verify-in-container.sh").read_text(
             encoding="utf-8"

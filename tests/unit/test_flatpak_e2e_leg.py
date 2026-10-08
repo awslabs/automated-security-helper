@@ -218,7 +218,12 @@ def _function(name: str) -> str:
 
 def test_the_runtime_is_pinned_by_a_full_commit_and_read_back() -> None:
     text = _script()
-    match = re.search(r'^RUNTIME_COMMIT_X86_64="([0-9a-f]+)"$', text, re.MULTILINE)
+    # The only thing allowed after the literal is detect-secrets' per-line marker.
+    match = re.search(
+        r'^RUNTIME_COMMIT_X86_64="([0-9a-f]+)"(?: # pragma: allowlist secret)?$',
+        text,
+        re.MULTILINE,
+    )
     assert match, "the x86_64 runtime commit pin is gone or not a literal"
     assert len(match.group(1)) == 64, "an OSTree commit is 64 hex digits"
     assert '--commit="$RUNTIME_COMMIT"' in text

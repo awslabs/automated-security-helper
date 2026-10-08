@@ -75,7 +75,8 @@ RUNTIME_VERSION="24.08"
 # pruned fails at the `flatpak update --commit` below, loudly, which is the point.
 # Measured 2026-10-08: this commit is the branch tip, dated 2026-10-03, and flathub
 # reports org.freedesktop.Platform 24.08 end-of-life, so it is also the last one.
-RUNTIME_COMMIT_X86_64="f840a6835a5d303866d8309ca512833fb516910f6994662cbe1c298371ef6873"
+# The commit id is public, from Flathub; not a credential.
+RUNTIME_COMMIT_X86_64="f840a6835a5d303866d8309ca512833fb516910f6994662cbe1c298371ef6873" # pragma: allowlist secret
 
 # shellcheck source=packaging/cli-name.sh
 . "$REPO/packaging/cli-name.sh"
