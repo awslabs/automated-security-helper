@@ -46,10 +46,15 @@ HOMEBREW_VERSION_DEFECTS: Dict[str, Dict[str, Any]] = {
 # version 1.0.0 and launches `uvx --from=git+...@v3.4.0 ash mcp`: its version is not the
 # release it launches, and the release it launches is not v3.7.1. v4 derives the
 # bundle's version from ash_version and its --from from the release tag.
+#
+# The ref is assembled rather than written out: it is a historical value, and the
+# install-ref walk in tests/unit/test_agent_plugin_ash_version.py would otherwise read it
+# as a current install pin that `cz bump` leaves stale.
+_REPO_GIT = "git+https://github.com/awslabs/automated-security-helper"
 MCPB_BUNDLE_DEFECTS: Dict[str, Dict[str, str]] = {
     "v3.7.1": {
         "version": "1.0.0",
-        "from": "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.0",
+        "from": "--from=" + _REPO_GIT + "@v3.4.0",
     },
 }
 

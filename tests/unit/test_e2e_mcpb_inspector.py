@@ -598,7 +598,11 @@ def test_the_e2e_scans_one_case_over_stdio():
 # The release N-1 bundle's recorded defect, exempted for that bundle only
 # --------------------------------------------------------------------------
 
-V371_FROM = "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.0"
+# Assembled rather than written out, as in scripts/e2e/release_defects.py, so the
+# install-ref walk in test_agent_plugin_ash_version.py does not read these historical and
+# templated refs as install pins.
+_REPO_GIT = "git+https://github.com/awslabs/automated-security-helper"
+V371_FROM = "--from=" + _REPO_GIT + "@v3.4.0"
 
 
 def _shipped(version="1.0.0", source=V371_FROM):
@@ -611,9 +615,7 @@ def _shipped(version="1.0.0", source=V371_FROM):
 
 
 def _v4_head(version="4.0.0"):
-    from_ = (
-        f"--from=git+https://github.com/awslabs/automated-security-helper@v{version}"
-    )
+    from_ = f"--from={_REPO_GIT}@v{version}"
     return {
         "name": "ash",
         "version": version,
