@@ -24,6 +24,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from automated_security_helper.base.plugin_base import PluginBase
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import (
@@ -300,13 +301,24 @@ def install_dependencies(
         )
         for plugin_class in ash_plugin_manager.plugin_modules(plugin_module_input):
             try:
+                # The plugin's own section of the resolved config, looked up the way
+                # the scan path looks it up (ExecutionEngine.get_scanner). Without
+                # it every plugin was built from its defaults, so a
+                # `--config-overrides scanners.semgrep.options.tool_version===X`
+                # reached resolved_config and stopped there: the scanner installed
+                # its default range, and the image carried whatever release PyPI
+                # had that day instead of the version its license entry records.
                 plugin_instance: PluginBase = plugin_class(
                     context=PluginContext(
                         source_dir=source_dir,
                         output_dir=output_dir,
                         work_dir=work_dir,
                         config=resolved_config,
-                    )
+                    ),
+                    config=resolved_config.get_plugin_config(
+                        plugin_type=plugin_module_input,
+                        plugin_name=plugin_config_key(plugin_class),
+                    ),
                 )
                 # `name` exists on every plugin config but is not always populated,
                 # and getattr's default only fires when the attribute is absent --
