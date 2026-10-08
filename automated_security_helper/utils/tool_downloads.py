@@ -933,7 +933,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             ),
         ),
     ),
-    # The cfn-lint community scanner's uv tool. The wheel's dist-info carries
+    # The cfn-lint scanner's uv tool. The wheel's dist-info carries
     # licenses/LICENSE and licenses/NOTICE.
     "cfn-lint": ThirdPartyLicense(
         tool="cfn-lint",
@@ -1040,7 +1040,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         ),
         executables=("uv", "uvx"),
     ),
-    # The zizmor community scanner's uv tool, a compiled Rust binary in a wheel. The
+    # The zizmor scanner's uv tool, a compiled Rust binary in a wheel. The
     # wheel's dist-info carries licenses/LICENSE.
     "zizmor": ThirdPartyLicense(
         tool="zizmor",

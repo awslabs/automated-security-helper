@@ -53,7 +53,7 @@ tags. So the spelling is hyphenated (``cfn-nag``, ``detect-secrets``,
 ``core/scanner_inventory.py`` reports for its own table. Matching against a
 snake_cased set would recognize none of the three hyphenated names.
 
-The set covers every scanner ASH ships, which is the ten in
+The set covers every scanner ASH ships, which is the sixteen in
 ``plugin_modules/ash_builtin/scanners`` plus the three vendored packages
 (``ferret-scan``, ``snyk-code``, ``trivy-repo``) that ``load_internal_plugins()``
 does not load. The vendored three are included because a vendored scanner's

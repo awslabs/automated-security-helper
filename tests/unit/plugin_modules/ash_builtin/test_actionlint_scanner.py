@@ -996,3 +996,17 @@ def test_an_override_of_another_option_does_not_vouch_for_shellcheck(
     argv = _argv(scanner, monkeypatch, repo)
 
     assert "-shellcheck=" in argv
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_the_scanned_tree_cannot_name_an_absolute_program_outside_it(
+    repo, monkeypatch, on_path, tmp_path
+):
+    """The operator rule on its own: outside the tree, but the tree's config chose it."""
+    tool = _plant(tmp_path / "elsewhere", "shellcheck")
+    scanner = _scanner(repo, shellcheck=tool.as_posix())
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert tool.as_posix() not in " ".join(argv)

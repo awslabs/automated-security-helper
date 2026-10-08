@@ -954,9 +954,11 @@ def test_trivy_repo_passes_its_own_config_and_an_empty_modules_dir(
     assert modules == (results / "trivy-modules").resolve()
     assert list(modules.iterdir()) == []
     assert planted.resolve().as_posix() not in " ".join(argv)
-    # Both flags precede the target, which trivy reads as its last positional.
-    assert argv.index(f"--config={config.as_posix()}") < argv.index(str(source))
-    assert argv.index(f"--module-dir={modules.as_posix()}") < argv.index(str(source))
+    # Both flags precede the target, which trivy reads as its last positional. The
+    # target is spelled as the scanner was given it or with forward slashes (Windows).
+    target = next(t for t in (str(source), source.as_posix()) if t in argv)
+    assert argv.index(f"--config={config.as_posix()}") < argv.index(target)
+    assert argv.index(f"--module-dir={modules.as_posix()}") < argv.index(target)
 
 
 def test_trivy_repo_empties_a_modules_dir_left_in_the_output(tmp_path, monkeypatch):

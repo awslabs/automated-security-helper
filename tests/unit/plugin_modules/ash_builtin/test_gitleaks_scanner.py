@@ -501,3 +501,36 @@ def test_findings_under_the_output_dir_are_dropped(tmp_path):
     ]
     assert len(uris) == len(EXPECTED)
     assert not any(u.startswith(".ash/") for u in uris)
+
+
+def test_gitleaks_config_variables_are_left_to_gitleaks_outside_a_sandbox(
+    tmp_path, monkeypatch
+):
+    scanner = _scanner(tmp_path)
+    (scanner.context.source_dir / ".gitleaks.toml").write_text('title = "repo"\n')
+    monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
+
+    assert scanner._resolve_config_file() is None
+
+
+def test_under_a_sandbox_gitleaks_config_variables_do_not_hand_over_to_the_repo(
+    tmp_path, monkeypatch, caplog
+):
+    """The sandbox drops GITLEAKS_*, so leaving resolution to gitleaks would quietly
+    pick the scanned tree's .gitleaks.toml. ASH's own discovery runs and says so."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        gitleaks_scanner as module,
+    )
+
+    scanner = _scanner(tmp_path)
+    repo_config = scanner.context.source_dir / ".gitleaks.toml"
+    repo_config.write_text('title = "repo"\n')
+    monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
+    monkeypatch.setattr(module, "active_scope", lambda: object())
+
+    with caplog.at_level("INFO"):
+        chosen = scanner._resolve_config_file()
+
+    assert chosen == repo_config.resolve()
+    assert "not passed into the scanner sandbox" in caplog.text
+    assert "uses .gitleaks.toml from the scanned source directory" in caplog.text
