@@ -330,11 +330,11 @@ ARG UV_VERSION="0.12.23"
 RUN with-retry 'install-pinned-tool uv -b /root/.local/bin'
 RUN uv --version
 
-ARG SYFT_VERSION="v1.42.4"
+ARG SYFT_VERSION="v1.54.1"
 RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'
 RUN syft --version
 
-ARG GRYPE_VERSION="v0.111.0"
+ARG GRYPE_VERSION="v0.120.1"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
@@ -414,7 +414,7 @@ RUN set -ue; if [ "${OFFLINE}" = "YES" ]; then \
     echo "offline provisioning verified: grype db, semgrep and opengrep caches are all non-empty"; \
     fi
 
-ARG TRIVY_VERSION="v0.69.3"
+ARG TRIVY_VERSION="v0.75.0"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 

@@ -42,28 +42,28 @@
 }:
 
 let
-  version = "1.15.1";
+  version = "1.30.2";
 
   # Tracks OpengrepScannerConfigOptions.version, NOT the v1.1.5 default in
   # get_opengrep_url's signature -- that fallback is unreachable whenever the config
-  # supplies a version, and pinning it would ship a scanner fourteen minor versions stale
+  # supplies a version, and pinning it would ship a scanner twenty-nine minor versions stale
   # while looking deliberate.
   assets = {
     x86_64-linux = {
       name = "opengrep_manylinux_x86";
-      hash = "sha256-xPaqse3IEwx6Ruj15SFXY0IHQPuUGY/JMBIVE1o3KQA=";
+      hash = "sha256-pmqjJ4RX8Csoe5haRbZ2KuvKulAA8miSRf0e2G0UVsc=";
     };
     aarch64-linux = {
       name = "opengrep_manylinux_aarch64";
-      hash = "sha256-CJMtsy9Mv9bjr2vagq2sQXVCddGKkcD+BlGB5qUpG+c=";
+      hash = "sha256-kKzqXfS3Mwg/OI1P7rJQyoAvZxsz0fIiZT0eVx3SsNg=";
     };
     x86_64-darwin = {
       name = "opengrep_osx_x86";
-      hash = "sha256-r7LVCKUB46frc9kZrxAvZ2Q1OVVjHuWFbvshT+5eNDI=";
+      hash = "sha256-/PR9ow1cOhERny7E4NHuVePDgi6PkNkJv58z386ZBEo=";
     };
     aarch64-darwin = {
       name = "opengrep_osx_arm64";
-      hash = "sha256-qDMyPYfP6H8pJJjQzNwDet+geQXxHy6y3Kf7zIuAPMU=";
+      hash = "sha256-8aqjC4iVnLglIsThR1gWJ4ofFh+ZRQmlGEU8BFX50ks=";
     };
   };
 

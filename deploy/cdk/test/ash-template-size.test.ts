@@ -85,10 +85,10 @@
  * worth 12% to 21% per stack.
  *
  * It also made every one of the five templates unscannable. Measured directly against
- * trivy v0.69.3 -- the version this repository pins in Dockerfile's `TRIVY_VERSION`,
- * so it is the version ASH's own users get -- `trivy config` over the single-line
- * templates panics on all five, exits 2, and produces no result at all. Same trace
- * every time:
+ * trivy v0.69.3 -- the version this repository then pinned in Dockerfile's
+ * `TRIVY_VERSION`, and still the version anyone on an older ASH image gets -- `trivy
+ * config` over the single-line templates panics on all five, exits 2, and produces no
+ * result at all. Same trace every time:
  *
  *   property.go:211 -> property.go:393
  *     -> adapters/cloudformation/aws/iam.getPolicies at policy.go:24
@@ -98,7 +98,9 @@
  * single-line JSON document reports start line 0, so the low bound is -1 and the
  * slice panics. It is reached only through the CloudFormation IAM-policy adapter,
  * which is why the crash needs a template with an IAM policy in it -- and every one
- * of these has several.
+ * of these has several. trivy v0.75.0 gives values that share a line a real start
+ * line (aquasecurity/trivy#11231): minified, all five scan there at rc=0 with no panic.
+ * The gate below stays, because older trivy builds are still in use.
  *
  * Re-indented, all five scan at rc=0 and non-vacuously: AshAgentCore runs 34 tests
  * (28 successes, 6 failures), AshCodeCommitGate 36, AshDistributedPipeline 45,
@@ -480,7 +482,8 @@ describe('committed templates stay indented', () => {
   // WHAT BREAKS THEM: setting `@aws-cdk/core:suppressTemplateIndentation` to true in
   // cdk.json's context and re-running `npm run synth`. `Stack._synthesizeTemplate`
   // then passes `indent = undefined` to `JSON.stringify`, the whole template becomes
-  // one line, and trivy v0.69.3 panics on all five rather than scanning them.
+  // one line, and trivy v0.69.3 panics on all five rather than scanning them (v0.75.0
+  // does not).
   test.each(ALL_STACKS)('%s contains newlines', (stack) => {
     expect(templateText(stack)).toContain('\n');
   });
