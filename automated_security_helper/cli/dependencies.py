@@ -24,6 +24,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from automated_security_helper.base.plugin_base import PluginBase
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import (
@@ -314,13 +315,24 @@ def install_dependencies(
         )
         for plugin_class in ash_plugin_manager.plugin_modules(plugin_module_input):
             try:
+                # The plugin's own config section has to be passed in. Built from
+                # the context alone, a scanner falls back to its class defaults,
+                # so `--config-overrides scanners.semgrep.options.tool_version=...`
+                # (how the image pins bandit, checkov and semgrep through
+                # `install-pinned-tool --uv-tool-pins`) never reached it, and
+                # `uv tool install` took the default range instead of the pin.
+                # This is the lookup the scan phase uses.
                 plugin_instance: PluginBase = plugin_class(
+                    config=resolved_config.get_plugin_config(
+                        plugin_type=plugin_module_input,
+                        plugin_name=plugin_config_key(plugin_class),
+                    ),
                     context=PluginContext(
                         source_dir=source_dir,
                         output_dir=output_dir,
                         work_dir=work_dir,
                         config=resolved_config,
-                    )
+                    ),
                 )
                 # `name` exists on every plugin config but is not always populated,
                 # and getattr's default only fires when the attribute is absent --
