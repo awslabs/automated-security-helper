@@ -114,6 +114,8 @@ on:
       - ".github/scripts/assert-required-checks-census.py"
       - ".github/scripts/assert-workflow-gate.py"
       - "tests/unit/test_native_packages_workflow.py"
+      - "tests/unit/test_posix_bash_helper.py"
+      - "tests/utils/posix_bash.py"
       - "packaging/*.py"
       - "packaging/*.sh"
       - "packaging/deb/**"
@@ -148,6 +150,8 @@ on:
       - ".github/scripts/assert-required-checks-census.py"
       - ".github/scripts/assert-workflow-gate.py"
       - "tests/unit/test_native_packages_workflow.py"
+      - "tests/unit/test_posix_bash_helper.py"
+      - "tests/utils/posix_bash.py"
       - "packaging/*.py"
       - "packaging/*.sh"
       - "packaging/deb/**"
@@ -270,6 +274,7 @@ jobs:
       - name: Unit tests for this workflow's gate, N-1 source and alternatives checks
         run: >-
           uv run --group dev pytest tests/unit/test_native_packages_workflow.py
+          tests/unit/test_posix_bash_helper.py
           -p no:cacheprovider -o addopts="" -v
 
       # Measured rather than asserted in a comment. If the gate ever learns to read

@@ -173,11 +173,15 @@ symlink, so the previous version keeps working.
 No maintainer script registers an alternative or a diversion either: a postinst that
 ran `update-alternatives --install /usr/bin/ash ash /usr/bin/<cli> 100`, or a
 `dpkg-divert` of `/usr/bin/ash`, would take the shell's name without shipping the path.
-`vl_check_maintainer_scripts` refuses any call to `update-alternatives`, `alternatives`
-or `dpkg-divert` in a built package's scripts (`dpkg-deb -e`, `rpm -qp --scripts
---triggerscripts`), `vl_assert_no_alternatives` checks every install and upgrade on the
-host, and the `negative-alternatives` mode plants the call above in postinst and
-`%post` and requires both checks to catch it.
+`vl_assert_no_alternatives` is the guard: after every install and upgrade it reads
+`/etc/alternatives`, the alternatives databases and `dpkg-divert --list` for anything
+pointing into the package or diverting `/bin/ash`. `vl_check_maintainer_scripts` is a
+pre-filter in front of it that refuses any call to `update-alternatives`,
+`alternatives` or `dpkg-divert` in a built package's scripts (`dpkg-deb -e`, `rpm -qp
+--scripts --triggerscripts`); being a grep, it cannot see a command name built from
+pieces or code the scripts reach through the installed payload. The
+`negative-alternatives` mode plants the call above in postinst and `%post` and requires
+both to catch it.
 
 Package versions are mapped from the wheel's PEP 440 version by `packaging/version-map.sh`
 so dpkg and rpm sort them correctly (`3.8.0rc1` becomes `3.8.0~rc1`, below `3.8.0`).
@@ -237,7 +241,13 @@ the deb prerm that deleted the venv on upgrade came from; an upgrade from a copy
 itself cannot see either. A commit with HEAD's tree is never used, the checkout needs
 the full history, and a shallow clone fails and says so.
 `packaging/test-n1-source.sh` shows the derivation refusing a same-tree history, a
-history with no earlier package, and a shallow clone.
+history with no earlier package, and a shallow clone. Each leg logs whether N-1's
+maintainer scripts differ from N's: a different tree does not imply different scripts.
+
+The legs call N-1's `build.sh` with N's calling convention (`build.sh <wheel>
+<outdir>`, the package path on stdout). A commit that changes that interface breaks its
+own upgrade leg until the next commit, whose N-1 then has the new interface too; keep
+the interface stable, or change it in two steps.
 
 ## Where the Flatpak differs, and why
 

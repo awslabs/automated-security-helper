@@ -196,6 +196,12 @@ vl_assert_shell_intact() {
 # `update-alternatives --install /usr/bin/ash ash /usr/bin/ashx 100` in a postinst, or
 # `dpkg-divert --rename /usr/bin/ash`. The package carries neither, so both are refused
 # twice: statically in the built package's scripts, and on the installed host.
+#
+# The host check is the guard. The static check is a grep, a pre-filter that names the
+# offending line early: a script that builds the command name from pieces
+# (`"${UA}natives"`, `eval`), or code the postinst reaches through the payload it
+# installs, gets past it. Nothing gets past the host check, which reads the result
+# after every install and upgrade.
 VL_FORBIDDEN_SCRIPT_COMMANDS='update-alternatives|alternatives|dpkg-divert'
 
 # Reads a package's maintainer scripts on stdin, as `rpm -qp --scripts` prints them or
@@ -244,7 +250,10 @@ vl_assert_no_alternatives() {
     fi
   done
   if command -v dpkg-divert >/dev/null 2>&1; then
-    diversions="$(dpkg-divert --list 2>/dev/null | grep -F -e "by $ASH_PKG_NAME" -e "/usr/bin/ash " || true)"
+    # Any diversion this package makes, and any diversion at all of /bin/ash or
+    # /usr/bin/ash, whoever made it: a `dpkg-divert --local` names no package.
+    diversions="$(dpkg-divert --list 2>/dev/null \
+      | grep -E -e "by ${ASH_PKG_NAME}\$" -e "diversion of /(usr/)?bin/ash " || true)"
     if [ -n "$diversions" ]; then
       printf 'FAIL: dpkg records a diversion this package must not make:\n%s\n' "$diversions" >&2
       rc=1
@@ -608,6 +617,27 @@ vl_load_n1() {
   [ -d "$PREV_SRC/packaging" ] || vl_fail "no N-1 packaging tree at $PREV_SRC"
   vl_say "   N-1: $N1_SHA ($N1_REF), version $N1_VERSION, packaged by its own $PREV_SRC/packaging"
   vl_say "   N:   $N1_HEAD"
+}
+
+# Says what the upgrade crosses in the maintainer scripts. N-1 always differs from N in
+# its tree, not necessarily in these files; when they are byte-identical the leg still
+# proves the upgrade works, but not that changed scripts meet an older install. Each
+# argument is a path relative to the repository root. Informational: never fails.
+vl_report_script_delta() {
+  local rel changed=()
+  for rel in "$@"; do
+    # sha256sum rather than cmp: coreutils is in every image these legs use, diffutils
+    # is not. A file missing on either side reads as a difference.
+    if [ "$(sha256sum <"$PREV_SRC/$rel" 2>/dev/null || echo missing-n1)" \
+      != "$(sha256sum <"$REPO/$rel" 2>/dev/null || echo missing-n)" ]; then
+      changed+=("$rel")
+    fi
+  done
+  if [ "${#changed[@]}" -gt 0 ]; then
+    vl_say "   maintainer scripts that differ between N-1 and N: ${changed[*]}"
+  else
+    vl_say "   maintainer scripts are byte-identical in N-1 and N ($*): this upgrade crosses a code change, not a script change"
+  fi
 }
 
 # The payload gate as N-1's tree defines it, for the N-1 package.
