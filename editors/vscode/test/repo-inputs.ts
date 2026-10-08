@@ -209,35 +209,67 @@ export function uncovered(inputs: readonly RepoInput[], filters: readonly string
     .filter((pattern) => !isCovered(filters, pattern));
 }
 
+/** A call's arguments: the code with comments removed, and each string literal's contents. */
+interface CallArguments {
+  readonly code: string;
+  readonly strings: readonly string[];
+}
+
 /**
- * The text between the parentheses of a call whose `(` is at `open`, with nested
- * parentheses balanced and string contents skipped. Undefined when unbalanced.
+ * The arguments of a call whose `(` is at `open`, with nested parentheses
+ * balanced. String literals and `//` and block comments are skipped while
+ * balancing, so a `)` in either does not end the call. Undefined when unbalanced.
  */
-function callArguments(source: string, open: number): string | undefined {
+function callArguments(source: string, open: number): CallArguments | undefined {
   let depth = 0;
-  let quote: string | undefined;
+  let code = '';
+  const strings: string[] = [];
   for (let i = open; i < source.length; i += 1) {
     const ch = source[i];
-    if (quote !== undefined) {
-      if (ch === '\\') {
-        i += 1;
-      } else if (ch === quote) {
-        quote = undefined;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      let text = '';
+      let j = i + 1;
+      for (; j < source.length && source[j] !== ch; j += 1) {
+        if (source[j] === '\\') {
+          text += source.slice(j, j + 2);
+          j += 1;
+        } else {
+          text += source[j];
+        }
       }
+      strings.push(text);
+      code += source.slice(i, j + 1);
+      i = j;
       continue;
     }
-    if (ch === "'" || ch === '"' || ch === '`') {
-      quote = ch;
-    } else if (ch === '(') {
+    if (ch === '/' && source[i + 1] === '/') {
+      const newline = source.indexOf('\n', i);
+      i = newline < 0 ? source.length : newline - 1;
+      code += ' ';
+      continue;
+    }
+    if (ch === '/' && source[i + 1] === '*') {
+      const close = source.indexOf('*/', i + 2);
+      i = close < 0 ? source.length : close + 1;
+      code += ' ';
+      continue;
+    }
+    if (ch === '(') {
       depth += 1;
     } else if (ch === ')') {
       depth -= 1;
       if (depth === 0) {
-        return source.slice(open + 1, i);
+        return { code: code.slice(1), strings };
       }
     }
+    code += ch;
   }
   return undefined;
+}
+
+/** How many `..` path segments a string literal's contents carry, split on `/` and `\\`. */
+function parentSegments(text: string): number {
+  return text.split(/\\\\|[\\/]/).filter((segment) => segment === '..').length;
 }
 
 const PATH_CALL = /path\.(?:join|resolve)\(/g;
@@ -250,8 +282,9 @@ const DIRNAME_CHAIN = /path\.dirname\(\s*path\.dirname\(/g;
  * A HEURISTIC, NOT A GUARANTEE. It catches the shapes a test here would plausibly
  * write:
  *
- *   - a `path.join(...)`/`path.resolve(...)` whose arguments (nested calls
- *     included) carry two or more `'..'` levels, or any `'..'` from a base other
+ *   - a `path.join(...)`/`path.resolve(...)` whose string arguments (nested
+ *     calls included, comments ignored) carry two or more `..` path segments in
+ *     total (`'../..'` is two), or any `..` from a base other
  *     than `__dirname` (`PACKAGE_ROOT, '..'` is already outside; one level from
  *     `__dirname` is test/ to the package root and stays inside);
  *   - a template literal that puts `..` after `${__dirname}`, `${PACKAGE_ROOT}` or
@@ -270,10 +303,10 @@ export function packageEscapes(source: string): string[] {
     if (args === undefined) {
       continue;
     }
-    const ups = (args.match(/['"]\.\.['"]/g) ?? []).length + (args.match(/\.\.\//g) ?? []).length;
-    const fromDirname = /^\s*__dirname\s*,/.test(args);
+    const ups = args.strings.reduce((total, text) => total + parentSegments(text), 0);
+    const fromDirname = /^\s*__dirname\s*,/.test(args.code);
     if (ups >= 2 || (ups >= 1 && !fromDirname)) {
-      out.push(`${match[0]}${args})`);
+      out.push(`${match[0]}${args.code})`);
     }
   }
   for (const pattern of [TEMPLATE_ESCAPE, DIRNAME_CHAIN]) {

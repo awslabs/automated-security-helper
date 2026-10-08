@@ -211,6 +211,31 @@ describe('the checks, against planted defects', () => {
     expect(packageEscapes(call('join', '__dirname', "')'", UP, UP))).toHaveLength(1);
   });
 
+  it('counts `..` path segments inside one string, not only whole-string literals', () => {
+    const call = (fn: string, ...args: string[]): string => `path.${fn}(${args.join(', ')})`;
+    const seg = '..';
+    // `'../..'` is two levels from test/, which is outside the package.
+    expect(packageEscapes(call('join', '__dirname', `'${seg}/${seg}'`))).toHaveLength(1);
+    expect(packageEscapes(call('join', '__dirname', `"${seg}/${seg}/tests/x.json"`))).toHaveLength(1);
+    expect(packageEscapes(call('resolve', '__dirname', `'${seg}\\${seg}'`))).toHaveLength(1);
+    expect(packageEscapes(call('join', '__dirname', `'${seg}'`, `'${seg}/x'`))).toHaveLength(1);
+    // One level, and a name that merely contains dots, stay inside.
+    expect(packageEscapes(call('join', '__dirname', `'${seg}/package.json'`))).toEqual([]);
+    expect(packageEscapes(call('join', '__dirname', "'a..b/...'"))).toEqual([]);
+  });
+
+  it('does not end a call at a parenthesis inside a comment', () => {
+    const seg = `'${'..'}'`;
+    const open = `path.${'join'}(`;
+    // Without comment handling the `)` in the comment closes the call before the
+    // two levels, and the escape goes unseen.
+    expect(packageEscapes(`${open}__dirname, // see (a)\n  ${seg}, ${seg})`)).toHaveLength(1);
+    expect(packageEscapes(`${open}__dirname, /* (x) ) */ ${seg}, ${seg})`)).toHaveLength(1);
+    // And a `..` that is only in a comment is not a level.
+    expect(packageEscapes(`${open}__dirname, /* ${seg} ${seg} */ 'fixtures')`)).toEqual([]);
+    expect(packageEscapes(`${open}/* base */ __dirname, ${seg}, 'package.json')`)).toEqual([]);
+  });
+
   it('refuses an undeclared repo path', () => {
     expect(() => repoPath('tests/test_data/outputs/other.json')).toThrow(/not declared/);
     expect(() => repoPath('.githubx/a')).toThrow(/not declared/);
