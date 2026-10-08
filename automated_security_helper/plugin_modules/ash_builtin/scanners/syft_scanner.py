@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field, model_validator
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -24,6 +25,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
 
 
@@ -78,6 +80,11 @@ class SyftScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     """SyftScanner implements IaC scanning using Syft."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        cache_paths=("~/.cache/syft",),
+        env_prefixes=("SYFT_",),
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
@@ -310,7 +317,9 @@ if __name__ == "__main__":
         by_alias=True,
         exclude_unset=True,
     )
-    with open(
-        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"), "w"
+    with open_for_write(
+        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"),
+        encoding=None,
+        errors=None,
     ) as f:
         f.write(report_json)

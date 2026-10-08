@@ -94,6 +94,17 @@ class RunMode(str, Enum):
     nix = "nix"
 
 
+class SandboxMode(str, Enum):
+    """How scanner subprocesses are confined. See docs/content/docs/scanner-sandbox.md."""
+
+    off = "off"
+    auto = "auto"
+    bwrap = "bwrap"
+    firejail = "firejail"
+    landlock = "landlock"
+    sandbox_exec = "sandbox-exec"
+
+
 class ExportFormat(str, Enum):
     """Supported export formats."""
 

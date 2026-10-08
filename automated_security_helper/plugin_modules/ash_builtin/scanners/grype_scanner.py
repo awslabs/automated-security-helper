@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Final, List, Literal, Mapping
 
 import yaml
 from pydantic import Field, model_validator
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -140,6 +141,12 @@ def _declared_grype_db_bound(
 @ash_scanner_plugin
 class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     """GrypeScanner implements IaC scanning using Grype."""
+
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        network=True,
+        cache_paths=("~/.cache/grype", "$GRYPE_DB_CACHE_DIR"),
+        env_prefixes=("GRYPE_",),
+    )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
     check_conf: str = "NOT_PROVIDED"

@@ -27,6 +27,12 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.utils.detect_secrets_worker import (
+    capturing_worker_command,
+    failing_worker_command,
+    read_capture,
+)
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.enums import ScannerToolType
@@ -631,16 +637,15 @@ def test_excluded_files_are_never_handed_to_detect_secrets(scanner, monkeypatch)
     the directory name of any test whose own name contains it, silently
     excluding every file and emptying the scan set.
     """
-    from detect_secrets import SecretsCollection
-
-    captured = []
-    real_scan_files = SecretsCollection.scan_files
-
-    def _capture(self, *filenames):
-        captured.extend(filenames)
-        return real_scan_files(self, *filenames)
-
-    monkeypatch.setattr(SecretsCollection, "scan_files", _capture)
+    # The scan runs in a worker subprocess, so the list handed to scan_files is
+    # observed as the worker's request: the worker passes request["paths"] to
+    # scan_files unchanged. See tests/utils/detect_secrets_worker.py.
+    capture_file = scanner.context.output_dir / "captured-request.json"
+    monkeypatch.setattr(
+        DetectSecretsScanner,
+        "_worker_command",
+        staticmethod(capturing_worker_command(capture_file)),
+    )
 
     source_with_planted_key(scanner.context.work_dir, name="skipme_settings.py")
     source_with_planted_key(scanner.context.work_dir, name="keepme_settings.py")
@@ -652,6 +657,7 @@ def test_excluded_files_are_never_handed_to_detect_secrets(scanner, monkeypatch)
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
+    captured = read_capture(capture_file)["paths"]
     assert captured, "no files were handed to detect-secrets at all"
     assert not any("skipme_settings.py" in f for f in captured), (
         f"the excluded file was still handed to detect-secrets: {captured}"
@@ -763,20 +769,12 @@ def test_an_unexpected_failure_is_wrapped_in_scanner_error(scanner, monkeypatch)
     """Errors inside the scan body surface as ScannerError."""
     source_with_planted_key(scanner.context.work_dir)
 
-    def _boom(*args, **kwargs):
-        raise RuntimeError("transient settings failed")
-
-    # Injected through the _detect_secrets_api seam rather than as a module
-    # attribute. The three detect-secrets entry points are imported inside the
-    # methods that use them, because a top-level import that raises removes this
-    # scanner and every plugin module imported after it from the registry.
-    real_collection, _real_settings, real_mapping = (
-        detect_secrets_scanner._detect_secrets_api()
-    )
+    # The scan body runs in a worker subprocess; this one raises where the real
+    # worker would enter transient_settings. See tests/utils/detect_secrets_worker.py.
     monkeypatch.setattr(
-        detect_secrets_scanner,
-        "_detect_secrets_api",
-        lambda: (real_collection, _boom, real_mapping),
+        DetectSecretsScanner,
+        "_worker_command",
+        staticmethod(failing_worker_command("transient settings failed")),
     )
 
     with pytest.raises(ScannerError) as excinfo:
