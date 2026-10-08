@@ -891,6 +891,10 @@ def _project_config_with_policy(
         # The whole workspace is scanned, so a config anywhere under its root was
         # written by the repository, not only one under this project.
         scanned_root=_workspace_root(project),
+        # A project's own config replaces the operator's default config. The
+        # operator's file still decides the sandbox when the project's is in the
+        # tree, the same as it would for a project that has none.
+        trusted_config_path=settings.default_config_path,
     )
 
     # Preserves the diagnostic the orchestrator used to emit from config_path,

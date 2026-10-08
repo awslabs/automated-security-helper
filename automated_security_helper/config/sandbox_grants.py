@@ -22,6 +22,17 @@ a scanner it does not name gets no network. A repository can still take network
 away from its own scan, which is what the docs recommend for detect-secrets. It just
 can't add network.
 
+``sandbox.mode`` follows the same rule. When the trusted settings turn the sandbox
+on, through ``--sandbox``, ``ASH_CONFIG`` or an operator's config file, an in-tree
+file can't turn it off or switch it to another backend. When they leave it off, an
+in-tree mode applies, because a sandbox the repository asks for only takes access
+away.
+
+The scanned tree is the nearest directory at or above the scan root that holds a
+``.git`` entry, or the scan root itself outside a repository. The repository being
+scanned controls all of it, not only the part being scanned. The check looks for the
+entry on disk and does not run git, which reads configuration from the repository.
+
 Whether a file is in the tree is decided with ``os.path.samefile`` on each of the
 file's parents, not by comparing path strings. A symlink, a ``..`` segment, or a
 case-only difference on a case-insensitive filesystem therefore can't make an
@@ -54,6 +65,15 @@ def is_within(path: Path, root: Path) -> bool:
     return False
 
 
+def scanned_tree(scan_root: Path) -> Path:
+    """The tree the scanned repository controls: its enclosing checkout, if any."""
+    start = Path(os.path.realpath(scan_root))
+    for candidate in (start, *start.parents):
+        if os.path.lexists(candidate / ".git"):
+            return candidate
+    return start
+
+
 def files_inside(chain: Iterable[Path], scanned_root: Path) -> List[Path]:
     """The files of ``chain`` that the scanned repository can write."""
     return [path for path in chain if is_within(path, scanned_root)]
@@ -66,26 +86,31 @@ def confine_sandbox_grants(
 
     Args:
         sandbox: The resolved settings, from the config files plus the overrides.
-        trusted: The same settings resolved from the defaults plus the overrides.
+        trusted: The same settings resolved from the trusted base plus the
+            overrides.
         in_tree: The config files inside the scanned tree. Named in the warning.
     """
-    dropped = []
+    ignored = []
     if sandbox.network_scanners != trusted.network_scanners:
-        dropped.append("sandbox.network_scanners")
+        ignored.append("sandbox.network_scanners")
     if list(sandbox.extra_read_paths) != list(trusted.extra_read_paths):
-        dropped.append("sandbox.extra_read_paths")
+        ignored.append("sandbox.extra_read_paths")
+    if trusted.mode != "off" and sandbox.mode != trusted.mode:
+        ignored.append("sandbox.mode")
+        sandbox.mode = trusted.mode
     limit = sandbox.network_scanners
     sandbox.network_scanners = (
         list(trusted.network_scanners) if trusted.network_scanners is not None else None
     )
     sandbox.extra_read_paths = list(trusted.extra_read_paths)
     sandbox.network_limit = list(limit) if limit is not None else None
-    if dropped:
+    if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         ASH_LOGGER.warning(
-            f"Not granting {' or '.join(dropped)} from {files}: the file is inside "
-            "the scanned tree, so the repository being scanned wrote it. Its "
-            "network_scanners list still removes network from scanners it does "
-            "not name. Grant access with --config-overrides or a config file "
-            "outside the tree."
+            f"Ignoring {', '.join(ignored)} from {files}: the file is inside the "
+            "scanned tree, so the repository being scanned wrote it. A "
+            "network_scanners list there still removes network from scanners it "
+            "does not name, and a sandbox mode there still applies when nothing "
+            "else turns the sandbox on. Set these with --config-overrides or a "
+            "config file outside the tree."
         )

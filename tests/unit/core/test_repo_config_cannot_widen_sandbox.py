@@ -426,3 +426,176 @@ def test_only_sandbox_overrides_are_replayed_onto_the_trusted_defaults(
         ["project_name=renamed", "sandbox.network_scanners+=[grype]"],
         ["sandbox.network_scanners+=[grype]"],
     ]
+
+
+TRUSTED_BWRAP = """project_name: operator
+sandbox:
+  mode: bwrap
+  network_scanners: [checkov]
+"""
+
+
+def test_a_repository_config_cannot_turn_off_a_sandbox_ash_config_turns_on(
+    tmp_path, monkeypatch
+):
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP)
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    for repo_config in (
+        "project_name: x\n",
+        "project_name: x\nsandbox:\n  mode: 'off'\n",
+    ):
+        source = tmp_path / f"repo-{len(repo_config)}"
+        (source / ".ash").mkdir(parents=True)
+        (source / ".ash" / ".ash.yaml").write_text(repo_config)
+        sandbox = resolve_config(source_dir=source).sandbox
+        assert sandbox.mode == "bwrap", repo_config
+        assert sandbox.network_scanners == ["checkov"], repo_config
+
+
+def test_a_repository_config_cannot_switch_the_sandbox_to_another_backend(
+    tmp_path, monkeypatch
+):
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP)
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    source = _repo(tmp_path, "project_name: x\nsandbox:\n  mode: firejail\n")
+    assert resolve_config(source_dir=source).sandbox.mode == "bwrap"
+
+
+def test_a_repository_config_can_turn_the_sandbox_on(tmp_path):
+    source = _repo(tmp_path, "project_name: x\nsandbox:\n  mode: landlock\n")
+    assert resolve_config(source_dir=source).sandbox.mode == "landlock"
+
+
+def test_workspace_mode_takes_the_sandbox_from_the_operators_config(tmp_path):
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        _project_config_with_policy,
+    )
+    from automated_security_helper.workspace.plan import ProjectPlan
+
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP)
+    workspace = tmp_path / "workspace"
+    project_dir = workspace / "api"
+    (project_dir / ".ash").mkdir(parents=True)
+    own = project_dir / ".ash" / ".ash.yaml"
+    own.write_text("project_name: api\nsandbox:\n  mode: 'off'\n")
+    project = ProjectPlan(
+        key="api",
+        relative_path="api",
+        path=project_dir.as_posix(),
+        label="api",
+        display_label="api",
+        severity_threshold="MEDIUM",
+        config_source=own.as_posix(),
+    )
+    settings = ProjectScanSettings(
+        output_dir=tmp_path / "out", default_config_path=str(operator)
+    )
+    sandbox = _project_config_with_policy(project, settings).sandbox
+    assert sandbox.mode == "bwrap"
+    assert sandbox.network_scanners == ["checkov"]
+
+
+def test_an_operator_config_inside_the_workspace_is_not_trusted(tmp_path):
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        _project_config_with_policy,
+    )
+    from automated_security_helper.workspace.plan import ProjectPlan
+
+    workspace = tmp_path / "workspace"
+    project_dir = workspace / "api"
+    (project_dir / ".ash").mkdir(parents=True)
+    own = project_dir / ".ash" / ".ash.yaml"
+    own.write_text("project_name: api\n")
+    in_tree_default = workspace / "default.yaml"
+    in_tree_default.write_text(TRUSTED_BWRAP)
+    project = ProjectPlan(
+        key="api",
+        relative_path="api",
+        path=project_dir.as_posix(),
+        label="api",
+        display_label="api",
+        severity_threshold="MEDIUM",
+        config_source=own.as_posix(),
+    )
+    settings = ProjectScanSettings(
+        output_dir=tmp_path / "out", default_config_path=str(in_tree_default)
+    )
+    sandbox = _project_config_with_policy(project, settings).sandbox
+    assert sandbox.network_scanners is None
+
+
+def test_a_config_elsewhere_in_the_scanned_repository_is_inside(tmp_path):
+    repository = tmp_path / "checkout"
+    (repository / ".git").mkdir(parents=True)
+    (repository / ".ash").mkdir()
+    (repository / ".ash" / "ci.yaml").write_text(REPO_CONFIG)
+    service = repository / "services" / "api"
+    service.mkdir(parents=True)
+    sandbox = resolve_config(
+        config_path=repository / ".ash" / "ci.yaml", source_dir=service
+    ).sandbox
+    assert sandbox.network_scanners is None
+    assert sandbox.extra_read_paths == []
+
+
+def test_a_git_file_marks_a_checkout_as_well(tmp_path):
+    # A linked worktree or a submodule has a .git file rather than a directory.
+    repository = tmp_path / "worktree"
+    repository.mkdir()
+    (repository / ".git").write_text("gitdir: /elsewhere/.git/worktrees/x\n")
+    (repository / "ash.yaml").write_text(REPO_CONFIG)
+    service = repository / "api"
+    service.mkdir()
+    sandbox = resolve_config(
+        config_path=repository / "ash.yaml", source_dir=service
+    ).sandbox
+    assert sandbox.network_scanners is None
+
+
+def test_the_limit_reaches_the_policy_of_a_real_spawn(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from automated_security_helper.utils.sandbox import scope as scope_module
+    from automated_security_helper.utils.sandbox.backends import SpawnPlan
+
+    class Recorder:
+        name = "recorder"
+
+        def __init__(self):
+            self.policies = []
+
+        def plan(self, argv, env, policy):
+            self.policies.append(policy)
+            return SpawnPlan(argv=list(argv), env=dict(env))
+
+    recorder = Recorder()
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: recorder)
+    monkeypatch.setattr(
+        "automated_security_helper.core.constants.is_offline_mode", lambda: False
+    )
+    source = _repo(tmp_path)
+    config = resolve_config(source_dir=source)
+    context = SimpleNamespace(
+        config=config, source_dir=source, output_dir=tmp_path / "out"
+    )
+
+    def network_of(name):
+        plugin = SimpleNamespace(
+            config=SimpleNamespace(name=name),
+            sandbox_requirements=SandboxRequirements(network=True),
+            results_dir=None,
+        )
+        scope = scope_module.scanner_sandbox_scope(plugin, context, source)
+        with scope_module.sandbox_scope(scope):
+            scope_module.prepare_spawn([sys.executable, "--version"], {}, None)
+        return recorder.policies[-1].network
+
+    # Both declare a need. The repository's list names checkov only.
+    assert network_of("checkov") is True
+    assert network_of("grype") is False

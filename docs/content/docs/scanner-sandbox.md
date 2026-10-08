@@ -167,12 +167,20 @@ sandbox:
 config was built from is inside the tree, both settings are taken from the defaults
 plus `--config-overrides`, and ASH logs a warning naming the file. That covers the
 discovered `.ash/.ash.yaml`, a `--config` path, an `extends` base, and the file
-`ASH_CONFIG` names. In workspace mode the tree is the workspace root, not just the
-project. A symlink, a `..` segment, or a case-only difference on a case-insensitive
-filesystem doesn't change the answer, because ASH compares the files themselves,
-not their path strings. An in-tree `network_scanners` list still takes network away:
-a scanner it doesn't name gets none, so a repository can keep its own scan offline
-with `network_scanners: []`. `mode` is honored from either.
+`ASH_CONFIG` names. The tree is the whole checkout: the nearest directory at or
+above the scanned directory (in workspace mode, the workspace root) that holds a
+`.git` entry, or the scanned directory itself outside a repository. A symlink, a `..`
+segment, or a case-only difference on a case-insensitive filesystem doesn't change
+the answer, because ASH compares the files themselves, not their path strings. An
+in-tree `network_scanners` list still takes network away: a scanner it doesn't name
+gets none, so a repository can keep its own scan offline with `network_scanners: []`.
+
+`mode` follows the same rule. When `--sandbox`, `ASH_CONFIG`, or the operator's
+config file turns the sandbox on, an in-tree config can't turn it off or switch it
+to another backend. When none of them does, an in-tree `mode` applies, because a
+sandbox the repository asks for only takes access away. In workspace mode, the
+operator's `--config` decides for a project that has its own config file, the same
+as for one that doesn't.
 
 A trusted config outside the tree that `extends` a base inside the tree loses its own
 grants too, because the merged settings no longer record which file set them. Pass

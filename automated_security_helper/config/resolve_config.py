@@ -20,6 +20,7 @@ from automated_security_helper.config.default_config import (
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     files_inside,
+    scanned_tree,
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -194,6 +195,7 @@ def resolve_config(
     config_overrides: List[str] = None,
     permit_base: Optional[Callable[[Path], bool]] = None,
     scanned_root: Path | str | None = None,
+    trusted_config_path: Path | str | None = None,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -207,10 +209,16 @@ def resolve_config(
             MCP server passes the calling session's; see
             ``config/config_sources.py``. A refusal is raised, never replaced by
             the default config.
-        scanned_root: The tree being scanned. A config file inside it was written
-            by the repository under scan, so the sandbox grants it makes are
-            dropped; see ``config/sandbox_grants.py``. Defaults to
-            ``source_dir``, or the working directory when that is None too.
+        scanned_root: The directory being scanned. A config file inside the
+            repository that holds it was written by the repository under scan,
+            so the sandbox grants it makes are dropped; see
+            ``config/sandbox_grants.py``. Defaults to ``source_dir``, or the
+            working directory when that is None too.
+        trusted_config_path: The operator's own config file, when the config
+            actually selected can replace it (workspace mode's default config,
+            which a project's own config file replaces). Used in place of the
+            defaults as the trusted base the grants come from, unless it is
+            inside the scanned tree as well.
 
     Returns:
         The resolved AshConfig object
@@ -228,7 +236,7 @@ def resolve_config(
         return config
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
-    root = Path(scanned_root)
+    root = scanned_tree(Path(scanned_root))
     if chain:
         in_tree = files_inside(chain, root)
         if not in_tree:
@@ -240,7 +248,9 @@ def resolve_config(
         in_tree = default_in_tree = files_inside(default_config_chain(), root)
         if not in_tree:
             return config
-    trusted = AshConfig() if default_in_tree else get_default_config()
+    trusted = _trusted_base(
+        root, default_in_tree, trusted_config_path, source_dir, permit_base
+    )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
     # section they write into.
@@ -253,6 +263,26 @@ def resolve_config(
         trusted = apply_config_overrides(trusted, sandbox_overrides)
     confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
     return config
+
+
+def _trusted_base(
+    root: Path,
+    default_in_tree: List[Path],
+    trusted_config_path: Path | str | None,
+    source_dir: Path | str | None,
+    permit_base: Optional[Callable[[Path], bool]],
+) -> AshConfig:
+    """The config the sandbox settings are taken from when the selected one is in the tree."""
+    if trusted_config_path is not None and Path(trusted_config_path).is_file():
+        path = Path(trusted_config_path)
+        document = resolve_config_document(
+            path,
+            confine_to=default_confinement_root(path, source_dir),
+            permit_base=permit_base,
+        )
+        if not files_inside(document.chain, root):
+            return AshConfig.model_validate(document.data, strict=True)
+    return AshConfig() if default_in_tree else get_default_config()
 
 
 def _resolve_config(
