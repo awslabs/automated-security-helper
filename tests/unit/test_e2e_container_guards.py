@@ -16,9 +16,10 @@ which drops comments, and heredoc bodies are dropped after it. A call has to be 
 command at the top level of the script or of the leg function the top level dispatches
 to (not commented out, not under an if, not behind `false &&`), under `set -euo
 pipefail`. Ahead of it, at any depth or in a function called there (transitively),
-there may be no `set +e` and no exit or return that could end the leg green: a bare
-one, status 0, or a variable status. A nonzero literal status is a failure path and is
-allowed. Calls made inside `$(...)` or quoted text are not followed. On Windows the
+there may be no `set +e`, no `exec <command>`, and no exit or return that could end
+the leg green (a bare one, status 0, or a variable status), whether written plainly,
+after `!`, `command`, `builtin` or `time`, or in a trap's command. A nonzero literal
+status is a failure path and is allowed. Calls made inside `$(...)` or quoted text are not followed. On Windows the
 parse runs in Git for Windows' bash, since `bash` on a runner's PATH is the WSL stub.
 """
 
@@ -205,14 +206,22 @@ _ALIAS_CALLS = {
 _ALIAS_ASSERT_LINE = (
     'ALIAS_ASSERT="$REPO/.github/actions/validate-install/assert-deprecated-alias.sh"'
 )
-# Where a command can start on a parsed line, once quoted text is gone.
-_AT_COMMAND = r"(?:^|[;&|({]|\b(?:then|else|do)\b)\s*"
+# Where a command can start on a parsed line, once quoted text is gone, including after
+# the words that run the next one: `!`, `command`, `builtin` and `time [-p]`.
+_AT_COMMAND = (
+    r"(?:^|[;&|({]|\b(?:then|else|do)\b)\s*"
+    r"(?:(?:!|command|builtin|time(?:\s+-p)?)\s+)*"
+)
 # An exit or return that can end the leg before the call. Only one with a nonzero
 # literal status is a failure path (fail's `exit 1`, the usage check's `exit 3`): a bare
 # one, `exit 0` or `exit $rc` could end the leg green without running the check.
 _LEAVE = re.compile(_AT_COMMAND + r"(exit|return)\b[ \t]*([^\s;&|)}]*)")
 # `set +e` (or +o errexit) lets a failed bare self-test line through.
 _ERREXIT_OFF = re.compile(_AT_COMMAND + r"set\s+(?:\+\w*e\w*|\+o\s+errexit)\b")
+# `exec <command>` replaces the shell; `exec` with only redirections does not.
+_EXEC = re.compile(_AT_COMMAND + r"exec\b(?!\s*(?:[0-9]*[<>]|$|[;&|)}]))")
+# A trap's command is quoted, so it is read from the line before quotes are removed.
+_TRAP = re.compile(_AT_COMMAND + r"trap\s+(?:'([^']*)'|\"((?:[^\"\\]|\\.)*)\")")
 _QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"' + r"|'[^']*'")
 _HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)(\w+)\2")
 
@@ -337,6 +346,13 @@ def _leaving(lines: list, rows, functions: dict, returns: bool) -> list:
                 found.append((lines[row].strip(), f"{kind} {status}".strip()))
         if _ERREXIT_OFF.search(code):
             found.append((lines[row].strip(), "errexit switched off"))
+        if _EXEC.search(code):
+            found.append((lines[row].strip(), "exec replaces the shell"))
+        for trap in _TRAP.finditer(lines[row].strip()):
+            body = _QUOTED.sub('""', trap.group(1) or trap.group(2) or "")
+            for match in _LEAVE.finditer(body):
+                if not re.fullmatch(r"[1-9][0-9]*", match.group(2)):
+                    found.append((lines[row].strip(), "a trap that exits"))
         for name, body in functions.items():
             if name not in seen and re.search(
                 _AT_COMMAND + re.escape(name) + r"\b", code
@@ -706,6 +722,14 @@ _NESTED_LEAVES = {
     "exit-a-variable": ('rc=0; [ -n "$REPO" ] || exit "$rc"',),
     "set-plus-e": ("set +e",),
     "set-plus-o-errexit": ("set +o errexit",),
+    "not-exit": ("! exit 0",),
+    "command-exit": ("command exit 0",),
+    "builtin-exit": ("builtin exit 0",),
+    "time-exit": ("time exit 0",),
+    "time-p-command-exit": ("time -p command exit",),
+    "exec-a-command": ("exec true",),
+    "trap-exit-0": ("trap 'rm -f /dev/null.x; exit 0' EXIT",),
+    "trap-exit-dq": ('trap "exit" ERR',),
 }
 
 
@@ -737,6 +761,10 @@ def test_e2e_alias_guard_accepts_failure_paths_and_uncalled_exits(rel):
         "never_called() { exit 0; }",
         "done_early() { return 0; }",
         "done_early",
+        "exec 9>/dev/null",
+        "exec >/dev/null 2>&1",
+        "trap 'rm -rf \"$WORK/tmp\"' EXIT",
+        "trap 'exit 1' INT",
     )
     assert _alias_call_problems(rel, edited) == []
 
