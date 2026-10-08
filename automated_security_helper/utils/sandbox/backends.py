@@ -577,7 +577,9 @@ class SandboxExecBackend(SandboxBackend):
             ]
         # Without a network nothing is allowed: (deny default) covers every socket.
         if report == "open-files":
-            lines.append("(allow file-read* file-write*)")
+            # Filtered: an unfiltered rule is only the operation's default and
+            # loses to every filtered deny above it.
+            lines.append('(allow file-read* file-write* (subpath "/"))')
         return "\n".join(lines)
 
     def plan(
