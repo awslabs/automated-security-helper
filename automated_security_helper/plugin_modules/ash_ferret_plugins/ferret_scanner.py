@@ -16,7 +16,10 @@ from urllib.parse import urljoin
 from pydantic import Field, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
 from automated_security_helper.base.plugin_base import pep440_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
@@ -441,6 +444,7 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
     # Version control options
     tool_version: Annotated[
         str | None,
+        tool_version_constraint("scanners.ferret-scan.options.tool_version"),
         Field(
             description=f"Version constraint for ferret-scan installation "
             f"(e.g., '>=1.0.0,<2.0.0', '==1.2.0'). If not specified, uses the plugin's "

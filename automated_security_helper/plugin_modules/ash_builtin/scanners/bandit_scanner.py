@@ -6,7 +6,10 @@ from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -70,6 +73,7 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
     ] = []
     tool_version: Annotated[
         str | None,
+        tool_version_constraint("scanners.bandit.options.tool_version"),
         Field(
             description=(
                 "Version constraint for bandit installation, in pip requirement "

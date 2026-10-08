@@ -16,6 +16,7 @@ from automated_security_helper.base.converter_plugin import (
 
 from automated_security_helper.base.options import (
     ConverterOptionsBase,
+    tool_version_constraint,
 )
 from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.get_scan_set import scan_set
@@ -31,6 +32,7 @@ from automated_security_helper.utils.process_env import snapshot_environ
 class JupyterConverterConfigOptions(ConverterOptionsBase):
     tool_version: Annotated[
         str | None,
+        tool_version_constraint("converters.jupyter.options.tool_version"),
         Field(
             description="Version constraint for nbconvert tool installation (e.g., '>=7.16.0'). If not specified, the latest version will be installed."
         ),

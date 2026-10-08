@@ -139,6 +139,63 @@ def reset_pre_installed_tool_cache() -> None:
         _verdict_cache.clear()
 
 
+def validate_version_constraint(value: Optional[str]) -> Optional[str]:
+    """``value`` as a PEP 440 specifier set, or None or empty; ValueError otherwise.
+
+    A scanner's ``tool_version`` is appended to its package name and handed to
+    ``uv tool install``, ``uv tool run --from`` or ``pip install``, so whatever it
+    holds decides what gets installed. It is meant to hold ``>=1.2,<2``. A value
+    such as ``" @ file:///repo/pkg"`` or ``"[extra] @ https://..."`` would instead
+    install a package from a path or URL, and building that package runs its code.
+    A config file in the scanned repository can set the option, so the check
+    applies wherever the value came from.
+
+    Parsing is ``packaging.specifiers.SpecifierSet``, which refuses ``@``, ``[``,
+    ``;`` and anything else that is not a specifier. Two things it accepts are
+    refused here as well. ``===`` takes an arbitrary string (``===1.0@file:///x``
+    parses), so every clause's version must be a real PEP 440 version, with
+    ``.*`` allowed only where PEP 440 allows it. And the result is rebuilt clause by
+    clause, so no whitespace or newline from the input reaches the requirement.
+
+    Returns:
+        None for None, an empty string for a blank one (no constraint either
+        way), otherwise the clauses in the order written, joined by commas, each
+        in canonical form (``>= 1.2`` becomes ``>=1.2``).
+    """
+    if value is None:
+        return None
+    if not value.strip():
+        return ""
+    from packaging.specifiers import InvalidSpecifier, Specifier, SpecifierSet
+    from packaging.version import InvalidVersion, Version
+
+    message = (
+        f"{value!r} is not a version constraint; use PEP 440 specifiers such as "
+        "'>=1.2.0,<2.0.0' or '==1.4.1'"
+    )
+    try:
+        SpecifierSet(value)
+    except InvalidSpecifier:
+        raise ValueError(message) from None
+    clauses: List[str] = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            specifier = Specifier(part)
+            version = specifier.version
+            if specifier.operator in ("==", "!=") and version.endswith(".*"):
+                version = version[: -len(".*")]
+            Version(version)
+        except (InvalidSpecifier, InvalidVersion):
+            raise ValueError(message) from None
+        clauses.append(str(specifier))
+    if not clauses:
+        raise ValueError(message)
+    return ",".join(clauses)
+
+
 def build_requirement(
     package: str, extras: Sequence[str] | None, version_constraint: str | None
 ) -> str:
