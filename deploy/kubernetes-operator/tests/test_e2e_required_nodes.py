@@ -5,10 +5,12 @@ the list names passed. This file proves the list is worth requiring:
 
 - every id in it is still collected, so a renamed or deleted e2e test fails here, in
   the unit job, instead of when somebody next reads the e2e log;
-- every test marked ``negative_control`` is in it, and a new negative control cannot be
-  added without being required. Two rules back that: every test named like one must be
-  marked, and every test in a class (or module) that holds a negative control must be
-  marked ``negative_control`` or ``positive_control``, so naming cannot dodge it;
+- every test marked ``negative_control`` is in it;
+- a new negative control is caught unmarked in two cases: when its id matches the name
+  rule below, and when it is added to a class (or module) that already holds a negative
+  control, where every test must be marked ``negative_control`` or ``positive_control``.
+  A control in a brand-new class whose name the rule does not match is NOT caught; marking
+  it is the author's job, and review is what checks it;
 - the check itself rejects a log that lacks one required pass, or has it only as a
   FAILED line or inside a longer id.
 """
@@ -194,6 +196,14 @@ class TestTheCensusCanFail:
     )
     def test_the_name_rule_sees_each_spelling(self, node):
         assert NEGATIVE_NAME.search(node), node
+
+    def test_the_documented_gap_is_real(self):
+        # The module docstring says a control in a brand-new class with an unmatched name
+        # is not caught. Hold the docstring to that: if this starts failing, the gap has
+        # closed and the docstring should say so.
+        node = "tests/e2e/x.py::TestWrongDigest::test_a_wrong_digest_fails_the_pull"
+        assert not NEGATIVE_NAME.search(node)
+        assert unclassified([node], negative=[], positive=[]) == []
 
     def test_the_name_rule_spares_the_positive_spelling(self):
         assert not NEGATIVE_NAME.search("tests/e2e/x.py::T::test_it_is_not_refused")
