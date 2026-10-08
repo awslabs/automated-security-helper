@@ -17,6 +17,7 @@ fails if any step there installs one of these tools without the pins.
 """
 
 import importlib.util
+import platform
 import re
 import shlex
 from pathlib import Path
@@ -36,6 +37,16 @@ DOCKERFILE = REPO_ROOT / "Dockerfile"
 PYTHON_TOOLS = sorted(
     tool for tool, entry in THIRD_PARTY_LICENSES.items() if entry.distribution
 )
+
+# Distributions `ash dependencies install` does not install on this host because
+# their scanner cannot run here: GuardDog on Windows (see
+# GuardDogScanner.unsupported_platform_reason, checked against this set below).
+NOT_INSTALLABLE_HERE = {"guarddog"} if platform.system().lower() == "windows" else set()
+INSTALLED_HERE = [
+    tool
+    for tool in PYTHON_TOOLS
+    if THIRD_PARTY_LICENSES[tool].distribution not in NOT_INSTALLABLE_HERE
+]
 
 
 def _load_installer():
@@ -164,7 +175,12 @@ class TestTheOverridesReachTheInstallCommand:
         specs = recorded_install(
             installer.uv_tool_pins(installer.default_package_root())
         )
-        for tool in PYTHON_TOOLS:
+        for distribution in NOT_INSTALLABLE_HERE:
+            assert distribution not in specs, (
+                f"{distribution} cannot be installed on this platform, so the "
+                f"installer must not try: {specs}"
+            )
+        for tool in INSTALLED_HERE:
             entry = THIRD_PARTY_LICENSES[tool]
             assert entry.distribution in specs, (
                 f"no `uv tool install` was recorded for {entry.distribution}: {specs}"
@@ -190,7 +206,7 @@ class TestTheOverridesReachTheInstallCommand:
         """
         specs = recorded_install([])
         ranged = 0
-        for tool in PYTHON_TOOLS:
+        for tool in INSTALLED_HERE:
             entry = THIRD_PARTY_LICENSES[tool]
             pinned = "==" + entry.version.lstrip("v")
             requirement = specs[entry.distribution]
@@ -250,3 +266,15 @@ class TestTheDockerfileInstallsOnlyThroughThePins:
             i for i in license_steps if all(t in runs[i] for t in PYTHON_TOOLS)
         )
         assert install_steps[0] < python_license_step
+
+
+@pytest.mark.parametrize("system", ["Windows", "Linux", "Darwin"])
+def test_the_not_installable_set_is_the_scanners_own_rule(monkeypatch, system):
+    """NOT_INSTALLABLE_HERE restates GuardDog's platform rule; hold the two equal."""
+    from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
+        guarddog_scanner,
+    )
+
+    monkeypatch.setattr(guarddog_scanner.platform, "system", lambda: system)
+    reason = guarddog_scanner.GuardDogScanner.unsupported_platform_reason(None)
+    assert (reason is not None) is (system == "Windows")
