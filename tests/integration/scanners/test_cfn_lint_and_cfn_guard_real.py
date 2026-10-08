@@ -270,3 +270,114 @@ def test_without_the_module_listed_they_leave_no_trace(tmp_path):
     assert (output / "ash_aggregated_results.json").exists(), log
     results = _scanner_results(output)
     assert "cfn-lint" not in results and "cfn-guard" not in results, sorted(results)
+
+
+# --------------------------------------------------------------------------- #
+# A .cfnlintrc's append_rules makes cfn-lint import Python files as rules. The
+# scanned tree's config cannot name one. Each rules file leaves a marker when it
+# is imported; the operator case is the control that proves cfn-lint does import
+# it when it is allowed to.
+# --------------------------------------------------------------------------- #
+
+
+def _require_cfn_lint() -> None:
+    if find_executable("cfn-lint") is None:
+        if _required():
+            pytest.fail("ASH_REQUIRE_CFN_TOOLS is set but cfn-lint is not on PATH")
+        pytest.skip("cfn-lint is not on PATH")
+
+
+def _rules_that_mark(directory: Path, marker: Path) -> Path:
+    directory.mkdir(parents=True)
+    (directory / "planted_rule.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n", encoding="utf-8"
+    )
+    return directory
+
+
+def _cfnlintrc(path: Path, rules: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"append_rules:\n  - {rules.as_posix()}\n", encoding="utf-8")
+    return path
+
+
+def _scan_with_tree_config(tmp_path: Path, tree_config: dict, *extra: str):
+    """``ash scan`` with no --config, so the tree's .ash/.ash.yaml is the config."""
+    source = tmp_path / "repo"
+    if not source.exists():
+        shutil.copytree(FIXTURE_REPO, source)
+    (source / ".ash").mkdir(exist_ok=True)
+    (source / ".ash" / ".ash.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "project_name": "scanned",
+                "ash_plugin_modules": [
+                    "automated_security_helper.plugin_modules.ash_cfn_plugins"
+                ],
+                **tree_config,
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / f"out-{len(list(tmp_path.iterdir()))}"
+    proc = subprocess.run(  # nosec B603 - fixed argv
+        [
+            _ash(),
+            "scan",
+            "--ash-plugin-modules",
+            "automated_security_helper.plugin_modules.ash_cfn_plugins",
+            "--mode",
+            "local",
+            "--source-dir",
+            str(source),
+            "--output-dir",
+            str(output),
+            "--scanners",
+            "cfn-lint",
+            "--no-progress",
+            "--no-fail-on-findings",
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=900,
+        env={**os.environ, "ASH_OFFLINE": "true"},
+    )
+    return proc, output
+
+
+def test_a_cfnlintrc_named_by_the_scanned_tree_never_loads_its_rules(tmp_path):
+    _require_cfn_lint()
+    source = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, source)
+    marker = tmp_path / "rule-imported"
+    rules = _rules_that_mark(source / "rules", marker)
+    _cfnlintrc(source / ".cfnlintrc", rules)
+
+    proc, output = _scan_with_tree_config(
+        tmp_path, {"scanners": {"cfn-lint": {"options": {"config_file": ".cfnlintrc"}}}}
+    )
+
+    assert not marker.exists(), "cfn-lint imported a rule the scanned tree planted"
+    log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    assert "Ignoring scanners.cfn-lint.options.config_file" in log, (
+        proc.stdout[-3000:] + proc.stderr[-3000:]
+    )
+    assert _scanner_results(output)["cfn-lint"]["status"] != "MISSING"
+
+
+def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
+    """The control: the same kind of rules file is imported when the operator names it."""
+    _require_cfn_lint()
+    marker = tmp_path / "operator-rule-imported"
+    rules = _rules_that_mark(tmp_path / "operator-rules", marker)
+    rc = _cfnlintrc(tmp_path / "operator" / ".cfnlintrc", rules)
+
+    _scan_with_tree_config(
+        tmp_path,
+        {},
+        "--config-overrides",
+        f"scanners.cfn-lint.options.config_file={rc.as_posix()}",
+    )
+
+    assert marker.exists(), "cfn-lint never imported the operator's rules"

@@ -743,3 +743,27 @@ def test_post_process_leaves_the_input_report_intact_for_other_runs(repo):
     _, second = _scan_with_output(repo, _mutated(lambda r: r.update(ruleId="z/x")))
     assert _summarize(first) == EXPECTED_FINDINGS
     assert _summarize(second) != _summarize(copy.deepcopy(first))
+
+
+# tool_version is appended to the package name for uv, so it must stay a version
+# constraint: a direct reference would let the config choose what uv installs.
+@pytest.mark.parametrize(
+    "value",
+    [
+        " @ file:///tmp/evil",
+        "@ git+https://example.invalid/evil.git",
+        "[evil]>=1",
+        ">=1; sys_platform != 'x'",
+        "1.30.1",
+    ],
+)
+def test_a_tool_version_that_is_not_a_specifier_set_is_rejected(value):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="not a version constraint"):
+        ZizmorScannerConfigOptions(tool_version=value)
+
+
+@pytest.mark.parametrize("value", [">=1.29.0,<2.0.0", "==1.30.1", None])
+def test_a_specifier_set_tool_version_is_accepted(value):
+    assert ZizmorScannerConfigOptions(tool_version=value).tool_version == value

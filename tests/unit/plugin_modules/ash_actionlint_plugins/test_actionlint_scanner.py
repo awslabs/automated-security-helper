@@ -56,6 +56,8 @@ from automated_security_helper.plugin_modules.ash_actionlint_plugins.actionlint_
     severity_for,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
 FIXTURES = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "actionlint"
@@ -115,14 +117,35 @@ def repo(tmp_path) -> Path:
     return target
 
 
-def _scanner(source: Path, output: Path | None = None, **options) -> ActionlintScanner:
+def _scanner(
+    source: Path,
+    output: Path | None = None,
+    *,
+    operator: bool = False,
+    overrides: tuple = (),
+    **options,
+) -> ActionlintScanner:
+    """A scanner whose config came from the scanned tree, or from the operator.
+
+    ``operator=True`` records a config file outside the tree; ``overrides`` records
+    --config-overrides keys. Otherwise the config is the tree's own .ash/.ash.yaml.
+    """
     output = output or source.parent / "ash_output"
+    config = get_default_config()
+    # operator=True: built from no file in the scanned tree. Otherwise from the
+    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    record_provenance(
+        config,
+        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+        config_overrides=list(overrides),
+    )
     return ActionlintScanner(
         context=PluginContext(
             source_dir=source,
             output_dir=output,
             work_dir=output / "converted",
-            config=get_default_config(),
+            config=config,
         ),
         config=ActionlintScannerConfig(
             enabled=True, options=ActionlintScannerConfigOptions(**options)
@@ -456,7 +479,9 @@ def test_configured_shellcheck_that_is_absent_is_missing_not_skipped(
 def test_configured_pyflakes_path_that_does_not_exist_is_missing(
     repo, monkeypatch, on_path, tmp_path
 ):
-    scanner = _scanner(repo, pyflakes=str(tmp_path / "nope" / "pyflakes"))
+    scanner = _scanner(
+        repo, operator=True, pyflakes=str(tmp_path / "nope" / "pyflakes")
+    )
     assert scanner.validate_plugin_dependencies() is False
     assert "pyflakes" in scanner.dependency_unavailable_reason
 
@@ -753,30 +778,15 @@ def test_a_workflow_symlinked_outside_the_root_is_not_passed(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
-def test_a_relative_integration_path_is_resolved_against_the_source_dir(
-    repo, monkeypatch, on_path
+def test_a_non_executable_integration_path_is_missing(
+    repo, monkeypatch, on_path, tmp_path
 ):
-    tool = repo / "tools" / "shellcheck"
-    tool.parent.mkdir()
-    tool.write_text("#!/bin/sh\n")
-    tool.chmod(0o755)
-    scanner = _scanner(repo, shellcheck="tools/shellcheck")
-    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
-
-    scanner.scan(target=repo, target_type="source")
-
-    ((argv, _),) = fake.calls
-    assert f"-shellcheck={tool.absolute().as_posix()}" in argv
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
-def test_a_non_executable_integration_path_is_missing(repo, monkeypatch, on_path):
-    tool = repo / "tools" / "shellcheck"
+    tool = tmp_path / "operator-bin" / "shellcheck"
     tool.parent.mkdir()
     tool.write_text("not executable\n")
     tool.chmod(0o644)
     assert not os.access(tool, os.X_OK)
-    scanner = _scanner(repo, shellcheck=tool.as_posix())
+    scanner = _scanner(repo, operator=True, shellcheck=tool.as_posix())
 
     assert scanner.validate_plugin_dependencies() is False
     assert "shellcheck" in scanner.dependency_unavailable_reason
@@ -841,3 +851,148 @@ def test_a_scan_set_path_outside_the_target_is_not_passed(
 
     ((argv, _),) = fake.calls
     assert argv[argv.index("--") + 1 :] == [".github/workflows/clean.yml"]
+
+
+# --------------------------------------------------------------------------- #
+# shellcheck and pyflakes name the program actionlint pipes run: scripts to.
+# The scanned tree's config may only turn them on by their own names.
+# --------------------------------------------------------------------------- #
+
+_EMPTY_RUN = '{"version":"1.7.12","errors":[]}'
+
+
+def _plant(directory: Path, name: str = "planted") -> Path:
+    """An executable that would leave a marker beside itself if anything ran it."""
+    directory.mkdir(parents=True, exist_ok=True)
+    tool = directory / name
+    tool.write_text(f"#!/bin/sh\ntouch '{directory / (name + '.ran')}'\n")
+    tool.chmod(0o755)
+    return tool
+
+
+def _argv(scanner, monkeypatch, repo) -> list:
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+    scanner.scan(target=repo, target_type="source")
+    ((argv, _),) = fake.calls
+    return argv
+
+
+@pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
+@pytest.mark.parametrize("value", ["sh", "bash", "python3", "env"])
+def test_the_scanned_tree_cannot_choose_another_program_by_name(
+    repo, monkeypatch, caplog, flag, value
+):
+    looked_up = []
+
+    def find(name):
+        looked_up.append(name)
+        return FAKE_ACTIONLINT if name == "actionlint" else f"/usr/bin/{name}"
+
+    monkeypatch.setattr(module, "find_executable", find)
+    scanner = _scanner(repo, **{flag: value})
+
+    with caplog.at_level(logging.WARNING):
+        argv = _argv(scanner, monkeypatch, repo)
+
+    assert [arg for arg in argv if arg.startswith(f"-{flag}=")] == [f"-{flag}="]
+    assert f"/usr/bin/{value}" not in " ".join(argv)
+    assert value not in looked_up
+    assert f"scanners.actionlint.options.{flag}" in caplog.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.parametrize("spelling", ["absolute", "relative", "dot-relative"])
+def test_the_scanned_tree_cannot_point_an_integration_at_its_own_file(
+    repo, monkeypatch, on_path, spelling
+):
+    tool = _plant(repo / "tools")
+    value = {
+        "absolute": tool.as_posix(),
+        "relative": "tools/planted",
+        "dot-relative": "./tools/planted",
+    }[spelling]
+    scanner = _scanner(repo, shellcheck=value)
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert not any("planted" in arg for arg in argv)
+    assert not (repo / "tools" / "planted.ran").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_the_operator_cannot_point_an_integration_inside_the_scanned_tree(
+    repo, monkeypatch, on_path
+):
+    tool = _plant(repo / "tools")
+    scanner = _scanner(repo, operator=True, shellcheck=tool.as_posix())
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert not any("planted" in arg for arg in argv)
+
+
+def test_a_name_that_resolves_inside_the_scanned_tree_is_refused(repo, monkeypatch):
+    # A relative PATH entry such as "." finds a file the repository committed.
+    inside = (repo / "shellcheck").as_posix()
+    monkeypatch.setattr(
+        module,
+        "find_executable",
+        lambda name: FAKE_ACTIONLINT if name == "actionlint" else inside,
+    )
+    scanner = _scanner(repo, shellcheck="shellcheck")
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert inside not in " ".join(argv)
+
+
+def test_the_scanned_tree_may_turn_shellcheck_on_by_its_own_name(repo, monkeypatch):
+    monkeypatch.setattr(module, "find_executable", lambda name: f"/opt/bin/{name}")
+    scanner = _scanner(repo, shellcheck="shellcheck", pyflakes="pyflakes")
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=/opt/bin/shellcheck" in argv
+    assert "-pyflakes=/opt/bin/pyflakes" in argv
+
+
+def test_an_operator_override_may_name_another_program(repo, monkeypatch):
+    monkeypatch.setattr(module, "find_executable", lambda name: f"/opt/bin/{name}")
+    scanner = _scanner(
+        repo,
+        overrides=("scanners.actionlint.options.shellcheck=shellcheck-0.10",),
+        shellcheck="shellcheck-0.10",
+    )
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=/opt/bin/shellcheck-0.10" in argv
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_an_operator_config_may_name_an_absolute_path_outside_the_tree(
+    repo, monkeypatch, on_path, tmp_path
+):
+    tool = _plant(tmp_path / "operator-bin", "shellcheck")
+    scanner = _scanner(repo, operator=True, shellcheck=tool.as_posix())
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert f"-shellcheck={tool.as_posix()}" in argv
+
+
+def test_an_override_of_another_option_does_not_vouch_for_shellcheck(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(
+        repo,
+        overrides=("scanners.actionlint.options.pyflakes=pyflakes",),
+        shellcheck="sh",
+    )
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv

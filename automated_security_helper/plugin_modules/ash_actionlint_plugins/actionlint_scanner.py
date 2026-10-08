@@ -35,11 +35,20 @@ Decisions, and why
    every ``run:`` script and ``pyflakes`` on ``shell: python`` steps when it finds
    them on PATH, and silently skips them when it does not. That makes the result set
    depend on what happens to be installed on the host. ASH passes ``-shellcheck=``
-   and ``-pyflakes=`` (the documented way to disable them) unless the operator sets
-   ``options.shellcheck`` / ``options.pyflakes`` to a command name or path. When one
-   is set and cannot be found or is not executable, the scanner reports MISSING
-   instead of running
+   and ``-pyflakes=`` (the documented way to disable them) unless
+   ``options.shellcheck`` / ``options.pyflakes`` is set. When one is set and cannot
+   be found or is not executable, the scanner reports MISSING instead of running
    without it, so an enabled integration is never skipped quietly either.
+
+   Both options name the program actionlint pipes each ``run:`` script to, and
+   ASH's config usually comes from the scanned repository (``.ash/.ash.yaml``), so
+   ``shellcheck: sh`` there would execute the repository's scripts. From a config
+   in the scanned tree, each option accepts only its own name (``shellcheck``,
+   ``pyflakes``), looked up on PATH and ASH's bin directory. The operator, through
+   ``--config-overrides`` or a config file outside the scanned tree
+   (``utils/config_trust.py``), may name another program or an absolute path.
+   Whoever sets it, a program that resolves inside the scanned tree is
+   refused. A refused value is logged and the integration stays off.
 
 3. The config file is always explicit. actionlint discovers
    ``.github/actionlint.yaml`` by walking up to the nearest ``.git`` directory, so
@@ -118,10 +127,10 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
 import yaml
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import (
@@ -135,6 +144,10 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
+)
+from automated_security_helper.utils.config_trust import (
+    inside_scanned_tree,
+    set_by_operator,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -411,9 +424,13 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "Command name or path of shellcheck, which actionlint runs on every "
-                "run: script. Unset (the default) disables the integration so results "
-                "do not depend on what is installed on the host. When set and not "
+                "Command name or absolute path of shellcheck, which actionlint runs "
+                "on every run: script. Unset (the default) disables the integration so "
+                "results do not depend on what is installed on the host. A config file "
+                "in the scanned tree may set only 'shellcheck', looked up on PATH; "
+                "another program or an absolute path outside the scanned tree "
+                "needs --config-overrides or a config file outside the tree. "
+                "Anything else is ignored with a warning. When set and not "
                 "found, the scanner reports MISSING."
             ),
         ),
@@ -422,8 +439,9 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "Command name or path of pyflakes, which actionlint runs on "
+                "Command name or absolute path of pyflakes, which actionlint runs on "
                 "'shell: python' steps. Unset (the default) disables the integration. "
+                "Accepted as for shellcheck: from the scanned tree only 'pyflakes'. "
                 "When set and not found, the scanner reports MISSING."
             ),
         ),
@@ -439,6 +457,10 @@ class ActionlintScannerConfig(ScannerPluginConfigBase):
     ] = ActionlintScannerConfigOptions()
 
 
+class _RefusedIntegration(Exception):
+    """A shellcheck/pyflakes value the scanned tree may not choose; see the module."""
+
+
 @ash_scanner_plugin
 class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     """Lints GitHub Actions workflow files with actionlint."""
@@ -448,6 +470,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     # workflows and ASH's config file, and needs no network, cache or variables. An
     # enabled shellcheck or pyflakes is found through PATH, which the baseline mounts.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+    # Integrations already reported as refused, so each is logged once per scan.
+    _refused_integrations: Set[str] = PrivateAttr(default_factory=set)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -483,7 +507,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def _integration_executables(self) -> Dict[str, Optional[str]]:
         """Resolved paths for the enabled shellcheck/pyflakes integrations.
 
-        A configured integration that cannot be found maps to None.
+        A configured integration that cannot be found maps to None. One whose value
+        is refused (see ``_integration_executable``) is left out, so actionlint runs
+        with it off.
         """
         options = self._options()
         resolved: Dict[str, Optional[str]] = {}
@@ -491,21 +517,65 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             configured = getattr(options, flag, None)
             if configured is None or str(configured).strip() == "":
                 continue
-            configured = str(configured).strip()
-            candidate = Path(configured)
-            if candidate.is_absolute() or len(candidate.parts) > 1:
-                # Relative to the source directory, and handed to actionlint as an
-                # absolute path because actionlint runs with the scan target as
-                # its working directory. A file that is not executable counts as
-                # absent: actionlint would otherwise drop the integration silently.
-                if not candidate.is_absolute():
-                    candidate = self._source_dir() / candidate
-                candidate = candidate.absolute()
-                usable = candidate.is_file() and os.access(candidate, os.X_OK)
-                resolved[flag] = candidate.as_posix() if usable else None
-            else:
-                resolved[flag] = find_executable(configured)
+            try:
+                resolved[flag] = self._integration_executable(
+                    flag, str(configured).strip()
+                )
+            except _RefusedIntegration as refused:
+                if flag not in self._refused_integrations:
+                    self._refused_integrations.add(flag)
+                    self._plugin_log(
+                        f"Ignoring scanners.actionlint.options.{flag} "
+                        f"({str(configured).strip()!r}): {refused}. actionlint runs "
+                        f"with {flag} off.",
+                        level=logging.WARNING,
+                    )
         return resolved
+
+    def _integration_executable(self, flag: str, configured: str) -> Optional[str]:
+        """The executable actionlint may run for ``flag``, None when it is absent.
+
+        actionlint pipes every ``run:`` script (or ``shell: python`` step) to this
+        program, so choosing it is choosing what runs the repository's scripts:
+        ``shellcheck: sh`` would execute them. A value from the scanned tree's config
+        is therefore accepted only when it is the flag's own name, looked up on PATH.
+        The operator (``--config-overrides`` or a config file outside the tree) may
+        name another program or an absolute path. Either way, the program must not
+        resolve inside the scanned tree: a relative PATH entry such as ``.``
+        would otherwise find one the repository committed.
+
+        Raises:
+            _RefusedIntegration: the value is not one this config source may set.
+        """
+        source_dir = self._source_dir()
+        context_config = self.context.config if self.context is not None else None
+        if configured != flag and not set_by_operator(
+            context_config, f"scanners.actionlint.options.{flag}", configured
+        ):
+            raise _RefusedIntegration(
+                f"a config file in the scanned tree may set only {flag!r} itself, or "
+                "an empty value to keep it off; name another program with "
+                "--config-overrides or a config file outside the scanned tree"
+            )
+        if not any(sep and sep in configured for sep in ("/", os.sep, os.altsep)):
+            found = find_executable(configured)
+            if found is not None and inside_scanned_tree(found, source_dir):
+                raise _RefusedIntegration(
+                    f"it resolves to {found}, inside the scanned tree"
+                )
+            return found
+        candidate = Path(configured)
+        if not candidate.is_absolute():
+            raise _RefusedIntegration(
+                "a relative path resolves inside the scanned tree; use a "
+                "command name or an absolute path outside it"
+            )
+        if inside_scanned_tree(candidate, source_dir):
+            raise _RefusedIntegration("it is inside the scanned tree")
+        # A file that is not executable counts as absent: actionlint would
+        # otherwise drop the integration silently.
+        usable = candidate.is_file() and os.access(candidate, os.X_OK)
+        return candidate.as_posix() if usable else None
 
     def validate_plugin_dependencies(self) -> bool:
         self.dependency_unavailable_reason = None

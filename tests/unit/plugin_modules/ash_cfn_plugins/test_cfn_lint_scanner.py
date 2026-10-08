@@ -42,6 +42,8 @@ from automated_security_helper.plugin_modules.ash_cfn_plugins.cfn_lint_scanner i
     severity_for_rule,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.config_trust import record_provenance
 
 FIXTURES = (
     Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "cfn_lint_guard"
@@ -94,12 +96,28 @@ def repo(ash_temp_path) -> Path:
     return target
 
 
-def _scanner(repo: Path, **options) -> CfnLintScanner:
+def _scanner(
+    repo: Path, *, operator: bool = False, overrides: tuple = (), **options
+) -> CfnLintScanner:
+    """A scanner whose config came from the scanned tree unless ``operator`` is set.
+
+    ``operator=True`` records a config file outside the tree; ``overrides`` records
+    --config-overrides keys.
+    """
+    config = get_default_config()
+    # operator=True: built from no file in the scanned tree. Otherwise from the
+    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    record_provenance(
+        config,
+        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+        config_overrides=list(overrides),
+    )
     context = PluginContext(
         source_dir=repo,
         output_dir=repo / ".ash" / "ash_output",
         work_dir=repo / ".ash" / "ash_output" / "converted",
-        config=get_default_config(),
+        config=config,
     )
     scanner = CfnLintScanner(
         context=context,
@@ -246,8 +264,10 @@ class TestOptions:
         constraint = CfnLintScannerConfigOptions().tool_version
         assert constraint == ">=1.43.3,<2.0.0"
 
-    def test_missing_config_file_is_an_error_not_a_silent_default(self, repo):
-        scanner = _scanner(repo, config_file="nope/.cfnlintrc")
+    def test_missing_config_file_is_an_error_not_a_silent_default(self, repo, tmp_path):
+        # Outside the checkout: the repo fixture lives inside it.
+        missing = tmp_path / "operator" / ".cfnlintrc"
+        scanner = _scanner(repo, operator=True, config_file=str(missing))
         with pytest.raises(Exception, match="does not exist"):
             scanner._option_args(repo)
 
@@ -350,13 +370,16 @@ class TestScan:
         assert "templates/-dash.yaml" in files
         assert argv.index("--") < argv.index("templates/-dash.yaml")
 
-    def test_config_options_reach_argv_as_single_tokens(self, repo):
-        (repo / ".cfnlintrc").write_text("ignore_checks: []\n")
+    def test_config_options_reach_argv_as_single_tokens(self, repo, tmp_path):
+        operator_rc = tmp_path / "operator" / ".cfnlintrc"
+        operator_rc.parent.mkdir()
+        operator_rc.write_text("ignore_checks: []\n")
         fake = FakeCfnLint({}, returncode=0)
         self._run(
             _scanner(
                 repo,
-                config_file=".cfnlintrc",
+                operator=True,
+                config_file=str(operator_rc),
                 regions=["eu-west-1"],
                 ignore_checks=["W2001"],
             ),
@@ -451,3 +474,103 @@ class TestScan:
         ):
             assert scanner.scan(target=repo, target_type="source") is False
         run.assert_not_called()
+
+
+class TestTheScannedTreeCannotLoadRules:
+    """A .cfnlintrc's append_rules makes cfn-lint import Python files as rules.
+
+    ``config_file`` is honored only when the operator set it and it lies outside the
+    scanned tree; anything else is ignored and ASH's empty configuration is passed.
+    """
+
+    @staticmethod
+    def _plant(repo: Path) -> Path:
+        rules = repo / "rules"
+        rules.mkdir()
+        (rules / "evil.py").write_text(
+            "from pathlib import Path\n"
+            f"Path({str(repo / 'rules' / 'imported')!r}).touch()\n"
+        )
+        rc = repo / ".cfnlintrc"
+        rc.write_text("append_rules:\n  - rules\n")
+        return rc
+
+    @staticmethod
+    def _config_arg(scanner, results: Path) -> str:
+        results.mkdir(exist_ok=True)
+        (arg,) = [
+            a for a in scanner._option_args(results) if a.startswith("--config-file=")
+        ]
+        return arg
+
+    @pytest.mark.parametrize("spelling", ["relative", "absolute"])
+    def test_a_config_file_set_by_the_scanned_tree_is_ignored(
+        self, repo, caplog, spelling
+    ):
+        rc = self._plant(repo)
+        value = ".cfnlintrc" if spelling == "relative" else rc.as_posix()
+        scanner = _scanner(repo, config_file=value)
+
+        with caplog.at_level("WARNING"):
+            arg = self._config_arg(scanner, repo / "out")
+
+        assert arg.endswith("/ash-empty.cfnlintrc")
+        assert "scanners.cfn-lint.options.config_file" in caplog.text
+
+    def test_the_operator_cannot_name_a_config_file_inside_the_tree(self, repo):
+        rc = self._plant(repo)
+        scanner = _scanner(repo, operator=True, config_file=rc.as_posix())
+
+        assert self._config_arg(scanner, repo / "out").endswith("/ash-empty.cfnlintrc")
+
+    def test_an_override_of_another_option_does_not_vouch_for_config_file(self, repo):
+        rc = self._plant(repo)
+        scanner = _scanner(
+            repo,
+            overrides=("scanners.cfn-lint.options.regions=[us-east-1]",),
+            config_file=rc.as_posix(),
+        )
+
+        assert self._config_arg(scanner, repo / "out").endswith("/ash-empty.cfnlintrc")
+
+    @pytest.mark.parametrize("key_spelling", ["cfn-lint", "cfn_lint"])
+    def test_an_operator_override_outside_the_tree_is_used(
+        self, repo, tmp_path, key_spelling
+    ):
+        operator_rc = tmp_path / "operator" / ".cfnlintrc"
+        operator_rc.parent.mkdir()
+        operator_rc.write_text("{}\n")
+        scanner = _scanner(
+            repo,
+            overrides=(f"scanners.{key_spelling}.options.config_file={operator_rc}",),
+            config_file=str(operator_rc),
+        )
+
+        arg = self._config_arg(scanner, repo / "out")
+
+        assert arg == f"--config-file={operator_rc.resolve().as_posix()}"
+
+
+class TestToolVersionIsOnlyAVersionConstraint:
+    """tool_version is appended to the package name for uv; it must stay a constraint."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            " @ file:///tmp/evil",
+            "@ git+https://example.invalid/evil.git",
+            "[evil]>=1",
+            ">=1; sys_platform != 'x'",
+            ">=1 --index-url https://example.invalid",
+            "1.57.2",
+        ],
+    )
+    def test_a_value_that_is_not_a_specifier_set_is_rejected(self, value):
+        with pytest.raises(ValidationError, match="not a version constraint"):
+            CfnLintScannerConfigOptions(tool_version=value)
+
+    @pytest.mark.parametrize(
+        "value", [">=1.43.3,<2.0.0", "==1.57.2", "~=1.57", "==1.*", None, ""]
+    )
+    def test_specifier_sets_are_accepted(self, value):
+        assert CfnLintScannerConfigOptions(tool_version=value).tool_version == value

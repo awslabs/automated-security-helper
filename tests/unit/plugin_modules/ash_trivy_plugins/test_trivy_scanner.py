@@ -51,6 +51,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import content_db_staleness as staleness
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     get_severity_metrics_from_sarif,
@@ -126,10 +127,23 @@ def _context(tmp_path: Path, config: AshConfig | None = None) -> PluginContext:
     )
 
 
-def _scanner(tmp_path: Path, **options) -> TrivyScanner:
+def _scanner(
+    tmp_path: Path, *, operator: bool = False, overrides: tuple = (), **options
+) -> TrivyScanner:
+    """A scanner whose config came from the scanned tree unless ``operator`` is set."""
     options.setdefault("offline", False)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    # operator=True: built from no file in the scanned tree. Otherwise from the
+    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    record_provenance(
+        context.config,
+        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+        config_overrides=list(overrides),
+    )
     return TrivyScanner(
-        context=_context(tmp_path),
+        context=context,
         config=TrivyScannerConfig(
             enabled=True, options=TrivyScannerConfigOptions(**options)
         ),
@@ -269,6 +283,25 @@ def test_the_ash_config_and_ignore_files_are_empty(tmp_path):
     ],
 )
 def test_an_operator_chosen_trivy_file_is_passed(tmp_path, option, flag, name):
+    chosen = tmp_path / "operator" / name
+    chosen.parent.mkdir()
+    chosen.write_text("", encoding="utf-8")
+    scanner = _scanner(tmp_path, operator=True, **{option: str(chosen)})
+    argv = _argv(scanner, scanner.context.source_dir)
+    assert f"{flag}={chosen.resolve().as_posix()}" in argv
+
+
+@pytest.mark.parametrize(
+    "option, flag, name",
+    [
+        ("ignore_file", "--ignorefile", ".trivyignore"),
+        ("secret_config_file", "--secret-config", "trivy-secret.yaml"),
+    ],
+)
+def test_pattern_files_from_the_scanned_tree_are_still_passed(
+    tmp_path, option, flag, name
+):
+    # They hold patterns, not code; only config_file can load modules.
     probe = _scanner(tmp_path)
     (probe.context.source_dir / name).write_text("", encoding="utf-8")
     scanner = _scanner(tmp_path, **{option: name})
@@ -277,9 +310,59 @@ def test_an_operator_chosen_trivy_file_is_passed(tmp_path, option, flag, name):
     assert f"{flag}={expected}" in argv
 
 
+_MODULE_CONFIG = "module:\n  dir: ./trivy-modules\n  enable-modules: [planted]\n"
+
+
+@pytest.mark.parametrize("spelling", ["relative", "absolute"])
+def test_a_trivy_config_set_by_the_scanned_tree_is_not_passed(
+    tmp_path, caplog, spelling
+):
+    probe = _scanner(tmp_path)
+    planted = probe.context.source_dir / "trivy.yaml"
+    planted.write_text(_MODULE_CONFIG, encoding="utf-8")
+    value = "trivy.yaml" if spelling == "relative" else planted.as_posix()
+    scanner = _scanner(tmp_path, config_file=value)
+
+    with caplog.at_level("WARNING"):
+        argv = _argv(scanner, scanner.context.source_dir)
+
+    (config_arg,) = [a for a in argv if a.startswith("--config=")]
+    assert config_arg.endswith("/trivy-config.yaml")
+    assert planted.resolve().as_posix() not in " ".join(argv)
+    assert "scanners.trivy.options.config_file" in caplog.text
+
+
+def test_the_operator_cannot_name_a_trivy_config_inside_the_tree(tmp_path):
+    probe = _scanner(tmp_path)
+    planted = probe.context.source_dir / "trivy.yaml"
+    planted.write_text(_MODULE_CONFIG, encoding="utf-8")
+    scanner = _scanner(tmp_path, operator=True, config_file=planted.as_posix())
+
+    argv = _argv(scanner, scanner.context.source_dir)
+
+    assert planted.resolve().as_posix() not in " ".join(argv)
+
+
+def test_an_operator_override_names_a_trivy_config_outside_the_tree(tmp_path):
+    chosen = tmp_path / "operator" / "trivy.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text("", encoding="utf-8")
+    scanner = _scanner(
+        tmp_path,
+        overrides=(f"scanners.trivy.options.config_file={chosen}",),
+        config_file=str(chosen),
+    )
+
+    argv = _argv(scanner, scanner.context.source_dir)
+
+    assert f"--config={chosen.resolve().as_posix()}" in argv
+
+
 @pytest.mark.parametrize("option", ["config_file", "ignore_file", "secret_config_file"])
 def test_a_configured_trivy_file_that_does_not_exist_fails_the_scan(tmp_path, option):
-    scanner = _scanner(tmp_path, **{option: "nope.yaml"})
+    scanner = _scanner(
+        tmp_path, operator=True, **{option: str(tmp_path / "operator" / "nope.yaml")}
+    )
     with pytest.raises(ScannerError, match=option):
         _argv(scanner, scanner.context.source_dir)
 
