@@ -62,25 +62,25 @@ const VPC = 'LAMBDA_INSIDE_VPC';
 const IGW = 'NO_UNRESTRICTED_ROUTE_TO_IGW';
 
 /**
- * The approved set. 13 resources carrying the 25 findings cfn-guard reported: one
- * bucket-policy result per policy statement (15 on 7 policies), two per Lambda function
- * (8 on 4), one per route (2 on 2).
+ * The approved set, read from test/guard-suppressions.approved.json, which
+ * deploy/tests/cfn-lint-guard.py reads too, so the two gates cannot drift apart. 13
+ * resources carrying the 25 findings cfn-guard reported: one bucket-policy result per
+ * policy statement (15 on 7 policies), two per Lambda function (8 on 4), one per route
+ * (2 on 2).
  */
-const APPROVED: GuardEntry[] = [
-  { template: 'AshAgentCore', logicalId: 'ImageBootstrapStarter2B9D5AC0', type: 'AWS::Lambda::Function', rules: [VPC] },
-  { template: 'AshCodeCommitGate', logicalId: 'ImageBootstrapStarter2B9D5AC0', type: 'AWS::Lambda::Function', rules: [VPC] },
-  { template: 'AshCodeCommitGate', logicalId: 'ScanFunction322CD7EE', type: 'AWS::Lambda::Function', rules: [VPC] },
-  { template: 'AshDistributedPipeline', logicalId: 'AccessLogsArchivePolicyBC5B3007', type: 'AWS::S3::BucketPolicy', rules: [TLS] },
-  { template: 'AshDistributedPipeline', logicalId: 'AccessLogsPolicyABDC4D2D', type: 'AWS::S3::BucketPolicy', rules: [TLS] },
-  { template: 'AshDistributedPipeline', logicalId: 'ArtifactsPolicy6E9058CC', type: 'AWS::S3::BucketPolicy', rules: [TLS] },
-  { template: 'AshDistributedPipeline', logicalId: 'ResultsPolicy9F4743DA', type: 'AWS::S3::BucketPolicy', rules: [TLS] },
-  { template: 'AshDistributedPipeline', logicalId: 'SourcePolicyE5AB5F73', type: 'AWS::S3::BucketPolicy', rules: [TLS] },
-  { template: 'AshFargate', logicalId: 'AccessLogsArchivePolicyBC5B3007', type: 'AWS::S3::BucketPolicy', rules: [TLS] },
-  { template: 'AshFargate', logicalId: 'AccessLogsPolicyABDC4D2D', type: 'AWS::S3::BucketPolicy', rules: [TLS] },
-  { template: 'AshFargate', logicalId: 'ImageBootstrapStarter2B9D5AC0', type: 'AWS::Lambda::Function', rules: [VPC] },
-  { template: 'AshFargate', logicalId: 'VpcPublicSubnet1DefaultRoute3DA9E72A', type: 'AWS::EC2::Route', rules: [IGW] },
-  { template: 'AshFargate', logicalId: 'VpcPublicSubnet2DefaultRoute97F91067', type: 'AWS::EC2::Route', rules: [IGW] },
-];
+interface ApprovedEntry extends GuardEntry {
+  reasons: Record<string, string>;
+}
+const APPROVED_FILE: { approved: ApprovedEntry[] } = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'guard-suppressions.approved.json'), 'utf8'),
+);
+const APPROVED_WITH_REASONS: ApprovedEntry[] = APPROVED_FILE.approved;
+const APPROVED: GuardEntry[] = APPROVED_WITH_REASONS.map(({ template, logicalId, type, rules }) => ({
+  template,
+  logicalId,
+  type,
+  rules,
+}));
 
 describe('cfn-guard suppressions sit only on the approved resources', () => {
   test('all six templates were read', () => {
@@ -113,6 +113,20 @@ describe('cfn-guard suppressions sit only on the approved resources', () => {
       for (const rule of entry.rules) {
         expect(guard.SuppressedRuleReasons[rule].length).toBeGreaterThan(40);
       }
+    },
+  );
+
+  test('the approved list holds 13 entries over the three registry rules', () => {
+    // Pins the file itself, so emptying it cannot make the exact-set test vacuous.
+    expect(APPROVED).toHaveLength(13);
+    expect([...new Set(APPROVED.flatMap((e) => e.rules))].sort()).toEqual([IGW, VPC, TLS].sort());
+  });
+
+  test.each(APPROVED_WITH_REASONS.map((e) => [`${e.template}/${e.logicalId}`, e] as const))(
+    '%s records exactly the approved reason',
+    (_name, entry) => {
+      const guard = COMMITTED[entry.template].Resources[entry.logicalId].Metadata.guard;
+      expect(guard.SuppressedRuleReasons).toEqual(entry.reasons);
     },
   );
 

@@ -25,15 +25,18 @@ point is to fix the template, not to quiet the tool. The W3005 warnings CDK used
 to produce are fixed in the stacks; see deploy/cdk/lib/ash-implied-dependencies.ts.
 
 One exception, and it cannot reach this gate's own rules. ASH's cfn-guard scanner
-runs the AWS Guard Rules Registry over the same templates, and main approved
-per-resource `Metadata.guard.SuppressedRules` for three registry rules (#761),
-pinned resource by resource in deploy/cdk/test/ash-guard-suppressions.test.ts.
-cfn-guard skips a resource only for the rule names it lists, so those entries
-leave every rule in ash-deploy.guard checking that resource. They are accepted
-here only for the rule names in ACCEPTED_REGISTRY_SUPPRESSIONS, only with a
-SuppressedRuleReasons entry for each, and never for a name this gate's rules
-file defines; self-test fails if the two sets ever share a name. A cfn-lint
-suppression is still never accepted.
+runs the AWS Guard Rules Registry over the same templates, and main approved 13
+per-resource `Metadata.guard.SuppressedRules` entries for three registry rules
+(#761). They are listed once, in deploy/cdk/test/guard-suppressions.approved.json,
+which this script and deploy/cdk/test/ash-guard-suppressions.test.ts both read.
+`check` accepts a guard suppression only when its (template, logical id, type,
+rules, reasons) is exactly one of those entries and none of its rules is defined
+in this gate's rules file. Any other guard suppression fails: another resource,
+another rule, an extra rule, a changed reason. An approved entry that no template
+carries any more fails too, as stale, so the list cannot outlive what it approves.
+A cfn-lint suppression is never accepted. cfn-guard skips a resource only for the
+rule names it lists, so an accepted entry still leaves every ash-deploy.guard rule
+checking that resource.
 
 cfn-guard: any rule reported non-compliant for any template. Also a failure: a
 rule that no template exercises. cfn-guard reports a rule with no matching
@@ -106,24 +109,10 @@ EXPECTED_UNEXERCISED = {
     ),
 }
 
-# Guard Rules Registry rules that a committed template may suppress on a resource,
-# each with the reason main approved it. Which resources may carry each one is
-# pinned in deploy/cdk/test/ash-guard-suppressions.test.ts; this list only bounds
-# the rule names, so a suppression of any other rule, including every rule in
-# ash-deploy.guard, still fails the gate.
-ACCEPTED_REGISTRY_SUPPRESSIONS = {
-    "LAMBDA_INSIDE_VPC": (
-        "The image-bootstrap custom-resource responder has no inbound path, and the "
-        "gate's scan function is placed in a VPC only when the adopter opts in."
-    ),
-    "S3_BUCKET_SSL_REQUESTS_ONLY": (
-        "enforceSSL already denies non-TLS access; the rule matches only a literal "
-        'Principal "*", Resource "*" statement, which CDK does not emit.'
-    ),
-    "NO_UNRESTRICTED_ROUTE_TO_IGW": (
-        "The NAT gateway's egress route, the only resource in its public subnet."
-    ),
-}
+# The approved per-resource cfn-guard suppressions; see "One exception" above.
+APPROVED_FILE = (
+    REPO_ROOT / "deploy" / "cdk" / "test" / "guard-suppressions.approved.json"
+)
 
 CFN_LINT_CONFIG_FILES = (
     ".cfnlintrc",
@@ -262,8 +251,85 @@ def cfn_guard(tools: Tools, rules_file: Path, template: Path) -> GuardResult:
 # --------------------------------------------------------------------------- #
 
 
-def find_suppressions(template: Template) -> list[str]:
-    """Places in `template` that ask cfn-lint or cfn-guard to skip something."""
+@dataclass(frozen=True)
+class ApprovedSuppression:
+    template: str
+    logical_id: str
+    type: str
+    rules: tuple[str, ...]
+    reasons: tuple[tuple[str, str], ...]
+
+
+def load_approved(path: Path) -> list[ApprovedSuppression]:
+    """The approved guard suppressions, refusing a file that is not well formed."""
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))["approved"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise GateError(
+            f"cannot read the approved suppressions in {path}: {exc}"
+        ) from exc
+    approved = []
+    for entry in entries:
+        try:
+            rules = tuple(entry["rules"])
+            reasons = entry["reasons"]
+            item = ApprovedSuppression(
+                template=entry["template"],
+                logical_id=entry["logicalId"],
+                type=entry["type"],
+                rules=rules,
+                reasons=tuple(sorted(reasons.items())),
+            )
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise GateError(f"malformed entry in {path}: {entry!r}") from exc
+        if (
+            not rules
+            or sorted(reasons) != sorted(rules)
+            or not all(isinstance(r, str) and r.strip() for r in reasons.values())
+        ):
+            raise GateError(
+                f"{path}: {item.template}/{item.logical_id} must give one non-empty "
+                "reason for each rule it suppresses"
+            )
+        approved.append(item)
+    keys = [(a.template, a.logical_id) for a in approved]
+    if len(keys) != len(set(keys)):
+        raise GateError(f"{path} lists a resource twice")
+    return approved
+
+
+def _guard_entry(
+    template_name: str, logical_id: str, resource: dict[str, Any], guard: dict[str, Any]
+) -> ApprovedSuppression | None:
+    rules = guard.get("SuppressedRules")
+    reasons = guard.get("SuppressedRuleReasons")
+    if not isinstance(rules, list) or not isinstance(reasons, dict):
+        return None
+    if not all(isinstance(r, str) for r in rules) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in reasons.items()
+    ):
+        return None
+    return ApprovedSuppression(
+        template=template_name,
+        logical_id=logical_id,
+        type=str(resource.get("Type")),
+        rules=tuple(rules),
+        reasons=tuple(sorted(reasons.items())),
+    )
+
+
+def find_suppressions(
+    template: Template,
+    template_name: str = "",
+    approved: list[ApprovedSuppression] | None = None,
+    gate_rules: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Places in `template` that ask cfn-lint or cfn-guard to skip something.
+
+    A guard suppression is left out only when it is exactly one of `approved` and
+    names no rule in `gate_rules`. With no `approved` list, every one is reported.
+    """
+    allowed = set(approved or ())
     found = []
     metadata = template.get("Metadata")
     if isinstance(metadata, dict) and "cfn-lint" in metadata:
@@ -276,24 +342,34 @@ def find_suppressions(template: Template) -> list[str]:
             found.append(f"{logical_id} Metadata.cfn-lint")
         guard = meta.get("guard")
         if isinstance(guard, dict) and "SuppressedRules" in guard:
-            if not _accepted_guard_suppression(guard):
+            entry = _guard_entry(template_name, logical_id, resource, guard)
+            if (
+                entry is None
+                or entry not in allowed
+                or not gate_rules.isdisjoint(entry.rules)
+            ):
                 found.append(f"{logical_id} Metadata.guard.SuppressedRules")
     return found
 
 
-def _accepted_guard_suppression(guard: dict[str, Any]) -> bool:
-    """True when every suppressed rule is an accepted registry rule with a reason."""
-    rules = guard.get("SuppressedRules")
-    reasons = guard.get("SuppressedRuleReasons")
-    if not isinstance(rules, list) or not rules or not isinstance(reasons, dict):
-        return False
-    return all(
-        isinstance(rule, str)
-        and rule in ACCEPTED_REGISTRY_SUPPRESSIONS
-        and isinstance(reasons.get(rule), str)
-        and reasons[rule].strip() != ""
-        for rule in rules
-    )
+def stale_approvals(
+    templates: dict[str, Template], approved: list[ApprovedSuppression]
+) -> list[str]:
+    """Approved entries that no template carries exactly as approved."""
+    carried = set()
+    for name, template in templates.items():
+        for logical_id, resource in (template.get("Resources") or {}).items():
+            meta = resource.get("Metadata") if isinstance(resource, dict) else None
+            guard = meta.get("guard") if isinstance(meta, dict) else None
+            if isinstance(guard, dict):
+                entry = _guard_entry(name, logical_id, resource, guard)
+                if entry is not None:
+                    carried.add(entry)
+    return [
+        f"{a.template}/{a.logical_id} {list(a.rules)}"
+        for a in approved
+        if a not in carried
+    ]
 
 
 def config_files(directories: list[Path]) -> list[Path]:
@@ -326,19 +402,38 @@ def committed_templates(template_dir: Path) -> list[Path]:
     return templates
 
 
-def check(tools: Tools, template_dir: Path, rules_file: Path) -> list[str]:
+def check(
+    tools: Tools,
+    template_dir: Path,
+    rules_file: Path,
+    approved_file: Path | None = None,
+) -> list[str]:
     problems: list[str] = []
     templates = committed_templates(template_dir)
+    approved = load_approved(approved_file) if approved_file is not None else []
+    gate_rules = frozenset(rule_names(rules_file))
 
     for path in config_files([Path.cwd(), REPO_ROOT, template_dir]):
         problems.append(
             f"{path} is a cfn-lint config file; this gate runs with no rule ignored, so remove it"
         )
+    bodies = {
+        path.name.removesuffix(".template.json"): json.loads(
+            path.read_text(encoding="utf-8")
+        )
+        for path in templates
+    }
     for path in templates:
-        for where in find_suppressions(json.loads(path.read_text(encoding="utf-8"))):
+        name = path.name.removesuffix(".template.json")
+        for where in find_suppressions(bodies[name], name, approved, gate_rules):
             problems.append(
                 f"{path.name}: {where} suppresses a check; fix the template instead"
             )
+    for stale in stale_approvals(bodies, approved):
+        problems.append(
+            f"{approved_file}: {stale} is approved but no template carries it as "
+            "approved; remove the entry or restore the suppression"
+        )
 
     matches = cfn_lint_matches(tools, templates)
     for m in matches:
@@ -814,47 +909,116 @@ def self_test(
                 "Metadata": {"guard": {"SuppressedRules": ["S3_BUCKET_ENCRYPTED"]}},
             },
             "C": {"Type": "AWS::SQS::Queue", "Metadata": {"aws:cdk:path": "x"}},
-            # An accepted registry rule with no reason: still a suppression.
-            "D": {
-                "Type": "AWS::SQS::Queue",
-                "Metadata": {"guard": {"SuppressedRules": ["LAMBDA_INSIDE_VPC"]}},
-            },
-            # The accepted shape, which must NOT be flagged, so the count below
-            # also fails if the detector starts flagging everything.
-            "E": {
-                "Type": "AWS::SQS::Queue",
-                "Metadata": {
-                    "guard": {
-                        "SuppressedRules": ["LAMBDA_INSIDE_VPC"],
-                        "SuppressedRuleReasons": {"LAMBDA_INSIDE_VPC": "reason"},
-                    }
-                },
-            },
         },
     }
     found = find_suppressions(planted_template)
-    expected = [
-        "template Metadata.cfn-lint",
-        "A Metadata.cfn-lint",
-        "B Metadata.guard.SuppressedRules",
-        "D Metadata.guard.SuppressedRules",
-    ]
-    if found != expected:
+    if len(found) != 3:
         problems.append(
-            f"suppression detector found {found} in a template planted with exactly {expected}"
+            f"suppression detector found {found} in a template with exactly three planted suppressions"
         )
     else:
         print(
-            "negative control ok: suppression detector flags all four planted suppressions "
-            "and accepts the reasoned registry one"
+            "negative control ok: suppression detector flags all three planted suppressions"
         )
-    shared = sorted(set(ACCEPTED_REGISTRY_SUPPRESSIONS) & set(rule_names(rules_file)))
+    problems += _approved_list_controls(template_dir, rules_file)
+    return problems
+
+
+def _approved_list_controls(template_dir: Path, rules_file: Path) -> list[str]:
+    """Negative controls for the approved guard-suppression list, on real templates."""
+    problems: list[str] = []
+    approved = load_approved(APPROVED_FILE)
+    gate_rules = frozenset(rule_names(rules_file))
+    shared = sorted({r for a in approved for r in a.rules} & gate_rules)
     if shared:
         problems.append(
-            f"ACCEPTED_REGISTRY_SUPPRESSIONS names {shared}, which {rules_file.name} also "
-            "defines; a template could then suppress this gate's own rule"
+            f"{APPROVED_FILE.name} approves {shared}, which {rules_file.name} defines; "
+            "a template could then suppress this gate's own rule"
+        )
+    bodies = {
+        p.name.removesuffix(".template.json"): json.loads(p.read_text(encoding="utf-8"))
+        for p in committed_templates(template_dir)
+    }
+
+    def flagged(b: dict[str, Template]) -> list[str]:
+        return [
+            f"{name}: {where}"
+            for name, t in b.items()
+            for where in find_suppressions(t, name, approved, gate_rules)
+        ]
+
+    if flagged(bodies) or stale_approvals(bodies, approved):
+        problems.append(
+            "the committed templates do not match the approved list, so the controls "
+            "below would prove nothing"
+        )
+        return problems
+    first = approved[0]
+    rule = first.rules[0]
+
+    # A 14th suppression of an approved rule, on a resource nobody approved.
+    extra = copy.deepcopy(bodies)
+    victim = next(
+        lid
+        for lid in extra[first.template]["Resources"]
+        if (first.template, lid) not in {(a.template, a.logical_id) for a in approved}
+    )
+    extra[first.template]["Resources"][victim].setdefault("Metadata", {})["guard"] = {
+        "SuppressedRules": [rule],
+        "SuppressedRuleReasons": dict(first.reasons),
+    }
+    _expect(
+        problems,
+        flagged(extra)
+        == [f"{first.template}: {victim} Metadata.guard.SuppressedRules"],
+        f"an approved rule on unapproved resource {first.template}/{victim} was not the one thing flagged: {flagged(extra)}",
+    )
+
+    # An approved resource whose reason was edited.
+    reworded = copy.deepcopy(bodies)
+    reworded[first.template]["Resources"][first.logical_id]["Metadata"]["guard"][
+        "SuppressedRuleReasons"
+    ][rule] += " (edited)"
+    _expect(
+        problems,
+        f"{first.template}: {first.logical_id} Metadata.guard.SuppressedRules"
+        in flagged(reworded),
+        "an approved suppression with a changed reason was accepted",
+    )
+
+    # An approved resource that also suppresses one of this gate's own rules.
+    own = copy.deepcopy(bodies)
+    guard = own[first.template]["Resources"][first.logical_id]["Metadata"]["guard"]
+    own_rule = min(gate_rules)
+    guard["SuppressedRules"] = [*guard["SuppressedRules"], own_rule]
+    guard["SuppressedRuleReasons"][own_rule] = "x"
+    _expect(
+        problems,
+        f"{first.template}: {first.logical_id} Metadata.guard.SuppressedRules"
+        in flagged(own),
+        f"an approved resource also suppressing gate rule {own_rule} was accepted",
+    )
+
+    # One of the approved suppressions removed from its template: stale.
+    removed = copy.deepcopy(bodies)
+    del removed[first.template]["Resources"][first.logical_id]["Metadata"]["guard"]
+    stale = stale_approvals(removed, approved)
+    _expect(
+        problems,
+        stale == [f"{first.template}/{first.logical_id} {list(first.rules)}"],
+        f"removing {first.template}/{first.logical_id}'s suppression reported {stale} as stale",
+    )
+    if not problems:
+        print(
+            "negative control ok: the approved list refuses a 14th resource, an edited "
+            "reason and a gate rule, and reports a removed entry as stale"
         )
     return problems
+
+
+def _expect(problems: list[str], ok: bool, message: str) -> None:
+    if not ok:
+        problems.append(message)
 
 
 # --------------------------------------------------------------------------- #
@@ -868,6 +1032,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--templates", type=Path, default=TEMPLATE_DIR)
     parser.add_argument("--rules", type=Path, default=RULES_FILE)
     parser.add_argument(
+        "--approved",
+        type=Path,
+        default=APPROVED_FILE,
+        help="the approved per-resource cfn-guard suppressions",
+    )
+    parser.add_argument(
         "--work-dir",
         type=Path,
         default=None,
@@ -878,7 +1048,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.mode == "check":
-            problems = check(tools, args.templates, args.rules)
+            problems = check(tools, args.templates, args.rules, args.approved)
         else:
             problems = self_test(tools, args.templates, args.rules, args.work_dir)
     except GateError as exc:

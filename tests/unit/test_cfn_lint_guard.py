@@ -311,70 +311,207 @@ def test_suppression_detector_ignores_ordinary_metadata(gate: ModuleType) -> Non
     )
 
 
-def _guard_meta(rules: list[str], reasons: dict[str, str] | None) -> dict:
-    guard: dict = {"SuppressedRules": rules}
-    if reasons is not None:
-        guard["SuppressedRuleReasons"] = reasons
-    return {"Resources": {"R": {"Type": "x", "Metadata": {"guard": guard}}}}
+@pytest.fixture(scope="module")
+def approved(gate: ModuleType) -> list:
+    return gate.load_approved(gate.APPROVED_FILE)
 
 
-def test_a_reasoned_registry_suppression_is_accepted(gate: ModuleType) -> None:
-    # The shape main's per-resource cfn-guard suppressions take (#761).
-    rule = "LAMBDA_INSIDE_VPC"
-    assert gate.find_suppressions(_guard_meta([rule], {rule: "why"})) == []
+def _committed(gate: ModuleType) -> dict:
+    return {
+        p.name.removesuffix(".template.json"): json.loads(p.read_text(encoding="utf-8"))
+        for p in gate.committed_templates(gate.TEMPLATE_DIR)
+    }
+
+
+def _flagged(gate: ModuleType, bodies: dict, approved: list) -> list[str]:
+    rules = frozenset(gate.rule_names(gate.RULES_FILE))
+    return [
+        f"{name}: {where}"
+        for name, body in bodies.items()
+        for where in gate.find_suppressions(body, name, approved, rules)
+    ]
+
+
+def test_the_approved_list_is_mains_thirteen(approved: list) -> None:
+    # #761 approved 13 resources over three registry rules; the jest test pins the
+    # same file, so the two gates read one list.
+    assert len(approved) == 13
+    assert {r for a in approved for r in a.rules} == {
+        "LAMBDA_INSIDE_VPC",
+        "NO_UNRESTRICTED_ROUTE_TO_IGW",
+        "S3_BUCKET_SSL_REQUESTS_ONLY",
+    }
+
+
+def test_the_committed_templates_carry_exactly_the_approved_list(
+    gate: ModuleType, approved: list
+) -> None:
+    bodies = _committed(gate)
+    assert _flagged(gate, bodies, approved) == []
+    assert gate.stale_approvals(bodies, approved) == []
+
+
+def test_without_the_list_every_guard_suppression_is_reported(
+    gate: ModuleType,
+) -> None:
+    # Non-vacuity: the committed templates do carry guard metadata, so the test above
+    # passing means each entry matched the list.
+    assert len(_flagged(gate, _committed(gate), [])) == 13
+
+
+def test_a_fourteenth_suppression_on_another_resource_fails(
+    gate: ModuleType, approved: list
+) -> None:
+    bodies = _committed(gate)
+    first = approved[0]
+    approved_keys = {(a.template, a.logical_id) for a in approved}
+    victim = next(
+        lid
+        for lid in bodies[first.template]["Resources"]
+        if (first.template, lid) not in approved_keys
+    )
+    bodies[first.template]["Resources"][victim].setdefault("Metadata", {})["guard"] = {
+        "SuppressedRules": list(first.rules),
+        "SuppressedRuleReasons": dict(first.reasons),
+    }
+    assert _flagged(gate, bodies, approved) == [
+        f"{first.template}: {victim} Metadata.guard.SuppressedRules"
+    ]
+
+
+def test_the_same_entry_in_another_template_fails(
+    gate: ModuleType, approved: list
+) -> None:
+    bodies = _committed(gate)
+    entry = next(a for a in approved if a.template == "AshAgentCore")
+    resource = bodies["AshAgentCore"]["Resources"][entry.logical_id]
+    bodies["AshEksOperator"]["Resources"][entry.logical_id] = resource
+    assert _flagged(gate, bodies, approved) == [
+        f"AshEksOperator: {entry.logical_id} Metadata.guard.SuppressedRules"
+    ]
 
 
 @pytest.mark.parametrize(
-    ("rules", "reasons"),
-    [
-        # A rule this gate itself enforces is never suppressible.
-        (["S3_BUCKET_ENCRYPTED"], {"S3_BUCKET_ENCRYPTED": "why"}),
-        # A registry rule nobody approved.
-        (["SOME_OTHER_REGISTRY_RULE"], {"SOME_OTHER_REGISTRY_RULE": "why"}),
-        # An approved rule with no reason, an empty reason, or no reasons map.
-        (["LAMBDA_INSIDE_VPC"], {}),
-        (["LAMBDA_INSIDE_VPC"], {"LAMBDA_INSIDE_VPC": "  "}),
-        (["LAMBDA_INSIDE_VPC"], None),
-        # One unapproved rule riding along with an approved one.
-        (
-            ["LAMBDA_INSIDE_VPC", "S3_BUCKET_ENCRYPTED"],
-            {"LAMBDA_INSIDE_VPC": "why", "S3_BUCKET_ENCRYPTED": "why"},
+    "tamper",
+    ["reworded", "extra_rule", "gate_rule", "no_reasons", "other_type"],
+)
+def test_an_approved_resource_changed_in_any_way_fails(
+    gate: ModuleType, approved: list, tamper: str
+) -> None:
+    bodies = _committed(gate)
+    first = approved[0]
+    resource = bodies[first.template]["Resources"][first.logical_id]
+    guard = resource["Metadata"]["guard"]
+    rule = first.rules[0]
+    if tamper == "reworded":
+        guard["SuppressedRuleReasons"][rule] += " (edited)"
+    elif tamper == "extra_rule":
+        guard["SuppressedRules"].append("INCOMING_SSH_DISABLED")
+        guard["SuppressedRuleReasons"]["INCOMING_SSH_DISABLED"] = "why"
+    elif tamper == "gate_rule":
+        guard["SuppressedRules"].append("S3_BUCKET_ENCRYPTED")
+        guard["SuppressedRuleReasons"]["S3_BUCKET_ENCRYPTED"] = "why"
+    elif tamper == "no_reasons":
+        del guard["SuppressedRuleReasons"]
+    else:
+        resource["Type"] = "AWS::SQS::Queue"
+    assert (
+        f"{first.template}: {first.logical_id} Metadata.guard.SuppressedRules"
+        in _flagged(gate, bodies, approved)
+    )
+
+
+def test_a_removed_approved_suppression_is_reported_stale(
+    gate: ModuleType, approved: list
+) -> None:
+    bodies = _committed(gate)
+    last = approved[-1]
+    del bodies[last.template]["Resources"][last.logical_id]["Metadata"]["guard"]
+    assert gate.stale_approvals(bodies, approved) == [
+        f"{last.template}/{last.logical_id} {list(last.rules)}"
+    ]
+
+
+def test_check_reports_stale_and_unapproved_entries(
+    gate: ModuleType, scratch: Path, tmp_path: Path
+) -> None:
+    # Through check() itself, with an approved list naming a resource the scratch
+    # template does not carry, beside an unapproved suppression it does.
+    listed = tmp_path / "approved.json"
+    listed.write_text(
+        json.dumps(
+            {
+                "approved": [
+                    {
+                        "template": "AshEksOperator",
+                        "logicalId": "Gone",
+                        "type": "AWS::Lambda::Function",
+                        "rules": ["LAMBDA_INSIDE_VPC"],
+                        "reasons": {"LAMBDA_INSIDE_VPC": "why"},
+                    }
+                ]
+            }
         ),
-        # An empty list asks for nothing and is still not the accepted shape.
-        ([], {}),
+        encoding="utf-8",
+    )
+    (scratch / "templates" / "AshEksOperator.template.json").write_text(
+        json.dumps(
+            {
+                "Resources": {
+                    "Q": {
+                        "Type": "AWS::SQS::Queue",
+                        "Metadata": {
+                            "guard": {
+                                "SuppressedRules": ["LAMBDA_INSIDE_VPC"],
+                                "SuppressedRuleReasons": {"LAMBDA_INSIDE_VPC": "why"},
+                            }
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    lint = fake_tool(scratch / "cfn-lint", "[]", 0)
+    guard = fake_tool(
+        scratch / "cfn-guard",
+        guard_report("PASS", [], ["ONE"], ["EKS_CLUSTER_ENDPOINT_NOT_OPEN"]),
+        0,
+    )
+    problems = gate.check(
+        gate.Tools(lint, guard),
+        scratch / "templates",
+        scratch / "rules.guard",
+        listed,
+    )
+    assert any("Q Metadata.guard.SuppressedRules suppresses" in p for p in problems)
+    assert any(
+        "AshEksOperator/Gone" in p and "no template carries it" in p for p in problems
+    )
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"template": "T", "logicalId": "R", "type": "x", "rules": [], "reasons": {}},
+        {"template": "T", "logicalId": "R", "type": "x", "rules": ["A"], "reasons": {}},
+        {
+            "template": "T",
+            "logicalId": "R",
+            "type": "x",
+            "rules": ["A"],
+            "reasons": {"A": " "},
+        },
+        {"template": "T", "logicalId": "R", "rules": ["A"], "reasons": {"A": "why"}},
     ],
 )
-def test_any_other_guard_suppression_fails(
-    gate: ModuleType, rules: list[str], reasons: dict[str, str] | None
+def test_a_malformed_approved_entry_is_refused(
+    gate: ModuleType, tmp_path: Path, entry: dict
 ) -> None:
-    assert gate.find_suppressions(_guard_meta(rules, reasons)) == [
-        "R Metadata.guard.SuppressedRules"
-    ]
-
-
-def test_no_accepted_registry_rule_shares_a_name_with_a_gate_rule(
-    gate: ModuleType,
-) -> None:
-    shipped = set(gate.rule_names(gate.RULES_FILE))
-    assert shipped, "no rules parsed from the shipped rules file"
-    assert set(gate.ACCEPTED_REGISTRY_SUPPRESSIONS).isdisjoint(shipped)
-
-
-def test_the_committed_templates_do_carry_registry_suppressions(
-    gate: ModuleType,
-) -> None:
-    # Non-vacuity for test_committed_templates_carry_no_suppression: the templates
-    # do hold guard metadata, so that test passing means each entry was accepted,
-    # not that there was nothing to look at.
-    carrying = [
-        logical_id
-        for path in gate.committed_templates(gate.TEMPLATE_DIR)
-        for logical_id, resource in json.loads(path.read_text(encoding="utf-8"))[
-            "Resources"
-        ].items()
-        if "guard" in (resource.get("Metadata") or {})
-    ]
-    assert carrying
+    listed = tmp_path / "approved.json"
+    listed.write_text(json.dumps({"approved": [entry]}), encoding="utf-8")
+    with pytest.raises(gate.GateError):
+        gate.load_approved(listed)
 
 
 # --------------------------------------------------------------------------- #
@@ -419,8 +556,13 @@ def test_a_mutant_that_changes_nothing_is_refused(
         )
 
 
-def test_committed_templates_carry_no_suppression(gate: ModuleType) -> None:
+def test_committed_templates_carry_no_suppression(
+    gate: ModuleType, approved: list
+) -> None:
+    # Nothing beyond the approved guard list: no cfn-lint suppression anywhere and no
+    # guard suppression the list does not name.
+    rules = frozenset(gate.rule_names(gate.RULES_FILE))
     for path in gate.committed_templates(gate.TEMPLATE_DIR):
-        assert (
-            gate.find_suppressions(json.loads(path.read_text(encoding="utf-8"))) == []
-        ), path.name
+        name = path.name.removesuffix(".template.json")
+        body = json.loads(path.read_text(encoding="utf-8"))
+        assert gate.find_suppressions(body, name, approved, rules) == [], path.name

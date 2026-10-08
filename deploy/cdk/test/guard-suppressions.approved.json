@@ -1,0 +1,152 @@
+{
+  "_comment": [
+    "The cfn-guard suppressions the maintainers approved one resource at a time (#761): template, logical id, resource type, the registry rules suppressed on it, and the reason recorded beside each.",
+    "The one list. test/ash-guard-suppressions.test.ts and deploy/tests/cfn-lint-guard.py both read it and each fails on any suppression in templates/ that is not here, on an entry here that no template carries, and on a reason that differs from the one here.",
+    "A new suppression needs the same review the originals got: add it here in the same change that adds the suppressGuardRule call in lib/."
+  ],
+  "approved": [
+    {
+      "logicalId": "ImageBootstrapStarter2B9D5AC0",
+      "reasons": {
+        "LAMBDA_INSIDE_VPC": "Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data."
+      },
+      "rules": [
+        "LAMBDA_INSIDE_VPC"
+      ],
+      "template": "AshAgentCore",
+      "type": "AWS::Lambda::Function"
+    },
+    {
+      "logicalId": "ImageBootstrapStarter2B9D5AC0",
+      "reasons": {
+        "LAMBDA_INSIDE_VPC": "Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data."
+      },
+      "rules": [
+        "LAMBDA_INSIDE_VPC"
+      ],
+      "template": "AshCodeCommitGate",
+      "type": "AWS::Lambda::Function"
+    },
+    {
+      "logicalId": "ScanFunction322CD7EE",
+      "reasons": {
+        "LAMBDA_INSIDE_VPC": "Opt-in: set VpcId and VpcSubnetIds to confine egress to a 443-only SG and your NACLs. Empty (default) leaves egress open."
+      },
+      "rules": [
+        "LAMBDA_INSIDE_VPC"
+      ],
+      "template": "AshCodeCommitGate",
+      "type": "AWS::Lambda::Function"
+    },
+    {
+      "logicalId": "AccessLogsArchivePolicyBC5B3007",
+      "reasons": {
+        "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+      },
+      "rules": [
+        "S3_BUCKET_SSL_REQUESTS_ONLY"
+      ],
+      "template": "AshDistributedPipeline",
+      "type": "AWS::S3::BucketPolicy"
+    },
+    {
+      "logicalId": "AccessLogsPolicyABDC4D2D",
+      "reasons": {
+        "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+      },
+      "rules": [
+        "S3_BUCKET_SSL_REQUESTS_ONLY"
+      ],
+      "template": "AshDistributedPipeline",
+      "type": "AWS::S3::BucketPolicy"
+    },
+    {
+      "logicalId": "ArtifactsPolicy6E9058CC",
+      "reasons": {
+        "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+      },
+      "rules": [
+        "S3_BUCKET_SSL_REQUESTS_ONLY"
+      ],
+      "template": "AshDistributedPipeline",
+      "type": "AWS::S3::BucketPolicy"
+    },
+    {
+      "logicalId": "ResultsPolicy9F4743DA",
+      "reasons": {
+        "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+      },
+      "rules": [
+        "S3_BUCKET_SSL_REQUESTS_ONLY"
+      ],
+      "template": "AshDistributedPipeline",
+      "type": "AWS::S3::BucketPolicy"
+    },
+    {
+      "logicalId": "SourcePolicyE5AB5F73",
+      "reasons": {
+        "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+      },
+      "rules": [
+        "S3_BUCKET_SSL_REQUESTS_ONLY"
+      ],
+      "template": "AshDistributedPipeline",
+      "type": "AWS::S3::BucketPolicy"
+    },
+    {
+      "logicalId": "AccessLogsArchivePolicyBC5B3007",
+      "reasons": {
+        "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+      },
+      "rules": [
+        "S3_BUCKET_SSL_REQUESTS_ONLY"
+      ],
+      "template": "AshFargate",
+      "type": "AWS::S3::BucketPolicy"
+    },
+    {
+      "logicalId": "AccessLogsPolicyABDC4D2D",
+      "reasons": {
+        "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+      },
+      "rules": [
+        "S3_BUCKET_SSL_REQUESTS_ONLY"
+      ],
+      "template": "AshFargate",
+      "type": "AWS::S3::BucketPolicy"
+    },
+    {
+      "logicalId": "ImageBootstrapStarter2B9D5AC0",
+      "reasons": {
+        "LAMBDA_INSIDE_VPC": "Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data."
+      },
+      "rules": [
+        "LAMBDA_INSIDE_VPC"
+      ],
+      "template": "AshFargate",
+      "type": "AWS::Lambda::Function"
+    },
+    {
+      "logicalId": "VpcPublicSubnet1DefaultRoute3DA9E72A",
+      "reasons": {
+        "NO_UNRESTRICTED_ROUTE_TO_IGW": "Egress route for the NAT gateway, the only resource in this subnet. Nothing here has a public IP or listener; the ALB is internal and tasks run in private subnets."
+      },
+      "rules": [
+        "NO_UNRESTRICTED_ROUTE_TO_IGW"
+      ],
+      "template": "AshFargate",
+      "type": "AWS::EC2::Route"
+    },
+    {
+      "logicalId": "VpcPublicSubnet2DefaultRoute97F91067",
+      "reasons": {
+        "NO_UNRESTRICTED_ROUTE_TO_IGW": "Egress route for the NAT gateway, the only resource in this subnet. Nothing here has a public IP or listener; the ALB is internal and tasks run in private subnets."
+      },
+      "rules": [
+        "NO_UNRESTRICTED_ROUTE_TO_IGW"
+      ],
+      "template": "AshFargate",
+      "type": "AWS::EC2::Route"
+    }
+  ]
+}
