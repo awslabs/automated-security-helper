@@ -234,3 +234,31 @@ def test_main_prints_json_on_stdout_and_exits_1_on_refusal(repo, tmp_path, capsy
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "FAIL:" in captured.err
+
+
+def test_a_named_ref_without_the_required_channel_is_refused(repo, tmp_path):
+    # --require applies to a named ref too, so a ref that predates the channel is
+    # reported as that rather than as a missing build script three steps later.
+    _commit(repo, {"pyproject.toml": _pyproject("3.7.0")}, "before the channel")
+    _git(repo, "branch", "base")
+    _commit(
+        repo, {"pyproject.toml": _pyproject("3.8.0"), "pkg/build.ps1": "x\n"}, "head"
+    )
+    with pytest.raises(pt.DerivationError, match="has no pkg/build.ps1"):
+        pt.derive(repo, "base", tmp_path / "out", ["pkg/build.ps1"])
+
+
+def test_auto_derives_and_lowers_like_a_named_ref(repo, tmp_path, capsys):
+    _commit(repo, {"pyproject.toml": _pyproject("3.9.0")}, "no channel yet")
+    channel = _commit(
+        repo, {"pyproject.toml": _pyproject("4.0.0"), "pkg/build.ps1": "1\n"}, "channel"
+    )
+    _commit(repo, {"pkg/build.ps1": "2\n"}, "head")
+    rc = pt.main(
+        ["--repo", str(repo), "--prev-ref", "auto", "--require", "pkg/build.ps1"]
+        + ["--out", str(tmp_path / "out")]
+    )
+    assert rc == 0
+    result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert result["prev_sha"] == channel
+    assert result["prev_version"] == "3.0.0"

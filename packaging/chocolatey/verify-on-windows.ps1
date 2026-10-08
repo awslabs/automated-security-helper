@@ -57,8 +57,11 @@ Where to write the built N .nupkg.
 Scratch directory for N-1, the scans and the negative-control package. Replaced.
 
 .PARAMETER PrevRef
-The git ref N-1 is built from. Defaults to $env:E2E_PREV_REF, then
-origin/v4-capabilities. A ref with HEAD's tree falls back to HEAD's first parent.
+The git ref N-1 is built from. Defaults to $env:E2E_PREV_REF, then `auto`: the newest
+release tag, else the newest ancestor of HEAD, that differs from HEAD and carries
+packaging/chocolatey (scripts/e2e/prev_tree.py). `auto` names no branch, so it keeps
+working once the branch this channel was developed on is merged and deleted. A named
+ref with HEAD's tree falls back to HEAD's first parent.
 #>
 [CmdletBinding()]
 param(
@@ -111,7 +114,7 @@ function Fail-IfProblems {
 if (-not $Repo) { $Repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if (-not $OutDir) { $OutDir = Join-Path ([System.IO.Path]::GetTempPath()) 'ash-choco-out' }
 if (-not $Work) { $Work = Join-Path ([System.IO.Path]::GetTempPath()) 'ash-choco-e2e' }
-if (-not $PrevRef) { $PrevRef = if ($env:E2E_PREV_REF) { $env:E2E_PREV_REF } else { 'origin/v4-capabilities' } }
+if (-not $PrevRef) { $PrevRef = if ($env:E2E_PREV_REF) { $env:E2E_PREV_REF } else { 'auto' } }
 if (Test-Path -LiteralPath $Work) { Remove-Item -LiteralPath $Work -Recurse -Force }
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 $Work = (Resolve-Path -LiteralPath $Work).Path
@@ -357,7 +360,7 @@ Write-Host "== 3c. build N-1 from $PrevRef"
 # differs from the wheel's. The N-1 version was never released, so neither the wheel
 # nor the package ever leaves $Work.
 $prevWork = Join-Path $Work 'prev'
-$r = Invoke-Harness -Arguments @((Join-Path $Repo 'scripts\e2e\prev_tree.py'), '--repo', $Repo, '--prev-ref', $PrevRef, '--out', $prevWork)
+$r = Invoke-Harness -Arguments @((Join-Path $Repo 'scripts\e2e\prev_tree.py'), '--repo', $Repo, '--prev-ref', $PrevRef, '--require', 'packaging/chocolatey/ash.nuspec', '--require', 'packaging/chocolatey/build.ps1', '--out', $prevWork)
 Assert-NativeSuccess -What 'scripts/e2e/prev_tree.py' -ExitCode $r.Rc
 $prev = ($r.Out.Trim() -split "`n" | Select-Object -Last 1) | ConvertFrom-Json
 if ($prev.head_version -ne $version) {

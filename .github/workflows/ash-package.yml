@@ -628,18 +628,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Two commits, so HEAD's parent is here for the N-1 fallback to HEAD^ described below.
-      # A HEAD that is not v4-capabilities but has its tree takes that fallback too, and a
-      # one-commit checkout has no HEAD^. tests/unit/test_e2e_n1_fetch.py rebuilds that clone.
+      # Full history and every tag, because N-1 is derived from them rather than named:
+      # E2E_PREV_REF=auto below makes scripts/e2e/prev_tree.py take the newest release tag,
+      # else the newest ancestor, that differs from HEAD and carries packaging/chocolatey.
+      # It used to be the tip of one development branch, fetched by name, and that fetch
+      # fails once the branch is merged and deleted, which would have turned this job red
+      # on main the day the channel landed there. In a shallow clone the derivation fails
+      # and says so. tests/unit/test_e2e_n1_fetch.py rebuilds both clones.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
-
-      # N-1 is built from v4-capabilities' tree (scripts/e2e/prev_tree.py), so that ref has
-      # to exist locally. Two commits, not one: on a push to v4-capabilities HEAD is that
-      # ref, and prev_tree.py then builds N-1 from HEAD's first parent instead.
-      - name: Fetch the N-1 ref
-        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+          fetch-depth: 0
 
       - name: Download the wheel built and gated by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -674,7 +672,7 @@ jobs:
       - name: Build N and N-1, install, scan, upgrade, uninstall, negative controls
         shell: pwsh
         env:
-          E2E_PREV_REF: origin/v4-capabilities
+          E2E_PREV_REF: auto
         run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}" -Work "${{ runner.temp }}\ash-choco-e2e"
 
   # The winget manifest set, checked against Microsoft's published JSON Schemas.
