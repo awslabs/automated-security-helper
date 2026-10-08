@@ -10,7 +10,7 @@ name: ASH - Native Packages (deb, rpm)
 # WHY THIS IS ITS OWN WORKFLOW
 #
 # The deb and rpm jobs used to live in ash-package.yml. They moved here because they
-# grew from two legs to twenty (four distributions, an upgrade leg on each, nine
+# grew from two legs to twenty-two (four distributions, an upgrade leg on each, eleven
 # negative controls and three version-ordering checks), and because ash-package.yml deliberately has no `push` trigger
 # (its header explains why), while these legs need to run on a pushed branch before
 # a pull request exists. ash-package.yml still owns the wheel and sdist gate; each leg
@@ -57,8 +57,7 @@ name: ASH - Native Packages (deb, rpm)
 #
 # THE UPGRADE LEGS
 #
-# Each distribution installs N-1 (the same tree with a lower version, built by
-# packaging/build-test-wheels.sh), upgrades to N, and requires the venv to have been
+# Each distribution installs N-1, upgrades to N, and requires the venv to have been
 # REBUILT from the N wheel -- the rpm used to report N while the venv kept running
 # N-1 -- while a probe samples every 50 ms that /usr/lib/automated-security-helper/venv stays usable
 # throughout. Each then fails an upgrade on purpose (Python index unreachable) and requires
@@ -66,6 +65,32 @@ name: ASH - Native Packages (deb, rpm)
 # the venv on `upgrade` and `failed-upgrade`.
 # Last, each rebuilds the venv as a plain directory, the layout earlier builds of
 # these packages used, and requires a reinstall to migrate it to the symlink.
+#
+# N-1 is the previous commit, not this tree at a lower version: packaging/n1-source.sh
+# takes it from the history with scripts/e2e/prev_tree.py (`--prev-ref auto`, the
+# derivation every upgrade leg shares), refuses one with HEAD's tree, and the leg builds
+# N-1's package with N-1's own packaging scripts and gates it with N-1's own payload
+# checker. So the upgrade runs this commit's maintainer scripts over an install an older
+# package's scripts made, which is where the rpm stale-venv and deb prerm defects lived.
+# That is why every package leg checks out the full history, and the log of each one
+# names both commits.
+#
+# NO ALTERNATIVES, NO DIVERSIONS
+#
+# Shipping no /usr/bin/ash is not enough: a maintainer script can still register one
+# with update-alternatives or move the shell aside with dpkg-divert. Every built package's
+# scripts are refused statically if they call either (or EL's `alternatives`), and every
+# install and upgrade is checked on the host for an alternative or a diversion pointing
+# into the package. Two negative legs plant `update-alternatives --install /usr/bin/ash`
+# in postinst and %post and require both checks to catch it.
+#
+# THE GATE
+#
+# `native-packages: gate` needs every other job and fails unless each succeeded, so this
+# workflow has one check name that does not move with the matrix labels. It reads this
+# file's own `jobs:` (.github/scripts/assert-workflow-gate.py), so a job added without
+# being added to its `needs` turns it red instead of going ungated. It first shows its
+# own verdict rejecting planted failed, skipped and missing jobs.
 #
 # THE RELEASE ASSETS
 #
@@ -86,6 +111,9 @@ on:
     paths:
       - ".github/workflows/ash-native-packages.yml"
       - ".github/scripts/assert-artifact-contents.py"
+      - ".github/scripts/assert-required-checks-census.py"
+      - ".github/scripts/assert-workflow-gate.py"
+      - "tests/unit/test_native_packages_workflow.py"
       - "packaging/*.py"
       - "packaging/*.sh"
       - "packaging/deb/**"
@@ -117,6 +145,9 @@ on:
     paths:
       - ".github/workflows/ash-native-packages.yml"
       - ".github/scripts/assert-artifact-contents.py"
+      - ".github/scripts/assert-required-checks-census.py"
+      - ".github/scripts/assert-workflow-gate.py"
+      - "tests/unit/test_native_packages_workflow.py"
       - "packaging/*.py"
       - "packaging/*.sh"
       - "packaging/deb/**"
@@ -228,6 +259,19 @@ jobs:
       - name: The artifact-contents gate can still fail
         run: uv run --no-project python .github/scripts/assert-artifact-contents.py --self-test
 
+      # The N-1 derivation the upgrade legs run, on histories built to break it: every
+      # candidate with HEAD's tree must be refused, never built.
+      - name: The N-1 derivation refuses an N-1 with HEAD's tree
+        shell: bash
+        run: bash packaging/test-n1-source.sh
+
+      # The gate, the N-1 wiring and the alternatives checks, held by unit tests that
+      # need no container: tests/unit/test_native_packages_workflow.py.
+      - name: Unit tests for this workflow's gate, N-1 source and alternatives checks
+        run: >-
+          uv run --group dev pytest tests/unit/test_native_packages_workflow.py
+          -p no:cacheprovider -o addopts="" -v
+
       # Measured rather than asserted in a comment. If the gate ever learns to read
       # these containers, this fails and the payload checker's docstring is then wrong
       # and findable.
@@ -290,6 +334,8 @@ jobs:
           - { label: "negative control: empty-payload rpm must fail the payload gate", family: rpm, mode: negative-payload, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
           - { label: "negative control: deb shipping /usr/bin/ash must fail the shell-path checks", family: deb, mode: negative-shell-path, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
           - { label: "negative control: rpm shipping /usr/bin/ash must fail the shell-path checks", family: rpm, mode: negative-shell-path, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "negative control: deb registering /usr/bin/ash as an alternative must fail", family: deb, mode: negative-alternatives, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: rpm registering /usr/bin/ash as an alternative must fail", family: rpm, mode: negative-alternatives, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
     steps:
       # Before checkout, because actions/checkout needs git and none of these images
       # ships it; without git it silently falls back to a REST tarball. `shell: bash`
@@ -308,9 +354,12 @@ jobs:
           fi
           git --version
 
+      # Full history and every tag: N-1 is derived from them (packaging/n1-source.sh),
+      # and in a shallow clone the derivation fails and says so.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       # Built here rather than in a shared job and downloaded, because a workflow
       # artifact on a public repository is downloadable by anyone, and the N-1 wheel is
@@ -320,7 +369,7 @@ jobs:
       # Paths come from $GITHUB_WORKSPACE and $RUNNER_TEMP, not from the github.workspace
       # and runner.temp contexts: inside a job container the contexts still hold the
       # HOST paths, while the environment variables hold the paths the container sees.
-      - name: Build and gate the N and N-1 wheels
+      - name: Build and gate the N and N-1 wheels, N-1 from the previous commit
         shell: bash
         run: REPO="$GITHUB_WORKSPACE" bash packaging/build-test-wheels.sh "$RUNNER_TEMP/native-wheels"
 
@@ -336,6 +385,10 @@ jobs:
           export REPO="$GITHUB_WORKSPACE"
           export DIST="$RUNNER_TEMP/native-wheels/dist"
           export PREV_DIST="$RUNNER_TEMP/native-wheels/dist-prev"
+          # N-1's own tree and the record of which commit it is, both written by
+          # build-test-wheels.sh.
+          export PREV_SRC="$RUNNER_TEMP/native-wheels/prev/src"
+          export N1_ENV="$RUNNER_TEMP/native-wheels/n1.env"
           # The package's build directory, in the workspace so the upload below can name
           # it with a relative path (the github.workspace context is the host's path).
           export OUT="$GITHUB_WORKSPACE/build/native-packages"
@@ -353,3 +406,33 @@ jobs:
           path: build/native-packages/*.${{ matrix.family }}
           if-no-files-found: error
           retention-days: 14
+
+  # The one check name this workflow reports regardless of the matrix. `if: always()`
+  # so it reports a verdict when a job it needs failed or was skipped, rather than
+  # being skipped itself, which a ruleset reads as neither pass nor fail.
+  gate:
+    name: "native-packages: gate"
+    needs: [self-tests, package]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Checked out for the census: the gate reads this file's own jobs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: The gate's verdict rejects planted failed, skipped and missing jobs
+        env:
+          GATE_JOB: ${{ github.job }}
+        run: >-
+          python3 .github/scripts/assert-workflow-gate.py --self-test
+          --workflow .github/workflows/ash-native-packages.yml --gate-job "$GATE_JOB"
+
+      - name: Require every job to have succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GATE_JOB: ${{ github.job }}
+        run: >-
+          python3 .github/scripts/assert-workflow-gate.py
+          --workflow .github/workflows/ash-native-packages.yml --gate-job "$GATE_JOB"

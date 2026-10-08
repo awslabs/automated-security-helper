@@ -170,6 +170,15 @@ tracks files a `postinst` wrote. An upgrade does not: the deb's `prerm` removes 
 `remove`, the rpm's `%postun` only when `$1` is 0, and a failed rebuild never touches the
 symlink, so the previous version keeps working.
 
+No maintainer script registers an alternative or a diversion either: a postinst that
+ran `update-alternatives --install /usr/bin/ash ash /usr/bin/<cli> 100`, or a
+`dpkg-divert` of `/usr/bin/ash`, would take the shell's name without shipping the path.
+`vl_check_maintainer_scripts` refuses any call to `update-alternatives`, `alternatives`
+or `dpkg-divert` in a built package's scripts (`dpkg-deb -e`, `rpm -qp --scripts
+--triggerscripts`), `vl_assert_no_alternatives` checks every install and upgrade on the
+host, and the `negative-alternatives` mode plants the call above in postinst and
+`%post` and requires both checks to catch it.
+
 Package versions are mapped from the wheel's PEP 440 version by `packaging/version-map.sh`
 so dpkg and rpm sort them correctly (`3.8.0rc1` becomes `3.8.0~rc1`, below `3.8.0`).
 
@@ -183,6 +192,52 @@ that gate. The shared install-and-scan logic,
 including the negative controls that show each check failing, is
 `packaging/verify-lib.sh`; the command name both packages install is set once, in
 `packaging/cli-name.sh`.
+
+## Scanners are selected after install, not inside the installer
+
+No package here carries a third-party scanner, so none can offer scanners as optional
+components in its installer the way an MSI feature tree would: the bytes are not in the
+package to select. In v4, "optional components selected at install time" means a
+second, explicit step after the package is installed, run by the user who will scan:
+
+```
+ashx dependencies install --tool grype          # one scanner
+ashx dependencies install --tool grype --tool syft
+ashx dependencies install                      # everything ASH knows how to install
+```
+
+Each named tool is downloaded from its pinned upstream release into `~/.ash/bin`
+(`--bin-path` or `ASH_BIN_PATH` to change it) and refused unless its SHA-256 matches the
+digest ASH carries. Run again, it installs nothing and reports the tool as "already
+present, verified against the pinned digest". A name ASH does not know exits 2
+(`EXIT_BAD_SELECTION`) and installs nothing, so a typo cannot read as success. Tools
+ASH has no install path for on a platform (npm-audit needs Node, cfn-nag needs
+RubyGems) are named in the output rather than skipped silently.
+
+The deb and rpm assert legs exercise exactly that from the installed package, as the
+unprivileged user that runs the scans: `--tool grype` must exit 0, name grype as
+verified on PATH and leave a binary that reports the pinned version; the second run
+must verify it against the digest without downloading; and `--tool nonexistent` must
+exit `EXIT_BAD_SELECTION` (read from the installed CLI, not restated) naming the tool
+(`vl_assert_dependency_selection` in `packaging/verify-lib.sh`). The download is the
+only step in those legs that reaches GitHub, so the harness retries it twice; the
+product does not retry.
+
+## The upgrade legs build N-1 from the previous commit
+
+Every upgrade leg (deb, rpm, Flatpak) installs N-1 and upgrades it to N. N-1 is not
+this tree at a lower version: `packaging/n1-source.sh` takes it from the history with
+`scripts/e2e/prev_tree.py --prev-ref auto`, the derivation every e2e upgrade leg shares
+(the newest release tag reachable from HEAD, else the newest ancestor, whose tree
+differs from HEAD's and that carries the packaging), and lowers its version. The leg then
+builds N-1's package with N-1's own `packaging/` scripts and gates it with N-1's own
+payload checker. So the upgrade runs this commit's maintainer scripts over an install an
+older package's scripts made, which is where the rpm venv that survived an upgrade and
+the deb prerm that deleted the venv on upgrade came from; an upgrade from a copy of
+itself cannot see either. A commit with HEAD's tree is never used, the checkout needs
+the full history, and a shallow clone fails and says so.
+`packaging/test-n1-source.sh` shows the derivation refusing a same-tree history, a
+history with no earlier package, and a shallow clone.
 
 ## Where the Flatpak differs, and why
 

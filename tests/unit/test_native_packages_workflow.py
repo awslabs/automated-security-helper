@@ -1,0 +1,451 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""ash-native-packages.yml: its gate, its N-1 source, and its alternatives checks.
+
+The legs themselves run in distribution containers in CI. These tests hold the parts
+that can drift without a container noticing:
+
+- the `gate` job needs every other job, always runs, and runs
+  .github/scripts/assert-workflow-gate.py's self-test before its verdict; the verdict
+  rejects a failed, skipped or cancelled job, a job left out of `needs`, and a `needs`
+  entry naming no job;
+- every package leg checks out the full history and hands the verify step the N-1 tree
+  packaging/build-test-wheels.sh exported, and the self-tests job runs
+  packaging/test-n1-source.sh;
+- every matrix mode is one its family's verify script handles, and both families have
+  the negative-alternatives leg;
+- vl_check_maintainer_scripts accepts the real maintainer scripts and rejects a planted
+  update-alternatives, alternatives or dpkg-divert call, and vl_assert_no_alternatives
+  is called after every install and upgrade.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict
+
+import pytest
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-native-packages.yml"
+GATE_SCRIPT = REPO_ROOT / ".github" / "scripts" / "assert-workflow-gate.py"
+VERIFY_LIB = REPO_ROOT / "packaging" / "verify-lib.sh"
+
+
+def _load_gate() -> Any:
+    spec = importlib.util.spec_from_file_location("ash_workflow_gate", GATE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+gate = _load_gate()
+
+
+def _workflow() -> Dict[str, Any]:
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _jobs() -> Dict[str, Any]:
+    jobs: Dict[str, Any] = _workflow()["jobs"]
+    return jobs
+
+
+# -- the gate -------------------------------------------------------------------
+
+
+def test_the_gate_needs_every_other_job_and_always_runs() -> None:
+    jobs = _jobs()
+    job = jobs["gate"]
+    assert job["name"] == "native-packages: gate"
+    assert sorted(job["needs"]) == sorted(set(jobs) - {"gate"})
+    assert job["if"] == "always()"
+    runs = [str(step.get("run", "")) for step in job["steps"]]
+    self_test = [
+        i for i, r in enumerate(runs) if "assert-workflow-gate.py --self-test" in r
+    ]
+    verdict = [
+        i
+        for i, r in enumerate(runs)
+        if "assert-workflow-gate.py" in r and "--self-test" not in r
+    ]
+    assert self_test and verdict and self_test[0] < verdict[0]
+    env = job["steps"][verdict[0]]["env"]
+    assert env["NEEDS_JSON"] == "${{ toJSON(needs) }}"
+    assert env["GATE_JOB"] == "${{ github.job }}"
+
+
+def test_the_census_scanner_reads_the_same_jobs_as_yaml() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    jobs = gate.gated_jobs(text, "gate")
+    assert sorted(jobs) == sorted(set(_jobs()) - {"gate"})
+
+
+def _verdict(needs: Dict[str, Dict[str, str]], workflow: Path = WORKFLOW) -> Any:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(GATE_SCRIPT),
+            "--workflow",
+            str(workflow),
+            "--gate-job",
+            "gate",
+        ],
+        env={**os.environ, "NEEDS_JSON": __import__("json").dumps(needs)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+ALL_OK = {"self-tests": {"result": "success"}, "package": {"result": "success"}}
+
+
+def test_the_verdict_passes_when_every_job_succeeded() -> None:
+    result = _verdict(ALL_OK)
+    assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.parametrize(
+    ("needs", "message"),
+    [
+        (
+            {**ALL_OK, "package": {"result": "failure"}},
+            "package is failure",
+        ),
+        (
+            {**ALL_OK, "package": {"result": "skipped"}},
+            "package is skipped",
+        ),
+        (
+            {**ALL_OK, "self-tests": {"result": "cancelled"}},
+            "self-tests is cancelled",
+        ),
+        (
+            {"self-tests": {"result": "success"}},
+            "job package is not in the gate's needs",
+        ),
+        (
+            {**ALL_OK, "ghost": {"result": "success"}},
+            "the gate needs ghost, which is not a job of this workflow",
+        ),
+    ],
+)
+def test_the_verdict_rejects_a_forced_red_or_missing_job(
+    needs: Dict[str, Dict[str, str]], message: str
+) -> None:
+    result = _verdict(needs)
+    assert result.returncode == 1, result.stdout
+    assert f"::error::{message}" in result.stdout
+
+
+def test_a_job_added_without_being_gated_turns_the_gate_red(tmp_path: Path) -> None:
+    planted = tmp_path / "w.yml"
+    planted.write_text(
+        WORKFLOW.read_text(encoding="utf-8")
+        + "\n  added-later:\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n",
+        encoding="utf-8",
+    )
+    result = _verdict(ALL_OK, planted)
+    assert result.returncode == 1
+    assert "job added-later is not in the gate's needs" in result.stdout
+
+
+def test_the_verdict_refuses_to_judge_without_needs() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(GATE_SCRIPT),
+            "--workflow",
+            str(WORKFLOW),
+            "--gate-job",
+            "gate",
+        ],
+        env={k: v for k, v in os.environ.items() if k != "NEEDS_JSON"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "NEEDS_JSON is unset or empty" in result.stdout
+
+
+def test_the_self_test_passes_and_fails_with_a_blind_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jobs = gate.gated_jobs(WORKFLOW.read_text(encoding="utf-8"), "gate")
+    assert gate.self_test(jobs) == []
+
+    real = gate.problems
+
+    def blind_to_skipped(jobs_: Any, needs: Any) -> Any:
+        return [p for p in real(jobs_, needs) if not p.endswith(" is skipped")]
+
+    monkeypatch.setattr(gate, "problems", blind_to_skipped)
+    failures = gate.self_test(jobs)
+    assert len(failures) == 1 and "skipped" in failures[0]
+
+
+# -- N-1 from the previous commit -------------------------------------------------
+
+
+def _package_steps() -> list:
+    steps: list = _jobs()["package"]["steps"]
+    return steps
+
+
+def test_every_package_leg_checks_out_the_full_history() -> None:
+    checkouts = [
+        s
+        for s in _package_steps()
+        if str(s.get("uses", "")).startswith("actions/checkout@")
+    ]
+    assert len(checkouts) == 1
+    assert int(checkouts[0]["with"]["fetch-depth"]) == 0
+
+
+def test_the_verify_step_gets_the_n_minus_1_tree_and_its_record() -> None:
+    steps = _package_steps()
+    build = [
+        s
+        for s in steps
+        if "bash packaging/build-test-wheels.sh" in str(s.get("run", ""))
+    ]
+    assert len(build) == 1
+    out = build[0]["run"].split()[-1].strip('"')
+    verify = [s for s in steps if "verify-in-container.sh" in str(s.get("run", ""))]
+    assert len(verify) == 1
+    run = verify[0]["run"]
+    assert f'export PREV_SRC="{out}/prev/src"' in run
+    assert f'export N1_ENV="{out}/n1.env"' in run
+    assert f'export PREV_DIST="{out}/dist-prev"' in run
+
+
+def test_the_self_tests_job_runs_the_n_minus_1_refusals() -> None:
+    runs = [str(s.get("run", "")) for s in _jobs()["self-tests"]["steps"]]
+    assert any(r.strip() == "bash packaging/test-n1-source.sh" for r in runs)
+
+
+def test_the_wheels_script_takes_n_minus_1_from_history_not_from_head() -> None:
+    text = (REPO_ROOT / "packaging" / "build-test-wheels.sh").read_text(
+        encoding="utf-8"
+    )
+    assert '. "$REPO/packaging/n1-source.sh"' in text
+    assert 'n1_export "$OUTDIR/prev"' in text
+    # The old derivation: HEAD's tree exported a second time with its version lowered.
+    assert 'export_tree "$TREE/prev"' not in text
+    assert "vl_lower_version" not in text
+    lib = (REPO_ROOT / "packaging" / "n1-source.sh").read_text(encoding="utf-8")
+    assert "--prev-ref auto" in lib
+
+
+@pytest.mark.parametrize("family", ["deb", "rpm"])
+def test_the_upgrade_leg_builds_n_minus_1_with_its_own_scripts(family: str) -> None:
+    text = (REPO_ROOT / "packaging" / family / "verify-in-container.sh").read_text(
+        encoding="utf-8"
+    )
+    upgrade = text[text.index('if [ "$MODE" = upgrade ]; then') :]
+    assert "vl_load_n1" in upgrade
+    assert f'"$PREV_SRC/packaging/{family}/build.sh" "$PREV_WHEEL"' in upgrade
+    assert "vl_payload_gate_n1 " in upgrade
+    assert f'build_{family} "$PREV_WHEEL"' not in upgrade
+
+
+# -- matrix modes and alternatives ------------------------------------------------
+
+
+def _matrix() -> list:
+    rows: list = _jobs()["package"]["strategy"]["matrix"]["include"]
+    return rows
+
+
+@pytest.mark.parametrize("family", ["deb", "rpm"])
+def test_every_matrix_mode_is_handled_by_its_family_script(family: str) -> None:
+    text = (REPO_ROOT / "packaging" / family / "verify-in-container.sh").read_text(
+        encoding="utf-8"
+    )
+    modes = {row["mode"] for row in _matrix() if row["family"] == family}
+    assert "negative-alternatives" in modes
+    for mode in modes:
+        handled = (
+            f'"$MODE" = {mode} ]' in text
+            or re.search(rf"^\s+{re.escape(mode)}\)$", text, re.MULTILINE) is not None
+        )
+        assert handled, f"{family} has no branch for mode {mode}"
+
+
+@pytest.mark.parametrize("family", ["deb", "rpm"])
+def test_every_install_and_upgrade_is_checked_for_alternatives(family: str) -> None:
+    text = (REPO_ROOT / "packaging" / family / "verify-in-container.sh").read_text(
+        encoding="utf-8"
+    )
+    # After the plain install, after the upgrade, and twice in the negative leg.
+    assert text.count("vl_assert_no_alternatives") >= 4
+    assert "| vl_check_maintainer_scripts " in text
+
+
+def _check_scripts(text: str) -> subprocess.CompletedProcess:
+    script = (
+        f'REPO="{REPO_ROOT}"; . "$REPO/packaging/verify-lib.sh"; '
+        'vl_check_maintainer_scripts "planted"'
+    )
+    return subprocess.run(
+        ["bash", "-c", script], input=text, capture_output=True, text=True, check=False
+    )
+
+
+def _real_scripts() -> str:
+    deb = REPO_ROOT / "packaging" / "deb" / "debian"
+    spec = (REPO_ROOT / "packaging" / "rpm" / "ash.spec").read_text(encoding="utf-8")
+    scriptlets = spec[spec.index("\n%post\n") :]
+    return "\n".join(
+        [
+            (deb / "postinst").read_text(encoding="utf-8"),
+            (deb / "prerm").read_text(encoding="utf-8"),
+            scriptlets,
+        ]
+    )
+
+
+def test_the_real_maintainer_scripts_pass() -> None:
+    result = _check_scripts(_real_scripts())
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [
+        "update-alternatives --install /usr/bin/ash ash /usr/bin/ashx 100",
+        "  alternatives --install /usr/bin/ash ash /usr/bin/ashx 100",
+        "dpkg-divert --package automated-security-helper --rename /usr/bin/ash",
+        "if true; then /usr/sbin/update-alternatives --set ash /usr/bin/ashx; fi",
+        "x=$(dpkg-divert --list)",
+    ],
+)
+def test_a_planted_alternative_or_diversion_is_refused(plant: str) -> None:
+    result = _check_scripts(_real_scripts() + "\n" + plant + "\n")
+    assert result.returncode == 1
+    assert "registers an alternative or a diversion" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "allowed",
+    [
+        "# never call update-alternatives here; see packaging/README.md",
+        'echo "installing ashx"',
+        "my-alternatives-helper --frob",
+    ],
+)
+def test_comments_and_other_words_are_not_refused(allowed: str) -> None:
+    result = _check_scripts(_real_scripts() + "\n" + allowed + "\n")
+    assert result.returncode == 0, result.stderr
+
+
+def test_no_scripts_read_is_a_failure_not_a_pass() -> None:
+    result = _check_scripts("")
+    assert result.returncode == 1
+    assert "no maintainer scripts were read" in result.stderr
+
+
+# -- scanner selection after install (vl_assert_dependency_selection) ------------
+
+_FAKE_ASHX = r"""#!/bin/bash
+# What `ashx dependencies install` prints, with one planted defect named by $PLANT.
+args="$*"
+state="$HOME/.ash/bin/grype"
+case "$args" in
+  *"--tool nonexistent"*)
+    [ "$PLANT" = unknown-accepted ] && { echo "Installation Complete"; exit 0; }
+    [ "$PLANT" = unknown-wrong-code ] && { echo "Unknown tool(s): nonexistent"; exit 1; }
+    echo "Unknown tool(s): nonexistent"; exit 2 ;;
+  *"--tool grype"*)
+    if [ -x "$state" ] && [ "$PLANT" != no-digest-verify ]; then
+      echo "│ Commands run: 0 (0 failed)"
+      echo "│ Already present, verified against the pinned digest: 1 -- grype │"
+    else
+      mkdir -p "$(dirname "$state")"
+      v=0.111.0; [ "$PLANT" = wrong-version ] && v=0.110.0
+      printf '#!/bin/sh\necho "Version:           %s"\n' "$v" > "$state"; chmod +x "$state"
+      echo "│ Commands run: 1 (0 failed)"
+      echo "│ Tools verified on PATH: 1 -- grype │"
+    fi
+    exit 0 ;;
+esac
+exit 9
+"""
+
+_FAKE_PYTHON = r"""#!/bin/bash
+case "$2" in
+  *EXIT_BAD_SELECTION*) echo 2 ;;
+  *TOOL_VERSIONS*) echo 0.111.0 ;;
+  *) exit 9 ;;
+esac
+"""
+
+
+def _run_selection(tmp_path: Path, plant: str) -> subprocess.CompletedProcess:
+    bindir = tmp_path / "bin"
+    venv = tmp_path / "venv" / "bin"
+    home = tmp_path / "home"
+    for d in (bindir, venv, home):
+        d.mkdir(parents=True, exist_ok=True)
+    (bindir / "ashx").write_text(_FAKE_ASHX, encoding="utf-8")
+    (venv / "python").write_text(_FAKE_PYTHON, encoding="utf-8")
+    for exe in (bindir / "ashx", venv / "python"):
+        exe.chmod(0o755)
+    # su and id stand-ins: the user is the test's own, its HOME the scratch home.
+    script = f"""
+REPO="{REPO_ROOT}"; . "$REPO/packaging/verify-lib.sh"
+ASH_VENV="{tmp_path / "venv"}"
+DEPS_LOG="{tmp_path / "deps.log"}"
+id() {{ return 0; }}
+su() {{ shift 4; HOME="{home}" PATH="{bindir}:$PATH" PLANT="{plant}" bash -c "$1"; }}
+vl_assert_dependency_selection
+"""
+    return subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, check=False
+    )
+
+
+def test_the_selection_check_passes_on_the_real_behavior(tmp_path: Path) -> None:
+    result = _run_selection(tmp_path, "none")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "refused with EXIT_BAD_SELECTION (2)" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("plant", "message"),
+    [
+        ("unknown-accepted", "--tool nonexistent exited 0, not EXIT_BAD_SELECTION (2)"),
+        (
+            "unknown-wrong-code",
+            "--tool nonexistent exited 1, not EXIT_BAD_SELECTION (2)",
+        ),
+        ("no-digest-verify", "did not verify grype against its pinned digest"),
+        ("wrong-version", "not the pinned 0.111.0"),
+    ],
+)
+def test_the_selection_check_rejects_each_planted_defect(
+    tmp_path: Path, plant: str, message: str
+) -> None:
+    result = _run_selection(tmp_path, plant)
+    assert result.returncode == 1, result.stdout
+    assert message in result.stderr
+
+
+@pytest.mark.parametrize("family", ["deb", "rpm"])
+def test_the_assert_leg_runs_the_selection_check(family: str) -> None:
+    text = (REPO_ROOT / "packaging" / family / "verify-in-container.sh").read_text(
+        encoding="utf-8"
+    )
+    assert_part = text[text.index('echo "== 4. the three e2e cases') :]
+    assert "vl_assert_dependency_selection" in assert_part
