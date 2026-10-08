@@ -48,9 +48,11 @@ it needs.
   The tool locations a scanner needs (ASH's bin directory, uv's tool and Python
   directories, the scanner's declared caches) are mounted at their usual paths.
 - Tool caches a scanner writes to (uv's cache, grype's and trivy's databases, semgrep's
-  settings) are writable through a throwaway overlay where the backend supports it:
-  writes succeed but are discarded when the scanner exits, so a scanner cannot poison
-  the cache another scanner or a later run reads.
+  settings) are writable through a throwaway overlay under bwrap (bubblewrap 0.8+ and
+  Linux 5.11+): writes succeed but are discarded when the scanner exits, so a scanner
+  cannot change the cache another scanner or a later run reads. firejail and Landlock
+  have no such overlay and mount these caches writable in place, so under them a
+  scanner can change what later runs, sandboxed or not, read from its caches.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
