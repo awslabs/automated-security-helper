@@ -106,7 +106,7 @@ say which database was stale and how old it was. See
 `--mode local` runs ASH as a Python process with no image involved:
 
 ```bash
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 ashx --mode local --source-dir .
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} ashx --mode local --source-dir .
 ```
 
 This avoids the image question entirely, at a cost: a few of the tools ASH
@@ -138,26 +138,3 @@ ashx build-image --build-target ci --custom-containerfile ./Dockerfile.internal
 Supplying a custom containerfile forces the `ci` build target, so the run-as-non-root
 configuration is not applied. Securing the final image is then yours to do — set a
 non-root `USER` in your own Dockerfile if you need one.
-
-## Third-party license files in the image
-
-The image bundles third-party programs that ASH installs from their upstream
-releases: grype, syft, trivy, opengrep and uv today. Each one's license and notice
-files are in the image under `/usr/share/doc/ash/third-party/<tool>/`, taken from the
-exact release the image carries. Beside them, a `SOURCE` file names the upstream
-repository, release tag and commit. For a copyleft tool (opengrep is LGPL-2.1), that
-file also says where the corresponding source is.
-
-`/usr/share/doc/ash/third-party/index.json` lists every bundled tool with its version,
-license expression, repository, commit and files. The image build writes it only
-after checking every entry against the built image, so it describes what is
-actually installed.
-
-```bash
-docker run --rm automated-security-helper:non-root cat /usr/share/doc/ash/third-party/index.json
-```
-
-If you redistribute the image, these are the files that go with those programs.
-Packages installed from Debian carry their own copyright files under
-`/usr/share/doc/<package>/`, and Python packages carry their license metadata in
-their `.dist-info` directories.

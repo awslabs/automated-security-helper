@@ -25,7 +25,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     register_profiles,
     set_profile_registry,
 )
-from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.core.constants import ash_reinstall_command
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -496,9 +496,7 @@ def mcp_command(
         # read "pip install --force-reinstall automated-security-helper", which
         # is an unrelated project's name on PyPI -- so following it replaced the
         # user's working ASH install with a stranger's package.
-        _stderr.print(
-            f"  [cyan]pip install --force-reinstall 'git+{ASH_REPO_URL}.git'[/cyan]"
-        )
+        _stderr.print(f"  [cyan]{ash_reinstall_command()}[/cyan]")
         _stderr.print("  [cyan]uv sync --reinstall[/cyan]")
         _stderr.print()
         _stderr.print(

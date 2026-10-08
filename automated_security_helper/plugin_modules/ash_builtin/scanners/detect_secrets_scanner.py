@@ -40,6 +40,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from automated_security_helper.core.constants import ash_reinstall_command
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -48,11 +49,12 @@ from automated_security_helper.models.core import IgnorePathWithReason
 
 #: Why this scanner cannot run when its library is absent. One string, used for
 #: the recorded reason and for the log line, so the two cannot drift.
+#: The reinstall goes through ASH's git repository: the PyPI name
+#: automated-security-helper belongs to an unrelated third party.
 _MISSING_LIBRARY_REASON = (
     "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
-    "It ships as a dependency of ASH; reinstall ASH (`pip install --force-reinstall "
-    "automated-security-helper`) or install the library directly with "
-    "`pip install detect-secrets`."
+    f"It ships as a dependency of ASH; reinstall ASH (`{ash_reinstall_command()}`) "
+    "or install the library directly with `pip install detect-secrets`."
 )
 
 

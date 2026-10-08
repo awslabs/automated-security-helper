@@ -79,6 +79,8 @@ NON_VACUITY_COVERAGE = {
     "Config file path consistency": "test_config_path_check_can_fail",
     "Suppression field name": "test_suppression_check_can_fail",
     "Plugin options in docs exist and validate": "test_plugin_options_check_can_fail",
+    "Native package install pages match packaging": "test_native_package_docs_check_can_fail",
+    "Nothing installs ASH by its PyPI name": "test_index_name_install_check_can_fail",
 }
 
 
@@ -600,3 +602,411 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
         assert template[: -len(".template")] in files, (
             f"{template} is collected but its rendered doc is not"
         )
+
+
+# ---------------------------------------------------------------------------
+# Native package install pages
+# ---------------------------------------------------------------------------
+
+_NATIVE_SOURCES = (
+    "docs/content/.nav.yml",
+    "packaging/chocolatey/ash.nuspec",
+    "packaging/chocolatey/build.ps1",
+    "packaging/chocolatey/README.chocolatey",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.locale.en-US.yaml",
+    "packaging/msix/AppxManifest.xml",
+    "packaging/msix/build.ps1",
+    "packaging/msix/README.msix",
+    "packaging/flatpak/io.github.awslabs.automated_security_helper.yml",
+    "packaging/flatpak/build.sh",
+    "packaging/flatpak/README.flatpak",
+    ".github/workflows/ash-tag-on-merge.yml",
+)
+
+
+# Commands that fetch ASH from its own wheel or git URL, which the name rule must accept.
+# The git ref is assembled rather than written out, so the install-ref walk in
+# test_agent_plugin_ash_version.py does not read a pin in this file that a bump would
+# leave stale. The rule under test only cares about the shape of the command.
+_GIT_REF = "git+https://github.com/awslabs/automated-security-helper" + ".git@main"
+_NAME_RULE_MUST_NOT_FLAG = (
+    f'pip install "automated-security-helper[symbols] @ {_GIT_REF}"',
+    f"pip install {_GIT_REF}",
+    'uv pip install "automated-security-helper@https://example.invalid/ash.tar.gz"',
+    'pip install "automated-security-helper @ file:///srv/wheels/ash.whl"',
+    f"uvx --from {_GIT_REF} ashx --version",
+    "pip download ./automated_security_helper-0.0.0-py3-none-any.whl -d wheels",
+)
+
+
+@pytest.fixture
+def native_tree(gate, tmp_path, monkeypatch):
+    """A copy of the install pages and the packaging they describe, wired into the gate.
+
+    Copied rather than edited in place, so a planted defect can never be left behind
+    in the real tree by a failing assertion.
+    """
+    import shutil
+
+    for rel in _NATIVE_SOURCES:
+        dest = tmp_path / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO_ROOT / rel, dest)
+    pages_src = REPO_ROOT / "docs" / "content" / "docs" / "native-packages"
+    pages = tmp_path / "docs" / "content" / "docs" / "native-packages"
+    shutil.copytree(pages_src, pages)
+
+    packaging = tmp_path / "packaging"
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "DOCS_DIR", tmp_path / "docs")
+    monkeypatch.setattr(
+        gate, "DOCS_NAV_YML", tmp_path / "docs" / "content" / ".nav.yml"
+    )
+    monkeypatch.setattr(gate, "NATIVE_PACKAGES_DOCS_DIR", pages)
+    monkeypatch.setattr(gate, "PACKAGING_DIR", packaging)
+    monkeypatch.setattr(
+        gate, "CHOCOLATEY_NUSPEC", packaging / "chocolatey" / "ash.nuspec"
+    )
+    monkeypatch.setattr(
+        gate, "CHOCOLATEY_BUILD_PS1", packaging / "chocolatey" / "build.ps1"
+    )
+    monkeypatch.setattr(
+        gate,
+        "WINGET_LOCALE_MANIFEST",
+        packaging / "winget" / "Amazon.AutomatedSecurityHelper.locale.en-US.yaml",
+    )
+    monkeypatch.setattr(
+        gate, "MSIX_APPX_MANIFEST", packaging / "msix" / "AppxManifest.xml"
+    )
+    monkeypatch.setattr(gate, "MSIX_BUILD_PS1", packaging / "msix" / "build.ps1")
+    monkeypatch.setattr(
+        gate,
+        "FLATPAK_MANIFEST",
+        packaging / "flatpak" / "io.github.awslabs.automated_security_helper.yml",
+    )
+    monkeypatch.setattr(gate, "FLATPAK_BUILD_SH", packaging / "flatpak" / "build.sh")
+    monkeypatch.setattr(
+        gate,
+        "RELEASE_WORKFLOW",
+        tmp_path / ".github" / "workflows" / "ash-tag-on-merge.yml",
+    )
+    monkeypatch.setattr(gate, "collect_md_files", lambda: sorted(pages.glob("*.md")))
+    return tmp_path
+
+
+def _edit(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert old in text, f"fixture drift: {old!r} is no longer in {path.name}"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def _append_text(path: Path, text: str) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def _append_fence(path: Path, body: str) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"\n```\n{body}\n```\n")
+
+
+def test_native_package_docs_check_can_fail(gate, native_tree):
+    """Every rule in check_native_package_docs rejects the drift it names.
+
+    Each case plants one defect in a fresh copy of the tree and requires a failure
+    whose message names that defect, so a case cannot pass on some other failure.
+    The control comes first: the copied tree must pass, or the failures below would
+    say nothing about the planted defects.
+    """
+    import shutil
+
+    pages = native_tree / "docs" / "content" / "docs" / "native-packages"
+    packaging = native_tree / "packaging"
+    nav = native_tree / "docs" / "content" / ".nav.yml"
+    pristine = native_tree.parent / (native_tree.name + "-pristine")
+    shutil.copytree(native_tree, pristine)
+
+    def reset() -> None:
+        shutil.rmtree(native_tree)
+        shutil.copytree(pristine, native_tree)
+
+    assert gate.check_native_package_docs() == []
+
+    cases = [
+        (
+            "the release starts attaching a native package",
+            lambda: _edit(
+                native_tree / ".github" / "workflows" / "ash-tag-on-merge.yml",
+                "dist/*.whl dist/*.tar.gz dist/*.mcpb",
+                "dist/*.whl dist/*.tar.gz dist/*.mcpb dist/*.msix",
+            ),
+            "now attaches ['*.mcpb', '*.msix', '*.tar.gz', '*.whl']",
+        ),
+        (
+            "nuspec id renamed under the pages",
+            lambda: _edit(
+                packaging / "chocolatey" / "ash.nuspec",
+                "<id>ash</id>",
+                "<id>ash-cli</id>",
+            ),
+            "but the package id is 'ash-cli'",
+        ),
+        (
+            "choco install without --source",
+            lambda: _append_fence(pages / "chocolatey.md", "choco install ash"),
+            "with no --source",
+        ),
+        (
+            "winget install from the community source",
+            lambda: _append_fence(pages / "winget.md", "winget install ash"),
+            "without --manifest",
+        ),
+        (
+            "flatpak install from Flathub",
+            lambda: _append_fence(
+                pages / "flatpak.md",
+                "flatpak install flathub io.github.awslabs.automated_security_helper",
+            ),
+            "it is not on Flathub",
+        ),
+        (
+            "wrong Flatpak app id",
+            lambda: _append_fence(
+                pages / "flatpak.md", "flatpak run io.github.awslabs.ash --version"
+            ),
+            "Flatpak app id 'io.github.awslabs.ash'",
+        ),
+        (
+            "wrong MSIX identity name",
+            lambda: _append_fence(
+                pages / "msix.md",
+                "Get-AppxPackage -Name AWSLabs.ASH | Remove-AppxPackage",
+            ),
+            "Get-AppxPackage -Name AWSLabs.ASH",
+        ),
+        (
+            "wrong .msix filename",
+            lambda: _edit(
+                pages / "msix.md",
+                "automated-security-helper-<version>.msix'",
+                "automated_security_helper-<version>-x64.msix'",
+            ),
+            "'automated_security_helper-<version>-x64.msix' is not the filename",
+        ),
+        (
+            "flatpak build.sh renames its bundle",
+            lambda: _edit(
+                packaging / "flatpak" / "build.sh",
+                'BUNDLE="$OUTDIR/ash-${VERSION}',
+                'BUNDLE="$OUTDIR/automated-security-helper-${VERSION}',
+            ),
+            "is not the filename the build writes (automated-security-helper-<version>-<arch>.flatpak)",
+        ),
+        (
+            "a page dropped from the nav",
+            lambda: _edit(
+                nav,
+                "          - Flatpak (Linux): docs/native-packages/flatpak.md\n",
+                "",
+            ),
+            "docs/native-packages/flatpak.md is not in .nav.yml",
+        ),
+        (
+            "the nav names a page that does not exist",
+            lambda: (pages / "winget.md").rename(pages / "winget-old.md"),
+            "lists docs/native-packages/winget.md, which does not exist",
+        ),
+        (
+            "winget moniker changed",
+            lambda: _edit(
+                packaging
+                / "winget"
+                / "Amazon.AutomatedSecurityHelper.locale.en-US.yaml",
+                "Moniker: ash",
+                "Moniker: ashx",
+            ),
+            "no install page names winget_moniker 'ashx'",
+        ),
+        (
+            "the deprecated ash as a command",
+            lambda: _append_fence(pages / "msix.md", "ash --version"),
+            "runs `ash`, which no native package installs",
+        ),
+        (
+            "--command=ash in the sandbox",
+            lambda: _append_fence(
+                pages / "flatpak.md",
+                "flatpak run --command=ash io.github.awslabs.automated_security_helper",
+            ),
+            "runs `ash`, which no native package installs",
+        ),
+    ]
+    for label, plant, expected in cases:
+        reset()
+        plant()
+        failures = gate.check_native_package_docs()
+        assert any(expected in f for f in failures), (
+            f"{label}: no failure containing {expected!r}; got {failures}"
+        )
+
+
+@pytest.fixture
+def name_rule_tree(gate, tmp_path, monkeypatch):
+    """An empty repository shape for the PyPI-name rule: one doc, one README, one module."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "packaging" / "msix").mkdir(parents=True)
+    (tmp_path / "automated_security_helper").mkdir()
+    (tmp_path / "docs" / "page.md").write_text("# Page\n", encoding="utf-8")
+    (tmp_path / "packaging" / "msix" / "README.msix").write_text(
+        "Title\n=====\n", encoding="utf-8"
+    )
+    (tmp_path / "automated_security_helper" / "mod.py").write_text(
+        '"""Module."""\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "PACKAGING_DIR", tmp_path / "packaging")
+    monkeypatch.setattr(
+        gate, "collect_md_files", lambda: sorted((tmp_path / "docs").glob("*.md"))
+    )
+    return tmp_path
+
+
+def test_index_name_install_check_can_fail(gate, name_rule_tree):
+    """Each surface rejects an instruction that fetches ASH by its PyPI name.
+
+    The name belongs to an unrelated third party. Every planted case is one the
+    repository actually shipped before this check existed, in the shape it shipped:
+    an offline recipe in a README, a doc example, a `uvx` run, an f-string hint and a
+    message split across adjacent literals.
+    """
+    import shutil
+
+    doc = name_rule_tree / "docs" / "page.md"
+    readme = name_rule_tree / "packaging" / "msix" / "README.msix"
+    module = name_rule_tree / "automated_security_helper" / "mod.py"
+    pristine = name_rule_tree.parent / (name_rule_tree.name + "-pristine")
+    shutil.copytree(name_rule_tree, pristine)
+
+    def reset() -> None:
+        shutil.rmtree(name_rule_tree)
+        shutil.copytree(pristine, name_rule_tree)
+
+    assert gate.check_no_index_name_install() == []
+
+    by_name = "installs automated-security-helper by name from an index"
+    in_message = "a message sends the user to ASH's PyPI name"
+    cases = [
+        (
+            "pip download in a README's indented command",
+            lambda: _append_text(
+                readme, "\n  pip download automated-security-helper==0.0.0 -d C:\\w\n"
+            ),
+            "README.msix:4: " + by_name,
+        ),
+        (
+            "uv tool install with an extra, in a doc",
+            lambda: _append_fence(
+                doc, 'uv tool install "automated-security-helper[x]"'
+            ),
+            by_name,
+        ),
+        (
+            "uvx with an index version after @",
+            lambda: _append_fence(
+                doc, "uvx automated-security-helper@latest --version"
+            ),
+            by_name,
+        ),
+        (
+            "uv tool install with a pinned index version after @",
+            lambda: _append_fence(
+                doc, "uv tool install automated-security-helper@4.0.0"
+            ),
+            by_name,
+        ),
+        (
+            "poetry add by name",
+            lambda: _append_fence(doc, 'poetry add "automated-security-helper[cdk]"'),
+            by_name,
+        ),
+        (
+            "an @ followed by something that is not a URL",
+            lambda: _append_fence(
+                doc, 'pip install "automated-security-helper @ 4.0.0"'
+            ),
+            by_name,
+        ),
+        (
+            "a message with an index version after @",
+            lambda: _append_text(
+                module, 'MSG = "install automated-security-helper@latest"\n'
+            ),
+            in_message,
+        ),
+        (
+            "uvx by name, in a doc",
+            lambda: _append_fence(doc, "uvx automated-security-helper --mode local"),
+            by_name,
+        ),
+        (
+            "an f-string hint naming the extra",
+            lambda: _append_text(
+                module,
+                'EXTRA = "x"\nHINT = f"install automated-security-helper[{EXTRA}]"\n',
+            ),
+            "mod.py:3: " + in_message,
+        ),
+        (
+            "a reinstall hint split across adjacent literals",
+            lambda: _append_text(
+                module,
+                'REASON = ("reinstall ASH (`pip install --force-reinstall "\n'
+                '    "automated-security-helper`)")\n',
+            ),
+            in_message,
+        ),
+        (
+            "a capitalized hint with no command in front",
+            lambda: _append_text(
+                module, 'MSG = "Install automated-security-helper first"\n'
+            ),
+            in_message,
+        ),
+        (
+            "an install argv, the shape the cdk-nag scanner shipped",
+            lambda: _append_text(
+                module,
+                'CMD = [sys.executable, "-m", "pip", "install", '
+                '"automated-security-helper[cdk]"]\n',
+            ),
+            "mod.py:2: builds an install command for automated-security-helper by name",
+        ),
+    ]
+    for label, plant, expected in cases:
+        reset()
+        plant()
+        failures = gate.check_no_index_name_install()
+        assert any(expected in f for f in failures), (
+            f"{label}: no failure containing {expected!r}; got {failures}"
+        )
+
+    # What the rule must accept: ASH's own wheel, its git URL, a direct reference to
+    # it, prose that warns against the name, and docstrings and comments that
+    # explain the history.
+    reset()
+    _append_fence(doc, "\n".join(_NAME_RULE_MUST_NOT_FLAG))
+    _append_text(doc, "\nDo not run `pip download automated-security-helper`.\n")
+    _append_text(
+        readme,
+        "\nDo NOT run `pip download automated-security-helper`: it is not ASH.\n",
+    )
+    _append_text(
+        module,
+        "def f():\n"
+        '    """This used to install ``automated-security-helper[cdk]``."""\n'
+        "    # it used to say: pip install automated-security-helper\n"
+        f"    return {_NAME_RULE_MUST_NOT_FLAG[0]!r}\n"
+        'GITLAB_ID = {"id": "automated-security-helper"}\n'
+        'ARGV = ["pip", "install", "automated-security-helper @ git+https://example.invalid"]\n',
+    )
+    assert gate.check_no_index_name_install() == []
