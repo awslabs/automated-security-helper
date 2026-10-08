@@ -46,6 +46,30 @@ bodies are read too:
   than copied, so a header added there is enforced here with no second edit.
 - a directory entry must carry no bytes, because a name ending in `/` is otherwise a way to
   ship a payload under a name no rule looks at.
+- every other entry in our jar must also be what its suffix says. Text resources (plugin.xml,
+  the manifest, inspection descriptions, icons) must be NUL-free UTF-8, and a
+  `.kotlin_module` file must carry the version header kotlinc writes. Any other suffix is
+  refused until it is added to the list with a reason. The header denylist catches the
+  formats it knows; this positive half catches the ones it does not, because no binary
+  payload is NUL-free UTF-8 by accident.
+
+WHY EVERY ENTRY IS READ BY ITS RECORD AND NOT BY ITS NAME, AND DUPLICATES ARE REFUSED
+
+A ZIP may carry two entries under one name. `ZipFile.read(name)` resolves the name to the
+LAST of them, so a check that collects names and then reads by name inspects one copy and
+never sees the other: an ELF stored first under our jar's name, with a clean jar stored
+second, passed this check that way. Which copy an installer extracts is up to the installer.
+So a duplicated name is refused outright, and every body is read through its own ZipInfo.
+
+WHY THE BYTES BETWEEN ENTRIES ARE ACCOUNTED FOR
+
+The rules above read what a ZIP reader extracts. A ZIP can carry bytes no reader extracts:
+between one entry's data and the next local header, between the last entry and the central
+directory, after the end record, or in the archive comment. Those bytes still ship in the
+release asset. So the distribution and every jar must be laid out end to end, each local
+record starting where the previous one ended, the central directory starting where the last
+record ended, the end record directly after the directory, an empty comment, and nothing
+after it.
 
 `--self-test` plants each of those shapes in a synthetic distribution and requires the check
 to refuse every one and to pass a clean one. verify-in-container.sh runs it before the build,
@@ -73,9 +97,11 @@ import argparse
 import importlib.util
 import io
 import pathlib
+import struct
 import sys
 import tarfile
 import tempfile
+import warnings
 import zipfile
 from types import ModuleType
 
@@ -123,6 +149,27 @@ MIN_CLASS_MAJOR = 45
 # The package every class in this plugin lives under. A class outside it inside the plugin's
 # own jar means something was shaded or shadowed in.
 OWN_PACKAGE_PREFIX = "io/github/awslabs/ash/jetbrains/"
+
+# Suffixes of the non-class entries our jar carries, matched case-folded, and what their
+# bodies must be. Measured on the real build: META-INF/MANIFEST.MF, META-INF/plugin.xml,
+# inspectionDescriptions/AshFinding.html and META-INF/ash-jetbrains.kotlin_module. Icons and
+# message bundles are listed because the platform loads them from these suffixes.
+TEXT_RESOURCE_SUFFIXES = (
+    ".mf",
+    ".xml",
+    ".html",
+    ".svg",
+    ".properties",
+    ".txt",
+    ".md",
+    ".json",
+)
+KOTLIN_MODULE_SUFFIX = ".kotlin_module"
+# kotlinc writes a .kotlin_module as a big-endian int count of metadata version numbers, the
+# numbers, then a small protobuf of package names. The real one is 24 bytes; a module with
+# every class in one package stays far under this.
+KOTLIN_MODULE_MAX_BYTES = 64 * 1024
+KOTLIN_MODULE_MAX_VERSION_INTS = 8
 
 # Files a plugin distribution legitimately carries besides its own jar. Kept explicit, so a
 # new kind of member has to be looked at rather than tolerated by a loose pattern.
@@ -213,35 +260,159 @@ def payload_header(data: bytes) -> str | None:
     return None
 
 
+LOCAL_HEADER_SIGNATURE = b"PK\x03\x04"
+CENTRAL_HEADER_SIGNATURE = b"PK\x01\x02"
+EOCD_SIGNATURE = b"PK\x05\x06"
+DATA_DESCRIPTOR_SIGNATURE = b"PK\x07\x08"
+LOCAL_HEADER_SIZE = 30
+CENTRAL_HEADER_SIZE = 46
+EOCD_SIZE = 22
+FLAG_DATA_DESCRIPTOR = 0x08
+
+
+def zip_layout_problems(label: str, data: bytes) -> list[str]:
+    """Refuses a ZIP that carries bytes no ZIP reader would extract.
+
+    Parsed from the raw bytes rather than through zipfile, which tolerates every one of
+    these shapes by design. Zip64 is refused: nothing this project builds is that large,
+    and its sentinels would otherwise read as nonsense offsets.
+    """
+    eocd = data.rfind(EOCD_SIGNATURE, max(0, len(data) - 0xFFFF - EOCD_SIZE))
+    if eocd < 0 or eocd + EOCD_SIZE > len(data):
+        return [f"{label} has no end-of-central-directory record"]
+    (_, _, _, count, directory_size, directory_offset, comment_length) = (
+        struct.unpack_from("<HHHHIIH", data, eocd + 4)
+    )
+    if (
+        count == 0xFFFF
+        or directory_size == 0xFFFFFFFF
+        or directory_offset == 0xFFFFFFFF
+    ):
+        return [f"{label} is a Zip64 archive, which this check does not read"]
+    problems: list[str] = []
+    if comment_length != 0:
+        problems.append(
+            f"{label} carries a {comment_length}-byte archive comment, bytes no reader extracts"
+        )
+    trailing = len(data) - (eocd + EOCD_SIZE + comment_length)
+    if trailing != 0:
+        problems.append(
+            f"{label} has {trailing} byte(s) after its end record that no reader extracts"
+            if trailing > 0
+            else f"{label} declares a comment that runs past the end of the file"
+        )
+    if directory_offset + directory_size != eocd:
+        problems.append(
+            f"{label}: the central directory ends at byte {directory_offset + directory_size} "
+            f"but the end record is at byte {eocd}, so bytes between them are not extracted"
+        )
+
+    records: list[
+        tuple[int, int, int, str]
+    ] = []  # offset, compressed size, flags, name
+    cursor = directory_offset
+    for index in range(count):
+        if data[cursor : cursor + 4] != CENTRAL_HEADER_SIGNATURE:
+            return problems + [
+                f"{label}: central-directory entry {index + 1} has no signature"
+            ]
+        (flags,) = struct.unpack_from("<H", data, cursor + 8)
+        (compressed,) = struct.unpack_from("<I", data, cursor + 20)
+        name_length, extra_length, comment = struct.unpack_from(
+            "<HHH", data, cursor + 28
+        )
+        (offset,) = struct.unpack_from("<I", data, cursor + 42)
+        name = data[
+            cursor + CENTRAL_HEADER_SIZE : cursor + CENTRAL_HEADER_SIZE + name_length
+        ]
+        records.append((offset, compressed, flags, name.decode("utf-8", "replace")))
+        cursor += CENTRAL_HEADER_SIZE + name_length + extra_length + comment
+    if cursor != directory_offset + directory_size:
+        problems.append(
+            f"{label}: its central-directory entries end at byte {cursor}, not at the "
+            f"{directory_offset + directory_size} the end record declares"
+        )
+
+    expected = 0
+    for offset, compressed, flags, name in sorted(records):
+        if offset != expected:
+            problems.append(
+                f"{label}: {name} starts at byte {offset}, but the previous record ended at "
+                f"byte {expected}"
+                + (
+                    ", so the bytes between them are not extracted"
+                    if offset > expected
+                    else ", so two records overlap"
+                )
+            )
+            return problems
+        if data[offset : offset + 4] != LOCAL_HEADER_SIGNATURE:
+            return problems + [
+                f"{label}: {name} has no local file header at byte {offset}"
+            ]
+        name_length, extra_length = struct.unpack_from("<HH", data, offset + 26)
+        expected = offset + LOCAL_HEADER_SIZE + name_length + extra_length + compressed
+        if flags & FLAG_DATA_DESCRIPTOR:
+            has_signature = data[expected : expected + 4] == DATA_DESCRIPTOR_SIGNATURE
+            expected += 16 if has_signature else 12
+    if expected != directory_offset:
+        problems.append(
+            f"{label}: its last record ends at byte {expected} but the central directory "
+            f"starts at byte {directory_offset}, so the bytes between them are not extracted"
+        )
+    return problems
+
+
+def file_entries(
+    label: str, archive: zipfile.ZipFile, problems: list[str]
+) -> list[zipfile.ZipInfo]:
+    """The file entries of an archive, after refusing duplicated names and loaded directories."""
+    seen: dict[str, int] = {}
+    for info in archive.infolist():
+        seen[info.filename] = seen.get(info.filename, 0) + 1
+    for name, count in seen.items():
+        if count > 1:
+            problems.append(
+                f"{label} carries {count} entries named {name}. A reader resolves a name to one "
+                "of them, so the others are bytes a check by name never sees."
+            )
+    files: list[zipfile.ZipInfo] = []
+    for info in archive.infolist():
+        if info.is_dir():
+            if info.file_size != 0:
+                problems.append(
+                    f"{label} contains {info.filename}, a directory entry that carries "
+                    f"{info.file_size} byte(s)"
+                )
+            continue
+        files.append(info)
+    return files
+
+
 def inspect_distribution(
     distribution: pathlib.Path, own_jar_prefix: str
 ) -> tuple[list[str], list[str]]:
     """Returns the distribution's file members and every problem found in them."""
     problems: list[str] = []
-    with open(distribution, "rb") as handle:
-        if not starts_with_zip(handle.read(4)):
-            problems.append(
-                f"{distribution.name} does not begin with a ZIP record, so something precedes "
-                "the archive. A zip appended to an executable still lists cleanly."
-            )
+    data = distribution.read_bytes()
+    if not starts_with_zip(data[:4]):
+        problems.append(
+            f"{distribution.name} does not begin with a ZIP record, so something precedes "
+            "the archive. A zip appended to an executable still lists cleanly."
+        )
 
     try:
-        archive = zipfile.ZipFile(distribution)
+        archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as error:
         problems.append(f"{distribution.name} does not open as a ZIP archive: {error}")
         return [], problems
+    problems.extend(zip_layout_problems(distribution.name, data))
     with archive:
-        members: list[str] = []
-        for info in archive.infolist():
-            if info.is_dir():
-                if info.file_size != 0:
-                    problems.append(
-                        f"{info.filename} is a directory entry that carries {info.file_size} byte(s)"
-                    )
-                continue
-            members.append(info.filename)
+        infos = file_entries(distribution.name, archive, problems)
+        members = [info.filename for info in infos]
 
-        for name in members:
+        for info in infos:
+            name = info.filename
             if name.endswith(".jar"):
                 base = pathlib.PurePosixPath(name).name
                 if not base.startswith(own_jar_prefix):
@@ -251,7 +422,7 @@ def inspect_distribution(
                         "artifact published as a release asset. See packaging/README.md."
                     )
                     continue
-                problems.extend(check_own_jar(name, archive.read(name)))
+                problems.extend(check_own_jar(name, archive.read(info)))
                 continue
             if name.endswith(".class"):
                 # A fat jar or a shade step would land here rather than as an extra jar, so
@@ -265,6 +436,37 @@ def inspect_distribution(
                     "suffix to ALLOWED_SUFFIXES with the reason."
                 )
     return members, problems
+
+
+def text_problem(body: bytes) -> str | None:
+    if b"\x00" in body:
+        return f"carries a NUL byte at offset {body.index(0)}, so it is not text"
+    try:
+        body.decode("utf-8")
+    except UnicodeDecodeError:
+        return "is not valid UTF-8, so it is not text"
+    return None
+
+
+def resource_problem(entry: str, body: bytes) -> str | None:
+    """Why a non-class entry of our jar is not what its suffix says, or None."""
+    lowered = entry.lower()
+    if lowered.endswith(TEXT_RESOURCE_SUFFIXES):
+        return text_problem(body)
+    if lowered.endswith(KOTLIN_MODULE_SUFFIX):
+        if not entry.startswith("META-INF/"):
+            return "is a Kotlin module file outside META-INF/, where kotlinc never writes one"
+        if len(body) > KOTLIN_MODULE_MAX_BYTES:
+            return f"is {len(body)} bytes, over the {KOTLIN_MODULE_MAX_BYTES}-byte Kotlin module ceiling"
+        version_ints = int.from_bytes(body[:4], "big") if len(body) >= 4 else 0
+        header_ok = 1 <= version_ints <= KOTLIN_MODULE_MAX_VERSION_INTS
+        if not header_ok or len(body) < 4 * (1 + version_ints):
+            return "does not begin with the metadata version header kotlinc writes"
+        return None
+    return (
+        "has a suffix this check does not know, so its bytes cannot be held to anything. If "
+        "it belongs, add the suffix to TEXT_RESOURCE_SUFFIXES or a rule of its own, with the reason"
+    )
 
 
 def check_own_jar(name: str, data: bytes) -> list[str]:
@@ -281,22 +483,17 @@ def check_own_jar(name: str, data: bytes) -> list[str]:
         inner = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as error:
         return [f"{name} begins like a ZIP but does not open as one: {error}"]
+    problems.extend(zip_layout_problems(name, data))
     with inner:
-        for info in inner.infolist():
+        for info in file_entries(name, inner, problems):
             entry = info.filename
-            if info.is_dir():
-                if info.file_size != 0:
-                    problems.append(
-                        f"{name} contains {entry}, a directory entry that carries {info.file_size} byte(s)"
-                    )
-                continue
             if info.file_size > MAX_MEMBER_BYTES:
                 problems.append(
                     f"{name} contains {entry}, {info.file_size} bytes, over the {MAX_MEMBER_BYTES}-byte "
                     "per-member ceiling the shared payload rules set"
                 )
                 continue
-            body = inner.read(entry)
+            body = inner.read(info)
             if entry.endswith(".class"):
                 if not entry.startswith(OWN_PACKAGE_PREFIX):
                     problems.append(
@@ -320,6 +517,10 @@ def check_own_jar(name: str, data: bytes) -> list[str]:
                     f"{name} contains {entry}, which carries {found}. Our jar ships classes and "
                     "resources, never an archive or an executable."
                 )
+                continue
+            reason = resource_problem(entry, body)
+            if reason is not None:
+                problems.append(f"{name} contains {entry}, which {reason}.")
     return problems
 
 
@@ -361,7 +562,12 @@ def clean_jar_entries() -> dict[str, bytes]:
     return {
         "META-INF/MANIFEST.MF": b"Manifest-Version: 1.0\r\n",
         "META-INF/plugin.xml": b"<idea-plugin/>\n",
-        "META-INF/ash-jetbrains.kotlin_module": b"\x00\x00\x00\x03\x00\x00\x00\x02",
+        # Byte for byte the file kotlinc wrote on the real build: three version ints, 2.1.0,
+        # then the package table.
+        "META-INF/ash-jetbrains.kotlin_module": (
+            b"\x00\x00\x00\x03\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00"
+            b'\x00\x00\x00\x00"\x00*\x00'
+        ),
         OWN_CLASS: CLASS_HEADER + b"\x00" * 32,
     }
 
@@ -372,6 +578,43 @@ def distribution_with_jar(jar: bytes) -> bytes:
 
 def jar_with(extra: dict[str, bytes]) -> bytes:
     return zip_bytes({**clean_jar_entries(), **extra})
+
+
+def zip_with_duplicate(
+    name: str, first: bytes, second: bytes, others: dict[str, bytes]
+) -> bytes:
+    """A ZIP carrying `name` twice. zipfile warns on the second write and writes it anyway."""
+    out = io.BytesIO()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+            for entry, data in others.items():
+                archive.writestr(entry, data)
+            archive.writestr(name, first)
+            archive.writestr(name, second)
+    return out.getvalue()
+
+
+def with_hidden_gap(data: bytes, payload: bytes) -> bytes:
+    """Inserts `payload` between the last local record and the central directory.
+
+    The end record's directory offset is moved to match, so every ZIP reader still opens the
+    archive and lists the same entries, and none of them extracts the payload.
+    """
+    eocd = data.rfind(EOCD_SIGNATURE)
+    (directory_offset,) = struct.unpack_from("<I", data, eocd + 16)
+    patched = bytearray(data[:directory_offset] + payload + data[directory_offset:])
+    struct.pack_into(
+        "<I", patched, eocd + len(payload) + 16, directory_offset + len(payload)
+    )
+    return bytes(patched)
+
+
+def with_comment(data: bytes, comment: bytes) -> bytes:
+    out = io.BytesIO(data)
+    with zipfile.ZipFile(out, "a") as archive:
+        archive.comment = comment
+    return out.getvalue()
 
 
 def self_test_cases() -> list[tuple[str, bytes, str | None]]:
@@ -450,6 +693,62 @@ def self_test_cases() -> list[tuple[str, bytes, str | None]]:
                 {OWN_JAR: jar_with({}), "ash-jetbrains/lib/gson-2.11.jar": jar_with({})}
             ),
             "did not build",
+        ),
+        (
+            "duplicate class name in our jar, ELF first and a real class second",
+            distribution_with_jar(
+                zip_with_duplicate(
+                    OWN_CLASS,
+                    ELF,
+                    CLASS_HEADER + b"\x00" * 32,
+                    {k: v for k, v in clean_jar_entries().items() if k != OWN_CLASS},
+                )
+            ),
+            "2 entries named " + OWN_CLASS,
+        ),
+        (
+            "duplicate own jar in the distribution, ELF first and a clean jar second",
+            zip_with_duplicate(OWN_JAR, ELF, jar_with({}), {}),
+            "2 entries named " + OWN_JAR,
+        ),
+        (
+            "binary with no known header renamed to an icon in our jar",
+            distribution_with_jar(
+                jar_with({"icons/ash.svg": bytes(range(1, 256)) * 4})
+            ),
+            "is not valid UTF-8",
+        ),
+        (
+            "resource with a suffix the check does not know in our jar",
+            distribution_with_jar(jar_with({"icons/ash.bin": b"plain text"})),
+            "suffix this check does not know",
+        ),
+        (
+            "Kotlin module file without the version header in our jar",
+            distribution_with_jar(
+                jar_with({"META-INF/ash-jetbrains.kotlin_module": b"\xff" * 24})
+            ),
+            "metadata version header",
+        ),
+        (
+            "ELF hidden between the records and the directory of our jar",
+            distribution_with_jar(with_hidden_gap(jar_with({}), ELF)),
+            "not extracted",
+        ),
+        (
+            "ELF hidden between the records and the directory of the distribution",
+            with_hidden_gap(distribution_with_jar(jar_with({})), ELF),
+            "not extracted",
+        ),
+        (
+            "archive comment on the distribution",
+            with_comment(distribution_with_jar(jar_with({})), b"payload"),
+            "archive comment",
+        ),
+        (
+            "bytes after the end record of the distribution",
+            distribution_with_jar(jar_with({})) + b"payload",
+            "after its end record",
         ),
         (
             "loose class",
