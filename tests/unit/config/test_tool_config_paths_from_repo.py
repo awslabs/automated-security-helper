@@ -250,7 +250,9 @@ def _forms_setup(tmp_path: Path, monkeypatch, name: str):
     home = tmp_path / "home"
     home.mkdir()
     (home / name).write_text("")
+    # expanduser reads HOME on POSIX and USERPROFILE on Windows.
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     (source / name).write_text("")
     (source / "~").mkdir()
     (source / "~" / name).write_text("")
