@@ -1802,7 +1802,7 @@ jobs:
     env:
       # Every test in the suites below at the time of writing, which is also the
       # length of the NODES list. Raise it when tests are added.
-      MIN_PASSED: "208"
+      MIN_PASSED: "210"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1891,6 +1891,7 @@ jobs:
           tests/unit/test_assert_pytest_required_nodes.py::test_a_collection_error_is_rejected
           tests/unit/test_assert_pytest_required_nodes.py::test_a_dropped_test_lowers_the_count_below_the_floor
           tests/unit/test_assert_pytest_required_nodes.py::test_a_failing_test_is_rejected
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_positional_parametrize_id_is_detected
           tests/unit/test_assert_pytest_required_nodes.py::test_a_real_colored_run_is_judged_like_a_plain_one
           tests/unit/test_assert_pytest_required_nodes.py::test_a_real_complete_run_is_accepted
           tests/unit/test_assert_pytest_required_nodes.py::test_a_renamed_test_is_rejected
@@ -1898,6 +1899,7 @@ jobs:
           tests/unit/test_assert_pytest_required_nodes.py::test_a_skipped_test_is_rejected
           tests/unit/test_assert_pytest_required_nodes.py::test_every_required_node_belongs_to_a_suite_the_job_runs
           tests/unit/test_assert_pytest_required_nodes.py::test_main_exits_non_zero_on_a_missing_node
+          tests/unit/test_assert_pytest_required_nodes.py::test_no_required_node_in_the_job_has_a_positional_id
           tests/unit/test_assert_pytest_required_nodes.py::test_self_test_passes
           tests/unit/test_assert_pytest_required_nodes.py::test_the_workflow_job_gates_on_this_guard
           tests/unit/test_cfn_lint_guard.py::test_a_mutant_that_changes_nothing_is_refused
@@ -1926,16 +1928,16 @@ jobs:
           tests/unit/test_cfn_lint_guard.py::test_suppression_detector_ignores_ordinary_metadata
           tests/unit/test_cfn_lint_guard.py::test_template_suppression_fails_the_check
           tests/unit/test_cfn_lint_guard.py::test_unknown_rule_in_report_is_refused
-          tests/unit/test_e2e_quick_create.py::TestARealRenderIsAccepted::test_accepted[hosting0-path]
-          tests/unit/test_e2e_quick_create.py::TestARealRenderIsAccepted::test_accepted[hosting1-virtual]
+          tests/unit/test_e2e_quick_create.py::TestARealRenderIsAccepted::test_accepted[dotted-path]
+          tests/unit/test_e2e_quick_create.py::TestARealRenderIsAccepted::test_accepted[undotted-virtual]
           tests/unit/test_e2e_quick_create.py::TestARealRenderIsAccepted::test_the_dotted_render_is_path_style
           tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_different_bucket
           tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_document_with_no_links
           tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_duplicated_link
-          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[edit0-not declared]
-          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[edit1-stackName is]
-          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[edit2-same region]
-          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[edit3-fragment does not start]
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[misspelled-param]
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[other-region]
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[renamed-stack]
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[wrong-fragment]
           tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_link_whose_ash_version_disagrees_with_the_template
           tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_missing_launch_region
           tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_noecho_parameter

@@ -10,6 +10,8 @@ controls run on every push that job covers.
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import re
 import subprocess
 import sys
@@ -247,3 +249,102 @@ def test_every_required_node_belongs_to_a_suite_the_job_runs() -> None:
     nodes = [line.strip() for line in nodes_block.group(1).splitlines() if line.strip()]
     assert nodes
     assert {node.split("::", 1)[0] for node in nodes} == suites
+
+
+# Run inside a collect-only pytest: for each parametrized item, report whether any
+# part of its id is pytest's positional fallback, "<argname><index>". pytest uses
+# that form only for a value it cannot render (a tuple, a dict, an object), and it
+# renumbers when a case is inserted above it. A value-derived id such as "B602" or
+# "...-s3-suffix" is stable and is not reported, which is why this asks pytest
+# rather than pattern-matching the id text.
+POSITIONAL_ID_PLUGIN = """
+import json, os
+
+def pytest_collection_finish(session):
+    out = []
+    for item in session.items:
+        spec = getattr(item, "callspec", None)
+        if spec is None:
+            continue
+        parts = spec.id.split("-")
+        if any(f"{name}{index}" in parts for name, index in spec.indices.items()):
+            out.append(item.nodeid)
+    with open(os.environ["POSITIONAL_IDS_OUT"], "w") as handle:
+        json.dump(out, handle)
+"""
+
+
+def positional_nodes(directory: Path, cwd: Path, paths: list[str]) -> list[str]:
+    """Collect ``paths`` from ``cwd`` and return the node ids with positional ids."""
+    (directory / "positional_id_plugin.py").write_text(
+        POSITIONAL_ID_PLUGIN, encoding="utf-8"
+    )
+    out = directory / "positional.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-o",
+            "addopts=",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "positional_id_plugin",
+            *paths,
+        ],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(directory),
+            "POSITIONAL_IDS_OUT": str(out),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def _required_nodes() -> list[str]:
+    job = _job_block(WORKFLOW.read_text(encoding="utf-8"), "planted-defect-suites")
+    nodes_block = re.search(
+        r"<<'NODES'\n(.*?)^\s+NODES$", job, re.MULTILINE | re.DOTALL
+    )
+    assert nodes_block, "the NODES heredoc is missing"
+    return [line.strip() for line in nodes_block.group(1).splitlines() if line.strip()]
+
+
+def test_a_positional_parametrize_id_is_detected(tmp_path: Path) -> None:
+    """The planted negative: tuple cases with no ids= get pytest's positional ids."""
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    (suite / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (suite / "test_planted.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('pair, note', [((1, 2), 'first'), ((3, 4), 'second')])\n"
+        "def test_positional(pair, note):\n    pass\n"
+        "@pytest.mark.parametrize('pair', [(1, 2)], ids=['explicit'])\n"
+        "def test_explicit(pair):\n    pass\n"
+        "@pytest.mark.parametrize('rule', ['B602', 's3-suffix'])\n"
+        "def test_value_derived(rule):\n    pass\n",
+        encoding="utf-8",
+    )
+    found = positional_nodes(tmp_path, suite, ["test_planted.py"])
+    assert sorted(found) == [
+        "test_planted.py::test_positional[pair0-first]",
+        "test_planted.py::test_positional[pair1-second]",
+    ]
+
+
+def test_no_required_node_in_the_job_has_a_positional_id(tmp_path: Path) -> None:
+    nodes = _required_nodes()
+    suites = sorted({node.split("::", 1)[0] for node in nodes})
+    assert len(nodes) > 100 and len(suites) > 1, (
+        "the NODES list parsed short; this check would be vacuous"
+    )
+    positional = positional_nodes(tmp_path, REPO, suites)
+    assert sorted(set(nodes) & set(positional)) == []
