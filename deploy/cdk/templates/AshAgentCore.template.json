@@ -886,7 +886,17 @@
    },
    "DependsOn": [
     "ImageBootstrapStarterRoleDefaultPolicy10189EBF"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "LAMBDA_INSIDE_VPC"
+     ],
+     "SuppressedRuleReasons": {
+      "LAMBDA_INSIDE_VPC": "Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data."
+     }
+    }
+   }
   },
   "ImageBootstrapBuildCBE6CA7A": {
    "Type": "Custom::AshImageBootstrap",

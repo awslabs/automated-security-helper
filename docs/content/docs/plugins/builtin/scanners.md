@@ -223,11 +223,11 @@ scanners:
       exclude_rule: []      # Rule IDs to skip
       severity: []          # Report only rules of these severities
       scan_timeout: 1800    # Seconds before the invocation is killed
-      version: "v1.15.1"    # OpenGrep version to use
+      version: "v1.30.2"    # OpenGrep version to use
       sha256: {}            # Required for any other version: digest per platform
 ```
 
-ASH pins OpenGrep v1.15.1 and verifies its SHA256 before installing it. To use
+ASH pins OpenGrep v1.30.2 and verifies its SHA256 before installing it. To use
 another version, supply the release asset's digest for each platform you install
 on, for example `sha256: {"linux/amd64": "<64 hex characters>"}`. GitHub lists a
 digest for every release asset, or run `sha256sum` on the downloaded asset. A

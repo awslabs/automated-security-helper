@@ -29,6 +29,15 @@ Decided per scan by ``content_db_staleness`` (``--allow-stale-content-db`` on th
 * ``warn``: the scan proceeds, and the same message goes to the log AND into the reports, so a
   reader of a report can see the scan ran against a stale database.
 
+``content_db_staleness_overrides`` narrows that to one database: an entry names a database, a
+policy, and a required expiration date, and holds only that database to its own policy until
+00:00 UTC on that date. It exists for an upstream publisher that has stopped publishing for a
+few days, where ``warn`` for the whole scan would also stop failing on every other database.
+An expired entry is ignored with a warning, so the database returns to the scan-wide policy
+without anyone having to remember to remove it. Either form of ``--allow-stale-content-db``
+clears the list for its scan (``content_db_staleness_flag_overrides``), so the flag still
+decides for every database.
+
 Where the fact is recorded, and why there
 -----------------------------------------
 On the scanner's SARIF invocation, as a ``toolConfigurationNotifications`` entry whose
@@ -67,7 +76,16 @@ import subprocess  # nosec B404 - fixed tool binaries, list arguments, no shell
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+)
 
 from automated_security_helper.utils.content_databases import (
     CONTENT_DATABASES,
@@ -112,6 +130,11 @@ class ContentDbAgeRecord:
     refresh: str
     error: Optional[str] = None
     timestamp_label: str = "built"
+    #: Set when a ``content_db_staleness_overrides`` entry chose ``policy`` rather than
+    #: ``content_db_staleness``: says which entry, and until when. Omitted from
+    #: ``to_dict`` when unset, so a scan with no overrides records exactly what it did
+    #: before the field existed.
+    policy_source: Optional[str] = None
 
     @property
     def age(self) -> Optional[timedelta]:
@@ -159,8 +182,13 @@ class ContentDbAgeRecord:
             )
             tail = f"To refresh it, {self.refresh}. {OPT_OUT_HINT}"
         else:
+            because = (
+                f"the {self.policy_source} sets it to warn"
+                if self.policy_source
+                else "content_db_staleness is warn"
+            )
             consequence = (
-                "The scan ran against it anyway because content_db_staleness is warn, so "
+                f"The scan ran against it anyway because {because}, so "
                 "it may be missing advisories or rules published since."
             )
             tail = f"To refresh it, {self.refresh}."
@@ -186,6 +214,7 @@ class ContentDbAgeRecord:
             "refresh": self.refresh,
             "error": self.error,
             "timestamp_label": self.timestamp_label,
+            **({"policy_source": self.policy_source} if self.policy_source else {}),
         }
 
     @classmethod
@@ -204,6 +233,7 @@ class ContentDbAgeRecord:
             refresh=str(data.get("refresh", "")),
             error=data.get("error"),
             timestamp_label=str(data.get("timestamp_label") or "built"),
+            policy_source=data.get("policy_source") or None,
         )
 
 
@@ -253,6 +283,48 @@ def resolve_policy(config: Any) -> str:
     if isinstance(value, str) and value.lower() in STALENESS_POLICIES:
         return value.lower()
     return DEFAULT_STALENESS_POLICY
+
+
+def resolve_overrides(config: Any) -> List[Any]:
+    """The config's ``content_db_staleness_overrides`` entries, expired ones included.
+
+    Expiry is decided in ``assess_scanner``, against the same clock as the measurement,
+    so that an expired entry is reported once per database it would have applied to.
+    """
+    return list(getattr(config, "content_db_staleness_overrides", None) or [])
+
+
+def _policy_for(
+    entry: ContentDatabase,
+    policy: str,
+    overrides: Sequence[Any],
+    now: datetime,
+) -> tuple[str, Optional[str]]:
+    """The policy one database is held to, and which override chose it, if any."""
+    for override in overrides:
+        if getattr(override, "database", None) != entry.name:
+            continue
+        expires = _iso(override.expires_at)
+        if override.is_expired(now):
+            ASH_LOGGER.warning(
+                f"The content_db_staleness_overrides entry for {entry.name} expired at "
+                f"{expires} and is ignored; {entry.name} is held to "
+                f"content_db_staleness ({policy}). Remove the entry from the ASH config."
+            )
+            return policy, None
+        chosen = str(getattr(override.policy, "value", override.policy)).lower()
+        if chosen not in STALENESS_POLICIES:
+            return policy, None
+        ASH_LOGGER.info(
+            f"Content database {entry.name} is held to {chosen} rather than "
+            f"content_db_staleness ({policy}) by a content_db_staleness_overrides entry "
+            f"until {expires}: {override.reason}"
+        )
+        return chosen, (
+            f"content_db_staleness_overrides entry for {entry.name}, which expires at "
+            f"{expires}"
+        )
+    return policy, None
 
 
 # --------------------------------------------------------------------------- measurement
@@ -458,8 +530,13 @@ def assess_scanner(
     sarif_report: Any,
     policy: str,
     now: Optional[datetime] = None,
+    overrides: Sequence[Any] = (),
 ) -> List[ContentDbAgeRecord]:
     """Measure every database this scanner used, log each stale one, and attach all of them.
+
+    ``policy`` is the scan-wide ``content_db_staleness``; ``overrides`` are the config's
+    ``content_db_staleness_overrides`` entries, and an unexpired one naming a database
+    replaces ``policy`` for that database only.
 
     Never raises. A failure to ask the scanner which databases it used is itself recorded as
     an unmeasurable record for each database declared for it, so a defect here cannot quietly
@@ -478,14 +555,24 @@ def assess_scanner(
     if not entries:
         return []
 
+    now = now or datetime.now(timezone.utc)
     records: List[ContentDbAgeRecord] = []
     for entry in entries:
+        try:
+            entry_policy, policy_source = _policy_for(entry, policy, overrides, now)
+        except Exception as exc:  # noqa: BLE001 - a broken override never relaxes
+            ASH_LOGGER.error(
+                f"Could not apply content_db_staleness_overrides to {entry.name}: {exc}; "
+                f"it is held to content_db_staleness ({policy})."
+            )
+            entry_policy, policy_source = policy, None
         if ctx is None:
-            record = measure(entry, ProbeContext(env={}), policy, now)
+            record = measure(entry, ProbeContext(env={}), entry_policy, now)
             record.error = f"the scanner could not describe its database: {failure}"
             record.built = None
         else:
-            record = measure(entry, ctx, policy, now)
+            record = measure(entry, ctx, entry_policy, now)
+        record.policy_source = policy_source
         records.append(record)
         if record.stale:
             level = (

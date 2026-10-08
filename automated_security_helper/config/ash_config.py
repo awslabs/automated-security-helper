@@ -1,4 +1,5 @@
 import os
+from datetime import date, datetime, timezone
 from pathlib import Path
 import re
 from pydantic import (
@@ -6,6 +7,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    field_validator,
     model_validator,
 )
 from typing import Annotated, Any, Callable, List, Dict, Literal, Optional
@@ -673,6 +675,7 @@ class RuntimeOverridesConfig(BaseModel):
         # And the staleness policy: flipping it to warn would let a scan against an
         # out-of-date vulnerability database pass.
         "/content_db_staleness",
+        "/content_db_staleness_overrides",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
@@ -890,6 +893,88 @@ class WorkspaceExecutionConfig(BaseModel):
         return max(1, min(4, cpu_count or 1))
 
 
+class ContentDbStalenessOverride(BaseModel):
+    """One content database held to a different staleness policy, until a fixed date.
+
+    ``content_db_staleness`` decides for every database at once. This narrows a
+    relaxation to the one database that needs it -- typically one whose upstream
+    publisher has stopped publishing for a while -- so every other database is still
+    held to the scan-wide policy. ``expiration`` and ``reason`` are required, the
+    same two fields a time-boxed suppression carries: an exception to a freshness
+    gate that has no end date is a permanent one. On and after ``expiration``
+    (00:00 UTC) the entry is ignored, with a warning in the log, and the database
+    falls back to ``content_db_staleness``.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    database: Annotated[
+        str,
+        Field(
+            description=(
+                "The content database's registry name, as listed in "
+                "automated_security_helper/utils/content_databases.py: grype-db, "
+                "trivy-db, semgrep-offline-rules or opengrep-offline-rules."
+            )
+        ),
+    ]
+    policy: Annotated[
+        Literal["fail", "warn"],
+        Field(
+            description="The policy this database is held to while the entry is in effect."
+        ),
+    ]
+    expiration: Annotated[
+        str,
+        Field(
+            description=(
+                "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer "
+                "applies: at 00:00 UTC that day the database returns to "
+                "content_db_staleness."
+            )
+        ),
+    ]
+    reason: Annotated[
+        str,
+        Field(
+            min_length=1, description="Required. Why this database is held differently."
+        ),
+    ]
+
+    @field_validator("database")
+    @classmethod
+    def _database_must_be_declared(cls, v: str) -> str:
+        from automated_security_helper.utils.content_databases import (
+            CONTENT_DATABASES,
+        )
+
+        names = sorted(entry.name for entry in CONTENT_DATABASES)
+        if v not in names:
+            raise ValueError(
+                f"unknown content database {v!r}; declared databases: {', '.join(names)}"
+            )
+        return v
+
+    @field_validator("expiration")
+    @classmethod
+    def _expiration_must_be_a_date(cls, v: str) -> str:
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"Invalid expiration date format. Use YYYY-MM-DD: {v}")
+        return v
+
+    @property
+    def expires_at(self) -> datetime:
+        """00:00 UTC on ``expiration``, the first instant the entry no longer applies."""
+        day = date.fromisoformat(self.expiration)
+        return datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+
+    def is_expired(self, now: Optional[datetime] = None) -> bool:
+        """True on and after 00:00 UTC on ``expiration``."""
+        return (now or datetime.now(timezone.utc)) >= self.expires_at
+
+
 class AshConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
 
@@ -969,6 +1054,21 @@ class AshConfig(BaseModel):
             )
         ),
     ] = "fail"
+
+    content_db_staleness_overrides: Annotated[
+        List[ContentDbStalenessOverride],
+        Field(
+            description=(
+                "Per-database exceptions to content_db_staleness, each with a required "
+                "expiration date and reason. An entry holds one named database to its "
+                "own policy until 00:00 UTC on its expiration date, and every database "
+                "not named keeps content_db_staleness. An expired entry is ignored with "
+                "a warning. Empty by default. Either form of --allow-stale-content-db "
+                "clears this list for that scan, so the flag still decides for every "
+                "database."
+            )
+        ),
+    ] = []
 
     ash_plugin_modules: Annotated[
         List[str],
@@ -1054,6 +1154,22 @@ class AshConfig(BaseModel):
             ),
         ),
     ] = None
+
+    @field_validator("content_db_staleness_overrides")
+    @classmethod
+    def _one_override_per_database(
+        cls, v: List[ContentDbStalenessOverride]
+    ) -> List[ContentDbStalenessOverride]:
+        seen: set[str] = set()
+        for entry in v:
+            if entry.database in seen:
+                raise ValueError(
+                    f"content database {entry.database!r} is named by more than one "
+                    "content_db_staleness_overrides entry; which one applies would be "
+                    "ambiguous"
+                )
+            seen.add(entry.database)
+        return v
 
     @model_validator(mode="after")
     def _extends_must_be_resolved(self) -> "AshConfig":

@@ -85,10 +85,10 @@
  * worth 12% to 21% per stack.
  *
  * It also made every one of the five templates unscannable. Measured directly against
- * trivy v0.69.3 -- the version this repository pins in Dockerfile's `TRIVY_VERSION`,
- * so it is the version ASH's own users get -- `trivy config` over the single-line
- * templates panics on all five, exits 2, and produces no result at all. Same trace
- * every time:
+ * trivy v0.69.3 -- the version this repository then pinned in Dockerfile's
+ * `TRIVY_VERSION`, and still the version anyone on an older ASH image gets -- `trivy
+ * config` over the single-line templates panics on all five, exits 2, and produces no
+ * result at all. Same trace every time:
  *
  *   property.go:211 -> property.go:393
  *     -> adapters/cloudformation/aws/iam.getPolicies at policy.go:24
@@ -98,7 +98,9 @@
  * single-line JSON document reports start line 0, so the low bound is -1 and the
  * slice panics. It is reached only through the CloudFormation IAM-policy adapter,
  * which is why the crash needs a template with an IAM policy in it -- and every one
- * of these has several.
+ * of these has several. trivy v0.75.0 gives values that share a line a real start
+ * line (aquasecurity/trivy#11231): minified, all five scan there at rc=0 with no panic.
+ * The gate below stays, because older trivy builds are still in use.
  *
  * Re-indented, all five scan at rc=0 and non-vacuously: AshAgentCore runs 34 tests
  * (28 successes, 6 failures), AshCodeCommitGate 36, AshDistributedPipeline 45,
@@ -202,6 +204,15 @@
  * wrong, which is the stale-prose hazard described above. Every
  * number in the paragraphs that follow is provenance for a change already landed and is
  * left as written; treat them as history, not as current state.
+ *
+ * AshCodeCommitGate HAS SINCE MOVED TO S3-ONLY. The optional VPC placement for its scan
+ * function (two parameters, a condition, a Rule, a conditional inline role policy and its
+ * suppressions) added about 3,200 bytes and put it over the cap at roughly 52,400. The
+ * trimming that remained available -- shorter reasons and descriptions -- was already
+ * done and recovered about 1,200, short of the 1,700 more the reserve needed, so it was
+ * reclassified rather than squeezed further. Console launches are unaffected, since the
+ * console reads every template from S3; only a scripted `--template-body` changes.
+ * AshAgentCore keeps the inline set non-empty.
  *
  * PER-POLICY REASONS ARE CHEAPER THAN THE ROLE-SCOPED UNION THEY REPLACED, WHICH IS THE
  * OPPOSITE OF WHAT AN EARLIER NOTE HERE PREDICTED. A union reason has to describe every
@@ -317,10 +328,15 @@ const INLINE_TEMPLATE_BUDGET_BYTES = INLINE_TEMPLATE_BODY_MAX_BYTES - INLINE_RES
 const S3_TEMPLATE_BODY_MAX_BYTES = 1_048_576;
 
 /** Launchable with `--template-body`. Keep in step with README.md. */
-const INLINE_LAUNCHABLE = ['AshAgentCore', 'AshCodeCommitGate', 'AshEksOperator'];
+const INLINE_LAUNCHABLE = ['AshAgentCore', 'AshEksOperator'];
 
 /** Must be uploaded and launched with `--template-url`. Keep in step with README.md. */
-const S3_URL_ONLY = ['AshDistributedPipeline', 'AshFargate', 'AshImagePipeline'];
+const S3_URL_ONLY = [
+  'AshCodeCommitGate',
+  'AshDistributedPipeline',
+  'AshFargate',
+  'AshImagePipeline',
+];
 
 const ALL_STACKS = [...INLINE_LAUNCHABLE, ...S3_URL_ONLY];
 
@@ -359,8 +375,9 @@ const SUPPRESSION_ENTRIES: Record<string, number> = {
   // 7 and 55 until the MCP auth secret left these two stacks, which do not serve
   // MCP. The gate lost the secret's AwsSolutions-SMG4 entry; the pipeline lost that
   // and five inert IAM5 entries, one per shard and merge `SecretsmanagerAccess`
-  // policy.
-  AshCodeCommitGate: 6,
+  // policy. The gate then gained one back with its optional VPC placement: the
+  // conditional `ScanFunctionRoleEc2Access` policy's entry.
+  AshCodeCommitGate: 7,
   AshDistributedPipeline: 49,
   AshFargate: 9,
   AshImagePipeline: 8,
@@ -372,8 +389,8 @@ const SUPPRESSION_ENTRIES: Record<string, number> = {
   AshEksOperator: 1,
 };
 
-/** 83, spelled out so the total is asserted and not merely derived from the map. */
-const SUPPRESSION_ENTRIES_TOTAL = 83;
+/** 84, spelled out so the total is asserted and not merely derived from the map. */
+const SUPPRESSION_ENTRIES_TOTAL = 84;
 
 /**
  * The entries no cdk-nag rule consults, named so the next reader can tell a known
@@ -528,7 +545,8 @@ describe('committed templates stay indented', () => {
   // WHAT BREAKS THEM: setting `@aws-cdk/core:suppressTemplateIndentation` to true in
   // cdk.json's context and re-running `npm run synth`. `Stack._synthesizeTemplate`
   // then passes `indent = undefined` to `JSON.stringify`, the whole template becomes
-  // one line, and trivy v0.69.3 panics on all five rather than scanning them.
+  // one line, and trivy v0.69.3 panics on all five rather than scanning them (v0.75.0
+  // does not).
   test.each(ALL_STACKS)('%s contains newlines', (stack) => {
     expect(templateText(stack)).toContain('\n');
   });
@@ -552,7 +570,7 @@ describe('the shipped cdk-nag suppression population', () => {
     },
   );
 
-  test('the six templates ship 83 suppression entries between them', () => {
+  test('the six templates ship 84 suppression entries between them', () => {
     const total = ALL_STACKS.reduce((n, stack) => n + suppressionEntries(stack).length, 0);
     expect(total).toBe(SUPPRESSION_ENTRIES_TOTAL);
     // Non-vacuity for the map above: a typo that made every count 0 would satisfy

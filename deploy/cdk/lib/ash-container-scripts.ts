@@ -313,8 +313,8 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * ---------------------------------------------------
  * Comments inside the script below are not free. The script is inlined into the
  * buildspec, which is inlined into every synthesized template, and CloudFormation
- * refuses an inline `--template-body` over 51,200 bytes — a ceiling two of these
- * templates sit just under. This JSDoc, by contrast, is stripped at synth and
+ * refuses an inline `--template-body` over 51,200 bytes — a ceiling one of these
+ * templates sits just under. This JSDoc, by contrast, is stripped at synth and
  * costs nothing.
  *
  * So the reasoning lives here and the script carries only what an operator

@@ -1,6 +1,25 @@
 # yaml-language-server: $schema=../automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
+# === Time-boxed: upstream trivy-db publishing outage (expires 2026-10-11T00:00:00Z) ===
+# The scheduled "Trivy DB" publish workflow in aquasecurity/trivy-db has failed on every
+# run from 2026-10-07 12:09Z on (https://github.com/aquasecurity/trivy-db/actions), so the
+# newest published trivy-db was built 2026-10-07T07:38:55Z and is past its 24h bound on
+# every run of these legs. This entry holds trivy-db, and only trivy-db, to warn: the scan
+# still prints the stale-database warning and records it in every report, while grype-db
+# and the offline rulesets keep content_db_staleness: fail. It stops applying at 00:00 UTC
+# on its expiration date, and tests/unit/test_ci_content_db_staleness_overrides.py fails
+# from that moment until this entry is removed. This is this repository's CI config only;
+# ASH's own default is still content_db_staleness: fail with no overrides.
+content_db_staleness_overrides:
+  - database: trivy-db
+    policy: warn
+    expiration: "2026-10-11"
+    reason: >-
+      aquasecurity/trivy-db has published no database since 2026-10-07T07:38:55Z because
+      its scheduled publish workflow is failing upstream, so no refresh can bring trivy-db
+      inside its 24h bound. Time-boxed so the scan fails on a stale trivy-db again
+      without anyone having to remember to turn it back on.
 #ash_plugin_modules: []
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
@@ -1071,6 +1090,72 @@ global_settings:
         A one-shot test runner: test/snapshots.ts runs it once and reads its exit
         status, and nothing reads a HEALTHCHECK. Same reasoning as this file's
         inline CKV_DOCKER_2 skip.
+    # === GuardDog (#727): false positives, approved by the maintainer 2026-10-07 ===
+    # The same 12 entries as .ash/.ash.yaml. This is the config the self-scan runs
+    # GuardDog under, and it does not read .ash/.ash.yaml.
+    # One entry per finding, pinned to its line, so a new hit anywhere else in these
+    # files is still reported. If a line moves, the finding comes back and the entry
+    # needs its line updated, which is the point of not using a range or a glob.
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 253
+      line_end: 253
+      reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 469
+      line_end: 469
+      reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 738
+      line_end: 738
+      reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+    - rule_id: threat-filesystem-destruction
+      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
+      line_start: 443
+      line_end: 443
+      reason: "'main; rm -rf /' is an input the test asserts is rejected at synth."
+    - rule_id: threat-filesystem-read
+      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
+      line_start: 438
+      line_end: 438
+      reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
+    - rule_id: threat-filesystem-destruction
+      path: tests/snapshot/test_snapshot_normalizer.py
+      line_start: 288
+      line_end: 288
+      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
+    - rule_id: threat-filesystem-destruction
+      path: tests/snapshot/test_snapshot_normalizer.py
+      line_start: 296
+      line_end: 296
+      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_artifact_contents_gate.py
+      line_start: 771
+      line_end: 771
+      reason: "Symlink target in a synthetic archive that the gate under test must reject."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_artifact_contents_gate.py
+      line_start: 1448
+      line_end: 1448
+      reason: "Symlink target in a synthetic archive that the gate under test must reject."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_defense_in_depth.py
+      line_start: 403
+      line_end: 403
+      reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_pinned_tool_version_check.py
+      line_start: 486
+      line_end: 486
+      reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
+    - rule_id: threat-runtime-obfuscation-base64exec
+      path: tests/unit/utils/test_opengrep_pinned_download.py
+      line_start: 380
+      line_end: 380
+      reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     # === trivy license scanner: two expressions the approved list does not match ===
     #
     # The approved-license entries above are keyed on rule ids of the form

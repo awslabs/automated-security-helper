@@ -66,11 +66,12 @@
 #
 # WHAT THE CASE COUNT MEANS, AND WHY IT IS EASY TO OVERSTATE
 # ----------------------------------------------------------
-# There are 44 validation blocks across the five modules -- agentcore 5,
-# ash-image-pipeline 11, codecommit-gate 11, codepipeline-executor 8, fargate 9 --
+# There are 45 validation blocks across the five modules -- agentcore 5,
+# ash-image-pipeline 11, codecommit-gate 12, codepipeline-executor 8, fargate 9 --
 # and every one now has a `must` case proven to fire it. (42 until the two
-# kms_key_arn rules were added; the mutation note below was measured over the 42,
-# and the two new rules were mutated the same way when they landed.)
+# kms_key_arn rules and the codecommit-gate VPC rule were added; the mutation note
+# below was measured over the 42, and the two kms_key_arn rules were mutated the
+# same way when they landed.)
 #
 # It reached 42 from 10, and the interesting part is that it was first reported as
 # 13. Three rules were counted as covered on the strength of an error_message
@@ -203,7 +204,7 @@ run_case() {
     # Neither conjunct can be satisfied by the credential error that ends the
     # mustnot plans on a runner with no credentials: that text carries no
     # module's error_message, and none of the four VAR_STAGE_ERROR strings.
-    # Mutation-measured rather than argued, once per rule -- each of the 42
+    # Mutation-measured rather than argued, once per rule -- each of the 43
     # rules across the five modules was rewritten to a tautology that still
     # references its variable (`var.X == var.X`, because terraform rejects a
     # validation condition that does not refer to var.<self>, so a bare `true`
@@ -509,6 +510,19 @@ run_case "max_comment_chars below 500 -> refused" must \
 run_case "ecr_image_tag_mutability lowercase -> refused" must \
   "ecr_image_tag_mutability must be either MUTABLE or IMMUTABLE" \
   "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var ecr_image_tag_mutability=mutable
+# Cross-variable rule on vpc_subnet_ids: vpc_id and the subnets together or
+# neither. Each half-configuration is its own case, and the both-set case is the
+# mustnot control.
+run_case "vpc_id without vpc_subnet_ids -> refused" must \
+  "Set vpc_id and vpc_subnet_ids together" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var vpc_id=vpc-example
+run_case "vpc_subnet_ids without vpc_id -> refused" must \
+  "Set vpc_id and vpc_subnet_ids together" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var 'vpc_subnet_ids=["subnet-example"]'
+run_case "both VPC inputs set -> allowed" mustnot \
+  "Set vpc_id and vpc_subnet_ids together" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var vpc_id=vpc-example \
+  -var 'vpc_subnet_ids=["subnet-example"]'
 
 # A validation rule says a value is well-formed, not that the module uses it. These
 # `terraform test` files plan each module against a mocked AWS provider and assert

@@ -148,6 +148,14 @@ def npm_on_path(monkeypatch, tmp_path):
 
 
 NPM_VERSION = "10.9.2"
+YARN_VERSION = "1.22.22"
+# What `yarn audit --json` (yarn 1) prints for a clean project: one closing
+# auditSummary event. An npm-shaped document is not a yarn report.
+YARN_CLEAN_AUDIT = (
+    '{"type":"auditSummary","data":{"vulnerabilities":{"info":0,"low":0,'
+    '"moderate":0,"high":0,"critical":0},"dependencies":1,"devDependencies":0,'
+    '"optionalDependencies":0,"totalDependencies":1}}\n'
+)
 
 
 def is_audit_call(call):
@@ -175,14 +183,15 @@ def subprocess_double():
 def emits(*payloads):
     """side_effect yielding one audit payload per audit call.
 
-    The `npm --version` probe is answered separately so it does not consume a
-    payload meant for an audit.
+    The `npm --version` and `yarn --version` probes are answered separately so
+    they do not consume a payload meant for an audit.
     """
     remaining = [json.dumps(p) if not isinstance(p, str) else p for p in payloads]
 
     def _side_effect(self, command, **kwargs):
         if "--version" in command:
-            return {"stdout": NPM_VERSION, "stderr": "", "returncode": 0}
+            version = YARN_VERSION if command[0] == "yarn" else NPM_VERSION
+            return {"stdout": version, "stderr": "", "returncode": 0}
         return {
             "stdout": remaining.pop(0) if remaining else "",
             "stderr": "",
@@ -370,7 +379,9 @@ def test_lock_file_selects_the_matching_package_manager(
 ):
     """Each lock file dialect is audited with its own tool."""
     node_project(lock_name=lock_name)
-    subprocess_double.side_effect = emits(audit_json())
+    subprocess_double.side_effect = emits(
+        YARN_CLEAN_AUDIT if expected_binary == "yarn" else audit_json()
+    )
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 

@@ -1,0 +1,11 @@
+{
+  "command": [
+    "yarn",
+    "audit",
+    "--json"
+  ],
+  "returncode": 1,
+  "stderr": "/root/.cache/node/corepack/v1/yarn/1.22.22/lib/cli.js:66658\n            throw new (_errors || _load_errors()).ResponseError(_this3.reporter.lang('requestFailed', description), res.statusCode);\n            ^\n\nResponseError: Request failed \"500 Internal Server Error\"\n    at ResponseError.ExtendableBuiltin (/root/.cache/node/corepack/v1/yarn/1.22.22/lib/cli.js:696:66)\n    at new ResponseError (/root/.cache/node/corepack/v1/yarn/1.22.22/lib/cli.js:802:124)\n    at params.callback [as _callback] (/root/.cache/node/corepack/v1/yarn/1.22.22/lib/cli.js:66658:19)\n    at self.callback (/root/.cache/node/corepack/v1/yarn/1.22.22/lib/cli.js:141410:22)\n\u001b[90m    at Request.emit (node:events:519:28)\u001b[39m\n    at Request.<anonymous> (/root/.cache/node/corepack/v1/yarn/1.22.22/lib/cli.js:142382:10)\n\u001b[90m    at Request.emit (node:events:519:28)\u001b[39m\n    at IncomingMessage.<anonymous> (/root/.cache/node/corepack/v1/yarn/1.22.22/lib/cli.js:142304:12)\n\u001b[90m    at Object.onceWrapper (node:events:633:28)\u001b[39m\n\u001b[90m    at IncomingMessage.emit (node:events:531:35)\u001b[39m {\n  responseCode: \u001b[33m500\u001b[39m\n}\n\nNode.js v22.22.0\n",
+  "stdout": "",
+  "yarn_version": "1.22.22"
+}

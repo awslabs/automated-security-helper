@@ -1,0 +1,11 @@
+{
+  "command": [
+    "yarn",
+    "audit",
+    "--json"
+  ],
+  "returncode": 1,
+  "stderr": "",
+  "stdout": "\u001b[31m\u001b[1mUsage Error\u001b[22m\u001b[39m: Couldn't find a script named \"audit\".\n\n\u001b[1m$ \u001b[22myarn run [--inspect] [--inspect-brk] [-T,--top-level] [-B,--binaries-only] [--require #0] <scriptName> ...\n",
+  "yarn_version": "4.18.1"
+}

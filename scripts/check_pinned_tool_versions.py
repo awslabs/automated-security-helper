@@ -40,6 +40,26 @@ moved line or a half-applied bump is refused rather than skipped. The same test 
 runs a census of version and image pins under ``.github/workflows``,
 ``.github/actions``, ``packaging``, ``editors`` and ``deploy``, and fails on one that
 neither ``REPO_PINS`` nor its short list of reasoned exemptions accounts for.
+The Dockerfile's apt pins
+-------------------------
+Every ``apt-get install`` in the root ``Dockerfile`` names ``package=version``
+(hadolint DL3008). Debian keeps one version of a package per suite, so a point
+release or a security update can take a pinned version out of the archive, and the
+next image build then fails with ``Version '...' for '...' was not found``. This
+script reads those pins from the Dockerfile and looks each one up in the package
+indexes apt reads in the image, for amd64 and arm64: the base image's Debian suite
+with its ``-updates`` and ``-security`` suites (the codename comes from the
+``BASE_IMAGE`` tag), and the NodeSource repository for the ``NODE_MAJOR`` the
+Dockerfile configures. Each pin is reported as
+
+* ``current``: the version apt would choose today;
+* ``outdated``: still installable, but a newer version is published, typically a
+  security update. Fails with ``--fail-on-outdated``, like a tool pin;
+* ``unavailable``: no index carries it any more, so the image build is already
+  broken. Always exits 1, and the report names the version to pin instead.
+
+An ``apt-get install`` of a package with no ``=version`` is refused (exit 2) rather
+than skipped, and so is one package pinned to two versions in different stages.
 
 What was rejected
 -----------------
@@ -83,6 +103,10 @@ Known limitations
 * Pre-release suffixes compare as text after the numeric part, so ``1.2.0rc10``
   sorts before ``1.2.0rc9``. The upstream APIs above return final releases, so
   the case does not arise in practice.
+* An apt pin is checked against the indexes, not against a build: the report says
+  what apt would find, so a dependency of a pinned package that no longer resolves
+  is not caught here. Debian versions are ordered by dpkg's rules (epoch, then
+  upstream version, then revision, with ``~`` sorting before everything).
 
 Usage::
 
@@ -90,8 +114,8 @@ Usage::
     python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
 
 Exit codes: 0 when no pin is behind (or ``--fail-on-outdated`` is not given),
-1 when a pin is behind and ``--fail-on-outdated`` is given, 2 when a lookup failed
-or the pins could not be read.
+1 when a pin is behind and ``--fail-on-outdated`` is given or when an apt pin is
+unavailable, 2 when a lookup failed or the pins could not be read.
 """
 
 from __future__ import annotations
@@ -99,6 +123,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import lzma
 import os
 import re
 import sys
@@ -138,13 +163,23 @@ _SNAPSHOT_FORMAT = "%Y%m%dT%H%M%SZ"
 _GITHUB_PREFIX = "https://github.com/"
 _TIMEOUT_SECONDS = 30
 
-# The only hosts _get_json may contact: the GitHub releases API, PyPI's JSON API,
-# RubyGems' API and Docker Hub's tag API, the upstreams the pins are compared against. Every URL is built
+# The only hosts _get_bytes may contact: the GitHub releases API, PyPI's JSON API,
+# RubyGems' API and Docker Hub's tag API, the upstreams the tool pins are compared
+# against, and the Debian and NodeSource archives the Dockerfile's apt pins are looked
+# up in. Every URL is built
 # from a fixed https prefix today; this check makes that a property of the function
 # rather than of its callers, so a later caller cannot point it at a file:// path, a
 # plain-http mirror or an arbitrary host.
 _ALLOWED_HOSTS = frozenset(
-    {"api.github.com", "pypi.org", "rubygems.org", "hub.docker.com"}
+    {
+        "api.github.com",
+        "pypi.org",
+        "rubygems.org",
+        "hub.docker.com",
+        # The archives the Dockerfile's apt pins are looked up in.
+        "deb.debian.org",
+        "deb.nodesource.com",
+    }
 )
 
 EXIT_OK = 0
@@ -618,7 +653,7 @@ def _checked_url(url: str) -> str:
     return url
 
 
-def _get_json(url: str, headers: dict[str, str] | None = None) -> Any:
+def _get_bytes(url: str, headers: dict[str, str] | None = None) -> bytes:
     request = urllib.request.Request(
         _checked_url(url), headers={"User-Agent": "ash-pin-check"}
     )
@@ -626,7 +661,11 @@ def _get_json(url: str, headers: dict[str, str] | None = None) -> Any:
         request.add_header(name, value)
     # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
     with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # nosec B310 - _checked_url above allows only https to _ALLOWED_HOSTS
-        return json.load(response)
+        return response.read()
+
+
+def _get_json(url: str, headers: dict[str, str] | None = None) -> Any:
+    return json.loads(_get_bytes(url, headers))
 
 
 def latest_github_release(project: str) -> str:
@@ -840,6 +879,361 @@ def bump_steps(pins: Any, result: Result, dockerfile: Path = DOCKERFILE) -> list
 
 
 # ---------------------------------------------------------------------------
+# The Dockerfile's apt pins
+# ---------------------------------------------------------------------------
+
+APT_ARCHITECTURES = ("amd64", "arm64")
+
+# Where each archive publishes the per-architecture index apt reads. {suite} and
+# {arch} are filled in per lookup; {major} is the Dockerfile's NODE_MAJOR.
+_DEBIAN_INDEX = (
+    "https://deb.debian.org/debian/dists/{suite}/main/binary-{arch}/Packages.xz"
+)
+_DEBIAN_SECURITY_INDEX = "https://deb.debian.org/debian-security/dists/{suite}/main/binary-{arch}/Packages.xz"
+_NODESOURCE_INDEX = "https://deb.nodesource.com/node_{major}.x/dists/nodistro/main/binary-{arch}/Packages"
+
+_APT_INSTALL = re.compile(
+    r"(?<![\w-])apt-get\s[^;&|]*?(?<![\w-])install(?![\w-])(?P<args>[^;&|]*)"
+)
+_APT_PIN = re.compile(
+    r"^(?P<package>[a-z0-9][a-z0-9+.-]+)=(?P<version>[A-Za-z0-9.+~:-]+)$"
+)
+
+
+@dataclass(frozen=True)
+class AptPin:
+    package: str
+    version: str
+    lines: tuple[int, ...]  # Dockerfile line numbers that carry this pin
+
+
+@dataclass(frozen=True)
+class AptIndex:
+    label: str  # e.g. "bookworm-security"
+    url: str  # with {arch} still to fill in
+
+
+@dataclass(frozen=True)
+class AptResult:
+    pin: AptPin
+    arch: str
+    candidate: str | None  # the version apt would choose, across every index
+    status: str  # "current" | "outdated" | "unavailable" | "error"
+    detail: str = ""
+
+
+def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
+    """Each RUN instruction as its (line number, text) lines, comments dropped."""
+    blocks: list[list[tuple[int, str]]] = []
+    current: list[tuple[int, str]] | None = None
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if current is None:
+            if not re.match(r"^RUN\s", line):
+                continue
+            current = []
+            line = line[3:].strip()
+        elif line.startswith("#"):
+            continue
+        continued = line.endswith("\\")
+        current.append((number, line[:-1] if continued else line))
+        if not continued:
+            blocks.append(current)
+            current = None
+    return blocks
+
+
+def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
+    """Every ``package=version`` an ``apt-get install`` in ``dockerfile`` names.
+
+    Raises:
+        PinEnumerationError: for an installed package with no ``=version``, or one
+            pinned to two different versions. Both are refused rather than skipped:
+            the first is a pin this check cannot see, the second is two images.
+    """
+    versions: dict[str, str] = {}
+    lines: dict[str, list[int]] = {}
+    for block in _run_blocks(dockerfile.read_text(encoding="utf-8")):
+        joined = " ".join(text for _, text in block)
+        for match in _APT_INSTALL.finditer(joined):
+            for word in match.group("args").split():
+                if word.startswith("-"):
+                    continue
+                pin = _APT_PIN.match(word)
+                if pin is None:
+                    raise PinEnumerationError(
+                        f"{dockerfile.name}:{block[0][0]} installs {word!r} with apt-get "
+                        "and no version. Pin it as package=version; see the comment "
+                        "above the first apt-get install for where versions come from."
+                    )
+                package, version = pin.group("package"), pin.group("version")
+                if versions.setdefault(package, version) != version:
+                    raise PinEnumerationError(
+                        f"{package} is pinned to {versions[package]} and to {version} "
+                        f"in {dockerfile.name}; every stage has to install the same one."
+                    )
+                lines.setdefault(package, []).extend(
+                    number
+                    for number, text in block
+                    if word in re.split(r"[\s;&|]+", text)
+                )
+    return [
+        AptPin(package, versions[package], tuple(sorted(set(lines[package]))))
+        for package in sorted(versions)
+    ]
+
+
+def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
+    """The indexes apt reads in the image the Dockerfile builds.
+
+    The Debian codename is the last ``-`` part of the ``BASE_IMAGE`` default's tag
+    (``python:3.12-slim-bookworm``), and the NodeSource repository is the one
+    ``NODE_MAJOR`` names, so a base-image or Node bump moves the lookup with it.
+    """
+    text = dockerfile.read_text(encoding="utf-8")
+    base = re.search(r"^ARG BASE_IMAGE=\S+:(?P<tag>\S+)$", text, re.MULTILINE)
+    codename = base.group("tag").rsplit("-", 1)[-1] if base else ""
+    if not re.fullmatch(r"[a-z]+", codename):
+        raise PinEnumerationError(
+            f"cannot read a Debian codename from {dockerfile.name}'s ARG BASE_IMAGE; "
+            "the apt pins cannot be looked up without knowing which suite apt reads."
+        )
+    indexes = [
+        AptIndex(codename, _DEBIAN_INDEX.format(suite=codename, arch="{arch}")),
+        AptIndex(
+            f"{codename}-updates",
+            _DEBIAN_INDEX.format(suite=f"{codename}-updates", arch="{arch}"),
+        ),
+        AptIndex(
+            f"{codename}-security",
+            _DEBIAN_SECURITY_INDEX.format(suite=f"{codename}-security", arch="{arch}"),
+        ),
+    ]
+    node = re.search(r"\bNODE_MAJOR=(?P<major>\d+)\b", text)
+    if node is not None:
+        major = node.group("major")
+        indexes.append(
+            AptIndex(
+                f"nodesource node_{major}.x",
+                _NODESOURCE_INDEX.format(major=major, arch="{arch}"),
+            )
+        )
+    return indexes
+
+
+def parse_packages_index(text: str) -> dict[str, set[str]]:
+    """Package name -> every version a Debian ``Packages`` index lists for it."""
+    found: dict[str, set[str]] = {}
+    for stanza in re.split(r"\n\s*\n", text):
+        fields = dict(
+            line.split(": ", 1)
+            for line in stanza.splitlines()
+            if ": " in line and not line.startswith((" ", "\t"))
+        )
+        if "Package" in fields and "Version" in fields:
+            found.setdefault(fields["Package"], set()).add(fields["Version"].strip())
+    return found
+
+
+def _dpkg_order(char: str) -> int:
+    if char == "~":
+        return -1
+    if char.isalpha():
+        return ord(char)
+    return ord(char) + 256
+
+
+def _dpkg_compare_part(a: str, b: str) -> int:
+    """dpkg's verrevcmp: alternating non-digit and digit runs."""
+    i = j = 0
+    while i < len(a) or j < len(b):
+        first_diff = 0
+        while (i < len(a) and not a[i].isdigit()) or (
+            j < len(b) and not b[j].isdigit()
+        ):
+            ac = _dpkg_order(a[i]) if i < len(a) and not a[i].isdigit() else 0
+            bc = _dpkg_order(b[j]) if j < len(b) and not b[j].isdigit() else 0
+            if ac != bc:
+                return ac - bc
+            i += 1
+            j += 1
+        while i < len(a) and a[i] == "0":
+            i += 1
+        while j < len(b) and b[j] == "0":
+            j += 1
+        while i < len(a) and a[i].isdigit() and j < len(b) and b[j].isdigit():
+            if not first_diff:
+                first_diff = ord(a[i]) - ord(b[j])
+            i += 1
+            j += 1
+        if i < len(a) and a[i].isdigit():
+            return 1
+        if j < len(b) and b[j].isdigit():
+            return -1
+        if first_diff:
+            return first_diff
+    return 0
+
+
+def _split_debian_version(version: str) -> tuple[int, str, str]:
+    epoch, _, rest = version.rpartition(":") if ":" in version else ("0", "", version)
+    upstream, _, revision = rest.rpartition("-") if "-" in rest else (rest, "", "")
+    return int(epoch or 0), upstream, revision
+
+
+def compare_debian_versions(a: str, b: str) -> int:
+    """Negative, zero or positive as ``a`` sorts before, with or after ``b``."""
+    ea, ua, ra = _split_debian_version(a)
+    eb, ub, rb = _split_debian_version(b)
+    if ea != eb:
+        return ea - eb
+    return _dpkg_compare_part(ua, ub) or _dpkg_compare_part(ra, rb)
+
+
+def _newest(versions: Iterable[str]) -> str | None:
+    newest = None
+    for version in versions:
+        if newest is None or compare_debian_versions(version, newest) > 0:
+            newest = version
+    return newest
+
+
+def fetch_index(url: str) -> str:
+    """One ``Packages`` index as text, decompressing ``.xz``."""
+    data = _get_bytes(url)
+    if url.endswith(".xz"):
+        data = lzma.decompress(data)
+    return data.decode("utf-8")
+
+
+def check_apt(
+    pins: Iterable[AptPin],
+    indexes: Iterable[AptIndex],
+    fetch: Callable[[str], str] = fetch_index,
+    architectures: Iterable[str] = APT_ARCHITECTURES,
+) -> list[AptResult]:
+    """Each pin against every index, once per architecture."""
+    pins, indexes = list(pins), list(indexes)
+    results: list[AptResult] = []
+    for arch in architectures:
+        available: dict[str, set[str]] = {}
+        failed: list[str] = []
+        for index in indexes:
+            url = index.url.format(arch=arch)
+            try:
+                listed = parse_packages_index(fetch(url))
+            except Exception as exc:  # reported per pin, and it fails the run
+                failed.append(f"{index.label} ({url}): {type(exc).__name__}: {exc}")
+                continue
+            for package, versions in listed.items():
+                available.setdefault(package, set()).update(versions)
+        for pin in pins:
+            versions = available.get(pin.package, set())
+            candidate = _newest(versions)
+            if failed:
+                results.append(
+                    AptResult(pin, arch, candidate, "error", "; ".join(failed))
+                )
+            elif candidate is None:
+                # Gone altogether, not merely moved on: apt cannot install it at any
+                # version, so the build is as broken as for a retired version.
+                results.append(
+                    AptResult(
+                        pin, arch, None, "unavailable", "no index lists the package"
+                    )
+                )
+            elif pin.version not in versions:
+                results.append(AptResult(pin, arch, candidate, "unavailable"))
+            elif compare_debian_versions(candidate, pin.version) > 0:
+                results.append(AptResult(pin, arch, candidate, "outdated"))
+            else:
+                results.append(AptResult(pin, arch, candidate, "current"))
+    return results
+
+
+def render_apt_report(results: list[AptResult], markdown: bool = False) -> str:
+    columns = (
+        "package",
+        "pinned",
+        "arch",
+        "apt would choose",
+        "status",
+        "Dockerfile lines",
+    )
+    rows = [
+        (
+            r.pin.package,
+            r.pin.version,
+            r.arch,
+            r.candidate or "?",
+            r.status,
+            ", ".join(str(n) for n in r.pin.lines),
+        )
+        for r in results
+    ]
+    out = ["## Dockerfile apt pins\n" if markdown else "\nDockerfile apt pins"]
+    if markdown:
+        out.append("| " + " | ".join(columns) + " |")
+        out.append("|" + "|".join("---" for _ in columns) + "|")
+        out += ["| " + " | ".join(row) + " |" for row in rows]
+    else:
+        widths = [
+            max(len(c), *(len(row[i]) for row in rows)) for i, c in enumerate(columns)
+        ]
+        fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+        out.append(fmt.format(*columns))
+        out.append(fmt.format(*("-" * w for w in widths)))
+        out += [fmt.format(*row).rstrip() for row in rows]
+
+    bullet = "- " if markdown else "  - "
+    seen: set[tuple[str, str]] = set()
+    for r in results:
+        if r.status not in ("unavailable", "outdated"):
+            continue
+        if (r.pin.package, r.candidate) in seen:
+            continue
+        seen.add((r.pin.package, r.candidate))
+        lines = ", ".join(f"Dockerfile:{n}" for n in r.pin.lines)
+        if r.candidate is None:
+            edit = f"{r.pin.package}={r.pin.version}"
+            why = "no index lists the package any more; the image build fails now"
+        else:
+            edit = f"{r.pin.package}={r.pin.version} -> {r.pin.package}={r.candidate}"
+            why = (
+                "no longer in any index, so the image build fails now"
+                if r.status == "unavailable"
+                else "a newer version is published"
+            )
+        out.append(
+            f"{bullet}{'`' + edit + '`' if markdown else edit} in {lines}: {why}"
+        )
+    for r in results:
+        if r.status == "error":
+            out.append(
+                f"{bullet}{r.pin.package} ({r.arch}): lookup failed ({r.detail})"
+            )
+    if all(r.status == "current" for r in results):
+        out.append("\nEvery apt pin is the version apt would choose today.")
+    return "\n".join(out) + "\n"
+
+
+# What main() fetches apt indexes with. A module global so tests can replace it, as
+# they replace DEFAULT_FETCHERS, and never reach the network.
+APT_INDEX_FETCHER: Callable[[str], str] = fetch_index
+
+
+def apt_exit_code(results: Iterable[AptResult], fail_on_outdated: bool) -> int:
+    results = list(results)
+    if any(r.status == "error" for r in results):
+        return EXIT_ERROR
+    if any(r.status == "unavailable" for r in results):
+        return EXIT_OUTDATED
+    if fail_on_outdated and any(r.status == "outdated" for r in results):
+        return EXIT_OUTDATED
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
 
@@ -940,13 +1334,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         pins = load_pins_module()
         pin_list = enumerate_pins(pins) + enumerate_repo_pins()
+        apt_pins = enumerate_apt_pins()
+        indexes = apt_indexes()
     except PinEnumerationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
     results = check(pin_list)
+    apt_results = check_apt(apt_pins, indexes, APT_INDEX_FETCHER)
     sys.stdout.write(render_report(pins, results, markdown=args.markdown))
-    return exit_code(results, args.fail_on_outdated)
+    sys.stdout.write(render_apt_report(apt_results, markdown=args.markdown))
+    # The worse of the two, where an error (2) outranks a failing pin (1).
+    return max(
+        exit_code(results, args.fail_on_outdated),
+        apt_exit_code(apt_results, args.fail_on_outdated),
+    )
 
 
 if __name__ == "__main__":

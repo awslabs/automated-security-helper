@@ -24,6 +24,17 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 )
 
 
+def _yarn_1_clean(command):
+    """yarn 1 answering `--version`, then a clean `yarn audit --json`."""
+    if "--version" in command:
+        return {"stdout": "1.22.22\n", "returncode": 0}
+    return {
+        "stdout": '{"type":"auditSummary","data":{"vulnerabilities":{"info":0,'
+        '"low":0,"moderate":0,"high":0,"critical":0}}}\n',
+        "returncode": 0,
+    }
+
+
 @pytest.fixture
 def npm_scanner(test_plugin_context):
     scanner = NpmAuditScanner(
@@ -125,7 +136,7 @@ def test_yarn_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
 
     def fake_run(command, **kwargs):
         captured_kwargs.append(kwargs)
-        return {"stdout": '{"vulnerabilities":{}}', "returncode": 0}
+        return _yarn_1_clean(command)
 
     with (
         patch(

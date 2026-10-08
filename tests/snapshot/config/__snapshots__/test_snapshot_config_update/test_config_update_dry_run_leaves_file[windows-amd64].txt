@@ -20,6 +20,7 @@ global_settings:
       - /fail_on_findings
       - /fail_on_incomplete_scanners
       - /content_db_staleness
+      - /content_db_staleness_overrides
       - /global_settings/ignore_paths
       - /global_settings/suppressions
       - /reporters/bedrock-summary-reporter/options/aws_*
@@ -28,6 +29,7 @@ global_settings:
 fail_on_findings: true
 fail_on_incomplete_scanners: true
 content_db_staleness: fail
+content_db_staleness_overrides: []
 ash_plugin_modules: []
 external_reports_to_include: []
 build: null
@@ -136,7 +138,7 @@ scanners:
       metrics: auto
       offline: false
       patterns: []
-      version: v1.15.1
+      version: v1.30.2
       sha256: {}
   semgrep:
     name: semgrep

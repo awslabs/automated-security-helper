@@ -58,7 +58,10 @@ describe('parameter names are the contract', () => {
     //
     // - `KmsKeyArn` is live. Every stack declares it, and it encrypts the log
     //   groups, the ECR repository, the secret and the Lambda environment.
-    // - `VpcSubnetIds` and `CertificateArn` are RESERVED. `ash-config.ts` ships a
+    // - `VpcSubnetIds` was reserved here and is now LIVE, with `VpcId`
+    //   beside it: AshCodeCommitGate declares both, and they place the scan function
+    //   in the adopter's VPC when set. No other stack declares either.
+    // - `CertificateArn` is RESERVED, as `VpcSubnetIds` was until the gate consumed it. `ash-config.ts` ships a
     //   factory for each, with the type and pattern settled, and no stack calls
     //   either one. They are the opt-in names the `CKV_AWS_117` and
     //   `CKV_AWS_2`/`CKV_AWS_103` suppressions in `.ash/.ash.yaml` refer to, fixed
@@ -84,6 +87,7 @@ describe('parameter names are the contract', () => {
         'McpStatelessHttp',
         'RebuildSchedule',
         'ShardCount',
+        'VpcId',
         'VpcSubnetIds',
         // Added with AshEksOperator, which is the first target to attach a Lambda
         // to a VPC and therefore the first to need a security group alongside the
@@ -96,15 +100,16 @@ describe('parameter names are the contract', () => {
   });
 
   /**
-   * The one stack that has taken `VpcSubnetIds` off the reserved list.
+   * The two stacks that have taken `VpcSubnetIds` off the reserved list.
    *
    * `AshEksOperator` attaches its installer function to a VPC so it can reach a
-   * cluster whose API endpoint is private-only, which is exactly the "until the
+   * cluster whose API endpoint is private-only, and `AshCodeCommitGate` offers the
+   * same opt-in placement for its scan function, which is exactly the "until the
    * resources that consume them land" condition the note below describes. The name
-   * going live for one stack does not un-reserve it for the others, so this is a
-   * single-stack exception rather than a relaxation of the assertion.
+   * going live for these stacks does not un-reserve it for the others, so this is a
+   * per-stack exception rather than a relaxation of the assertion.
    */
-  const VPC_SUBNETS_LIVE_IN = new Set(['AshEksOperator']);
+  const VPC_SUBNETS_LIVE_IN = new Set(['AshCodeCommitGate', 'AshEksOperator']);
 
   test('the reserved names are reserved, not quietly declared', () => {
     // The other half of the note above, as an assertion rather than a promise. If
@@ -122,16 +127,20 @@ describe('parameter names are the contract', () => {
       // cannot supply the name either: an Object.entries key is always a non-empty
       // string, so that assertion can never fail and never prints anything.
       //
-      // `kmsKeyArn` is the positive control. Without it the two reserved-name
-      // assertions would also hold for a template that declared no parameters at all.
+      // `kmsKeyArn` is the positive control. Without it the reserved-name assertion
+      // would also hold for a template that declared no parameters at all. `VpcId` is
+      // live on the gate stack only, so it is pinned to exactly it; `VpcSubnetIds` is
+      // pinned to the stacks VPC_SUBNETS_LIVE_IN names.
       expect({
         stack: id,
         vpcSubnetIds: declared.includes(ASH_PARAMETER_NAMES.vpcSubnetIds),
+        vpcId: declared.includes(ASH_PARAMETER_NAMES.vpcId),
         certificateArn: declared.includes(ASH_PARAMETER_NAMES.certificateArn),
         kmsKeyArn: declared.includes(ASH_PARAMETER_NAMES.kmsKeyArn),
       }).toEqual({
         stack: id,
         vpcSubnetIds: VPC_SUBNETS_LIVE_IN.has(id),
+        vpcId: id === 'AshCodeCommitGate',
         certificateArn: false,
         kmsKeyArn: true,
       });

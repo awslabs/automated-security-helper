@@ -142,6 +142,7 @@
 
 import { CfnResource, Stack } from 'aws-cdk-lib';
 import { CfnManagedPolicy, CfnPolicy } from 'aws-cdk-lib/aws-iam';
+import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { NagPackSuppression, NagSuppressions } from 'cdk-nag';
 import { IConstruct } from 'constructs';
 
@@ -861,3 +862,79 @@ export function suppressTaskDefinitionEnvironment(scope: IConstruct): void {
   ]);
 }
 
+
+/**
+ * The cfn-guard rules this app suppresses, each on named resources only.
+ *
+ * cfn-guard runs over the committed templates with the AWS Guard Rules Registry's
+ * wa-Security-Pillar set. Every registry rule skips a resource whose
+ * `Metadata.guard.SuppressedRules` names it, and that per-resource key is the only
+ * suppression form used here: no file-level or global suppression exists, so a new
+ * resource of the same type is evaluated like any other. Each entry was approved by
+ * the maintainers one resource at a time, and `test/ash-guard-suppressions.test.ts`
+ * pins the exact set of resources carrying one, so an entry that lands anywhere else
+ * fails the build.
+ */
+export type GuardRuleId =
+  | 'S3_BUCKET_SSL_REQUESTS_ONLY'
+  | 'LAMBDA_INSIDE_VPC'
+  | 'NO_UNRESTRICTED_ROUTE_TO_IGW';
+
+/**
+ * Suppress one cfn-guard rule on exactly one resource, recording why beside it.
+ *
+ * `scope` is an L1, or an L2 whose `defaultChild` is the L1 that carries the finding.
+ * The reason is written into the template as `Metadata.guard.SuppressedRuleReasons`,
+ * next to the `SuppressedRules` entry it justifies. cfn-guard reads only the latter;
+ * the former is for the reader of the template. Calling this twice on one resource
+ * accumulates both rules rather than replacing the first.
+ */
+export function suppressGuardRule(scope: IConstruct, rule: GuardRuleId, reason: string): void {
+  const l1 = scope instanceof CfnResource ? scope : scope.node.defaultChild;
+  if (!(l1 instanceof CfnResource)) {
+    throw new Error(`suppressGuardRule: ${scope.node.path} has no CloudFormation resource`);
+  }
+  const existing = (l1.getMetadata('guard') ?? {}) as {
+    SuppressedRules?: string[];
+    SuppressedRuleReasons?: Record<string, string>;
+  };
+  l1.addMetadata('guard', {
+    SuppressedRules: [...(existing.SuppressedRules ?? []), rule],
+    SuppressedRuleReasons: { ...(existing.SuppressedRuleReasons ?? {}), [rule]: reason },
+  });
+}
+
+/**
+ * The bucket-policy reason, shared by every bucket because the argument is the same
+ * for each: `enforceSSL: true` already denies insecure transport on that bucket.
+ */
+export const GUARD_REASON_BUCKET_TLS =
+  'enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its ' +
+  'objects (cdk-nag S10 checks it). The rule matches only a literal Principal "*", ' +
+  'Resource "*" statement, which CDK does not emit.';
+
+/** Suppress S3_BUCKET_SSL_REQUESTS_ONLY on the policy `enforceSSL` created for `bucket`. */
+export function suppressBucketTlsLiteral(bucket: Bucket): void {
+  if (!bucket.policy) {
+    throw new Error(
+      `suppressBucketTlsLiteral: ${bucket.node.path} has no bucket policy; set enforceSSL: true`,
+    );
+  }
+  suppressGuardRule(bucket.policy, 'S3_BUCKET_SSL_REQUESTS_ONLY', GUARD_REASON_BUCKET_TLS);
+}
+
+/**
+ * The gate scan function's conditional VPC network-interface policy.
+ *
+ * It exists only when the adopter supplied VpcSubnetIds (ash-codecommit-gate-stack.ts).
+ */
+export function suppressScanFunctionVpcAccess(scope: IConstruct): void {
+  suppressPolicyWildcards(scope, [
+    {
+      id: 'AwsSolutions-IAM5',
+      reason:
+        'Resource "*" on the network-interface grants Lambda documents as all-resources for ' +
+        'VPC attachment. Created only when VpcSubnetIds is set; denied to function code.',
+    },
+  ]);
+}

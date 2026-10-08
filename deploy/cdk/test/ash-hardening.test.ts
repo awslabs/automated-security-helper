@@ -336,6 +336,87 @@ describe('the Fargate VPC does not auto-assign public IPv4 addresses', () => {
   });
 });
 
+/**
+ * Logical ids of the subnets whose route table sends 0.0.0.0/0 to an internet
+ * gateway, and the types of every resource that references one of them by `Ref`.
+ */
+function internetRoutedSubnetUsers(resources: Record<string, any>): {
+  igwRoutes: number;
+  publicSubnets: string[];
+  users: Array<[string, string]>;
+} {
+  const igws = new Set(
+    Object.keys(resources).filter((id) => resources[id].Type === 'AWS::EC2::InternetGateway'),
+  );
+  const igwRouteTables = new Set<string>();
+  let igwRoutes = 0;
+  for (const resource of Object.values<any>(resources)) {
+    const props = resource.Properties ?? {};
+    if (resource.Type === 'AWS::EC2::Route' && igws.has(props.GatewayId?.Ref)) {
+      igwRoutes += 1;
+      igwRouteTables.add(props.RouteTableId?.Ref);
+    }
+  }
+  const publicSubnets = Object.values<any>(resources)
+    .filter(
+      (resource) =>
+        resource.Type === 'AWS::EC2::SubnetRouteTableAssociation' &&
+        igwRouteTables.has(resource.Properties?.RouteTableId?.Ref),
+    )
+    .map((resource) => resource.Properties.SubnetId.Ref as string);
+  const users: Array<[string, string]> = [];
+  for (const [id, resource] of Object.entries<any>(resources)) {
+    const body = JSON.stringify(resource.Properties ?? {});
+    if (publicSubnets.some((subnet) => body.includes(JSON.stringify({ Ref: subnet })))) {
+      users.push([id, resource.Type]);
+    }
+  }
+  return { igwRoutes, publicSubnets, users };
+}
+
+describe('only the NAT gateway sits in a subnet routed to the internet gateway', () => {
+  /*
+   * cfn-guard's NO_UNRESTRICTED_ROUTE_TO_IGW flags the two 0.0.0.0/0 routes to the
+   * internet gateway in AshFargate. Those routes are how the NAT gateway reaches the
+   * internet, so they cannot go while the tasks need egress (see
+   * ashFargateSubnetLayout). They expose nothing inbound only as long as the NAT
+   * gateway is the one thing placed in those subnets: the ALB is internal, the
+   * tasks run in the private subnets without a public IP, and no subnet assigns
+   * public addresses. This pins that, so a load balancer or service moved into a
+   * public subnet fails here rather than shipping behind an approved suppression.
+   */
+  const { igwRoutes, publicSubnets, users } = internetRoutedSubnetUsers(
+    TEMPLATES.AshFargate.toJSON().Resources,
+  );
+
+  test('there are internet-routed subnets to check', () => {
+    expect(igwRoutes).toBe(2);
+    expect(publicSubnets).toHaveLength(2);
+  });
+
+  test('nothing but route-table associations and the NAT gateway references them', () => {
+    const types = users.map(([, type]) => type).sort();
+    expect(types).toEqual([
+      'AWS::EC2::NatGateway',
+      'AWS::EC2::SubnetRouteTableAssociation',
+      'AWS::EC2::SubnetRouteTableAssociation',
+    ]);
+  });
+
+  test('the check sees a resource placed in a public subnet', () => {
+    // Positive control: without it, a helper that matched nothing would pass above.
+    const resources = structuredClone(TEMPLATES.AshFargate.toJSON().Resources);
+    resources.Misplaced = {
+      Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer',
+      Properties: { Subnets: [{ Ref: publicSubnets[0] }] },
+    };
+    expect(internetRoutedSubnetUsers(resources).users).toContainEqual([
+      'Misplaced',
+      'AWS::ElasticLoadBalancingV2::LoadBalancer',
+    ]);
+  });
+});
+
 describe('no IAM policy grants the same thing twice', () => {
   // `Repository.grantPull` already emits ecr:GetAuthorizationToken on "*". The
   // AgentCore execution role used to add an identical statement of its own under a
@@ -353,7 +434,7 @@ describe('no IAM policy grants the same thing twice', () => {
   );
 
   test('there are policies to check in every stack', () => {
-    // 85 across the five stacks, in the order STACKS declares them. Exact and
+    // 86 across the five stacks, in the order STACKS declares them. Exact and
     // per-stack, so one stack losing its policies to a rename cannot leave the loop
     // for that stack iterating over nothing while the others carry the assertion.
     //
@@ -361,19 +442,22 @@ describe('no IAM policy grants the same thing twice', () => {
     // ash-policy-split.ts, which files each role's statements into one
     // AWS::IAM::Policy per AWS service so that no single document trips cfn-nag's
     // W76 ceiling. The counts rose; the statements did not change, which the
-    // duplicate check below is a second witness to -- it passes over all 85.
+    // duplicate check below is a second witness to -- it passes over all 86.
     //
     // AshDistributedPipeline was 50 until the MCP auth secret left the two stacks
     // that do not serve MCP: its five shard and merge roles each lost their
     // `SecretsmanagerAccess` policy. AshCodeCommitGate's grant lived in a policy
     // that still has other statements, so its count did not move.
     //
-    // 83 of the 85 come from the split. The other two are AshAgentCore's and
-    // AshFargate's `ConfigKeyAccess`, which AshRuntimeConfig authors directly so
+    // 83 of the 86 come from the split. Two of the other three are AshAgentCore's
+    // and AshFargate's `ConfigKeyAccess`, which AshRuntimeConfig authors directly so
     // the `kms:Decrypt` grant on an adopter-supplied key can be made conditional.
     // That is why those two stacks are one higher than the split alone produces.
+    //
+    // AshCodeCommitGate's eighth is `ScanFunctionRoleEc2Access`, authored directly for
+    // the same reason: it exists only under the ScanFunctionInVpc condition.
     expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
-      10, 13, 10, 7, 45,
+      10, 13, 10, 8, 45,
     ]);
   });
 

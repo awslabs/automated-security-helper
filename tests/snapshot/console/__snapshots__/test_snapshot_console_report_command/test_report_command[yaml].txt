@@ -57,6 +57,7 @@ ash_config:
   ash_plugin_modules: []
   build: null
   content_db_staleness: fail
+  content_db_staleness_overrides: []
   converters:
     archive:
       enabled: true
@@ -80,6 +81,7 @@ ash_config:
         - /fail_on_findings
         - /fail_on_incomplete_scanners
         - /content_db_staleness
+        - /content_db_staleness_overrides
         - /global_settings/ignore_paths
         - /global_settings/suppressions
         - /reporters/bedrock-summary-reporter/options/aws_*
@@ -300,7 +302,7 @@ ash_config:
         severity: []
         severity_threshold: CRITICAL
         sha256: {}
-        version: v1.15.1
+        version: v1.30.2
     semgrep:
       enabled: true
       name: semgrep

@@ -1,0 +1,11 @@
+{
+  "command": [
+    "yarn",
+    "audit",
+    "--json"
+  ],
+  "returncode": 1,
+  "stderr": "{\"type\":\"error\",\"data\":\"Error: https://registry.yarnpkg.com/-/npm/v1/security/audits: tunneling socket could not be established, cause=connect ECONNREFUSED 127.0.0.1:9\\n    at ClientRequest.onError (/root/.cache/node/corepack/v1/yarn/1.22.22/lib/cli.js:152896:17)\\n    at Object.onceWrapper (node:events:634:26)\\n    at ClientRequest.emit (node:events:519:28)\\n    at emitErrorEvent (node:_http_client:107:11)\\n    at Socket.socketErrorListener (node:_http_client:574:5)\\n    at Socket.emit (node:events:519:28)\\n    at emitErrorNT (node:internal/streams/destroy:170:8)\\n    at emitErrorCloseNT (node:internal/streams/destroy:129:3)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)\"}\n",
+  "stdout": "{\"type\":\"info\",\"data\":\"Visit \\u001b[1mhttps://yarnpkg.com/en/docs/cli/audit\\u001b[22m for documentation about this command.\"}\n",
+  "yarn_version": "1.22.22"
+}

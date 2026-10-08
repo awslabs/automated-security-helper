@@ -1302,6 +1302,15 @@
           "title": "Content Db Staleness",
           "type": "string"
         },
+        "content_db_staleness_overrides": {
+          "default": [],
+          "description": "Per-database exceptions to content_db_staleness, each with a required expiration date and reason. An entry holds one named database to its own policy until 00:00 UTC on its expiration date, and every database not named keeps content_db_staleness. An expired entry is ignored with a warning. Empty by default. Either form of --allow-stale-content-db clears this list for that scan, so the flag still decides for every database.",
+          "items": {
+            "$ref": "#/$defs/ContentDbStalenessOverride"
+          },
+          "title": "Content Db Staleness Overrides",
+          "type": "array"
+        },
         "converters": {
           "$ref": "#/$defs/ConverterConfigSegment",
           "default": {
@@ -1372,6 +1381,7 @@
                   "/fail_on_findings",
                   "/fail_on_incomplete_scanners",
                   "/content_db_staleness",
+                  "/content_db_staleness_overrides",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1674,7 +1684,7 @@
                 "severity": [],
                 "severity_threshold": null,
                 "sha256": {},
-                "version": "v1.15.1"
+                "version": "v1.30.2"
               }
             },
             "semgrep": {
@@ -1746,6 +1756,7 @@
                 "/fail_on_findings",
                 "/fail_on_incomplete_scanners",
                 "/content_db_staleness",
+                "/content_db_staleness_overrides",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1795,6 +1806,7 @@
               "/fail_on_findings",
               "/fail_on_incomplete_scanners",
               "/content_db_staleness",
+              "/content_db_staleness_overrides",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
               "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -4491,6 +4503,45 @@
         }
       },
       "title": "Considerations",
+      "type": "object"
+    },
+    "ContentDbStalenessOverride": {
+      "additionalProperties": false,
+      "description": "One content database held to a different staleness policy, until a fixed date.\n\n``content_db_staleness`` decides for every database at once. This narrows a\nrelaxation to the one database that needs it -- typically one whose upstream\npublisher has stopped publishing for a while -- so every other database is still\nheld to the scan-wide policy. ``expiration`` and ``reason`` are required, the\nsame two fields a time-boxed suppression carries: an exception to a freshness\ngate that has no end date is a permanent one. On and after ``expiration``\n(00:00 UTC) the entry is ignored, with a warning in the log, and the database\nfalls back to ``content_db_staleness``.",
+      "properties": {
+        "database": {
+          "description": "The content database's registry name, as listed in automated_security_helper/utils/content_databases.py: grype-db, trivy-db, semgrep-offline-rules or opengrep-offline-rules.",
+          "title": "Database",
+          "type": "string"
+        },
+        "expiration": {
+          "description": "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer applies: at 00:00 UTC that day the database returns to content_db_staleness.",
+          "title": "Expiration",
+          "type": "string"
+        },
+        "policy": {
+          "description": "The policy this database is held to while the entry is in effect.",
+          "enum": [
+            "fail",
+            "warn"
+          ],
+          "title": "Policy",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Required. Why this database is held differently.",
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "database",
+        "policy",
+        "expiration",
+        "reason"
+      ],
+      "title": "ContentDbStalenessOverride",
       "type": "object"
     },
     "Contents": {
@@ -11383,7 +11434,7 @@
             "severity": [],
             "severity_threshold": null,
             "sha256": {},
-            "version": "v1.15.1"
+            "version": "v1.30.2"
           },
           "description": "Configure Opengrep scanner"
         }
@@ -11515,7 +11566,7 @@
           "type": "object"
         },
         "version": {
-          "default": "v1.15.1",
+          "default": "v1.30.2",
           "description": "Version of OpenGrep to use.",
           "title": "Version",
           "type": "string"
@@ -15916,6 +15967,7 @@
             "/fail_on_findings",
             "/fail_on_incomplete_scanners",
             "/content_db_staleness",
+            "/content_db_staleness_overrides",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -16222,7 +16274,7 @@
               "severity": [],
               "severity_threshold": null,
               "sha256": {},
-              "version": "v1.15.1"
+              "version": "v1.30.2"
             }
           },
           "description": "Configure the options for Opengrep"

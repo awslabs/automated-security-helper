@@ -54,6 +54,23 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", refuse)
 
 
+@pytest.fixture(autouse=True)
+def _recorded_apt_indexes(monkeypatch):
+    """main() also checks the Dockerfile's apt pins; answer from the recorded indexes.
+
+    tests/unit/test_apt_pin_check.py is where that check is tested. Here it only has
+    to be current, so the exit codes below are the tool pins' alone.
+    """
+    fixtures = REPO_ROOT / "tests" / "test_data" / "apt_indices"
+    monkeypatch.setattr(
+        checker,
+        "APT_INDEX_FETCHER",
+        lambda url: (
+            fixtures / url.removeprefix("https://").removesuffix(".xz")
+        ).read_text(encoding="utf-8"),
+    )
+
+
 @pytest.fixture
 def pins():
     """A fresh copy of tool_downloads per test, so monkeypatching it is local."""

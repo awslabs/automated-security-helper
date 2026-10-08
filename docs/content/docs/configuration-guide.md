@@ -194,10 +194,31 @@ entry with descriptor id `ASH-CONTENT-DB-STALE` on the scanner's invocation in
 and `enforced: false`. A reader of any of those can see the scan ran against an
 out-of-date database.
 
+To relax one database without relaxing the others, for example while an upstream
+publisher is not publishing, name it in `content_db_staleness_overrides`:
+
+```yaml
+content_db_staleness: fail
+content_db_staleness_overrides:
+  - database: trivy-db        # a name from the table above
+    policy: warn
+    expiration: "2026-10-11"  # YYYY-MM-DD; required
+    reason: "Upstream trivy-db publishing is failing"  # required
+```
+
+The entry applies only to the database it names, so every other database is
+still held to `content_db_staleness`. It stops applying at 00:00 UTC on its
+expiration date: from then on it is ignored, with a warning in the log, and the
+database is held to `content_db_staleness` again. A stale database relaxed this
+way is reported the same as under `warn`, and the message names the entry and its
+expiry. Each database can appear in at most one entry, and an unknown database
+name is a config error. The list is empty by default.
+
 The CLI flag takes precedence over the config value in both directions:
 `--no-allow-stale-content-db` restores `fail` for one scan even when the config
-says `warn`. Like `fail_on_incomplete_scanners`, it cannot be changed by an MCP
-runtime patch.
+says `warn`, and either form of the flag also clears
+`content_db_staleness_overrides` for that scan. Like `fail_on_incomplete_scanners`,
+neither key can be changed by an MCP runtime patch.
 
 This gate is independent of `fail_on_incomplete_scanners` and does not need it
 turned on. When the scan also has actionable findings, the exit code is 1 rather

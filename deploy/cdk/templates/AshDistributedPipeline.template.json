@@ -877,6 +877,16 @@
      ],
      "Version": "2012-10-17"
     }
+   },
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "S3_BUCKET_SSL_REQUESTS_ONLY"
+     ],
+     "SuppressedRuleReasons": {
+      "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+     }
+    }
    }
   },
   "AccessLogs8B620ECA": {
@@ -1063,6 +1073,16 @@
      ],
      "Version": "2012-10-17"
     }
+   },
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "S3_BUCKET_SSL_REQUESTS_ONLY"
+     ],
+     "SuppressedRuleReasons": {
+      "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+     }
+    }
    }
   },
   "Source71E471F1": {
@@ -1140,6 +1160,16 @@
       }
      ],
      "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "S3_BUCKET_SSL_REQUESTS_ONLY"
+     ],
+     "SuppressedRuleReasons": {
+      "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+     }
     }
    }
   },
@@ -1231,6 +1261,16 @@
      ],
      "Version": "2012-10-17"
     }
+   },
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "S3_BUCKET_SSL_REQUESTS_ONLY"
+     ],
+     "SuppressedRuleReasons": {
+      "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+     }
+    }
    }
   },
   "Artifacts82DD59A1": {
@@ -1319,6 +1359,16 @@
       }
      ],
      "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "S3_BUCKET_SSL_REQUESTS_ONLY"
+     ],
+     "SuppressedRuleReasons": {
+      "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+     }
     }
    }
   },

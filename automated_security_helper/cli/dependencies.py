@@ -51,12 +51,56 @@ dependencies_app = typer.Typer(
 )
 
 console = Console()
+# Deprecation warnings go to stderr so a script that parses this command's stdout
+# is not handed a line it has never seen.
+err_console = Console(stderr=True)
 
 # Exit codes. Distinct values so a caller can tell "you asked for a tool that does
 # not exist" from "the install ran and something failed".
 EXIT_OK = 0
 EXIT_INSTALL_FAILED = 1
 EXIT_BAD_SELECTION = 2
+
+# `--tool` names that stopped working when this command began building each plugin
+# from its own config section (#766), mapped to the config key that replaced them.
+#
+# Before #766 a plugin's selectable name was its default config's `name`, or its
+# class name when the plugin was built without a config. The archive converter was
+# the only bundled plugin in the second group, so it was selected as
+# `ArchiveConverter`; it is now `archive`, like its config key. Every other bundled
+# converter, scanner and reporter, including those in ash_aws_plugins and the
+# community modules, kept its name: the two commits' `Available:` lists were
+# compared for each plugin type with every bundled plugin module loaded.
+#
+# The old spelling keeps working so that scripts and docs written against it do not
+# start exiting 2, and it warns so they can move to the new key.
+DEPRECATED_TOOL_ALIASES: dict[str, str] = {
+    "ArchiveConverter": "archive",
+}
+
+
+def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
+    """Map each requested `--tool` name to the plugin name to select it by.
+
+    A deprecated alias maps to its replacement and prints one warning to stderr per
+    alias, however many times it was passed. Every other name maps to itself, so an
+    unknown name is still refused by the caller exactly as before.
+    """
+    resolved: dict[str, str] = {}
+    for tool in tools:
+        if tool in resolved:
+            continue
+        replacement = DEPRECATED_TOOL_ALIASES.get(tool)
+        if replacement is None:
+            resolved[tool] = tool
+            continue
+        err_console.print(
+            f"[bold yellow]Deprecated:[/bold yellow] --tool {escape(tool)} is "
+            f"deprecated; use --tool {escape(replacement)} instead.",
+            highlight=False,
+        )
+        resolved[tool] = replacement
+    return resolved
 
 
 @dataclass
@@ -315,23 +359,23 @@ def install_dependencies(
         )
         for plugin_class in ash_plugin_manager.plugin_modules(plugin_module_input):
             try:
-                # The plugin's own config section has to be passed in. Built from
-                # the context alone, a scanner falls back to its class defaults,
-                # so `--config-overrides scanners.semgrep.options.tool_version=...`
-                # (how the image pins bandit, checkov and semgrep through
-                # `install-pinned-tool --uv-tool-pins`) never reached it, and
-                # `uv tool install` took the default range instead of the pin.
-                # This is the lookup the scan phase uses.
+                # The plugin's own section of the resolved config, looked up the way
+                # the scan path looks it up (ExecutionEngine.get_scanner). Without
+                # it every plugin was built from its defaults, so a
+                # `--config-overrides scanners.semgrep.options.tool_version===X`
+                # reached resolved_config and stopped there: the scanner installed
+                # its default range, and the image carried whatever release PyPI
+                # had that day instead of the version its license entry records.
                 plugin_instance: PluginBase = plugin_class(
-                    config=resolved_config.get_plugin_config(
-                        plugin_type=plugin_module_input,
-                        plugin_name=plugin_config_key(plugin_class),
-                    ),
                     context=PluginContext(
                         source_dir=source_dir,
                         output_dir=output_dir,
                         work_dir=work_dir,
                         config=resolved_config,
+                    ),
+                    config=resolved_config.get_plugin_config(
+                        plugin_type=plugin_module_input,
+                        plugin_name=plugin_config_key(plugin_class),
                     ),
                 )
                 # `name` exists on every plugin config but is not always populated,
@@ -371,9 +415,19 @@ def install_dependencies(
     # a hardcoded list, so it cannot drift from the plugin registry. An unknown name
     # is refused: silently installing nothing for `--tool gryp` would be a typo that
     # reports success, which is the class of bug this whole change is about.
+    #
+    # Deprecated aliases are resolved first, so `--tool ArchiveConverter` selects,
+    # installs and is judged exactly as `--tool archive` is. An unknown name is still
+    # reported in the spelling the caller typed.
+    tool_resolution = _resolve_tool_aliases(tools)
+    requested_names = list(dict.fromkeys(tool_resolution.values()))
     if tools:
         available = sorted({name for _, name, _ in discovered})
-        unknown = [t for t in tools if t not in available]
+        unknown = [
+            typed
+            for typed, resolved_name in tool_resolution.items()
+            if resolved_name not in available
+        ]
         if unknown:
             # A plugin that failed to construct has no config, so its declared name is
             # unknowable here -- only its class name is. Rather than claim a match that
@@ -400,7 +454,7 @@ def install_dependencies(
                 )
             )
             raise typer.Exit(EXIT_BAD_SELECTION)
-        selected = [entry for entry in discovered if entry[1] in tools]
+        selected = [entry for entry in discovered if entry[1] in requested_names]
     else:
         # Only a run that was not narrowed to specific tools answers for every
         # plugin, so construction failures count against the verdict only here.
@@ -489,7 +543,7 @@ def install_dependencies(
         if outcome.needs_external_tool:
             outcome.executable = find_executable(outcome.command)
 
-    return _report_and_exit(outcomes, requested_tools=tools)
+    return _report_and_exit(outcomes, requested_tools=requested_names)
 
 
 def _report_and_exit(
