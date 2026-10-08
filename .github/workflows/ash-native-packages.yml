@@ -67,7 +67,18 @@ name: ASH - Native Packages (deb, rpm)
 # Last, each rebuilds the venv as a plain directory, the layout earlier builds of
 # these packages used, and requires a reinstall to migrate it to the symlink.
 #
-# Testing in a distribution image PUBLISHES NOTHING. Nothing here uploads a package.
+# THE RELEASE ASSETS
+#
+# Two assert legs, Debian 12 for the .deb and Amazon Linux 2023 for the .rpm, upload the
+# package they built, payload-gated, installed, scanned with and purged. Those bytes are
+# what ash-release-assets.yml gates again and a release attaches, which is why the
+# upload comes from a leg that exercised the package rather than from a separate build.
+# The other assert legs build the same package in other images and upload nothing; one
+# file per format is what a release carries. N-1 packages are never uploaded.
+#
+# Testing in a distribution image PUBLISHES NOTHING. The two uploads above are workflow
+# artifacts, which on this public repository anyone can download, and are allowlisted as
+# such in .github/scripts/assert-publish-surfaces.py. Nothing here creates a release.
 
 on:
   push:
@@ -131,6 +142,16 @@ on:
   merge_group:
     types: [checks_requested]
   workflow_dispatch: {}
+  # Called by ash-release-assets.yml for the .deb and .rpm a release attaches. `ref` is
+  # the commit to build; empty means the event's commit. The concurrency group below
+  # uses the caller's workflow name, so a call never shares a group with a push run.
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out and build. Empty means the event's commit.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -149,13 +170,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           # The same uv the container legs install (packaging/verify-lib.sh), which is
           # the floor pyproject.toml declares.
-          version: "0.12.19"
+          version: "0.12.21"
           # Stated rather than left out: the default ("auto") turns the cache on for a
           # push on a GitHub-hosted runner, a cache in this public repository is
           # readable by anyone, and .github/scripts/assert-publish-surfaces.py refuses
@@ -242,9 +265,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { label: "deb: Debian 12 (bookworm), beside Debian's ash shell", family: deb, mode: assert, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "deb: Debian 12 (bookworm), beside Debian's ash shell", family: deb, mode: assert, asset: true, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
           - { label: "deb: Ubuntu 24.04 (noble), beside Ubuntu's ash shell", family: deb, mode: assert, image: "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3" }
-          - { label: "rpm: Amazon Linux 2023", family: rpm, mode: assert, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "rpm: Amazon Linux 2023", family: rpm, mode: assert, asset: true, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
           - { label: "rpm: RHEL UBI 9", family: rpm, mode: assert, image: "redhat/ubi9@sha256:094ea2ecfd3225af8f93807b99daa9ff33710fc705ebdf6e8466f46ed605585c" }
           - { label: "upgrade: deb, Debian 12", family: deb, mode: upgrade, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
           - { label: "upgrade: deb, Ubuntu 24.04", family: deb, mode: upgrade, image: "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3" }
@@ -286,6 +309,8 @@ jobs:
           git --version
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       # Built here rather than in a shared job and downloaded, because a workflow
       # artifact on a public repository is downloadable by anyone, and the N-1 wheel is
@@ -311,4 +336,20 @@ jobs:
           export REPO="$GITHUB_WORKSPACE"
           export DIST="$RUNNER_TEMP/native-wheels/dist"
           export PREV_DIST="$RUNNER_TEMP/native-wheels/dist-prev"
+          # The package's build directory, in the workspace so the upload below can name
+          # it with a relative path (the github.workspace context is the host's path).
+          export OUT="$GITHUB_WORKSPACE/build/native-packages"
           bash "packaging/${FAMILY}/verify-in-container.sh" --mode "${MODE}"
+
+      # Only after the verification passed, and only from the two legs named in the
+      # header. `*.${{ matrix.family }}` at the top of OUT is the one package that leg
+      # built; the negative-control variants are written under subdirectories or by
+      # other legs.
+      - name: Upload the verified package for the release assets
+        if: matrix.asset
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-${{ matrix.family }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/native-packages/*.${{ matrix.family }}
+          if-no-files-found: error
+          retention-days: 14

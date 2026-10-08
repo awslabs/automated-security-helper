@@ -5,7 +5,7 @@
 
 import json
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import yaml
 
@@ -17,7 +17,10 @@ from automated_security_helper.config.config_sources import (
     read_config_file,
     resolve_config_document,
 )
-from automated_security_helper.core.exceptions import ASHConfigSourceError
+from automated_security_helper.core.exceptions import (
+    ASHConfigInputNotPermittedError,
+    ASHConfigSourceError,
+)
 
 
 class ConfigValidationError(Exception):
@@ -82,9 +85,16 @@ class ConfigValidator:
     # ConfigLinter maps to its own category.
     EXTENDS_ERROR_PREFIX = "Config extends error: "
 
+    # Prefix of the error for an `extends` base that `permit_base` refused. Its
+    # own prefix so a caller can tell a refusal from a broken chain.
+    NOT_PERMITTED_ERROR_PREFIX = "Config input not permitted: "
+
     @classmethod
     def validate_config_file(
-        cls, config_path: Path, source_dir: Optional[Path] = None
+        cls,
+        config_path: Path,
+        source_dir: Optional[Path] = None,
+        permit_base: Optional[Callable[[Path], bool]] = None,
     ) -> Tuple[bool, List[str]]:
         """Validate a configuration file and return validation results.
 
@@ -92,6 +102,8 @@ class ConfigValidator:
             config_path: Path to the configuration file
             source_dir: Path to the source directory (for resolving ignore_path patterns).
                         If None, inferred from config_path location.
+            permit_base: Optional check every ``extends`` base must also pass;
+                see ``config/config_sources.py``.
 
         Returns:
             Tuple of (is_valid, list_of_errors)
@@ -134,7 +146,11 @@ class ConfigValidator:
                     resolved_data = resolve_config_document(
                         config_path,
                         confine_to=default_confinement_root(config_path, source_dir),
+                        permit_base=permit_base,
                     ).data
+                except ASHConfigInputNotPermittedError as e:
+                    errors.append(f"{cls.NOT_PERMITTED_ERROR_PREFIX}{e}")
+                    chain_resolved = False
                 except ASHConfigSourceError as e:
                     errors.append(f"{cls.EXTENDS_ERROR_PREFIX}{e}")
                     chain_resolved = False

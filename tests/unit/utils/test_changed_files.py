@@ -4,6 +4,7 @@
 """Tests for get_changed_files() and _filter_results_to_changed_files()."""
 
 import logging
+import os
 import subprocess  # nosec B404
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -49,6 +50,8 @@ class TestGetChangedFiles:
             text=True,
             timeout=30,
             cwd=None,
+            # An explicit copy, never the live environ: see utils/process_env.py.
+            env=dict(os.environ),
         )
         assert result == [Path("src/app.py"), Path("README.md"), Path("lib/utils.js")]
 
@@ -104,6 +107,8 @@ class TestGetChangedFiles:
             text=True,
             timeout=30,
             cwd=None,
+            # An explicit copy, never the live environ: see utils/process_env.py.
+            env=dict(os.environ),
         )
         assert result == [Path("file.txt")]
 

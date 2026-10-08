@@ -180,3 +180,61 @@ jobs:
         with:
           path: ~/.cache/grype/db
           key: grype-db-${{ runner.os }}-${{ steps.key.outputs.grype-db }}
+
+  # The `ash` job above skips push, so run-ash-security-scan.yml's default-branch
+  # save of the OpenGrep binary never fires in this repository. This job is that
+  # save, the way grype-db-cache is for the grype database: without it every pull
+  # request misses and downloads the binary. The key and path must stay identical
+  # to the restore in run-ash-security-scan.yml. A week that already has an entry
+  # is a lookup and nothing else.
+  opengrep-cache:
+    name: Refresh the OpenGrep binary cache (main only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Compute the OpenGrep cache key
+        id: key
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+      - name: Look up this week's entry
+        id: lookup
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opengrep/cli/latest
+          key: opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}
+          lookup-only: true
+      # The entry written here is what run-ash-security-scan.yml restores, so it has to
+      # be the same file that workflow would install: `opengrep` at the version and
+      # SHA256 pinned in automated_security_helper/utils/tool_downloads.py. The consumer
+      # re-hashes whatever it restores against that pin and discards a mismatch, so this
+      # is not the only check -- but a seeder that cached an unverified download (which
+      # is what `gh release download --pattern` with no tag was, of whatever release was
+      # newest that day) would turn every pull request's cache hit into a re-download.
+      #
+      # install-pinned-tool.py rather than `ash dependencies install`: it needs only the
+      # runner's python3 and the checkout, so this job still installs no ASH and no uv.
+      # It reads the same table, verifies before anything lands, and exits 3 on a
+      # mismatch.
+      - name: Check out the pinned tool table
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the pinned OpenGrep release binary
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$HOME/.opengrep/cli/latest"
+          python3 automated_security_helper/assets/install-pinned-tool.py opengrep \
+            -b "$INSTALL_DIR" \
+            --pins-dir automated_security_helper
+          "$INSTALL_DIR/opengrep" --version
+      - name: Save the OpenGrep binary cache (main only)
+        if: >-
+          steps.lookup.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opengrep/cli/latest
+          key: opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}

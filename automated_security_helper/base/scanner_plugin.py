@@ -167,6 +167,40 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         )
         return super().model_post_init(context)
 
+    def _scanner_offline(self) -> bool:
+        """Whether this scanner runs offline, resolved at the moment it is asked.
+
+        Precedence, highest first:
+
+        1. ASH's offline mode -- ``--offline`` (which sets ``ASH_OFFLINE`` before any
+           scanner is built), ``ASH_OFFLINE`` in the environment, or an image built
+           with ``--offline``. It applies to every scanner and cannot be switched off
+           for one of them.
+        2. The scanner's own ``options.offline: true``, which forces that scanner
+           offline while the rest of the run stays online.
+
+        ``options.offline: false``, the default, means "follow ASH". It does not
+        re-enable the network under ``--offline``: ``ashx config init`` and the
+        documented examples write ``offline: false`` for every scanner that has the
+        option, so letting it win would put those configurations online during an
+        air-gapped run.
+
+        Why the global mode is read here and not baked into the option: the option
+        used to default to ``is_offline_mode()``, evaluated when the config object
+        was built. ``ScannerConfigSegment`` builds its default scanner configs when
+        ``ash_config`` is imported, which in local mode is before ``--offline`` sets
+        ``ASH_OFFLINE``, so ``ashx scan --offline`` left checkov, grype, syft and the
+        rest with ``offline=False`` and they went to the network. Config round-trips
+        through ``model_dump`` and ``model_validate`` carry that stale value forward,
+        so the only reliable reading is one taken when the scanner uses it.
+        """
+        from automated_security_helper.core.constants import is_offline_mode
+
+        if is_offline_mode():
+            return True
+        options = getattr(self.config, "options", None)
+        return getattr(options, "offline", False) is True
+
     def unsupported_platform_reason(self) -> str | None:
         """Why this scanner cannot run on the current platform, or None if it can.
 

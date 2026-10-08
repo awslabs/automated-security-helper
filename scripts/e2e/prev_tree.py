@@ -4,7 +4,8 @@
 
 """Exports the N-1 source tree an e2e upgrade leg builds its old package from.
 
-    prev_tree.py --repo REPO --prev-ref REF --out DIR
+    prev_tree.py --repo REPO --prev-ref REF --out DIR [--require PATH ...]
+    prev_tree.py --repo REPO --prev-ref auto --require PATH [--require PATH ...] --out DIR
 
 An upgrade leg has to cross a real code change and a real version change, or it tests
 nothing: a package upgraded to a copy of itself never runs the new install script
@@ -13,6 +14,18 @@ that packages ASH itself (Chocolatey, MSIX):
 
 1. Resolves REF. When REF has HEAD's tree, as on a push to the branch REF names, it
    uses HEAD's first parent instead, and fails if that has HEAD's tree too.
+
+   `--prev-ref auto` names no branch at all, so it keeps working after the branch an
+   explicit ref would name is merged and deleted. It takes the newest release tag
+   reachable from HEAD (`git describe --tags --match 'v[0-9]*'`), which is the version
+   a user actually upgrades from, and otherwise the newest ancestor of HEAD in
+   `--date-order`. Either one must differ from HEAD's tree and carry every --require
+   path: an ancestor that predates a channel has no package of that channel to upgrade
+   from, so it is passed over rather than built. On a pull request's merge commit that
+   walks past the base branch's side when the base predates the channel, and finds the
+   pull request's own side. When nothing qualifies it fails and says whether the clone
+   was too shallow to look (fetch with fetch-depth 0) or the history has no such
+   commit.
 2. Exports that commit with `git archive` into DIR/src, so no build step writes into
    the checkout. Zip format and Python's zipfile, so it needs no tar on Windows.
 3. Lowers the [project] version in DIR/src/pyproject.toml by decrementing its last
@@ -38,10 +51,15 @@ import subprocess  # nosec B404 - runs git on the local checkout only
 import sys
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 VERSION_LINE = re.compile(r'^version = "(?P<v>[^"]+)"(?P<eol>\r?)$', re.MULTILINE)
 DOTTED = re.compile(r"[0-9]+(\.[0-9]+)*")
+AUTO = "auto"
+# How far back `auto` looks for an ancestor. Each candidate costs one line of a single
+# batched `git cat-file`, so the bound is about not walking a whole unrelated history
+# when every commit predates the channel, not about speed.
+AUTO_WALK_LIMIT = 5000
 
 
 class DerivationError(Exception):
@@ -134,12 +152,124 @@ def resolve_prev(repo: Path, prev_ref: str) -> Tuple[str, str]:
     return "HEAD^", parent
 
 
-def derive(repo: Path, prev_ref: str, out: Path) -> Dict[str, str]:
+def missing_paths(
+    repo: Path, commits: Sequence[str], paths: Sequence[str]
+) -> Dict[str, List[str]]:
+    """{commit: [required paths absent from it]}, from one batched git cat-file."""
+    if not commits or not paths:
+        return {c: [] for c in commits}
+    queries = [f"{c}:{p}" for c in commits for p in paths]
+    result = subprocess.run(  # nosec B603 B607 - fixed git subcommand, no shell
+        ["git", "-C", str(repo), "cat-file", "--batch-check"],
+        input="".join(f"{q}\n" for q in queries),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise DerivationError(
+            f"git cat-file --batch-check failed: {result.stderr.strip()}"
+        )
+    lines = result.stdout.splitlines()
+    if len(lines) != len(queries):
+        raise DerivationError(
+            f"git cat-file answered {len(lines)} of {len(queries)} queries"
+        )
+    absent: Dict[str, List[str]] = {c: [] for c in commits}
+    for query, line in zip(queries, lines):
+        if line.endswith(" missing"):
+            commit, path = query.split(":", 1)
+            absent[commit].append(path)
+    return absent
+
+
+def resolve_auto(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
+    """The newest release tag, else the newest ancestor, that can be an N-1.
+
+    Qualifies when its tree differs from HEAD's and it carries every REQUIRE path.
+    """
+    if not require:
+        raise DerivationError(
+            "--prev-ref auto needs at least one --require path naming the channel, "
+            "or it cannot tell an ancestor that predates the channel from one that has it"
+        )
+    head_sha = git(repo, "rev-parse", "HEAD")
+    head_tree = git(repo, "rev-parse", "HEAD^{tree}")
+    candidates: List[Tuple[str, str, str]] = []  # (label, sha, tree)
+    try:
+        tag = git(
+            repo, "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD"
+        )
+    except DerivationError:
+        tag = ""
+    if tag:
+        tag_sha = git(repo, "rev-parse", f"{tag}^{{commit}}")
+        candidates.append(
+            (
+                f"{tag} (newest release tag)",
+                tag_sha,
+                git(repo, "rev-parse", f"{tag_sha}^{{tree}}"),
+            )
+        )
+    log = git(
+        repo, "log", "--date-order", f"-n{AUTO_WALK_LIMIT}", "--format=%H %T", "HEAD"
+    )
+    for line in log.splitlines():
+        sha, tree = line.split()
+        if sha != head_sha:
+            candidates.append((f"ancestor {sha[:12]}", sha, tree))
+    absent = missing_paths(repo, [c[1] for c in candidates], require)
+    passed_over: List[str] = []
+    for label, sha, tree in candidates:
+        if tree == head_tree:
+            passed_over.append(f"{label}: HEAD's tree")
+            continue
+        if absent[sha]:
+            passed_over.append(f"{label}: no {', '.join(absent[sha])}")
+            continue
+        for reason in passed_over[:5]:
+            print(f"passed over {reason}", file=sys.stderr)
+        if len(passed_over) > 5:
+            print(f"passed over {len(passed_over) - 5} more", file=sys.stderr)
+        return label, sha
+    shallow = git(repo, "rev-parse", "--is-shallow-repository") == "true"
+    walked = len(candidates)
+    if shallow:
+        raise DerivationError(
+            f"none of the {walked} commit(s) in this shallow clone differs from HEAD and "
+            f"carries {', '.join(require)}; fetch the full history (fetch-depth: 0) so "
+            "the release tags and older ancestors are there to choose from"
+        )
+    if walked >= AUTO_WALK_LIMIT:
+        raise DerivationError(
+            f"none of the newest {AUTO_WALK_LIMIT} ancestors differs from HEAD and "
+            f"carries {', '.join(require)}"
+        )
+    raise DerivationError(
+        f"no release tag or ancestor of HEAD differs from it and carries "
+        f"{', '.join(require)}: this commit introduces the channel, so there is no "
+        "earlier package of it to upgrade from"
+    )
+
+
+def derive(
+    repo: Path, prev_ref: str, out: Path, require: Sequence[str] = ()
+) -> Dict[str, str]:
     repo = repo.resolve()
     head_sha = git(repo, "rev-parse", "HEAD")
     head_text = (repo / "pyproject.toml").read_text(encoding="utf-8")
     head_version = project_version(head_text, str(repo / "pyproject.toml"))
-    used_ref, prev_sha = resolve_prev(repo, prev_ref)
+    if prev_ref == AUTO:
+        used_ref, prev_sha = resolve_auto(repo, require)
+    else:
+        used_ref, prev_sha = resolve_prev(repo, prev_ref)
+        absent = missing_paths(repo, [prev_sha], require)[prev_sha]
+        if absent:
+            raise DerivationError(
+                f"{used_ref} ({prev_sha}) has no {', '.join(absent)}, so it has no "
+                "package of this channel to upgrade from"
+            )
 
     out.mkdir(parents=True, exist_ok=True)
     out = out.resolve()
@@ -188,13 +318,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--repo", required=True, type=Path, help="the checkout (HEAD is N)"
     )
-    parser.add_argument("--prev-ref", required=True, help="the ref N-1 is built from")
+    parser.add_argument(
+        "--prev-ref",
+        required=True,
+        help=f"the ref N-1 is built from, or {AUTO!r} to derive it from the history",
+    )
+    parser.add_argument(
+        "--require",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="a path N-1 must carry (the channel's packaging); may be repeated",
+    )
     parser.add_argument(
         "--out", required=True, type=Path, help="scratch dir; <out>/src is replaced"
     )
     args = parser.parse_args(argv)
     try:
-        result = derive(args.repo, args.prev_ref, args.out)
+        result = derive(args.repo, args.prev_ref, args.out, args.require)
     except DerivationError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1

@@ -56,11 +56,48 @@ runs:
     #
     # Bump procedure: change the version, then regenerate the golden and review
     # its diff -- `python .github/actions/validate-mcp/compare_tool_surface.py --update`.
+    # The inspector's version, stated once and read by the install and by the npm
+    # cache key, so a bump re-keys the cache without a second copy to forget.
+    - name: "mcp: pin the MCP Inspector version"
+      id: inspector
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        echo "version=2.8.0" >> "$GITHUB_OUTPUT"
+        echo "npm-cache=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+
+    # npm's download cache for that one pinned install: third-party tarballs from
+    # the npm registry, restored everywhere and saved from a push to main only.
+    # The install took 16 s on each of the 20 non-Windows `bundle` legs per push,
+    # nearly all of it fetching the same package tree.
+    - name: "mcp: restore the npm cache"
+      id: inspector-npm-cache
+      if: runner.os != 'Windows'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.inspector.outputs.npm-cache }}
+        key: npm-mcp-inspector-${{ runner.os }}-${{ runner.arch }}-${{ steps.inspector.outputs.version }}
+
+    - name: "Cache report: npm-mcp-inspector"
+      if: ${{ !cancelled() && steps.inspector-npm-cache.outcome == 'success' }}
+      shell: bash
+      env:
+        CACHE_NAME: npm-mcp-inspector
+        CACHE_HIT: ${{ steps.inspector-npm-cache.outputs.cache-hit }}
+        CACHE_MATCHED: ${{ steps.inspector-npm-cache.outputs.cache-matched-key }}
+      run: |
+        # One line per cache per job, same shape everywhere, so hit rates can be
+        # counted across runs from job summaries.
+        if [ "${CACHE_HIT}" = "true" ]; then result=hit
+        elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+        else result=miss; fi
+        echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
+
     - name: "mcp: install MCP Inspector"
       if: runner.os != 'Windows'
       shell: bash
       env:
-        INSPECTOR_VERSION: "2.8.0"
+        INSPECTOR_VERSION: ${{ steps.inspector.outputs.version }}
       run: |
         set -u
         PKG="@modelcontextprotocol/inspector@${INSPECTOR_VERSION}"
@@ -119,6 +156,17 @@ runs:
           echo "Retryable failure; sleeping ${BACKOFF}s before attempt $((attempt + 1))."
           sleep "$BACKOFF"
         done
+
+    - name: "mcp: save the npm cache (main only)"
+      if: >-
+        runner.os != 'Windows'
+        && steps.inspector-npm-cache.outputs.cache-hit != 'true'
+        && github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.inspector.outputs.npm-cache }}
+        key: npm-mcp-inspector-${{ runner.os }}-${{ runner.arch }}-${{ steps.inspector.outputs.version }}
 
     # The step the install exists for. Uses the same stdio invocation the
     # start/stop check above uses -- `ashx mcp` with no transport flag, which

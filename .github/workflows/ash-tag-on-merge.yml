@@ -6,42 +6,42 @@ on:
     branches:
       - main
 
-# Read-only default. The one job below declares everything it needs, and a
-# job-level `permissions:` block REPLACES this one rather than adding to it, so
-# this value never applies to that job. Keeping it at `read` means a job added
-# here later starts with no write access instead of silently inheriting the
-# write scopes that publishing needs.
+# Read-only default. Every job below declares what it needs, and a job-level
+# `permissions:` block REPLACES this one rather than adding to it, so this value
+# never applies to them. Only tag-and-release holds write scopes. Keeping this at
+# `read` means a job added here later starts with no write access instead of
+# silently inheriting the write scopes that publishing needs.
 permissions:
   contents: read
 
 jobs:
-  tag-and-release:
-    name: Create tag and GitHub Release
+  # What to release, decided once, before anything is built. The commit is pinned here
+  # and handed to every later job: the assets take most of an hour to build, and main can
+  # move in that time, so "check out main" in two jobs could name two commits.
+  #
+  # The commit is the pull request's merge commit, not main's tip when this job starts.
+  # actions/attest-build-provenance records github.sha as the source commit, and for a
+  # merged pull request github.sha is that merge commit. Checking out `main` would build
+  # from whatever landed after the merge while the attestation names the merge, so a
+  # verifier would be pointed at code the assets were not built from.
+  resolve:
+    name: Decide what to release
     if: >-
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.title, 'chore(release):')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # `contents: write` creates the tag and the release and moves the floating
-    # major tag. The other two exist only for provenance and are the minimum
-    # `actions/attest-build-provenance` accepts:
-    #
-    #   id-token: write       mints the OIDC token Sigstore binds the attestation
-    #                         to. Without it the action fails at signing rather
-    #                         than silently publishing an unattested asset. It
-    #                         grants no repository access by itself.
-    #   attestations: write   writes the attestation to this repository's
-    #                         attestation store, which is what
-    #                         `gh attestation verify` later reads.
+    timeout-minutes: 10
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.sha.outputs.sha }}
+      skip: ${{ steps.existing.outputs.skip }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
 
       - name: Install uv
@@ -64,15 +64,36 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
-      # Asked before building rather than inside the release step, because the
-      # build, the contents gate and the attestation are all pointless work if the
-      # release already exists -- and an attestation is not free: it writes to the
-      # repository's attestation store, so attesting artifacts for a release that
-      # is then skipped leaves a signed record of something never published.
+      # Fails here, before an hour of building, rather than after: an empty merge SHA
+      # would have checked out the default branch, and one that is not github.sha would
+      # give the attestation a source commit the assets were not built from.
+      # tests/unit/test_release_assets.py runs this script.
       #
-      # The previous shape put this check inside the release step and used a bare
-      # `exit 0`, which meant the step could not distinguish "already released" from
-      # "released just now" for anything downstream.
+      # Two comparisons, no format check: HEAD is always a full 40-hex SHA, so any
+      # MERGE_SHA that is empty or not a commit ID differs from github.sha or from HEAD.
+      # A separate regex on MERGE_SHA would refuse nothing these two let through.
+      - name: Pin the commit being released
+        id: sha
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$MERGE_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::merge_commit_sha '${MERGE_SHA}' is not github.sha ${GITHUB_SHA}, which the provenance attestation records as the source commit. Refusing to attest assets built from a commit the attestation does not name."
+            exit 1
+          fi
+          SHA="$(git rev-parse HEAD)"
+          if [ "$SHA" != "$MERGE_SHA" ]; then
+            echo "::error::the checkout is at ${SHA}, not the merge commit '${MERGE_SHA}'"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Releasing the merge commit $SHA"
+
+      # Asked before building, because the build, the gates and the attestation are all
+      # pointless work if the release already exists -- and an attestation is not free:
+      # it writes to the repository's attestation store, so attesting artifacts for a
+      # release that is then skipped leaves a signed record of something never published.
       - name: Decide whether this release already exists
         id: existing
         env:
@@ -88,131 +109,144 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # The wheel and sdist are built HERE, from the tagged tree, rather than
-      # downloaded from the ash-package.yml run on the merge commit. Two reasons:
-      # an artifact downloaded across workflow runs is not covered by this run's
-      # OIDC identity, so attesting it would bind provenance to a build this job
-      # did not perform; and `actions/download-artifact` across runs needs a token
-      # and a run id, which adds a failure mode to the publish path for no gain.
-      # `uv build` is deterministic from pyproject metadata, so building twice
-      # produces the same distribution as the gate already checked on the PR.
-      - name: Build distribution artifacts
-        if: steps.existing.outputs.skip == 'false'
+  # Every release asset, built, installed where it can be, and gated on the bytes that
+  # will be attached: the wheel, sdist and .mcpb this job used to build itself, plus the
+  # .deb, .rpm, .msix, .nupkg, Flatpak bundle, .vsix, JetBrains plugin zip and winget
+  # manifests. ash-release-assets.yml is the same workflow a push runs as the dry run;
+  # packaging/release-assets.py is the list it holds the staged set to.
+  #
+  # Called rather than downloaded from the merge commit's own CI: a called workflow is
+  # part of THIS run, so its artifacts are covered by this run's OIDC identity when the
+  # job below attests them, which an artifact from another run would not be.
+  assets:
+    name: Release assets
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ash-release-assets.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      release: true
+    secrets:
+      MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}
+      MSIX_SIGNING_PFX_PASSWORD: ${{ secrets.MSIX_SIGNING_PFX_PASSWORD }}
+
+  tag-and-release:
+    name: Create tag and GitHub Release
+    needs: [resolve, assets]
+    # Runs when the release already exists too, with the publishing steps skipped, so the
+    # floating major tag is still maintained -- the behavior before the assets moved into
+    # their own jobs. `assets` is skipped in that case, which would skip this job without
+    # the explicit condition.
+    if: >-
+      !cancelled() &&
+      needs.resolve.result == 'success' &&
+      (needs.resolve.outputs.skip == 'true' || needs.assets.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # `contents: write` creates the tag and the release and moves the floating
+    # major tag. The other two exist only for provenance and are the minimum
+    # `actions/attest-build-provenance` accepts:
+    #
+    #   id-token: write       mints the OIDC token Sigstore binds the attestation
+    #                         to. Without it the action fails at signing rather
+    #                         than silently publishing an unattested asset. It
+    #                         grants no repository access by itself.
+    #   attestations: write   writes the attestation to this repository's
+    #                         attestation store, which is what
+    #                         `gh attestation verify` later reads.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      # The commit resolve pinned: the one the assets were built from and checked out
+      # below, and the one the tag is created on.
+      RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+
+      # download-artifact treats an empty artifact-ids as "no filter" and downloads
+      # every artifact of the run, each into its own subdirectory. The verify step
+      # would then fail, but on a confusing message, so the ID is held to a number here.
+      - name: Check the release asset artifact ID
+        if: needs.resolve.outputs.skip == 'false'
+        env:
+          ARTIFACT_ID: ${{ needs.assets.outputs.artifact-id }}
         run: |
           set -euo pipefail
-          uv build --out-dir dist
-          # `uv build` exiting 0 is not evidence it wrote anything -- assert the
-          # two artifacts exist before anything downstream trusts the directory.
-          test -n "$(find dist -maxdepth 1 -name '*.whl' -print -quit)" \
-            || { echo "::error::uv build produced no wheel"; exit 1; }
-          test -n "$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)" \
-            || { echo "::error::uv build produced no sdist"; exit 1; }
-          ls -l dist
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the assets job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "release asset artifact: ${ARTIFACT_ID}"
 
-      # The same gate ash-package.yml runs on every pull request, run again on the
-      # exact bytes about to be published. This is the control that matters most for
-      # the operator's hard rule -- no GitHub-published artifact may contain
-      # third-party scanner source or assets -- because a release asset is the only
-      # artifact that actually reaches users. Running it on the PR proves the tree
-      # was clean; running it here proves the *published file* is.
-      - name: Assert no third-party scanner content in the artifacts
-        if: steps.existing.outputs.skip == 'false'
+      # By ID, so exactly the one artifact the assemble job uploaded is fetched, and
+      # with one artifact download-artifact extracts it straight into `path` (no
+      # per-artifact subdirectory). An ID also survives "re-run failed jobs", where a
+      # name carrying run_attempt would name an artifact that was never uploaded.
+      - name: Download the gated release assets
+        if: needs.resolve.outputs.skip == 'false'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.assets.outputs.artifact-id }}
+          path: release-assets
+
+      # The bytes about to be attached are the bytes the gates passed: the digests come
+      # from the assemble job's output, computed after its gates, not from a file inside
+      # the artifact, so they cannot travel with the files they describe. The set check
+      # then refuses anything missing or extra, which sha256sum -c alone does not.
+      - name: Verify the assets are the gated set
+        if: needs.resolve.outputs.skip == 'false'
+        env:
+          SUMS: ${{ needs.assets.outputs.sums }}
+          BUILT_VERSION: ${{ needs.assets.outputs.version }}
         run: |
           set -euo pipefail
-          python .github/scripts/assert-artifact-contents.py dist/*.whl dist/*.tar.gz
+          if [ "$BUILT_VERSION" != "$VERSION" ]; then
+            echo "::error::the assets were built for ${BUILT_VERSION}, and this release is ${VERSION}"
+            exit 1
+          fi
+          # Blank lines dropped: under --strict, sha256sum fails on one, so a trailing
+          # newline in the output value would refuse a good set. An empty SUMS still
+          # leaves no checksum line, which sha256sum refuses.
+          printf '%s\n' "$SUMS" | awk 'NF' > "$RUNNER_TEMP/SHA256SUMS"
+          (cd release-assets && sha256sum --strict -c "$RUNNER_TEMP/SHA256SUMS")
+          python3 packaging/release-assets.py check release-assets --version "$VERSION"
 
-      # The MCPB bundle for Claude Desktop. Its backend has declared a
-      # release-stage `copy-archive` phase since it was written, and nothing
-      # invoked it: `agentic-plugins release` appears nowhere else in .github/, so
-      # every ASH release published a wheel and an sdist while the committed
-      # ash.mcpb never left the repository. The phase is run here rather than
-      # given a workflow of its own because this is the only job that attaches
-      # release assets, and an artifact built anywhere else is not covered by this
-      # run's OIDC identity -- the same reason the wheel and sdist are built here
-      # instead of downloaded, spelled out above.
-      #
-      # THE DRIFT CHECK IS WHAT MAKES THE STAGED FILE TRUSTWORTHY, and it is not
-      # interchangeable with comparing the two copies. copy-archive COPIES the
-      # committed archive rather than rebuilding it, so asserting that the staged
-      # file matches the committed one only proves shutil.copy2 works -- it would
-      # pass just as happily on a committed archive that went stale six releases
-      # ago, because the staged copy inherits whatever is committed. The question
-      # that can actually be answered wrongly is whether the committed bytes still
-      # equal what _base/ generates today, and that is drift. It runs on the pull
-      # request through ash-agent-plugins-drift.yml and runs again here for the
-      # reason the contents gate does: the pull request proves the tree was clean,
-      # this proves the published file is. Measured at well under a second for all
-      # 17 backends, so it costs this job nothing.
-      #
-      # THE MEMBER COUNT IS THE PUBLISHING BOUNDARY. The archive must hold exactly
-      # one member, manifest.json, which ASH authors -- see the backend's module
-      # docstring. This is the same one-file invariant packaging/README.md holds
-      # the .deb and .rpm to by counting bundled wheels, and it is asserted on the
-      # bytes about to be uploaded rather than trusted to a comment.
-      #
-      # NOT passed to assert-artifact-contents.py, and that is a property of the
-      # artifact rather than an exemption. That script reads an artifact as a
-      # Python distribution: it requires exactly one top-level distribution root
-      # and RAISES rather than reporting clean when it finds none, which is
-      # deliberate -- an artifact it cannot reason about is one it cannot clear. A
-      # .mcpb carries a single loose manifest.json and no package root, so it would
-      # exit 2 on a correct archive. Feeding it one would force either a carve-out
-      # in that script or a release that cannot publish; the member-count assertion
-      # below is the boundary control for this shape, and the script keeps its
-      # wheel-and-sdist scope untouched.
-      - name: Stage and verify the MCPB bundle
-        if: steps.existing.outputs.skip == 'false'
-        run: |
-          set -euo pipefail
-          uv run --project ash-agent-plugins/agentic-coding/transpiler \
-            agentic-plugins check --drift-only
-          uv run --project ash-agent-plugins/agentic-coding/transpiler \
-            agentic-plugins release mcpb --dist dist
-          MCPB="$(find dist -maxdepth 1 -name '*.mcpb' -print -quit)"
-          test -n "$MCPB" \
-            || { echo "::error::agentic-plugins release wrote no .mcpb into dist"; exit 1; }
-          python3 - "$MCPB" <<'PY'
-          import sys
-          import zipfile
-
-          path = sys.argv[1]
-          with zipfile.ZipFile(path) as archive:
-              members = [i.filename for i in archive.infolist() if not i.is_dir()]
-          if members != ["manifest.json"]:
-              sys.exit(
-                  f"::error::{path} must hold exactly one member, manifest.json. "
-                  f"Found {len(members)}: {members}. Anything else in a published "
-                  "archive crosses the boundary in packaging/README.md."
-              )
-          print(f"{path}: 1 member, manifest.json")
-          PY
-
-      # Provenance. Attested BEFORE the release is created, so a signing failure
-      # blocks publication rather than leaving an unattested asset already public
-      # and needing a delete. `subject-path` takes all three artifacts in one call,
-      # which produces one attestation per subject.
+      # Provenance. Attested BEFORE the release is created, so a signing failure blocks
+      # publication rather than leaving an unattested asset already public and needing a
+      # delete. `release-assets/*` is every file the step above held to the asset list,
+      # so the attested set and the attached set are one glob over one checked directory.
+      # One call, one attestation per subject.
       - name: Attest build provenance
-        if: steps.existing.outputs.skip == 'false'
+        if: needs.resolve.outputs.skip == 'false'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: |
-            dist/*.whl
-            dist/*.tar.gz
-            dist/*.mcpb
+          subject-path: release-assets/*
 
       - name: Create tag and GitHub Release
-        if: steps.existing.outputs.skip == 'false'
+        if: needs.resolve.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           TAG="v${VERSION}"
 
-          # The artifacts are passed as positional arguments, which is the whole
-          # point of this change: before it, this command had no file argument at
-          # all, so every ASH release since the workflow was written published
-          # release notes and nothing installable.
+          # The artifacts are passed as positional arguments. Before they were, this
+          # command had no file argument at all, so every ASH release published
+          # release notes and nothing installable. `release-assets/*` is the
+          # directory the verify step held to packaging/release-assets.py.
+          #
+          # --target is RELEASE_SHA, the commit resolve pinned and the assets were
+          # built from, rather than `main`, which may have moved while they were
+          # built. `set -u` stops the step if it is unset.
           #
           # The release body leads with this version's CHANGELOG.md entry, and
           # GitHub's generated notes follow it. gh prepends --notes to
@@ -258,18 +292,36 @@ jobs:
           # The test runs this step on macOS runners as well as ubuntu.
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --target main \
+            --target "$RELEASE_SHA" \
             --generate-notes \
             ${NOTES_ARGS[@]+"${NOTES_ARGS[@]}"} \
             --title "$TAG" \
-            dist/*.whl dist/*.tar.gz dist/*.mcpb
+            release-assets/*
 
-          # The .mcpb belongs in this count as well as in the upload. The count is
-          # this step's own evidence of how much it attached, so an artifact
-          # missing from it is one the log says nothing about.
-          echo "Created release $TAG with $(find dist -maxdepth 1 \
-            \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.mcpb' \) \
+          # The count is this step's own evidence of how much it attached. The step
+          # below compares names with what the release actually carries.
+          echo "Created release $TAG with $(find release-assets -maxdepth 1 -type f \
             | wc -l) attached artifact(s)"
+
+      # The release as GitHub holds it, against the staged set. A release can be
+      # created with an asset missing (an upload that failed after the release
+      # existed), and nothing above would notice. It cannot be un-published from
+      # here, but it fails loudly, by name, while the person who merged is watching.
+      - name: Assert the release carries exactly the staged assets
+        if: needs.resolve.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name' | sort > "$RUNNER_TEMP/attached.txt"
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort > "$RUNNER_TEMP/staged.txt"
+          if ! diff -u "$RUNNER_TEMP/staged.txt" "$RUNNER_TEMP/attached.txt"; then
+            echo "::error::release ${TAG} does not carry exactly the staged assets (diff above: - staged, + attached)"
+            exit 1
+          fi
+          echo "release ${TAG} carries all $(wc -l < "$RUNNER_TEMP/staged.txt") staged asset(s)"
 
       # The floating tag is named from the version being released. It used to be the
       # literal `v3`, which meant a 4.x release would have pointed `v3` at a 4.0 commit
@@ -287,7 +339,6 @@ jobs:
       - name: Update floating major tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Validate before touching anything: every ref name below is derived from
           # $VERSION, so an unparsable value would otherwise name a ref from garbage.

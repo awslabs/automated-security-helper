@@ -17,7 +17,6 @@ supports multiple transports:
 
 from __future__ import annotations
 
-import os
 from typing import Annotated, List, Optional
 import typer
 from rich.console import Console
@@ -30,6 +29,7 @@ from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import set_environ
 
 # Import MCP dependencies directly. We capture both the server class and the
 # Starlette type so the streamable-HTTP path can build a typed ASGI app.
@@ -483,7 +483,7 @@ def mcp_command(
     #
     # Set before the transport is chosen so it also covers the HTTP transports,
     # where it is harmless, and before any scan can start.
-    os.environ["ASH_LOG_TO_STDERR"] = "1"
+    set_environ("ASH_LOG_TO_STDERR", "1")
 
     # Check for MCP dependencies using our validation function
     if not validate_mcp_dependencies():

@@ -62,6 +62,56 @@ the real packages and runs in the `build` job of `ash-package.yml` before anythi
 built; `tests/unit/test_package_contents_gate.py` pins those fixtures to the member
 lists of real builds.
 
+## Release assets and provenance
+
+A GitHub Release of ASH attaches these files, and nothing else.
+`packaging/release-assets.py` holds the list, and every workflow reads it from there:
+
+| Asset | File | Built and exercised by | Gate run on the attached bytes |
+|---|---|---|---|
+| wheel, sdist | `automated_security_helper-<v>-py3-none-any.whl`, `automated_security_helper-<v>.tar.gz` | `ash-package.yml` `build` | `assert-artifact-contents.py` |
+| MCP bundle | `ash-<bundle version>.mcpb` | the committed archive, drift-checked | exactly one member, `manifest.json` |
+| deb | `automated-security-helper_<v>_all.deb` | `ash-native-packages.yml`, Debian 12 assert leg | `assert-package-payload.py` |
+| rpm | `automated-security-helper-<v>-1.noarch.rpm` | `ash-native-packages.yml`, Amazon Linux 2023 assert leg | `assert-package-payload.py` |
+| MSIX | `automated-security-helper-<v>.msix` | `ash-package.yml` `msix` | `assert-package-contents.py` |
+| Chocolatey | `ash.<v>.nupkg` | `ash-package.yml` `chocolatey` | `assert-package-contents.py` |
+| Flatpak | `ash-<v>-x86_64.flatpak` | `ash-package.yml` `flatpak` | the bundle is imported into a scratch OSTree repository and checked out, then `assert-package-contents.py --flatpak-tree` |
+| winget | `Amazon.AutomatedSecurityHelper.yaml`, `.installer.yaml`, `.locale.en-US.yaml` | rendered for the attached MSIX by `winget/set-release-metadata.py` | `winget/validate-manifests.py --released`, and InstallerSha256 and InstallerUrl must name the attached MSIX |
+| VS Code | `ash-vscode-<v>.vsix` | `ash-release-assets.yml` `vsix` | `vsix-contents.ts`, then Python's zipfile over the same bytes |
+| JetBrains | `ash-jetbrains-<plugin version>.zip` | `ash-release-assets.yml` `jetbrains` | `editors/jetbrains/assert-plugin-zip-contents.py` |
+
+`homebrew/` attaches nothing: its channel is `Formula/ash.rb`, which names the release
+tag. The container image is never published, here or anywhere else, and the asset check
+refuses an image archive by name and by content.
+
+`.github/workflows/ash-release-assets.yml` builds the whole set, stages it in one
+directory, runs every gate above on it, and requires the directory to hold exactly the
+listed files. Then it shows that check failing on a copy with the `.deb` removed and on a
+copy with an ungated file added. On a push that is the release's dry run: it attests
+nothing and publishes nothing. `ash-tag-on-merge.yml` calls the same workflow when a
+`chore(release):` pull request merges, checks the downloaded bytes against the digests
+the gates produced, attests every file with `actions/attest-build-provenance`, attaches
+them with `gh release create`, and then compares the release's asset names with the
+staged set.
+
+To check a downloaded asset, with the GitHub CLI:
+
+```bash
+# Any asset, by its file name. The attestation names the workflow that built and
+# attested it, so pin that too.
+gh attestation verify automated-security-helper_4.0.0_all.deb \
+  --repo awslabs/automated-security-helper \
+  --signer-workflow awslabs/automated-security-helper/.github/workflows/ash-tag-on-merge.yml
+```
+
+The command is the same for every asset type: the `.whl`, `.tar.gz`, `.mcpb`, `.deb`,
+`.rpm`, `.msix`, `.nupkg`, `.flatpak`, the three winget `.yaml` files, the `.vsix` and the
+JetBrains `.zip`. Verify the file before installing it, because each installer runs code
+from it. Two formats carry a second check of their own. Windows checks the MSIX's
+Authenticode signature at install (`README.msix` covers the self-signed certificate), and
+winget refuses an MSIX whose SHA-256 differs from the manifest's `InstallerSha256`, so
+verifying the installer manifest also pins the MSIX it names.
+
 ## Layout
 
 | Directory | Format | Verified by |

@@ -29,6 +29,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from mcp.server.mcpserver import Context
 
+from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_ENV
 from automated_security_helper.cli.mcp_server import (
     analyze_security_findings,
@@ -372,20 +373,35 @@ class TestGetScanResultPaths:
         assert "Failed to send error message to client" in logger.error.call_args[0][0]
 
 
+def _stdio_ctx() -> MagicMock:
+    """A Context with no headers, as stdio delivers: the default session."""
+    ctx = MagicMock()
+    ctx.headers = None
+    return ctx
+
+
 class TestDelegatingToolWrappers:
-    """Each wrapper forwards its arguments, and converts a raise into a dict."""
+    """Each wrapper forwards its arguments, and converts a raise into a dict.
+
+    Each also forwards the session id it resolved from the transport, which the
+    inner function checks paths against; stdio resolves to the default session.
+    """
 
     def test_explain_finding_forwards_its_arguments(self, tmp_path):
         with patch(
             f"{_SERVER}.mcp_explain_finding", return_value={"success": True}
         ) as inner:
             result = asyncio.run(
-                explain_finding(finding_id="finding-1", results_path=str(tmp_path))
+                explain_finding(
+                    _stdio_ctx(), finding_id="finding-1", results_path=str(tmp_path)
+                )
             )
 
         assert result == {"success": True}
         inner.assert_called_once_with(
-            finding_id="finding-1", results_path=str(tmp_path)
+            finding_id="finding-1",
+            results_path=str(tmp_path),
+            session_id=DEFAULT_SESSION_ID,
         )
 
     def test_explain_finding_converts_a_raise_into_an_error_dict(self):
@@ -393,7 +409,7 @@ class TestDelegatingToolWrappers:
             patch(f"{_SERVER}.mcp_explain_finding", side_effect=RuntimeError("boom")),
             patch(f"{_SERVER}.logger", MagicMock()),
         ):
-            result = asyncio.run(explain_finding(finding_id="finding-1"))
+            result = asyncio.run(explain_finding(_stdio_ctx(), finding_id="finding-1"))
 
         assert result["success"] is False
         assert result["error"] == "Error explaining finding: boom"
@@ -403,17 +419,19 @@ class TestDelegatingToolWrappers:
         with patch(
             f"{_SERVER}.mcp_get_config", return_value={"project_name": "demo"}
         ) as inner:
-            result = asyncio.run(get_config(config_path=None, raw=True))
+            result = asyncio.run(get_config(_stdio_ctx(), config_path=None, raw=True))
 
         assert result == {"project_name": "demo"}
-        inner.assert_called_once_with(config_path=None, raw=True)
+        inner.assert_called_once_with(
+            config_path=None, raw=True, session_id=DEFAULT_SESSION_ID
+        )
 
     def test_get_config_converts_a_raise_into_an_error_dict(self):
         with (
             patch(f"{_SERVER}.mcp_get_config", side_effect=OSError("unreadable")),
             patch(f"{_SERVER}.logger", MagicMock()),
         ):
-            result = asyncio.run(get_config())
+            result = asyncio.run(get_config(_stdio_ctx()))
 
         assert result["success"] is False
         assert result["error"] == "Error getting config: unreadable"
@@ -448,11 +466,13 @@ class TestDelegatingToolWrappers:
             return_value={"new": [], "resolved": [], "severity_changed": []},
         ) as inner:
             result = asyncio.run(
-                diff_scan_results(before_path=before, after_path=after)
+                diff_scan_results(_stdio_ctx(), before_path=before, after_path=after)
             )
 
         assert result["new"] == []
-        inner.assert_called_once_with(before_path=before, after_path=after)
+        inner.assert_called_once_with(
+            before_path=before, after_path=after, session_id=DEFAULT_SESSION_ID
+        )
 
     def test_diff_scan_results_converts_a_raise_into_an_error_dict(self):
         with (
@@ -461,7 +481,9 @@ class TestDelegatingToolWrappers:
             ),
             patch(f"{_SERVER}.logger", MagicMock()),
         ):
-            result = asyncio.run(diff_scan_results(before_path="a", after_path="b"))
+            result = asyncio.run(
+                diff_scan_results(_stdio_ctx(), before_path="a", after_path="b")
+            )
 
         assert result["success"] is False
         assert result["error"] == "Error diffing scan results: bad diff"
@@ -471,11 +493,15 @@ class TestDelegatingToolWrappers:
         with patch(
             f"{_SERVER}.mcp_validate_config", return_value={"valid": True, "errors": []}
         ) as inner:
-            result = validate_config(config_content="project_name: demo\n")
+            result = validate_config(
+                _stdio_ctx(), config_content="project_name: demo\n"
+            )
 
         assert result["valid"] is True
         inner.assert_called_once_with(
-            config_content="project_name: demo\n", config_path=None
+            config_content="project_name: demo\n",
+            config_path=None,
+            session_id=DEFAULT_SESSION_ID,
         )
 
     def test_validate_config_reports_a_raise_in_the_validation_error_shape(self):
@@ -487,7 +513,7 @@ class TestDelegatingToolWrappers:
             ),
             patch(f"{_SERVER}.logger", MagicMock()),
         ):
-            result = validate_config(config_path="ash.yaml")
+            result = validate_config(_stdio_ctx(), config_path="ash.yaml")
 
         assert result["valid"] is False
         assert result["errors"] == [
@@ -504,6 +530,7 @@ class TestDelegatingToolWrappers:
         ) as inner:
             result = asyncio.run(
                 suggest_suppression(
+                    _stdio_ctx(),
                     finding_id="finding-1",
                     results_path=str(tmp_path),
                     expiration="2030-01-01",
@@ -517,6 +544,7 @@ class TestDelegatingToolWrappers:
             results_path=str(tmp_path),
             expiration="2030-01-01",
             justification="accepted risk",
+            session_id=DEFAULT_SESSION_ID,
         )
 
     def test_suggest_suppression_converts_a_raise_into_an_error_dict(self):
@@ -527,7 +555,9 @@ class TestDelegatingToolWrappers:
             ),
             patch(f"{_SERVER}.logger", MagicMock()),
         ):
-            result = asyncio.run(suggest_suppression(finding_id="finding-1"))
+            result = asyncio.run(
+                suggest_suppression(_stdio_ctx(), finding_id="finding-1")
+            )
 
         assert result["success"] is False
         assert result["error"] == "Error suggesting suppression: no results"

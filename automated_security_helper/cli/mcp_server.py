@@ -57,7 +57,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     resolve_session_config_path,
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
-from automated_security_helper.cli.mcp.sandbox import validate_config_input
+from automated_security_helper.cli.mcp.sandbox import validate_config_chain
 from automated_security_helper.cli.mcp.scan_target import (
     resolve_scan_target,
     validate_output_tree,
@@ -315,8 +315,12 @@ async def run_ash_scan(
         else:
             # Caller-named, so it is caller-supplied input and gets the same
             # boundary the workspace tools' config inputs get. Without this the
-            # scan tool would be the one unconfined config read left.
-            config_error = validate_config_input(config_path, session_id=session_id)
+            # scan tool would be the one unconfined config read left. Every base
+            # its `extends` chain names is checked the same way, against the scan
+            # target the chain will be resolved for.
+            config_error = validate_config_chain(
+                config_path, session_id=session_id, source_dir=source_dir
+            )
             if config_error:
                 await ctx.error(str(config_error))
                 return {
@@ -980,6 +984,12 @@ async def get_scan_result_paths(
         output_dir: Path to the scan output directory (absolute path recommended)
     """
     try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
         if not Path(output_dir).is_absolute():
             output_dir = str(Path.cwd() / output_dir)
 
@@ -990,7 +1000,7 @@ async def get_scan_result_paths(
         # directory, and an output directory for a permitted scan lives beneath
         # the permitted target. Checked before the existence branch below so a
         # refusal is not reported as a missing directory.
-        target_error = validate_scan_target(output_path)
+        target_error = validate_scan_target(output_path, session_id=session_id)
         if target_error:
             await ctx.error(str(target_error))
             return {
@@ -1153,6 +1163,7 @@ async def check_installation(ctx: Context) -> Dict[str, Any]:
 
 @mcp.tool()
 async def explain_finding(
+    ctx: Context,
     finding_id: str,
     results_path: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -1173,9 +1184,15 @@ async def explain_finding(
         and scanner_metadata.
     """
     try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        return _session_error(e)
+
+    try:
         return mcp_explain_finding(
             finding_id=finding_id,
             results_path=results_path,
+            session_id=session_id,
         )
     except Exception as e:
         logger.exception(f"Error in explain_finding: {str(e)}")
@@ -1188,6 +1205,7 @@ async def explain_finding(
 
 @mcp.tool()
 async def get_config(
+    ctx: Context,
     config_path: Optional[str] = None,
     raw: bool = False,
 ) -> Dict[str, Any]:
@@ -1198,7 +1216,12 @@ async def get_config(
         raw: If True, returns the user file contents without merging defaults.
     """
     try:
-        return mcp_get_config(config_path=config_path, raw=raw)
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        return _session_error(e)
+
+    try:
+        return mcp_get_config(config_path=config_path, raw=raw, session_id=session_id)
     except Exception as e:
         logger.exception(f"Error in get_config: {str(e)}")
         return {
@@ -1244,6 +1267,7 @@ def list_scanners() -> list:
 
 @mcp.tool()
 async def diff_scan_results(
+    ctx: Context,
     before_path: str,
     after_path: str,
 ) -> Dict[str, Any]:
@@ -1257,7 +1281,14 @@ async def diff_scan_results(
         Dict with keys new, resolved, and severity_changed.
     """
     try:
-        return mcp_diff_scan_results(before_path=before_path, after_path=after_path)
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        return _session_error(e)
+
+    try:
+        return mcp_diff_scan_results(
+            before_path=before_path, after_path=after_path, session_id=session_id
+        )
     except Exception as e:
         logger.exception(f"Error in diff_scan_results: {str(e)}")
         return {
@@ -1269,6 +1300,7 @@ async def diff_scan_results(
 
 @mcp.tool()
 def validate_config(
+    ctx: Context,
     config_content: Optional[str] = None,
     config_path: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -1282,8 +1314,18 @@ def validate_config(
         Dict with valid (bool) and errors (list of {field, message, type}).
     """
     try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        return {
+            "valid": False,
+            "errors": [{"field": "", "message": str(e), "type": "invalid_session_id"}],
+        }
+
+    try:
         return mcp_validate_config(
-            config_content=config_content, config_path=config_path
+            config_content=config_content,
+            config_path=config_path,
+            session_id=session_id,
         )
     except Exception as e:
         logger.exception(f"Error in validate_config: {str(e)}")
@@ -1327,6 +1369,7 @@ def get_ash_suppression_schema() -> str:
 
 @mcp.tool()
 async def suggest_suppression(
+    ctx: Context,
     finding_id: str,
     results_path: Optional[str] = None,
     expiration: Optional[str] = None,
@@ -1342,11 +1385,17 @@ async def suggest_suppression(
         justification: Human-readable reason for the suppression.
     """
     try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        return _session_error(e)
+
+    try:
         return mcp_suggest_suppression(
             finding_id=finding_id,
             results_path=results_path,
             expiration=expiration,
             justification=justification,
+            session_id=session_id,
         )
     except Exception as e:
         logger.exception(f"Error in suggest_suppression: {str(e)}")

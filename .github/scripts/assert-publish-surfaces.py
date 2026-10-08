@@ -91,13 +91,25 @@ KNOWN LIMITATIONS
     so a condition it cannot read is reported rather than trusted. Entries
     without `required_condition` are still keyed on WHAT only, and a job-level
     `if:` is not read.
-  * Release assets (`softprops/action-gh-release` and friends) are out of scope.
-    A release is a deliberate, human-triggered publication with a human on the
-    button, which is the opposite of the accidental case this guards.
+  * Release assets are censused too, as kind `release-asset`: a `run:` line that
+    calls `gh release create` or `gh release upload`, keyed on the positional
+    arguments after the tag (the files it attaches), and the release-publishing
+    actions (`softprops/action-gh-release`, `ncipollo/release-action`,
+    `actions/upload-release-asset`), keyed on their file inputs. A release has a
+    human on the button, but which files it attaches is decided in YAML, and a
+    second attach site or a widened glob is the same mistake as a second upload.
+    The set of files a glob matches is not this script's business:
+    packaging/release-assets.py holds the staged directory to a fixed list before
+    the one allowlisted site attaches it. A `gh` call built at run time (a
+    variable holding "release", an alias, a script file) is invisible here, the
+    same limit as the `run:` steps described below.
   * Expressions are compared as source text. Two spellings of the same artifact
     name are two different keys, which costs a false failure on a pure
     refactor -- the cheaper direction to be wrong in.
-  * Only `uses:` steps are read. A third-party action can upload or cache from
+  * Two non-`uses:` shapes are read as well, both for ASH's own image layer
+    cache: a step that exports ACTIONS_RUNTIME_TOKEN to later steps, and any
+    `env:` setting ASH_GHA_BUILD_CACHE_EXPORT to something other than none.
+    Otherwise only `uses:` steps are read. A third-party action can upload or cache from
     inside its own implementation, which is invisible here, and a `run:` step
     holding ACTIONS_RUNTIME_TOKEN can call the artifact API directly. Neither is
     reachable by a static census of this tree; what covers them is that adding a
@@ -114,6 +126,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import re
+import shlex
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -128,6 +142,41 @@ GITHUB_DIR = REPO_ROOT / ".github"
 KIND_UPLOAD = "upload-artifact"
 KIND_CACHE = "cache"
 KIND_BUILTIN_CACHE = "builtin-cache"
+# ASH's own container build writing image layers to the Actions cache (buildx
+# type=gha, in automated_security_helper/interactions/run_ash_container.py). No
+# `uses:` line does that, so two things are censused instead: a step that hands
+# the cache credentials to later steps, which is what makes any layer export
+# possible, and a step that sets ASH_GHA_BUILD_CACHE_EXPORT, which decides how
+# much is exported.
+KIND_CACHE_ACCESS_HANDOFF = "cache-access-handoff"
+KIND_LAYER_CACHE = "layer-cache"
+# Files attached to a GitHub Release. See KNOWN LIMITATIONS.
+KIND_RELEASE_ASSET = "release-asset"
+_GH_RELEASE = re.compile(r"(?:^|[\s;&|(])gh\s+release\s+(create|upload)\b(.*)$")
+# gh release flags that take a value, so the value is not read as a file to attach.
+_GH_RELEASE_VALUE_FLAGS = frozenset(
+    {
+        "--repo",
+        "-R",
+        "--target",
+        "--title",
+        "-t",
+        "--notes",
+        "-n",
+        "--notes-file",
+        "-F",
+        "--discussion-category",
+        "--notes-start-tag",
+    }
+)
+# Actions that attach files to a release, and the inputs that name the files.
+_RELEASE_ACTIONS: dict[str, tuple[str, ...]] = {
+    "action-gh-release": ("files",),
+    "release-action": ("artifacts",),
+    "upload-release-asset": ("asset_path", "asset_name"),
+}
+_LAYER_CACHE_ENV = "ASH_GHA_BUILD_CACHE_EXPORT"
+_LAYER_CACHE_ACTION = "ash build (buildx type=gha)"
 
 # Injected by the line-tracking loader below; never a real workflow key.
 LINE_KEY = "__line__"
@@ -223,7 +272,46 @@ _UV_CACHE_REASON = (
 _NPM_CACHE_REASON = (
     "npm's download cache, keyed on a committed lockfile. Holds third-party "
     "packages already published on the npm registry, so it redistributes nothing "
-    "this project builds."
+    "this project builds. Restored everywhere and saved from a push to main only, "
+    "so a pull request never writes an entry another run reads."
+)
+_PIP_HTTP_CACHE_REASON = (
+    "pip's HTTP download cache: responses fetched from PyPI, third-party packages "
+    "already published there. Only the http directories are cached, never pip's "
+    "wheels/ directory, which is where a locally built wheel -- ASH's own -- would "
+    "land. Restored everywhere, saved from a push to main only."
+)
+_MCP_INSPECTOR_NPM_REASON = (
+    "npm's download cache for the pinned @modelcontextprotocol/inspector install: "
+    "third-party tarballs from the npm registry, keyed on the pinned version. "
+    "Restored everywhere, saved from a push to main only."
+)
+_LAYER_CACHE_REASON = (
+    "ASH's container image build layers, exported to the Actions cache by buildx "
+    "type=gha. MAINTAINER DECISION (2026-10-06): the operator accepted that these "
+    "layers are restorable by any workflow run in this repository, approved fork "
+    "pull requests included, in exchange for warm image builds -- for build layers "
+    "only. Exported only from pushes to main (mode=max); pull requests read and "
+    "never write. Pushing the image to any registry, and uploading the image or a "
+    "tarball of it as an artifact, remain forbidden."
+)
+_TOOL_ASSET_CACHE_REASON = (
+    "Release assets of the scanner tools pinned by sha256 in "
+    "automated_security_helper/utils/tool_downloads.py: public upstream releases, "
+    "downloaded and verified by install_pinned_tool. MAINTAINER DECISION "
+    "(2026-10-07): the operator approved caching these digest-pinned public "
+    "binaries. Assets only -- never extracted binaries, install receipts, ASH's own "
+    "wheel or its image. Re-verified against the pin on every use, and deleted and "
+    "re-downloaded on a mismatch. Keyed on the pin table's hash; saved from a push "
+    "to main only."
+)
+_OPENGREP_CACHE_REASON = (
+    "The OpenGrep release binary, downloaded from the upstream GitHub release at the "
+    "version pinned in utils/tool_downloads.py. A third-party binary that is already "
+    "publicly downloadable, not one this project produced. Digest verified against "
+    "that pin before it is cached and again after it is restored, before it reaches "
+    "PATH; a restored copy that does not match is deleted and re-downloaded. Keyed on "
+    "the ISO week, and saved from a push to the default branch only."
 )
 _BASE_IMAGE_CACHE_REASON = (
     "Third-party public image, byte-identical to docker.io at the pinned digest, "
@@ -241,7 +329,137 @@ _GRYPE_DB_CACHE_REASON = (
     "content_databases.py), so no restored copy is older than that bound."
 )
 
+_RELEASE_ASSET_ARTIFACT_REASON = (
+    "BUILT BYTES, and a release asset (operator decision O3: the native packages and "
+    "IDE artifacts may be public Release downloads; the container image never). "
+    "This upload carries the file the job built, gated and, where the format allows, "
+    "installed and exercised, to .github/workflows/ash-release-assets.yml, which "
+    "gates it again on these bytes and stages it. Each package wraps the one ASH "
+    "wheel the build job already publishes, held to that by its contents gate "
+    "(packaging/assert-package-payload.py, packaging/assert-package-contents.py, "
+    "vsix-contents.ts, editors/jetbrains/assert-plugin-zip-contents.py), so it "
+    "widens the format and not the content. One file per artifact, N only, never "
+    "an N-1 build; if-no-files-found: error and 14-day retention."
+)
+
 ALLOWLIST: tuple[Entry, ...] = (
+    # -- GitHub Release attachments ----------------------------------------
+    Entry(
+        file=".github/workflows/ash-tag-on-merge.yml",
+        kind=KIND_RELEASE_ASSET,
+        action="gh release create",
+        publishes="assets=${NOTES_ARGS[@]+${NOTES_ARGS[@]}}|release-assets/*",
+        reason=(
+            "THE RELEASE. The one place files are attached to a GitHub Release, in "
+            "the job that runs only when a chore(release): pull request merges. "
+            "release-assets/ is the directory the step before it held to "
+            "packaging/release-assets.py (exactly the listed assets, digests equal to "
+            "the ones computed after their gates) and attested. NOTES_ARGS expands to "
+            "--notes and the changelog text, never a file."
+        ),
+    ),
+    # -- Digest-pinned scanner release assets (maintainer decision) ----------
+    Entry(
+        file=".github/actions/tool-download-cache/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ runner.temp }}/ash-tool-downloads key=ash-tool-asse"
+            "ts-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('automated_security_helper/utils/tool_downloads.py') }}"
+        ),
+        reason=_TOOL_ASSET_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/tool-download-cache/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ runner.temp }}/ash-tool-downloads key=ash-tool-asse"
+            "ts-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('automated_security_helper/utils/tool_downloads.py') }}"
+        ),
+        reason=_TOOL_ASSET_CACHE_REASON,
+    ),
+    # -- ASH image build layers in the Actions cache (maintainer decision) ------
+    Entry(
+        file=".github/actions/run-scan-test/action.yml",
+        kind=KIND_CACHE_ACCESS_HANDOFF,
+        action="actions/github-script",
+        publishes=("exports ACTIONS_RUNTIME_TOKEN to later steps"),
+        reason=_LAYER_CACHE_REASON
+        + " The hand-off the python-container docker legs build with; revoked after the scan.",
+    ),
+    Entry(
+        file=".github/actions/run-scan-test/action.yml",
+        kind=KIND_LAYER_CACHE,
+        action="ash build (buildx type=gha)",
+        publishes=(
+            "ASH_GHA_BUILD_CACHE_EXPORT=${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'max' || 'none' }}"
+        ),
+        reason=_LAYER_CACHE_REASON + " max on a push to main, none otherwise.",
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_CACHE_ACCESS_HANDOFF,
+        action="actions/github-script",
+        publishes=("exports ACTIONS_RUNTIME_TOKEN to later steps"),
+        reason=_LAYER_CACHE_REASON
+        + " The warm-image-layers job, which runs on pushes to main only.",
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_LAYER_CACHE,
+        action="ash build (buildx type=gha)",
+        publishes=("ASH_GHA_BUILD_CACHE_EXPORT=max"),
+        reason=_LAYER_CACHE_REASON
+        + " The warm-image-layers job, which runs on pushes to main only.",
+    ),
+    # -- Third-party download caches added by the per-job cache pass ---------
+    Entry(
+        file=".github/actions/setup-ash/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ steps.pip-cache-dir.outputs.dir }}/http-v2|"
+            "${{ steps.pip-cache-dir.outputs.dir }}/http "
+            "key=pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-"
+            "${{ hashFiles('pyproject.toml') }}"
+        ),
+        reason=_PIP_HTTP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/setup-ash/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ steps.pip-cache-dir.outputs.dir }}/http-v2|"
+            "${{ steps.pip-cache-dir.outputs.dir }}/http "
+            "key=pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-"
+            "${{ hashFiles('pyproject.toml') }}"
+        ),
+        reason=_PIP_HTTP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/validate-mcp/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ steps.inspector.outputs.npm-cache }} "
+            "key=npm-mcp-inspector-${{ runner.os }}-${{ runner.arch }}-"
+            "${{ steps.inspector.outputs.version }}"
+        ),
+        reason=_MCP_INSPECTOR_NPM_REASON,
+    ),
+    Entry(
+        file=".github/actions/validate-mcp/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ steps.inspector.outputs.npm-cache }} "
+            "key=npm-mcp-inspector-${{ runner.os }}-${{ runner.arch }}-"
+            "${{ steps.inspector.outputs.version }}"
+        ),
+        reason=_MCP_INSPECTOR_NPM_REASON,
+    ),
     # -- Artifact uploads -----------------------------------------------------
     #
     # Three entries here publish something this project BUILT: the wheel and
@@ -282,10 +500,86 @@ ALLOWLIST: tuple[Entry, ...] = (
             "packaging/msix/AshLauncher.cs, so it widens the format, not the "
             "content. Signed with the repository's MSIX_SIGNING_PFX secret when set "
             "and a throwaway self-signed certificate otherwise, which Windows will "
-            "not trust; it is evidence for the winget manifest, not a release asset. "
+            "not trust. ash-release-assets.yml stages this file as the release's "
+            ".msix and renders the winget manifests from it (operator decision O3). "
             "Exactly one .msix is uploaded, asserted by verify-on-windows.ps1, with "
             "if-no-files-found: error and 14-day retention."
         ),
+    ),
+    Entry(
+        file=".github/workflows/ash-package.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-nupkg-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/choco-out/*.nupkg"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The Chocolatey .nupkg the chocolatey job installed, scanned with, "
+        "upgraded to and uninstalled.",
+    ),
+    Entry(
+        file=".github/workflows/ash-package.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-flatpak-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/flatpak-out/*.flatpak"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The N Flatpak bundle the flatpak job installed and updated to; the N-1 "
+        "bundle sits under prev/, which the glob does not descend into.",
+    ),
+    Entry(
+        file=".github/workflows/ash-native-packages.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-${{ matrix.family }}-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/native-packages/*.${{ matrix.family }}"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The .deb from the Debian 12 assert leg and the .rpm from the Amazon "
+        "Linux 2023 assert leg (matrix.asset), each uploaded only after that leg "
+        "installed, scanned with and purged it.",
+        required_condition="matrix.asset",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-vsix-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/vsix/*.vsix"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The .vsix, after the no-runtime-dependency check and vsix-contents.ts.",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-jetbrains-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/jetbrains/build/distributions/*.zip"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The JetBrains plugin zip, after assertDistributionContents and "
+        "assert-plugin-zip-contents.py.",
+    ),
+    Entry(
+        file=".github/workflows/ash-release-assets.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-release-assets-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=release-assets/"
+        ),
+        reason=_RELEASE_ASSET_ARTIFACT_REASON
+        + " The whole staged set, uploaded only after packaging/release-assets.py "
+        "passed every gate on it: the files above plus the .mcpb and the winget "
+        "manifests rendered for the staged .msix. ash-tag-on-merge.yml downloads "
+        "it in the same run and attaches exactly these bytes.",
     ),
     Entry(
         file=".github/workflows/ash-vscode-extension.yml",
@@ -545,16 +839,42 @@ ALLOWLIST: tuple[Entry, ...] = (
     Entry(
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_CACHE,
-        action="actions/cache",
+        action="actions/cache/restore",
         publishes=(
             "path=~/.opengrep/cli/latest "
             "key=opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}"
         ),
-        reason=(
-            "The OpenGrep release binary, downloaded from upstream with its digest "
-            "verified before install. A third-party binary that is already "
-            "publicly downloadable, not one this project produced."
+        reason=_OPENGREP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/run-ash-security-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.opengrep/cli/latest "
+            "key=opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}"
         ),
+        reason=_OPENGREP_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.opengrep/cli/latest "
+            "key=opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}"
+        ),
+        reason=_OPENGREP_CACHE_REASON + " A lookup-only probe; it downloads nothing.",
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.opengrep/cli/latest "
+            "key=opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}"
+        ),
+        reason=_OPENGREP_CACHE_REASON,
     ),
     # The build base image, as a verified OCI layout. The only cache the maintainer has
     # approved for image bytes, and deliberately not ASH's own image or layers. Restore runs
@@ -633,9 +953,22 @@ ALLOWLIST: tuple[Entry, ...] = (
     ),
     Entry(
         file=".github/workflows/ash-vscode-extension.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_NODE,
-        publishes="cache=npm cache-dependency-path=editors/vscode/package-lock.json",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}"
+        ),
+        reason=_NPM_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('editors/vscode/package-lock.json') }}"
+        ),
         reason=_NPM_CACHE_REASON,
     ),
     Entry(
@@ -657,8 +990,10 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
+        publishes="enable-cache=true save-cache=${{ github.event_name == 'push' }}",
+        reason=_UV_CACHE_REASON
+        + " Saved from a push only, which narrows who writes the entry: a pull"
+        " request restores its base branch's copy and no longer saves its own.",
     ),
     Entry(
         file=".github/workflows/ash-upgrade-paths.yml",
@@ -671,29 +1006,74 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
+        publishes="enable-cache=true save-cache=${{ github.event_name == 'push' }}",
+        reason=_UV_CACHE_REASON
+        + " Saved from a push only, which narrows who writes the entry: a pull"
+        " request restores its base branch's copy and no longer saves its own.",
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_NODE,
-        publishes="cache=npm cache-dependency-path=deploy/cdk/package-lock.json",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/cdk/package-lock.json') }}"
+        ),
         count=2,
         reason=_NPM_CACHE_REASON + " Twice: the synth job and the cdk-nag job.",
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_NODE,
-        publishes="cache=npm cache-dependency-path=deploy/cdk-constructs/package-lock.json",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/cdk-constructs/package-lock.json') }}"
+        ),
         reason=_NPM_CACHE_REASON,
     ),
     Entry(
         file=".github/workflows/ash-typescript-ci.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_NODE,
-        publishes="cache=npm cache-dependency-path=${{ matrix.dir }}/package-lock.json",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/package-lock.json', matrix.dir)) }}"
+        ),
+        reason=(
+            _NPM_CACHE_REASON + " Keyed on ${{ matrix.dir }} since editors/vscode "
+            "joined deploy/cdk and deploy/cdk-constructs in the matrix."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-iac-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/cdk/package-lock.json') }}"
+        ),
+        count=2,
+        reason=_NPM_CACHE_REASON + " Twice: the synth job and the cdk-nag job.",
+    ),
+    Entry(
+        file=".github/workflows/ash-iac-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/cdk-constructs/package-lock.json') }}"
+        ),
+        reason=_NPM_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-typescript-ci.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.npm "
+            "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/package-lock.json', matrix.dir)) }}"
+        ),
         reason=(
             _NPM_CACHE_REASON + " Keyed on ${{ matrix.dir }} since editors/vscode "
             "joined deploy/cdk and deploy/cdk-constructs in the matrix."
@@ -787,6 +1167,14 @@ def _classify(step: dict) -> tuple[str, str] | None:
     with_block = step.get("with")
     inputs = with_block if isinstance(with_block, dict) else {}
 
+    # A release-publishing action. Keyed on the inputs that name the files.
+    if segments[-1] in _RELEASE_ACTIONS:
+        rendered = " ".join(
+            f"{name}={_flatten(inputs.get(name)) or '(unset)'}"
+            for name in _RELEASE_ACTIONS[segments[-1]]
+        )
+        return KIND_RELEASE_ASSET, rendered
+
     # An artifact upload, by any owner. Keyed on `name` and `path` because those
     # two decide what appears at the download URL.
     if segments[-1].startswith("upload-artifact"):
@@ -824,6 +1212,110 @@ def _classify(step: dict) -> tuple[str, str] | None:
         )
         return KIND_BUILTIN_CACHE, rendered
     return None
+
+
+def _walk_mappings(node: object):
+    """Yield every mapping in the document, steps and jobs alike."""
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _walk_mappings(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk_mappings(item)
+
+
+def _layer_cache_sites(document: object):
+    """(mapping, kind, action, publishes) for the two layer-cache site shapes.
+
+    A step exporting ACTIONS_RUNTIME_TOKEN to GITHUB_ENV is censused whatever it
+    exports it for: with that token in the environment, ASH's build exports layers
+    at its default (min) without any ASH_GHA_BUILD_CACHE_EXPORT in sight. And a
+    mapping (step, job or workflow) whose `env` sets ASH_GHA_BUILD_CACHE_EXPORT to
+    anything but none is censused with the value, expressions included.
+    """
+    for node in _walk_mappings(document):
+        env = node.get("env")
+        if isinstance(env, dict) and _LAYER_CACHE_ENV in env:
+            value = _flatten(env[_LAYER_CACHE_ENV])
+            if value.strip().lower() != "none":
+                yield (
+                    node,
+                    KIND_LAYER_CACHE,
+                    _LAYER_CACHE_ACTION,
+                    f"{_LAYER_CACHE_ENV}={value}",
+                )
+        texts = [
+            node.get("run"),
+            (node.get("with") or {}).get("script")
+            if isinstance(node.get("with"), dict)
+            else None,
+        ]
+        for text in texts:
+            if (
+                isinstance(text, str)
+                and "ACTIONS_RUNTIME_TOKEN" in text
+                and ("exportVariable" in text or "GITHUB_ENV" in text)
+            ):
+                # The revoke steps write an empty value back; those publish nothing.
+                if re.search(r'echo "\$\{name\}=" >> "\$GITHUB_ENV"', text):
+                    continue
+                yield (
+                    node,
+                    KIND_CACHE_ACCESS_HANDOFF,
+                    _normalize_action(str(node.get("uses", "run"))),
+                    "exports ACTIONS_RUNTIME_TOKEN to later steps",
+                )
+
+
+def _gh_release_attachments(script: str) -> list[tuple[str, str]]:
+    """(verb, publishes) for each `gh release create|upload` in a run: script.
+
+    Continuation lines are joined first, so a command spread over several lines is
+    one command. A line that is wholly a shell comment is skipped, so prose can
+    name the command. The positional arguments after the tag are the files; a flag
+    that takes a value has its value skipped, and anything dynamic (a variable, an
+    array expansion) stays in the key verbatim, because it could add files.
+    """
+    joined = re.sub(r"\\\n", " ", script)
+    sites: list[tuple[str, str]] = []
+    for line in joined.splitlines():
+        if line.strip().startswith("#"):
+            continue
+        match = _GH_RELEASE.search(line)
+        if match is None:
+            continue
+        verb, rest = match.group(1), match.group(2)
+        try:
+            tokens = shlex.split(rest, comments=True)
+        except ValueError:
+            tokens = rest.split()
+        positional: list[str] = []
+        skip_next = False
+        for token in tokens:
+            if skip_next:
+                skip_next = False
+                continue
+            if token in {";", "&&", "||", "|"}:
+                break
+            if token.startswith("-"):
+                if "=" not in token and token in _GH_RELEASE_VALUE_FLAGS:
+                    skip_next = True
+                continue
+            positional.append(token)
+        files = positional[1:]
+        sites.append((verb, f"assets={'|'.join(files) or '(none)'}"))
+    return sites
+
+
+def _release_sites(document: object):
+    """(mapping, kind, action, publishes) for every gh release attach in run: text."""
+    for node in _walk_mappings(document):
+        text = node.get("run")
+        if not isinstance(text, str) or "gh" not in text:
+            continue
+        for verb, publishes in _gh_release_attachments(text):
+            yield node, KIND_RELEASE_ASSET, f"gh release {verb}", publishes
 
 
 def _walk_steps(node: object):
@@ -867,6 +1359,22 @@ def scan_text(rel_path: str, text: str) -> list[Found]:
                     step=_step_name(step, action),
                     line=int(step.get(LINE_KEY, 1)),
                     condition=_flatten(step.get("if")),
+                )
+            )
+        for node, kind, action, publishes in (
+            *_layer_cache_sites(document),
+            *_release_sites(document),
+        ):
+            name = node.get("name")
+            found.append(
+                Found(
+                    surface=Surface(
+                        file=rel_path, kind=kind, action=action, publishes=publishes
+                    ),
+                    step=name.strip()
+                    if isinstance(name, str) and name.strip()
+                    else "(unnamed)",
+                    line=int(node.get(LINE_KEY, 1)),
                 )
             )
     return found
@@ -1007,6 +1515,9 @@ def _report_failures(
             KIND_UPLOAD: "uploads an artifact",
             KIND_CACHE: "writes an Actions cache",
             KIND_BUILTIN_CACHE: "enables an action's built-in cache",
+            KIND_CACHE_ACCESS_HANDOFF: "hands the Actions cache token to later steps",
+            KIND_LAYER_CACHE: "sets ASH's image layer-cache export",
+            KIND_RELEASE_ASSET: "attaches files to a GitHub Release",
         }[surface.kind]
         print(
             f"::error file={surface.file},line={item.line}::New publicly-downloadable surface: {surface.file} step '{item.step}' {headline} ({surface.publishes}) and is not allowlisted"
@@ -1067,6 +1578,28 @@ def _report_failures(
 
 _SELF_TEST_ALLOWED_FILE = "fixture/allowed.yml"
 _SELF_TEST_CLEAN_FILE = "fixture/clean.yml"
+_SELF_TEST_RELEASE_FILE = "fixture/release.yml"
+
+# The allowlisted release attach is spread over continuation lines and preceded by a
+# comment that names the command, so the clean baseline already proves the joiner
+# reads one command and the comment rule keeps prose out of the census.
+_SELF_TEST_RELEASE_YAML = """
+name: fixture release
+on: [pull_request]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish
+        run: |
+          set -euo pipefail
+          # gh release create v9 everything/* would be wrong here
+          gh release create "$TAG" \\
+            --repo "$GITHUB_REPOSITORY" \\
+            --title "$TAG" \\
+            --generate-notes \\
+            dist/*.whl
+"""
 
 _SELF_TEST_ALLOWED_YAML = """
 name: fixture
@@ -1126,6 +1659,13 @@ _SELF_TEST_ALLOWLIST: tuple[Entry, ...] = (
         publishes="enable-cache=true",
         reason="self-test fixture",
     ),
+    Entry(
+        file=_SELF_TEST_RELEASE_FILE,
+        kind=KIND_RELEASE_ASSET,
+        action="gh release create",
+        publishes="assets=dist/*.whl",
+        reason="self-test fixture",
+    ),
 )
 
 
@@ -1142,7 +1682,36 @@ def self_test() -> int:
     baseline = {
         _SELF_TEST_ALLOWED_FILE: _SELF_TEST_ALLOWED_YAML,
         _SELF_TEST_CLEAN_FILE: _SELF_TEST_CLEAN_YAML,
+        _SELF_TEST_RELEASE_FILE: _SELF_TEST_RELEASE_YAML,
     }
+
+    # (h) a second place that attaches files to a release, through gh.
+    release_upload = dict(baseline)
+    release_upload[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Attach the image to the release too
+        run: gh release upload "v${VERSION}" image.tar --clobber
+"""
+    )
+
+    # (h1) the same through a release action instead of gh.
+    release_action = dict(baseline)
+    release_action[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Release with an action
+        uses: softprops/action-gh-release@0000000000000000000000000000000000000000 # v2
+        with:
+          files: dist/*
+"""
+    )
+
+    # (h2) the allowlisted attach widened to more files.
+    release_widened = dict(baseline)
+    release_widened[_SELF_TEST_RELEASE_FILE] = _SELF_TEST_RELEASE_YAML.replace(
+        "dist/*.whl", "dist/*.whl build/*"
+    )
 
     # (a) a new upload in a file that has none today.
     new_file_upload = dict(baseline)
@@ -1252,6 +1821,29 @@ def self_test() -> int:
 """
     )
 
+    # (c5) ASH's layer cache: an export mode set where none was decided, and the
+    # credential hand-off that makes an export possible at all.
+    layer_export = dict(baseline)
+    layer_export[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Build the image and export every layer
+        env:
+          ASH_GHA_BUILD_CACHE_EXPORT: max
+        run: ashx build-image --no-run
+"""
+    )
+    credentials_export = dict(baseline)
+    credentials_export[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Hand the cache token to the build
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN)
+"""
+    )
+
     # (d) an allowed upload repointed at a different path.
     repointed = dict(baseline)
     repointed[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
@@ -1315,6 +1907,8 @@ def self_test() -> int:
         ("(c2) built-in cache via cache-to", builtin_cache, 1, 0, 0),
         ("(c3) setup-uv with enable-cache left out", default_uv_cache, 1, 0, 0),
         ("(c4) setup-uv with enable-cache auto", auto_uv_cache, 1, 0, 0),
+        ("(c5) layer-cache export mode set", layer_export, 1, 0, 0),
+        ("(c6) cache credentials handed to later steps", credentials_export, 1, 0, 0),
         ("(d) allowed upload repointed", repointed, 1, 1, 0),
         ("(e) allowlisted site deleted", deleted, 0, 2, 0),
         ("(f) failure-only upload widened to always()", widened_always, 0, 0, 1),
@@ -1323,6 +1917,9 @@ def self_test() -> int:
         ("(f3) failure() negated", widened_negated, 0, 0, 1),
         ("(f4) failure() inside a negated group", widened_grouped, 0, 0, 1),
         ("(g) bare if: failure() still holds", bare_failure, 0, 0, 0),
+        ("(h) a second gh release attach", release_upload, 1, 0, 0),
+        ("(h1) a release action attaching files", release_action, 1, 0, 0),
+        ("(h2) the allowed release attach widened", release_widened, 1, 1, 0),
     ]
 
     failures = 0

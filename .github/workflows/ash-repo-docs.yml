@@ -29,7 +29,6 @@ concurrency:
 jobs:
   build-docs:
     name: Build documentation
-    needs: []
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -57,7 +56,6 @@ jobs:
 
   deploy-docs:
     name: Deploy documentation
-    needs: []
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

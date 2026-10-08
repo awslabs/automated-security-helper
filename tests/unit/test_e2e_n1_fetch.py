@@ -21,6 +21,14 @@ things have to be true of the workflow for that to work on any branch:
    ("detected dubious ownership"); actions/checkout's safe.directory entry lives in a
    temporary HOME and does not outlast the checkout step. That is what failed the
    JetBrains headless-real job.
+
+A leg can instead derive N-1 from the history with E2E_PREV_REF=auto, which names no
+branch and so survives the branch being merged and deleted (the Chocolatey leg does).
+Those legs are held to a full-history checkout and to the derivation picking a commit
+that carries the channel, on every shape of history the leg will meet: a push to the
+development branch, a pull request's merge commit whose base predates the channel, the
+landing commit in a clone where the development branch no longer exists, a release
+after the first one, and a squash landing that leaves no earlier package at all.
 """
 
 from __future__ import annotations
@@ -47,8 +55,15 @@ EXPECTED_LEGS = {
     ("ash-e2e.yml", "wheel"),
     ("ash-e2e.yml", "container"),
     ("ash-e2e.yml", "homebrew"),
-    ("ash-package.yml", "chocolatey"),
     ("ash-jetbrains-ci.yml", "headless-real"),
+}
+
+# Legs that set E2E_PREV_REF=auto, with the paths each passes to prev_tree.py --require.
+AUTO_LEGS = {
+    ("ash-package.yml", "chocolatey"): (
+        "packaging/chocolatey/ash.nuspec",
+        "packaging/chocolatey/build.ps1",
+    ),
 }
 
 
@@ -279,3 +294,169 @@ def test_the_leg_derives_n_minus_1_on_any_branch(key, shape, origin, tmp_path):
     assert (used_ref, prev_sha) == origin["expect"][shape]
     # The commit has to be readable, not merely named: every leg archives it.
     assert _git(clone, "cat-file", "-t", f"{prev_sha}^{{tree}}") == "tree"
+
+
+# -- legs that derive N-1 with E2E_PREV_REF=auto -------------------------------
+
+
+def _auto_legs() -> dict:
+    legs = {}
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        jobs = yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}
+        for name, job in jobs.items():
+            for step in job.get("steps") or []:
+                if (step.get("env") or {}).get("E2E_PREV_REF") == "auto":
+                    legs[(path.name, name)] = job
+    return legs
+
+
+AUTO = _auto_legs()
+
+
+def test_every_auto_leg_is_checked():
+    assert set(AUTO) == set(AUTO_LEGS)
+
+
+@pytest.mark.parametrize("key", sorted(AUTO), ids=lambda k: ":".join(k))
+def test_an_auto_leg_checks_out_full_history_and_names_no_branch(key):
+    job = AUTO[key]
+    _, checkout = _checkout(job["steps"])
+    assert int((checkout.get("with") or {}).get("fetch-depth", 1)) == 0, (
+        f"{key}: the release tags and older ancestors auto chooses from need fetch-depth 0"
+    )
+    assert not any(step.get("name") == FETCH_STEP for step in job["steps"])
+    assert f"refs/heads/{BASE}" not in yaml.safe_dump(job)
+
+
+def test_the_chocolatey_script_requires_its_own_channel():
+    script = (REPO_ROOT / "packaging/chocolatey/verify-on-windows.ps1").read_text(
+        encoding="utf-8"
+    )
+    for path in AUTO_LEGS[("ash-package.yml", "chocolatey")]:
+        assert f"'--require', '{path}'" in script
+    assert "else { 'auto' }" in script
+    assert "origin/v4-capabilities" not in script
+
+
+CHANNEL = "packaging/chocolatey/build.ps1"
+
+
+@pytest.fixture
+def history(tmp_path: Path) -> dict:
+    """main predates the channel; a development branch adds it.
+
+    main:   m1 (tag v3.9.0) - m2 - M (merge of dev) - L
+    dev:    m1 - d1 (adds the channel) - d2
+    squash: m2 - S (dev's tree, one commit, no dev history)
+    M also takes a change from m2, so its tree differs from d2's. v4.0.0 tags M.
+    """
+    work = tmp_path / "author"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    m1 = _commit(work, {"pyproject.toml": _pyproject("3.9.0"), "a.py": "1\n"}, "m1")
+    _git(work, "tag", "v3.9.0", m1)
+    _git(work, "checkout", "-q", "-b", "dev", m1)
+    (work / "packaging" / "chocolatey").mkdir(parents=True)
+    (work / CHANNEL).write_text("build\n", encoding="utf-8")
+    d1 = _commit(work, {"pyproject.toml": _pyproject("4.0.0")}, "d1: add the channel")
+    d2 = _commit(work, {"a.py": "dev\n"}, "d2")
+    _git(work, "checkout", "-q", "main")
+    m2 = _commit(work, {"b.py": "main\n"}, "m2")
+    _git(
+        work,
+        "-c",
+        "user.name=e2e",
+        "-c",
+        "user.email=e2e@example.invalid",
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "M: land dev",
+        "dev",
+    )
+    merge = _git(work, "rev-parse", "HEAD")
+    _git(work, "tag", "v4.0.0", merge)
+    later = _commit(work, {"c.py": "later\n"}, "L")
+    squash = _same_tree_commit(work, merge, m2, "S: dev squashed onto main")
+    _git(work, "branch", "squash", squash)
+    full = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(work), str(full)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    # The same history once dev was merged and deleted, and before v4.0.0 existed.
+    landed = tmp_path / "landed.git"
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(work), str(landed)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(landed, "branch", "-D", "dev")
+    _git(landed, "tag", "-d", "v4.0.0")
+    return {
+        "full": full.as_uri(),
+        "landed": landed.as_uri(),
+        "sha": {"d1": d1, "d2": d2, "m2": m2, "M": merge, "L": later, "S": squash},
+    }
+
+
+def _full_clone(url: str, head: str, dest: Path) -> Path:
+    """What actions/checkout leaves with fetch-depth 0: every branch and tag, HEAD detached."""
+    subprocess.run(
+        ["git", "clone", "-q", "--no-checkout", url, str(dest)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(dest, "checkout", "-q", "--detach", head)
+    return dest
+
+
+@pytest.mark.parametrize(
+    ("label", "origin_key", "head", "want"),
+    [
+        # dev's parent carries the channel; v3.9.0 predates it and is passed over.
+        ("a push to the development branch", "full", "d2", "d1"),
+        # M^1 is main without the channel; the walk finds dev's side.
+        ("the landing merge commit, dev deleted", "landed", "M", "d2"),
+        # After a release, N-1 is that release.
+        ("a commit after the first release", "full", "L", "M"),
+    ],
+)
+def test_auto_picks_a_commit_that_carries_the_channel(
+    history, tmp_path, label, origin_key, head, want
+):
+    sha = history["sha"]
+    clone = _full_clone(history[origin_key], sha[head], tmp_path / "ws")
+    used_ref, prev_sha = pt.resolve_auto(clone, [CHANNEL])
+    assert prev_sha == sha[want], (label, used_ref)
+    if head == "L":
+        assert used_ref.startswith("v4.0.0"), used_ref
+
+
+def test_auto_refuses_a_squash_landing_with_no_earlier_package(history, tmp_path):
+    clone = _full_clone(history["full"], history["sha"]["S"], tmp_path / "ws")
+    with pytest.raises(pt.DerivationError, match="introduces the channel"):
+        pt.resolve_auto(clone, [CHANNEL])
+
+
+def test_auto_in_a_shallow_clone_says_to_fetch_history(history, tmp_path):
+    # The default actions/checkout clone: one commit of one branch, no tags.
+    clone = _ci_clone(
+        {"url": history["full"], "branch": {"squash": "squash"}},
+        "squash",
+        1,
+        tmp_path / "ws",
+    )
+    with pytest.raises(pt.DerivationError, match="fetch-depth: 0"):
+        pt.resolve_auto(clone, [CHANNEL])
+
+
+def test_auto_without_a_required_path_is_refused(history, tmp_path):
+    clone = _full_clone(history["full"], history["sha"]["d2"], tmp_path / "ws")
+    with pytest.raises(pt.DerivationError, match="--require"):
+        pt.resolve_auto(clone, [])

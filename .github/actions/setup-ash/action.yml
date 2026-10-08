@@ -14,15 +14,79 @@ runs:
   using: "composite"
   steps:
     - name: Install uv
+      id: setup-uv
       uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       with:
         version: "0.11.4"
         enable-cache: true
 
+    - name: "Cache report: uv"
+      if: ${{ !cancelled() && steps.setup-uv.outcome == 'success' }}
+      shell: bash
+      env:
+        CACHE_NAME: uv
+        CACHE_HIT: ${{ steps.setup-uv.outputs.cache-hit }}
+      run: |
+        # One line per cache per job, same shape everywhere, so hit rates can be
+        # counted across runs from job summaries.
+        if [ "${CACHE_HIT}" = "true" ]; then result=hit
+        elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+        else result=miss; fi
+        echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
+
     - name: Set up Python ${{ inputs.python-version }}
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: ${{ inputs.python-version }}
+
+    # pip's HTTP download cache, for the `pip install .` below. That install fetched
+    # about 130 third-party packages from PyPI on every leg that installs ASH --
+    # 24 scan-validation legs and 4 more per push -- and none of it was cached.
+    #
+    # Only the http directories, never `wheels/`. pip keeps the wheels it builds
+    # locally there, and the one it builds here is ASH's own, which must not be
+    # put in a cache anyone with a read token can restore. The http directories
+    # hold responses fetched from the index: third-party bytes that are already
+    # public. `http-v2` is pip 24.2+; `http` is the older layout that the 3.10 and
+    # 3.11 interpreters' bundled pip still uses.
+    #
+    # Restored everywhere, saved from a push to main only, so a pull request
+    # never writes an entry another run reads. The restore-keys prefix is safe for
+    # a download cache: pip re-resolves every requirement and uses a cached
+    # response only when it matches, so a stale entry costs a download, never a
+    # wrong package.
+    - name: Locate pip's cache
+      id: pip-cache-dir
+      if: inputs.install-ash == 'true'
+      shell: bash
+      run: echo "dir=$(python -m pip cache dir)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore pip's download cache
+      id: pip-cache
+      if: inputs.install-ash == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.pip-cache-dir.outputs.dir }}/http-v2
+          ${{ steps.pip-cache-dir.outputs.dir }}/http
+        key: pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-${{ hashFiles('pyproject.toml') }}
+        restore-keys: |
+          pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-
+
+    - name: "Cache report: pip-http"
+      if: ${{ !cancelled() && steps.pip-cache.outcome == 'success' }}
+      shell: bash
+      env:
+        CACHE_NAME: pip-http
+        CACHE_HIT: ${{ steps.pip-cache.outputs.cache-hit }}
+        CACHE_MATCHED: ${{ steps.pip-cache.outputs.cache-matched-key }}
+      run: |
+        # One line per cache per job, same shape everywhere, so hit rates can be
+        # counted across runs from job summaries.
+        if [ "${CACHE_HIT}" = "true" ]; then result=hit
+        elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+        else result=miss; fi
+        echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Install ASH package (Unix)
       if: inputs.install-ash == 'true' && runner.os != 'Windows'
@@ -35,3 +99,16 @@ runs:
       run: |
         pip install .
         echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+
+    - name: Save pip's download cache (main only)
+      if: >-
+        inputs.install-ash == 'true'
+        && steps.pip-cache.outputs.cache-hit != 'true'
+        && github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.pip-cache-dir.outputs.dir }}/http-v2
+          ${{ steps.pip-cache-dir.outputs.dir }}/http
+        key: pip-http-${{ runner.os }}-${{ runner.arch }}-py${{ inputs.python-version }}-${{ hashFiles('pyproject.toml') }}

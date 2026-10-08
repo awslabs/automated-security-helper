@@ -473,10 +473,39 @@ def test_offline_mode_adds_the_offline_flag_and_disables_corepack_network(
     assert kwargs["env"]["COREPACK_ENABLE_NETWORK"] == "0"
 
 
+def test_offline_flag_set_after_config_built_reaches_npm(
+    plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
+):
+    """``ashx scan --offline`` in local mode sets ASH_OFFLINE after configs exist.
+
+    The option used to default to ``is_offline_mode()`` at construction, and
+    ``ScannerConfigSegment`` constructs its defaults at import, so this order ran
+    ``npm audit`` without ``--offline``. See
+    tests/unit/plugin_modules/test_offline_resolved_at_scan_time.py.
+    """
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setattr(
+        offline_mode_validator, "validate_npm_audit_offline_mode", lambda: (True, [])
+    )
+    config = NpmAuditScannerConfig()
+    monkeypatch.setenv("ASH_OFFLINE", "YES")
+    scanner = NpmAuditScanner(context=plugin_context, config=config)
+    node_project()
+    subprocess_double.side_effect = emits(audit_json())
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    kwargs = audit_calls(subprocess_double)[-1].kwargs
+    assert kwargs["command"] == ["npm", "audit", "--json", "--offline"]
+    assert kwargs["env"]["COREPACK_ENABLE_NETWORK"] == "0"
+
+
 def test_online_mode_passes_no_env_override(
-    scanner, npm_on_path, node_project, subprocess_double
+    scanner, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
     """Control for the offline test: online runs inherit the parent env."""
+    # ASH's offline mode outranks the option, so this control needs ASH online.
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     node_project()
     subprocess_double.side_effect = emits(audit_json())
 
@@ -732,7 +761,11 @@ def test_unparseable_audit_output_is_warned_about_and_skipped(
 def test_one_packages_failure_does_not_abort_the_others(
     scanner, npm_on_path, node_project, subprocess_double, caplog
 ):
-    """A subprocess error is caught per package, so the rest still audit."""
+    """A subprocess error is caught per package, so the rest still audit.
+
+    The package that raised was not audited, so the scan then fails naming it,
+    rather than returning the other package's findings as the whole answer.
+    """
     node_project(directory=scanner.context.work_dir / "packages" / "api")
     node_project(directory=scanner.context.work_dir / "packages" / "web")
     calls = {"n": 0}
@@ -753,11 +786,12 @@ def test_one_packages_failure_does_not_abort_the_others(
 
     subprocess_double.side_effect = _first_call_explodes
 
-    with caplog.at_level(logging.WARNING):
-        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    with caplog.at_level(logging.WARNING), pytest.raises(ScannerError) as excinfo:
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert calls["n"] == 2, "the second package should still have been audited"
-    assert [r.ruleId for r in report.runs[0].results] == ["GHSA-2222-2222-2222"]
+    assert "could not audit 1 lockfile(s)" in str(excinfo.value)
+    assert "OSError: npm died" in str(excinfo.value)
     assert any("Failed to run npm audit" in r.message for r in caplog.records)
 
 
