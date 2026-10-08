@@ -52,10 +52,22 @@ ARG BASE_IMAGE_DIGEST=sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523eb
 FROM ${BASE_IMAGE} AS uv-reqs
 
 ENV PYTHONDONTWRITEBYTECODE=1
+# apt packages are pinned to the version apt selects today from the base image's
+# own sources (bookworm, bookworm-updates, bookworm-security), identical on amd64
+# and arm64. The same package carries the same pin in every stage. Debian keeps one
+# version per suite, so a point release or security update retires a pin and the
+# build fails with "Version '...' for '...' was not found"; take the new version
+# from `apt-cache policy <package>` in the base image. nodejs pins come from the
+# NodeSource repository, which keeps its old releases.
 RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends ca-certificates python3-venv git tree curl && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates=20250419~deb12u1 \
+    python3-venv=3.11.2-1+b1 \
+    git=1:2.39.5-0+deb12u3 \
+    tree=2.1.0-1 \
+    curl=7.88.1-10+deb12u15 && \
     rm -rf /var/lib/apt/lists/*
 
 ARG INSTALL_ASH_REVISION="LOCAL"
@@ -177,14 +189,14 @@ RUN mkdir -p ${HOME}/.ssh && \
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    git \
-    gnupg \
-    python3-venv \
-    ripgrep \
-    ruby \
-    tree && \
+    ca-certificates=20250419~deb12u1 \
+    curl=7.88.1-10+deb12u15 \
+    git=1:2.39.5-0+deb12u3 \
+    gnupg=2.2.40-1.1+deb12u2 \
+    python3-venv=3.11.2-1+b1 \
+    ripgrep=13.0.0-4+b2 \
+    ruby=1:3.1 \
+    tree=2.1.0-1 && \
     rm -rf /var/lib/apt/lists/*
 
 #
@@ -203,7 +215,7 @@ RUN set -uex; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
-    apt-get -qy install --no-install-recommends nodejs;
+    apt-get -qy install --no-install-recommends nodejs=22.23.3-1nodesource1;
 #
 # uv is installed in the core stage below, after the pinned-tool installer is copied
 # in, from the same verified release asset as the uv-reqs stage.
@@ -240,7 +252,7 @@ ARG BUNDLER_VERSION="2.4.22"
 # apt-get update runs again because the base layer clears the package lists.
 RUN echo "gem: --no-document" >> /etc/gemrc && \
     apt-get update && \
-    apt-get install -y --no-install-recommends build-essential ruby-dev && \
+    apt-get install -y --no-install-recommends build-essential=12.9 ruby-dev=1:3.1 && \
     with-retry 'gem install bundler -v ${BUNDLER_VERSION}' && \
     with-retry 'bundle install --jobs=4' && \
     apt-get purge -y --auto-remove build-essential ruby-dev && \
@@ -552,7 +564,7 @@ RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
-    CMD command -v ash || exit 1
+    CMD ["/bin/sh", "-c", "command -v ash || exit 1"]
 
 ENTRYPOINT [ ]
 CMD [ "ash" ]

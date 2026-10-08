@@ -69,6 +69,8 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Construct } from 'constructs';
 
 import { AshCustomerKey, diagnosticLogGroupProps } from './ash-config';
@@ -79,6 +81,41 @@ import {
 } from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
 import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope } from './ash-policy-split';
+
+/** Where the gate's Python pins live, relative to the repository root. */
+export const GATE_REQUIREMENTS_REPO_PATH = 'deploy/terraform/modules/codecommit-gate/files/gate-requirements.txt';
+
+/**
+ * The gate image's pinned, hashed Python requirements, read from the file the
+ * Terraform gate image installs, so the two builds of that image cannot drift.
+ *
+ * Read at synth time and inlined, rather than COPYed from the cloned `ash-src`:
+ * the clone is whatever `AshVersion` names at deploy time, which can predate the
+ * file, and the pins belong to this template, not to the ref it builds. Comment
+ * lines are dropped because the buildspec is charged against CloudFormation's
+ * 51,200-byte inline template cap and nothing in the image reads them.
+ *
+ * Found by walking up from this module, so it resolves from `lib/` under ts-node
+ * and jest and from `dist/lib/` after `tsc`.
+ */
+export function gateRequirements(): string {
+  let dir = __dirname;
+  for (;;) {
+    const candidate = path.join(dir, GATE_REQUIREMENTS_REPO_PATH);
+    if (fs.existsSync(candidate)) {
+      return fs
+        .readFileSync(candidate, 'utf8')
+        .split('\n')
+        .filter((line) => line.trim() !== '' && !line.startsWith('#'))
+        .join('\n');
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      throw new Error(`${GATE_REQUIREMENTS_REPO_PATH} not found above ${__dirname}`);
+    }
+    dir = parent;
+  }
+}
 
 /** Upstream ASH repository. Public, so an anonymous clone works. */
 export const ASH_REPOSITORY_URL = 'https://github.com/awslabs/automated-security-helper.git';
@@ -766,18 +803,24 @@ export class AshImageBuild extends Construct {
 
     return [
       this.writeFileCommand('ash-src/ash_gate_handler.py', CODECOMMIT_GATE_HANDLER),
+      this.writeFileCommand('ash-src/gate-requirements.txt', gateRequirements()),
       this.writeFileCommand(
         'ash-src/Dockerfile.lambda',
         [
           `FROM ${base}`,
-          '# A container Lambda must speak the Lambda Runtime API, so the runtime',
-          '# interface client is mandatory — ASH’s image has no notion of Lambda.',
-          '# git-remote-codecommit gives git the codecommit:// transport so the',
-          '# handler can clone using the function role. boto3 is named explicitly',
-          '# rather than relied on transitively: the handler imports it from the',
-          '# system interpreter, while `ash` runs from its own environment.',
+          // awslambdaric speaks the Lambda Runtime API, which ASH's image has no
+          // notion of; git-remote-codecommit gives git the codecommit:// transport so
+          // the handler can clone with the function role. Both come pinned by version
+          // and SHA256 from GATE_REQUIREMENTS_REPO_PATH, the file the Terraform gate
+          // image installs. boto3 is not in that file: the base image's ASH install
+          // provides it, and pinning it there would replace the version ASH resolved.
+          // The handler imports it from the system interpreter, so the import is
+          // checked here, where a base without it fails the build rather than the
+          // first invocation.
+          'COPY gate-requirements.txt /tmp/gate-requirements.txt',
           'RUN python3 -m pip install --no-cache-dir --break-system-packages \\',
-          '      awslambdaric boto3 git-remote-codecommit',
+          '      --require-hashes -r /tmp/gate-requirements.txt && \\',
+          '    rm /tmp/gate-requirements.txt && python3 -c "import boto3"',
           // Lambda requires the image to run on a READ-ONLY root filesystem with only
           // /tmp writable, and it also sets its own PATH
           // (/usr/local/bin:/usr/bin/:/bin:/opt/bin), shadowing the one the ASH stages

@@ -1,0 +1,15 @@
+Package: ca-certificates
+Version: 20250419~deb12u1
+Architecture: all
+
+Package: curl
+Version: 7.88.1-10+deb12u5
+Architecture: arm64
+
+Package: git
+Version: 1:2.39.5-0+deb12u2
+Architecture: arm64
+
+Package: nodejs
+Version: 18.20.4+dfsg-1~deb12u3
+Architecture: arm64

@@ -1,0 +1,40 @@
+# What the pull-request gate's Lambda image adds to the ASH image, pinned by
+# version and SHA256 and installed with `pip install --require-hashes`.
+#
+# This one file feeds both builds of that image: gate.Dockerfile here, and the
+# CDK `lambda` flavor in deploy/cdk/lib/ash-image-build.ts, which reads this file
+# at synth time and writes it into its build context. They cannot drift apart;
+# tests/unit/deploy/test_gate_python_installs_are_pinned.py fails if either
+# installs anything else.
+#
+# The four lines are the two packages the gate needs and their own dependencies
+# that the ASH image does not already carry. git-remote-codecommit also needs
+# botocore, which is deliberately absent: ASH depends on boto3, so the base image
+# has it, and pip leaves an installed requirement alone even in hash mode.
+# Listing it here would pin botocore to a version other than the one the base
+# image resolved and make pip replace it. If a base image ever lacks botocore,
+# the install fails with "all requirements must have their versions pinned"
+# rather than fetching it unverified.
+#
+# Only the files these builds can install are hashed: the CPython 3.12 glibc
+# wheels for x86_64 and aarch64 (the base image is python:3.12-slim-bookworm, and
+# both Lambda architectures are supported), the pure-Python wheel where that is
+# all there is, and git-remote-codecommit's sdist, its only distribution. Hashing
+# every published file would have cost about 14 KB, and the CDK build inlines
+# this into a template that must stay under CloudFormation's 51,200-byte
+# template-body cap. A base image on another Python fails the install with a
+# hash mismatch rather than picking up an unverified wheel; re-take the hashes.
+#
+# To change a version, take each kept file's sha256 from
+# https://pypi.org/pypi/<name>/<version>/json (the `urls[].digests.sha256` of the
+# filenames described above).
+awslambdaric==4.2.0 \
+    --hash=sha256:3b58ea45be0db82a12ad1277efbf592bc73e307344ec17e0b0f1cfd89ecda4fd \
+    --hash=sha256:88312546cf5271d24ac1cb8a2dc745292e0ad3c6df168669dc9186823b412554
+git-remote-codecommit==1.17 \
+    --hash=sha256:fd4a9ba3fbd88cd455a8e2087765e415da0beaae9932d4e84010069a536de24e
+simplejson==4.2.0 \
+    --hash=sha256:8c1e156ad810704994439719b9c03694e267052d4938ca188d91a1769d6f742b \
+    --hash=sha256:e8910997afb7bae918b1ccf766e106e37707c8f8b4c61ac6ce433c4c86c5848f
+snapshot-restore-py==1.0.0 \
+    --hash=sha256:38f99e696793790f54658e71c68c7a8a40cea877c81232b5052383b1301aceba
