@@ -14,16 +14,25 @@
  * a subset test passes on the empty set.
  */
 
+import { execFileSync } from 'child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
 import {
+  ARCHIVE_MAGICS,
+  MAGIC_READ_BYTES,
+  MAX_MEMBER_BYTES,
+  NATIVE_MAGICS,
   describeProblems,
+  inspectArchive,
   inspectMembers,
   listZipMembers,
+  readEntryData,
+  readZipDirectory,
+  shapeProblem,
 } from '../src/vsix-contents';
 import { main, verify } from '../src/verify-vsix';
-import { CLEAN_VSIX_MEMBERS, writeZip } from './zip';
+import { CLEAN_VSIX_MEMBERS, ZipEntry, writeZip } from './zip';
 
 function collector(): { write(text: string): void; text(): string } {
   const chunks: string[] = [];
@@ -291,5 +300,175 @@ describe('the verify-vsix command', () => {
     writeFileSync(archive, writeZip(CLEAN_VSIX_MEMBERS));
 
     expect(main(['node', 'verify-vsix.js', archive], collector() as never, collector() as never)).toBe(0);
+  });
+});
+
+/** A real POSIX ustar header block plus one 512-byte data block: `ustar` sits at byte 257. */
+function tarArchive(): Buffer {
+  const header = Buffer.alloc(512);
+  header.write('grype', 0, 'latin1');
+  header.write('0000755\0', 100, 'latin1');
+  header.write('0000000\0', 108, 'latin1');
+  header.write('0000000\0', 116, 'latin1');
+  header.write('00000000020\0', 124, 'latin1');
+  header.write('00000000000\0', 136, 'latin1');
+  header.write('        ', 148, 'latin1');
+  header.write('0', 156, 'latin1');
+  header.write('ustar\0', 257, 'latin1');
+  header.write('00', 263, 'latin1');
+  let sum = 0;
+  for (const byte of header) {
+    sum += byte;
+  }
+  header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'latin1');
+  const data = Buffer.alloc(512);
+  data.write('#!/bin/sh\necho x\n', 0, 'latin1');
+  return Buffer.concat([header, data, Buffer.alloc(1024)]);
+}
+
+const ELF = Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]), Buffer.alloc(56)]);
+
+function withMember(name: string, data: Buffer | string, deflate = false): ZipEntry[] {
+  return [
+    ...CLEAN_VSIX_MEMBERS.filter((entry) => entry.name !== name),
+    { name, data, deflate },
+  ];
+}
+
+function misshapenOf(entries: readonly ZipEntry[], leading?: Buffer): string[] {
+  return inspectArchive(writeZip(entries, { leading })).misshapen.map((p) => `${p.member} ${p.reason}`);
+}
+
+describe('content shape', () => {
+  it('accepts the clean archive, stored or deflated as vsce writes it', () => {
+    expect(misshapenOf(CLEAN_VSIX_MEMBERS)).toEqual([]);
+    expect(misshapenOf(CLEAN_VSIX_MEMBERS.map((entry) => ({ ...entry, deflate: true })))).toEqual([]);
+    expect(describeProblems(inspectArchive(writeZip(CLEAN_VSIX_MEMBERS)))).toBeNull();
+  });
+
+  it('rejects a tar archive renamed extension/out/x.js, by its ustar header at byte 257', () => {
+    for (const deflate of [false, true]) {
+      expect(misshapenOf(withMember('extension/out/x.js', tarArchive(), deflate))).toEqual([
+        'extension/out/x.js carries a tar archive header at byte 257',
+      ]);
+    }
+  });
+
+  it('rejects an ELF executable renamed extension/out/x.js', () => {
+    for (const deflate of [false, true]) {
+      expect(misshapenOf(withMember('extension/out/x.js', ELF, deflate))).toEqual([
+        'extension/out/x.js carries a ELF executable header',
+      ]);
+    }
+  });
+
+  it('rejects every archive and executable header the shared gate knows, in any member', () => {
+    for (const candidate of [...ARCHIVE_MAGICS, ...NATIVE_MAGICS]) {
+      const body = Buffer.alloc(MAGIC_READ_BYTES, 0x20);
+      candidate.bytes.copy(body, candidate.offset);
+      const problems = misshapenOf(withMember('extension/readme.md', body));
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain(candidate.label);
+    }
+  });
+
+  it('rejects binary content with no known header, because it is not text', () => {
+    expect(misshapenOf(withMember('extension/out/x.js', Buffer.from([0x41, 0x00, 0x42])))).toEqual([
+      'extension/out/x.js carries a NUL byte at offset 1, so it is not text',
+    ]);
+    expect(misshapenOf(withMember('extension/changelog.md', Buffer.from([0x41, 0xc3, 0x28])))).toEqual([
+      'extension/changelog.md is not valid UTF-8, so it is not text',
+    ]);
+  });
+
+  it('holds package.json to a JSON object and the container files to XML', () => {
+    expect(misshapenOf(withMember('extension/package.json', 'not json'))).toEqual([
+      'extension/package.json does not parse as JSON',
+    ]);
+    expect(misshapenOf(withMember('extension/package.json', '[1]'))).toEqual([
+      'extension/package.json parses as JSON but not as an object, so it is not an extension manifest',
+    ]);
+    expect(misshapenOf(withMember('extension/package.json', '\uFEFF{"name":"x"}'))).toEqual([]);
+    expect(misshapenOf(withMember('extension.vsixmanifest', 'plain'))).toEqual([
+      'extension.vsixmanifest does not start with `<`, so it is not XML',
+    ]);
+  });
+
+  it('rejects a directory entry that carries bytes, and the oversize member', () => {
+    expect(shapeProblem('extension/out/', 0, Buffer.alloc(0))).toBeNull();
+    expect(shapeProblem('extension/out/', 7, Buffer.from('payload'))).toBe(
+      'is a directory entry that carries 7 byte(s)',
+    );
+    expect(misshapenOf([...CLEAN_VSIX_MEMBERS, { name: 'extension/out/', data: 'payload' }])).toEqual([
+      'extension/out/ is a directory entry that carries 7 byte(s)',
+    ]);
+    expect(misshapenOf(withMember('extension/out/big.js', 'a'.repeat(MAX_MEMBER_BYTES + 1)))).toEqual([
+      `extension/out/big.js is ${MAX_MEMBER_BYTES + 1} bytes, over the ${MAX_MEMBER_BYTES}-byte per-member ceiling`,
+    ]);
+  });
+
+  it('leaves names foreign by the allowlist to the name verdict', () => {
+    expect(shapeProblem('extension/icon.png', 3, Buffer.from([0x89, 0x50, 0x00]))).toBeNull();
+  });
+
+  it('rejects a zip appended to an executable, which still lists cleanly', () => {
+    expect(misshapenOf(CLEAN_VSIX_MEMBERS, ELF)).toEqual([
+      '(archive) does not begin with a ZIP record, so something precedes the archive',
+    ]);
+  });
+
+  it('refuses to vouch for a body it cannot read', () => {
+    expect(() => inspectArchive(writeZip(withMember('extension/out/x.js', 'x').map((e) => ({ ...e, rawMethod: 12 })))))
+      .toThrow(/compression method 12/);
+    expect(() => inspectArchive(writeZip([{ name: 'extension/out/x.js', data: 'not deflate', rawMethod: 8 }])))
+      .toThrow(/does not inflate/);
+
+    const zip = writeZip(CLEAN_VSIX_MEMBERS);
+    const [first] = readZipDirectory(zip);
+    expect(() => readEntryData(zip, { ...first, localHeaderOffset: 1 })).toThrow(/no local file header/);
+    expect(() => readEntryData(zip, { ...first, compressedSize: zip.length })).toThrow(/runs past the end/);
+    expect(() => readEntryData(zip, { ...first, uncompressedSize: 1 })).toThrow(/declares 1/);
+    expect(readEntryData(zip, { ...first, uncompressedSize: MAX_MEMBER_BYTES + 1 })).toHaveLength(0);
+  });
+
+  it('makes verify-vsix exit 1 on a renamed executable, naming the content rule', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'ash-vsix-shape-'));
+    try {
+      const archive = path.join(dir, 'renamed.vsix');
+      writeFileSync(archive, writeZip(withMember('extension/out/x.js', ELF, true)));
+      const err = collector();
+      expect(verify(archive, collector() as never, err as never)).toBe(1);
+      expect(err.text()).toContain('content does not match their name');
+      expect(err.text()).toContain('extension/out/x.js carries a ELF executable header');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the payload tables match the shared gate', () => {
+  // src/vsix-contents.ts cannot import Python, so it carries a copy of the
+  // tables in .github/scripts/assert-artifact-contents.py. This reads that
+  // file's tables through python3 and fails on any difference, so a header added
+  // there and not here turns this suite red instead of opening a bypass.
+  it('has the same archive and executable headers, read size and size ceiling', () => {
+    const gate = path.resolve(__dirname, '..', '..', '..', '.github', 'scripts', 'assert-artifact-contents.py');
+    const program = [
+      'import importlib.util, json, sys',
+      'sys.dont_write_bytecode = True',
+      'spec = importlib.util.spec_from_file_location("gate", sys.argv[1])',
+      'module = importlib.util.module_from_spec(spec)',
+      'sys.modules["gate"] = module',
+      'spec.loader.exec_module(module)',
+      'print(json.dumps({"archive": [[o, m.hex()] for o, m in module.ARCHIVE_MAGICS],',
+      '  "native": [m.hex() for m in module.NATIVE_MAGICS],',
+      '  "read": module.MAGIC_READ_BYTES, "max": module.MAX_MEMBER_BYTES}))',
+    ].join('\n');
+    const shared = JSON.parse(execFileSync('python3', ['-c', program, gate], { encoding: 'utf8' }));
+
+    expect(ARCHIVE_MAGICS.map((m) => [m.offset, m.bytes.toString('hex')])).toEqual(shared.archive);
+    expect(NATIVE_MAGICS.map((m) => m.bytes.toString('hex'))).toEqual(shared.native);
+    expect(MAGIC_READ_BYTES).toBe(shared.read);
+    expect(MAX_MEMBER_BYTES).toBe(shared.max);
   });
 });

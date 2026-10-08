@@ -148,6 +148,9 @@ on:
       # Node version from, so editing it changes the toolchain this gate runs on. A
       # file that decides what a gate tests belongs in the gate's own filter.
       - ".nvmrc"
+      # The same rule: test/vsix-contents.test.ts holds src/vsix-contents.ts's
+      # payload tables to this file's, so editing it changes what that test asserts.
+      - ".github/scripts/assert-artifact-contents.py"
   pull_request:
     # "**" for the same reason as the push filter above: a pull request whose BASE is
     # a nested branch -- a stacked pull request targeting e.g. ci/close-gate-gaps --
@@ -159,6 +162,7 @@ on:
       - "deploy/cdk-constructs/**"
       - "editors/vscode/**"
       - ".nvmrc"
+      - ".github/scripts/assert-artifact-contents.py"
   # THE MERGE QUEUE LEG, AND WHY IT CARRIES NO paths FILTER
   #
   # This repository runs a merge queue -- ash-unified-ci.yml declares merge_group

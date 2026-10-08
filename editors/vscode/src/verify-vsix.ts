@@ -20,7 +20,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { describeProblems, inspectMembers, listZipMembers } from './vsix-contents';
+import { ContentsVerdict, describeProblems, inspectArchive, listZipMembers } from './vsix-contents';
 
 export function verify(archive: string, out = process.stdout, err = process.stderr): number {
   let buffer: Buffer;
@@ -31,15 +31,16 @@ export function verify(archive: string, out = process.stdout, err = process.stde
     return 2;
   }
 
+  let verdict: ContentsVerdict;
   let members: string[];
   try {
+    verdict = inspectArchive(buffer);
     members = listZipMembers(buffer);
   } catch (parseError) {
     err.write(`vsix contents: ${archive}: ${(parseError as Error).message}\n`);
     return 2;
   }
 
-  const verdict = inspectMembers(members);
   const problems = describeProblems(verdict);
   if (problems !== null) {
     err.write(`vsix contents check failed for ${archive}:\n${problems}\n`);
@@ -48,7 +49,7 @@ export function verify(archive: string, out = process.stdout, err = process.stde
 
   out.write(
     `vsix contents OK: ${archive} carries ${verdict.memberCount} member(s), all of them ` +
-      'VSIX container files or this extension\'s own output.\n',
+      'VSIX container files or this extension\'s own output, and every body matches its name.\n',
   );
   for (const member of members) {
     out.write(`  ${member}\n`);
