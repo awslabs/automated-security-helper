@@ -234,7 +234,72 @@ def test_the_throwaway_account_is_removed_even_when_a_check_fails():
     assert step.count("Remove-StandardUser") == 1, "only in the finally block"
     helper = text[text.index("function Remove-StandardUser") :]
     helper = helper[: helper.index("\n}\n")]
-    assert "[string] $Name" in helper and "[ADSI]::Exists" in helper
+    assert "[string] $Name" in helper and "Test-LocalUser -Name $Name" in helper
+
+
+def _ps_function(text: str, name: str) -> str:
+    start = text.index(f"function {name} {{")
+    return text[start : text.index("\n}\n", start) + 3]
+
+
+def test_the_account_lookup_never_uses_adsi_exists():
+    # With the WinNT provider [ADSI]::Exists throws "The user name could not be found"
+    # for a missing user instead of returning false, so New-StandardUser died on a clean
+    # runner and the same call in finally then hid that error.
+    text = CHOCOLATEY_LEG.read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "::Exists(" not in code
+    lookup = _ps_function(text, "Test-LocalUser")
+    assert "Win32_UserAccount" in lookup and "-ErrorAction Stop" in lookup
+    assert "LocalAccount=True AND Name='$Name'" in lookup
+    for name in ("New-StandardUser", "Remove-StandardUser"):
+        assert "Test-LocalUser -Name $Name" in _ps_function(text, name), name
+
+
+def test_a_failed_cleanup_does_not_mask_the_failure_that_ended_step_7b():
+    text = CHOCOLATEY_LEG.read_text(encoding="utf-8")
+    start = text.index("Write-Host '== 7b.")
+    step = text[start : text.index("Write-Host '== 8.", start)]
+    opened = step.index("\ntry {")
+    finally_at = step.index("} finally {", opened)
+    body, cleanup = step[opened:finally_at], step[finally_at:]
+    # The flag is set by the last statement of the try block, after every check.
+    assert body.rstrip().endswith("$step7bPassed = $true")
+    assert "$step7bPassed = $false" in step[:opened]
+    # The cleanup is caught, and rethrown only when nothing before it failed.
+    assert "    try {\n        Remove-StandardUser" in cleanup
+    assert (
+        "} catch {\n        if ($step7bPassed) { throw }\n        Write-Warning"
+        in cleanup
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="Win32_UserAccount and ADSI exist only on Windows"
+)
+def test_remove_standard_user_is_a_no_op_for_a_missing_account():
+    import shutil
+
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    assert pwsh, "no PowerShell on a Windows host"
+    text = CHOCOLATEY_LEG.read_text(encoding="utf-8")
+    program = (
+        _ps_function(text, "Test-LocalUser")
+        + _ps_function(text, "Remove-StandardUser")
+        + "$ErrorActionPreference = 'Stop'\n"
+        + "if (Test-LocalUser -Name 'ashe2enosuchuser') { exit 3 }\n"
+        + "Remove-StandardUser -Name 'ashe2enosuchuser'\n"
+        + "exit 0\n"
+    )
+    done = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-Command", program],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 def test_a_box_drawing_line_reaches_a_cp1252_stdout(home, monkeypatch):

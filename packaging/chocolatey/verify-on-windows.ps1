@@ -320,10 +320,21 @@ function Get-RebuildProblems {
 # Through ADSI's WinNT provider rather than the LocalAccounts cmdlets, which PowerShell 7
 # may load through the Windows PowerShell compatibility layer and then hand back
 # deserialized objects. And not `net user`, which would put the password on a command line.
+# Whether a local account named $Name exists. Not [ADSI]::Exists: with the WinNT provider
+# it throws "The user name could not be found" for a missing user instead of returning
+# false. Win32_UserAccount answers both ways, and a failed query throws rather than
+# reading as "absent".
+function Test-LocalUser {
+    param([Parameter(Mandatory = $true)][string] $Name)
+    $found = Get-CimInstance -ClassName Win32_UserAccount -ErrorAction Stop `
+        -Filter "LocalAccount=True AND Name='$Name'"
+    return [bool] $found
+}
+
 function New-StandardUser {
     param([Parameter(Mandatory = $true)][string] $Name)
     $computer = [ADSI] "WinNT://$env:COMPUTERNAME,computer"
-    if ([ADSI]::Exists("WinNT://$env:COMPUTERNAME/$Name,user")) {
+    if (Test-LocalUser -Name $Name) {
         $computer.Delete('User', $Name) | Out-Null
     }
     # A random password, never printed and never written anywhere; the account lives for
@@ -359,7 +370,7 @@ function New-StandardUser {
 # returned nothing. Removing an account that does not exist is a no-op.
 function Remove-StandardUser {
     param([Parameter(Mandatory = $true)][string] $Name)
-    if (-not [ADSI]::Exists("WinNT://$env:COMPUTERNAME/$Name,user")) {
+    if (-not (Test-LocalUser -Name $Name)) {
         return
     }
     $sid = ([System.Security.Principal.NTAccount] "$env:COMPUTERNAME\$Name").Translate(
@@ -617,6 +628,9 @@ Write-Host '== 7b. an unprivileged user selects a scanner: ashx dependencies ins
 # them behind. PowerShell runs a finally block when exit leaves the try block.
 $standardUserName = 'ashe2estd'
 $userWork = Join-Path $env:SystemDrive 'ash-e2e-standard-user'
+# Set only when every check in the try block has passed. A cleanup failure after a failed
+# step is reported as a warning, so it cannot replace the failure that ended the step.
+$step7bPassed = $false
 try {
     $standardUser = New-StandardUser -Name $standardUserName
     if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
@@ -658,9 +672,15 @@ try {
         Fail-Verification "$($installedTool.binary) is owned by $owner, not by $($standardUser.Name)"
     }
     Write-Host "   OK: $($installedTool.tool) $($installedTool.version) at $($installedTool.binary), owned by $owner"
+    $step7bPassed = $true
 } finally {
-    Remove-StandardUser -Name $standardUserName
-    if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
+    try {
+        Remove-StandardUser -Name $standardUserName
+        if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
+    } catch {
+        if ($step7bPassed) { throw }
+        Write-Warning "cleanup after the failed step 7b also failed, and is not the cause: $_"
+    }
 }
 
 Write-Host '== 8. uninstall drops the venv, the shims and the package record'
