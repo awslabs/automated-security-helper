@@ -1,0 +1,2259 @@
+additional_reports:
+  trivy:
+    source:
+      duration: 0.5
+      end_time: '2026-01-15T12:00:00.500000Z'
+      finding_count: 10
+      metadata:
+        scanner_version: 0.69.3
+      report_type: sarif
+      scanner_name: trivy
+      severity_counts:
+        high: 3
+        medium: 7
+      start_time: '2026-01-15T12:00:00Z'
+      status: PASSED
+      target: <TMP>/src
+      target_type: source
+ash_config:
+  ash_plugin_modules: []
+  build: null
+  content_db_staleness: fail
+  content_db_staleness_overrides: []
+  converters:
+    archive:
+      enabled: true
+      name: archive
+      options: {}
+    jupyter:
+      enabled: true
+      name: jupyter
+      options:
+        install_timeout: 300
+        tool_version: '>=7.16.0,<8.0.0'
+  external_reports_to_include: []
+  fail_on_findings: true
+  fail_on_incomplete_scanners: true
+  global_settings:
+    ignore_paths: []
+    mcp:
+      runtime_overrides:
+        allowed_paths: []
+        denied_paths:
+        - /fail_on_findings
+        - /fail_on_incomplete_scanners
+        - /content_db_staleness
+        - /content_db_staleness_overrides
+        - /sandbox
+        - /sandbox/**
+        - /global_settings/ignore_paths
+        - /global_settings/suppressions
+        - /reporters/bedrock-summary-reporter/options/aws_*
+        - /reporters/cloudwatch-logs/**
+        denied_value_patterns: {}
+        enabled: false
+    severity_threshold: MEDIUM
+    suppressions: []
+  mcp-resource-management:
+    enable_health_checks: true
+    enable_resource_logging: true
+    health_check_interval_seconds: 60
+    log_resource_operations: false
+    max_concurrent_scans: 3
+    max_concurrent_tasks: 20
+    max_directory_size_mb: 1000
+    max_message_size_bytes: 10485760
+    max_path_length: 4096
+    memory_critical_threshold_mb: 2048
+    memory_warning_threshold_mb: 1024
+    operation_timeout_seconds: 180
+    scan_timeout_seconds: 1800
+    shutdown_timeout_seconds: 30
+    task_count_warning_threshold: 15
+    thread_pool_max_workers: 4
+  project_name: trivy-snapshot
+  reporters:
+    csv:
+      enabled: true
+      extension: csv
+      name: csv
+      options: {}
+    cyclonedx:
+      enabled: true
+      extension: cdx.json
+      name: cyclonedx
+      options: {}
+    flat-json:
+      enabled: true
+      extension: flat.json
+      name: flat-json
+      options:
+        include_metadata: true
+        include_scanner_metrics: true
+        include_summary_metrics: true
+    github-ghas:
+      enabled: true
+      extension: ghas.sarif
+      name: github-ghas
+      options:
+        exclude_suppressed: true
+    gitlab-cyclonedx:
+      enabled: true
+      extension: gl-dependency-scanning-report.cdx.json
+      name: gitlab-cyclonedx
+      options:
+        category: production
+        input_file_path_override: null
+        language_override: null
+        package_manager_override: null
+    gitlab-sast:
+      enabled: true
+      extension: gl-sast-report.json
+      name: gitlab-sast
+      options:
+        exclude_suppressed: false
+    html:
+      enabled: true
+      extension: html
+      name: html
+      options: {}
+    junitxml:
+      enabled: true
+      extension: junit.xml
+      name: junitxml
+      options:
+        respect_severity_threshold: true
+    markdown:
+      enabled: true
+      extension: summary.md
+      name: markdown
+      options:
+        compact: false
+        include_detailed_findings: true
+        include_findings_table: false
+        include_summary: true
+        max_detailed_findings: 20
+        top_hotspots_limit: 10
+        use_collapsible_details: true
+    ocsf:
+      enabled: true
+      extension: ocsf.json
+      name: ocsf
+      options: {}
+    sarif:
+      enabled: true
+      extension: sarif
+      name: sarif
+      options: {}
+    spdx:
+      enabled: false
+      extension: spdx.json
+      name: spdx
+      options: {}
+    text:
+      enabled: true
+      extension: summary.txt
+      name: text
+      options:
+        include_detailed_findings: false
+        include_findings_table: false
+        include_summary: true
+        max_detailed_findings: 20
+        top_hotspots_limit: 20
+    unused-suppressions:
+      enabled: true
+      extension: unused-suppressions.json
+      name: unused-suppressions
+      options:
+        output_format: both
+    yaml:
+      enabled: false
+      extension: yaml
+      name: yaml
+      options: {}
+  sandbox:
+    extra_read_paths: []
+    mode: 'off'
+    network_scanners: null
+  scanners:
+    bandit:
+      enabled: true
+      name: bandit
+      options:
+        additional_formats: []
+        confidence_level: all
+        config_file: null
+        excluded_paths: []
+        ignore_nosec: false
+        install_timeout: 300
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.7.0,<2.0.0'
+    cdk-nag:
+      enabled: true
+      name: cdk-nag
+      options:
+        include_compliant_checks: false
+        nag_packs:
+          AwsSolutionsChecks: true
+          HIPAASecurityChecks: false
+          NIST80053R4Checks: false
+          NIST80053R5Checks: false
+          PCIDSS321Checks: false
+        scan_timeout: 1800
+        severity_threshold: null
+    cfn-nag:
+      enabled: true
+      name: cfn-nag
+      options:
+        scan_timeout: 1800
+        severity_threshold: null
+    checkov:
+      enabled: true
+      name: checkov
+      options:
+        additional_formats:
+        - cyclonedx_json
+        config_file: null
+        frameworks:
+        - all
+        install_timeout: 300
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+        skip_ash_output_dir: true
+        skip_frameworks: []
+        skip_path: []
+        tool_version: null
+    detect-secrets:
+      enabled: true
+      name: detect-secrets
+      options:
+        baseline_file: null
+        scan_settings:
+          filters_used: []
+          generated_at: null
+          plugins_used: []
+          results: {}
+          version: null
+        scan_timeout: 1800
+        severity_threshold: null
+        skip_generated_lockfiles: true
+    grype:
+      enabled: true
+      name: grype
+      options:
+        config_file: null
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    npm-audit:
+      enabled: true
+      name: npm-audit
+      options:
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    opengrep:
+      enabled: true
+      name: opengrep
+      options:
+        config: p/ci
+        exclude:
+        - '*-converted.py'
+        - '*_report_result.txt'
+        exclude_rule: []
+        metrics: auto
+        offline: false
+        patterns: []
+        scan_timeout: 1800
+        severity: []
+        severity_threshold: null
+        sha256: {}
+        version: v1.30.2
+    semgrep:
+      enabled: true
+      name: semgrep
+      options:
+        config: p/ci
+        exclude:
+        - '*-converted.py'
+        - '*_report_result.txt'
+        exclude_rule: []
+        install_timeout: 300
+        metrics: auto
+        offline: false
+        scan_timeout: 1800
+        severity: []
+        severity_threshold: null
+        tool_version: null
+    syft:
+      enabled: true
+      name: syft
+      options:
+        additional_outputs:
+        - syft-table
+        config_file: null
+        exclude: []
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    trivy:
+      enabled: true
+  workspace:
+    max_parallel_projects: null
+    project_timeout: null
+converter_results: {}
+cyclonedx:
+  $schema: null
+  annotations: null
+  bomFormat: CycloneDX
+  components: null
+  compositions: null
+  declarations: null
+  definitions: null
+  dependencies: null
+  externalReferences: null
+  formulation: null
+  metadata: null
+  properties: null
+  serialNumber: null
+  services: null
+  signature: null
+  specVersion: '1.6'
+  version: 1
+  vulnerabilities: null
+description: Aggregated security scan results
+metadata:
+  description: Automated Security Helper Aggregated Report Post-processor
+  execution_discrepancy_report: {}
+  expected_scanners: []
+  generated_at: '2026-01-15T12:00:00+00:00'
+  plugin_load_errors: {}
+  project_name: ASH
+  report_id: ASH-20260115
+  shard: null
+  summary_stats:
+    actionable: 10
+    duration: 0.0
+    end: null
+    error: 0
+    failed: 1
+    missing: 0
+    passed: 0
+    severity_counts:
+      critical: 0
+      high: 3
+      info: 0
+      low: 0
+      medium: 7
+      suppressed: 0
+    skipped: 0
+    start: null
+    total: 10
+  tool_version: <ASH_VERSION>
+  validation_summary: {}
+name: ASH Scan 2026-01-15T12:00:00
+sarif:
+  $schema: https://json.schemastore.org/sarif-2.1.0.json
+  inlineExternalProperties: []
+  properties:
+    tags: []
+  runs:
+  - addresses: []
+    artifacts: null
+    automationDetails: null
+    baselineGuid: null
+    columnKind: null
+    conversion: null
+    defaultEncoding: null
+    defaultSourceLanguage: null
+    externalPropertyFileReferences: null
+    graphs: []
+    invocations: []
+    language: en-US
+    logicalLocations: []
+    newlineSequences:
+    - "\r\n"
+    - '
+
+      '
+    originalUriBaseIds: null
+    policies: []
+    properties:
+      tags: []
+    redactionTokens: []
+    results:
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'package-lock.json: lodash@4.17.20'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: package-lock.json
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 17
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 13
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: lodash
+
+          Installed Version: 4.17.20
+
+          Vulnerability CVE-2021-23337
+
+          Severity: HIGH
+
+          Fixed Version: 4.17.21
+
+          Link: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: HIGH
+        package_name: lodash
+        package_path: node_modules/lodash
+        package_version: 4.17.20
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2021-23337
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'package-lock.json: lodash@4.17.20'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: package-lock.json
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 17
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 13
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: lodash
+
+          Installed Version: 4.17.20
+
+          Vulnerability CVE-2026-4800
+
+          Severity: HIGH
+
+          Fixed Version: 4.18.0
+
+          Link: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: HIGH
+        package_name: lodash
+        package_path: node_modules/lodash
+        package_version: 4.17.20
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2026-4800
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'package-lock.json: lodash@4.17.20'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: package-lock.json
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 17
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 13
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: lodash
+
+          Installed Version: 4.17.20
+
+          Vulnerability CVE-2020-28500
+
+          Severity: MEDIUM
+
+          Fixed Version: 4.17.21
+
+          Link: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        package_name: lodash
+        package_path: node_modules/lodash
+        package_version: 4.17.20
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2020-28500
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'package-lock.json: lodash@4.17.20'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: package-lock.json
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 17
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 13
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: lodash
+
+          Installed Version: 4.17.20
+
+          Vulnerability CVE-2025-13465
+
+          Severity: MEDIUM
+
+          Fixed Version: 4.17.23
+
+          Link: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        package_name: lodash
+        package_path: node_modules/lodash
+        package_version: 4.17.20
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2025-13465
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'package-lock.json: lodash@4.17.20'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: package-lock.json
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 17
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 13
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: lodash
+
+          Installed Version: 4.17.20
+
+          Vulnerability CVE-2026-2950
+
+          Severity: MEDIUM
+
+          Fixed Version: 4.18.0
+
+          Link: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        package_name: lodash
+        package_path: node_modules/lodash
+        package_version: 4.17.20
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2026-2950
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'requirements.txt: requests@2.19.1'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: requirements.txt
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 2
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 2
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: requests
+
+          Installed Version: 2.19.1
+
+          Vulnerability CVE-2018-18074
+
+          Severity: HIGH
+
+          Fixed Version: 2.20.0
+
+          Link: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: HIGH
+        package_name: requests
+        package_version: 2.19.1
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2018-18074
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'requirements.txt: requests@2.19.1'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: requirements.txt
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 2
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 2
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: requests
+
+          Installed Version: 2.19.1
+
+          Vulnerability CVE-2023-32681
+
+          Severity: MEDIUM
+
+          Fixed Version: 2.31.0
+
+          Link: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        package_name: requests
+        package_version: 2.19.1
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2023-32681
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'requirements.txt: requests@2.19.1'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: requirements.txt
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 2
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 2
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: requests
+
+          Installed Version: 2.19.1
+
+          Vulnerability CVE-2024-35195
+
+          Severity: MEDIUM
+
+          Fixed Version: 2.32.0
+
+          Link: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        package_name: requests
+        package_version: 2.19.1
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2024-35195
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'requirements.txt: requests@2.19.1'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: requirements.txt
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 2
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 2
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: requests
+
+          Installed Version: 2.19.1
+
+          Vulnerability CVE-2024-47081
+
+          Severity: MEDIUM
+
+          Fixed Version: 2.32.4
+
+          Link: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        package_name: requests
+        package_version: 2.19.1
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2024-47081
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message:
+          arguments: []
+          id: null
+          markdown: null
+          properties: null
+          text: 'requirements.txt: requests@2.19.1'
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: requirements.txt
+            uriBaseId: ROOTPATH
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 1
+            endLine: 2
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: 1
+            startLine: 2
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Package: requests
+
+          Installed Version: 2.19.1
+
+          Vulnerability CVE-2026-25645
+
+          Severity: MEDIUM
+
+          Fixed Version: 2.33.0
+
+          Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)'
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: MEDIUM
+        package_name: requests
+        package_version: 2.19.1
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: trivy
+          tool_version: 0.69.3
+        scanner_name: trivy
+        scanner_version: 0.69.3
+        tags:
+        - trivy
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2026-25645
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    runAggregates: []
+    specialLocations: null
+    taxonomies: []
+    threadFlowLocations: []
+    tool:
+      driver:
+        associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: https://github.com/awslabs/automated-security-helper
+        fullDescription: null
+        fullName: awslabs/automated-security-helper
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://awslabs.github.io/automated-security-helper
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: AWS Labs - Automated Security Helper
+        notifications: []
+        organization: Amazon Web Services
+        product: null
+        productSuite: null
+        properties: null
+        releaseDateUtc: null
+        rules: []
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: <ASH_VERSION>
+      extensions:
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: Trivy Vulnerability Scanner
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://github.com/aquasecurity/trivy
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: trivy
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 0.5
+              end_time: '2026-01-15T12:00:00.500000+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:00+00:00'
+            tool_name: trivy
+            tool_version: 0.69.3
+          tags:
+          - trivy
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration:
+            enabled: true
+            level: error
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: Lodash versions prior to 4.17.21 are vulnerable to Command Injection
+              via the template function.
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2021-23337**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |HIGH|lodash|4.17.21|[CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)|
+
+
+              Lodash versions prior to 4.17.21 are vulnerable to Command Injection
+              via the template function.'
+            properties: null
+            text: 'Vulnerability CVE-2021-23337
+
+              Severity: HIGH
+
+              Package: lodash
+
+              Fixed Version: 4.17.21
+
+              Link: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)
+
+              Lodash versions prior to 4.17.21 are vulnerable to Command Injection
+              via the template function.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2021-23337
+          id: CVE-2021-23337
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 7.2
+            cvssv3_vector: CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H
+            precision: very-high
+            security-severity: '7.2'
+            tags:
+            - vulnerability
+            - security
+            - HIGH
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'nodejs-lodash: command injection via template'
+        - defaultConfiguration:
+            enabled: true
+            level: error
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: 'Impact:
+
+
+              The fix for CVE-2021-23337 (https://github.com/advisories/GHSA-35jh-r3h4-6jhm)
+              added validation for the variable option in _.template but did not apply
+              the same validation to options.imports key names. Both paths flow into
+              the same Function() constructor sink.
+
+
+              When an application passes untrusted input as options.imports key names,
+              an attacker can inject default-parameter expressions that execute arbitrary
+              code at template compilation time.
+
+
+              Additionally, _.template uses assignInWith to merge imports, which enumerates
+              inherited properties via for..in. If Object.prototype has been polluted
+              by any other vector, the polluted keys are copied into the imports object
+              and passed to Function().
+
+
+              Patches:
+
+
+              Users should upgrade to version 4.18.0.
+
+
+              Workarounds:
+
+
+              Do not pass untrusted input as key names in options.imports. Only use
+              developer-controlled, static key names.'
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2026-4800**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |HIGH|lodash|4.18.0|[CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)|
+
+
+              Impact:
+
+
+              The fix for CVE-2021-23337 (https://github.com/advisories/GHSA-35jh-r3h4-6jhm)
+              added validation for the variable option in _.template but did not apply
+              the same validation to options.imports key names. Both paths flow into
+              the same Function() constructor sink.
+
+
+              When an application passes untrusted input as options.imports key names,
+              an attacker can inject default-parameter expressions that execute arbitrary
+              code at template compilation time.
+
+
+              Additionally, _.template uses assignInWith to merge imports, which enumerates
+              inherited properties via for..in. If Object.prototype has been polluted
+              by any other vector, the polluted keys are copied into the imports object
+              and passed to Function().
+
+
+              Patches:
+
+
+              Users should upgrade to version 4.18.0.
+
+
+              Workarounds:
+
+
+              Do not pass untrusted input as key names in options.imports. Only use
+              developer-controlled, static key names.'
+            properties: null
+            text: 'Vulnerability CVE-2026-4800
+
+              Severity: HIGH
+
+              Package: lodash
+
+              Fixed Version: 4.18.0
+
+              Link: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)
+
+              Impact:
+
+
+              The fix for CVE-2021-23337 (https://github.com/advisories/GHSA-35jh-r3h4-6jhm)
+              added validation for the variable option in _.template but did not apply
+              the same validation to options.imports key names. Both paths flow into
+              the same Function() constructor sink.
+
+
+              When an application passes untrusted input as options.imports key names,
+              an attacker can inject default-parameter expressions that execute arbitrary
+              code at template compilation time.
+
+
+              Additionally, _.template uses assignInWith to merge imports, which enumerates
+              inherited properties via for..in. If Object.prototype has been polluted
+              by any other vector, the polluted keys are copied into the imports object
+              and passed to Function().
+
+
+              Patches:
+
+
+              Users should upgrade to version 4.18.0.
+
+
+              Workarounds:
+
+
+              Do not pass untrusted input as key names in options.imports. Only use
+              developer-controlled, static key names.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2026-4800
+          id: CVE-2026-4800
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 8.1
+            cvssv3_vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H
+            precision: very-high
+            security-severity: '8.1'
+            tags:
+            - vulnerability
+            - security
+            - HIGH
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'lodash: lodash: Arbitrary code execution via untrusted input in
+              template imports'
+        - defaultConfiguration:
+            enabled: true
+            level: warning
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: Lodash versions prior to 4.17.21 are vulnerable to Regular Expression
+              Denial of Service (ReDoS) via the toNumber, trim and trimEnd functions.
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2020-28500**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |MEDIUM|lodash|4.17.21|[CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)|
+
+
+              Lodash versions prior to 4.17.21 are vulnerable to Regular Expression
+              Denial of Service (ReDoS) via the toNumber, trim and trimEnd functions.'
+            properties: null
+            text: 'Vulnerability CVE-2020-28500
+
+              Severity: MEDIUM
+
+              Package: lodash
+
+              Fixed Version: 4.17.21
+
+              Link: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)
+
+              Lodash versions prior to 4.17.21 are vulnerable to Regular Expression
+              Denial of Service (ReDoS) via the toNumber, trim and trimEnd functions.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2020-28500
+          id: CVE-2020-28500
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 5.3
+            cvssv3_vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L
+            precision: very-high
+            security-severity: '5.3'
+            tags:
+            - vulnerability
+            - security
+            - MEDIUM
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'nodejs-lodash: ReDoS via the toNumber, trim and trimEnd functions'
+        - defaultConfiguration:
+            enabled: true
+            level: warning
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: "Lodash versions 4.0.0 through 4.17.22 are vulnerable to prototype\
+              \ pollution in the _.unset\_and _.omit\_functions. An attacker can pass\
+              \ crafted paths which cause Lodash to delete methods from global prototypes.\n\
+              \nThe issue permits deletion of properties but does not allow overwriting\
+              \ their original behavior.\n\nThis issue is patched on 4.17.23"
+          guid: null
+          help:
+            markdown: "**Vulnerability CVE-2025-13465**\n| Severity | Package | Fixed\
+              \ Version | Link |\n| --- | --- | --- | --- |\n|MEDIUM|lodash|4.17.23|[CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)|\n\
+              \nLodash versions 4.0.0 through 4.17.22 are vulnerable to prototype\
+              \ pollution in the _.unset\_and _.omit\_functions. An attacker can pass\
+              \ crafted paths which cause Lodash to delete methods from global prototypes.\n\
+              \nThe issue permits deletion of properties but does not allow overwriting\
+              \ their original behavior.\n\nThis issue is patched on 4.17.23"
+            properties: null
+            text: "Vulnerability CVE-2025-13465\nSeverity: MEDIUM\nPackage: lodash\n\
+              Fixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)\n\
+              Lodash versions 4.0.0 through 4.17.22 are vulnerable to prototype pollution\
+              \ in the _.unset\_and _.omit\_functions. An attacker can pass crafted\
+              \ paths which cause Lodash to delete methods from global prototypes.\n\
+              \nThe issue permits deletion of properties but does not allow overwriting\
+              \ their original behavior.\n\nThis issue is patched on 4.17.23"
+          helpUri: https://avd.aquasec.com/nvd/cve-2025-13465
+          id: CVE-2025-13465
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 6.5
+            cvssv3_vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L
+            cvssv40_baseScore: 6.9
+            cvssv40_vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:L/SC:H/SI:H/SA:H/E:P
+            precision: very-high
+            security-severity: '6.5'
+            tags:
+            - vulnerability
+            - security
+            - MEDIUM
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'lodash: prototype pollution in _.unset and _.omit functions'
+        - defaultConfiguration:
+            enabled: true
+            level: warning
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: 'Impact:
+
+
+              Lodash versions 4.17.23 and earlier are vulnerable to prototype pollution
+              in the _.unset and _.omit functions. The fix for (CVE-2025-13465: https://github.com/lodash/lodash/security/advisories/GHSA-xxjr-mmjv-4gpg)
+              only guards against string key members, so an attacker can bypass the
+              check by passing array-wrapped path segments. This allows deletion of
+              properties from built-in prototypes such as Object.prototype, Number.prototype,
+              and String.prototype.
+
+
+              The issue permits deletion of prototype properties but does not allow
+              overwriting their original behavior.
+
+
+              Patches:
+
+
+              This issue is patched in 4.18.0.
+
+
+              Workarounds:
+
+
+              None. Upgrade to the patched version.'
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2026-2950**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |MEDIUM|lodash|4.18.0|[CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)|
+
+
+              Impact:
+
+
+              Lodash versions 4.17.23 and earlier are vulnerable to prototype pollution
+              in the _.unset and _.omit functions. The fix for (CVE-2025-13465: https://github.com/lodash/lodash/security/advisories/GHSA-xxjr-mmjv-4gpg)
+              only guards against string key members, so an attacker can bypass the
+              check by passing array-wrapped path segments. This allows deletion of
+              properties from built-in prototypes such as Object.prototype, Number.prototype,
+              and String.prototype.
+
+
+              The issue permits deletion of prototype properties but does not allow
+              overwriting their original behavior.
+
+
+              Patches:
+
+
+              This issue is patched in 4.18.0.
+
+
+              Workarounds:
+
+
+              None. Upgrade to the patched version.'
+            properties: null
+            text: 'Vulnerability CVE-2026-2950
+
+              Severity: MEDIUM
+
+              Package: lodash
+
+              Fixed Version: 4.18.0
+
+              Link: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)
+
+              Impact:
+
+
+              Lodash versions 4.17.23 and earlier are vulnerable to prototype pollution
+              in the _.unset and _.omit functions. The fix for (CVE-2025-13465: https://github.com/lodash/lodash/security/advisories/GHSA-xxjr-mmjv-4gpg)
+              only guards against string key members, so an attacker can bypass the
+              check by passing array-wrapped path segments. This allows deletion of
+              properties from built-in prototypes such as Object.prototype, Number.prototype,
+              and String.prototype.
+
+
+              The issue permits deletion of prototype properties but does not allow
+              overwriting their original behavior.
+
+
+              Patches:
+
+
+              This issue is patched in 4.18.0.
+
+
+              Workarounds:
+
+
+              None. Upgrade to the patched version.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2026-2950
+          id: CVE-2026-2950
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 6.5
+            cvssv3_vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L
+            precision: very-high
+            security-severity: '6.5'
+            tags:
+            - vulnerability
+            - security
+            - MEDIUM
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'lodash: Lodash: Prototype pollution allows deletion of built-in
+              prototype properties via array path bypass'
+        - defaultConfiguration:
+            enabled: true
+            level: error
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: The Requests package before 2.20.0 for Python sends an HTTP Authorization
+              header to an http URI upon receiving a same-hostname https-to-http redirect,
+              which makes it easier for remote attackers to discover credentials by
+              sniffing the network.
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2018-18074**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |HIGH|requests|2.20.0|[CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)|
+
+
+              The Requests package before 2.20.0 for Python sends an HTTP Authorization
+              header to an http URI upon receiving a same-hostname https-to-http redirect,
+              which makes it easier for remote attackers to discover credentials by
+              sniffing the network.'
+            properties: null
+            text: 'Vulnerability CVE-2018-18074
+
+              Severity: HIGH
+
+              Package: requests
+
+              Fixed Version: 2.20.0
+
+              Link: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)
+
+              The Requests package before 2.20.0 for Python sends an HTTP Authorization
+              header to an http URI upon receiving a same-hostname https-to-http redirect,
+              which makes it easier for remote attackers to discover credentials by
+              sniffing the network.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2018-18074
+          id: CVE-2018-18074
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 7.5
+            cvssv3_vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N
+            precision: very-high
+            security-severity: '7.5'
+            tags:
+            - vulnerability
+            - security
+            - HIGH
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'python-requests: Redirect from HTTPS to HTTP does not remove Authorization
+              header'
+        - defaultConfiguration:
+            enabled: true
+            level: warning
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: Requests is a HTTP library. Since Requests 2.3.0, Requests has been
+              leaking Proxy-Authorization headers to destination servers when redirected
+              to an HTTPS endpoint. This is a product of how we use `rebuild_proxies`
+              to reattach the `Proxy-Authorization` header to requests. For HTTP connections
+              sent through the tunnel, the proxy will identify the header in the request
+              itself and remove it prior to forwarding to the destination server.
+              However when sent over HTTPS, the `Proxy-Authorization` header must
+              be sent in the CONNECT request as the proxy has no visibility into the
+              tunneled request. This results in Requests forwarding proxy credentials
+              to the destination server unintentionally, allowing a malicious actor
+              to potentially exfiltrate sensitive information. This issue has been
+              patched in version 2.31.0.
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2023-32681**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |MEDIUM|requests|2.31.0|[CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)|
+
+
+              Requests is a HTTP library. Since Requests 2.3.0, Requests has been
+              leaking Proxy-Authorization headers to destination servers when redirected
+              to an HTTPS endpoint. This is a product of how we use `rebuild_proxies`
+              to reattach the `Proxy-Authorization` header to requests. For HTTP connections
+              sent through the tunnel, the proxy will identify the header in the request
+              itself and remove it prior to forwarding to the destination server.
+              However when sent over HTTPS, the `Proxy-Authorization` header must
+              be sent in the CONNECT request as the proxy has no visibility into the
+              tunneled request. This results in Requests forwarding proxy credentials
+              to the destination server unintentionally, allowing a malicious actor
+              to potentially exfiltrate sensitive information. This issue has been
+              patched in version 2.31.0.'
+            properties: null
+            text: 'Vulnerability CVE-2023-32681
+
+              Severity: MEDIUM
+
+              Package: requests
+
+              Fixed Version: 2.31.0
+
+              Link: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)
+
+              Requests is a HTTP library. Since Requests 2.3.0, Requests has been
+              leaking Proxy-Authorization headers to destination servers when redirected
+              to an HTTPS endpoint. This is a product of how we use `rebuild_proxies`
+              to reattach the `Proxy-Authorization` header to requests. For HTTP connections
+              sent through the tunnel, the proxy will identify the header in the request
+              itself and remove it prior to forwarding to the destination server.
+              However when sent over HTTPS, the `Proxy-Authorization` header must
+              be sent in the CONNECT request as the proxy has no visibility into the
+              tunneled request. This results in Requests forwarding proxy credentials
+              to the destination server unintentionally, allowing a malicious actor
+              to potentially exfiltrate sensitive information. This issue has been
+              patched in version 2.31.0.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2023-32681
+          id: CVE-2023-32681
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 6.1
+            cvssv3_vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:N/A:N
+            precision: very-high
+            security-severity: '6.1'
+            tags:
+            - vulnerability
+            - security
+            - MEDIUM
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'python-requests: Unintended leak of Proxy-Authorization header'
+        - defaultConfiguration:
+            enabled: true
+            level: warning
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: Requests is a HTTP library. Prior to 2.32.0, when making requests
+              through a Requests `Session`, if the first request is made with `verify=False`
+              to disable cert verification, all subsequent requests to the same host
+              will continue to ignore cert verification regardless of changes to the
+              value of `verify`. This behavior will continue for the lifecycle of
+              the connection in the connection pool. This vulnerability is fixed in
+              2.32.0.
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2024-35195**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |MEDIUM|requests|2.32.0|[CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)|
+
+
+              Requests is a HTTP library. Prior to 2.32.0, when making requests through
+              a Requests `Session`, if the first request is made with `verify=False`
+              to disable cert verification, all subsequent requests to the same host
+              will continue to ignore cert verification regardless of changes to the
+              value of `verify`. This behavior will continue for the lifecycle of
+              the connection in the connection pool. This vulnerability is fixed in
+              2.32.0.'
+            properties: null
+            text: 'Vulnerability CVE-2024-35195
+
+              Severity: MEDIUM
+
+              Package: requests
+
+              Fixed Version: 2.32.0
+
+              Link: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)
+
+              Requests is a HTTP library. Prior to 2.32.0, when making requests through
+              a Requests `Session`, if the first request is made with `verify=False`
+              to disable cert verification, all subsequent requests to the same host
+              will continue to ignore cert verification regardless of changes to the
+              value of `verify`. This behavior will continue for the lifecycle of
+              the connection in the connection pool. This vulnerability is fixed in
+              2.32.0.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2024-35195
+          id: CVE-2024-35195
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 5.6
+            cvssv3_vector: CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:H/I:H/A:N
+            precision: very-high
+            security-severity: '5.6'
+            tags:
+            - vulnerability
+            - security
+            - MEDIUM
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'requests: subsequent requests to the same host ignore cert verification'
+        - defaultConfiguration:
+            enabled: true
+            level: warning
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: Requests is a HTTP library. Due to a URL parsing issue, Requests
+              releases prior to 2.32.4 may leak .netrc credentials to third parties
+              for specific maliciously-crafted URLs. Users should upgrade to version
+              2.32.4 to receive a fix. For older versions of Requests, use of the
+              .netrc file can be disabled with `trust_env=False` on one's Requests
+              Session.
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2024-47081**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |MEDIUM|requests|2.32.4|[CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)|
+
+
+              Requests is a HTTP library. Due to a URL parsing issue, Requests releases
+              prior to 2.32.4 may leak .netrc credentials to third parties for specific
+              maliciously-crafted URLs. Users should upgrade to version 2.32.4 to
+              receive a fix. For older versions of Requests, use of the .netrc file
+              can be disabled with `trust_env=False` on one''s Requests Session.'
+            properties: null
+            text: 'Vulnerability CVE-2024-47081
+
+              Severity: MEDIUM
+
+              Package: requests
+
+              Fixed Version: 2.32.4
+
+              Link: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)
+
+              Requests is a HTTP library. Due to a URL parsing issue, Requests releases
+              prior to 2.32.4 may leak .netrc credentials to third parties for specific
+              maliciously-crafted URLs. Users should upgrade to version 2.32.4 to
+              receive a fix. For older versions of Requests, use of the .netrc file
+              can be disabled with `trust_env=False` on one''s Requests Session.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2024-47081
+          id: CVE-2024-47081
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 5.3
+            cvssv3_vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N
+            precision: very-high
+            security-severity: '5.3'
+            tags:
+            - vulnerability
+            - security
+            - MEDIUM
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'requests: Requests vulnerable to .netrc credentials leak via malicious
+              URLs'
+        - defaultConfiguration:
+            enabled: true
+            level: warning
+            parameters: null
+            properties: null
+            rank: -1.0
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription:
+            markdown: null
+            properties: null
+            text: Requests is a HTTP library. Prior to version 2.33.0, the `requests.utils.extract_zipped_paths()`
+              utility function uses a predictable filename when extracting files from
+              zip archives into the system temporary directory. If the target file
+              already exists, it is reused without validation. A local attacker with
+              write access to the temp directory could pre-create a malicious file
+              that would be loaded in place of the legitimate one. Standard usage
+              of the Requests library is not affected by this vulnerability. Only
+              applications that call `extract_zipped_paths()` directly are impacted.
+              Starting in version 2.33.0, the library extracts files to a non-deterministic
+              location. If developers are unable to upgrade, they can set `TMPDIR`
+              in their environment to a directory with restricted write access.
+          guid: null
+          help:
+            markdown: '**Vulnerability CVE-2026-25645**
+
+              | Severity | Package | Fixed Version | Link |
+
+              | --- | --- | --- | --- |
+
+              |MEDIUM|requests|2.33.0|[CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)|
+
+
+              Requests is a HTTP library. Prior to version 2.33.0, the `requests.utils.extract_zipped_paths()`
+              utility function uses a predictable filename when extracting files from
+              zip archives into the system temporary directory. If the target file
+              already exists, it is reused without validation. A local attacker with
+              write access to the temp directory could pre-create a malicious file
+              that would be loaded in place of the legitimate one. Standard usage
+              of the Requests library is not affected by this vulnerability. Only
+              applications that call `extract_zipped_paths()` directly are impacted.
+              Starting in version 2.33.0, the library extracts files to a non-deterministic
+              location. If developers are unable to upgrade, they can set `TMPDIR`
+              in their environment to a directory with restricted write access.'
+            properties: null
+            text: 'Vulnerability CVE-2026-25645
+
+              Severity: MEDIUM
+
+              Package: requests
+
+              Fixed Version: 2.33.0
+
+              Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)
+
+              Requests is a HTTP library. Prior to version 2.33.0, the `requests.utils.extract_zipped_paths()`
+              utility function uses a predictable filename when extracting files from
+              zip archives into the system temporary directory. If the target file
+              already exists, it is reused without validation. A local attacker with
+              write access to the temp directory could pre-create a malicious file
+              that would be loaded in place of the legitimate one. Standard usage
+              of the Requests library is not affected by this vulnerability. Only
+              applications that call `extract_zipped_paths()` directly are impacted.
+              Starting in version 2.33.0, the library extracts files to a non-deterministic
+              location. If developers are unable to upgrade, they can set `TMPDIR`
+              in their environment to a directory with restricted write access.'
+          helpUri: https://avd.aquasec.com/nvd/cve-2026-25645
+          id: CVE-2026-25645
+          messageStrings: null
+          name: LanguageSpecificPackageVulnerability
+          properties:
+            cvssv3_baseScore: 4.4
+            cvssv3_vector: CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:N/I:H/A:N
+            precision: very-high
+            security-severity: '4.4'
+            tags:
+            - vulnerability
+            - security
+            - MEDIUM
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: 'requests: Requests: Security bypass due to predictable temporary
+              file creation'
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 0.69.3
+      properties: null
+    translations: []
+    versionControlProvenance: []
+    webRequests: []
+    webResponses: []
+  version: 2.1.0
+scanner_results:
+  trivy:
+    actionable_finding_count: 10
+    dependencies_satisfied: true
+    duration: 0.5
+    excluded: false
+    exit_code: 0
+    finding_count: 10
+    severity_counts:
+      critical: 0
+      high: 3
+      info: 0
+      low: 0
+      medium: 7
+      suppressed: 0
+    status: FAILED
+    suppressed_finding_count: 0
+used_suppressions: []
+validation_checkpoints: []
+workspace: null

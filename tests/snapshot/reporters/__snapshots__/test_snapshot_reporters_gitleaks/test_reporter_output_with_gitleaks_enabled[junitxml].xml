@@ -1,0 +1,10 @@
+<testsuites name="ASH Scan Report"><testsuite name="gitleaks" tests="3" errors="3" failures="0" skipped="0" time="0"><testcase name="slack-bot-token has detected secret for file app/settings.py. [slack-bot-token]" classname="slack-bot-token"><error message="slack-bot-token has detected secret for file app/settings.py." type="error" /><system-out>tags: ['secret', 'security', 'gitleaks']
+scanner_name: gitleaks
+scanner_version: 8.30.1
+scanner_details: {'tool_name': 'gitleaks', 'tool_version': '8.30.1', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="github-pat has detected secret for file app/settings.py. [github-pat]" classname="github-pat"><error message="github-pat has detected secret for file app/settings.py." type="error" /><system-out>tags: ['secret', 'security', 'gitleaks']
+scanner_name: gitleaks
+scanner_version: 8.30.1
+scanner_details: {'tool_name': 'gitleaks', 'tool_version': '8.30.1', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="aws-access-token has detected secret for file app/settings.py. [aws-access-token]" classname="aws-access-token"><error message="aws-access-token has detected secret for file app/settings.py." type="error" /><system-out>tags: ['secret', 'security', 'gitleaks']
+scanner_name: gitleaks
+scanner_version: 8.30.1
+scanner_details: {'tool_name': 'gitleaks', 'tool_version': '8.30.1', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase></testsuite></testsuites>
