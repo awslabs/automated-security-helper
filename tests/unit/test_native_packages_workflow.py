@@ -28,7 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Dict
 
 import pytest
@@ -730,6 +730,33 @@ def _delta_script(tmp_path: Path, same: bool, path_dir: Path) -> str:
     )
 
 
+def _shim_args_for(real: str) -> str:
+    """What the shasum shim passes on to the real tool it wraps.
+
+    sha256sum takes no algorithm flag; shasum needs ``-a 256``. Decided on the file
+    name without its extension and case-insensitively: on Windows shutil.which
+    returns the PATHEXT spelling, ``...\\sha256sum.EXE``, which a case-sensitive
+    ``endswith("sha256sum.exe")`` missed, so Git for Windows' sha256sum was handed
+    ``-a 256`` and every Windows cell failed with "unknown option -- a".
+    """
+    name = PureWindowsPath(real).name.lower()
+    return "" if name in ("sha256sum", "sha256sum.exe") else " -a 256"
+
+
+@pytest.mark.parametrize(
+    ("real", "args"),
+    [
+        ("/usr/bin/sha256sum", ""),
+        ("/usr/bin/shasum", " -a 256"),
+        (r"C:\Program Files\Git\usr\bin\sha256sum.EXE", ""),
+        (r"C:\Program Files\Git\usr\bin\sha256sum.exe", ""),
+        (r"C:\Strawberry\perl\bin\shasum.BAT", " -a 256"),
+    ],
+)
+def test_the_shim_passes_no_algorithm_flag_to_sha256sum(real: str, args: str) -> None:
+    assert _shim_args_for(real) == args
+
+
 @pytest.mark.parametrize(
     ("same", "expected"), [(True, "byte-identical"), (False, "differ")]
 )
@@ -739,7 +766,7 @@ def test_the_script_delta_falls_back_to_shasum_without_sha256sum(
     """A macOS before 15 has shasum and no sha256sum: identical files must still match."""
     real = shutil.which("sha256sum") or shutil.which("shasum")
     assert real, "neither sha256sum nor shasum on this host"
-    shasum_args = "" if real.endswith(("sha256sum", "sha256sum.exe")) else " -a 256"
+    shasum_args = _shim_args_for(real)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_lf(
