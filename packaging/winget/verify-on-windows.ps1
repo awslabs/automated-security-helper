@@ -356,11 +356,16 @@ function Assert-CliVersion {
 }
 
 function Invoke-Case {
-    param([string] $Cli, [string] $Case, [string] $Label, [string[]] $Extra = @())
+    # -ExpectReject marks a negative control: its rejection prints as plain lines, not as
+    # error annotations on a green run. The exit code is unchanged and still judged.
+    param([string] $Cli, [string] $Case, [string] $Label, [string[]] $Extra = @(), [switch] $ExpectReject)
     $arguments = @(
         (Join-Path $repoRoot 'scripts/e2e/run_case.py'),
         '--cli', $Cli, '--case', $Case, '--work', (Join-Path $script:work 'scans'), '--label', $Label
     )
+    if ($ExpectReject) {
+        $arguments += '--expect-reject'
+    }
     if ($Extra.Count -gt 0) {
         $arguments += '--'
         $arguments += $Extra
@@ -535,7 +540,7 @@ try {
     Assert-Case -Cli $cli -Case 'incomplete' -Label 'fresh-incomplete'
 
     Write-Step '7. NEGATIVE CONTROL: a findings scan that exits 0 must be rejected'
-    $code = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-no-fail-on-findings' -Extra @('--no-fail-on-findings')
+    $code = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-no-fail-on-findings' -Extra @('--no-fail-on-findings') -ExpectReject
     if ($code -ne 1) {
         Fail "run_case.py returned $code for a findings scan run with --no-fail-on-findings; expected 1"
     }

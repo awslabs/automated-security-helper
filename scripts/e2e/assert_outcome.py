@@ -331,6 +331,51 @@ def expectation_from(args: argparse.Namespace) -> Expectation:
 
 
 # --------------------------------------------------------------------------
+# Reporting a verdict
+# --------------------------------------------------------------------------
+
+# GitHub Actions turns a stdout line starting with this into an error annotation on the
+# run summary.
+ERROR_ANNOTATION = "::error::"
+# What a rejection the caller asked for is printed with instead. Deliberately not an
+# annotation: see report_problems.
+EXPECTED_REJECTION = "expected rejection: "
+
+
+def report_problems(label: str, problems: List[str], expect_reject: bool) -> None:
+    """Prints why an outcome was rejected, one line per problem.
+
+    A rejection nobody asked for is a real failure, so each problem is an error
+    annotation and shows on the run summary. A negative control asks for its
+    rejection with --expect-reject, and then the same problems print as plain lines.
+    The reason is the reader: the e2e legs run several negative controls each, and
+    when every one of them annotated, a green run's summary listed errors such as
+    "[expect-rc 2] exit code 0 ..." on every channel. A summary that shows errors on
+    a passing run trains whoever reads it to skip them, including on the run where one
+    is real.
+
+    The flag changes the printing and nothing else. The exit code still says whether
+    the outcome matched, so the caller goes on judging the rejection itself: that it
+    happened, and for the reason the control planted.
+    """
+    prefix = EXPECTED_REJECTION if expect_reject else ERROR_ANNOTATION
+    for problem in problems:
+        print(f"{prefix}[{label}] {problem}")
+
+
+def report_unexpected_match(label: str) -> None:
+    """The outcome matched although the caller expected a rejection.
+
+    That is the negative control failing, so it is annotated: whatever the caller does
+    with the exit code next, the summary shows that a control rejected nothing.
+    """
+    print(
+        f"{ERROR_ANNOTATION}[{label}] --expect-reject was given and the outcome "
+        "matched, so this negative control rejected nothing"
+    )
+
+
+# --------------------------------------------------------------------------
 # Self-test
 # --------------------------------------------------------------------------
 
@@ -666,6 +711,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--incomplete-scanner",
         help="for exit 1: the scanner that must be MISSING or ERROR",
     )
+    parser.add_argument(
+        "--expect-reject",
+        action="store_true",
+        help=(
+            "this run is a negative control that must be rejected: print the problems "
+            "as plain lines rather than error annotations, and annotate a match "
+            "instead. The exit code is unchanged (1 rejected, 0 matched)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.self_test:
@@ -683,12 +737,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     problems = check_outcome(args.output_dir, args.rc, expected)
     label = args.case or f"expect-rc {expected.expect_rc}"
     if problems:
-        for problem in problems:
-            print(f"::error::[{label}] {problem}")
+        report_problems(label, problems, args.expect_reject)
+        verdict = "REJECTED, as the caller expected" if args.expect_reject else "FAIL"
         print(
-            f"FAIL: {len(problems)} problem(s) with the {label} outcome in {args.output_dir}"
+            f"{verdict}: {len(problems)} problem(s) with the {label} outcome in "
+            f"{args.output_dir}"
         )
         return 1
+    if args.expect_reject:
+        report_unexpected_match(label)
     count = (
         expected.findings
         if expected.findings is not None

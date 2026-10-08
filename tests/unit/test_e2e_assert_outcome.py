@@ -64,6 +64,171 @@ def test_cli_rejects_the_wrong_exit_code(tmp_path):
     assert ao.main(["--case", "findings", "--output-dir", str(out), "--rc", "0"]) == 1
 
 
+def _findings_output(tmp_path):
+    return _write(
+        tmp_path,
+        [ao._sarif_result("detect-secrets")] * 3,
+        {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+    )
+
+
+def _annotations(text):
+    return [line for line in text.splitlines() if line.lstrip().startswith("::error::")]
+
+
+def test_a_real_rejection_is_an_error_annotation(tmp_path, capsys):
+    # The control for the next test: without --expect-reject, every problem is an
+    # annotation, so a real failure still shows on the run summary.
+    out = _findings_output(tmp_path)
+    rc = ao.main(["--case", "findings", "--output-dir", str(out), "--rc", "0"])
+    printed = capsys.readouterr().out
+    assert rc == 1
+    assert _annotations(printed)
+    assert "exit code 0 (nothing actionable), expected exactly 2" in printed
+    assert "FAIL:" in printed
+
+
+def test_an_expected_rejection_prints_no_annotation(tmp_path, capsys):
+    out = _findings_output(tmp_path)
+    rc = ao.main(
+        ["--case", "findings", "--output-dir", str(out), "--rc", "0", "--expect-reject"]
+    )
+    printed = capsys.readouterr().out
+    assert rc == 1, "the flag must not change the verdict"
+    assert _annotations(printed) == []
+    # The reason is still printed, so a caller can check the control fired for it.
+    assert (
+        f"{ao.EXPECTED_REJECTION}[findings] exit code 0 (nothing actionable), "
+        "expected exactly 2" in printed
+    )
+    assert "REJECTED, as the caller expected" in printed
+
+
+def test_an_expected_rejection_that_matched_is_annotated(tmp_path, capsys):
+    # The negative control failing: it asked for a rejection and the outcome matched.
+    out = _findings_output(tmp_path)
+    rc = ao.main(
+        ["--case", "findings", "--output-dir", str(out), "--rc", "2", "--expect-reject"]
+    )
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert len(_annotations(printed)) == 1
+    assert "rejected nothing" in printed
+
+
+def _fake_scan(run_case, monkeypatch, rc, write_output):
+    class _Done:
+        returncode = rc
+
+    def fake_run(command, **kwargs):
+        if write_output is not None:
+            write_output(Path(command[command.index("--output-dir") + 1]))
+        return _Done()
+
+    monkeypatch.setattr(run_case.subprocess, "run", fake_run)
+
+
+@pytest.mark.parametrize("expect_reject", [False, True])
+def test_run_case_annotates_only_unexpected_rejections(
+    tmp_path, monkeypatch, capsys, expect_reject
+):
+    run_case = _load(RUN_CASE, "ash_e2e_run_case")
+    cli = tmp_path / "fake-ashx"
+    cli.write_text("", encoding="utf-8")
+    # A findings scan that exited 0, the shape of the --no-fail-on-findings control.
+    _fake_scan(
+        run_case,
+        monkeypatch,
+        0,
+        lambda out: _write(
+            out,
+            [ao._sarif_result("detect-secrets")] * 3,
+            {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        ),
+    )
+    argv = ["--cli", str(cli), "--case", "findings", "--work", str(tmp_path / "w")]
+    if expect_reject:
+        argv.append("--expect-reject")
+    rc = run_case.main(argv)
+    printed = capsys.readouterr().out
+    assert rc == 1
+    assert "exit code 0 (nothing actionable), expected exactly 2" in printed
+    assert bool(_annotations(printed)) is not expect_reject
+
+
+def test_run_case_annotates_an_expected_rejection_that_matched(
+    tmp_path, monkeypatch, capsys
+):
+    run_case = _load(RUN_CASE, "ash_e2e_run_case")
+    cli = tmp_path / "fake-ashx"
+    cli.write_text("", encoding="utf-8")
+    _fake_scan(
+        run_case,
+        monkeypatch,
+        2,
+        lambda out: _write(
+            out,
+            [ao._sarif_result("detect-secrets")] * 3,
+            {"detect-secrets": "FAILED"},  # pragma: allowlist secret
+        ),
+    )
+    rc = run_case.main(
+        [
+            "--cli",
+            str(cli),
+            "--case",
+            "findings",
+            "--work",
+            str(tmp_path / "w"),
+            "--expect-reject",
+        ]
+    )
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert len(_annotations(printed)) == 1
+
+
+WINDOWS_LEGS = {
+    "msix": REPO_ROOT / "packaging" / "msix" / "verify-on-windows.ps1",
+    "chocolatey": REPO_ROOT / "packaging" / "chocolatey" / "verify-on-windows.ps1",
+    "winget": REPO_ROOT / "packaging" / "winget" / "verify-on-windows.ps1",
+}
+
+
+def _asks_for_rejection(line):
+    # The flag itself, or the -ExpectReject switch of the scripts' Invoke-Case helper.
+    return "--expect-reject" in line or "-ExpectReject" in line
+
+
+@pytest.mark.parametrize("leg", sorted(WINDOWS_LEGS))
+def test_windows_negative_controls_ask_for_their_rejection(leg):
+    # Each deliberate negative on the shared verdict passes --expect-reject, and no
+    # positive case does. Counted per call: a control that dropped the flag would
+    # annotate a green run again, and a positive case that gained it would turn a real
+    # failure into a plain line.
+    text = WINDOWS_LEGS[leg].read_text(encoding="utf-8")
+    negatives = re.findall(r"^.*negative-no-fail-on-findings.*$", text, re.MULTILINE)
+    calls = [line for line in negatives if "--no-fail-on-findings" in line]
+    assert calls, f"{leg}: no --no-fail-on-findings control found"
+    for line in calls:
+        assert _asks_for_rejection(line), f"{leg}: {line.strip()}"
+    flagged = [
+        line
+        for line in text.splitlines()
+        if _asks_for_rejection(line)
+        and not line.lstrip().startswith("#")
+        # The Invoke-Case helper turning its switch into the flag.
+        and "$arguments" not in line
+    ]
+    # The only other flagged call is the clean-output-as-findings control, which runs
+    # assert_outcome.py with --expect-rc 2 on the clean case's output.
+    for line in flagged:
+        assert "negative" in line or "--expect-rc" in line or "'--expect-rc'" in line, (
+            f"{leg}: --expect-reject on a line that is not a negative control: "
+            f"{line.strip()}"
+        )
+
+
 def test_cli_incomplete_case_requires_the_named_scanner(tmp_path):
     out = _write(
         tmp_path,

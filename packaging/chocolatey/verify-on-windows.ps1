@@ -159,12 +159,16 @@ function Invoke-Case {
         [Parameter(Mandatory = $true)][string] $Cli,
         [Parameter(Mandatory = $true)][string] $Case,
         [Parameter(Mandatory = $true)][string] $Label,
-        [string[]] $Extra = @()
+        [string[]] $Extra = @(),
+        # A negative control: its rejection prints as plain lines, not as error
+        # annotations on a green run. The exit code is unchanged and still judged.
+        [switch] $ExpectReject
     )
     $arguments = @(
         (Join-Path $Repo 'scripts\e2e\run_case.py'),
         '--cli', $Cli, '--case', $Case, '--work', (Join-Path $Work 'scans'), '--label', $Label
     )
+    if ($ExpectReject) { $arguments += '--expect-reject' }
     if ($Extra.Count -gt 0) { $arguments += @('--') + $Extra }
     return Invoke-Harness -Arguments $arguments
 }
@@ -440,7 +444,7 @@ foreach ($case in @('findings', 'clean', 'incomplete')) {
 
 Write-Host '== 7. negative controls on the verdicts'
 Write-Host '   a findings scan with --no-fail-on-findings must be rejected for its exit code'
-$r = Invoke-Case -Cli $shim -Case 'findings' -Label 'negative-no-fail-on-findings' -Extra @('--no-fail-on-findings')
+$r = Invoke-Case -Cli $shim -Case 'findings' -Label 'negative-no-fail-on-findings' -Extra @('--no-fail-on-findings') -ExpectReject
 if ($r.Rc -ne 1) { Fail-Verification "NEGATIVE CONTROL: run_case returned $($r.Rc) for a findings scan that exited 0; expected 1" }
 # rc 1 alone would also come from a missing report or a wrong count. The control only
 # controls anything if the exit-code check is what fired.
@@ -453,7 +457,7 @@ Write-Host '   the clean output judged as a findings outcome must be rejected'
 $r = Invoke-Harness -Arguments @(
     (Join-Path $Repo 'scripts\e2e\assert_outcome.py'),
     '--output-dir', (Join-Path $Work 'scans\fresh-clean\out'), '--rc', '0',
-    '--expect-rc', '2', '--min-findings', '1', '--require-scanner', 'detect-secrets', '--selected', 'detect-secrets'
+    '--expect-rc', '2', '--min-findings', '1', '--require-scanner', 'detect-secrets', '--selected', 'detect-secrets', '--expect-reject'
 )
 if ($r.Rc -ne 1) { Fail-Verification "NEGATIVE CONTROL: assert_outcome returned $($r.Rc) on a clean output expected to hold findings" }
 Write-Host "   OK: rejected (exit $($r.Rc))"

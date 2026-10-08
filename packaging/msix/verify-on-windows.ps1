@@ -953,9 +953,11 @@ Write-Step '8b. negative controls on the verdict'
 # exit code: rc 1 alone would also come from a missing report or a wrong count, and then this
 # control would control nothing about the exit-code check. The '--' is quoted because PowerShell
 # consumes a bare -- as its own end-of-parameters token when calling a function, and
-# run_case.py needs it to tell its own options from the scan's.
+# run_case.py needs it to tell its own options from the scan's. --expect-reject, here and
+# below, makes the expected rejection print as plain lines rather than as error
+# annotations on a green run; the exit code and the reason are still judged here.
 $negativeLog = Join-Path $work 'negative-no-fail-on-findings.log'
-Invoke-Harness $runCase --cli $resolved[$cliName] --case findings --work $scans --label 'msix-negative-no-fail-on-findings' '--' --no-fail-on-findings *> $negativeLog
+Invoke-Harness $runCase --cli $resolved[$cliName] --case findings --work $scans --label 'msix-negative-no-fail-on-findings' --expect-reject '--' --no-fail-on-findings *> $negativeLog
 $negativeExit = $LASTEXITCODE
 Get-Content -LiteralPath $negativeLog | ForEach-Object { Write-Host "   | $_" }
 if ($negativeExit -ne 1) {
@@ -969,7 +971,7 @@ Write-Host '   OK: rejected for exit code 0'
 # The real clean output, judged as if it were a findings outcome, must be rejected.
 Invoke-Harness (Join-Path $repoRoot 'scripts/e2e/assert_outcome.py') `
     --output-dir (Join-Path $scans 'msix-clean\out') --rc 0 `
-    --expect-rc 2 --min-findings 1 --require-scanner detect-secrets --selected detect-secrets
+    --expect-rc 2 --min-findings 1 --require-scanner detect-secrets --selected detect-secrets --expect-reject
 $negativeExit = $LASTEXITCODE
 if ($negativeExit -ne 1) {
     Fail "NEGATIVE CONTROL: assert_outcome.py returned $negativeExit on a clean output expected to hold findings; expected 1"
