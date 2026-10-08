@@ -1,0 +1,9 @@
+{
+  "name": "ash-e2e-mcp-inspector",
+  "private": true,
+  "description": "The MCP Inspector the MCPB e2e leg (scripts/e2e/mcpb.sh) drives, locked with every transitive dependency. Installed with npm ci into the run's own directory. The version is held equal to .github/actions/validate-mcp/action.yml's INSPECTOR_VERSION by tests/unit/test_e2e_mcpb_inspector.py.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/inspector": "2.9.0"
+  }
+}

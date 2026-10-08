@@ -60,7 +60,7 @@ runs:
       if: runner.os != 'Windows'
       shell: bash
       env:
-        INSPECTOR_VERSION: "2.8.0"
+        INSPECTOR_VERSION: "2.9.0"
       run: |
         set -u
         PKG="@modelcontextprotocol/inspector@${INSPECTOR_VERSION}"

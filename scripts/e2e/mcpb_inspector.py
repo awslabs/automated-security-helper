@@ -4,7 +4,8 @@
 
 """The MCPB channel end to end, driven through the MCP Inspector.
 
-    mcpb_inspector.py --bundle ash-1.0.0.mcpb --wheel N.whl --prev-wheel N-1.whl \\
+    mcpb_inspector.py --bundle ash-4.0.0.mcpb --prev-bundle ash-3.0.0.mcpb \\
+        --wheel N.whl --prev-wheel N-1.whl \\
         --inspector node_modules/.bin/mcp-inspector --work <scratch>
 
 The bundle is what a desktop MCP host installs: one manifest.json whose mcp_config
@@ -15,17 +16,24 @@ launches the bundle's own command through the Inspector.
 
 WHAT IT DOES, IN ORDER
 
-1. Reads the bundle and requires exactly one member, manifest.json, the same
-   invariant the release workflow asserts before it attaches the archive.
-2. Upgrade, in the order a user meets it. The bundle is pointed at the N-1 wheel,
-   launched over stdio, and must report N-1 through `check_installation` and scan the
-   findings case. It is then pointed at the head wheel, relaunched with the same uv
-   cache, and must report N. The reported version is the server's own answer
-   (importlib metadata of the environment uvx built), not a file this script read.
+1. Reads both bundles, N-1 and head, and requires each to hold exactly one member,
+   manifest.json, the same invariant the release workflow asserts before it attaches
+   the archive.
+2. Upgrade, in the order a user meets it. A desktop host replaces an installed bundle
+   when a download carries a higher `version`, so the bundles' own versions must be
+   the ASH releases they launch and must move from N-1 to N; a bundle whose version
+   was not raised is shown failing that check. The N-1 bundle is pointed at the N-1
+   wheel, launched over stdio, and must report N-1 through `check_installation` and
+   scan the findings case. The head bundle is then pointed at the head wheel,
+   relaunched with the same uv cache, and must report N. The reported version is the
+   server's own answer (importlib metadata of the environment uvx built), not a file
+   this script read.
 3. Over stdio, the transport a desktop host uses, the head launch must complete the
-   handshake and list the tools a scan needs.
-4. The three cases from tests/e2e/fixtures/cases.json: `tools/call run_ash_scan`,
-   then `get_scan_progress` until the scan is terminal, then `get_scan_summary`.
+   handshake and list the tools a scan needs. Then one scan over stdio, the findings
+   case, held to the same verdict as the others (see the next section for how).
+4. The three cases from tests/e2e/fixtures/cases.json over streamable HTTP:
+   `tools/call run_ash_scan`, then `get_scan_progress` until the scan is terminal,
+   then `get_scan_summary`.
 5. Uninstall. A bundle installs nothing outside the uv cache, so the cache is the
    install. A relaunch with UV_OFFLINE=1 must succeed before `uv cache clean` (the
    control that makes the next step mean something) and must fail after it.
@@ -47,6 +55,15 @@ So each case launches the bundle's command with `--transport streamable-http` on
 loopback port appended, and every Inspector call connects to that one long-lived
 process. Nothing else about the command changes. The stdio launch is still exercised
 by steps 2, 3 and 5 with the command exactly as the bundle has it.
+
+A desktop host is not one-shot: it keeps the stdio session open, which is how a scan
+survives there. So step 3 also scans the findings case over stdio with a client of
+this script's own (StdioSession): it launches the bundle's command exactly as the
+bundle has it, keeps the session open, and makes the same run_ash_scan,
+get_scan_progress and get_scan_summary calls the HTTP cases make through the
+Inspector. It is a minimal client on purpose, newline-delimited JSON-RPC as the MCP
+stdio transport defines it, and it refuses anything on the server's stdout that is not
+JSON-RPC, because a desktop host would.
 
 `run_ash_workspace_scan` is synchronous and would work over stdio, and it was
 rejected. A workspace answers 2 when a project has findings and an incomplete
@@ -84,11 +101,13 @@ import argparse
 import copy
 import json
 import os
+import queue
 import shutil
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -120,6 +139,10 @@ READY_TIMEOUT_S = 300
 SCAN_TIMEOUT_S = 600
 POLL_INTERVAL_S = 3
 INSPECTOR_TIMEOUT_S = 300
+
+# What StdioSession offers in `initialize`. The server answers with the version it
+# speaks, and nothing below depends on a feature newer than this one.
+STDIO_PROTOCOL_VERSION = "2025-06-18"
 
 
 class Failure(Exception):
@@ -214,6 +237,59 @@ def rewrite_from(config: Dict[str, Any], wheel: Path) -> Dict[str, Any]:
             f"the rewrite changed more than args[{index}]: {config} -> {rewritten}"
         )
     return rewritten
+
+
+def _release_key(version: str) -> Optional[Tuple[int, int, int]]:
+    parts = version.split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    return (int(parts[0]), int(parts[1]), int(parts[2]))
+
+
+def bundle_upgrade_problems(
+    prev_manifest: Dict[str, Any],
+    head_manifest: Dict[str, Any],
+    prev_version: str,
+    version: str,
+) -> List[str]:
+    """Why a desktop host would not see the head bundle replace the N-1 bundle.
+
+    A host keys an installed bundle by its manifest `name` and replaces it when a
+    download of the same name carries a higher `version`. So each bundle's version
+    must be the ASH release it launches (the transpiler derives it from ash_version),
+    the names must match, and the head version must be strictly higher.
+    """
+    problems: List[str] = []
+    for label, manifest, wanted in (
+        ("N-1", prev_manifest, prev_version),
+        ("head", head_manifest, version),
+    ):
+        if manifest.get("version") != wanted:
+            problems.append(
+                f"the {label} bundle's version is {manifest.get('version')!r} and it "
+                f"launches ASH {wanted}; a host compares the bundle's version, so it "
+                "must be the ASH release"
+            )
+    if prev_manifest.get("name") != head_manifest.get("name"):
+        problems.append(
+            f"the bundles are named {prev_manifest.get('name')!r} and "
+            f"{head_manifest.get('name')!r}; a host keys a bundle by name, so these "
+            "are two extensions rather than an upgrade"
+        )
+    old = _release_key(str(prev_manifest.get("version")))
+    new = _release_key(str(head_manifest.get("version")))
+    if old is None or new is None:
+        problems.append(
+            f"bundle versions {prev_manifest.get('version')!r} and "
+            f"{head_manifest.get('version')!r} are not both MAJOR.MINOR.PATCH"
+        )
+    elif not new > old:
+        problems.append(
+            f"the head bundle's version {head_manifest.get('version')} is not raised "
+            f"over the N-1 bundle's {prev_manifest.get('version')}, so a host would "
+            "keep the N-1 bundle installed"
+        )
+    return problems
 
 
 # --------------------------------------------------------------------------
@@ -528,6 +604,207 @@ class HttpServer:
         self.handle.close()
 
 
+class HttpClient:
+    """The bundle's command over streamable HTTP, called through the Inspector."""
+
+    def __init__(
+        self,
+        inspector: Inspector,
+        command: List[str],
+        env: Dict[str, str],
+        cwd: Path,
+        log: Path,
+    ) -> None:
+        self.inspector = inspector
+        self.server = HttpServer(command, env, cwd, log)
+        self.log = log
+
+    def ready(self) -> List[str]:
+        return self.server.wait_ready(self.inspector)
+
+    def call(self, tool: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
+        return self.inspector.call(self.server.target, tool, arguments)
+
+    def tail(self) -> str:
+        return self.server.tail()
+
+    def stop(self) -> None:
+        self.server.stop()
+
+
+class StdioSession:
+    """A minimal MCP client that keeps one stdio session open, as a desktop host does.
+
+    Newline-delimited JSON-RPC 2.0 on the server's stdin and stdout, which is the MCP
+    stdio transport. A request from the server (roots, sampling, elicitation) is
+    answered with "method not found", because a host may decline any of them and ASH's
+    tools must not depend on one. A notification (logging, progress) is recorded and
+    skipped. A line on stdout that is not a JSON-RPC message fails the session: a
+    desktop host reads stdout as the protocol stream, and a stray print there breaks
+    it. The traffic is written to <log>.jsonrpc and the server's stderr to <log>.
+    """
+
+    def __init__(
+        self, command: List[str], env: Dict[str, str], cwd: Path, log: Path
+    ) -> None:
+        self.log = log
+        self.handle = open(log, "w", encoding="utf-8", errors="replace")
+        self.trace = open(
+            log.with_suffix(".jsonrpc"), "w", encoding="utf-8", errors="replace"
+        )
+        self.proc = subprocess.Popen(  # noqa: S603
+            command,
+            env=env,
+            cwd=cwd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self.handle,
+            start_new_session=True,
+        )
+        self.lines: "queue.Queue[Optional[bytes]]" = queue.Queue()
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+        self.next_id = 0
+
+    def _read(self) -> None:
+        stdout = self.proc.stdout
+        if stdout is None:  # pragma: no cover - Popen was given stdout=PIPE
+            self.lines.put(None)
+            return
+        for line in stdout:
+            self.lines.put(line)
+        self.lines.put(None)
+
+    def _send(self, message: Dict[str, Any]) -> None:
+        data = json.dumps(message)
+        self.trace.write(f"> {data}\n")
+        self.trace.flush()
+        stdin = self.proc.stdin
+        if stdin is None:  # pragma: no cover - Popen was given stdin=PIPE
+            raise Failure("the server was started without a stdin pipe")
+        try:
+            stdin.write((data + "\n").encode("utf-8"))
+            stdin.flush()
+        except (BrokenPipeError, OSError) as error:
+            raise Failure(
+                f"the server's stdin closed ({error}); exit {self.proc.poll()}, log "
+                f"tail:\n{self.tail()}"
+            ) from error
+
+    def notify(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+        message: Dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            message["params"] = params
+        self._send(message)
+
+    def request(
+        self, method: str, params: Dict[str, Any], timeout: float
+    ) -> Dict[str, Any]:
+        """The server's reply to one request: the JSON-RPC message, result or error."""
+        self.next_id += 1
+        request_id = self.next_id
+        self._send(
+            {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        )
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise Failure(
+                    f"no reply to {method} within {timeout}s over stdio; log tail:\n"
+                    f"{self.tail()}"
+                )
+            try:
+                line = self.lines.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if line is None:
+                raise Failure(
+                    f"the server closed stdout (exit {self.proc.poll()}) before "
+                    f"replying to {method}; log tail:\n{self.tail()}"
+                )
+            text = line.decode("utf-8", errors="replace").strip()
+            self.trace.write(f"< {text}\n")
+            self.trace.flush()
+            if not text:
+                continue
+            try:
+                message = json.loads(text)
+            except json.JSONDecodeError:
+                message = None
+            if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+                raise Failure(
+                    f"the server wrote a line to stdout that is not a JSON-RPC message: "
+                    f"{text[:300]!r}. A desktop host reads stdout as the protocol "
+                    "stream, so this breaks the session."
+                )
+            if "method" in message:
+                if "id" in message:
+                    self._send(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": message["id"],
+                            "error": {
+                                "code": -32601,
+                                "message": f"this client does not offer {message['method']}",
+                            },
+                        }
+                    )
+                continue
+            if message.get("id") == request_id:
+                return message
+
+    def ready(self) -> List[str]:
+        reply = self.request(
+            "initialize",
+            {
+                "protocolVersion": STDIO_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "ash-e2e-mcpb", "version": "1"},
+            },
+            READY_TIMEOUT_S,
+        )
+        if not isinstance(reply.get("result"), dict):
+            raise Failure(f"initialize over stdio failed: {_brief(reply)}")
+        self.notify("notifications/initialized")
+        names = listed_tools(0, self.request("tools/list", {}, INSPECTOR_TIMEOUT_S))
+        if names is None:
+            raise Failure("tools/list over stdio returned no tool list")
+        return names
+
+    def call(self, tool: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
+        reply = self.request(
+            "tools/call",
+            {"name": tool, "arguments": arguments or {}},
+            INSPECTOR_TIMEOUT_S,
+        )
+        return tool_result(tool, 0, reply)
+
+    def tail(self, lines: int = 30) -> str:
+        self.handle.flush()
+        text = self.log.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(text[-lines:])
+
+    def stop(self) -> None:
+        # The stdio transport's shutdown is the client closing the server's input.
+        if self.proc.stdin is not None:
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
+        try:
+            self.proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            os.killpg(self.proc.pid, signal.SIGTERM)
+            try:
+                self.proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.proc.pid, signal.SIGKILL)
+                self.proc.wait(timeout=30)
+        self.handle.close()
+        self.trace.close()
+
+
 def run_case(
     inspector: Inspector,
     command: List[str],
@@ -537,8 +814,14 @@ def run_case(
     case_name: str,
     label: str,
     expect_version: str,
+    transport: str = "http",
 ) -> Path:
-    """Scans one case through run_ash_scan and judges it. Returns its output dir."""
+    """Scans one case through run_ash_scan and judges it. Returns its output dir.
+
+    transport "http" launches the command with a streamable-http transport and calls it
+    through the Inspector; "stdio" launches the command as given and holds one stdio
+    session open with StdioSession. The verdict is the same for both.
+    """
     case = assert_outcome.load_case(fixtures / "cases.json", case_name)
     expected = expectation_of(case)
     root = work / "scans" / label
@@ -550,13 +833,19 @@ def run_case(
     env["ASH_MCP_ALLOWED_ROOTS"] = str(root)
     env["ASH_MCP_ALLOWED_CONFIG_ROOTS"] = str(root)
 
-    server = HttpServer(command, env, root, root / "server.log")
+    client: Any
+    if transport == "stdio":
+        client = StdioSession(command, env, root, root / "server.log")
+    elif transport == "http":
+        client = HttpClient(inspector, command, env, root, root / "server.log")
+    else:
+        raise Failure(f"unknown transport {transport!r}")
     try:
-        tools = server.wait_ready(inspector)
+        tools = client.ready()
         missing = [t for t in REQUIRED_TOOLS if t not in tools]
         if missing:
             raise Failure(f"[{label}] the server does not list {missing}")
-        listed = inspector.call(server.target, "list_scanners")
+        listed = client.call("list_scanners")
         if isinstance(listed, dict):
             listed = [listed]
         names = [
@@ -572,8 +861,7 @@ def run_case(
             json.dumps(case_config(case, names), indent=2), encoding="utf-8"
         )
 
-        started = inspector.call(
-            server.target,
+        started = client.call(
             "run_ash_scan",
             {"source_dir": str(src), "config_path": str(config_path)},
         )
@@ -591,9 +879,7 @@ def run_case(
         deadline = time.monotonic() + SCAN_TIMEOUT_S
         polls = 0
         while True:
-            progress = inspector.call(
-                server.target, "get_scan_progress", {"scan_id": scan_id}
-            )
+            progress = client.call("get_scan_progress", {"scan_id": scan_id})
             polls += 1
             if not isinstance(progress, dict) or progress.get("success") is False:
                 raise Failure(f"[{label}] get_scan_progress failed: {_brief(progress)}")
@@ -623,9 +909,7 @@ def run_case(
                 f"the scan ran with config_path {progress.get('config_path')!r}, not "
                 f"{str(config_path)!r}, so the case's scanner selection was not applied"
             )
-        summary = inspector.call(
-            server.target, "get_scan_summary", {"output_dir": str(output_dir)}
-        )
+        summary = client.call("get_scan_summary", {"output_dir": str(output_dir)})
         if not isinstance(summary, dict):
             raise Failure(f"[{label}] get_scan_summary replied {_brief(summary)}")
         verdict, rc = verdict_problems(case, progress, summary)
@@ -649,15 +933,16 @@ def run_case(
         if problems:
             for problem in problems:
                 print(f"::error::[{label}] {problem}")
-            print(f"--- server log tail ({server.log})\n{server.tail()}")
+            print(f"--- server log tail ({client.log})\n{client.tail()}")
             raise Failure(f"[{label}] {len(problems)} problem(s)")
         say(
-            f"OK: [{label}] status={progress.get('status')} derived exit {rc}, "
-            f"{case.get('findings')} finding(s) expected, reports in {output_dir}"
+            f"OK: [{label}] over {transport}: status={progress.get('status')} derived "
+            f"exit {rc}, {case.get('findings')} finding(s) expected, reports in "
+            f"{output_dir}"
         )
         return output_dir
     finally:
-        server.stop()
+        client.stop()
 
 
 # --------------------------------------------------------------------------
@@ -687,6 +972,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--bundle", type=Path, required=True, help="the .mcpb built from head"
     )
+    parser.add_argument(
+        "--prev-bundle",
+        type=Path,
+        required=True,
+        help="the .mcpb the N-1 tree builds, which the head bundle must replace",
+    )
     parser.add_argument("--wheel", type=Path, required=True, help="the head wheel (N)")
     parser.add_argument("--prev-wheel", type=Path, required=True, help="the N-1 wheel")
     parser.add_argument(
@@ -696,7 +987,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--fixtures", type=Path, default=FIXTURES)
     args = parser.parse_args(argv)
 
-    for path in (args.bundle, args.wheel, args.prev_wheel):
+    for path in (args.bundle, args.prev_bundle, args.wheel, args.prev_wheel):
         if not path.is_file():
             print(f"error: no file at {path}", file=sys.stderr)
             return 3
@@ -733,8 +1024,33 @@ def main(argv: Optional[List[str]] = None) -> int:
         say(
             f"bundle {manifest.get('name')} {manifest.get('version')}: {original['command']} {' '.join(original['args'])}"
         )
+        say(f"reading {args.prev_bundle}")
+        prev_manifest = read_bundle(args.prev_bundle)
+        prev_original = mcp_config_of(prev_manifest)
+        say(f"bundle {prev_manifest.get('name')} {prev_manifest.get('version')} (N-1)")
+
+        say("the bundle upgrade: the bundle versions are the ASH releases and move")
+        problems = bundle_upgrade_problems(
+            prev_manifest, manifest, prev_version, version
+        )
+        if problems:
+            raise Failure("; ".join(problems))
+        say(
+            f"   OK: {prev_manifest.get('version')} -> {manifest.get('version')}, "
+            f"name {manifest.get('name')!r}"
+        )
+        say("negative control: a head bundle whose version was not raised must fail it")
+        stale = {**manifest, "version": prev_manifest.get("version")}
+        rejected = bundle_upgrade_problems(prev_manifest, stale, prev_version, version)
+        if not any("not raised" in problem for problem in rejected):
+            raise Failure(
+                "NEGATIVE CONTROL: a head bundle with the N-1 bundle's version passed "
+                f"the upgrade check: {rejected}"
+            )
+        say(f"   OK: rejected ({len(rejected)} problem(s), e.g. {rejected[-1]})")
+
         head_config = rewrite_from(original, wheel)
-        prev_config = rewrite_from(original, prev_wheel)
+        prev_config = rewrite_from(prev_original, prev_wheel)
         say(f"rewrote the --from argument only: {' '.join(head_config['args'])}")
 
         # Upgrade: N-1 first, as a user who installed the earlier bundle would have it.
@@ -775,6 +1091,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
 
         head_command = [head_config["command"], *head_config["args"]]
+        # One scan over the transport the bundle declares, with the command exactly
+        # as the bundle has it, in a session held open the way a desktop host holds it.
+        run_case(
+            inspector,
+            head_command,
+            server_env,
+            work,
+            args.fixtures,
+            "findings",
+            "stdio-findings",
+            version,
+            transport="stdio",
+        )
         outputs = {}
         for case_name in ("findings", "clean", "incomplete"):
             outputs[case_name] = run_case(
