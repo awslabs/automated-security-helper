@@ -430,8 +430,12 @@ global_settings:
     # CKV_AWS_51, AWS-0054 to CKV_AWS_2 and CFN_NAG_W56, AWS-0066 to CKV_AWS_50,
     # AWS-0089 to CKV_AWS_18, AWS-0098 to CKV_AWS_149, AWS-0104 to CFN_NAG_W5,
     # DS-0002 to CKV_DOCKER_3 and CKV_DOCKER_8, and DS-0026 to CKV_DOCKER_2.
-    # AWS-0036 maps to a decision recorded here against detect-secrets rather than
-    # checkov, on the same variable-name heuristic. That leaves two, AWS-0033 and
+    # (That count was taken when the CKV_AWS_149 decision was still recorded as
+    # inline skips in the agentcore and fargate modules. Those modules have since
+    # taken a kms_key_arn input and the skips are gone; the remaining AWS-0098
+    # entries rest on the conditional-key block below.) AWS-0036 maps to a
+    # decision recorded here against detect-secrets rather than checkov, on the
+    # same variable-name heuristic. That leaves two, AWS-0033 and
     # AWS-0132, where the nearest checkov rule asks a weaker question and therefore
     # passed, so the argument had to be assembled from the same cost family; both say
     # so where they sit.
@@ -581,16 +585,20 @@ global_settings:
     # Description says "Empty uses AWS-managed encryption", so a Default would
     # contradict the documented behaviour and point at a key nobody owns. The cost of
     # removing the option instead is a customer managed key per deployment, billed
-    # monthly per key plus per request, to encrypt container image build logs and a
-    # placeholder secret that the non-MCP stacks never read.
+    # monthly per key plus per request, to encrypt container image build logs and,
+    # on the two stacks that serve MCP, the auth header secret.
     #
     # The terraform modules reach the same place from the other direction, and the
-    # honest wording differs: there the inputs simply default to null, so trivy
-    # resolves the HCL correctly and the findings are accurate rather than artifacts.
-    # ECR encryption_type is a ternary on ecr_kms_key_arn, and the log groups set no
-    # kms_key_id at all. The trade is already recorded there against checkov's
-    # CKV_AWS_158 and CKV_AWS_149 as inline skips on
-    # deploy/terraform/modules/*/main.tf.
+    # honest wording differs: the findings there are accurate rather than artifacts.
+    # In ash-image-pipeline, codecommit-gate and codepipeline-executor the log
+    # groups set no kms_key_id, and ECR encryption_type is a ternary on an
+    # ecr_kms_key_arn input that defaults to null. Those log groups carry inline
+    # CKV_AWS_158 skips recording the trade. The agentcore and fargate modules take
+    # a kms_key_arn input instead and set kms_key_id from it on the auth header
+    # secret and the fargate task log group. trivy reports nothing on those
+    # resources, so they need no entry here. Measured: AWS-0017 fired on the
+    # fargate task log group before the input existed and does not with
+    # kms_key_id bound to it, even at its null default.
     - rule_id: AWS-0017
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -638,11 +646,6 @@ global_settings:
         aws_cloudwatch_log_group.shard and aws_cloudwatch_log_group.merge, the two
         resources this module's inline CKV_AWS_158 skips already cover. Same
         reasoning as the ash-image-pipeline entry.
-    - rule_id: AWS-0017
-      path: deploy/terraform/modules/fargate/main.tf
-      reason: >-
-        aws_cloudwatch_log_group.task, the resource this module's inline CKV_AWS_158
-        skip already covers. Same reasoning as the ash-image-pipeline entry.
     - rule_id: AWS-0033
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -675,7 +678,7 @@ global_settings:
         default the repository is encrypted with an Amazon-owned key and there is no
         customer key, which is what the variable's own description says. The
         variable is the opt-in, and the same trade is recorded against CKV_AWS_158
-        and CKV_AWS_149 elsewhere in these modules.
+        in the inline skips on the log groups of this module and two others.
     - rule_id: AWS-0033
       path: deploy/terraform/modules/codecommit-gate/main.tf
       reason: >-
@@ -686,20 +689,9 @@ global_settings:
       reason: >-
         ConfigMcpAuthHeaderSecret takes KmsKeyId from the HasKmsKey condition, so it
         is encrypted with the aws/secretsmanager managed key unless KmsKeyArn is
-        supplied. The identical trade is recorded against checkov's CKV_AWS_149 in
-        the agentcore and fargate terraform modules' inline skips.
-    - rule_id: AWS-0098
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      reason: >-
-        ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore
-        entry. This stack does not serve MCP, so the secret holds the disabled-auth
-        placeholder and nothing reads it.
-    - rule_id: AWS-0098
-      path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      reason: >-
-        ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore
-        entry. This stack runs the sharded executor, does not serve MCP, and gets
-        the placeholder secret nothing reads.
+        supplied. The agentcore and fargate terraform modules make the same choice
+        through a kms_key_arn input that defaults to null. Only the stacks that
+        serve MCP create this secret.
     - rule_id: AWS-0098
       path: deploy/cdk/templates/AshFargate.template.json
       reason: "ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore entry."
@@ -776,7 +768,7 @@ global_settings:
     # keep one shape across both stacks.
     #
     # For the remaining pipeline buckets the trade is the one already recorded
-    # against CKV_AWS_158 and CKV_AWS_149: a customer managed key is billed monthly
+    # against CKV_AWS_158: a customer managed key is billed monthly
     # per key plus per request, and it would additionally need a decrypt grant on
     # every CodePipeline action role that touches an artifact. Wiring KmsKeyArn
     # through to these buckets is a reasonable follow-up for a deployment that needs

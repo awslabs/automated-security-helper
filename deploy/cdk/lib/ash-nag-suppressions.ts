@@ -99,7 +99,9 @@
  * -> 0. Intermediate states of this branch went higher than 129 before coming down;
  * those numbers are not the ones to quote.
  *
- * THE 17 THAT REMAIN ARE ALL IN AshDistributedPipeline, AND THEY STAY DELIBERATELY.
+ * THE 17 THAT REMAINED ARE ALL IN AshDistributedPipeline, AND THEY STAY DELIBERATELY.
+ * (12 now: the five `SecretsmanagerAccess` entries went when the MCP auth secret left
+ * the stacks that do not serve MCP, because their policies went with it.)
  * test/ash-template-size.test.ts pins the number and enumerates them, so a new
  * unconsulted entry is a test failure rather than something a reader has to tell
  * apart from the known ones. Why they are not removed: every one of them hangs off a
@@ -323,7 +325,6 @@ function holdsWildcard(policy: CfnResource): boolean {
  *   KmsAccess             Action    kms:GenerateDataKey*, kms:ReEncrypt*   -- no resource
  *   LogsAccess            Resource  log-group:/aws/codebuild/<Project>:*
  *   SsmAccess             (none, COMPLIANT)
- *   SecretsmanagerAccess  (none, COMPLIANT)
  *
  * IAM5 RAISES A FINDING PER WILDCARD ACTION AS WELL AS PER WILDCARD RESOURCE, which is
  * why `KmsAccess` appears here at all and why a resource-only reading of these policies
@@ -437,9 +438,9 @@ export function suppressImageBuildRoleWildcards(scope: IConstruct): void {
  * The scan-shard and merge project roles, one policy at a time. Same two call shapes as
  * `suppressImageBuildRoleWildcards` and for the same reasons.
  *
- * TWO GROUPS HERE HOLD NO WILDCARD AT ALL, AND THEIR ENTRIES STAY. `SsmAccess` and
- * `SecretsmanagerAccess` are ten of the seventeen entries no rule consults, pinned and
- * enumerated by test/ash-template-size.test.ts; the header says why removing them would
+ * ONE GROUP HERE HOLDS NO WILDCARD AT ALL, AND ITS ENTRIES STAY. `SsmAccess` is five of
+ * the twelve entries no rule consults, pinned and enumerated by
+ * test/ash-template-size.test.ts; the header says why removing them would
  * be a claim about aws-cdk-lib's grant implementations rather than about this app. What
  * they must not do is carry a reason describing wildcards they do not have, which is what
  * the shared reason did to them -- `Shard0Project/Role/SsmAccess` grants four
@@ -462,12 +463,6 @@ export function suppressScanProjectRoleWildcards(scope: IConstruct): void {
       'wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib ' +
       'grant helper writes these statements, so which of this role\'s service groups holds ' +
       'a wildcard is aws-cdk-lib\'s choice rather than this app\'s.',
-    SecretsmanagerAccess:
-      'This policy holds no wildcard: secretsmanager:GetSecretValue and ' +
-      'secretsmanager:DescribeSecret are scoped to the one secret this stack creates, and ' +
-      'no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an ' +
-      'aws-cdk-lib grant helper writes these statements, so which of this role\'s service ' +
-      'groups holds a wildcard is aws-cdk-lib\'s choice rather than this app\'s.',
   });
 }
 

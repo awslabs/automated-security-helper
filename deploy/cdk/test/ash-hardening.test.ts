@@ -127,9 +127,9 @@ describe('every secret specifies a KmsKeyId', () => {
   const secrets = everyResource('AWS::SecretsManager::Secret');
 
   test('there are secrets to check', () => {
-    // One per stack that declares the MCP auth surface plus the two that create it
-    // unconditionally for one class shape: four, which is the W77 count.
-    expect(secrets.length).toBe(4);
+    // One per stack that serves MCP (AgentCore, Fargate). The gate and the sharded
+    // executor create none; ash-mcp-secret-scope.test.ts pins that side.
+    expect(secrets.length).toBe(2);
   });
 
   test.each(secrets.map(([name, props]) => [name, props] as const))(
@@ -353,7 +353,7 @@ describe('no IAM policy grants the same thing twice', () => {
   );
 
   test('there are policies to check in every stack', () => {
-    // 90 across the five stacks, in the order STACKS declares them. Exact and
+    // 85 across the five stacks, in the order STACKS declares them. Exact and
     // per-stack, so one stack losing its policies to a rename cannot leave the loop
     // for that stack iterating over nothing while the others carry the assertion.
     //
@@ -361,14 +361,19 @@ describe('no IAM policy grants the same thing twice', () => {
     // ash-policy-split.ts, which files each role's statements into one
     // AWS::IAM::Policy per AWS service so that no single document trips cfn-nag's
     // W76 ceiling. The counts rose; the statements did not change, which the
-    // duplicate check below is a second witness to -- it passes over all 90.
+    // duplicate check below is a second witness to -- it passes over all 85.
     //
-    // 88 of the 90 come from the split. The other two are AshAgentCore's and
+    // AshDistributedPipeline was 50 until the MCP auth secret left the two stacks
+    // that do not serve MCP: its five shard and merge roles each lost their
+    // `SecretsmanagerAccess` policy. AshCodeCommitGate's grant lived in a policy
+    // that still has other statements, so its count did not move.
+    //
+    // 83 of the 85 come from the split. The other two are AshAgentCore's and
     // AshFargate's `ConfigKeyAccess`, which AshRuntimeConfig authors directly so
     // the `kms:Decrypt` grant on an adopter-supplied key can be made conditional.
     // That is why those two stacks are one higher than the split alone produces.
     expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
-      10, 13, 10, 7, 50,
+      10, 13, 10, 7, 45,
     ]);
   });
 

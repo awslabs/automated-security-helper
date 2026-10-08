@@ -213,6 +213,18 @@ One limit worth stating: `ash_plugin_modules` is passed through, but the operato
 cannot install a Python module into your ASH image. A custom plugin has to be baked
 into the image you name in `spec.image`.
 
+The AWS integrations ship inside ASH as an opt-in plugin module,
+`automated_security_helper.plugin_modules.ash_aws_plugins`. It is the only part of
+ASH that imports boto3 or botocore (tests/unit/test_aws_sdk_confinement.py holds
+that), and nothing loads it unless `ash_plugin_modules` names it.
+Naming it turns on four reporters at once (`aws-security-hub`,
+`cloudwatch-logs`, `bedrock-summary-reporter` and `s3`), each enabled by default
+and each calling an AWS API from the scan pod. Give the pod's ServiceAccount AWS
+credentials through EKS Pod Identity or IRSA, with permission for the reporters
+you keep, and set `enabled: false` under `reporters:` for the ones you do not
+want. A missing permission does not fail the scan: the reporter logs an error and
+the scan's phase is unaffected. deploy/README.md has the detail.
+
 ## Status
 
 `.status.phase` ends in one of four terminal values. Three are `ashx merge`'s three

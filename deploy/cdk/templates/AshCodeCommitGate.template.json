@@ -132,36 +132,6 @@
     }
    }
   },
-  "ConfigMcpAuthHeaderSecret99D04B65": {
-   "Type": "AWS::SecretsManager::Secret",
-   "Properties": {
-    "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
-    "KmsKeyId": {
-     "Fn::If": [
-      "HasKmsKey",
-      {
-       "Ref": "KmsKeyArn"
-      },
-      {
-       "Ref": "AWS::NoValue"
-      }
-     ]
-    },
-    "SecretString": "ash-mcp-auth-disabled"
-   },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Automatic rotation would break authentication rather than improve it. ASH resolves this value once at container start and compares every request against it, so a rotated secret leaves running tasks validating the old value while callers send the new one, with no signal. The value is a shared secret the adopter also configures on the calling side, so any change has to be coordinated with callers regardless. Rotate by updating the secret and restarting the tasks.",
-       "id": "AwsSolutions-SMG4"
-      }
-     ]
-    }
-   }
-  },
   "EncryptionKey1B843E66": {
    "Type": "AWS::KMS::Key",
    "Properties": {
@@ -1002,16 +972,6 @@
           }
          ]
         ]
-       }
-      },
-      {
-       "Action": [
-        "secretsmanager:DescribeSecret",
-        "secretsmanager:GetSecretValue"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
        }
       },
       {
