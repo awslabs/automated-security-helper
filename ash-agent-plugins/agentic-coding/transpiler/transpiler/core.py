@@ -748,6 +748,11 @@ class BaseBackend:
             "stdout": result.stdout.decode("utf-8", errors="replace")
             if result.stdout
             else "",
+            # Some validators exit 0 and report on stderr (kiro-cli-chat agent
+            # validate does), so a caller scanning output needs both streams.
+            "stderr": result.stderr.decode("utf-8", errors="replace")
+            if result.stderr
+            else "",
         }
 
     # Back-compat alias — _invoke_cli used to be the only helper. New code
