@@ -352,3 +352,40 @@ def test_the_runner_passes_an_operator_specifier_through(tmp_path):
 def test_checked_requirement_accepts_what_plugins_build():
     for spec in ("bandit[sarif,toml]>=1.7.0,<2.0.0", "nbconvert", "jupyter"):
         assert checked_requirement(spec) == spec
+
+
+def test_a_value_assigned_after_validation_does_not_reach_any_install_path(tmp_path):
+    """The options validate on construction; the sinks check again at use."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+        BanditScanner,
+    )
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        FerretScanScanner,
+    )
+    from automated_security_helper.utils import pre_installed_tool
+
+    source, standin = _tree_with_standin(tmp_path)
+    reference = _direct_reference(standin)
+    config = resolve_config(source_dir=source)
+    context = _scanner_context(source, tmp_path, config)
+    with patch.object(UVToolRunner, "is_uv_available", return_value=False):
+        bandit = BanditScanner(
+            config=config.get_plugin_config("scanner", "bandit"), context=context
+        )
+        ferret = FerretScanScanner(context=context)
+    bandit.config.options.tool_version = reference
+    ferret.config.options.tool_version = reference
+
+    bandit._setup_uv_tool_install_commands()
+    assert bandit.uv_tool_install_commands == []
+
+    with pytest.raises(UVToolRunnerError):
+        ferret.get_installation_commands("linux", "amd64")
+
+    with patch.object(pre_installed_tool, "_run") as run:
+        verdict = pre_installed_tool.verify_pre_installed_tool(
+            "/bin/true", "bandit", ["sarif"], reference
+        )
+    run.assert_not_called()
+    assert verdict.status == "unverifiable"
+    assert verdict.requirement is None

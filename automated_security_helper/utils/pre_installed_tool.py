@@ -381,6 +381,12 @@ def verify_pre_installed_tool(
     dependency check several times per run, and the ``--version`` probe of a
     large tool takes seconds.
     """
+    try:
+        validate_version_constraint(version_constraint)
+    except ValueError as error:
+        # Never handed to the dry run below: uv resolves whatever the requirement
+        # names, and a path or URL would be built to read its metadata.
+        return PreInstalledToolVerdict("unverifiable", executable, None, str(error))
     requirement = build_requirement(package, extras, version_constraint)
     resolved = os.path.realpath(executable)
     try:

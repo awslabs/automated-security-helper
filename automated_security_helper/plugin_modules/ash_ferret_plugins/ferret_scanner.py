@@ -22,6 +22,7 @@ from automated_security_helper.base.options import (
     tool_version_constraint,
 )
 from automated_security_helper.base.plugin_base import pep440_requirement
+from automated_security_helper.utils.uv_tool_runner import checked_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -624,8 +625,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 "-m",
                 "pip",
                 "install",
-                pep440_requirement(
-                    "ferret-scan", self._get_tool_version_constraint() or "latest"
+                checked_requirement(
+                    pep440_requirement(
+                        "ferret-scan", self._get_tool_version_constraint() or "latest"
+                    )
                 ),
             ]
         )
