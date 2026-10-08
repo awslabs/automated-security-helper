@@ -83,11 +83,14 @@ const APPROVED: GuardEntry[] = [
 ];
 
 describe('cfn-guard suppressions sit only on the approved resources', () => {
-  test('all five templates were read', () => {
+  test('all six templates were read', () => {
+    // AshEksOperator carries no suppression; it is listed so the exact-set test
+    // below is known to have looked at it.
     expect(Object.keys(COMMITTED).sort()).toEqual([
       'AshAgentCore',
       'AshCodeCommitGate',
       'AshDistributedPipeline',
+      'AshEksOperator',
       'AshFargate',
       'AshImagePipeline',
     ]);
