@@ -26,6 +26,8 @@
       8. negative controls on the verdict: a findings scan run with --no-fail-on-findings must
          be rejected for its exit code, and the clean output judged as a findings outcome
          must be rejected;
+      8c. `ashx dependencies install --tool grype` through the installed package, checked
+         against the pin, and `--tool <unknown>` refused with EXIT_BAD_SELECTION;
       9. a same-version reinstall must keep the venv rather than rebuild it;
      10. uninstall, then require the package, its venv and its three aliases to be gone.
 
@@ -989,6 +991,25 @@ if ($negativeExit -ne 1) {
     Fail "NEGATIVE CONTROL: assert_outcome.py returned $negativeExit on a clean output expected to hold findings; expected 1"
 }
 Write-Host '   OK: the clean output was rejected as a findings outcome'
+
+Write-Step '8c. select a scanner after install: ashx dependencies install --tool grype'
+# No package bundles a scanner; a user selects one after installing (README.msix).
+# scripts/e2e/assert_dependencies_install.py runs under the installed venv's interpreter,
+# with the packaged alias as the CLI: it requires nothing installed yet, the install to
+# exit 0, grype at ~\.ash\bin with a receipt recording this ASH's pinned version and
+# archive SHA-256 and the binary's own hash, `grype version` to name the pin, and
+# `--tool <unknown>` to exit EXIT_BAD_SELECTION, which is the negative control.
+#
+# As the installing user, unlike the Chocolatey leg's separate unprivileged account: an
+# MSIX package is registered per user, so another account has no `ashx` to run. That the
+# install needs no privilege is the Chocolatey leg's proof; this one proves the packaged
+# app's own process can download and place a scanner outside the package, where ~\.ash
+# lives and where package file-system virtualization does not reach.
+$venvPython = Join-Path $venv 'Scripts\python.exe'
+& $venvPython -I (Join-Path $repoRoot 'scripts/e2e/assert_dependencies_install.py') --cli $resolved[$cliName] --tool grype
+if ($LASTEXITCODE -ne 0) {
+    Fail "ashx dependencies install --tool grype through the installed package failed (assert_dependencies_install.py exit $LASTEXITCODE)"
+}
 
 Write-Step '9. a same-version reinstall keeps the venv'
 # The MSIX equivalent of the rpm script's %postun check, and the other half of step 6: the

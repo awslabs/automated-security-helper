@@ -66,6 +66,7 @@ on:
       - "tests/unit/test_e2e_prev_tree.py"
       - "tests/unit/test_winget_e2e.py"
       - "tests/unit/test_planted_scanner_negative.py"
+      - "tests/unit/test_e2e_dependencies_install.py"
   workflow_dispatch: {}
 
 permissions:
@@ -122,3 +123,4 @@ jobs:
           tests/unit/test_e2e_prev_tree.py
           tests/unit/test_winget_e2e.py
           tests/unit/test_planted_scanner_negative.py
+          tests/unit/test_e2e_dependencies_install.py
