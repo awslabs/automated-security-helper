@@ -268,8 +268,9 @@ Still open, re-measured against `v4-capabilities` at `bd1ce7de`:
   exercised in CI but are neither attached to a release nor attested, and the same holds
   for the VS Code `.vsix` and the JetBrains plugin zip. Of the OS packages only the MSIX
   leaves CI at all, as a 14-day workflow artifact; the `.vsix` is uploaded the same way.
-  Attesting outside a tag run writes to the repository's public attestation store, so how a negative control for native provenance should run
-  is a maintainer decision, not a mechanical change. Until this closes, the install pages
+  Attesting outside a tag run writes to the repository's public attestation store, so
+  how a negative control for native provenance should run is a maintainer decision, not
+  a mechanical change. Until this closes, the install pages
   under `docs/content/docs/native-packages/` tell users to build from a checkout, and
   `check_native_package_docs` in `scripts/verify_docs_freshness.py` fails when the
   release step starts attaching anything else, so those pages cannot go stale silently.
