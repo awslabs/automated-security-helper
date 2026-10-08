@@ -16,6 +16,7 @@ from urllib.parse import urljoin
 from pydantic import Field, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.config.path_trust import anchored, honored_path
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
@@ -893,9 +894,24 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         Returns:
             Path to config file if found, None otherwise
         """
+        # A config file inside the scanned tree is not passed to ferret-scan,
+        # whether the option names it or it is found by name below; see
+        # config/path_trust.py. The bundled default is used instead.
+        source_dir = self.context.source_dir
+
         # 1. Check explicitly specified config file
         if config_file:
             path = Path(config_file)
+            if (
+                anchored(path, source_dir).exists()
+                and honored_path(
+                    path,
+                    source_dir=source_dir,
+                    key="scanners.ferret-scan.options.config_file",
+                )
+                is None
+            ):
+                return self._bundled_config()
             if path.is_absolute():
                 if path.exists():
                     self._plugin_log(
@@ -935,7 +951,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         ]
 
         for path in possible_paths:
-            if path.exists():
+            if path.exists() and honored_path(
+                path,
+                source_dir=source_dir,
+                key=f"ferret-scan config file {path.relative_to(source_dir).as_posix()}",
+            ):
                 self._plugin_log(
                     f"Found Ferret config file in source directory: {path}",
                     level=logging.DEBUG,
@@ -943,6 +963,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 return path
 
         # 3. Use default config bundled with this plugin
+        return self._bundled_config()
+
+    def _bundled_config(self) -> Path | None:
+        """The config bundled with this plugin, when use_default_config allows it."""
         if self.config.options.use_default_config and DEFAULT_FERRET_CONFIG.exists():
             self._plugin_log(
                 f"Using default Ferret config bundled with plugin: {DEFAULT_FERRET_CONFIG}",

@@ -12,6 +12,7 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
@@ -326,6 +327,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     f"Falling back to default settings."
                 )
 
+        self._drop_in_tree_settings_paths()
+
         # Skipped when the library is absent: the plugin list has to be read out of
         # detect-secrets itself, and there is no scan to configure for a scanner that
         # has already been recorded unable to run. Returning here rather than
@@ -379,6 +382,41 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ASH_LOGGER.debug(f"Default settings identified: {settings}")
 
         return super()._process_config_options()
+
+    def _drop_in_tree_settings_paths(self) -> None:
+        """Drop plugins_used and filters_used entries whose file is in the scanned tree.
+
+        detect-secrets names a plugin or filter defined in a file as
+        ``file://<path>`` (a filter adds ``::<function>``). Such an entry, from the
+        config or from the baseline file, is kept only when the file is outside the
+        scanned tree; see config/path_trust.py. Entries naming detect-secrets' own
+        plugins and filters are unaffected.
+        """
+        settings = self.config.options.scan_settings
+        source_dir = Path(self.context.source_dir)
+
+        def _kept(value: Any, key: str) -> bool:
+            if not isinstance(value, str) or not value.startswith("file://"):
+                return True
+            file_part = value[len("file://") :].split("::", 1)[0]
+            return honored_path(file_part, source_dir=source_dir, key=key) is not None
+
+        settings.plugins_used = [
+            plugin
+            for plugin in settings.plugins_used
+            if _kept(
+                getattr(plugin, "path", None),
+                "scanners.detect-secrets.options.scan_settings.plugins_used[].path",
+            )
+        ]
+        settings.filters_used = [
+            item
+            for item in settings.filters_used
+            if _kept(
+                item.path,
+                "scanners.detect-secrets.options.scan_settings.filters_used[].path",
+            )
+        ]
 
     @staticmethod
     def _get_baseline_exclude_patterns(

@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.config.path_trust import anchored, honored_path
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
@@ -287,11 +288,20 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # correct without a global chdir, which also matters for scanning several
         # projects in one process.
         source_dir = Path(self.context.source_dir)
-        for conf_path in possible_config_paths:
-            candidate = Path(conf_path)
-            if not candidate.is_absolute():
-                candidate = source_dir / candidate
-            if candidate.exists():
+        for index, conf_path in enumerate(possible_config_paths):
+            configured = index == 0 and self.config.options.config_file is not None
+            if not anchored(conf_path, source_dir).exists():
+                continue
+            # A config file inside the scanned tree is not passed to checkov; see
+            # config/path_trust.py.
+            candidate = honored_path(
+                conf_path,
+                source_dir=source_dir,
+                key="scanners.checkov.options.config_file"
+                if configured
+                else f"checkov config file {conf_path}",
+            )
+            if candidate is not None:
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config-file",
