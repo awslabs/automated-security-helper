@@ -599,3 +599,220 @@ def test_the_limit_reaches_the_policy_of_a_real_spawn(tmp_path, monkeypatch):
     # Both declare a need. The repository's list names checkov only.
     assert network_of("checkov") is True
     assert network_of("grype") is False
+
+
+REPO_OFF = "project_name: thirdparty\nsandbox:\n  mode: 'off'\n"
+
+
+@pytest.mark.parametrize("layout", ["operator-checkout", "home-is-a-checkout"])
+def test_an_operator_config_inside_a_checkout_still_sets_the_mode_floor(
+    tmp_path, monkeypatch, caplog, layout
+):
+    # A .git above both the operator's ASH_CONFIG and the scanned tree makes the
+    # operator's file "in the tree". Its grants are dropped, but its mode holds.
+    top = tmp_path / layout
+    (top / ".git").mkdir(parents=True)
+    operator = top / "ash" / "operator.yaml"
+    operator.parent.mkdir()
+    operator.write_text(TRUSTED_BWRAP)
+    target = top / "targets" / "thirdparty"
+    (target / ".ash").mkdir(parents=True)
+    (target / ".ash" / ".ash.yaml").write_text(REPO_OFF)
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    caplog.set_level("WARNING")
+    sandbox = resolve_config(source_dir=target).sandbox
+    assert sandbox.mode == "bwrap"
+    assert sandbox.network_scanners is None
+    assert any("sandbox.mode" in record.getMessage() for record in caplog.records)
+
+
+def test_the_sandbox_flag_still_turns_off_an_operator_floor(tmp_path, monkeypatch):
+    top = tmp_path / "checkout"
+    (top / ".git").mkdir(parents=True)
+    operator = top / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP)
+    target = top / "thirdparty"
+    (target / ".ash").mkdir(parents=True)
+    (target / ".ash" / ".ash.yaml").write_text("project_name: x\n")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    sandbox = resolve_config(
+        source_dir=target, config_overrides=["sandbox.mode=off"]
+    ).sandbox
+    assert sandbox.mode == "off"
+
+
+def _workspace_project(workspace: Path, own_config: str):
+    from automated_security_helper.workspace.plan import ProjectPlan
+
+    project_dir = workspace / "api"
+    (project_dir / ".ash").mkdir(parents=True)
+    own = project_dir / ".ash" / ".ash.yaml"
+    own.write_text(own_config)
+    return ProjectPlan(
+        key="api",
+        relative_path="api",
+        path=project_dir.as_posix(),
+        label="api",
+        display_label="api",
+        severity_threshold="MEDIUM",
+        config_source=own.as_posix(),
+    )
+
+
+def test_a_workspace_operator_config_inside_a_checkout_still_sets_the_mode_floor(
+    tmp_path,
+):
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        _project_config_with_policy,
+    )
+
+    top = tmp_path / "checkout"
+    (top / ".git").mkdir(parents=True)
+    operator = top / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP)
+    project = _workspace_project(top / "workspace", REPO_OFF)
+    settings = ProjectScanSettings(
+        output_dir=tmp_path / "out", default_config_path=str(operator)
+    )
+    sandbox = _project_config_with_policy(project, settings).sandbox
+    assert sandbox.mode == "bwrap"
+    assert sandbox.network_scanners is None
+
+
+def test_an_operator_config_extending_into_the_tree_still_sets_the_mode_floor(
+    tmp_path,
+):
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        _project_config_with_policy,
+    )
+
+    workspace = tmp_path / "workspace"
+    project = _workspace_project(workspace, REPO_OFF)
+    (workspace / "shared").mkdir()
+    (workspace / "shared" / "base.yaml").write_text("project_name: shared\n")
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP + "extends: workspace/shared/base.yaml\n")
+    settings = ProjectScanSettings(
+        output_dir=tmp_path / "out", default_config_path=str(operator)
+    )
+    sandbox = _project_config_with_policy(project, settings).sandbox
+    assert sandbox.mode == "bwrap"
+    assert sandbox.network_scanners is None
+
+
+def test_an_invalid_operator_config_is_refused_like_any_config(tmp_path):
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        _project_config_with_policy,
+    )
+
+    project = _workspace_project(tmp_path / "workspace", "project_name: api\n")
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP + "fail_on_findings: 'true'\n")
+    settings = ProjectScanSettings(
+        output_dir=tmp_path / "out", default_config_path=str(operator)
+    )
+    with pytest.raises(ASHConfigValidationError):
+        _project_config_with_policy(project, settings)
+
+
+def test_a_git_file_below_the_checkout_does_not_move_the_superproject_outside(
+    tmp_path,
+):
+    superproject = tmp_path / "super"
+    (superproject / ".git").mkdir(parents=True)
+    (superproject / ".ash").mkdir()
+    (superproject / ".ash" / "ci.yaml").write_text(REPO_CONFIG)
+    submodule = superproject / "src"
+    submodule.mkdir()
+    (submodule / ".git").write_text("gitdir: ../.git/modules/src\n")
+    sandbox = resolve_config(
+        config_path=superproject / ".ash" / "ci.yaml", source_dir=submodule
+    ).sandbox
+    assert sandbox.network_scanners is None
+    assert sandbox.extra_read_paths == []
+
+
+def test_a_dangling_git_symlink_still_marks_a_checkout(tmp_path):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    _symlink(checkout / ".git", tmp_path / "gone")
+    (checkout / "ci.yaml").write_text(REPO_CONFIG)
+    (checkout / "api").mkdir()
+    sandbox = resolve_config(
+        config_path=checkout / "ci.yaml", source_dir=checkout / "api"
+    ).sandbox
+    assert sandbox.network_scanners is None
+
+
+def test_a_scan_root_symlinked_out_of_the_checkout_still_counts_the_checkout(
+    tmp_path,
+):
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "ci.yaml").write_text(REPO_CONFIG)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _symlink(checkout / "vendor", elsewhere)
+    sandbox = resolve_config(
+        config_path=checkout / "ci.yaml", source_dir=checkout / "vendor"
+    ).sandbox
+    assert sandbox.network_scanners is None
+
+
+def test_a_scan_root_symlinked_into_a_checkout_counts_that_checkout(tmp_path):
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "ci.yaml").write_text(REPO_CONFIG)
+    (checkout / "api").mkdir()
+    link = tmp_path / "api-link"
+    _symlink(link, checkout / "api")
+    sandbox = resolve_config(config_path=checkout / "ci.yaml", source_dir=link).sandbox
+    assert sandbox.network_scanners is None
+
+
+def test_dropping_a_grant_says_which_file_and_which_settings(tmp_path, caplog):
+    source = _repo(tmp_path)
+    caplog.set_level("WARNING")
+    resolve_config(source_dir=source)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "sandbox.network_scanners" in message
+        and "sandbox.extra_read_paths" in message
+        and ".ash.yaml" in message
+        for message in messages
+    ), messages
+
+
+def test_withholding_a_settings_derived_need_is_logged(tmp_path, monkeypatch, caplog):
+    from types import SimpleNamespace
+
+    from automated_security_helper.utils.sandbox import scope as scope_module
+
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: None)
+    monkeypatch.setattr(
+        "automated_security_helper.core.constants.is_offline_mode", lambda: False
+    )
+    config = resolve_config(
+        source_dir=_repo(tmp_path, "project_name: x\nsandbox:\n  mode: bwrap\n")
+    )
+    plugin = SimpleNamespace(
+        config=SimpleNamespace(name="detect-secrets"),
+        sandbox_requirements=SandboxRequirements(
+            network=True, network_requires_grant=True
+        ),
+        results_dir=None,
+    )
+    context = SimpleNamespace(
+        config=config, source_dir=tmp_path, output_dir=tmp_path / "out"
+    )
+    caplog.set_level("WARNING")
+    scope_module.scanner_sandbox_scope(plugin, context, tmp_path)
+    assert any(
+        "detect-secrets" in record.getMessage()
+        and "sandbox.network_scanners" in record.getMessage()
+        for record in caplog.records
+    )

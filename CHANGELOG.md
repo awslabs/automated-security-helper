@@ -67,7 +67,8 @@
   `ASH_CONFIG`) cannot set them; they come from `--config-overrides` or a config
   file outside the tree. Such a file's `network_scanners` can still remove network,
   and its `sandbox.mode` applies only when nothing trusted turned the sandbox on.
-  The tree is the enclosing checkout, not only the scanned directory.
+  The tree is the outermost enclosing checkout, not only the scanned directory, and
+  the operator's sandbox mode holds even when the operator's own file is in the tree.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
