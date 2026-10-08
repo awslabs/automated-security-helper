@@ -28,6 +28,9 @@
 #    The next start must load no ASH plugin.
 # 5. Negative controls, each seen failing: the loaded-version check asked for N while N-1 is
 #    loaded, the same check after uninstall, and an install from a truncated zip.
+# 6. Leaves two installs for e2e-installed-scan.sh, which scans through them: the fresh N from
+#    step 2 and a separate N-1, each written by the installer and checked loaded, named in
+#    <work-dir>/installed-plugins.env.
 #
 # "Loaded" is the IDE's own statement. At startup it logs "Loaded custom plugins: <name>
 # (<version>)" for every enabled third-party plugin. The start used to read that line is
@@ -299,6 +302,7 @@ say "fresh install of N ($HEAD_VERSION)"
 install "$FRESH" "$HEAD_ZIP" "$HEAD_VERSION" || fail "installing N into a fresh IDE failed"
 assert_installed "$FRESH" "$HEAD_ZIP"
 assert_loaded "$FRESH" "$HEAD_VERSION" || fail "a fresh install of N is not what the IDE loads"
+# Nothing below touches $FRESH again, so e2e-installed-scan.sh scans through this install.
 
 # --------------------------------------------------------------------------
 # 3. Upgrade N-1 -> N.
@@ -337,6 +341,26 @@ PY
 CORRUPT="$(new_home corrupt)"
 must_fail "install from a truncated zip" install "$CORRUPT" "$CORRUPT_ZIP" "$HEAD_VERSION"
 must_fail "loaded after a failed install" assert_loaded "$CORRUPT" "$HEAD_VERSION"
+
+# --------------------------------------------------------------------------
+# 6. The installs e2e-installed-scan.sh scans through.
+# --------------------------------------------------------------------------
+say "install N-1 ($PREV_VERSION) on its own, for the installed-zip scan's negative control"
+PREV="$(new_home prev)"
+install "$PREV" "$PREV_ZIP" "$PREV_VERSION" || fail "installing N-1 for the installed-zip scan failed"
+assert_installed "$PREV" "$PREV_ZIP"
+assert_loaded "$PREV" "$PREV_VERSION" || fail "the separate N-1 install is not what the IDE loads"
+assert_installed "$FRESH" "$HEAD_ZIP"
+PLUGIN_DIR="$(zip_dir "$HEAD_ZIP")"
+{
+  printf 'HEAD_VERSION=%q\n' "$HEAD_VERSION"
+  printf 'HEAD_ZIP=%q\n' "$HEAD_ZIP"
+  printf 'HEAD_PLUGIN_DIR=%q\n' "$FRESH/plugins/$PLUGIN_DIR"
+  printf 'PREV_VERSION=%q\n' "$PREV_VERSION"
+  printf 'PREV_ZIP=%q\n' "$PREV_ZIP"
+  printf 'PREV_PLUGIN_DIR=%q\n' "$PREV/plugins/$PLUGIN_DIR"
+} > "$WORK/installed-plugins.env"
+printf '   recorded in %s\n' "$WORK/installed-plugins.env"
 
 echo
 echo "JETBRAINS IDE INSTALL CYCLE PASSED: fresh $HEAD_VERSION, upgrade $PREV_VERSION -> $HEAD_VERSION, uninstall, 4 negative controls"
