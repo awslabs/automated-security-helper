@@ -182,3 +182,36 @@ def test_non_package_result_is_untouched(mock_plugin_context, tmp_path):
     (r,) = out.runs[0].results
     assert len(r.locations) == 2
     assert "package_name" not in props(r)
+
+
+def test_license_result_gets_its_package_name(mock_plugin_context, tmp_path):
+    # trivy writes a license result's package as "PkgName:", not "Package:",
+    # and gives no version. Without the name a package-scoped license approval
+    # matches nothing.
+    root = tmp_path / "src"
+    write_lockfile(root, {"node_modules/lightningcss": {"version": "1.33.0"}})
+    sarif = report(
+        {
+            "ruleId": "lightningcss:MPL-2.0",
+            "message": {
+                "text": (
+                    "Artifact: package-lock.json\nLicense MPL-2.0\n"
+                    "PkgName: lightningcss\n Classification: reciprocal\n"
+                    " Path: package-lock.json"
+                )
+            },
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": "package-lock.json"},
+                        "region": {"startLine": 1, "endLine": 1},
+                    }
+                }
+            ],
+        }
+    )
+    out = scanner(mock_plugin_context)._attach_package_identity(sarif, root)
+    (r,) = out.runs[0].results
+    assert props(r)["package_name"] == "lightningcss"
+    assert "package_version" not in props(r)
+    assert "package_path" not in props(r)

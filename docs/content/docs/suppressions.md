@@ -142,6 +142,11 @@ Known limits:
 - `package_path` is only available for npm lockfiles (`package-lock.json` and
   `npm-shrinkwrap.json`, format v2 and later). Other ecosystems get
   `package_name` and `package_version` only.
+- trivy-repo license findings carry `package_name` only. trivy names them
+  `<package>:<license>` (for example `lightningcss:MPL-2.0`) and puts every one
+  on line 1 of the manifest, so a line range cannot narrow them. To approve a
+  license for some packages in one file, set `rule_id: '*:<license>'`, the
+  file's exact `path`, and `package_name`.
 - ASH versions without these fields ignore unknown suppression keys, so an
   older ASH reading a package-scoped suppression applies it without the
   package fields, which is broader. Make sure every environment that reads the

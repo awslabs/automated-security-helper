@@ -406,6 +406,36 @@ global_settings:
     - rule_id: "*:Python Software Foundation License"
       path: "**"
       reason: "Python Software Foundation License is an approved license"
+    # MPL-2.0 is approved per (license, file, package), never repository-wide.
+    # trivy names license results "<package>:<license>" and puts every one on
+    # line 1, so a line range cannot narrow them; package_name (read from the
+    # result's "PkgName:" line) is what keeps a new MPL-2.0 package in these
+    # same files, or MPL-2.0 in any other file, failing.
+    # tests/unit/config/test_mpl_license_approval.py holds that.
+    - rule_id: "*:MPL-2.0"
+      path: "scripts/e2e/inspector/package-lock.json"
+      package_name: "lightningcss"
+      reason: >-
+        Weak-copyleft MPL-2.0, file-level only. lightningcss is an unmodified
+        transitive dependency of @modelcontextprotocol/inspector (via vite).
+        This lockfile pins the inspector that the MCPB end-to-end test
+        (scripts/e2e/mcpb.sh) installs into a scratch directory. Neither the
+        lockfile nor lightningcss is in the ASH wheel, sdist or image.
+    - rule_id: "*:MPL-2.0"
+      path: "scripts/e2e/inspector/package-lock.json"
+      package_name: "lightningcss-*"
+      reason: >-
+        The per-platform lightningcss binaries (lightningcss-linux-x64-gnu and
+        so on), MPL-2.0 like lightningcss itself, installed only for the same
+        end-to-end test and never shipped.
+    - rule_id: "*:MPL-2.0"
+      path: "deploy/kubernetes-operator/requirements.txt"
+      package_name: "certifi"
+      reason: >-
+        Weak-copyleft MPL-2.0, file-level only. certifi is an unmodified
+        transitive dependency of the operator (via kubernetes and requests),
+        installed from PyPI into the operator image as published. The
+        obligation covers modified MPL files, and none are modified.
     # =====================================================================
     # Community-plugin mode: bandit, ferret-scan, trivy-repo
     # =====================================================================
