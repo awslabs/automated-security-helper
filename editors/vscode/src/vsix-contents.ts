@@ -156,6 +156,8 @@ export interface ZipDirectoryEntry {
   readonly localHeaderOffset: number;
   /** General-purpose flags. Bit 3 means a data descriptor follows the body. */
   readonly flags: number;
+  /** CRC-32 of the uncompressed body, which a data descriptor must repeat. */
+  readonly crc32: number;
 }
 
 /** Where the parts of a ZIP archive sit, as its end record and directory declare them. */
@@ -251,6 +253,7 @@ export function readZipStructure(buffer: Buffer): ZipStructure {
       uncompressedSize: buffer.readUInt32LE(cursor + 24),
       localHeaderOffset: buffer.readUInt32LE(cursor + 42),
       flags: buffer.readUInt16LE(cursor + 8),
+      crc32: buffer.readUInt32LE(cursor + 16),
     });
     cursor = nameEnd + extraLength + commentLength;
   }
@@ -267,6 +270,27 @@ export function readZipStructure(buffer: Buffer): ZipStructure {
 
 const FLAG_DATA_DESCRIPTOR = 0x08;
 const DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
+
+/**
+ * The length of the data descriptor at `at`, or null when it does not match `entry`.
+ *
+ * A descriptor repeats the entry's CRC and sizes, optionally behind the
+ * PK\x07\x08 signature. Skipping any 12 or 16 bytes after a body would let the
+ * flag hide that many arbitrary bytes per entry, so both forms are compared
+ * field by field. The signed form is tried first; an unsigned descriptor whose
+ * CRC happens to equal the signature value is still found by the second test.
+ */
+function descriptorLength(buffer: Buffer, at: number, entry: ZipDirectoryEntry): number | null {
+  const matches = (from: number): boolean =>
+    from + 12 <= buffer.length &&
+    buffer.readUInt32LE(from) === entry.crc32 &&
+    buffer.readUInt32LE(from + 4) === entry.compressedSize &&
+    buffer.readUInt32LE(from + 8) === entry.uncompressedSize;
+  if (at + 4 <= buffer.length && buffer.readUInt32LE(at) === DATA_DESCRIPTOR_SIGNATURE && matches(at + 4)) {
+    return 16;
+  }
+  return matches(at) ? 12 : null;
+}
 
 /**
  * Returns every place a ZIP archive carries bytes that no reader extracts.
@@ -320,8 +344,15 @@ export function layoutProblems(buffer: Buffer, structure: ZipStructure = readZip
       header + LOCAL_HEADER_MIN_SIZE + buffer.readUInt16LE(header + 26) + buffer.readUInt16LE(header + 28) +
       entry.compressedSize;
     if ((entry.flags & FLAG_DATA_DESCRIPTOR) !== 0) {
-      const signed = expected + 4 <= buffer.length && buffer.readUInt32LE(expected) === DATA_DESCRIPTOR_SIGNATURE;
-      expected += signed ? 16 : 12;
+      const length = descriptorLength(buffer, expected, entry);
+      if (length === null) {
+        problems.push(
+          `${entry.name} sets the data-descriptor flag, but the 12 or 16 bytes after its body do not ` +
+            'repeat the CRC and sizes of its central record, so they are bytes no reader extracts',
+        );
+        return problems;
+      }
+      expected += length;
     }
   }
   if (expected !== directoryOffset) {
