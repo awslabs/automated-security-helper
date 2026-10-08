@@ -155,3 +155,50 @@ def test_a_root_cwd_is_not_a_sandbox_read_grant(tmp_path):
     )
     assert Path("/") not in policy.read_only
     assert policy.cwd == Path("/")
+
+
+@pytest.mark.parametrize("which", ["checkov", "ferret-scan"])
+def test_the_scanner_cwd_is_never_inside_the_source_tree(tmp_path, which):
+    from automated_security_helper.config.path_trust import in_scanned_tree
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        FerretScanScanner,
+    )
+
+    source = tmp_path / "src"
+    (source / ".git").mkdir(parents=True)
+    output = source / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    context = PluginContext(source_dir=source, output_dir=output, config=AshConfig())
+    scanner = (
+        CheckovScanner(context=context)
+        if which == "checkov"
+        else FerretScanScanner(context=context)
+    )
+    results_dir = Path(scanner.results_dir) / "source"
+    cwd = scanner._subprocess_cwd(results_dir)
+    assert cwd is not None
+    assert not in_scanned_tree(cwd, source)
+
+
+def test_ferret_scan_runs_its_subprocess_from_that_cwd(tmp_path):
+    from unittest.mock import patch
+
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        FerretScanScanner,
+    )
+
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "a.txt").write_text("x\n")
+    output = tmp_path / "out"
+    output.mkdir()
+    scanner = FerretScanScanner(
+        context=PluginContext(source_dir=source, output_dir=output, config=AshConfig())
+    )
+    scanner.dependencies_satisfied = True
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+    ):
+        scanner.scan(target=source, target_type="source")
+    assert run.call_args.kwargs["cwd"] == Path("/")

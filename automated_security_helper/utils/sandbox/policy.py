@@ -443,9 +443,9 @@ def _refuse_symlinked_results_dir(output_dir: Path, results_dir: Path) -> None:
 def _readable_cwd(cwd: Optional[Path]) -> Optional[Path]:
     """``cwd`` as a read grant, or None for a filesystem root.
 
-    checkov runs from the filesystem root so that it reads no config file from the
-    scanned tree, and is handed only absolute paths
-    (``CheckovScanner._subprocess_cwd``). Granting the root would let every
+    checkov and ferret-scan run from the filesystem root so that they read no
+    config file from the scanned tree, and are handed only absolute paths
+    (``_subprocess_cwd`` on each scanner). Granting the root would let every
     sandboxed process read the whole filesystem; every backend can still change
     into ``/`` without it.
     """

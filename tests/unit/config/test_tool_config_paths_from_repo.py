@@ -360,3 +360,24 @@ def test_in_workspace_mode_a_file_elsewhere_in_the_workspace_is_not_passed(tmp_p
     assert other.resolve().as_posix() in argv(None)
     # Workspace mode records the workspace root, and the same file is refused.
     assert not any(other.resolve().as_posix() in a for a in argv(workspace))
+
+
+def test_ferret_always_gets_an_explicit_config_outside_the_tree(tmp_path):
+    """ferret-scan loads ferret.yaml from its working directory without --config."""
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        FerretScanScanner,
+        FerretScannerConfig,
+    )
+
+    source = _tree(tmp_path, "")
+    (source / "ferret.yaml").write_text("")
+    config = resolve_config(source_dir=source)
+    scanner = FerretScanScanner(
+        config=FerretScannerConfig(options={"use_default_config": False}),
+        context=_context(source, tmp_path, config),
+    )
+    values = [a.value for a in scanner.args.extra_args if a.key == "--config"]
+    assert len(values) == 1
+    passed = Path(values[0])
+    assert not passed.resolve().is_relative_to(source.resolve())
+    assert passed.read_text().strip() == "{}"

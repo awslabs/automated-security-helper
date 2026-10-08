@@ -6,6 +6,7 @@
 import json
 import shlex
 import logging
+import os
 import re
 import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
 import sys
@@ -22,6 +23,7 @@ from automated_security_helper.base.options import (
     tool_version_constraint,
 )
 from automated_security_helper.base.plugin_base import pep440_requirement
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import checked_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
@@ -794,12 +796,16 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         if options.recursive:
             self.args.extra_args.append(ToolExtraArg(key="--recursive", value=None))
 
-        # Config file
-        config_file_path = self._find_config_file(options.config_file)
-        if config_file_path:
-            self.args.extra_args.append(
-                ToolExtraArg(key="--config", value=str(config_file_path))
-            )
+        # Config file. Always passed: without --config, ferret-scan loads a
+        # ferret.yaml from its working directory, the source directory (measured
+        # with ferret-scan 2.5.3), so a run with no config of its own gets an
+        # empty one ASH writes, which ferret-scan treats as its defaults.
+        config_file_path = (
+            self._find_config_file(options.config_file) or self._empty_config_file()
+        )
+        self.args.extra_args.append(
+            ToolExtraArg(key="--config", value=str(config_file_path))
+        )
 
         # Profile
         if options.profile:
@@ -957,6 +963,27 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # 3. Use default config bundled with this plugin
         return self._bundled_config()
 
+    def _subprocess_cwd(self, results_dir: Path) -> Path | None:
+        """Run ferret-scan from the filesystem root, outside the scanned tree.
+
+        ferret-scan loads a ferret.yaml from its working directory when no
+        --config is given, and ASH always gives one; running it outside the tree
+        as well means a config in the tree is not read either way. Its SARIF
+        paths are relative to the scanned path, not the working directory
+        (measured with ferret-scan 2.5.3), so they do not change. The sandbox
+        does not turn a root working directory into a read grant
+        (``sandbox.policy._readable_cwd``).
+        """
+        return Path(Path(os.path.abspath(results_dir)).anchor)
+
+    def _empty_config_file(self) -> Path:
+        """An empty ferret-scan config in this scanner's results directory."""
+        path = Path(self.results_dir) / "ferret-empty-config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open_for_write(path) as handle:
+            handle.write("{}\n")
+        return path.resolve()
+
     def _bundled_config(self) -> Path | None:
         """The config bundled with this plugin, when use_default_config allows it."""
         if self.config.options.use_default_config and DEFAULT_FERRET_CONFIG.exists():
@@ -1111,6 +1138,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 results_dir=target_results_dir,
                 stdout_preference="write",
                 stderr_preference="write",
+                cwd=self._subprocess_cwd(target_results_dir),
                 env={**snapshot_environ(), **FERRET_SUBPROCESS_ENV_OVERRIDES},
                 timeout=self._effective_scan_timeout(),
             )
