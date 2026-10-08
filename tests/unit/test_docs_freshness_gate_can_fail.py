@@ -79,6 +79,7 @@ NON_VACUITY_COVERAGE = {
     "Config file path consistency": "test_config_path_check_can_fail",
     "Suppression field name": "test_suppression_check_can_fail",
     "Plugin options in docs exist and validate": "test_plugin_options_check_can_fail",
+    "Native package install pages match packaging": "test_native_package_docs_check_can_fail",
 }
 
 
@@ -600,3 +601,262 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
         assert template[: -len(".template")] in files, (
             f"{template} is collected but its rendered doc is not"
         )
+
+
+# ---------------------------------------------------------------------------
+# Native package install pages
+# ---------------------------------------------------------------------------
+
+_NATIVE_SOURCES = (
+    "docs/content/.nav.yml",
+    "packaging/chocolatey/ash.nuspec",
+    "packaging/chocolatey/build.ps1",
+    "packaging/chocolatey/README.chocolatey",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.locale.en-US.yaml",
+    "packaging/msix/AppxManifest.xml",
+    "packaging/msix/build.ps1",
+    "packaging/msix/README.msix",
+    "packaging/flatpak/io.github.awslabs.automated_security_helper.yml",
+    "packaging/flatpak/build.sh",
+    "packaging/flatpak/README.flatpak",
+    ".github/workflows/ash-tag-on-merge.yml",
+)
+
+
+@pytest.fixture
+def native_tree(gate, tmp_path, monkeypatch):
+    """A copy of the install pages and the packaging they describe, wired into the gate.
+
+    Copied rather than edited in place, so a planted defect can never be left behind
+    in the real tree by a failing assertion.
+    """
+    import shutil
+
+    for rel in _NATIVE_SOURCES:
+        dest = tmp_path / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO_ROOT / rel, dest)
+    pages_src = REPO_ROOT / "docs" / "content" / "docs" / "native-packages"
+    pages = tmp_path / "docs" / "content" / "docs" / "native-packages"
+    shutil.copytree(pages_src, pages)
+
+    packaging = tmp_path / "packaging"
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "DOCS_DIR", tmp_path / "docs")
+    monkeypatch.setattr(
+        gate, "DOCS_NAV_YML", tmp_path / "docs" / "content" / ".nav.yml"
+    )
+    monkeypatch.setattr(gate, "NATIVE_PACKAGES_DOCS_DIR", pages)
+    monkeypatch.setattr(gate, "PACKAGING_DIR", packaging)
+    monkeypatch.setattr(
+        gate, "CHOCOLATEY_NUSPEC", packaging / "chocolatey" / "ash.nuspec"
+    )
+    monkeypatch.setattr(
+        gate, "CHOCOLATEY_BUILD_PS1", packaging / "chocolatey" / "build.ps1"
+    )
+    monkeypatch.setattr(
+        gate,
+        "WINGET_LOCALE_MANIFEST",
+        packaging / "winget" / "Amazon.AutomatedSecurityHelper.locale.en-US.yaml",
+    )
+    monkeypatch.setattr(
+        gate, "MSIX_APPX_MANIFEST", packaging / "msix" / "AppxManifest.xml"
+    )
+    monkeypatch.setattr(gate, "MSIX_BUILD_PS1", packaging / "msix" / "build.ps1")
+    monkeypatch.setattr(
+        gate,
+        "FLATPAK_MANIFEST",
+        packaging / "flatpak" / "io.github.awslabs.automated_security_helper.yml",
+    )
+    monkeypatch.setattr(gate, "FLATPAK_BUILD_SH", packaging / "flatpak" / "build.sh")
+    monkeypatch.setattr(
+        gate,
+        "RELEASE_WORKFLOW",
+        tmp_path / ".github" / "workflows" / "ash-tag-on-merge.yml",
+    )
+    monkeypatch.setattr(gate, "collect_md_files", lambda: sorted(pages.glob("*.md")))
+    return tmp_path
+
+
+def _edit(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert old in text, f"fixture drift: {old!r} is no longer in {path.name}"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def _append_text(path: Path, text: str) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def _append_fence(path: Path, body: str) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"\n```\n{body}\n```\n")
+
+
+def test_native_package_docs_check_can_fail(gate, native_tree):
+    """Every rule in check_native_package_docs rejects the drift it names.
+
+    Each case plants one defect in a fresh copy of the tree and requires a failure
+    whose message names that defect, so a case cannot pass on some other failure.
+    The control comes first: the copied tree must pass, or the failures below would
+    say nothing about the planted defects.
+    """
+    import shutil
+
+    pages = native_tree / "docs" / "content" / "docs" / "native-packages"
+    packaging = native_tree / "packaging"
+    nav = native_tree / "docs" / "content" / ".nav.yml"
+    pristine = native_tree.parent / (native_tree.name + "-pristine")
+    shutil.copytree(native_tree, pristine)
+
+    def reset() -> None:
+        shutil.rmtree(native_tree)
+        shutil.copytree(pristine, native_tree)
+
+    assert gate.check_native_package_docs() == []
+
+    cases = [
+        (
+            "the release starts attaching a native package",
+            lambda: _edit(
+                native_tree / ".github" / "workflows" / "ash-tag-on-merge.yml",
+                "dist/*.whl dist/*.tar.gz dist/*.mcpb",
+                "dist/*.whl dist/*.tar.gz dist/*.mcpb dist/*.msix",
+            ),
+            "now attaches ['*.mcpb', '*.msix', '*.tar.gz', '*.whl']",
+        ),
+        (
+            "nuspec id renamed under the pages",
+            lambda: _edit(
+                packaging / "chocolatey" / "ash.nuspec",
+                "<id>ash</id>",
+                "<id>ash-cli</id>",
+            ),
+            "but the package id is 'ash-cli'",
+        ),
+        (
+            "choco install without --source",
+            lambda: _append_fence(pages / "chocolatey.md", "choco install ash"),
+            "with no --source",
+        ),
+        (
+            "winget install from the community source",
+            lambda: _append_fence(pages / "winget.md", "winget install ash"),
+            "without --manifest",
+        ),
+        (
+            "flatpak install from Flathub",
+            lambda: _append_fence(
+                pages / "flatpak.md",
+                "flatpak install flathub io.github.awslabs.automated_security_helper",
+            ),
+            "it is not on Flathub",
+        ),
+        (
+            "wrong Flatpak app id",
+            lambda: _append_fence(
+                pages / "flatpak.md", "flatpak run io.github.awslabs.ash --version"
+            ),
+            "Flatpak app id 'io.github.awslabs.ash'",
+        ),
+        (
+            "wrong MSIX identity name",
+            lambda: _append_fence(
+                pages / "msix.md",
+                "Get-AppxPackage -Name AWSLabs.ASH | Remove-AppxPackage",
+            ),
+            "Get-AppxPackage -Name AWSLabs.ASH",
+        ),
+        (
+            "wrong .msix filename",
+            lambda: _edit(
+                pages / "msix.md",
+                "automated-security-helper-<version>.msix'",
+                "automated_security_helper-<version>-x64.msix'",
+            ),
+            "'automated_security_helper-<version>-x64.msix' is not the filename",
+        ),
+        (
+            "flatpak build.sh renames its bundle",
+            lambda: _edit(
+                packaging / "flatpak" / "build.sh",
+                'BUNDLE="$OUTDIR/ash-${VERSION}',
+                'BUNDLE="$OUTDIR/automated-security-helper-${VERSION}',
+            ),
+            "is not the filename the build writes (automated-security-helper-<version>-<arch>.flatpak)",
+        ),
+        (
+            "a page dropped from the nav",
+            lambda: _edit(
+                nav,
+                "          - Flatpak (Linux): docs/native-packages/flatpak.md\n",
+                "",
+            ),
+            "docs/native-packages/flatpak.md is not in .nav.yml",
+        ),
+        (
+            "the nav names a page that does not exist",
+            lambda: (pages / "winget.md").rename(pages / "winget-old.md"),
+            "lists docs/native-packages/winget.md, which does not exist",
+        ),
+        (
+            "winget moniker changed",
+            lambda: _edit(
+                packaging
+                / "winget"
+                / "Amazon.AutomatedSecurityHelper.locale.en-US.yaml",
+                "Moniker: ash",
+                "Moniker: ashx",
+            ),
+            "no install page names winget_moniker 'ashx'",
+        ),
+        (
+            "the deprecated ash as a command",
+            lambda: _append_fence(pages / "msix.md", "ash --version"),
+            "runs `ash`, which no native package installs",
+        ),
+        (
+            "--command=ash in the sandbox",
+            lambda: _append_fence(
+                pages / "flatpak.md",
+                "flatpak run --command=ash io.github.awslabs.automated_security_helper",
+            ),
+            "runs `ash`, which no native package installs",
+        ),
+        (
+            "ASH downloaded by name in a packaging README",
+            lambda: _append_text(
+                packaging / "msix" / "README.msix",
+                "\n  pip download automated-security-helper==4.0.0 -d C:\\w\n",
+            ),
+            "README.msix",
+        ),
+        (
+            "ASH installed by name with an extra, in a doc",
+            lambda: _append_fence(
+                pages / "index.md",
+                'uv tool install "automated-security-helper[symbols]"',
+            ),
+            "installs automated-security-helper by name from an index",
+        ),
+    ]
+    for label, plant, expected in cases:
+        reset()
+        plant()
+        failures = gate.check_native_package_docs()
+        assert any(expected in f for f in failures), (
+            f"{label}: no failure containing {expected!r}; got {failures}"
+        )
+
+    # Controls for the name rule: what it must NOT flag.
+    reset()
+    _append_fence(
+        pages / "index.md",
+        'pip install "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v4"\n'
+        "pip install git+https://github.com/awslabs/automated-security-helper.git@v4\n"
+        "pip download ./automated_security_helper-4.0.0-py3-none-any.whl -d wheels",
+    )
+    with (pages / "index.md").open("a", encoding="utf-8") as handle:
+        handle.write("\nDo not run `pip download automated-security-helper`.\n")
+    assert gate.check_native_package_docs() == []
