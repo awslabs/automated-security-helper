@@ -45,6 +45,13 @@ n1_resolve() {
   line="${line%$'\r'}"
   PREV_SHA="${line%% *}"
   PREV_REF="${line#* }"
+  # yes when N-1 is a published release: an artifact this tree's gates never built and
+  # cannot change, so a leg holds only N to this tree's packaging rules.
+  # shellcheck disable=SC2034 # read by the leg that sources this file
+  case "$PREV_REF" in
+    *" (latest published release)") N1_IS_RELEASE=yes ;;
+    *) N1_IS_RELEASE=no ;;
+  esac
   case "$PREV_SHA" in
     *[!0-9a-f]* | "") fail "prev_tree.py printed '$line', not '<sha> <label>'" ;;
   esac
@@ -85,4 +92,36 @@ n1_tarball() {
 n1_unchanged() {
   n1_revision "${PREV_SHA:-}"
   git -C "$REPO" diff --quiet "$PREV_SHA" HEAD -- "$@"
+}
+
+# The version N-1 is installed at. A release is installed at its own version, which
+# already sorts below HEAD's; a development commit that shares HEAD's version has its
+# last non-zero component decremented (4.0.0 -> 3.0.0), so the upgrade moves forward.
+# Fails when even that does not sort below HEAD's version.
+n1_prev_version() {
+  harness - "$1" "$2" <<'PY' || fail "N-1 version $1 cannot be placed below head's $2"
+import re, sys
+base, head = sys.argv[1:]
+for v in (base, head):
+    if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", v):
+        sys.exit(f"version {v!r} is not dotted integers")
+def key(v):
+    parts = [int(p) for p in v.split(".")]
+    return parts + [0] * (8 - len(parts))
+if key(base) < key(head):
+    print(base)
+    sys.exit(0)
+parts = [int(p) for p in base.split(".")]
+i = len(parts) - 1
+while i >= 0 and parts[i] == 0:
+    i -= 1
+if i < 0:
+    sys.exit(f"cannot lower {base}")
+parts[i] -= 1
+parts[i + 1:] = [0] * (len(parts) - i - 1)
+lowered = ".".join(map(str, parts))
+if not key(lowered) < key(head):
+    sys.exit(f"{lowered} does not sort below {head}")
+print(lowered)
+PY
 }

@@ -93,8 +93,14 @@ HEAD_WHEEL="$WORK/dist-head/automated_security_helper-${VERSION}-py3-none-any.wh
 PREV_WHEEL="$WORK/dist-prev/automated_security_helper-${PREV_VERSION}-py3-none-any.whl"
 [ -f "$HEAD_WHEEL" ] || fail "uv build did not write $HEAD_WHEEL"
 [ -f "$PREV_WHEEL" ] || fail "uv build did not write $PREV_WHEEL"
-say "artifact-contents gate on both wheels"
-harness "$REPO/.github/scripts/assert-artifact-contents.py" "$HEAD_WHEEL" "$PREV_WHEEL"
+if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+  # A published release is what it is; this tree's packaging rules gate what it builds.
+  say "artifact-contents gate on the head wheel (N-1 is the published $PREV_REF)"
+  harness "$REPO/.github/scripts/assert-artifact-contents.py" "$HEAD_WHEEL"
+else
+  say "artifact-contents gate on both wheels"
+  harness "$REPO/.github/scripts/assert-artifact-contents.py" "$HEAD_WHEEL" "$PREV_WHEEL"
+fi
 say "N = $VERSION, N-1 = $PREV_VERSION"
 
 # The N-1 bundle, built by the N-1 export's own transpiler. Only ash_version is

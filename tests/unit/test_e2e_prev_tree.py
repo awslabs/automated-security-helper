@@ -291,3 +291,196 @@ def test_auto_passes_over_a_tag_and_ancestors_that_have_heads_tree(repo, tmp_pat
     )
     label, sha = pt.resolve_auto(repo, ["pkg/build.ps1"])
     assert sha == older, label
+
+
+# -- --prev-ref latest-release --------------------------------------------------
+
+
+def _release(tag: str, draft: bool = False, prerelease: bool = False) -> dict:
+    return {"tag_name": tag, "draft": draft, "prerelease": prerelease}
+
+
+# The shape GitHub listed on 2026-10-08: v3.7.0 and v3.6.0 drafts, v3.7.1 Latest.
+LISTING = [
+    _release("v3.8.0-rc1", prerelease=True),
+    # A prerelease can carry a plain version tag too; the flag, not the tag, decides.
+    _release("v3.9.0", prerelease=True),
+    _release("v3.7.1"),
+    _release("v3.6.1"),
+    _release("v3.7.0", draft=True),
+    _release("v3.6.0", draft=True),
+    _release("v3.5.9"),
+    _release("nightly"),
+]
+
+
+def test_latest_release_skips_drafts_and_prereleases():
+    assert pt.latest_published_tag(LISTING) == "v3.7.1"
+
+
+def test_latest_release_orders_by_version_not_by_listing_order():
+    listing = [_release("v3.9.0"), _release("v3.10.0"), _release("v3.10.0-beta")]
+    assert pt.latest_published_tag(listing) == "v3.10.0"
+
+
+def test_a_listing_with_nothing_published_is_refused():
+    listing = [_release("v4.0.0", draft=True), _release("v4.0.0rc1", prerelease=True)]
+    with pytest.raises(pt.DerivationError, match="no latest release"):
+        pt.latest_published_tag(listing)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["file:///nonexistent/ash-releases.json", "https://127.0.0.1:9/releases"],
+    ids=["missing-file", "no-network"],
+)
+def test_no_listing_fails_loudly_and_says_what_it_needs(url, monkeypatch, tmp_path):
+    monkeypatch.setenv(pt.RELEASES_URL_ENV, url)
+    with pytest.raises(pt.DerivationError, match="cannot list the releases at"):
+        pt.list_releases(url)
+
+
+def test_a_listing_that_is_not_a_list_is_refused(tmp_path):
+    bad = tmp_path / "releases.json"
+    bad.write_text('{"message": "API rate limit exceeded"}', encoding="utf-8")
+    with pytest.raises(pt.DerivationError, match="did not return a list"):
+        pt.list_releases(bad.as_uri())
+
+
+def test_every_page_of_the_listing_is_read(monkeypatch):
+    pages = {
+        "https://api.example/releases?page=1": (
+            [_release("v1.0.0")],
+            '<https://api.example/releases?page=2>; rel="next"',
+        ),
+        "https://api.example/releases?page=2": ([_release("v1.2.0")], ""),
+    }
+
+    class Response:
+        def __init__(self, url):
+            self.body, link = pages[url]
+            self.headers = {"Link": link}
+
+        def read(self):
+            return json.dumps(self.body).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        pt.urllib.request, "urlopen", lambda req, timeout: Response(req.full_url)
+    )
+    releases = pt.list_releases("https://api.example/releases?page=1")
+    assert [r["tag_name"] for r in releases] == ["v1.0.0", "v1.2.0"]
+    assert pt.latest_published_tag(releases) == "v1.2.0"
+
+
+def _listing_file(tmp_path: Path, releases: list) -> str:
+    path = tmp_path / "releases.json"
+    path.write_text(json.dumps(releases), encoding="utf-8")
+    return path.as_uri()
+
+
+@pytest.fixture
+def released(repo, tmp_path, monkeypatch):
+    """main: r1 (tag v3.7.1, a release) - d1 - head (4.0.0). v3.8.0 tags a draft."""
+    r1 = _commit(repo, {"pyproject.toml": _pyproject("3.7.1"), "a.py": "1\n"}, "r1")
+    _git(repo, "tag", "v3.7.1", r1)
+    d1 = _commit(repo, {"a.py": "2\n"}, "d1")
+    _git(repo, "tag", "v3.8.0", d1)
+    head = _commit(repo, {"pyproject.toml": _pyproject("4.0.0")}, "head")
+    listing = [_release("v3.8.0", draft=True), _release("v3.7.1")]
+    monkeypatch.setenv(pt.RELEASES_URL_ENV, _listing_file(tmp_path, listing))
+    return {"r1": r1, "d1": d1, "head": head}
+
+
+def test_latest_release_resolves_the_published_tag(repo, released):
+    label, sha = pt.resolve(repo, "latest-release", ["pyproject.toml"])
+    assert sha == released["r1"]
+    assert label == "v3.7.1 (latest published release)"
+
+
+def test_latest_release_fetches_a_tag_the_clone_lacks(repo, released, tmp_path):
+    # A release tagged on another branch is not in a single-branch, tagless clone.
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", "--no-tags", str(repo), str(clone)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if "v3.7.1" in _git(clone, "tag").split():
+        _git(clone, "tag", "-d", "v3.7.1")
+    assert "v3.7.1" not in _git(clone, "tag").split()
+    label, sha = pt.resolve(clone, "latest-release")
+    assert sha == released["r1"]
+    assert "v3.7.1" in _git(clone, "tag").split()
+
+
+def test_a_release_tag_that_cannot_be_found_is_refused(
+    repo, released, tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        pt.RELEASES_URL_ENV, _listing_file(tmp_path, [_release("v3.9.9")])
+    )
+    with pytest.raises(pt.DerivationError, match="cannot be fetched from origin"):
+        pt.resolve(repo, "latest-release")
+
+
+def test_head_that_is_the_latest_release_is_refused(
+    repo, released, tmp_path, monkeypatch
+):
+    _git(repo, "tag", "v4.0.0", released["head"])
+    listing = [_release("v4.0.0"), _release("v3.7.1")]
+    monkeypatch.setenv(pt.RELEASES_URL_ENV, _listing_file(tmp_path, listing))
+    with pytest.raises(
+        pt.DerivationError, match="HEAD is the latest published release"
+    ):
+        pt.resolve(repo, "latest-release")
+
+
+def test_latest_release_without_a_required_path_is_refused(repo, released):
+    with pytest.raises(
+        pt.DerivationError, match="has no packaging/chocolatey/build.ps1"
+    ):
+        pt.resolve(repo, "latest-release", ["packaging/chocolatey/build.ps1"])
+
+
+def test_a_release_is_exported_at_its_own_version(repo, released, tmp_path, capsys):
+    rc = pt.main(
+        [
+            "--repo",
+            str(repo),
+            "--prev-ref",
+            "latest-release",
+            "--out",
+            str(tmp_path / "o"),
+        ]
+    )
+    assert rc == 0
+    result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert result["prev_sha"] == released["r1"]
+    # The real release, not a lowered copy of it.
+    assert result["prev_version"] == result["prev_base_version"] == "3.7.1"
+    text = (tmp_path / "o" / "src" / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'version = "3.7.1"' in text
+
+
+def test_the_slug_comes_from_origin_when_not_given(repo, monkeypatch):
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    _git(
+        repo,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/awslabs/automated-security-helper.git",
+    )
+    assert pt.github_slug(repo) == "awslabs/automated-security-helper"
+    _git(repo, "remote", "set-url", "origin", "git@github.com:someone/fork")
+    assert pt.github_slug(repo) == "someone/fork"
+    _git(repo, "remote", "set-url", "origin", "/some/local/path")
+    with pytest.raises(pt.DerivationError, match="GITHUB_REPOSITORY"):
+        pt.github_slug(repo)

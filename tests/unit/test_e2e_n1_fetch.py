@@ -47,6 +47,7 @@ call through or refused an ordinary line.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -71,21 +72,14 @@ OLD_FETCH_STEP = "Fetch the N-1 ref"
 # that is not listed here, or a listed one that disappears, fails
 # test_every_n_minus_1_leg_is_listed.
 LEGS = {
-    ("ash-e2e.yml", "wheel"): (
-        "scripts/e2e/wheel.sh",
-        ("scripts/e2e/wheel.sh", "pyproject.toml"),
-    ),
+    ("ash-e2e.yml", "wheel"): ("scripts/e2e/wheel.sh", ("pyproject.toml",)),
     ("ash-e2e.yml", "container"): (
         "scripts/e2e/container.sh",
-        (
-            "scripts/e2e/container.sh",
-            "Dockerfile",
-            "automated_security_helper/__init__.py",
-        ),
+        ("Dockerfile", "automated_security_helper/__init__.py", "pyproject.toml"),
     ),
     ("ash-e2e.yml", "homebrew"): (
         "scripts/e2e/homebrew.sh",
-        ("scripts/e2e/homebrew.sh", "Formula/ash.rb", "pyproject.toml"),
+        ("Formula/ash.rb", "pyproject.toml"),
     ),
     ("ash-jetbrains-ci.yml", "headless-real"): (
         "editors/jetbrains/e2e-ide-cycle.sh",
@@ -98,6 +92,18 @@ LEGS = {
         "packaging/chocolatey/verify-on-windows.ps1",
         ("packaging/chocolatey/ash.nuspec", "packaging/chocolatey/build.ps1"),
     ),
+}
+# The N-1 mode each leg runs in. latest-release is the latest published GitHub
+# release, for the channels it shipped (the wheel, the container image built by its
+# own CLI, its own Homebrew formula). The JetBrains plugin and Chocolatey never shipped
+# in a release yet, so they take auto: the newest release that carries the channel,
+# which today is a development commit and becomes a release once one ships it.
+LEG_MODES = {
+    ("ash-e2e.yml", "wheel"): "latest-release",
+    ("ash-e2e.yml", "container"): "latest-release",
+    ("ash-e2e.yml", "homebrew"): "latest-release",
+    ("ash-jetbrains-ci.yml", "headless-real"): "auto",
+    ("ash-package.yml", "chocolatey"): "auto",
 }
 SHELL_LEGS = {k: v for k, v in LEGS.items() if v[0].endswith(".sh")}
 
@@ -118,7 +124,7 @@ pt = _load_prev_tree()
 
 # The one value an N-1 ref may hold as a literal. A variable ($PrevRef, "$PREV_REF") is
 # not a literal and is not matched.
-ALLOWED = {"auto"}
+ALLOWED = {"auto", "latest-release"}
 
 # (name, pattern). Each pattern's `v` group is the literal.
 _LITERAL = r"""['"]?(?P<v>[^\s'"$}{)(,#][^\s'"}{)(,#]*)"""
@@ -225,7 +231,7 @@ def test_the_patterns_match_the_real_syntax_they_guard():
         text = path.read_text(encoding="utf-8")
         for name, pattern in PATTERNS:
             seen[name] += sum(
-                1 for m in pattern.finditer(text) if m.group("v") == "auto"
+                1 for m in pattern.finditer(text) if m.group("v") in ALLOWED
             )
     assert seen["E2E_PREV_REF value"] >= len(LEGS)
     assert seen["E2E_PREV_REF default"] >= len(SHELL_LEGS)
@@ -282,7 +288,7 @@ def test_a_planted_literal_n_minus_1_ref_is_caught(planted, name, value):
     "allowed",
     [
         "          E2E_PREV_REF: auto\n",
-        'PREV_REF="${E2E_PREV_REF:-auto}"\n',
+        'PREV_REF="${E2E_PREV_REF:-latest-release}"\n',
         "@('prev_tree.py', '--prev-ref', $PrevRef, '--out', $w)\n",
         'line="$(harness prev_tree.py --prev-ref "$PREV_REF" --resolve-only)"\n',
         'PREV_REF="${line#* }"\n',
@@ -298,8 +304,9 @@ def test_a_planted_branch_in_a_real_leg_is_caught(key):
     # the plant is in exactly the YAML the real scan reads.
     workflow, _ = key
     text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
-    assert "E2E_PREV_REF: auto" in text
-    planted = text.replace("E2E_PREV_REF: auto", "E2E_PREV_REF: origin/main", 1)
+    sanctioned = f"E2E_PREV_REF: {LEG_MODES[key]}"
+    assert sanctioned in text
+    planted = text.replace(sanctioned, "E2E_PREV_REF: origin/main", 1)
     assert ("E2E_PREV_REF value", "origin/main") in {
         (n, v) for n, _, v in literal_n1_refs(planted)
     }
@@ -335,6 +342,8 @@ def _n1_legs() -> dict:
 
 N1 = _n1_legs()
 IDS = [":".join(k) for k in sorted(LEGS)]
+AUTO_LEGS = sorted(k for k in LEGS if LEG_MODES[k] == "auto")
+RELEASE_LEGS = sorted(k for k in LEGS if LEG_MODES[k] == "latest-release")
 
 
 def _checkout(steps: list) -> tuple:
@@ -363,6 +372,7 @@ def test_a_leg_derives_n_minus_1_and_runs_its_script(key):
     assert users, key
     for _, step in users:
         assert script.rsplit("/", 1)[-1] in str(step.get("run", "")), (key, script)
+        assert step["env"]["E2E_PREV_REF"] == LEG_MODES[key], (key, step["env"])
     workflow = yaml.safe_load((WORKFLOWS / key[0]).read_text(encoding="utf-8"))
     assert workflow_leg_problems(workflow, key[1], LEG_OVERRIDES.get(key, ())) == [], (
         key
@@ -435,7 +445,7 @@ def workflow_leg_problems(workflow: dict, job_name: str, overrides=None) -> list
     ]
     for where, env in scopes:
         for name, value in (env or {}).items():
-            if str(name).upper() == "E2E_PREV_REF" and value != "auto":
+            if str(name).upper() == "E2E_PREV_REF" and value not in ALLOWED:
                 problems.append(f"{where} sets E2E_PREV_REF to {value!r}")
     if overrides is None:
         overrides = next(
@@ -564,7 +574,15 @@ def test_a_container_leg_hands_the_checkout_to_its_user_before_git_runs(key):
 # What no leg script, n1-ref.sh or N-1 job may contain at all: a branch named as an N-1
 # can be spelled through a variable or a git argument, which no value pattern sees.
 BRANCH_SPELLINGS = re.compile(r"v4-capabilities|origin/|refs/heads/")
-DEFAULT_LINE = 'PREV_REF="${E2E_PREV_REF:-auto}"'
+
+
+def default_line(mode: str) -> str:
+    return f'PREV_REF="${{E2E_PREV_REF:-{mode}}}"'
+
+
+DEFAULT_LINES = {default_line(mode) for mode in ("auto", "latest-release")}
+# The wheel leg's, the one the planted cases below are written into.
+DEFAULT_LINE = default_line("latest-release")
 # The one sanctioned copy of the commit n1_resolve sets (homebrew.sh's leg function).
 SANCTIONED_SHA = 'prev_sha="$PREV_SHA"'
 # The word git, as a word: a leg script may carry it only in a comment.
@@ -819,10 +837,10 @@ def shell_leg_problems(text: str, require) -> list:
     code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
     # E2E_PREV_REF is only ever read, once, on the default line.
     reads = [line.strip() for line in code if "E2E_PREV_REF" in line]
-    if reads != [DEFAULT_LINE]:
+    if len(reads) != 1 or reads[0] not in DEFAULT_LINES:
         problems.append(f"E2E_PREV_REF is used other than by the default line: {reads}")
     assigns = writes_to("PREV_REF", text)
-    if assigns != [DEFAULT_LINE]:
+    if len(assigns) != 1 or assigns[0] not in DEFAULT_LINES:
         problems.append(
             f"PREV_REF is assigned other than by the default line: {assigns}"
         )
@@ -862,10 +880,11 @@ def shell_leg_problems(text: str, require) -> list:
 
 
 @pytest.mark.parametrize("key", sorted(SHELL_LEGS), ids=lambda k: ":".join(k))
-def test_a_shell_leg_defaults_to_auto_and_requires_its_paths(key):
+def test_a_shell_leg_defaults_to_its_mode_and_requires_its_paths(key):
     script, require = LEGS[key]
     text = (REPO_ROOT / script).read_text(encoding="utf-8")
     assert shell_leg_problems(text, require) == []
+    assert default_line(LEG_MODES[key]) in text, (key, LEG_MODES[key])
 
 
 def test_n1_ref_sh_and_the_chocolatey_script_name_no_branch():
@@ -883,7 +902,7 @@ def test_an_n_minus_1_job_body_names_no_branch(key):
 
 WHEEL = ("ash-e2e.yml", "wheel")
 _REAL_DEFAULT = DEFAULT_LINE + "\n"
-_REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
+_REAL_CALL = "n1_resolve pyproject.toml\n"
 
 
 @pytest.mark.parametrize(
@@ -896,28 +915,28 @@ _REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
         ),
         (
             "a message that shows prev_sha=",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "N-1: prev_sha=$PREV_SHA"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nsay "N-1: prev_sha=$PREV_SHA"\n',
         ),
         (
             "a message that says cannot read (mJ)",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "cannot read $WORK/list"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nsay "cannot read $WORK/list"\n',
         ),
         (
             "read into fixed names from a here-string (mK)",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nread -r A B <<< "$WORK x"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nread -r A B <<< "$WORK x"\n',
         ),
         (
             "a read loop over a file",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nwhile IFS= read -r line; do say "$line"; done < "$WORK/list"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nwhile IFS= read -r line; do say "$line"; done < "$WORK/list"\n',
         ),
         (
             "git in a comment",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n# git archive HEAD~1 is what this replaced\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\n# git archive HEAD~1 is what this replaced\n",
         ),
         (
             "a continued helper call",
@@ -926,33 +945,33 @@ _REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
         ),
         (
             "a message about the export",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "N-1 comes from the export of $PREV_SHA (HEAD~1 is not it)"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nsay "N-1 comes from the export of $PREV_SHA (HEAD~1 is not it)"\n',
         ),
         (
             "the HEAD commit through the helper",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nTOP="$(n1_head_sha)"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nTOP="$(n1_head_sha)"\n',
         ),
         (
             "a changed-paths check through the helper",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\nif n1_unchanged pyproject.toml; then say same; fi\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\nif n1_unchanged pyproject.toml; then say same; fi\n",
         ),
         (
             "an unquoted heredoc using the helpers",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncat <<EOF\nN-1 is $(n1_head_sha) and $PREV_SHA\nEOF\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\ncat <<EOF\nN-1 is $(n1_head_sha) and $PREV_SHA\nEOF\n",
         ),
         (
             "a case arm on a tool name",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncase "$TOOL" in\n  uv) say uv ;;\nesac\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ncase "$TOOL" in\n  uv) say uv ;;\nesac\n',
         ),
         (
             "echo inside a message that says then read",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "then read $WORK/n"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\necho "then read $WORK/n"\n',
         ),
     ],
 )
@@ -970,62 +989,62 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
     [
         (
             "a branch through a variable",
-            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
-            'PREV_REF="${E2E_PREV_REF:-auto}"\nN1_BRANCH=main-line\n[ "$PREV_REF" != auto ] || PREV_REF=$N1_BRANCH\n',
+            'PREV_REF="${E2E_PREV_REF:-latest-release}"\n',
+            'PREV_REF="${E2E_PREV_REF:-latest-release}"\nN1_BRANCH=main-line\n[ "$PREV_REF" != auto ] || PREV_REF=$N1_BRANCH\n',
             "PREV_REF is assigned",
         ),
         (
             "the resolved commit overridden",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nPREV_SHA="$(git -C "$REPO" rev-parse "$N1_BRANCH")"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nPREV_SHA="$(git -C "$REPO" rev-parse "$N1_BRANCH")"\n',
             "mentions git outside a comment",
         ),
         (
             "a remote-tracking ref as a git argument",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" archive origin/release | tar -x\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" archive origin/release | tar -x\n',
             "mentions git outside a comment",
         ),
         (
             "the development branch by name",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\nBASE=v4-capabilities\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\nBASE=v4-capabilities\n",
             "names a branch: v4-capabilities",
         ),
         (
             "a heads ref",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit fetch origin refs/heads/main\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\ngit fetch origin refs/heads/main\n",
             "mentions git outside a comment",
         ),
         (
             "an assigning default",
-            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
-            'PREV_REF="${E2E_PREV_REF:-auto}"\n: "${PREV_REF:=main}"\n',
+            'PREV_REF="${E2E_PREV_REF:-latest-release}"\n',
+            'PREV_REF="${E2E_PREV_REF:-latest-release}"\n: "${PREV_REF:=main}"\n',
             "PREV_REF is assigned",
         ),
         (
             "the commit read from elsewhere",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nread -r PREV_SHA < "$WORK/n1"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nread -r PREV_SHA < "$WORK/n1"\n',
             "set outside n1_resolve",
         ),
         (
             "the commit written with printf -v",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nprintf -v PREV_SHA %s "$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nprintf -v PREV_SHA %s "$other"\n',
             "set outside n1_resolve",
         ),
         (
             "E2E_PREV_REF through a variable (mA)",
-            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
-            'N1_BRANCH=main-line\nE2E_PREV_REF=$N1_BRANCH\nPREV_REF="${E2E_PREV_REF:-auto}"\n',
+            'PREV_REF="${E2E_PREV_REF:-latest-release}"\n',
+            'N1_BRANCH=main-line\nE2E_PREV_REF=$N1_BRANCH\nPREV_REF="${E2E_PREV_REF:-latest-release}"\n',
             "E2E_PREV_REF is used other than by the default line",
         ),
         (
             "E2E_PREV_REF exported with a default",
-            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
-            ': "${E2E_PREV_REF:=$N1}"\nPREV_REF="${E2E_PREV_REF:-auto}"\n',
+            'PREV_REF="${E2E_PREV_REF:-latest-release}"\n',
+            ': "${E2E_PREV_REF:=$N1}"\nPREV_REF="${E2E_PREV_REF:-latest-release}"\n',
             "E2E_PREV_REF is used other than by the default line",
         ),
         (
@@ -1048,104 +1067,104 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
         ),
         (
             "a commit taken from rev-parse",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nOTHER="$(git -C "$REPO" rev-parse HEAD~1)"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nOTHER="$(git -C "$REPO" rev-parse HEAD~1)"\n',
             "mentions git outside a comment",
         ),
         (
             "a tree read some other way",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" worktree add "$WORK/old" v3.7.0\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" worktree add "$WORK/old" v3.7.0\n',
             "mentions git outside a comment",
         ),
         (
             "a nameref to the commit",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ndeclare -n _r=PREV_SHA\n_r="$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ndeclare -n _r=PREV_SHA\n_r="$other"\n',
             "set outside n1_resolve",
         ),
         (
             "printf -v with the name quoted",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nprintf -v "PREV_SHA" %s "$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nprintf -v "PREV_SHA" %s "$other"\n',
             "set outside n1_resolve",
         ),
         (
             "read with the name quoted",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nread -r "PREV_SHA" <<<"$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nread -r "PREV_SHA" <<<"$other"\n',
             "set outside n1_resolve",
         ),
         (
             "mapfile",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nmapfile -t PREV_SHA < "$WORK/n1"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nmapfile -t PREV_SHA < "$WORK/n1"\n',
             "set outside n1_resolve",
         ),
         (
             "readarray",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nreadarray -t PREV_SHA < "$WORK/n1"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nreadarray -t PREV_SHA < "$WORK/n1"\n',
             "set outside n1_resolve",
         ),
         (
             "an append after unset",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nunset PREV_SHA; PREV_SHA+="$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nunset PREV_SHA; PREV_SHA+="$other"\n',
             "set outside n1_resolve",
         ),
         (
             "declare -g",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ndeclare -g PREV_SHA="$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ndeclare -g PREV_SHA="$other"\n',
             "set outside n1_resolve",
         ),
         (
             "a nameref to PREV_REF",
-            'PREV_REF="${E2E_PREV_REF:-auto}"\n',
-            'PREV_REF="${E2E_PREV_REF:-auto}"\ndeclare -n _p=PREV_REF; _p=main\n',
+            'PREV_REF="${E2E_PREV_REF:-latest-release}"\n',
+            'PREV_REF="${E2E_PREV_REF:-latest-release}"\ndeclare -n _p=PREV_REF; _p=main\n',
             "PREV_REF is assigned",
         ),
         (
             "eval",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\neval "PREV_""SHA=$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\neval "PREV_""SHA=$other"\n',
             "uses eval",
         ),
         (
             "n1_resolve redefined",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve() { PREV_SHA="$other"; }\nn1_resolve scripts/e2e/wheel.sh pyproject.toml\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve() { PREV_SHA="$other"; }\nn1_resolve pyproject.toml\n',
             "redefines n1_resolve",
         ),
         (
             "harness redefined before the call",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'harness() { echo "$other x"; }\nn1_resolve scripts/e2e/wheel.sh pyproject.toml\n',
+            "n1_resolve pyproject.toml\n",
+            'harness() { echo "$other x"; }\nn1_resolve pyproject.toml\n',
             "defines harness other than exactly once",
         ),
         (
             "another file sourced",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\n. "$WORK/overrides.sh"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\n. "$WORK/overrides.sh"\n',
             "sources",
         ),
         (
             "another file sourced with source",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsource "$REPO/packaging/verify-lib.sh"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nsource "$REPO/packaging/verify-lib.sh"\n',
             "sources",
         ),
         (
             "git pointed at another repository",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nexport GIT_DIR="$WORK/other.git"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nexport GIT_DIR="$WORK/other.git"\n',
             "mentions git outside a comment",
         ),
         (
             "a replaced commit",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncp "$WORK/x" "$REPO/.git/refs/replace/$PREV_SHA"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ncp "$WORK/x" "$REPO/.git/refs/replace/$PREV_SHA"\n',
             "mentions git outside a comment",
         ),
         (
@@ -1186,20 +1205,20 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
         ),
         (
             "git replaced by a function",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'git() { command git "${@/$PREV_SHA/HEAD~1}"; }\nn1_resolve scripts/e2e/wheel.sh pyproject.toml\n',
+            "n1_resolve pyproject.toml\n",
+            'git() { command git "${@/$PREV_SHA/HEAD~1}"; }\nn1_resolve pyproject.toml\n',
             "mentions git outside a comment",
         ),
         (
             "a write to a name held in a variable",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nn=PREV_SHA; printf -v "$n" %s "$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nn=PREV_SHA; printf -v "$n" %s "$other"\n',
             "named by an expansion",
         ),
         (
             "a name split by quoting",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ndeclare PREV_"SHA"="$other"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ndeclare PREV_"SHA"="$other"\n',
             "set outside n1_resolve",
         ),
         (
@@ -1258,50 +1277,50 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
         ),
         (
             "a range that leaves the chosen commit",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" log --oneline "HEAD~3..HEAD"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" log --oneline "HEAD~3..HEAD"\n',
             "mentions git outside a comment",
         ),
         (
             "a rev:path of another commit",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" show "HEAD~1:pyproject.toml"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" show "HEAD~1:pyproject.toml"\n',
             "mentions git outside a comment",
         ),
         (
             "a substitution in an unquoted heredoc",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncat <<EOF2\nN-1: $(git -C "$REPO" archive HEAD~1 | wc -c)\nEOF2\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ncat <<EOF2\nN-1: $(git -C "$REPO" archive HEAD~1 | wc -c)\nEOF2\n',
             "mentions git outside a comment",
         ),
         (
             "git describe of another commit",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" describe --tags HEAD~1\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" describe --tags HEAD~1\n',
             "mentions git outside a comment",
         ),
         (
             "the helper not called",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
+            "n1_resolve pyproject.toml\n",
             "",
             "n1_resolve is called",
         ),
         (
             "rev-parse with only options",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nTOP="$(git -C "$REPO" rev-parse --show-toplevel)"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nTOP="$(git -C "$REPO" rev-parse --show-toplevel)"\n',
             "mentions git outside a comment",
         ),
         (
             "a redirection after HEAD",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" rev-parse HEAD 2>/dev/null >"$WORK/head"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" rev-parse HEAD 2>/dev/null >"$WORK/head"\n',
             "mentions git outside a comment",
         ),
         (
             "a redirection operator with its target apart",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" rev-parse HEAD 2> /dev/null\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" rev-parse HEAD 2> /dev/null\n',
             "mentions git outside a comment",
         ),
         (
@@ -1312,14 +1331,14 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
         ),
         (
             "git named in a message",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "N-1 comes from git archive of $X (HEAD~1 is not it)"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nsay "N-1 comes from git archive of $X (HEAD~1 is not it)"\n',
             "mentions git outside a comment",
         ),
         (
             "git --version",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "git: $(git --version)"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nsay "git: $(git --version)"\n',
             "mentions git outside a comment",
         ),
         (
@@ -1330,68 +1349,68 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
         ),
         (
             "a log of the chosen commit",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nsay "$(git -C "$REPO" log -1 --oneline "$PREV_SHA")"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nsay "$(git -C "$REPO" log -1 --oneline "$PREV_SHA")"\n',
             "mentions git outside a comment",
         ),
         (
             "git after ( inside a message",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "N-1 (git archive of the chosen commit) unpacked"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\necho "N-1 (git archive of the chosen commit) unpacked"\n',
             "mentions git outside a comment",
         ),
         (
             "git after ; inside a message",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "step 2; git archive"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\necho "step 2; git archive"\n',
             "mentions git outside a comment",
         ),
         (
             "git after && inside a message",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "done && git is clean"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\necho "done && git is clean"\n',
             "mentions git outside a comment",
         ),
         (
             "an unquoted heredoc that mentions git",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncat <<EOF2\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\ncat <<EOF2\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
             "mentions git outside a comment",
         ),
         (
             "a quoted heredoc that mentions git",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncat <<'EOF2'\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\ncat <<'EOF2'\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
             "mentions git outside a comment",
         ),
         (
             "a check that git is installed",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ncommand -v git >/dev/null || { echo "git missing"; exit 1; }\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ncommand -v git >/dev/null || { echo "git missing"; exit 1; }\n',
             "mentions git outside a comment",
         ),
         (
             "git describe of HEAD",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" describe --tags --always\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" describe --tags --always\n',
             "mentions git outside a comment",
         ),
         (
             "a range from the chosen commit to HEAD",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" log --oneline "$PREV_SHA..HEAD"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" log --oneline "$PREV_SHA..HEAD"\n',
             "mentions git outside a comment",
         ),
         (
             "a file of the chosen commit",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\ngit -C "$REPO" show "$PREV_SHA:pyproject.toml" >/dev/null\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\ngit -C "$REPO" show "$PREV_SHA:pyproject.toml" >/dev/null\n',
             "mentions git outside a comment",
         ),
         (
             "an env prefix on an allowed call",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nLC_ALL=C git -C "$REPO" log -1 --oneline "$PREV_SHA"\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nLC_ALL=C git -C "$REPO" log -1 --oneline "$PREV_SHA"\n',
             "mentions git outside a comment",
         ),
         (
@@ -1414,32 +1433,32 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
         ),
         (
             "a heredoc fed to a shell",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nbash <<EOF\ngit -C "$REPO" archive HEAD~1 | tar -x\nEOF\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nbash <<EOF\ngit -C "$REPO" archive HEAD~1 | tar -x\nEOF\n',
             "mentions git outside a comment",
         ),
         (
             "a heredoc after an arithmetic shift",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\nn=$(( a << b ))\ngit -C "$REPO" archive HEAD~1 | tar -x\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\nn=$(( a << b ))\ngit -C "$REPO" archive HEAD~1 | tar -x\n',
             "mentions git outside a comment",
         ),
         (
             "a quoted heredoc opener in a message",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            'n1_resolve scripts/e2e/wheel.sh pyproject.toml\necho "feed it with <<EOF"\ngit -C "$REPO" archive HEAD~1 | tar -x\n',
+            "n1_resolve pyproject.toml\n",
+            'n1_resolve pyproject.toml\necho "feed it with <<EOF"\ngit -C "$REPO" archive HEAD~1 | tar -x\n',
             "mentions git outside a comment",
         ),
         (
             "bash -c with git",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\nbash -c 'git -C \"$REPO\" archive HEAD~1'\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\nbash -c 'git -C \"$REPO\" archive HEAD~1'\n",
             "mentions git outside a comment",
         ),
         (
             "a trap string with git",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n",
-            "n1_resolve scripts/e2e/wheel.sh pyproject.toml\ntrap 'git -C \"$REPO\" archive HEAD~1 >/dev/null' EXIT\n",
+            "n1_resolve pyproject.toml\n",
+            "n1_resolve pyproject.toml\ntrap 'git -C \"$REPO\" archive HEAD~1 >/dev/null' EXIT\n",
             "mentions git outside a comment",
         ),
     ],
@@ -1764,7 +1783,7 @@ def _bare(work: Path, dest: Path) -> Path:
     return dest
 
 
-@pytest.fixture(params=sorted(LEGS), ids=IDS)
+@pytest.fixture(params=AUTO_LEGS, ids=lambda k: ":".join(k))
 def history(request, tmp_path: Path) -> dict:
     """main predates the leg's channel; a development branch adds it.
 
@@ -1916,7 +1935,7 @@ harness() { "$E2E_TEST_PYTHON" "$@"; }
 . "$E2E_TEST_HELPER"
 PREV_REF="${E2E_PREV_REF:-auto}"
 n1_resolve "$@"
-printf 'sha=%s\nref=%s\n' "$PREV_SHA" "$PREV_REF"
+printf 'sha=%s\nref=%s\nrelease=%s\n' "$PREV_SHA" "$PREV_REF" "$N1_IS_RELEASE"
 """
 
 
@@ -1978,13 +1997,13 @@ def test_n1_ref_sh_keeps_a_named_ref_and_its_heads_parent_fallback(tmp_path):
     _git(work, "branch", "named")
     result = _n1_ref_sh(work, require, prev_ref="named")
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [f"sha={parent}", "ref=HEAD^"]
+    assert result.stdout.splitlines() == [f"sha={parent}", "ref=HEAD^", "release=no"]
 
 
 # -- candidates with HEAD's tree ------------------------------------------------
 
 
-@pytest.fixture(params=sorted(LEGS), ids=IDS)
+@pytest.fixture(params=AUTO_LEGS, ids=lambda k: ":".join(k))
 def same_tree(request, tmp_path: Path) -> dict:
     """HEADs where some commit auto could reach has HEAD's tree, and must be passed over.
 
@@ -2269,3 +2288,83 @@ def test_n1_unchanged_refuses_to_run_before_n1_resolve(two_commits):
     result = _helper(two_commits["repo"], "", "n1_unchanged", "a.txt")
     assert result.returncode == 1
     assert "is neither HEAD nor the N-1 n1_resolve chose" in result.stderr
+
+
+# -- latest-release, through n1-ref.sh -------------------------------------------
+
+
+def _release(tag: str, draft: bool = False, prerelease: bool = False) -> dict:
+    return {"tag_name": tag, "draft": draft, "prerelease": prerelease}
+
+
+@pytest.fixture(params=RELEASE_LEGS, ids=lambda k: ":".join(k))
+def released(request, tmp_path: Path, monkeypatch) -> dict:
+    """old (tag v3.6.1) - rel (tag v3.7.1, Latest) - dev (tag v3.8.0, a draft) - HEAD.
+
+    The listing is GitHub's shape on 2026-10-08 plus a prerelease and a draft that
+    sort above the latest published release, and the published one is not the newest
+    commit, so a resolver that took the newest tag or ignored the flags is caught.
+    """
+    key = request.param
+    require = LEGS[key][1]
+    work = tmp_path / "author"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    files = {path: f"{path}\n" for path in require if path != "pyproject.toml"}
+    old = _commit(work, {"pyproject.toml": _pyproject("3.6.1"), **files}, "old")
+    _git(work, "tag", "v3.6.1", old)
+    rel = _commit(work, {"pyproject.toml": _pyproject("3.7.1"), "a.py": "1\n"}, "rel")
+    _git(work, "tag", "v3.7.1", rel)
+    dev = _commit(work, {"a.py": "2\n"}, "dev")
+    _git(work, "tag", "v3.8.0", dev)
+    _commit(work, {"pyproject.toml": _pyproject("4.0.0")}, "head")
+    listing = tmp_path / "releases.json"
+    listing.write_text(
+        json.dumps(
+            [
+                _release("v4.0.0-rc1", prerelease=True),
+                _release("v3.9.0", prerelease=True),
+                _release("v3.8.0", draft=True),
+                _release("v3.7.1"),
+                _release("v3.6.1"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(pt.RELEASES_URL_ENV, listing.as_uri())
+    return {
+        "key": key,
+        "require": require,
+        "url": _bare(work, tmp_path / "o.git").as_uri(),
+        "rel": rel,
+    }
+
+
+def test_n1_ref_sh_resolves_the_latest_published_release(released, tmp_path):
+    clone = tmp_path / "ws"
+    # Without tags, the way a single-branch checkout of another line has them: the
+    # resolver has to fetch the release tag itself.
+    subprocess.run(
+        ["git", "clone", "-q", "--no-tags", released["url"], str(clone)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert "v3.7.1" not in _git(clone, "tag").split()
+    result = _n1_ref_sh(clone, released["require"], prev_ref="latest-release")
+    assert result.returncode == 0, result.stderr
+    lines = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    assert lines["sha"] == released["rel"], (released["key"], result.stdout)
+    assert lines["ref"] == "v3.7.1 (latest published release)"
+    assert lines["release"] == "yes"
+
+
+def test_n1_ref_sh_fails_loudly_when_the_releases_cannot_be_listed(
+    released, tmp_path, monkeypatch
+):
+    clone = _full_clone(released["url"], "HEAD", tmp_path / "ws")
+    monkeypatch.setenv(pt.RELEASES_URL_ENV, "https://127.0.0.1:9/releases")
+    result = _n1_ref_sh(clone, released["require"], prev_ref="latest-release")
+    assert result.returncode == 1, result.stdout
+    assert "cannot list the releases at" in result.stderr
+    assert "FAIL: cannot derive N-1 from E2E_PREV_REF=latest-release" in result.stderr
