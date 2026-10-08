@@ -92,6 +92,51 @@
   policy. Two scanners that ran inside the ASH process now run as worker
   subprocesses so the sandbox can cover them: detect-secrets and cdk-nag. Their
   findings are unchanged.
+- **Five community scanners ship with ASH: actionlint, the CloudFormation pair
+  cfn-lint and cfn-guard, gitleaks and zizmor, plus a second trivy scanner, `trivy`,
+  in the existing Trivy plugin.** Each is a community plugin module under
+  `automated_security_helper/plugin_modules`, loaded only when it is listed in
+  `ash_plugin_modules` (or passed with `--ash-plugin-modules`), the same way the
+  Trivy, Snyk and Ferret plugins are; a scan that lists none of them is unchanged. A
+  listed module's scanners run by default, except `trivy`, which stays off beside
+  `trivy-repo` until `scanners.trivy.enabled: true`, so a config that lists the Trivy
+  plugin for `trivy-repo` keeps its results. `--scanners gitleaks` without its module
+  listed is refused with a message naming the module to add, and a selection that also
+  names scanners that did load warns with the same advice and runs those, as any
+  partly unresolved `--scanners` list does. The container image ships every tool,
+  pinned, digest-verified and with its license files, and `ash dependencies install
+  --tool <name>` installs the same pinned build locally. See [Community
+  Plugins](docs/content/docs/plugins/community/index.md).
+  - `ash_actionlint_plugins`: actionlint 1.7.12 on `.github/workflows` files. Script
+    injection from untrusted event data and hard-coded container credentials are
+    HIGH, always-true `if:` conditions, invalid `permissions:` and
+    `set-env`/`add-path` MEDIUM, other lint findings LOW. Its shellcheck and pyflakes
+    integrations are off unless configured, so results do not depend on the host.
+  - `ash_cfn_plugins`: cfn-lint (`>=1.43.3,<2.0.0`, uv tool; E to MEDIUM, W to LOW,
+    I to INFO) and cfn-guard 3.2.1 against the AWS Guard Rules Registry 1.0.2,
+    default rule set `wa-Security-Pillar`, every violation HIGH. Both read the
+    templates cfn-nag reads, and neither needs the network.
+  - `ash_gitleaks_plugins`: gitleaks 8.30.1 (`gitleaks dir`, working tree only),
+    CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,
+    which stays on by default and unchanged. `.gitleaks.toml`, `.gitleaksignore`,
+    `gitleaks:allow` and `options.baseline_path` apply alongside ASH suppressions.
+  - `ash_zizmor_plugins`: zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
+    actions, run with `--offline`; GitHub tokens are withheld unless
+    `options.online_audits` is true.
+  - `ash_trivy_plugins` `trivy`: `trivy fs` (0.75.0), `vuln` only by default, held to
+    the trivy database's 24h bound; offline with no database it is MISSING with the
+    reason. Unlike `trivy-repo` it does not read a `trivy.yaml` or `.trivyignore`
+    from the scanned repository.
+
+  ASH does not deduplicate across scanners, so overlapping pairs (gitleaks and
+  detect-secrets, trivy and grype or trivy-repo, zizmor and actionlint) report a
+  shared finding once per scanner; each plugin page says where.
+- **The container image ships license files for the community plugins' tools.**
+  actionlint, gitleaks, and cfn-guard with the Guard Rules Registry bundle it reads
+  get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0) and zizmor,
+  read from each installed wheel's dist-info and checked against its RECORD. Every
+  uv install in the image now runs with `UV_NO_CACHE=1`, so uv's cache is no longer
+  kept in any layer.
 
 ### Behavior changes
 
@@ -747,6 +792,11 @@
   results instead of reporting every version under the first range. A failed pnpm audit
   is still ERROR.
 
+- **A scanner whose constructor raises is recorded under its scanner name.** The
+  ERROR row for a scanner that could not be constructed was keyed by its class
+  name (`banditscanner`) because the configured name was read off a dict with
+  `getattr`. It is now keyed by the scanner name (`bandit`), which is the name
+  the expected-scanner roster, the shard partition and `--exclude-scanners` use.
 - MCP config tools now confine config paths, including `extends` chains, to the allowed roots.
   The `get_config`, `validate_config`, `explain_finding`, `suggest_suppression` and
   `diff_scan_results` functions in `cli/mcp_server.py` now take the MCP `Context` as

@@ -1,7 +1,7 @@
 """The image's Python scanners are installed at exactly their license entries' versions.
 
-The Dockerfile pins bandit, checkov and semgrep by passing the output of
-``install-pinned-tool --uv-tool-pins`` (``--config-overrides
+The Dockerfile pins bandit, checkov, semgrep and the community scanners' uv tools
+by passing the output of ``install-pinned-tool --uv-tool-pins`` (``--config-overrides
 scanners.<tool>.options.tool_version===<version>``) to ``ash dependencies install``.
 The overrides reached the resolved ``AshConfig``, but ``ash dependencies install``
 built every plugin from its context alone, without its section of that config, so
@@ -46,6 +46,22 @@ def _load_installer():
 
 
 installer = _load_installer()
+
+
+def _dockerfile_community_modules() -> str:
+    """The plugin modules the Dockerfile loads for its `ash dependencies install` runs.
+
+    Some of the uv tools (cfn-lint, zizmor) back community scanners, which are
+    plugins only once their module is loaded; the image loads them through
+    ASH_COMMUNITY_PLUGIN_MODULES, so the recorded install has to load the same ones.
+    """
+    match = re.search(
+        r'^ARG ASH_COMMUNITY_PLUGIN_MODULES="([^"]+)"$',
+        DOCKERFILE.read_text(),
+        re.MULTILINE,
+    )
+    assert match, "the Dockerfile no longer declares ASH_COMMUNITY_PLUGIN_MODULES"
+    return match.group(1)
 
 
 def _dockerfile_run_instructions() -> "list[str]":
@@ -112,6 +128,8 @@ def recorded_install(tmp_path, monkeypatch):
                 "--bin-path",
                 str(tmp_path / "bin"),
                 *tool_args,
+                "--config-overrides",
+                f"ash_plugin_modules+=[{_dockerfile_community_modules()}]",
                 *extra_args,
             ],
         )
