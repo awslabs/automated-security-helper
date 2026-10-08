@@ -24,6 +24,7 @@ locals {
 
   use_base_config = var.base_config_ssm_parameter_name != null
   chain_rebuild   = var.base_image_codebuild_project_arn != null
+  use_vpc         = length(var.vpc_subnet_ids) > 0
 
   gate_image_uri = "${aws_ecr_repository.gate.repository_url}:${var.image_tag}"
   ecr_registry   = split("/", aws_ecr_repository.gate.repository_url)[0]
@@ -382,6 +383,47 @@ data "aws_iam_policy_document" "gate" {
       resources = [var.base_config_ssm_parameter_arn]
     }
   }
+
+  # Only when the function is attached to a VPC. Lambda documents these network-
+  # interface permissions as all-resources:
+  # https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html
+  dynamic "statement" {
+    for_each = local.use_vpc ? [1] : []
+
+    content {
+      sid    = "LambdaManagesNetworkInterfaces"
+      effect = "Allow"
+      actions = [
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:CreateNetworkInterface",
+        "ec2:DeleteNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeSubnets",
+        "ec2:UnassignPrivateIpAddresses",
+      ]
+      resources = ["*"]
+    }
+  }
+
+  # The same page's least-privilege advice: lambda:SourceFunctionArn is present
+  # only on calls made by function code, so the Lambda service keeps the grant
+  # above and scanned code gets no EC2 access at all.
+  dynamic "statement" {
+    for_each = local.use_vpc ? [1] : []
+
+    content {
+      sid       = "FunctionCodeCannotUseThem"
+      effect    = "Deny"
+      actions   = ["ec2:*"]
+      resources = ["*"]
+
+      condition {
+        test     = "Null"
+        variable = "lambda:SourceFunctionArn"
+        values   = ["false"]
+      }
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "gate" {
@@ -397,11 +439,12 @@ resource "aws_lambda_function" "gate" {
   # aws_ecr_repository.gate above enables with scan_on_push.
   #checkov:skip=CKV_AWS_272:Code signing is unavailable for package_type Image; scan_on_push on the gate ECR repository is the image-side equivalent.
   #
-  # CKV_AWS_117: the function talks to CodeCommit, SSM, and CloudWatch Logs, all
-  # AWS API endpoints. A VPC would add a NAT gateway or four interface endpoints
-  # and their hourly cost while reaching the same APIs, and it would not place
-  # the function nearer anything private.
-  #checkov:skip=CKV_AWS_117:Reaches only AWS API endpoints, so a VPC adds NAT or interface-endpoint cost without changing what it can talk to.
+  # CKV_AWS_117: VPC placement is opt-in through vpc_subnet_ids and
+  # vpc_security_group_ids. Left empty, the default, the function talks to
+  # CodeCommit, SSM and CloudWatch Logs over open egress, and a VPC would add a
+  # NAT gateway or four interface endpoints and their hourly cost to reach the same
+  # APIs. Set them to confine that egress to your security groups and NACLs.
+  #checkov:skip=CKV_AWS_117:VPC placement is opt-in via vpc_subnet_ids and vpc_security_group_ids; the default leaves egress open to reach AWS API endpoints without NAT or interface-endpoint cost.
   #
   # CKV_AWS_173: the eight values in the environment block below are
   # configuration rather than secrets -- a severity threshold, three booleans, a
@@ -469,6 +512,17 @@ resource "aws_lambda_function" "gate" {
   logging_config {
     log_format = "Text"
     log_group  = aws_cloudwatch_log_group.gate.name
+  }
+
+  # Opt-in; see vpc_subnet_ids. The network-interface grant it needs is in
+  # aws_iam_role_policy.gate, which depends_on below orders ahead of the function.
+  dynamic "vpc_config" {
+    for_each = local.use_vpc ? [1] : []
+
+    content {
+      subnet_ids         = var.vpc_subnet_ids
+      security_group_ids = var.vpc_security_group_ids
+    }
   }
 
   tags = var.tags

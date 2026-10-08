@@ -43,15 +43,15 @@ export and no hint about which stack to deploy first.
 
 The CloudFormation console launch flow reads the template from an S3 URL, so it
 works for all five. Scripting `create-stack` does not: CloudFormation caps an
-inline `--template-body` at **51,200 bytes**, and three of these templates are
+inline `--template-body` at **51,200 bytes**, and four of these templates are
 larger than that. Upload those to a bucket and launch by URL, where the ceiling is
 1 MB.
 <https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html>
 
 | Template | Scripted launch |
 | --- | --- |
-| `AshCodeCommitGate` | `--template-body` |
 | `AshAgentCore` | `--template-body` |
+| `AshCodeCommitGate` | `--template-url` only |
 | `AshImagePipeline` | `--template-url` only |
 | `AshFargate` | `--template-url` only |
 | `AshDistributedPipeline` | `--template-url` only |
@@ -60,7 +60,7 @@ Byte counts are deliberately not repeated here — they change with every templa
 change and nothing would catch it if this table went stale. Run
 `wc -c templates/*.template.json` for the current numbers.
 
-The two under the cap launch directly:
+The one under the cap launches directly:
 
 ```sh
 aws cloudformation create-stack \
@@ -69,7 +69,7 @@ aws cloudformation create-stack \
   --capabilities CAPABILITY_IAM
 ```
 
-The other three need one upload first. Any bucket in the same region works:
+The other four need one upload first. Any bucket in the same region works:
 
 ```sh
 aws s3 cp deploy/cdk/templates/AshFargate.template.json \
@@ -107,6 +107,8 @@ change for adopters and desynchronizes the two implementations.
 | `McpAuthHeaderValue` | empty | `NoEcho`. Stored in Secrets Manager; the container gets the ARN, never the value. |
 | `RebuildSchedule` | `rate(1 day)` | EventBridge schedule expression for the image rebuild. |
 | `CodeCommitRepositoryArn` | required | An **existing** repository. The gate stack never creates or deletes one. |
+| `VpcSubnetIds` | empty | Gate only. Comma-separated subnets for the scan function, set together with `VpcSecurityGroupIds`. Empty keeps the function outside any VPC, with open egress. See below. |
+| `VpcSecurityGroupIds` | empty | Gate only. Security groups for the scan function. Setting these without `VpcSubnetIds` is refused at launch. |
 | `ShardCount` | 4 | **Not a CloudFormation parameter.** See below. |
 
 `AshBaseConfigYaml` is stored in an SSM parameter on the Advanced tier and written

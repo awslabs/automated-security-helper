@@ -530,10 +530,13 @@ global_settings:
     # where no code change satisfies the rule.
     #
     # Three rules ask for hardening that costs money or infrastructure the adopter
-    # has to own. Each names the parameter that opts in. Two of those parameters are
-    # RESERVED rather than declared: the names are fixed in ASH_PARAMETER_NAMES and
-    # deploy/cdk/lib/ash-config.ts ships a factory for each, but no template declares
-    # them, because a parameter no resource reads is a question with no consequence.
+    # has to own. Each names the parameter that opts in. CertificateArn is RESERVED
+    # rather than declared: the name is fixed in ASH_PARAMETER_NAMES and
+    # deploy/cdk/lib/ash-config.ts ships a factory, but no template declares it,
+    # because a parameter no resource reads is a question with no consequence.
+    # VpcSubnetIds was reserved the same way and is now declared by
+    # AshCodeCommitGate alone, for its scan function; for the bootstrap starters
+    # below it remains the name an opt-in would use.
     - rule_id: CKV_AWS_117
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -549,10 +552,10 @@ global_settings:
     - rule_id: CKV_AWS_117
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
-        Same cost and same reasoning as the AshAgentCore entry above. Both functions
-        in this template are affected: the image-build bootstrap starter and the
-        pull-request scan function. VpcSubnetIds is the reserved name for this
-        opt-in.
+        Same cost and same reasoning as the AshAgentCore entry above. The finding is
+        on the image-build bootstrap starter only. The pull-request scan function no
+        longer reports it: it carries a conditional VpcConfig, opted into with the
+        VpcSubnetIds and VpcSecurityGroupIds parameters.
     - rule_id: CKV_AWS_117
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
@@ -795,9 +798,9 @@ global_settings:
     - rule_id: CFN_NAG_W89
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
-        Both functions, the same two CKV_AWS_117 names for this file: the image-build
-        bootstrap starter and the pull-request scan function. Same cost, recorded
-        there. VpcSubnetIds is the reserved name for this opt-in.
+        The image-build bootstrap starter, the one CKV_AWS_117 name left for this file.
+        Same cost, recorded there. The pull-request scan function no longer reports
+        it: VpcSubnetIds and VpcSecurityGroupIds attach it to a VPC.
     - rule_id: CFN_NAG_W89
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
@@ -834,8 +837,11 @@ global_settings:
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
-        One policy, the image-build role's CDK DefaultPolicy, whose only wildcard is
-        ecr:GetAuthorizationToken. Same reasoning as the AshAgentCore entry above.
+        Two policies. The image-build role's CDK DefaultPolicy, whose only wildcard is
+        ecr:GetAuthorizationToken, for the same reasoning as the AshAgentCore entry
+        above. And ScanFunctionRoleEc2Access, created only when VpcSubnetIds is set,
+        whose Resource "*" is on the network-interface actions Lambda documents as
+        all-resources for VPC attachment, with ec2:* denied to function code.
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshDistributedPipeline.template.json
       reason: >-

@@ -66,11 +66,11 @@
 #
 # WHAT THE CASE COUNT MEANS, AND WHY IT IS EASY TO OVERSTATE
 # ----------------------------------------------------------
-# There are 42 validation blocks across the five modules -- agentcore 4,
-# ash-image-pipeline 11, codecommit-gate 11, codepipeline-executor 8, fargate 8 --
+# There are 43 validation blocks across the five modules -- agentcore 4,
+# ash-image-pipeline 11, codecommit-gate 12, codepipeline-executor 8, fargate 8 --
 # and every one now has a `must` case proven to fire it.
 #
-# It reached 42 from 10, and the interesting part is that it was first reported as
+# It reached 42 from 10 (43 since the codecommit-gate VPC rule), and the interesting part is that it was first reported as
 # 13. Three rules were counted as covered on the strength of an error_message
 # appearing in some case's output, when the case that produced it was exercising a
 # DIFFERENT rule:
@@ -201,7 +201,7 @@ run_case() {
     # Neither conjunct can be satisfied by the credential error that ends the
     # mustnot plans on a runner with no credentials: that text carries no
     # module's error_message, and none of the four VAR_STAGE_ERROR strings.
-    # Mutation-measured rather than argued, once per rule -- each of the 42
+    # Mutation-measured rather than argued, once per rule -- each of the 43
     # rules across the five modules was rewritten to a tautology that still
     # references its variable (`var.X == var.X`, because terraform rejects a
     # validation condition that does not refer to var.<self>, so a bare `true`
@@ -485,6 +485,18 @@ run_case "max_comment_chars below 500 -> refused" must \
 run_case "ecr_image_tag_mutability lowercase -> refused" must \
   "ecr_image_tag_mutability must be either MUTABLE or IMMUTABLE" \
   "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var ecr_image_tag_mutability=mutable
+# Cross-variable rule on vpc_security_group_ids: both VPC lists or neither. Each
+# half-configuration is its own case, and the both-set case is the mustnot control.
+run_case "vpc_security_group_ids without vpc_subnet_ids -> refused" must \
+  "Set vpc_subnet_ids and vpc_security_group_ids together" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var 'vpc_security_group_ids=["sg-example"]'
+run_case "vpc_subnet_ids without vpc_security_group_ids -> refused" must \
+  "Set vpc_subnet_ids and vpc_security_group_ids together" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var 'vpc_subnet_ids=["subnet-example"]'
+run_case "both VPC lists set -> allowed" mustnot \
+  "Set vpc_subnet_ids and vpc_security_group_ids together" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var 'vpc_subnet_ids=["subnet-example"]' \
+  -var 'vpc_security_group_ids=["sg-example"]'
 
 echo
 echo "validate-inputs: pass=$PASS fail=$FAIL"

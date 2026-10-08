@@ -50,8 +50,11 @@
  */
 
 import {
+  Aws,
+  CfnCondition,
   CfnOutput,
   CfnParameter,
+  CfnRule,
   Duration,
   Fn,
   RemovalPolicy,
@@ -76,9 +79,16 @@ import {
   codeCommitRepositoryArn,
   diagnosticLogGroupProps,
   rebuildSchedule,
+  vpcSecurityGroupIds,
+  vpcSubnetIds,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
-import { suppressLambdaLogWildcard, suppressSecretRotation } from './ash-nag-suppressions';
+import {
+  suppressGuardRule,
+  suppressLambdaLogWildcard,
+  suppressScanFunctionVpcAccess,
+  suppressSecretRotation,
+} from './ash-nag-suppressions';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
 export class AshCodeCommitGateStack extends Stack {
@@ -232,6 +242,113 @@ export class AshCodeCommitGateStack extends Stack {
         ASH_BASE_CONFIG_SSM_PARAMETER: config.configParameterNameOrEmpty(),
       },
     });
+
+    /*
+     * OPTIONAL VPC PLACEMENT: VpcSubnetIds plus VpcSecurityGroupIds.
+     *
+     * Both empty, the default, leaves the function outside any VPC, as it always was:
+     * egress is then open to the internet, which is how it reaches CodeCommit, ECR,
+     * Systems Manager and CloudWatch Logs with nothing to configure. Both set attaches
+     * it to those subnets, and from then on its egress is exactly what the adopter's
+     * security groups, network ACLs and route tables allow -- this stack adds no rule
+     * of its own, and the function still needs a NAT gateway or interface endpoints
+     * for those four services or every scan fails. That is the way to confine what
+     * scanned repository code can send anywhere.
+     *
+     * Conditions rather than a synth-time switch, so the one template serves both and
+     * a console launch with nothing filled in behaves as before.
+     *
+     * The Rule fails a launch that sets security groups without subnets before anything
+     * is created; otherwise the function would silently run outside the VPC. The other
+     * half-configuration, subnets without security groups, already fails loudly: the
+     * empty group id is rejected when Lambda creates the function.
+     */
+    const subnetIds = vpcSubnetIds(this);
+    const securityGroupIds = vpcSecurityGroupIds(this);
+    const scanInVpc = new CfnCondition(this, 'ScanFunctionInVpc', {
+      // A CommaDelimitedList left empty resolves to [""]; see vpcSubnetIds.
+      expression: Fn.conditionNot(Fn.conditionEquals(Fn.select(0, subnetIds.valueAsList), '')),
+    });
+    new CfnRule(this, 'VpcSubnetsWithSecurityGroups', {
+      ruleCondition: Fn.conditionNot(
+        Fn.conditionEachMemberEquals(securityGroupIds.valueAsList, ''),
+      ),
+      assertions: [
+        {
+          assert: Fn.conditionNot(Fn.conditionEachMemberEquals(subnetIds.valueAsList, '')),
+          assertDescription: 'VpcSecurityGroupIds needs VpcSubnetIds.',
+        },
+      ],
+    });
+    const cfnScanFunction = scanFunction.node.defaultChild as lambda.CfnFunction;
+    cfnScanFunction.vpcConfig = Fn.conditionIf(
+      scanInVpc.logicalId,
+      { SubnetIds: subnetIds.valueAsList, SecurityGroupIds: securityGroupIds.valueAsList },
+      Aws.NO_VALUE,
+    );
+    /*
+     * The network-interface permissions Lambda needs to attach the function, granted
+     * only when it is attached. Lambda documents these as `Resource: "*"`:
+     * https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html
+     *
+     * A separate AWS::IAM::Policy behind the same condition. Not an inline role policy:
+     * cfn-guard's IAM_NO_INLINE_POLICY_CHECK rejects those, and an inline `Fn::If` is also
+     * opaque to cdk-nag's IAM5, so neither checker would review it.
+     *
+     * ORDERING. Lambda checks the role holds these when the function is created, so the
+     * policy must exist first. A `DependsOn` cannot say that: it would name a resource
+     * that does not exist when the condition is false, which CloudFormation refuses
+     * (cfn-lint E3005). So the dependency is carried by a `Ref` inside an `Fn::If` on the
+     * SAME condition -- a tag on the function naming the policy -- which CloudFormation
+     * resolves only when both exist. The tag is set as a raw property override, so a
+     * future `Tags.of(...)` on this function would need to merge with it.
+     *
+     * The Deny is the same page's least-privilege advice. These permissions would
+     * otherwise reach the function's own code too, and `lambda:SourceFunctionArn` is
+     * present only on calls made by function code, so the Lambda service keeps them
+     * and scanned code does not. It denies all of `ec2:*` rather than the page's seven
+     * actions: the function code needs no EC2 call at all.
+     */
+    const vpcAccess = new iam.Policy(this, 'ScanFunctionRoleEc2Access', {
+      roles: [scanRole],
+      statements: [
+        new iam.PolicyStatement({
+          sid: 'LambdaManagesNetworkInterfaces',
+          actions: [
+            'ec2:CreateNetworkInterface',
+            'ec2:DescribeNetworkInterfaces',
+            'ec2:DescribeSubnets',
+            'ec2:DeleteNetworkInterface',
+            'ec2:AssignPrivateIpAddresses',
+            'ec2:UnassignPrivateIpAddresses',
+          ],
+          resources: ['*'],
+        }),
+        new iam.PolicyStatement({
+          sid: 'FunctionCodeCannotUseThem',
+          effect: iam.Effect.DENY,
+          actions: ['ec2:*'],
+          resources: ['*'],
+          conditions: { Null: { 'lambda:SourceFunctionArn': 'false' } },
+        }),
+      ],
+    });
+    const cfnVpcAccess = vpcAccess.node.defaultChild as iam.CfnPolicy;
+    cfnVpcAccess.cfnOptions.condition = scanInVpc;
+    cfnScanFunction.addPropertyOverride('Tags', [
+      Fn.conditionIf(
+        scanInVpc.logicalId,
+        { Key: 'ash:vpc-access-policy', Value: cfnVpcAccess.ref },
+        Aws.NO_VALUE,
+      ),
+    ]);
+    suppressScanFunctionVpcAccess(vpcAccess);
+    suppressGuardRule(
+      scanFunction,
+      'LAMBDA_INSIDE_VPC',
+      'Opt-in: set VpcSubnetIds and VpcSecurityGroupIds to confine egress to your SGs and ' +
+        'NACLs. Empty (default) leaves egress open.',
+    );
 
     scanFunction.node.addDependency(image.bootstrap!);
     config.grantRead(scanFunction);

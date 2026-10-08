@@ -74,6 +74,7 @@ export const ASH_PARAMETER_NAMES = {
   codeCommitRepositoryArn: 'CodeCommitRepositoryArn',
   kmsKeyArn: 'KmsKeyArn',
   vpcSubnetIds: 'VpcSubnetIds',
+  vpcSecurityGroupIds: 'VpcSecurityGroupIds',
   certificateArn: 'CertificateArn',
 } as const;
 
@@ -611,25 +612,47 @@ export function kmsKeyArn(scope: Stack): CfnParameter {
  * and CloudFormation does the splitting, so there is one fewer place to get it
  * wrong. Neither type renders a picker in the console, so nothing is lost there.
  *
- * SCOPE OF THIS CHANGE, STATED SO NOBODY IS MISLED
- * -----------------------------------------------
- * This declares the name. No resource consumes it yet: attaching the gate
- * function to a VPC is what `CKV_AWS_117` asks for, and it is suppressed in
- * `.ash/.ash.yaml` with the cost that suppression names, because a VPC-attached
- * function reaches CodeCommit, ECR and Secrets Manager only through a NAT
- * gateway or through interface endpoints for each of them. The name is fixed here
- * so the shared parameter surface and the suppression reason agree on what the
- * opt-in will be called.
+ * WHAT CONSUMES IT
+ * ----------------
+ * `AshCodeCommitGate`'s scan function, together with `VpcSecurityGroupIds`. Both
+ * set puts the function in that VPC; both empty, the default, leaves it outside any
+ * VPC exactly as before these parameters existed. A template Rule refuses a launch
+ * that sets one and not the other, so a half-configured VPC fails before any
+ * resource is created rather than silently running outside it.
+ *
+ * Once attached, the function's egress is whatever the adopter's security groups,
+ * network ACLs and route tables allow; this stack adds none of its own. It still
+ * has to reach CodeCommit, ECR, Systems Manager and CloudWatch Logs, through a NAT
+ * gateway or interface endpoints the adopter provides, or every scan fails.
+ *
+ * No `VpcId` parameter accompanies these, deliberately. Lambda's `VpcConfig` has no
+ * VPC id field (the VPC is the subnets'), and the network-interface permissions the
+ * function needs are documented as `Resource: "*"`, so a VPC id would have nothing
+ * to feed and the "no stack declares a parameter it does not read" test would
+ * reject it.
  */
 export function vpcSubnetIds(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.vpcSubnetIds, {
     type: 'CommaDelimitedList',
     default: '',
     description:
-      'Private subnet ids, comma separated, to attach the scan function to. Empty leaves ' +
-      'it outside any VPC, which is the default and unchanged from before this parameter ' +
-      'existed. A VPC-attached function needs a NAT gateway, or interface endpoints for ' +
-      'CodeCommit, ECR and Secrets Manager, to reach them at all.',
+      'Subnets for the scan function, with VpcSecurityGroupIds. Empty: no VPC. Set: egress ' +
+      'is your SGs/NACLs/routes, which must reach CodeCommit, ECR, SSM, Logs.',
+  });
+}
+
+/**
+ * Security groups for the scan function, paired with `VpcSubnetIds`; see there.
+ *
+ * Same type and same empty default for the same reason: an AWS-specific list type
+ * cannot be empty, so it could not be optional.
+ */
+export function vpcSecurityGroupIds(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.vpcSecurityGroupIds, {
+    type: 'CommaDelimitedList',
+    default: '',
+    description:
+      'Security groups for the scan function, with VpcSubnetIds.',
   });
 }
 

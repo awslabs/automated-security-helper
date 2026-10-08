@@ -339,14 +339,17 @@ describe('no IAM policy grants the same thing twice', () => {
     // ash-policy-split.ts, which files each role's statements into one
     // AWS::IAM::Policy per AWS service so that no single document trips cfn-nag's
     // W76 ceiling. The counts rose; the statements did not change, which the
-    // duplicate check below is a second witness to -- it passes over all 90.
+    // duplicate check below is a second witness to -- it passes over all 91.
     //
     // 88 of the 90 come from the split. The other two are AshAgentCore's and
     // AshFargate's `ConfigKeyAccess`, which AshRuntimeConfig authors directly so
     // the `kms:Decrypt` grant on an adopter-supplied key can be made conditional.
     // That is why those two stacks are one higher than the split alone produces.
+    //
+    // AshCodeCommitGate's eighth is `ScanFunctionRoleEc2Access`, authored directly for
+    // the same reason: it exists only under the ScanFunctionInVpc condition.
     expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
-      10, 13, 10, 7, 50,
+      10, 13, 10, 8, 50,
     ]);
   });
 

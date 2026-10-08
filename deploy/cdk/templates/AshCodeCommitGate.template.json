@@ -74,6 +74,16 @@
    "Type": "String",
    "Default": "",
    "Description": "ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild republishes, so a replaced task adopts the newest image at no defined moment. Pin the build's version-qualified tag instead; its digest is only known after a build, so deploy empty, read the tag, then set this on a stack update."
+  },
+  "VpcSubnetIds": {
+   "Type": "CommaDelimitedList",
+   "Default": "",
+   "Description": "Subnets for the scan function, with VpcSecurityGroupIds. Empty: no VPC. Set: egress is your SGs/NACLs/routes, which must reach CodeCommit, ECR, SSM, Logs."
+  },
+  "VpcSecurityGroupIds": {
+   "Type": "CommaDelimitedList",
+   "Default": "",
+   "Description": "Security groups for the scan function, with VpcSubnetIds."
   }
  },
  "Conditions": {
@@ -107,6 +117,23 @@
      "Fn::Equals": [
       {
        "Ref": "AshImageTag"
+      },
+      ""
+     ]
+    }
+   ]
+  },
+  "ScanFunctionInVpc": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Fn::Select": [
+        0,
+        {
+         "Ref": "VpcSubnetIds"
+        }
+       ]
       },
       ""
      ]
@@ -865,7 +892,17 @@
    "DependsOn": [
     "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
     "ImageBootstrapStarterRole4262AC52"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "LAMBDA_INSIDE_VPC"
+     ],
+     "SuppressedRuleReasons": {
+      "LAMBDA_INSIDE_VPC": "Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data."
+     }
+    }
+   }
   },
   "ImageBootstrapBuildCBE6CA7A": {
    "Type": "Custom::AshImageBootstrap",
@@ -1182,13 +1219,106 @@
       "Arn"
      ]
     },
-    "Timeout": 900
+    "Tags": [
+     {
+      "Fn::If": [
+       "ScanFunctionInVpc",
+       {
+        "Key": "ash:vpc-access-policy",
+        "Value": {
+         "Ref": "ScanFunctionRoleEc2Access99A7E33E"
+        }
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    ],
+    "Timeout": 900,
+    "VpcConfig": {
+     "Fn::If": [
+      "ScanFunctionInVpc",
+      {
+       "SubnetIds": {
+        "Ref": "VpcSubnetIds"
+       },
+       "SecurityGroupIds": {
+        "Ref": "VpcSecurityGroupIds"
+       }
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    }
    },
    "DependsOn": [
     "ImageBootstrapBuildCBE6CA7A",
     "ScanFunctionRoleDefaultPolicy885340FF",
     "ScanFunctionRoleD9323212"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "LAMBDA_INSIDE_VPC"
+     ],
+     "SuppressedRuleReasons": {
+      "LAMBDA_INSIDE_VPC": "Opt-in: set VpcSubnetIds and VpcSecurityGroupIds to confine egress to your SGs and NACLs. Empty (default) leaves egress open."
+     }
+    }
+   }
+  },
+  "ScanFunctionRoleEc2Access99A7E33E": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:CreateNetworkInterface",
+        "ec2:DeleteNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeSubnets",
+        "ec2:UnassignPrivateIpAddresses"
+       ],
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "LambdaManagesNetworkInterfaces"
+      },
+      {
+       "Action": "ec2:*",
+       "Condition": {
+        "Null": {
+         "lambda:SourceFunctionArn": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Resource": "*",
+       "Sid": "FunctionCodeCannotUseThem"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ScanFunctionRoleEc2Access99A7E33E",
+    "Roles": [
+     {
+      "Ref": "ScanFunctionRoleD9323212"
+     }
+    ]
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Resource \"*\" on the network-interface grants Lambda documents as all-resources for VPC attachment. Created only when VpcSubnetIds is set; denied to function code.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   },
+   "Condition": "ScanFunctionInVpc"
   },
   "PullRequestRule01EC9868": {
    "Type": "AWS::Events::Rule",
@@ -1249,6 +1379,39 @@
      ]
     }
    }
+  }
+ },
+ "Rules": {
+  "VpcSubnetsWithSecurityGroups": {
+   "RuleCondition": {
+    "Fn::Not": [
+     {
+      "Fn::EachMemberEquals": [
+       {
+        "Ref": "VpcSecurityGroupIds"
+       },
+       ""
+      ]
+     }
+    ]
+   },
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Not": [
+       {
+        "Fn::EachMemberEquals": [
+         {
+          "Ref": "VpcSubnetIds"
+         },
+         ""
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "VpcSecurityGroupIds needs VpcSubnetIds."
+    }
+   ]
   }
  },
  "Outputs": {
