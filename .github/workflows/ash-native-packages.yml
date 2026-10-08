@@ -189,12 +189,16 @@ jobs:
       # checker still refuses to measure if the installed hatchling does not satisfy
       # that requirement, so a stale one turns this step red rather than measuring a
       # different build.
-      - name: The paths filters cover every input to the wheel
+      - name: The paths filters here and in ash-package-formats.yml cover every input to the wheel
         shell: bash
         run: |
           set -euo pipefail
           uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py --self-test
           uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py
+          # ash-package-formats.yml wraps the same wheel and keeps a push paths filter,
+          # so its list must cover the same measured inputs. This workflow runs on every
+          # push, so a drift there turns this step red even when that one is skipped.
+          uv run --isolated --no-project --with hatchling python packaging/assert-paths-filter.py --workflow .github/workflows/ash-package-formats.yml --event push
 
       # Toolchain-free: the name check runs before either build looks for its tool.
       - name: The deb and rpm builds refuse the same names, and the docs follow them

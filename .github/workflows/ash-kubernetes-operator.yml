@@ -32,8 +32,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Pushes are keyed by commit, as in ash-e2e.yml and ash-jetbrains-ci.yml. Keyed by ref,
+  # a second push to a branch would cancel the first push's lint-and-unit, crd-drift and
+  # e2e-kind, and that commit would carry three cancelled required checks. Only
+  # pull_request runs may be cancelled; a merge_group run must finish or the queue loses
+  # its verdict.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   OPERATOR_DIR: deploy/kubernetes-operator

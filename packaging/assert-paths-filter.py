@@ -91,7 +91,7 @@ review is the control there.
 The self-test runs each layer on its own against fixture repositories it builds
 with hatchling, so a deleted measurement in either layer turns it red.
 
-Usage: assert-paths-filter.py [--repo DIR] [--workflow PATH]
+Usage: assert-paths-filter.py [--repo DIR] [--workflow PATH] [--event NAME ...]
        assert-paths-filter.py --self-test
 Both need hatchling importable, e.g. `uv run --isolated --no-project --with
 hatchling` (`--isolated` so that a hatchling already in a discovered .venv is not
@@ -829,9 +829,21 @@ def wheel_inputs(repo: str, out_dir: str, layers: tuple[str, ...] = LAYERS) -> s
     return {as_probe(repo, path) for path in inputs}
 
 
-def check(filters: dict[str, list[str] | None], inputs: set[str]) -> list[str]:
+EVENTS = ("push", "pull_request")
+
+
+def check(
+    filters: dict[str, list[str] | None],
+    inputs: set[str],
+    events: tuple[str, ...] = EVENTS,
+) -> list[str]:
+    """Problems with `filters` as a guard on `inputs`, for the trigger `events`.
+
+    ash-native-packages.yml is checked on push and pull_request. ash-package-formats.yml
+    wraps the same wheel and triggers on push only, so it is checked with
+    events=("push",)."""
     problems: list[str] = []
-    for event in ("push", "pull_request"):
+    for event in events:
         if event not in filters:
             problems.append(
                 f"the workflow does not trigger on {event}, so no {event} runs the legs"
@@ -852,19 +864,20 @@ def check(filters: dict[str, list[str] | None], inputs: set[str]) -> list[str]:
                 )
     push = filters.get("push")
     pull = filters.get("pull_request")
-    if (push is None) != (pull is None):
+    both = "pull_request" in events
+    if both and (push is None) != (pull is None):
         problems.append(
             "one of push and pull_request has a paths filter and the other has none: "
             f"push {'is unfiltered' if push is None else 'is filtered'}, pull_request "
             f"{'is unfiltered' if pull is None else 'is filtered'}"
         )
-    elif push is not None and pull is not None and push != pull:
+    elif both and push is not None and pull is not None and push != pull:
         problems.append(
             "the push and pull_request paths lists differ: only in push "
             f"{sorted(set(push) - set(pull))}, only in pull_request "
             f"{sorted(set(pull) - set(push))}, or the same entries in another order"
         )
-    for event in ("push", "pull_request"):
+    for event in events:
         listed = filters.get(event)
         if listed is None:
             # No filter (or no such trigger, reported above): nothing to match.
@@ -875,7 +888,7 @@ def check(filters: dict[str, list[str] | None], inputs: set[str]) -> list[str]:
                 problems.append(
                     f"{name} is an input to the wheel the packages are built from, "
                     f"but no {event} paths entry matches it, so a change to it skips "
-                    "every deb and rpm leg"
+                    "every package leg the workflow runs"
                 )
     return problems
 
@@ -1180,6 +1193,38 @@ def self_test() -> int:
             print(f"  FAILED {label}: read as no filter instead of refused")
         else:
             print(f"  ok {label} (refused)")
+    push_only = (
+        "on:\n  push:\n    branches: ['**']\n    paths:\n      - \"a/**\"\n"
+        '      - "README.md"\n  workflow_dispatch: {}\n'
+    )
+    for label, text, inputs, events, should_fail in [
+        (
+            "push only: the push list covers every input",
+            push_only,
+            {"a/b", "README.md"},
+            ("push",),
+            False,
+        ),
+        (
+            "push only: an input the push list misses",
+            push_only,
+            {"a/b", "Dockerfile"},
+            ("push",),
+            True,
+        ),
+        (
+            "push only: checked on pull_request too, which it lacks",
+            push_only,
+            {"a/b"},
+            EVENTS,
+            True,
+        ),
+    ]:
+        if bool(check(read_paths_filters(text), inputs, events)) != should_fail:
+            failures += 1
+            print(f"  FAILED {label}")
+        else:
+            print(f"  ok {label}{' (rejected)' if should_fail else ''}")
     for label, text, inputs, should_fail in cases:
         problems = check(read_paths_filters(text), inputs)
         if bool(problems) != should_fail:
@@ -1847,7 +1892,7 @@ def self_test() -> int:
                 print(f"  FAILED {label}: expected {expected}, got {got}")
             else:
                 print(f"  ok {label} ({got.split(':', 1)[0]})")
-    total = len(cases) + 2 + len(units) + len(wheel_cases)
+    total = len(cases) + 2 + 3 + len(units) + len(wheel_cases)
     print("self-test " + ("FAILED" if failures else f"OK ({total} cases)"))
     return 1 if failures else 0
 
@@ -1857,7 +1902,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--workflow", default=DEFAULT_WORKFLOW)
     parser.add_argument("--repo", default=".")
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--event",
+        action="append",
+        choices=EVENTS,
+        help="a trigger to check; repeatable; default push and pull_request",
+    )
     args = parser.parse_args(argv[1:])
+    events = tuple(args.event) if args.event else EVENTS
     if args.self_test:
         return self_test()
     try:
@@ -1868,21 +1920,23 @@ def main(argv: list[str]) -> int:
     except ValueError as error:  # Unresolvable is a ValueError
         print(f"paths filter check FAILED for {args.workflow}: {error}")
         return 1
-    problems = check(filters, inputs)
+    problems = check(filters, inputs, events)
     if problems:
         print(f"paths filter check FAILED for {args.workflow}:")
         for problem in problems:
             print(f"  - {problem}")
         return 1
     outside = sorted(i for i in inputs if not i.startswith(f"{PACKAGE_DIR}/"))
-    push = filters["push"]
-    listed = (
-        "carry no paths filter, so every change runs the legs"
-        if push is None
-        else f"list the same {len(push)} entries"
-    )
+    first = filters[events[0]]
+    plural = len(events) > 1
+    if first is None:
+        listed = f"carr{'y' if plural else 'ies'} no paths filter, so every change runs the legs"
+    elif plural:
+        listed = f"list the same {len(first)} entries"
+    else:
+        listed = f"lists {len(first)} entries"
     print(
-        f"paths filter OK: push and pull_request {listed}, and they match all "
+        f"paths filter OK: {' and '.join(events)} {listed}, and they match all "
         f"{len(inputs)} wheel inputs; outside {PACKAGE_DIR}/ those are "
         f"{', '.join(outside)}."
     )

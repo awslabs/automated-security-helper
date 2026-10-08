@@ -17,7 +17,13 @@ unsatisfied, and nothing says why. Three things make a check not report on a pus
    ``needs`` (a skipped dependency skips the dependant). A skipped check does not
    satisfy the rule either. The two gates carry ``if: always()``, which never skips,
    and nothing else may carry one.
-3. A renamed job, or a matrix on it. The ruleset matches the check name verbatim, and
+3. A concurrency group two pushes to one branch share. With ``cancel-in-progress``
+   the second push cancels the first push's checks, so that commit carries
+   ``cancelled``; without it GitHub still keeps only one pending run per group and
+   evicts the older one before it starts. ``test_two_pushes_never_share_a_concurrency_group``
+   evaluates every workflow- and job-level group for two pushes and requires them to
+   differ.
+4. A renamed job, or a matrix on it. The ruleset matches the check name verbatim, and
    GitHub appends the matrix values to a job name that does not reference them, so
    either change leaves the old name with nothing reporting under it.
 
@@ -154,6 +160,111 @@ def required_job_problems(text: str, required: tuple[str, ...]) -> list[str]:
     return problems
 
 
+# The expression forms concurrency groups here use. Anything else is refused rather
+# than guessed at, so a new form fails this test instead of passing it unevaluated.
+_EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}")
+_TOKEN = re.compile(r"\s*(github\.[a-z_]+|'[^']*'|==|!=|&&|\|\||\(|\))")
+
+
+def _evaluate(expression: str, context: dict[str, str]) -> str:
+    """One `${{ }}` body: github.<x> lookups, '...' literals, ==, !=, && and ||,
+    with GitHub's short-circuit semantics (an operator returns an operand)."""
+    tokens, position = [], 0
+    while position < len(expression.rstrip()):
+        match = _TOKEN.match(expression, position)
+        if match is None:
+            raise ValueError(f"unreadable concurrency expression: {expression!r}")
+        tokens.append(match.group(1))
+        position = match.end()
+
+    def operand(index: int) -> tuple[object, int]:
+        token = tokens[index]
+        if token == "(":
+            value, index = disjunction(index + 1)
+            if tokens[index] != ")":
+                raise ValueError(f"unbalanced concurrency expression: {expression!r}")
+            return value, index + 1
+        if token.startswith("'"):
+            return token[1:-1], index + 1
+        if token.startswith("github."):
+            name = token.removeprefix("github.")
+            if name not in context:
+                raise ValueError(f"no value for {token} in {expression!r}")
+            return context[name], index + 1
+        raise ValueError(f"unreadable concurrency expression: {expression!r}")
+
+    def comparison(index: int) -> tuple[object, int]:
+        left, index = operand(index)
+        while index < len(tokens) and tokens[index] in ("==", "!="):
+            op = tokens[index]
+            right, index = operand(index + 1)
+            left = (left == right) if op == "==" else (left != right)
+        return left, index
+
+    def conjunction(index: int) -> tuple[object, int]:
+        left, index = comparison(index)
+        while index < len(tokens) and tokens[index] == "&&":
+            right, index = comparison(index + 1)
+            left = left and right
+        return left, index
+
+    def disjunction(index: int) -> tuple[object, int]:
+        left, index = conjunction(index)
+        while index < len(tokens) and tokens[index] == "||":
+            right, index = conjunction(index + 1)
+            left = left or right
+        return left, index
+
+    value, end = disjunction(0)
+    if end != len(tokens):
+        raise ValueError(f"unreadable concurrency expression: {expression!r}")
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _render(template: str, context: dict[str, str]) -> str:
+    return _EXPRESSION.sub(lambda m: _evaluate(m.group(1), context), template)
+
+
+def _push(sha: str) -> dict[str, str]:
+    return {
+        "event_name": "push",
+        "ref": "refs/heads/v4-capabilities",
+        "sha": sha,
+        "workflow": "a workflow",
+        "head_ref": "",
+        "run_id": "1",
+    }
+
+
+def concurrency_problems(text: str) -> list[str]:
+    """Concurrency groups two pushes to one branch would share; empty when none."""
+    workflow = _load(text)
+    scopes = [("the workflow", workflow.get("concurrency"))] + [
+        (f"job {job_id!r}", job.get("concurrency"))
+        for job_id, job in (workflow.get("jobs") or {}).items()
+    ]
+    problems = []
+    for where, concurrency in scopes:
+        if concurrency is None:
+            continue
+        group = (
+            concurrency.get("group") if isinstance(concurrency, dict) else concurrency
+        )
+        try:
+            first = _render(str(group), _push("a" * 40))
+            second = _render(str(group), _push("b" * 40))
+        except ValueError as error:
+            problems.append(f"{where}: {error}")
+            continue
+        if first == second:
+            problems.append(
+                f"{where}: two pushes to one branch share concurrency group {first!r}"
+            )
+    return problems
+
+
 def _text(workflow: str) -> str:
     return (WORKFLOWS / workflow).read_text(encoding="utf-8")
 
@@ -287,3 +398,82 @@ def test_a_matrix_on_a_required_job_is_refused() -> None:
     assert required_job_problems(
         planted, REQUIRED_CHECKS["ash-kubernetes-operator.yml"]
     ) == ["'lint-and-unit' has a matrix, so its checks report under other names"]
+
+
+@pytest.mark.parametrize("workflow", sorted(REQUIRED_CHECKS))
+def test_two_pushes_never_share_a_concurrency_group(workflow: str) -> None:
+    assert concurrency_problems(_text(workflow)) == []
+
+
+def test_the_expression_reader_follows_github_semantics() -> None:
+    group = (
+        "${{ github.workflow }}-"
+        "${{ github.event_name == 'push' && github.sha || github.ref }}"
+    )
+    assert _render(group, _push("abc")) == "a workflow-abc"
+    pull = {**_push("abc"), "event_name": "pull_request", "ref": "refs/pull/1/merge"}
+    assert _render(group, pull) == "a workflow-refs/pull/1/merge"
+    assert _render("${{ github.event_name == 'pull_request' }}", pull) == "true"
+    assert (
+        _render("x-${{ github.event_name == 'push' && github.sha || '' }}", pull)
+        == "x-"
+    )
+
+
+BASE_KEYING = (
+    "concurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n"
+    "  cancel-in-progress: true\n"
+)
+
+
+@pytest.mark.parametrize("workflow", sorted(REQUIRED_CHECKS))
+def test_ref_keyed_workflow_concurrency_is_refused(workflow: str) -> None:
+    text = _text(workflow)
+    planted, count = re.subn(
+        r"^concurrency:\n(?:[ #].*\n|\n)*?(?=\S)",
+        BASE_KEYING + "\n",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert count == 1, f"{workflow} has no workflow-level concurrency to replace"
+    assert concurrency_problems(planted) == [
+        (
+            "the workflow: two pushes to one branch share concurrency group "
+            "'a workflow-refs/heads/v4-capabilities'"
+        )
+    ]
+
+
+def test_ref_keyed_job_concurrency_is_refused() -> None:
+    text = _text("ash-kubernetes-operator.yml")
+    planted, count = re.subn(
+        r"^(  e2e-kind:\n)",
+        r"\g<1>    concurrency:\n      group: kind-${{ github.ref }}\n",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert count == 1
+    assert concurrency_problems(planted) == [
+        (
+            "job 'e2e-kind': two pushes to one branch share concurrency group "
+            "'kind-refs/heads/v4-capabilities'"
+        )
+    ]
+
+
+def test_a_fixed_string_group_is_refused() -> None:
+    text = "on:\n  push:\nconcurrency: deploy\njobs: {}\n"
+    assert concurrency_problems(text) == [
+        "the workflow: two pushes to one branch share concurrency group 'deploy'"
+    ]
+
+
+def test_an_unreadable_group_expression_is_refused() -> None:
+    text = (
+        "on:\n  push:\nconcurrency:\n"
+        "  group: ${{ format('{0}', github.sha) }}\njobs: {}\n"
+    )
+    problems = concurrency_problems(text)
+    assert len(problems) == 1 and "unreadable concurrency expression" in problems[0]
