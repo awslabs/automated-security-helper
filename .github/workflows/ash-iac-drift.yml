@@ -1786,7 +1786,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Each install hands its binary's path to the two steps that run the gate as a
+      # step output, mapped into their env, rather than through GITHUB_ENV, which
+      # would put it into every later step of the job (zizmor's github-env audit).
       - name: Install cfn-lint from the hash-locked requirements
+        id: cfn-lint
         shell: bash
         run: |
           set -euo pipefail
@@ -1794,9 +1798,10 @@ jobs:
           "$RUNNER_TEMP/cfn-lint/bin/python" -m pip install --quiet --disable-pip-version-check \
             --require-hashes --no-deps -r deploy/tests/cfn-lint-requirements.txt
           "$RUNNER_TEMP/cfn-lint/bin/cfn-lint" --version
-          echo "CFN_LINT=$RUNNER_TEMP/cfn-lint/bin/cfn-lint" >> "$GITHUB_ENV"
+          echo "path=$RUNNER_TEMP/cfn-lint/bin/cfn-lint" >> "$GITHUB_OUTPUT"
 
       - name: Install cfn-guard from its release, verified by sha256
+        id: cfn-guard
         shell: bash
         run: |
           set -euo pipefail
@@ -1819,16 +1824,22 @@ jobs:
             echo "::error::expected cfn-guard $CFN_GUARD_VERSION, the binary reports '$reported'."
             exit 1
           fi
-          echo "CFN_GUARD=$bin" >> "$GITHUB_ENV"
+          echo "path=$bin" >> "$GITHUB_OUTPUT"
 
       - name: Prove both tools reject planted defects
         shell: bash
+        env:
+          CFN_LINT: ${{ steps.cfn-lint.outputs.path }}
+          CFN_GUARD: ${{ steps.cfn-guard.outputs.path }}
         run: |
           set -euo pipefail
           python3 deploy/tests/cfn-lint-guard.py self-test --work-dir "$RUNNER_TEMP"
 
       - name: Lint and guard every committed template
         shell: bash
+        env:
+          CFN_LINT: ${{ steps.cfn-lint.outputs.path }}
+          CFN_GUARD: ${{ steps.cfn-guard.outputs.path }}
         run: |
           set -euo pipefail
           python3 deploy/tests/cfn-lint-guard.py check

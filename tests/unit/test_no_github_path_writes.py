@@ -302,3 +302,73 @@ def test_trigger_parsing_reads_the_bare_on_key():
         "push",
         "pull_request_target",
     }
+
+
+# The GITHUB_PATH and GITHUB_ENV writes main still has in workflows on ordinary
+# triggers, which the docstring's "What it does not cover" names, by file, job and
+# step, with how many command lines in that step write. v4's own workflow writes
+# (cfn-lint-guard's two tool paths, the kind/kubectl directory, the VS Code
+# real-ASH directory) became step outputs mapped into the env of the steps that use
+# them, so on v4 every other workflow is held to none. The list may only shrink.
+MAIN_WORKFLOW_WRITES = {
+    (
+        ".github/workflows/ash-unified-ci.yml",
+        "actionlint",
+        "Install actionlint and shellcheck, verified against their pinned digests",
+    ): 1,
+    # A fixture: the workflow text actionlint's self-test is fed, not a write.
+    (
+        ".github/workflows/ash-unified-ci.yml",
+        "actionlint",
+        "Self-test -- an unquoted expansion must be reported",
+    ): 1,
+    (".github/workflows/run-ash-security-scan.yml", "ash", "Install Grype"): 1,
+    (".github/workflows/run-ash-security-scan.yml", "ash", "Install Syft"): 1,
+    (".github/workflows/run-ash-security-scan.yml", "ash", "Install OpenGrep"): 1,
+    (".github/workflows/run-ash-security-scan.yml", "ash", "Install cfn-nag"): 1,
+}
+
+
+def _workflow_write_counts(
+    files: list[Path], root: Path = REPO_ROOT
+) -> dict[tuple[str, str, str], int]:
+    counts: dict[tuple[str, str, str], int] = {}
+    for path in files:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        rel = path.relative_to(root).as_posix()
+        for job_name, job in (data.get("jobs") or {}).items():
+            for name, body in _step_bodies((job or {}).get("steps")):
+                n = sum(
+                    1
+                    for line in _command_lines(body)
+                    if re.search(
+                        r"GITHUB_(PATH|ENV)|core\.(addPath|exportVariable)", line
+                    )
+                )
+                if n:
+                    key = (rel, str(job_name), name)
+                    counts[key] = counts.get(key, 0) + n
+    return counts
+
+
+def test_no_workflow_writes_github_path_or_env_beyond_mains_sites():
+    counts = _workflow_write_counts(_workflow_files())
+    extra = {k: v for k, v in counts.items() if MAIN_WORKFLOW_WRITES.get(k) != v}
+    assert not extra, (
+        "these workflow steps write GITHUB_PATH or GITHUB_ENV. Hand the value over as "
+        "a step output and map it into the `env:` of the steps that use it:\n  "
+        + "\n  ".join(f"{k}: {v}" for k, v in sorted(extra.items()))
+    )
+    stale = sorted(set(MAIN_WORKFLOW_WRITES) - set(counts))
+    assert not stale, f"remove these from MAIN_WORKFLOW_WRITES: {stale}"
+
+
+def test_the_workflow_count_sees_a_planted_write(tmp_path):
+    """Control: a write in an ordinary push workflow is counted."""
+    planted = tmp_path / "planted.yml"
+    planted.write_text(
+        "on: push\njobs:\n  j:\n    steps:\n      - name: s\n"
+        '        run: echo "X=$Y" >> "$GITHUB_ENV"\n',
+        encoding="utf-8",
+    )
+    assert _workflow_write_counts([planted], tmp_path) == {("planted.yml", "j", "s"): 1}

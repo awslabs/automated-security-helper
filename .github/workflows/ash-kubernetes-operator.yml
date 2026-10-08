@@ -204,7 +204,12 @@ jobs:
         with:
           enable-cache: false
 
+      # The directory goes to the two steps that run kind and kubectl as a step
+      # output, and each prepends it to its own PATH, rather than through
+      # GITHUB_PATH, which would put it ahead of everything in every later step of
+      # the job (zizmor's github-env audit).
       - name: Install kind and kubectl, checksum-verified
+        id: kind
         run: |
           # Under $HOME rather than /usr/local/bin, so the step also works in
           # container images where /usr/local/bin is not writable.
@@ -217,7 +222,7 @@ jobs:
             "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           echo "${KUBECTL_SHA256}  $bin/kubectl" | sha256sum --check --strict
           chmod +x "$bin/kind" "$bin/kubectl"
-          echo "$bin" >>"$GITHUB_PATH"
+          echo "bin=$bin" >>"$GITHUB_OUTPUT"
           "$bin/kind" version
           "$bin/kubectl" version --client
 
@@ -226,8 +231,10 @@ jobs:
         env:
           PYTHONPATH: .
           ASH_OPERATOR_E2E: "1"
+          KIND_BIN: ${{ steps.kind.outputs.bin }}
         run: |
           set -o pipefail
+          export PATH="$KIND_BIN:$PATH"
           # The CRDs installed are the committed ones under generated/, which
           # crd-drift holds equal to what the generator emits, so this tests what an
           # adopter applies. -v rather than -q, for the count line the guard needs.
@@ -254,7 +261,11 @@ jobs:
         # outliving its job is a container nobody owns. `kind delete cluster` exits 0
         # when the cluster is already gone.
         if: always()
-        run: kind delete cluster --name "$ASH_OPERATOR_E2E_CLUSTER"
+        env:
+          KIND_BIN: ${{ steps.kind.outputs.bin }}
+        run: |
+          export PATH="$KIND_BIN:$PATH"
+          kind delete cluster --name "$ASH_OPERATOR_E2E_CLUSTER"
 
       - name: Upload the e2e log
         # Failure evidence only. A green run's log says nothing the job summary does

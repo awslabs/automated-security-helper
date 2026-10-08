@@ -293,6 +293,7 @@ jobs:
       # into a venv that has never held ASH. The installed version must be this
       # commit's, or the scans below would be judging some other build.
       - name: Build the head wheel and install it into a fresh venv
+        id: real-ash
         env:
           WORK: ${{ runner.temp }}/ash-e2e-vscode
         run: |
@@ -318,7 +319,7 @@ jobs:
           for name in "$ASH_CLI_NAME" ash; do
             test -x "$WORK/venv/bin/$name" || { echo "::error::the venv has no $name entry point"; exit 1; }
           done
-          echo "ASH_IT_REAL_ASH_DIR=$WORK/venv/bin" >> "$GITHUB_ENV"
+          echo "dir=$WORK/venv/bin" >> "$GITHUB_OUTPUT"
 
       - name: Download the .vsix the package job built and inspected
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -339,6 +340,9 @@ jobs:
         working-directory: editors/vscode
         env:
           ASH_IT_VSIX: ${{ runner.temp }}/ash-e2e-vscode/vsix/ash-vscode.vsix
+          # From the wheel step's output rather than GITHUB_ENV, so it reaches only
+          # this step (zizmor's github-env audit).
+          ASH_IT_REAL_ASH_DIR: ${{ steps.real-ash.outputs.dir }}
         run: xvfb-run -a npm run test:e2e-vsix
 
   # ASH's own coverage rule over the cases src/coverage.ts is tested against.
