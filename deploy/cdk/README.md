@@ -703,6 +703,10 @@ against code that is no longer there. This was hit in development: four new
 assertions failed against a buildspec that had already been changed.
 `jest.config.js` also lists `ts` first, so the invariant is stated where it matters.
 
+`npm test` needs `python3` on `PATH` (or `ASH_TEST_PYTHON` set to an interpreter): the
+EKS suite runs the operator installer's inline Python to get the RBAC it builds, and
+fails rather than skips when no interpreter is found.
+
 The templates synthesize with no AWS credentials and no `cdk.context.json`: nothing
 uses `fromLookup`, so `npx cdk synth --all --no-lookups` works offline. The pinned
 `aws-cdk` CLI (2.1139.0) matches the cloud-assembly schema `aws-cdk-lib` 2.267.0

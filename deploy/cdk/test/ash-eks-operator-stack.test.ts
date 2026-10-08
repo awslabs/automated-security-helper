@@ -891,18 +891,32 @@ const INSTALLED_RBAC = INSTALLED.filter((d) => RBAC_KINDS.includes(d.kind));
 const EXPECTED_NAMESPACED_RULE_COUNT = 10;
 const EXPECTED_CLUSTER_RULE_COUNT = 1;
 
+/** The fields a PolicyRule can carry. Anything else is reported, never dropped. */
+const RULE_FIELDS = ['apiGroups', 'resources', 'verbs', 'resourceNames', 'nonResourceURLs'];
+
 /**
  * One rule as a canonical string, so rules can be compared as a set.
+ *
+ * EVERY field of the rule is in it, not only the three `RbacRule` declares. Projecting a
+ * rule down to apiGroups/resources/verbs let `resourceNames: [one]` on the operator's
+ * side compare equal to the stack's grant on every object of that resource. The two
+ * optional fields appear only when present, and a key outside RULE_FIELDS is rendered as
+ * `?key=value`, so it can only ever make the two sides differ.
  *
  * Members are sorted within each field, so a reordering is not a difference; the
  * fields themselves keep their identity, so `pods: get` and `configmaps: get` never
  * collapse into each other.
  */
 function canonical(rule: RbacRule): string {
-  const groups = [...rule.apiGroups].sort().join(',');
-  const resources = [...rule.resources].sort().join(',');
-  const verbs = [...rule.verbs].sort().join(',');
-  return `[${groups}] ${resources} -> ${verbs}`;
+  const raw = rule as unknown as Record<string, unknown>;
+  const list = (field: string) => [...((raw[field] as string[] | undefined) ?? [])].sort().join(',');
+  let text = `[${list('apiGroups')}] ${list('resources')} -> ${list('verbs')}`;
+  if (raw.resourceNames !== undefined) text += ` names=${list('resourceNames')}`;
+  if (raw.nonResourceURLs !== undefined) text += ` urls=${list('nonResourceURLs')}`;
+  for (const key of Object.keys(raw).filter((k) => !RULE_FIELDS.includes(k)).sort()) {
+    text += ` ?${key}=${JSON.stringify(raw[key])}`;
+  }
+  return text;
 }
 
 function canonicalSet(rules: RbacRule[]): string[] {
@@ -1059,9 +1073,44 @@ function canonicalRoleRef(doc: K8sDoc): string {
   return `${ref.apiGroup ?? 'rbac.authorization.k8s.io'}/${ref.kind}/${ref.name}`;
 }
 
-/** A binding's subjects, each as `Kind namespace/name`, sorted. */
+/**
+ * A binding's subjects, each as `Kind namespace/name`, sorted.
+ *
+ * A non-empty apiGroup is shown as `Kind[group]`, and any key beyond kind, apiGroup,
+ * name and namespace as `?key=value`, so neither can be silently dropped.
+ */
 function canonicalSubjects(doc: K8sDoc): string[] {
-  return (doc.subjects ?? []).map((s) => `${s.kind} ${s.namespace ?? '(none)'}/${s.name}`).sort();
+  return (doc.subjects ?? [])
+    .map((s) => {
+      const raw = s as unknown as Record<string, unknown>;
+      const group = raw.apiGroup ? `[${raw.apiGroup}]` : '';
+      const extra = Object.keys(raw)
+        .filter((k) => !['kind', 'apiGroup', 'name', 'namespace'].includes(k))
+        .sort()
+        .map((k) => ` ?${k}=${JSON.stringify(raw[k])}`)
+        .join('');
+      return `${s.kind}${group} ${s.namespace ?? '(none)'}/${s.name}${extra}`;
+    })
+    .sort();
+}
+
+/** The top-level keys an RBAC document may carry here; any other one is reported. */
+const RBAC_DOC_FIELDS = ['apiVersion', 'kind', 'metadata', 'rules', 'aggregationRule', 'roleRef', 'subjects'];
+
+/** A ClusterRole's aggregationRule as one string, with object keys in sorted order. */
+function canonicalAggregation(doc: K8sDoc): string {
+  const sortKeys = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sortKeys)
+      : v && typeof v === 'object'
+        ? Object.fromEntries(
+            Object.keys(v as object)
+              .sort()
+              .map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]),
+          )
+        : v;
+  const rule = (doc as unknown as Record<string, unknown>).aggregationRule;
+  return rule === undefined ? '(none)' : JSON.stringify(sortKeys(rule));
 }
 
 /**
@@ -1079,20 +1128,35 @@ function contractDrift(op: OperatorContract): string[] {
   const diffSets = (what: string, ours: string[], theirs: string[]) => {
     for (const x of ours.filter((v) => !theirs.includes(v))) drift.push(`${what}: only in the stack: ${x}`);
     for (const x of theirs.filter((v) => !ours.includes(v))) drift.push(`${what}: only in the operator: ${x}`);
+    // Membership alone would let a duplicated entry on one side pass as equal.
+    for (const [side, list] of [['stack', ours], ['operator', theirs]] as const) {
+      for (const x of new Set(list.filter((v, i) => list.indexOf(v) !== i))) {
+        drift.push(`${what}: repeated in the ${side}: ${x}`);
+      }
+    }
   };
   const ours = new Map(INSTALLED_RBAC.map((d) => [rbacKey(d), d]));
   const theirs = new Map(op.rbac.map((d) => [rbacKey(d), d]));
   // Two documents with one key would collapse in the maps and hide each other.
   if (theirs.size !== op.rbac.length) drift.push('RBAC objects: the operator repeats a kind/namespace/name');
   diffSets('RBAC objects', [...ours.keys()].sort(), [...theirs.keys()].sort());
+  for (const [side, docs] of [['stack', INSTALLED_RBAC], ['operator', op.rbac]] as const) {
+    for (const doc of docs) {
+      for (const field of Object.keys(doc).filter((k) => !RBAC_DOC_FIELDS.includes(k)).sort()) {
+        drift.push(`${rbacKey(doc)}: unknown field in the ${side}: ${field}`);
+      }
+    }
+  }
   for (const [key, mine] of ours) {
     const other = theirs.get(key);
     if (other === undefined) continue;
+    diffSets(`${key} apiVersion`, [(mine as any).apiVersion], [(other as any).apiVersion]);
     if (mine.kind.endsWith('Binding')) {
       diffSets(`${key} roleRef`, [canonicalRoleRef(mine)], [canonicalRoleRef(other)]);
       diffSets(`${key} subjects`, canonicalSubjects(mine), canonicalSubjects(other));
     } else {
       diffSets(`${key} rules`, canonicalSet(mine.rules ?? []), canonicalSet(other.rules ?? []));
+      diffSets(`${key} aggregationRule`, [canonicalAggregation(mine)], [canonicalAggregation(other)]);
     }
   }
   diffSets(
@@ -1257,6 +1321,82 @@ describe("the stack's operator contract equals the operator's own files", () => 
     expect(contractDrift(planted)).toEqual([
       'ClusterRoleBinding (cluster)/ash-operator-crd-reader roleRef: only in the stack: rbac.authorization.k8s.io/ClusterRole/ash-operator-crd-reader',
       'ClusterRoleBinding (cluster)/ash-operator-crd-reader roleRef: only in the operator: rbac.authorization.k8s.io/ClusterRole/view',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: resourceNames added to an operator rule is reported', () => {
+    // The operator granting ONE ConfigMap while the stack grants all of them.
+    const planted = plantedContract(
+      OPERATOR_RBAC_YAML,
+      'resources: ["configmaps"]\n    verbs: ["get", "list", "watch", "create", "delete"]\n',
+      'resources: ["configmaps"]\n    resourceNames: ["ash-only"]\n    verbs: ["get", "list", "watch", "create", "delete"]\n',
+    );
+    expect(contractDrift(planted)).toEqual([
+      'Role ash-system/ash-operator rules: only in the stack: [] configmaps -> create,delete,get,list,watch',
+      'Role ash-system/ash-operator rules: only in the operator: [] configmaps -> create,delete,get,list,watch names=ash-only',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: a nonResourceURLs rule added to the ClusterRole is reported', () => {
+    const planted = plantedContract(
+      OPERATOR_RBAC_YAML,
+      '    resources: ["customresourcedefinitions"]\n    verbs: ["get", "list", "watch"]\n',
+      '    resources: ["customresourcedefinitions"]\n    verbs: ["get", "list", "watch"]\n' +
+        '  - nonResourceURLs: ["/metrics"]\n    verbs: ["get"]\n',
+    );
+    expect(contractDrift(planted)).toEqual([
+      'ClusterRole (cluster)/ash-operator-crd-reader rules: only in the operator: []  -> get urls=/metrics',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: an aggregationRule added to the ClusterRole is reported', () => {
+    // Aggregation makes the controller manager fill the rules from other ClusterRoles,
+    // so the operator's effective grant is no longer the rules list in this file.
+    const planted = plantedContract(
+      OPERATOR_RBAC_YAML,
+      'kind: ClusterRole\nmetadata:\n  name: ash-operator-crd-reader\nrules:\n',
+      'kind: ClusterRole\nmetadata:\n  name: ash-operator-crd-reader\n' +
+        'aggregationRule:\n  clusterRoleSelectors:\n    - matchLabels: {ash-aggregate: "true"}\nrules:\n',
+    );
+    expect(contractDrift(planted)).toEqual([
+      'ClusterRole (cluster)/ash-operator-crd-reader aggregationRule: only in the stack: (none)',
+      'ClusterRole (cluster)/ash-operator-crd-reader aggregationRule: only in the operator: ' +
+        '{"clusterRoleSelectors":[{"matchLabels":{"ash-aggregate":"true"}}]}',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: an unknown rule key or document field is reported, not dropped', () => {
+    const planted = plantedContract(
+      OPERATOR_RBAC_YAML,
+      'resources: ["pods"]\n    verbs: ["get", "list", "watch"]\n',
+      'resources: ["pods"]\n    verbs: ["get", "list", "watch"]\n    futureField: ["x"]\n',
+    );
+    expect(contractDrift(planted)).toEqual([
+      'Role ash-system/ash-operator rules: only in the stack: [] pods -> get,list,watch',
+      'Role ash-system/ash-operator rules: only in the operator: [] pods -> get,list,watch ?futureField=["x"]',
+    ]);
+    const field = plantedContract(OPERATOR_RBAC_YAML, 'kind: Role\nmetadata:', 'kind: Role\nfutureField: 1\nmetadata:');
+    expect(contractDrift(field)).toEqual(['Role ash-system/ash-operator: unknown field in the operator: futureField']);
+  });
+
+  test("NEGATIVE CONTROL: a subject's apiGroup and a duplicated subject are reported", () => {
+    const grouped = plantedContract(
+      OPERATOR_RBAC_YAML,
+      '  name: ash-operator\nsubjects:\n  - kind: ServiceAccount\n    name: ash-operator\n',
+      '  name: ash-operator\nsubjects:\n  - kind: ServiceAccount\n    apiGroup: example.io\n    name: ash-operator\n',
+    );
+    expect(contractDrift(grouped)).toEqual([
+      'RoleBinding ash-system/ash-operator subjects: only in the stack: ServiceAccount ash-system/ash-operator',
+      'RoleBinding ash-system/ash-operator subjects: only in the operator: ServiceAccount[example.io] ash-system/ash-operator',
+    ]);
+    const doubled = plantedContract(
+      OPERATOR_RBAC_YAML,
+      '  name: ash-operator\nsubjects:\n  - kind: ServiceAccount\n    name: ash-operator\n    namespace: ash-system\n',
+      '  name: ash-operator\nsubjects:\n  - kind: ServiceAccount\n    name: ash-operator\n    namespace: ash-system\n' +
+        '  - kind: ServiceAccount\n    name: ash-operator\n    namespace: ash-system\n',
+    );
+    expect(contractDrift(doubled)).toEqual([
+      'RoleBinding ash-system/ash-operator subjects: repeated in the operator: ServiceAccount ash-system/ash-operator',
     ]);
   });
 
