@@ -19,7 +19,9 @@ and attaches it. Three things can drift apart, and each has a test here:
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -346,3 +348,497 @@ def test_publishing_steps_are_skipped_together_when_the_release_exists():
         "Create tag and GitHub Release",
         "Assert the release carries exactly the staged assets",
     ]
+
+
+# -- the release trigger, exactly --------------------------------------------
+#
+# A push trigger, or a resolve job without its merged and title guards, would run the
+# release (tag, attest, publish) on something other than a merged release PR. These
+# hold the exact values, so a weakened copy that keeps a familiar substring fails.
+
+
+def test_the_release_runs_only_on_a_closed_pull_request_into_main():
+    assert _workflow(TAG_ON_MERGE)["on"] == {
+        "pull_request": {"types": ["closed"], "branches": ["main"]}
+    }
+
+
+def test_the_release_runs_only_for_a_merged_release_pull_request():
+    jobs = _workflow(TAG_ON_MERGE)["jobs"]
+    assert jobs["resolve"]["if"] == (
+        "github.event.pull_request.merged == true && "
+        "startsWith(github.event.pull_request.title, 'chore(release):')"
+    )
+    assert jobs["assets"]["needs"] == "resolve"
+    assert jobs["assets"]["if"] == "needs.resolve.outputs.skip == 'false'"
+    assert jobs["tag-and-release"]["needs"] == ["resolve", "assets"]
+    assert jobs["tag-and-release"]["if"] == (
+        "!cancelled() && needs.resolve.result == 'success' && "
+        "(needs.resolve.outputs.skip == 'true' || needs.assets.result == 'success')"
+    )
+
+
+def test_the_release_builds_the_merge_commit_the_attestation_names():
+    steps = _workflow(TAG_ON_MERGE)["jobs"]["resolve"]["steps"]
+    checkout = _index(
+        steps, lambda s: str(s.get("uses", "")).startswith("actions/checkout@")
+    )
+    assert steps[checkout]["with"]["ref"] == (
+        "${{ github.event.pull_request.merge_commit_sha }}"
+    )
+    pin = _index(steps, lambda s: s.get("id") == "sha")
+    assert steps[pin]["env"]["MERGE_SHA"] == (
+        "${{ github.event.pull_request.merge_commit_sha }}"
+    )
+
+
+# -- the release steps, run ---------------------------------------------------
+#
+# Each step's own shell, extracted from the YAML and run the way Actions runs a bash
+# step, against planted inputs. A step made non-fatal (an `|| true`, a dropped
+# `set -e`, an `if` that only warns) keeps every substring the structural tests look
+# for and fails here.
+
+needs_bash = pytest.mark.skipif(
+    os.name == "nt" or shutil.which("bash") is None,
+    reason="bash on Windows runners is the WSL stub; the steps run on ubuntu-latest",
+)
+
+
+def _gnu_sha256sum() -> bool:
+    # The verify step runs GNU `sha256sum --strict -c` on ubuntu-latest. A macOS
+    # runner's sha256sum, where there is one, is not that program.
+    if shutil.which("sha256sum") is None:
+        return False
+    probe = subprocess.run(
+        ["sha256sum", "--version"], capture_output=True, text=True, check=False
+    )
+    return probe.returncode == 0 and "GNU coreutils" in probe.stdout
+
+
+needs_gnu_sha256sum = pytest.mark.skipif(
+    not _gnu_sha256sum(),
+    reason="the verify step runs GNU coreutils sha256sum on ubuntu-latest",
+)
+
+# `uv run [--flags] python ARGS` -> this interpreter, ARGS. The steps reach Python
+# through uv; the harness has no reason to resolve an environment.
+UV_SHIM = """#!/usr/bin/env bash
+set -euo pipefail
+[ "$1" = run ] || { echo "uv shim: only 'run' is supported" >&2; exit 2; }
+shift
+while [ "$#" -gt 0 ] && [ "$1" != python ]; do shift; done
+[ "$#" -gt 0 ] || { echo "uv shim: no python in the command" >&2; exit 2; }
+shift
+exec "$ASH_TEST_PYTHON" "$@"
+"""
+
+
+def _step_run(path: Path, job: str, predicate) -> str:
+    steps = _steps(_workflow(path), job)
+    return str(steps[_index(steps, predicate)]["run"])
+
+
+def _named(name: str):
+    return lambda s: s.get("name") == name
+
+
+def _shim_dir(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text(UV_SHIM, encoding="utf-8")
+    uv.chmod(0o755)
+    (bin_dir / "python3").symlink_to(sys.executable)
+    return bin_dir
+
+
+def _run_step(script: str, cwd: Path, env: dict, bin_dir: Path):
+    runner_temp = cwd / "_runner_temp"
+    runner_temp.mkdir(exist_ok=True)
+    script_file = runner_temp / "step.sh"
+    script_file.write_text(script, encoding="utf-8")
+    full_env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(cwd),
+        "RUNNER_TEMP": str(runner_temp),
+        "GITHUB_OUTPUT": str(runner_temp / "github_output"),
+        "GITHUB_STEP_SUMMARY": str(runner_temp / "step_summary"),
+        "ASH_TEST_PYTHON": sys.executable,
+        **env,
+    }
+    # The shell Actions uses for `shell: bash` on a hosted runner.
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script_file)],
+        cwd=str(cwd),
+        env=full_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _staged_tree(tmp_path: Path, version: str = "4.0.0") -> Path:
+    """A working directory with packaging/release-assets.py and a complete set."""
+    work = tmp_path / "work"
+    (work / "packaging").mkdir(parents=True)
+    shutil.copy2(SCRIPT, work / "packaging" / "release-assets.py")
+    ra._write_fixture(work / "release-assets", ra._fixture_names(version))
+    return work
+
+
+def _sums(directory: Path) -> str:
+    return "".join(
+        f"{ra.sha256(p)}  {p.name}\n"
+        for p in sorted(directory.iterdir())
+        if p.is_file()
+    )
+
+
+VERIFY = "Verify the assets are the gated set"
+
+
+@needs_bash
+@needs_gnu_sha256sum
+@pytest.mark.parametrize("trailing_newline", [False, True])
+def test_the_verify_step_passes_the_gated_set(tmp_path: Path, trailing_newline):
+    # The runner hands a heredoc output over without its last newline; with one, the
+    # step must still read the sums, since --strict refuses a blank line.
+    work = _staged_tree(tmp_path)
+    sums = _sums(work / "release-assets")
+    proc = _run_step(
+        _step_run(TAG_ON_MERGE, "tag-and-release", _named(VERIFY)),
+        work,
+        {
+            "VERSION": "4.0.0",
+            "BUILT_VERSION": "4.0.0",
+            "SUMS": sums if trailing_newline else sums.rstrip("\n"),
+        },
+        _shim_dir(tmp_path),
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "release asset set OK: 13 file(s)" in proc.stdout
+
+
+@needs_bash
+@needs_gnu_sha256sum
+@pytest.mark.parametrize(
+    "case",
+    ["built-for-another-version", "tampered-file", "extra-file", "empty-sums"],
+)
+def test_the_verify_step_refuses_what_the_gates_did_not_pass(tmp_path: Path, case):
+    work = _staged_tree(tmp_path)
+    staged = work / "release-assets"
+    env = {
+        "VERSION": "4.0.0",
+        "BUILT_VERSION": "4.0.0",
+        "SUMS": _sums(staged).rstrip("\n"),
+    }
+    expect = ""
+    if case == "built-for-another-version":
+        env["BUILT_VERSION"] = "3.9.0"
+        expect = "the assets were built for 3.9.0, and this release is 4.0.0"
+    elif case == "tampered-file":
+        # Same name, so the set check alone would pass it; only the digest refuses.
+        (staged / "ash.4.0.0.nupkg").write_bytes(b"swapped after the gates ran")
+        expect = "FAILED"
+    elif case == "extra-file":
+        # Not in the sums, so sha256sum -c alone would pass it; only the check refuses.
+        (staged / "ash-extra-4.0.0.bin").write_bytes(b"ungated")
+        expect = "ash-extra-4.0.0.bin is not a release asset"
+    elif case == "empty-sums":
+        env["SUMS"] = ""
+        expect = "no properly formatted"
+    proc = _run_step(
+        _step_run(TAG_ON_MERGE, "tag-and-release", _named(VERIFY)),
+        work,
+        env,
+        _shim_dir(tmp_path),
+    )
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert expect in proc.stdout + proc.stderr
+
+
+ARTIFACT_ID = "Check the release asset artifact ID"
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    "value, ok", [("4242424242", True), ("", False), ("ash-release-assets-x", False)]
+)
+def test_the_release_refuses_a_download_with_no_artifact_id(tmp_path: Path, value, ok):
+    proc = _run_step(
+        _step_run(TAG_ON_MERGE, "tag-and-release", _named(ARTIFACT_ID)),
+        tmp_path,
+        {"ARTIFACT_ID": value},
+        _shim_dir(tmp_path),
+    )
+    assert (proc.returncode == 0) is ok, proc.stdout + proc.stderr
+    if not ok:
+        assert "not an artifact ID" in proc.stdout
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+@needs_bash
+@pytest.mark.parametrize("case", ["merge", "empty", "not-github-sha", "not-head"])
+def test_the_resolve_job_pins_the_merge_commit(tmp_path: Path, case):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    for message in ("first", "merge"):
+        _git(
+            repo,
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            message,
+        )
+    head = _git(repo, "rev-parse", "HEAD")
+    first = _git(repo, "rev-parse", "HEAD^")
+    env = {"MERGE_SHA": head, "GITHUB_SHA": head}
+    if case == "empty":
+        env["MERGE_SHA"] = ""
+    elif case == "not-github-sha":
+        env["GITHUB_SHA"] = first
+    elif case == "not-head":
+        env["MERGE_SHA"] = env["GITHUB_SHA"] = first
+    proc = _run_step(
+        _step_run(TAG_ON_MERGE, "resolve", lambda s: s.get("id") == "sha"),
+        repo,
+        env,
+        _shim_dir(tmp_path),
+    )
+    output = repo / "_runner_temp" / "github_output"
+    if case == "merge":
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert output.read_text(encoding="utf-8") == f"sha={head}\n"
+    else:
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "::error::" in proc.stdout
+        assert not output.exists() or "sha=" not in output.read_text(encoding="utf-8")
+
+
+# A stand-in for packaging/release-assets.py: `gate` writes the list and sums files and
+# exits with STUB_RC; `check` exits with STUB_RC and prints STUB_MESSAGE. The gate
+# writes the files even when it fails, so only its exit status can stop the step.
+RELEASE_ASSETS_STUB = """import os, sys
+args = sys.argv[1:]
+rc = int(os.environ.get("STUB_RC", "0"))
+if args[0] == "gate":
+    print("  FAIL deb planted" if rc else "  PASS every asset")
+    lst = args[args.index("--list-out") + 1]
+    sums = args[args.index("--sums-out") + 1]
+    open(lst, "w").write("a.deb\\n")
+    open(sums, "w").write("0" * 64 + "  a.deb\\n")
+    sys.exit(rc)
+print(os.environ.get("STUB_MESSAGE", ""), file=sys.stderr)
+sys.exit(rc)
+"""
+
+GATE = "Gate every release asset"
+
+
+@needs_bash
+@pytest.mark.parametrize("rc", [0, 1])
+def test_the_gate_step_fails_with_the_gate_and_exports_sums_only_on_a_pass(
+    tmp_path: Path, rc
+):
+    work = tmp_path / "work"
+    (work / "packaging").mkdir(parents=True)
+    (work / "packaging" / "release-assets.py").write_text(
+        RELEASE_ASSETS_STUB, encoding="utf-8"
+    )
+    proc = _run_step(
+        _step_run(RELEASE_ASSETS, "assemble", _named(GATE)),
+        work,
+        {"VERSION": "4.0.0", "STUB_RC": str(rc)},
+        _shim_dir(tmp_path),
+    )
+    output = work / "_runner_temp" / "github_output"
+    if rc == 0:
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert output.read_text(encoding="utf-8") == (
+            "sums<<ASH_RELEASE_SUMS_EOF\n"
+            + "0" * 64
+            + "  a.deb\nASH_RELEASE_SUMS_EOF\n"
+        )
+    else:
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert not output.exists() or "sums" not in output.read_text(encoding="utf-8")
+
+
+NEGATIVE = "Negative control: a missing or ungated asset fails the check"
+
+
+@needs_bash
+def test_the_negative_control_step_passes_when_the_real_check_refuses_both(
+    tmp_path: Path,
+):
+    work = _staged_tree(tmp_path)
+    proc = _run_step(
+        _step_run(RELEASE_ASSETS, "assemble", _named(NEGATIVE)),
+        work,
+        {"VERSION": "4.0.0"},
+        _shim_dir(tmp_path),
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stdout.count("OK: ") == 2
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    "rc, message",
+    [
+        (0, "release asset set OK"),
+        (1, "failed for some other reason"),
+        (2, "deb: expected 1 file(s) ash-extra-4.0.0.bin is not a release asset"),
+    ],
+    ids=["check-passes", "fails-without-naming-the-asset", "exit-2-not-1"],
+)
+def test_the_negative_control_step_fails_when_the_check_does_not_refuse(
+    tmp_path: Path, rc, message
+):
+    work = _staged_tree(tmp_path)
+    (work / "packaging" / "release-assets.py").write_text(
+        RELEASE_ASSETS_STUB, encoding="utf-8"
+    )
+    proc = _run_step(
+        _step_run(RELEASE_ASSETS, "assemble", _named(NEGATIVE)),
+        work,
+        {"VERSION": "4.0.0", "STUB_RC": str(rc), "STUB_MESSAGE": message},
+        _shim_dir(tmp_path),
+    )
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "::error::" in proc.stdout
+
+
+# -- release-assets.py gate, on planted gates ---------------------------------
+
+
+def _all_gates(result):
+    return {name: (lambda ctx, files, _r=result: _r) for name in ra.GATES}
+
+
+def test_cmd_gate_fails_on_one_failed_verdict_and_writes_nothing(
+    tmp_path: Path, monkeypatch
+):
+    staged = tmp_path / "staged"
+    ra._write_fixture(staged, ra._fixture_names("4.0.0"))
+    gates = _all_gates((True, "stub"))
+    gates["flatpak-bundle"] = lambda ctx, files: (False, "planted")
+    monkeypatch.setattr(ra, "GATES", gates)
+    lst, sums = tmp_path / "assets.txt", tmp_path / "SHA256SUMS"
+    rc = ra.cmd_gate(staged, "4.0.0", ra.DEFAULT_REPOSITORY, lst, sums)
+    assert rc == 1
+    assert not lst.exists() and not sums.exists()
+
+
+def test_cmd_gate_writes_the_digest_of_every_staged_file(tmp_path: Path, monkeypatch):
+    staged = tmp_path / "staged"
+    names = ra._fixture_names("4.0.0")
+    ra._write_fixture(staged, names)
+    monkeypatch.setattr(ra, "GATES", _all_gates((True, "stub")))
+    lst, sums = tmp_path / "assets.txt", tmp_path / "SHA256SUMS"
+    assert ra.cmd_gate(staged, "4.0.0", ra.DEFAULT_REPOSITORY, lst, sums) == 0
+    assert lst.read_text(encoding="utf-8").splitlines() == sorted(names)
+    lines = sums.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 13
+    assert lines == [f"{ra.sha256(staged / n)}  {n}" for n in sorted(names)]
+
+
+def _winget_set(tmp_path: Path, digest: str, url: str) -> list:
+    """The committed manifests, filled the way set-release-metadata.py fills them."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    files = []
+    for source in sorted((REPO_ROOT / "packaging" / "winget").glob("*.yaml")):
+        text = source.read_text(encoding="utf-8")
+        if source.name.endswith(".installer.yaml"):
+            text, urls = re.subn(
+                r"^  InstallerUrl: .*$",
+                f"  InstallerUrl: {url}",
+                text,
+                flags=re.MULTILINE,
+            )
+            text, digests = re.subn(
+                r"^  InstallerSha256: .*$",
+                f"  InstallerSha256: {digest}",
+                text,
+                flags=re.MULTILINE,
+            )
+            assert (urls, digests) == (1, 1), (
+                "the committed installer manifest changed shape"
+            )
+        (tmp_path / source.name).write_text(text, encoding="utf-8")
+        files.append(tmp_path / source.name)
+    assert len(files) == 3
+    return files
+
+
+@pytest.mark.parametrize(
+    "case", ["bound", "wrong-digest", "wrong-url", "validator-fails", "no-msix"]
+)
+def test_the_winget_gate_binds_the_manifests_to_the_attached_msix(tmp_path: Path, case):
+    msix = tmp_path / "automated-security-helper-4.0.0.msix"
+    msix.write_bytes(b"the msix bytes")
+    digest = ra.sha256(msix).upper()
+    url = f"https://github.com/{ra.DEFAULT_REPOSITORY}/releases/download/v4.0.0/{msix.name}"
+    if case == "wrong-digest":
+        digest = "0" * 64
+    if case == "wrong-url":
+        url = url.replace("v4.0.0", "v3.9.0")
+    files = _winget_set(tmp_path / "winget", digest, url)
+    validator_rc = 1 if case == "validator-fails" else 0
+    ctx = ra.Context(
+        tmp_path,
+        "4.0.0",
+        ra.DEFAULT_REPOSITORY,
+        lambda argv, cwd: (validator_rc, "validator output"),
+        staged={"msix": [] if case == "no-msix" else [msix]},
+    )
+    ok, detail = ra.gate_winget_manifests(ctx, files)
+    assert ok is (case == "bound"), detail
+    expected = {
+        "bound": "InstallerSha256 and InstallerUrl name the attached",
+        "wrong-digest": "InstallerSha256 is",
+        "wrong-url": "InstallerUrl is",
+        "validator-fails": "exited 1",
+        "no-msix": "no single staged .msix",
+    }[case]
+    assert expected in detail
+
+
+@pytest.mark.parametrize("tree_rc", [0, 1])
+def test_the_flatpak_gate_runs_the_tree_gate_and_takes_its_verdict(
+    tmp_path: Path, tree_rc
+):
+    bundle = tmp_path / "ash-4.0.0-x86_64.flatpak"
+    bundle.write_bytes(b"bundle")
+    calls = []
+
+    def runner(argv, cwd):
+        calls.append(list(argv))
+        if "refs" in argv:
+            return 0, "app/com.amazon.ash/x86_64/stable\n"
+        if "--flatpak-tree" in argv:
+            return tree_rc, "tree gate output"
+        return 0, ""
+
+    ctx = ra.Context(REPO_ROOT, "4.0.0", ra.DEFAULT_REPOSITORY, runner)
+    ok, detail = ra.gate_flatpak_bundle(ctx, [bundle])
+    tree_calls = [c for c in calls if "--flatpak-tree" in c]
+    assert len(tree_calls) == 1, calls
+    assert tree_calls[0][-1].endswith("/tree/files")
+    assert ok is (tree_rc == 0), detail

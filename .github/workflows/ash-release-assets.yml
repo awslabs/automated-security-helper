@@ -407,6 +407,11 @@ jobs:
       # one file no gate knows. Each must fail the set check with a message naming it,
       # or the check that guards the release would pass a release short an asset, or
       # one carrying something unchecked.
+      #
+      # `|| rc=$?` rather than the command and then `rc=$?`: Actions runs bash with -e,
+      # which a `set -uo pipefail` does not turn off, so a bare failing command would end
+      # the step at the first expected failure. tests/unit/test_release_assets.py runs
+      # this step against the real check and against a check that does not refuse.
       - name: "Negative control: a missing or ungated asset fails the check"
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -414,10 +419,9 @@ jobs:
           set -uo pipefail
           failures=0
           expect_fail() {
-            local label="$1" dir="$2" needle="$3" rc
+            local label="$1" dir="$2" needle="$3" rc=0
             uv run --no-project python packaging/release-assets.py check "$dir" --version "$VERSION" \
-              > "$RUNNER_TEMP/neg.out" 2>&1
-            rc=$?
+              > "$RUNNER_TEMP/neg.out" 2>&1 || rc=$?
             if [ "$rc" -ne 1 ] || ! grep -qF -- "$needle" "$RUNNER_TEMP/neg.out"; then
               echo "::error::${label}: exit ${rc}, expected 1 naming '${needle}'"
               cat "$RUNNER_TEMP/neg.out"

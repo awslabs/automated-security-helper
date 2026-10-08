@@ -18,6 +18,12 @@ jobs:
   # What to release, decided once, before anything is built. The commit is pinned here
   # and handed to every later job: the assets take most of an hour to build, and main can
   # move in that time, so "check out main" in two jobs could name two commits.
+  #
+  # The commit is the pull request's merge commit, not main's tip when this job starts.
+  # actions/attest-build-provenance records github.sha as the source commit, and for a
+  # merged pull request github.sha is that merge commit. Checking out `main` would build
+  # from whatever landed after the merge while the attestation names the merge, so a
+  # verifier would be pointed at code the assets were not built from.
   resolve:
     name: Decide what to release
     if: >-
@@ -35,7 +41,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
 
       - name: Install uv
@@ -58,13 +64,31 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
+      # Fails here, before an hour of building, rather than after: an empty merge SHA
+      # would have checked out the default branch, and one that is not github.sha would
+      # give the attestation a source commit the assets were not built from.
+      # tests/unit/test_release_assets.py runs this script.
       - name: Pin the commit being released
         id: sha
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
+          if [[ ! "$MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the pull request's merge_commit_sha is '${MERGE_SHA}', not a commit. Refusing to release."
+            exit 1
+          fi
+          if [ "$MERGE_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::merge_commit_sha ${MERGE_SHA} is not github.sha ${GITHUB_SHA}, which the provenance attestation records as the source commit. Refusing to attest assets built from a commit the attestation does not name."
+            exit 1
+          fi
           SHA="$(git rev-parse HEAD)"
+          if [ "$SHA" != "$MERGE_SHA" ]; then
+            echo "::error::the checkout is at ${SHA}, not the merge commit ${MERGE_SHA}"
+            exit 1
+          fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "Releasing main at $SHA"
+          echo "Releasing the merge commit $SHA"
 
       # Asked before building, because the build, the gates and the attestation are all
       # pointless work if the release already exists -- and an attestation is not free:
@@ -189,7 +213,10 @@ jobs:
             echo "::error::the assets were built for ${BUILT_VERSION}, and this release is ${VERSION}"
             exit 1
           fi
-          printf '%s\n' "$SUMS" > "$RUNNER_TEMP/SHA256SUMS"
+          # Blank lines dropped: under --strict, sha256sum fails on one, so a trailing
+          # newline in the output value would refuse a good set. An empty SUMS still
+          # leaves no checksum line, which sha256sum refuses.
+          printf '%s\n' "$SUMS" | awk 'NF' > "$RUNNER_TEMP/SHA256SUMS"
           (cd release-assets && sha256sum --strict -c "$RUNNER_TEMP/SHA256SUMS")
           python3 packaging/release-assets.py check release-assets --version "$VERSION"
 
