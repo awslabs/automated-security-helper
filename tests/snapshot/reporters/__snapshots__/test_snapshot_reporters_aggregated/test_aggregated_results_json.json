@@ -215,7 +215,7 @@
           "metrics": "auto",
           "offline": false,
           "patterns": [],
-          "version": "v1.15.1",
+          "version": "v1.30.2",
           "sha256": {}
         }
       },
