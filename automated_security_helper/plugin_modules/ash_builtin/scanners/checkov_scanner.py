@@ -485,7 +485,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         """
         return Path(Path(os.path.abspath(results_dir)).anchor)
 
-    def _read_results_file(self, results_file: Path) -> Optional[dict]:
+    def _read_results_file(self, results_file: Path) -> Optional[dict[str, Any]]:
         """Read checkov's SARIF with its paths made relative to the source directory.
 
         The JSON report, written when ``additional_formats`` asks for it, is
