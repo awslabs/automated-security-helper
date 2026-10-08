@@ -59,7 +59,7 @@ Path hashes let clients detect that the operator rotated a profile file undernea
 
 1. **Static.** `select_profile(profile_name="default")` — bind the profile as-is.
 2. **Inherit-and-patch.** `select_profile(profile_name="default", patch_ops=[...])` — apply a JSON-Patch document, each op checked against the runtime-override allowlist first; a rejected op fails the whole call without mutating the session config. See [Runtime config overrides](#runtime-config-overrides).
-3. **Full override.** `select_profile(profile_name="default", override_yaml="...")` — replace the resolved config with a client-supplied YAML string, still validated through `AshConfig`.
+3. **Full override.** `select_profile(profile_name="default", override_yaml="...")` — replace the resolved config with a client-supplied YAML string, validated through `AshConfig` and held to the same runtime-override allowlist as `patch_ops`. See [Overrides are patches](#overrides-are-patches).
 
 `patch_ops` and `override_yaml` are mutually exclusive, and the parameter is `profile_name` — a profile must be named in every mode, including override.
 
@@ -213,6 +213,12 @@ Additional invariants enforced by `apply_runtime_patch`:
 
 The full allowlist is exposed at runtime via the `ash://schema/runtime-overrides` resource so clients can introspect what is patchable before composing a patch.
 
+### Overrides are patches
+
+`override_yaml` is checked by the same rules, not by a second copy of them. The server validates the YAML as an `AshConfig`, diffs it against the profile, and sends the resulting add/remove/replace ops through `apply_runtime_patch`. An override is accepted exactly when that patch would be: never while `enabled` is false, and only if every field it changes is in `allowed_paths`, outside `denied_paths`, and clear of `denied_value_patterns`. A refusal returns `success: false` with an `override denied:` error naming the op and the rule.
+
+Because an override replaces the profile wholesale, a field the YAML leaves out reverts to its default, and that counts as a change. Omitting `sandbox` from an override of a profile that sets `sandbox.mode: bwrap` is a `replace` at `/sandbox/mode`, refused by the `/sandbox` entry. To change one field with `override_yaml`, restate the profile and edit that field; `patch_ops` is usually the shorter way to say the same thing.
+
 ### Safe example
 
 A profile that has `mcp.runtime_overrides.enabled: true` and allows `/scanners/*/options/severity_threshold` plus `/global_settings/allowlist`. The client raises bandit's threshold to `HIGH` and narrows the allowlist:
@@ -359,7 +365,7 @@ The streamable-HTTP transport puts the MCP server on the network. A few invarian
 - **The auth header is the only built-in gate.** There is no per-tool RBAC, no per-tenant rate limiting, no audit log beyond standard logging. Anything more sophisticated belongs in a fronting proxy.
 - **Set `ASH_MCP_ALLOWED_ROOTS`.** Scan targets are confined to the roots it names, plus the per-session workspace. The fallback when it is unset refuses only a short list of system directories and leaves the rest of the server's filesystem available as a scan target, so on a network-reachable deployment it is not a substitute for naming the roots yourself. See [Restricting scan targets](#restricting-scan-targets).
 - **Always run behind TLS in production.** ASH does not terminate TLS itself. Use nginx, traefik, an API gateway, or a service mesh sidecar.
-- **The runtime-override allowlist defaults to disabled.** A profile must explicitly set `mcp.runtime_overrides.enabled: true` and enumerate `allowed_paths` for any client patching to succeed. Leaving it off is the safe default — clients can still pick profiles, just not modify them.
+- **The runtime-override allowlist defaults to disabled.** A profile must explicitly set `mcp.runtime_overrides.enabled: true` and enumerate `allowed_paths` for any client patching to succeed, through `patch_ops` or `override_yaml`. Leaving it off is the safe default — clients can still pick profiles, just not modify them.
 - **Source-upload limits are per-session, not per-tenant.** A misbehaving tenant can still consume their session quota. Pair the transport with upstream rate limits if untrusted clients can connect.
 - **Workspaces are wiped on disconnect.** Don't rely on session-resident state to survive reconnects; persisted state across server restarts is explicitly out of scope (Track 10.8).
 
