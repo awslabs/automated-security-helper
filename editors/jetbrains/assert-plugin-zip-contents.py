@@ -94,6 +94,7 @@ check, which is a failure and not a skip.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import importlib.util
 import io
 import pathlib
@@ -104,6 +105,7 @@ import tempfile
 import warnings
 import zipfile
 from types import ModuleType
+from typing import Tuple, Union
 
 # Set before the shared gate is imported. Importing compiles it and would write
 # __pycache__ next to the source, inside .github/scripts/, which this check only reads.
@@ -270,6 +272,37 @@ EOCD_SIZE = 22
 FLAG_DATA_DESCRIPTOR = 0x08
 
 
+@dataclasses.dataclass(frozen=True)
+class CentralRecord:
+    offset: int
+    crc: int
+    compressed: int
+    uncompressed: int
+    flags: int
+    name: str
+
+
+def descriptor_length(data: bytes, at: int, record: CentralRecord) -> int | None:
+    """The length of the data descriptor at `at`, or None when it does not match `record`.
+
+    A descriptor repeats the entry's CRC and sizes, optionally behind the PK\\x07\\x08
+    signature. Accepting any 12 or 16 bytes after a body would let the flag hide that many
+    arbitrary bytes per entry, so both forms are compared field by field with the central
+    record. The signed form is tried first; an unsigned descriptor whose CRC happens to equal
+    the signature value is still found by the second comparison.
+    """
+    fields = (record.crc, record.compressed, record.uncompressed)
+    if (
+        data[at : at + 4] == DATA_DESCRIPTOR_SIGNATURE
+        and len(data) >= at + 16
+        and struct.unpack_from("<III", data, at + 4) == fields
+    ):
+        return 16
+    if len(data) >= at + 12 and struct.unpack_from("<III", data, at) == fields:
+        return 12
+    return None
+
+
 def zip_layout_problems(label: str, data: bytes) -> list[str]:
     """Refuses a ZIP that carries bytes no ZIP reader would extract.
 
@@ -307,9 +340,7 @@ def zip_layout_problems(label: str, data: bytes) -> list[str]:
             f"but the end record is at byte {eocd}, so bytes between them are not extracted"
         )
 
-    records: list[
-        tuple[int, int, int, str]
-    ] = []  # offset, compressed size, flags, name
+    records: list[CentralRecord] = []
     cursor = directory_offset
     for index in range(count):
         if data[cursor : cursor + 4] != CENTRAL_HEADER_SIGNATURE:
@@ -317,15 +348,24 @@ def zip_layout_problems(label: str, data: bytes) -> list[str]:
                 f"{label}: central-directory entry {index + 1} has no signature"
             ]
         (flags,) = struct.unpack_from("<H", data, cursor + 8)
-        (compressed,) = struct.unpack_from("<I", data, cursor + 20)
+        crc, compressed, uncompressed = struct.unpack_from("<III", data, cursor + 16)
         name_length, extra_length, comment = struct.unpack_from(
             "<HHH", data, cursor + 28
         )
         (offset,) = struct.unpack_from("<I", data, cursor + 42)
-        name = data[
+        raw_name = data[
             cursor + CENTRAL_HEADER_SIZE : cursor + CENTRAL_HEADER_SIZE + name_length
         ]
-        records.append((offset, compressed, flags, name.decode("utf-8", "replace")))
+        records.append(
+            CentralRecord(
+                offset=offset,
+                crc=crc,
+                compressed=compressed,
+                uncompressed=uncompressed,
+                flags=flags,
+                name=raw_name.decode("utf-8", "replace"),
+            )
+        )
         cursor += CENTRAL_HEADER_SIZE + name_length + extra_length + comment
     if cursor != directory_offset + directory_size:
         problems.append(
@@ -334,7 +374,8 @@ def zip_layout_problems(label: str, data: bytes) -> list[str]:
         )
 
     expected = 0
-    for offset, compressed, flags, name in sorted(records):
+    for record in sorted(records, key=lambda r: r.offset):
+        offset, name = record.offset, record.name
         if offset != expected:
             problems.append(
                 f"{label}: {name} starts at byte {offset}, but the previous record ended at "
@@ -351,10 +392,20 @@ def zip_layout_problems(label: str, data: bytes) -> list[str]:
                 f"{label}: {name} has no local file header at byte {offset}"
             ]
         name_length, extra_length = struct.unpack_from("<HH", data, offset + 26)
-        expected = offset + LOCAL_HEADER_SIZE + name_length + extra_length + compressed
-        if flags & FLAG_DATA_DESCRIPTOR:
-            has_signature = data[expected : expected + 4] == DATA_DESCRIPTOR_SIGNATURE
-            expected += 16 if has_signature else 12
+        expected = (
+            offset + LOCAL_HEADER_SIZE + name_length + extra_length + record.compressed
+        )
+        if record.flags & FLAG_DATA_DESCRIPTOR:
+            length = descriptor_length(data, expected, record)
+            if length is None:
+                return problems + [
+                    (
+                        f"{label}: {name} sets the data-descriptor flag, but the 12 or 16 "
+                        "bytes after its body do not repeat the CRC and sizes of its central "
+                        "record, so they are bytes no reader extracts"
+                    )
+                ]
+            expected += length
     if expected != directory_offset:
         problems.append(
             f"{label}: its last record ends at byte {expected} but the central directory "
@@ -405,6 +456,9 @@ def inspect_distribution(
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as error:
         problems.append(f"{distribution.name} does not open as a ZIP archive: {error}")
+        if starts_with_zip(data[:4]):
+            # Laid out wrongly enough that zipfile gives up, which is worth saying why.
+            problems.extend(zip_layout_problems(distribution.name, data))
         return [], problems
     problems.extend(zip_layout_problems(distribution.name, data))
     with archive:
@@ -482,7 +536,10 @@ def check_own_jar(name: str, data: bytes) -> list[str]:
     try:
         inner = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as error:
-        return [f"{name} begins like a ZIP but does not open as one: {error}"]
+        return [
+            f"{name} begins like a ZIP but does not open as one: {error}",
+            *zip_layout_problems(name, data),
+        ]
     problems.extend(zip_layout_problems(name, data))
     with inner:
         for info in file_entries(name, inner, problems):
@@ -610,6 +667,38 @@ def with_hidden_gap(data: bytes, payload: bytes) -> bytes:
     return bytes(patched)
 
 
+def with_descriptor(data: bytes, descriptor: bytes) -> bytes:
+    """Sets the data-descriptor flag on the last record and writes `descriptor` after it."""
+    eocd = data.rfind(EOCD_SIGNATURE)
+    (count,) = struct.unpack_from("<H", data, eocd + 10)
+    (directory_offset,) = struct.unpack_from("<I", data, eocd + 16)
+    cursor, last_central, last_local = directory_offset, -1, -1
+    for _ in range(count):
+        (offset,) = struct.unpack_from("<I", data, cursor + 42)
+        if offset > last_local:
+            last_central, last_local = cursor, offset
+        lengths = struct.unpack_from("<HHH", data, cursor + 28)
+        cursor += CENTRAL_HEADER_SIZE + sum(lengths)
+    patched = bytearray(data)
+    for flags_at in (last_central + 8, last_local + 6):
+        (flags,) = struct.unpack_from("<H", patched, flags_at)
+        struct.pack_into("<H", patched, flags_at, flags | FLAG_DATA_DESCRIPTOR)
+    return with_hidden_gap(bytes(patched), descriptor)
+
+
+def last_record_fields(data: bytes) -> tuple[int, int, int]:
+    info = max(
+        zipfile.ZipFile(io.BytesIO(data)).infolist(), key=lambda i: i.header_offset
+    )
+    return info.CRC, info.compress_size, info.file_size
+
+
+def with_inner_gap(data: bytes, payload: bytes) -> bytes:
+    """Writes `payload` between the central directory and the end record, moving nothing."""
+    eocd = data.rfind(EOCD_SIGNATURE)
+    return data[:eocd] + payload + data[eocd:]
+
+
 def with_comment(data: bytes, comment: bytes) -> bytes:
     out = io.BytesIO(data)
     with zipfile.ZipFile(out, "a") as archive:
@@ -617,9 +706,18 @@ def with_comment(data: bytes, comment: bytes) -> bytes:
     return out.getvalue()
 
 
-def self_test_cases() -> list[tuple[str, bytes, str | None]]:
-    """(label, distribution bytes, a substring the problems must contain or None for clean)."""
+Expectation = Union[str, Tuple[str, ...], None]
+
+
+def self_test_cases() -> list[tuple[str, bytes, Expectation]]:
+    """(label, distribution bytes, what the problems must contain, or None for clean).
+
+    A tuple names several substrings, each of which some problem must contain.
+    """
     tar = tar_bytes()
+    clean_distribution = distribution_with_jar(jar_with({}))
+    crc, compressed, uncompressed = last_record_fields(clean_distribution)
+    unsigned_descriptor = struct.pack("<III", crc, compressed, uncompressed)
     directory_with_bytes = io.BytesIO()
     with zipfile.ZipFile(directory_with_bytes, "w") as archive:
         for entry, data in clean_jar_entries().items():
@@ -695,23 +793,6 @@ def self_test_cases() -> list[tuple[str, bytes, str | None]]:
             "did not build",
         ),
         (
-            "duplicate class name in our jar, ELF first and a real class second",
-            distribution_with_jar(
-                zip_with_duplicate(
-                    OWN_CLASS,
-                    ELF,
-                    CLASS_HEADER + b"\x00" * 32,
-                    {k: v for k, v in clean_jar_entries().items() if k != OWN_CLASS},
-                )
-            ),
-            "2 entries named " + OWN_CLASS,
-        ),
-        (
-            "duplicate own jar in the distribution, ELF first and a clean jar second",
-            zip_with_duplicate(OWN_JAR, ELF, jar_with({}), {}),
-            "2 entries named " + OWN_JAR,
-        ),
-        (
             "binary with no known header renamed to an icon in our jar",
             distribution_with_jar(
                 jar_with({"icons/ash.svg": bytes(range(1, 256)) * 4})
@@ -751,6 +832,67 @@ def self_test_cases() -> list[tuple[str, bytes, str | None]]:
             "after its end record",
         ),
         (
+            "valid unsigned data descriptor after the last record",
+            with_descriptor(clean_distribution, unsigned_descriptor),
+            None,
+        ),
+        (
+            "valid signed data descriptor after the last record",
+            with_descriptor(
+                clean_distribution, DATA_DESCRIPTOR_SIGNATURE + unsigned_descriptor
+            ),
+            None,
+        ),
+        (
+            "12 ELF bytes hidden behind the data-descriptor flag of the distribution",
+            with_descriptor(clean_distribution, ELF[:12]),
+            "do not repeat the CRC and sizes",
+        ),
+        (
+            "16 ELF bytes behind a descriptor signature on our jar's last record",
+            distribution_with_jar(
+                with_descriptor(jar_with({}), DATA_DESCRIPTOR_SIGNATURE + ELF[:12])
+            ),
+            "do not repeat the CRC and sizes",
+        ),
+        (
+            "ELF hidden between the central directory and the end record",
+            with_inner_gap(clean_distribution, ELF),
+            "but the end record is at byte",
+        ),
+        (
+            "Kotlin module file outside META-INF in our jar",
+            distribution_with_jar(
+                jar_with(
+                    {
+                        "io/github/awslabs/ash/jetbrains/x.kotlin_module": clean_jar_entries()[
+                            "META-INF/ash-jetbrains.kotlin_module"
+                        ]
+                    }
+                )
+            ),
+            "outside META-INF/",
+        ),
+        (
+            # Both messages are required: the duplicate refusal alone would pass this case
+            # with a check that reads by name and never opens the ELF stored first.
+            "duplicate class name in our jar, and the first copy is read too",
+            distribution_with_jar(
+                zip_with_duplicate(
+                    OWN_CLASS,
+                    ELF,
+                    CLASS_HEADER + b"\x00" * 32,
+                    {k: v for k, v in clean_jar_entries().items() if k != OWN_CLASS},
+                )
+            ),
+            ("2 entries named " + OWN_CLASS, "not a JVM class file"),
+        ),
+        (
+            "duplicate own jar in the distribution, and the first copy is read too",
+            zip_with_duplicate(OWN_JAR, ELF, jar_with({}), {}),
+            ("2 entries named " + OWN_JAR, "does not begin with a ZIP record"),
+        ),
+        (
             "loose class",
             zip_bytes(
                 {OWN_JAR: jar_with({}), "ash-jetbrains/lib/Loose.class": CLASS_HEADER}
@@ -775,7 +917,8 @@ def run_self_test() -> int:
                     else f"FAILED: refused a clean distribution: {problems}"
                 )
             else:
-                ok = any(expected in problem for problem in problems)
+                wanted = (expected,) if isinstance(expected, str) else expected
+                ok = all(any(w in problem for problem in problems) for w in wanted)
                 verdict = (
                     "refused"
                     if ok
