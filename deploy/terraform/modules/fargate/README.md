@@ -102,7 +102,7 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 | `enable_execute_command` | — | `bool` | `false` | ECS Exec is an extra access path. |
 | `enable_deletion_protection` | — | `bool` | `false` | |
 | `additional_environment_variables` | — | `map(string)` | `{}` | Module keys win on collision. |
-| `kms_key_arn` | — | `string` | `null` | Customer managed key for the auth header secret and the task log group. `null` keeps AWS managed encryption. The key policy must admit CloudWatch Logs. |
+| `kms_key_arn` | — | `string` | `null` | Customer managed key for the auth header secret, the task log group and, with `enable_execute_command` on a cluster this module creates, ECS Exec sessions. `null` keeps AWS managed encryption. The key policy must admit CloudWatch Logs. |
 | `tags` | — | `map(string)` | `{}` | |
 
 ## Outputs

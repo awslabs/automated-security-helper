@@ -92,3 +92,45 @@ run "no_key_leaves_aws_managed_encryption" {
     error_message = "With kms_key_arn unset, no kms:Decrypt statement should be granted."
   }
 }
+
+run "key_and_ecs_exec_encrypt_exec_sessions" {
+  command = plan
+
+  variables {
+    enable_execute_command = true
+    kms_key_arn            = "arn:aws:kms:us-east-1:${format("%012d", 1)}:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  }
+
+  assert {
+    condition     = one(one(aws_ecs_cluster.this[0].configuration).execute_command_configuration).kms_key_id == var.kms_key_arn
+    error_message = "With ECS Exec on, the cluster does not encrypt exec sessions with kms_key_arn."
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.task.statement :
+      s.sid == "DecryptEcsExecSession" && s.actions == toset(["kms:Decrypt"]) && s.resources == toset([var.kms_key_arn])
+    ])
+    error_message = "The task role is not granted kms:Decrypt on kms_key_arn, so ECS Exec sessions could not open."
+  }
+}
+
+run "ecs_exec_without_key_leaves_the_cluster_unchanged" {
+  command = plan
+
+  variables {
+    enable_execute_command = true
+  }
+
+  assert {
+    condition     = length(aws_ecs_cluster.this[0].configuration) == 0
+    error_message = "With kms_key_arn unset, the cluster should carry no execute command configuration."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.task.statement : s.sid != "DecryptEcsExecSession"
+    ])
+    error_message = "With kms_key_arn unset, no ECS Exec kms:Decrypt statement should be granted."
+  }
+}
