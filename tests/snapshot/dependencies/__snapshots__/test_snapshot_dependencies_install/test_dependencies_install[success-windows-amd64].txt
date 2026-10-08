@@ -19,7 +19,7 @@ Installing dependencies for scanner plugin: bandit
 Running command: uv tool install bandit[sarif,toml]>=1.7.0,<2.0.0
 Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: cdk-nag
-Running command: python3 -m pip install aws-cdk-lib<3.0.0,>=2.269.0 cdk-nag<4.0.0,>=3.0
+Running command: python3 -m pip install aws-cdk-lib<3.0.0,>=2.273.0 cdk-nag<4.0.0,>=3.0
 constructs<11.0.0,>=10.8
 Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: cfn-nag

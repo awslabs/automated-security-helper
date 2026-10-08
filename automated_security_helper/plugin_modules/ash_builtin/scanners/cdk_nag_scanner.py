@@ -71,7 +71,7 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 # derives its distribution NAMES from this list. That ordering is load bearing --
 # a module-level name has to exist before the statement that reads it.
 _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
-    "aws-cdk-lib>=2.269.0,<3.0.0",
+    "aws-cdk-lib>=2.273.0,<3.0.0",
     "cdk-nag>=3.0,<4.0.0",
     "constructs>=10.8,<11.0.0",
 ]
