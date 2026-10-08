@@ -216,7 +216,28 @@ def _uv_directories() -> List[Path]:
         data / "uv" / "tools",
         data / "uv" / "python",
     ]
-    return _existing(candidates)
+    found = _existing(candidates)
+    # Each installed tool's environment runs on the interpreter it was created
+    # with, which need not be in uv's default python directory: a tool installed
+    # with UV_PYTHON_INSTALL_DIR set elsewhere keeps pointing there. Its
+    # bin/python symlink names it.
+    for tools_dir in [p for p in found if p.name == "tools" or p == candidates[0]]:
+        try:
+            entries = list(tools_dir.iterdir())
+        except OSError:
+            continue
+        for tool in entries:
+            interpreter = tool / "bin" / "python"
+            if not interpreter.is_symlink():
+                continue
+            real = Path(os.path.realpath(interpreter))
+            too_broad = {Path("/"), Path(os.path.realpath(home))}
+            for directory in [h.parent for h in _symlink_hops(interpreter)[1:]] + (
+                [real.parent.parent] if real.parent.name in _BIN_DIR_NAMES else []
+            ):
+                if Path(os.path.realpath(directory)) not in too_broad:
+                    found.append(directory)
+    return _existing(found)
 
 
 def uv_cache_directory() -> Optional[Path]:

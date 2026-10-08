@@ -592,3 +592,24 @@ class TestPluginDeclarations:
         )
         policy, _ = self._policy_for(plugin, tmp_path, monkeypatch)
         assert policy.network is False
+
+
+def test_a_uv_tool_interpreter_installed_elsewhere_is_readable(
+    layout, tmp_path, monkeypatch
+):
+    """A uv tool environment runs on the interpreter it was created with.
+
+    With UV_PYTHON_INSTALL_DIR set elsewhere at install time, that interpreter
+    lives outside uv's default python directory; the sandbox has to show it or
+    every uv tool fails to start. Measured: bandit and checkov failed to exec
+    under both bwrap and landlock until this was added.
+    """
+    pythons = tmp_path / "elsewhere" / "cpython-3.13" / "bin"
+    pythons.mkdir(parents=True)
+    interpreter = pythons / "python3.13"
+    interpreter.write_text("")
+    tool_bin = layout.home / ".local" / "share" / "uv" / "tools" / "bandit" / "bin"
+    tool_bin.mkdir(parents=True)
+    (tool_bin / "python").symlink_to(interpreter)
+    exposed = _resolved(_policy(layout).read_only)
+    assert Path(os.path.realpath(pythons.parent)) in exposed
