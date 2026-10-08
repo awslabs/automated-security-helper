@@ -229,15 +229,29 @@ def resolve_config(
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
     root = Path(scanned_root)
-    # With no config file, the config is get_default_config(): ASH_CONFIG's file
-    # when that variable names one, which can be inside the tree as well.
-    default_in_tree = files_inside(default_config_chain(), root)
-    in_tree = files_inside(chain, root) if chain else default_in_tree
-    if in_tree:
-        trusted = AshConfig() if default_in_tree else get_default_config()
-        if config_overrides:
-            trusted = apply_config_overrides(trusted, config_overrides)
-        confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
+    if chain:
+        in_tree = files_inside(chain, root)
+        if not in_tree:
+            return config
+        default_in_tree = files_inside(default_config_chain(), root)
+    else:
+        # With no config file, the config is get_default_config(): ASH_CONFIG's
+        # file when that variable names one, which can be inside the tree too.
+        in_tree = default_in_tree = files_inside(default_config_chain(), root)
+        if not in_tree:
+            return config
+    trusted = AshConfig() if default_in_tree else get_default_config()
+    # Only an override under `sandbox` can change the sandbox section, and replaying
+    # the rest onto the defaults could fail where the config file supplied the
+    # section they write into.
+    sandbox_overrides = [
+        override
+        for override in config_overrides or []
+        if override.partition("=")[0].removesuffix("+").split(".")[0] == "sandbox"
+    ]
+    if sandbox_overrides:
+        trusted = apply_config_overrides(trusted, sandbox_overrides)
+    confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
     return config
 
 

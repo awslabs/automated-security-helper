@@ -399,3 +399,30 @@ def test_detect_secrets_verification_from_the_repository_gets_no_network(tmp_pat
         network_limit=config.sandbox.network_limit,
     )
     assert policy.network is False
+
+
+def test_only_sandbox_overrides_are_replayed_onto_the_trusted_defaults(
+    tmp_path, monkeypatch
+):
+    from automated_security_helper.config import resolve_config as module
+
+    replayed = []
+    real = module.apply_config_overrides
+
+    def recording(config, overrides):
+        replayed.append(list(overrides))
+        return real(config, overrides)
+
+    monkeypatch.setattr(module, "apply_config_overrides", recording)
+    resolve_config(
+        source_dir=_repo(tmp_path),
+        config_overrides=[
+            "project_name=renamed",
+            "sandbox.network_scanners+=[grype]",
+        ],
+    )
+    # Once for the scan's config, once for the trusted defaults.
+    assert replayed == [
+        ["project_name=renamed", "sandbox.network_scanners+=[grype]"],
+        ["sandbox.network_scanners+=[grype]"],
+    ]
