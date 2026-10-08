@@ -26,10 +26,10 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { REPO_ROOT, repoPath } from './repo-inputs';
 import { UPDATE_ENV, UPDATE_FLAG, underCi, updateAllowed } from './update-policy';
 
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
-const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
 
 // A `#` at line start or after whitespace starts a comment in YAML and shell; a note
 // explaining the rule must not trip it, and nothing a comment says is executed.
@@ -214,9 +214,9 @@ describe('no CI path updates a snapshot', () => {
   });
 
   test('no file under .github/ and no npm script passes one', () => {
-    const files = filesUnder(path.join(REPO_ROOT, '.github'));
+    const files = filesUnder(repoPath('.github'));
     expect(files.some((file) => file.endsWith('ash-vscode-extension.yml'))).toBe(true);
-    const checker = fs.readFileSync(path.join(REPO_ROOT, POLICY_CHECKER), 'utf8');
+    const checker = fs.readFileSync(repoPath(POLICY_CHECKER), 'utf8');
     expect(checker).toContain('def find_update_flags(');
     const offenders: Record<string, string[]> = {};
     for (const file of files) {
@@ -289,7 +289,7 @@ describe('the pixel suite environment is pinned', () => {
     expect(dockerfile).toMatch(/^ARG VSCODE_SHA256=[0-9a-f]{64}$/m);
     expect(dockerfile).toMatch(/sha256sum -c -/);
     const workflow = fs.readFileSync(
-      path.join(REPO_ROOT, '.github', 'workflows', 'ash-vscode-extension.yml'),
+      repoPath('.github/workflows/ash-vscode-extension.yml'),
       'utf8',
     );
     expect(workflow).toContain(`ASH_IT_VSCODE_VERSION: "${version}"`);
