@@ -1,0 +1,11 @@
+{
+  "command": [
+    "pnpm",
+    "audit",
+    "--json"
+  ],
+  "pnpm_version": "12.10.1",
+  "returncode": 1,
+  "stderr": "Error: \u001b[31mERR_PNPM_AUDIT_BAD_RESPONSE\u001b[0m\n\n  \u001b[31m\u00d7\u001b[0m The audit endpoint (at http://127.0.0.1:47617/-/npm/v1/security/\n  \u001b[31m\u2502\u001b[0m advisories/bulk) responded with 500: {\"error\":\"Internal Server Error\"}\n\n",
+  "stdout": ""
+}

@@ -1,0 +1,11 @@
+{
+  "command": [
+    "pnpm",
+    "audit",
+    "--json"
+  ],
+  "pnpm_version": "12.10.1",
+  "returncode": 1,
+  "stderr": "Error: \u001b[31mERR_PNPM_AUDIT_BAD_RESPONSE\u001b[0m\n\n  \u001b[31m\u00d7\u001b[0m Failed to request the audit endpoint (at http://127.0.0.1:9/-/npm/v1/\n  \u001b[31m\u2502\u001b[0m security/advisories/bulk): error sending request for url\n  \u001b[31m\u2502\u001b[0m (http://127.0.0.1:9/-/npm/v1/security/advisories/bulk)\n\u001b[31m  \u251c\u2500\u25b6 \u001b[0mclient error (Connect)\n\u001b[31m  \u251c\u2500\u25b6 \u001b[0mtcp connect error\n\u001b[31m  \u2570\u2500\u25b6 \u001b[0mConnection refused (os error 111)\n\n",
+  "stdout": ""
+}

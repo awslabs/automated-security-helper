@@ -59,7 +59,7 @@ _REPORT_KEY = {"npm": "vulnerabilities", "pnpm": "advisories"}
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
-# Advisory severity to SARIF level, for npm and yarn alike.
+# Advisory severity to SARIF level, for npm, yarn and pnpm alike.
 _SEVERITY_LEVEL = {
     "critical": "error",
     "high": "error",
@@ -444,14 +444,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 advisories = document.get("advisories") or {}
                 if isinstance(advisories, dict):
                     is_report = True
-                    for advisory in advisories.values():
-                        record = (
-                            cls._v1_advisory_record(advisory)
-                            if isinstance(advisory, dict)
-                            else None
-                        )
-                        if record is not None:
-                            records.append(record)
+                    records.extend(cls._v1_advisory_records(advisories))
                     meta = document.get("metadata")
                     if isinstance(meta, dict):
                         metadata = {
@@ -493,10 +486,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             )
 
         # One record per (advisory, package); yarn 1 repeats an advisory once
-        # per dependency path that reaches it.
+        # per dependency path that reaches it. Keyed on the advisory's id before
+        # its URL: one GHSA can come back as several ids, one per vulnerable
+        # range (minimist's GHSA-xvch-5gv4-984h is <0.2.4 and >=1.0.0 <1.2.6),
+        # and merging those would report each version under another's range.
         merged: Dict[tuple[str, str], Dict[str, Any]] = {}
         for record in records:
-            key = (str(record["url"] or record["id"]), record["package"])
+            key = (str(record["id"] or record["url"]), record["package"])
             if key not in merged:
                 merged[key] = record
                 continue
@@ -505,17 +501,40 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 known.extend(p for p in paths if p not in known)
         return {_YARN_ADVISORIES_KEY: list(merged.values()), "metadata": metadata}, None
 
+    @classmethod
+    def _v1_advisory_records(cls, advisories: Any) -> List[Dict[str, Any]]:
+        """Records for an npm v1 ``advisories`` object, as pnpm audit writes it.
+
+        `pnpm audit --json` keys advisories by id, one entry per vulnerable
+        range, and lists each installed version that range matches under
+        ``findings``. An entry is never repeated, so nothing is merged: a GHSA
+        split across ranges stays one record per range, each with its own
+        ``vulnerable_versions``.
+        """
+        if not isinstance(advisories, dict):
+            return []
+        records = []
+        for advisory in advisories.values():
+            record = (
+                cls._v1_advisory_record(advisory)
+                if isinstance(advisory, dict)
+                else None
+            )
+            if record is not None:
+                records.append(record)
+        return records
+
     def _add_yarn_results(
         self,
         records: List[Dict[str, Any]],
         rules_dict: Dict[str, ReportingDescriptor],
         results: List[Result],
     ) -> None:
-        """Rules and results for yarn advisories, in the shape npm's take.
+        """Rules and results for yarn and pnpm advisories, in the shape npm's take.
 
         One result per installed version of the advisory's package. The URI is
         the one the npm path gives a hoisted package, so path-based
-        suppressions read the same; yarn does not say where a copy is
+        suppressions read the same; neither yarn nor pnpm says where a copy is
         installed, so ``package_path`` is left out.
         """
         for record in records:
@@ -887,6 +906,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 npm_audit_results[_YARN_ADVISORIES_KEY], rules_dict, results
             )
 
+        # pnpm audit writes npm's v1 report, ``advisories`` and ``metadata``,
+        # where npm 7+ writes ``vulnerabilities``. Read only the vulnerabilities
+        # key and a pnpm project with real advisories converted to no findings.
+        if "advisories" in npm_audit_results:
+            self._add_yarn_results(
+                self._v1_advisory_records(npm_audit_results["advisories"]),
+                rules_dict,
+                results,
+            )
+
         # Add all rules to the tool component
         tool_component.rules = list(rules_dict.values())
 
@@ -1230,6 +1259,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     all_results.setdefault(
                                         "vulnerabilities", {}
                                     ).update(audit_results["vulnerabilities"])
+                                # pnpm's advisories, so results.json keeps them
+                                if isinstance(audit_results.get("advisories"), dict):
+                                    all_results.setdefault("advisories", {}).update(
+                                        audit_results["advisories"]
+                                    )
                                 # Update metadata
                                 if "metadata" in audit_results:
                                     for key, value in audit_results["metadata"].items():

@@ -612,6 +612,16 @@
   without its closing `auditSummary`, yarn 2+ exiting non-zero without advisories, or an
   error event or crash) goes through the same failure path as npm and pnpm.
 
+- npm-audit now reports pnpm findings. `pnpm audit --json` writes npm's v1 report, with
+  `advisories` and `metadata`, and the scanner read only npm 7's `vulnerabilities` key, so
+  a project with a `pnpm-lock.yaml` came out PASSED with 0 findings and exit 0 whatever
+  its dependencies held. Each pnpm advisory now becomes one result per installed version
+  it lists, with the npm path's severity levels, rule ids, URI and properties, so a
+  vulnerable pnpm project fails the scan (exit 2). A GHSA that pnpm, or yarn 2 and 3,
+  return as several advisories, one per vulnerable range, keeps each range on its own
+  results instead of reporting every version under the first range. A failed pnpm audit
+  is still ERROR.
+
 - MCP config tools now confine config paths, including `extends` chains, to the allowed roots.
   The `get_config`, `validate_config`, `explain_finding`, `suggest_suppression` and
   `diff_scan_results` functions in `cli/mcp_server.py` now take the MCP `Context` as
