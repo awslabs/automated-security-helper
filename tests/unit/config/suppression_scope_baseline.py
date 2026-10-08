@@ -697,7 +697,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("B108", "deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py"),
         ("B404", "deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py"),
         ("B603", "deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py"),
-        ("DS-0002", "deploy/terraform/modules/codecommit-gate/files/gate.Dockerfile"),
         ("DS-0026", "deploy/terraform/modules/codecommit-gate/files/gate.Dockerfile"),
         ("AWS-0017", "deploy/terraform/modules/codecommit-gate/main.tf"),
         ("AWS-0031", "deploy/terraform/modules/codecommit-gate/main.tf"),

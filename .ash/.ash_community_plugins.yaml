@@ -1005,10 +1005,12 @@ global_settings:
     # questions, and the mapping is one to one:
     #
     #   DS-0002 "specify at least 1 USER command with a non-root user" maps to
-    #   CKV_DOCKER_3 on wrapper.Dockerfile, which sets no USER at all, and to
-    #   CKV_DOCKER_8 on gate.Dockerfile, which sets USER root. checkov reports
-    #   CKV_DOCKER_3 only on the first and CKV_DOCKER_8 only on the second; trivy
-    #   reports DS-0002 on both, because one rule covers both shapes.
+    #   CKV_DOCKER_3 on wrapper.Dockerfile, which sets no USER at all. It used to
+    #   map to CKV_DOCKER_8 on gate.Dockerfile too, which ended on USER root; since
+    #   #762 that file switches back to USER ${ASH_UID}:${ASH_GID} after its pip
+    #   install, so trivy v0.75.0 no longer reports DS-0002 there and the entry for
+    #   it is gone. A suppression that matches nothing would only hide the finding
+    #   if the file went back to ending on root.
     #
     #   DS-0026 "add HEALTHCHECK" maps to CKV_DOCKER_2 on both files.
     #
@@ -1038,16 +1040,6 @@ global_settings:
         one. The ash_image_target input decides this, not the wrapper. Same
         reasoning as this file's inline CKV_DOCKER_3 skip, and the reason the COPY
         instructions use --chmod rather than a RUN chmod.
-    - rule_id: DS-0002
-      path: deploy/terraform/modules/codecommit-gate/files/gate.Dockerfile
-      reason: >-
-        USER root is set and cannot be reverted: pip needs to write to
-        site-packages, ASH's scanners need root to run, and no fixed uid could be
-        restored because only the base image's non-root target defines one. This
-        image is a Lambda function, where each invocation gets a single-tenant
-        execution environment with a read-only root filesystem outside /tmp, so root
-        confers nothing across a boundary. Same reasoning as this file's inline
-        CKV_DOCKER_8 skip.
     - rule_id: DS-0026
       path: deploy/terraform/modules/ash-image-pipeline/files/wrapper.Dockerfile
       reason: >-
