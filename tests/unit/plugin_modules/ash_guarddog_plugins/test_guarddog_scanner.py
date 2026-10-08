@@ -1571,3 +1571,26 @@ def test_a_write_to_a_staged_file_does_not_reach_the_source(tmp_path):
     after = original.stat()
     assert (after.st_ino, after.st_nlink) == (before.st_ino, before.st_nlink)
     assert (staging / "setup.py").stat().st_ino != before.st_ino
+
+
+# tool_version is appended to the package name for uv, so it must stay a version
+# constraint: a direct reference would let the config choose what uv installs.
+@pytest.mark.parametrize(
+    "value",
+    [
+        " @ file:///tmp/evil",
+        "@ git+https://example.invalid/evil.git",
+        "[x]>=3",
+        "3.2.0",
+    ],
+)
+def test_a_tool_version_that_is_not_a_specifier_set_is_rejected(value):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="not a version constraint"):
+        GuardDogScannerConfigOptions(tool_version=value)
+
+
+@pytest.mark.parametrize("value", ["==3.2.0", ">=3.1,<4", None])
+def test_a_specifier_set_tool_version_is_accepted(value):
+    assert GuardDogScannerConfigOptions(tool_version=value).tool_version == value

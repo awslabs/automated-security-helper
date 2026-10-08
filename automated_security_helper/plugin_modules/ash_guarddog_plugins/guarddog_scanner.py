@@ -96,6 +96,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.package_identity import identity_properties
+from automated_security_helper.utils.pre_installed_tool import (
+    validate_version_constraint,
+)
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
@@ -341,6 +344,12 @@ class GuardDogScannerConfigOptions(ScannerOptionsBase):
         int,
         Field(description="Timeout in seconds for tool installation"),
     ] = 300
+
+    @field_validator("tool_version")
+    @classmethod
+    def _valid_tool_version(cls, value: str | None) -> str | None:
+        # Appended to the package name for uv; see validate_version_constraint.
+        return validate_version_constraint(value)
 
     @field_validator("rules", "exclude_rules")
     @classmethod
