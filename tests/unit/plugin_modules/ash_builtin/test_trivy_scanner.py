@@ -1098,7 +1098,7 @@ def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
         ]
     ]
     (final,) = ran
-    assert final[:3] == ["trivy", "fs", "--skip-db-update"]
+    assert final[:4] == ["trivy", "fs", "--skip-db-update", "--cache-backend=memory"]
     assert "--skip-check-update" not in final
     # In place, so the invocation ASH records is the one that ran.
     assert command == final
@@ -1157,20 +1157,35 @@ def test_offline_runs_no_update(tmp_path, monkeypatch):
     scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
 
     assert fake.calls == []
-    assert ran == [["trivy", "fs", "/t"]]
+    assert ran == [["trivy", "fs", "--cache-backend=memory", "/t"]]
 
 
-def test_a_throwaway_cache_overlay_runs_no_update(tmp_path, monkeypatch):
-    """Under bwrap's overlay each spawn has its own cache copy: nothing is shared."""
-    fake = _FakeTrivy()
+def test_the_update_runs_outside_the_scanner_sandbox(tmp_path, monkeypatch):
+    """A sandbox may mount the cache read-only; the update must reach the host."""
+    from automated_security_helper.utils.sandbox import scope as scope_module
+
+    seen = []
+
+    class Recording(_FakeTrivy):
+        def __call__(self, argv, **kwargs):
+            seen.append(scope_module.active_scope())
+            return super().__call__(argv, **kwargs)
+
+    fake = Recording()
     ran = _update_env(tmp_path, monkeypatch, fake)
-    monkeypatch.setattr(trivy_base, "cache_writes_reach_the_host", lambda: False)
-    scanner = _scanner(tmp_path)
+    sandbox = object()
+    token = scope_module._ACTIVE.set(sandbox)
+    try:
+        _scanner(tmp_path)._run_subprocess(
+            command=["trivy", "fs", "/t"], results_dir=tmp_path
+        )
+        after = scope_module.active_scope()
+    finally:
+        scope_module._ACTIVE.reset(token)
 
-    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
-
-    assert fake.calls == []
-    assert ran == [["trivy", "fs", "/t"]]
+    assert seen == [None]
+    assert after is sandbox, "the scanner's own spawn runs back inside its sandbox"
+    assert ran[0][2] == "--skip-db-update"
 
 
 def test_a_failed_update_fails_the_scan_with_trivys_reason(tmp_path, monkeypatch):

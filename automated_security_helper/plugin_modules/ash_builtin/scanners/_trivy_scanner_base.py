@@ -26,10 +26,12 @@ so both config classes satisfy it without sharing a base.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
 import subprocess  # nosec B404 - spawn_run below is the sandbox choke point
+import tempfile
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, Generic, List, Optional, TypeVar
 
@@ -57,7 +59,7 @@ from automated_security_helper.utils.file_lock import exclusive_lock
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.process_env import snapshot_environ
-from automated_security_helper.utils.sandbox.scope import cache_writes_reach_the_host
+from automated_security_helper.utils.sandbox.scope import outside_scanner_sandbox
 from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.package_identity import (
@@ -130,17 +132,38 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
         return Path(base) / "trivy"
 
+    def _update_lock_path(self) -> Path:
+        """Where the update lock lives: in trivy's cache, or beside it when read-only.
+
+        A cache the operator provides read-only (a pre-seeded mount) still gets a
+        lock, in the system temporary directory and named for the cache, so the
+        scanners of this host still take turns; trivy then finds the database
+        current and writes nothing, or fails to update it and says why.
+        """
+        cache = self._trivy_cache_dir()
+        probe = cache if cache.exists() else cache.parent
+        if os.access(probe, os.W_OK):
+            return cache / UPDATE_LOCK_NAME
+        digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
+        return Path(tempfile.gettempdir()) / f"ash-trivy-update-{digest}.lock"
+
     def _run_subprocess(
         self, command: List[str], *args: Any, **kwargs: Any
     ) -> Dict[str, str]:
         """Bring trivy's shared caches up to date first, then run ``command``.
 
-        ``command`` gains the flags that skip the update, in place, so the
-        invocation ASH records is the one that ran.
+        ``command`` gains, in place so the invocation ASH records is the one that
+        ran, the flags that skip the update and ``--cache-backend=memory``. trivy
+        keeps its scan cache (``fanal/fanal.db``) in the cache directory unless told
+        otherwise, ``trivy repository`` included, and a sandbox may mount that
+        directory read-only: with the scan cache in memory the scan only reads the
+        database and checks there. The scan cache only saves re-analysing an
+        unchanged target, so results are the same either way.
         """
         flags = self._shared_update_flags(command, kwargs.get("results_dir"))
-        if flags:
-            command[2:2] = flags
+        if not any(a.startswith("--cache-backend") for a in command):
+            flags.append("--cache-backend=memory")
+        command[2:2] = flags
         return super()._run_subprocess(command, *args, **kwargs)
 
     def _shared_update_flags(
@@ -161,19 +184,24 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         trivy's update command returns at once. The scan-time staleness check
         (``utils/content_db_staleness.py``) still measures the database after.
 
-        Not done offline, where ``OFFLINE_FLAGS`` already skip every update, nor
-        when the sandbox mounts trivy's cache through a throwaway overlay: then
-        each spawn writes its own copy, nothing is shared, and an update made in
-        one spawn would be gone before the scan's spawn starts.
+        The update runs outside the scanner sandbox (``outside_scanner_sandbox``):
+        a sandbox may mount trivy's cache read-only, or through a throwaway
+        overlay, so an update made inside it would not reach the cache the scan
+        reads, or would let one sandboxed scanner change what the next one runs
+        on. The sandboxed scan then only reads the cache, which trivy (0.75, whose
+        default scan cache is in memory) does with the cache read-only. The update
+        commands run no scanner code and read nothing from the scanned tree.
+
+        Not done offline, where ``OFFLINE_FLAGS`` already skip every update.
         """
-        if self._offline() or not cache_writes_reach_the_host():
+        if self._offline():
             return []
         options: Any = self.config.options  # type: ignore[union-attr]
         wants_checks = "misconfig" in (options.scanners or [])
         executable = find_executable(command[0]) or command[0]
         config_args = [a for a in command if a.startswith("--config=")]
         env = {**snapshot_environ(), **self.extra_env}
-        with exclusive_lock(self._trivy_cache_dir() / UPDATE_LOCK_NAME):
+        with exclusive_lock(self._update_lock_path()), outside_scanner_sandbox():
             self._run_update(
                 [
                     executable,

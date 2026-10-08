@@ -615,3 +615,48 @@ def test_trivy_and_trivy_repo_share_an_empty_cache_without_racing(
             round_,
             log,
         )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_both_scanners_scan_from_a_read_only_prepared_cache(tmp_path, trivy_bin_dir):
+    """What a sandbox that mounts trivy's cache read-only leaves them.
+
+    ASH updates the database (and the checks bundle) outside the sandbox; the
+    scanners then only read the cache. Here the cache is prepared once, made
+    read-only, and both scanners scan with it; trivy's own update step finds the
+    database current and writes nothing.
+    """
+    source = _copy_fixture(tmp_path)
+    cache = tmp_path / "cache"
+    env = {
+        **os.environ,
+        "PATH": f"{trivy_bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "TRIVY_CACHE_DIR": str(cache),
+    }
+    env.pop("ASH_OFFLINE", None)
+    config = {
+        "project_name": "trivy-read-only-cache",
+        "ash_plugin_modules": [
+            "automated_security_helper.plugin_modules.ash_trivy_plugins"
+        ],
+        "scanners": {"trivy": {"enabled": True}},
+    }
+    proc, log = _run_ash(
+        source, tmp_path / "out0", config, env, "--scanners", "trivy,trivy-repo"
+    )
+    assert (cache / "db").is_dir(), log
+    for path in [cache, *cache.rglob("*")]:
+        path.chmod(path.stat().st_mode & ~0o222)
+    try:
+        proc, log = _run_ash(
+            source, tmp_path / "out1", config, env, "--scanners", "trivy,trivy-repo"
+        )
+        statuses = {
+            name: info.get("status")
+            for name, info in _aggregated(tmp_path / "out1")["scanner_results"].items()
+        }
+    finally:
+        for path in [cache, *cache.rglob("*")]:
+            path.chmod(path.stat().st_mode | 0o200)
+    assert statuses.get("trivy") == "FAILED", (statuses, log)
+    assert statuses.get("trivy-repo") == "FAILED", (statuses, log)

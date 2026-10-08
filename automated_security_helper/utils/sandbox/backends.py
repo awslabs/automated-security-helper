@@ -117,15 +117,6 @@ class SandboxBackend:
     name = ""
     platforms: Tuple[str, ...] = ()
 
-    @property
-    def caches_are_throwaway(self) -> bool:
-        """Whether a scanner's writes to its declared caches are discarded with it.
-
-        False unless the backend mounts caches through a throwaway overlay, in which
-        case each spawn writes its own copy and nothing it writes reaches the host.
-        """
-        return False
-
     def probe(self) -> Optional[str]:
         """None when the backend works here, otherwise why it does not."""
         if platform.system().lower() not in self.platforms:
@@ -220,10 +211,6 @@ class BwrapBackend(SandboxBackend):
     def __init__(self) -> None:
         self._executable: Optional[str] = None
         self._overlay = False
-
-    @property
-    def caches_are_throwaway(self) -> bool:
-        return self._overlay
 
     def _probe(self) -> Optional[str]:
         found = shutil.which("bwrap")
