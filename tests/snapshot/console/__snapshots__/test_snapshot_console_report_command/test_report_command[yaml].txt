@@ -216,6 +216,15 @@ ash_config:
     mode: 'off'
     network_scanners: null
   scanners:
+    actionlint:
+      enabled: true
+      name: actionlint
+      options:
+        config_file: null
+        pyflakes: null
+        scan_timeout: 1800
+        severity_threshold: null
+        shellcheck: null
     bandit:
       enabled: true
       name: bandit
@@ -242,6 +251,27 @@ ash_config:
           PCIDSS321Checks: false
         scan_timeout: 1800
         severity_threshold: null
+    cfn-guard:
+      enabled: true
+      name: cfn-guard
+      options:
+        rule_sets:
+        - wa-Security-Pillar
+        rules_paths: []
+        scan_timeout: 1800
+        severity_threshold: null
+    cfn-lint:
+      enabled: true
+      name: cfn-lint
+      options:
+        config_file: null
+        ignore_checks: []
+        include_checks: []
+        install_timeout: 300
+        regions: []
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.43.3,<2.0.0'
     cfn-nag:
       enabled: true
       name: cfn-nag
@@ -279,6 +309,15 @@ ash_config:
         scan_timeout: 1800
         severity_threshold: null
         skip_generated_lockfiles: true
+    gitleaks:
+      enabled: true
+      name: gitleaks
+      options:
+        baseline_path: null
+        config_file: null
+        max_target_megabytes: null
+        scan_timeout: 1800
+        severity_threshold: null
     grype:
       enabled: true
       name: grype
@@ -338,6 +377,32 @@ ash_config:
         offline: false
         scan_timeout: 1800
         severity_threshold: null
+    trivy:
+      enabled: true
+      name: trivy
+      options:
+        config_file: null
+        disable_telemetry: true
+        ignore_file: null
+        ignore_unfixed: false
+        license_full: false
+        offline: false
+        scan_timeout: 1800
+        scanners:
+        - vuln
+        secret_config_file: null
+        severity_threshold: null
+    zizmor:
+      enabled: true
+      name: zizmor
+      options:
+        config_file: null
+        install_timeout: 300
+        online_audits: false
+        persona: regular
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.29.0,<2.0.0'
   workspace:
     max_parallel_projects: null
     project_timeout: null
