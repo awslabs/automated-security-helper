@@ -97,8 +97,8 @@ CREDENTIAL_MARKERS = (
     "PRIVATE_KEY",
     "SESSION",
 )
-#: A value carrying userinfo (scheme://user:pass@host) is a credential whatever
-#: the variable is called.
+#: A URL value that carries a user name and password before its host is a
+#: credential whatever the variable is called.
 _URL_USERINFO = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*@")
 
 #: Proxy settings only matter, and are only passed, when the scanner has a network.

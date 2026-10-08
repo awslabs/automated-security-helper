@@ -377,11 +377,14 @@ class TestReviewFindings:
         assert Path(os.path.realpath(config_dir)) not in exposed
 
     def test_credential_shaped_names_under_allowed_prefixes_are_dropped(self, layout):
-        env = _policy(layout).filter_env(
+        env = _policy(
+            layout
+        ).filter_env(
             {
                 "UV_PUBLISH_TOKEN": "s",
                 "UV_INDEX_PRIVATE_PASSWORD": "s",
-                "UV_INDEX_URL": "https://user:tok@example.invalid/simple",
+                # A fake credential in URL form: the filter must drop it.
+                "UV_INDEX_URL": "https://user:tok@example.invalid/simple",  # pragma: allowlist secret
                 "UV_CACHE_DIR": "/cache",
                 "ASH_API_KEY": "s",
             }
@@ -411,12 +414,12 @@ class TestReviewFindings:
         )
         from automated_security_helper.utils.subprocess_utils import spawn_run
 
-        token = _ACTIVE.set(RefusingScope("grype", "no bwrap here"))
+        scope_reset = _ACTIVE.set(RefusingScope("grype", "no bwrap here"))
         try:
             with pytest.raises(SandboxUnavailable, match="no bwrap here"):
                 spawn_run(["/usr/bin/true"])
         finally:
-            _ACTIVE.reset(token)
+            _ACTIVE.reset(scope_reset)
 
 
 class TestProbeScope:

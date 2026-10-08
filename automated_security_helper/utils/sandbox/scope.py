@@ -233,11 +233,11 @@ def plugin_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
             probe.results_dir = probe_dir
     except SandboxUnavailable as refusal:
         probe = RefusingScope(_plugin_name(plugin), str(refusal))
-    token = _ACTIVE.set(probe)
+    scope_reset = _ACTIVE.set(probe)
     try:
         yield
     finally:
-        _ACTIVE.reset(token)
+        _ACTIVE.reset(scope_reset)
         shutil.rmtree(probe_dir, ignore_errors=True)
 
 
@@ -253,11 +253,11 @@ def _plugin_name(plugin: Any) -> str:
 @contextmanager
 def sandbox_scope(scope: Optional[SandboxScope]) -> Iterator[None]:
     """Make ``scope`` the active one for spawns in this thread."""
-    token = _ACTIVE.set(scope)
+    scope_reset = _ACTIVE.set(scope)
     try:
         yield
     finally:
-        _ACTIVE.reset(token)
+        _ACTIVE.reset(scope_reset)
 
 
 def active_scope() -> "SandboxScope | RefusingScope | None":

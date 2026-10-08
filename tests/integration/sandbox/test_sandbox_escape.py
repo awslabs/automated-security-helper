@@ -40,7 +40,7 @@ from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
 pytestmark = pytest.mark.integration
 
 FIXTURE = Path(__file__).resolve().parents[2] / "test_data" / "sandbox_escape"
-SECRET = "ash-sandbox-canary-7b9e2f"
+CANARY = "ash-sandbox-canary-7b9e2f"
 BACKENDS = ["bwrap", "firejail", "landlock", "sandbox-exec"]
 
 
@@ -162,11 +162,11 @@ def _scan(
 ) -> "tuple[Dict[str, str] | None, subprocess.CompletedProcess]":
     home = tmp_path / "home"
     (home / ".ssh").mkdir(parents=True)
-    (home / ".ssh" / "id_rsa").write_text(f"-----BEGIN KEY-----\n{SECRET}\n")
+    (home / ".ssh" / "id_rsa").write_text(f"-----BEGIN KEY-----\n{CANARY}\n")
     # Inside $HOME so that every backend, firejail included, is expected to hide it.
     outside = home / "outside"
     outside.mkdir()
-    (outside / "secret.txt").write_text(SECRET)
+    (outside / "secret.txt").write_text(CANARY)
     for victim in ("victim-results.txt", "victim-log.txt"):
         (outside / victim).write_text("original\n")
     source = tmp_path / "src"
@@ -183,7 +183,7 @@ def _scan(
     spec = {
         "probe": str(source / "escape_probe.py"),
         "home": str(home),
-        "secret": SECRET,
+        "secret": CANARY,
         "outside_file": str(outside / "secret.txt"),
         "outside_dir": str(outside),
         "output_dir": str(output),
@@ -210,7 +210,7 @@ def _scan(
         "PYTHONPATH": os.pathsep.join(
             [str(FIXTURE), os.environ.get("PYTHONPATH", "")]
         ).rstrip(os.pathsep),
-        "AWS_SECRET_ACCESS_KEY": SECRET,
+        "AWS_SECRET_ACCESS_KEY": CANARY,
         # A path, not the document: ASH_* variables are passed into the sandbox, and
         # the spec carries the canary, which parent_environ would then find in the
         # sandbox's own init process.
@@ -289,7 +289,7 @@ def test_every_attempt_succeeds_without_a_sandbox(tmp_path, listeners):
         if v != "succeeded" and k not in CONTROL_EXEMPT
     }
     assert not failed, f"attempts that should have succeeded unsandboxed: {failed}"
-    assert any(SECRET.encode() in data for data in listeners.received)
+    assert any(CANARY.encode() in data for data in listeners.received)
 
 
 #: What a blocked attempt may fail with. Anything else (a NameError, a TypeError,
