@@ -922,7 +922,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             path = honored_path(
                 config_file,
                 source_dir=source_dir,
-                config=self.context.config,
+                config=getattr(self.context, "config", None),
                 key="scanners.ferret-scan.options.config_file",
             )
             if path is None:
@@ -949,7 +949,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             path = honored_path(
                 candidate,
                 source_dir=source_dir,
-                config=self.context.config,
+                config=getattr(self.context, "config", None),
                 key="ferret-scan config file "
                 + candidate.relative_to(source_dir).as_posix(),
             )

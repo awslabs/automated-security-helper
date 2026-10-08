@@ -8,9 +8,10 @@ or a file it loads as a plugin. A path that resolves inside the scanned tree nam
 a file the repository being scanned wrote, so it is not passed to the tool, whether
 an option set it or ASH found it by name in the source directory. A path outside
 the tree is passed as before. "The scanned tree" is
-``config.sandbox_grants.scanned_tree``: the enclosing checkout of the source
-directory. Containment uses ``sandbox_grants.is_within``, so symlinks and ``..``
-are resolved first.
+any tree ``config.sandbox_grants.scanned_trees`` returns for the scan root: the
+outermost checkout above the source directory, under each name it has.
+Containment uses ``sandbox_grants.is_within``, so symlinks and ``..`` are resolved
+first.
 
 Each refusal logs one warning naming the option, however many times the scanner
 asks.
@@ -36,20 +37,21 @@ def reset_path_refusal_warnings() -> None:
 
 
 def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool:
-    """Whether ``path`` is in the tree the repository being scanned controls.
+    """Whether ``path`` is in a tree the repository being scanned controls.
 
     The one membership test this module and ``plugin_module_trust`` use, so the
-    rule for which tree that is (today ``sandbox_grants.scanned_tree`` of the scan
-    root) changes in one place.
+    rule for which trees those are (``sandbox_grants.scanned_trees`` of the scan
+    root, the same trees ``resolve_config`` checks config files against) changes
+    in one place.
     """
     # Imported here: sandbox_grants imports ash_config, which imports the scanners
     # that import this module.
     from automated_security_helper.config.sandbox_grants import (
         is_within,
-        scanned_tree,
+        scanned_trees,
     )
 
-    return is_within(Path(path), scanned_tree(Path(scan_root)))
+    return any(is_within(Path(path), tree) for tree in scanned_trees(Path(scan_root)))
 
 
 def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:

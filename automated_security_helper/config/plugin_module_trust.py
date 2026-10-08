@@ -128,7 +128,8 @@ def confine_plugin_modules(
         config_overrides: ``--config-overrides``. Those under
             ``ash_plugin_modules`` are replayed onto ``trusted_config`` to get the
             trusted list, the same way the sandbox overrides are.
-        scanned_root: The scanned tree (``sandbox_grants.scanned_tree``).
+        scanned_root: The scan root; the trees it is checked against are
+            ``path_trust.in_scanned_tree``'s.
         in_tree: The config files inside the tree, named in the warning.
     """
     from automated_security_helper.config.resolve_config import (

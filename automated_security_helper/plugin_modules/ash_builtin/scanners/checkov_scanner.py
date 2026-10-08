@@ -385,7 +385,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             candidate = honored_path(
                 conf_path,
                 source_dir=source_dir,
-                config=self.context.config,
+                config=getattr(self.context, "config", None),
                 key="scanners.checkov.options.config_file"
                 if configured
                 else f"checkov config file {conf_path}",

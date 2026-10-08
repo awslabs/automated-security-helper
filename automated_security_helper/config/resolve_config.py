@@ -276,7 +276,9 @@ def resolve_config(
     if sandbox_overrides:
         trusted = apply_config_overrides(trusted, sandbox_overrides)
     confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
-    confine_plugin_modules(config, trusted, config_overrides, root, in_tree)
+    confine_plugin_modules(
+        config, trusted, config_overrides, Path(scanned_root), in_tree
+    )
     return config
 
 

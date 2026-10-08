@@ -423,7 +423,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
                 return False, value
             honored = honored_path(
-                file_part, source_dir=source_dir, key=key, config=self.context.config
+                file_part,
+                source_dir=source_dir,
+                key=key,
+                config=getattr(self.context, "config", None),
             )
             if honored is None:
                 return False, value
