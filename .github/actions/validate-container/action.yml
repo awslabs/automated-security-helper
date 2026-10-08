@@ -510,6 +510,15 @@ runs:
             1) echo "::error::1 is ASH's 'error during execution', which --fail-on-incomplete-scanners also uses for a scan where a selected scanner reported ERROR or MISSING. Read the per-scanner table below." ;;
             2) echo "::error::2 means either actionable findings on a fixture that is one print statement, or a click UsageError -- a flag above was renamed or removed and the scan never ran." ;;
           esac
+          # The end of each scanner's stderr log, where a tool says why it failed. This
+          # job uploads no artifacts, so without it the reason is only in the runner.
+          find /tmp/ash-selftest/output/scanners -name '*.stderr.log' -size +0 2>/dev/null |
+            sort | while read -r log; do
+              echo "::group::last 4000 bytes of ${log}"
+              tail -c 4000 "$log"
+              echo
+              echo "::endgroup::"
+            done
           exit "$rc"
         fi
         echo "scan exited $rc"
