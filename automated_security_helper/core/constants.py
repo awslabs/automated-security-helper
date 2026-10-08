@@ -18,25 +18,28 @@ ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
 
 
 def ash_git_requirement(extra: str = "") -> str:
-    """ASH as a PEP 508 direct reference to its own repository.
+    """ASH as a PEP 508 direct reference to its own repository, at the running version.
 
     ASH is installed from git, not from a package index, and the name
     ``automated-security-helper`` on PyPI belongs to an unrelated third party, so a
     requirement that names ASH without a URL resolves to a stranger's package.
 
-    The reference is untagged. Pinning it to ``v<running version>`` was tried and
-    rejected: a build of an unreleased version names a tag that does not exist yet,
-    so the hint fails exactly where a developer reads it. The JetBrains plugin's
-    install hint uses the same untagged URL.
+    The reference is pinned to the tag of the running version, so following a hint
+    built from it reinstalls the same ASH. An untagged URL was tried and rejected: it
+    resolves to the default branch, so on a v4 install it silently replaced ASH with
+    an older release. Before a version's tag exists the pinned form fails to resolve,
+    which is loud, and the release creates the tag.
     """
+    from automated_security_helper import __version__
+
     name = (
         f"automated-security-helper[{extra}]" if extra else "automated-security-helper"
     )
-    return f"{name} @ git+{ASH_REPO_URL}.git"
+    return f"{name} @ git+{ASH_REPO_URL}.git@v{__version__}"
 
 
 def ash_reinstall_command() -> str:
-    """The command that reinstalls ASH from its repository."""
+    """The command that reinstalls the running version of ASH from its repository."""
     return f'pip install --force-reinstall "{ash_git_requirement()}"'
 
 
