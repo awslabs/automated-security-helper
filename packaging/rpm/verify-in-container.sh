@@ -297,10 +297,13 @@ case "$MODE" in
     rpm_install install "$ALT" 2>/tmp/variant-install.err || rc=$?
     if [ "$rc" -ne 0 ]; then
       tail -n 5 /tmp/variant-install.err | sed 's/^/   /'
-      # Refused counts only if the planted call is what failed, not anything else.
-      grep -qF alternatives /tmp/dnf-install.log \
-        || vl_fail "NEGATIVE CONTROL: the install failed, but not in the planted alternatives call"
-      echo "   OK: the install was refused in the planted alternatives call"
+      # Refused counts only if the planted call is what failed: rpm reports a failed
+      # %post scriptlet, and the error names the planted update-alternatives command.
+      grep -qE 'scriptlet failed|Error in POST scriptlet' /tmp/dnf-install.log \
+        || vl_fail "NEGATIVE CONTROL: the install failed, but not in %post"
+      grep -qF update-alternatives /tmp/dnf-install.log \
+        || vl_fail "NEGATIVE CONTROL: %post failed, but not in the planted update-alternatives call"
+      echo "   OK: the install was refused: %post failed in the planted update-alternatives call"
     else
       rc=0
       vl_assert_no_alternatives || rc=$?

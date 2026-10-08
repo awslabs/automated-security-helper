@@ -200,8 +200,11 @@ vl_assert_shell_intact() {
 # The host check is the guard. The static check is a grep, a pre-filter that names the
 # offending line early: a script that builds the command name from pieces
 # (`"${UA}natives"`, `eval`), or code the postinst reaches through the payload it
-# installs, gets past it. Nothing gets past the host check, which reads the result
-# after every install and upgrade.
+# installs, gets past it. The host check reads the result after every install and
+# upgrade, so an alternative or a diversion is caught however it was made. It covers
+# those two mechanisms only: a script that writes /usr/bin/ash directly, as a file or a
+# symlink, is caught by vl_assert_shell_intact and, for a shipped path, by
+# vl_check_command_paths.
 VL_FORBIDDEN_SCRIPT_COMMANDS='update-alternatives|alternatives|dpkg-divert'
 
 # Reads a package's maintainer scripts on stdin, as `rpm -qp --scripts` prints them or

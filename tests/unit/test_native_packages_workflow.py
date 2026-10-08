@@ -726,3 +726,12 @@ def test_the_refused_branch_of_the_alternatives_control_requires_its_reason() ->
         )
         neg = text[text.index("negative-alternatives") :]
         assert f"alternatives {log}" in neg, family
+        # The planted command itself, not a word any alternatives error would carry.
+        assert f"grep -qF update-alternatives {log}" in neg, family
+    rpm = (REPO_ROOT / "packaging" / "rpm" / "verify-in-container.sh").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "grep -qE 'scriptlet failed|Error in POST scriptlet' /tmp/dnf-install.log"
+        in rpm
+    )
