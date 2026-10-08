@@ -327,7 +327,7 @@ def capture(
     ahead of the target makes the inspector ignore the target entirely, fall back
     to its server catalog, and fail with
     `{"error":{"code":"error","message":"No servers found in config file"}}`.
-    Measured against inspector 2.8.0.
+    Measured on 2.8.0; not re-measured on 2.9.0.
 
     stdio is the right transport here: it is what every desktop MCP client uses
     for a locally installed server, the inspector auto-detects it from a command
@@ -338,7 +338,8 @@ def capture(
     only to `tools/list`, the one method run with `--strict`. Against a stub
     server that answers `tools/list` with a property whose schema is the bare
     boolean `true`, inspector 2.8.0 prints the full `tools/list` reply on stdout,
-    the per-tool error detail on stderr, and exits 6. So a portability error does
+    the per-tool error detail on stderr, and exits 6 (measured on 2.8.0; not
+    re-measured on 2.9.0). So a portability error does
     not cost the golden comparison: both verdicts are reported from one spawn.
     The other three methods run without `--strict`, measured to exit 0 against
     `ashx mcp` with inspector 2.8.0 and again with 2.9.0, so anything else from them
