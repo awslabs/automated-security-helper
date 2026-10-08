@@ -80,6 +80,7 @@ from automated_security_helper.utils.link_exclusions import (
     trivy_skip_dirs,
     trivy_skip_files,
 )
+from automated_security_helper.utils.file_lock import exclusive_lock
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.subprocess_utils import find_executable
