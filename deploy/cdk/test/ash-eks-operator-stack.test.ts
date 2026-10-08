@@ -241,9 +241,10 @@ describe('authorization is wired, and wired in the right order', () => {
       .filter((s: any) => [s.Resource].flat().some((r: any) => r === '*'))
       .flatMap((s: any) => [s.Action].flat())
       .sort();
-    // Exactly the list the Lambda developer guide requires for a VPC-attached function.
-    // Written out rather than read from LAMBDA_VPC_ENI_ACTIONS, so a change to that
-    // constant shows up here as a failing test.
+    // Exactly the list the Lambda developer guide requires for a VPC-attached function,
+    // plus the two X-Ray upload actions active tracing needs. Written out rather than
+    // read from LAMBDA_VPC_ENI_ACTIONS, so a change to that constant shows up here as a
+    // failing test.
     expect(wildcardActions).toEqual([
       'ec2:AssignPrivateIpAddresses',
       'ec2:CreateNetworkInterface',
@@ -251,6 +252,8 @@ describe('authorization is wired, and wired in the right order', () => {
       'ec2:DescribeNetworkInterfaces',
       'ec2:DescribeSubnets',
       'ec2:UnassignPrivateIpAddresses',
+      'xray:PutTelemetryRecords',
+      'xray:PutTraceSegments',
     ]);
     // eks:DescribeCluster must NOT be one of them: it is scoped to the named cluster.
     expect(wildcardActions).not.toContain('eks:DescribeCluster');
@@ -2013,5 +2016,38 @@ describe('the VPC opt-in', () => {
     const condition = JSON.stringify(JSON_TEMPLATE.Conditions.HasVpcConfig);
     expect(condition).toContain('Fn::Select');
     expect(condition).toContain('VpcSubnetIds');
+  });
+});
+
+describe('X-Ray tracing is on for the installer only', () => {
+  /*
+   * The operator chose active tracing for this one function: it reaches a cluster
+   * endpoint that may be private, and a trace separates an unreachable endpoint from a
+   * slow apply. The recorded decision for every other Lambda in these stacks -- the
+   * custom-resource responders and the CodeCommit gate's scan function -- is no tracing,
+   * and the AWS-0066 entries in .ash/.ash_community_plugins.yaml say why. Read from the
+   * committed templates, which synth:check keeps equal to a fresh synth, so a sibling
+   * that gains tracing fails here instead of going unnoticed.
+   */
+  const templatesDir = join(__dirname, '..', 'templates');
+
+  test('the installer function traces actively', () => {
+    const functions = TEMPLATE.findResources('AWS::Lambda::Function');
+    const installer = Object.entries<any>(functions).filter(([id]) => id.startsWith('Installer'));
+    expect(installer).toHaveLength(1);
+    expect(installer[0][1].Properties.TracingConfig).toEqual({ Mode: 'Active' });
+  });
+
+  test('no other function in any committed template is traced', () => {
+    const traced: string[] = [];
+    for (const file of readdirSync(templatesDir).filter((f) => f.endsWith('.template.json'))) {
+      const resources = JSON.parse(readFileSync(join(templatesDir, file), 'utf8')).Resources;
+      for (const [id, resource] of Object.entries<any>(resources)) {
+        if (resource.Type === 'AWS::Lambda::Function' && resource.Properties?.TracingConfig) {
+          traced.push(`${file}:${id}`);
+        }
+      }
+    }
+    expect(traced).toEqual(['AshEksOperator.template.json:InstallerA8F6E21F']);
   });
 });
