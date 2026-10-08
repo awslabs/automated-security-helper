@@ -8,7 +8,8 @@ Why this exists
 ``gitlab_sast_reporter`` emits ``"version": "15.2.2"`` in every report, which is a
 claim that the document conforms to that schema. The CI step that checks the claim --
 "Validate GitLab SAST Report Schema Compliance" in
-``.github/actions/run-scan-test/action.yml`` -- fetched the schema from the upstream
+``.github/actions/run-scan-test/action.yml``, whose body is
+``validate_gitlab_sast_reports.sh`` next to it -- fetched the schema from the upstream
 repository's ``master`` instead, so it validated against whatever GitLab had merged
 most recently rather than against the claim.
 
@@ -38,6 +39,8 @@ import json
 import re
 from pathlib import Path
 
+import yaml
+
 from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
     GITLAB_SAST_SCHEMA_VERSION,
 )
@@ -45,6 +48,9 @@ from tests.utils.helpers import iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCAN_TEST_ACTION = REPO_ROOT / ".github/actions/run-scan-test/action.yml"
+# The step's body. It was inline `shell: bash` until the step had to pick Git Bash by
+# absolute path on Windows; see the step's comment in SCAN_TEST_ACTION.
+SCHEMA_SCRIPT = SCAN_TEST_ACTION.parent / "validate_gitlab_sast_reports.sh"
 REPORTER_SOURCE = (
     REPO_ROOT
     / "automated_security_helper/plugin_modules/ash_builtin/reporters/gitlab_sast_reporter.py"
@@ -99,9 +105,26 @@ class TestTheEmittedReportCarriesTheConstant:
 
 
 class TestTheCiGateResolvesTheSchemaFromTheConstant:
+    def test_the_step_runs_the_script(self):
+        """Every check below reads the script, so they mean nothing if it is orphaned."""
+        steps = yaml.safe_load(SCAN_TEST_ACTION.read_text())["runs"]["steps"]
+        (step,) = [
+            s
+            for s in steps
+            if s.get("name") == "Validate GitLab SAST Report Schema Compliance"
+        ]
+        assert SCHEMA_SCRIPT.name in step["run"], (
+            f"the schema-compliance step no longer runs {SCHEMA_SCRIPT.name}, so the "
+            "assertions over that file test code CI does not execute."
+        )
+        assert "-eo pipefail" in step["run"], (
+            "the script is not run with `-eo pipefail`, which `shell: bash` passed "
+            "and which the script's own error handling assumes."
+        )
+
     def test_the_schema_is_not_fetched_from_a_floating_ref(self):
         """The regression: `/-/raw/master/` made an external branch the contract."""
-        text = SCAN_TEST_ACTION.read_text()
+        text = SCAN_TEST_ACTION.read_text() + SCHEMA_SCRIPT.read_text()
         offenders = [
             line.strip()
             for line in text.splitlines()
@@ -116,7 +139,7 @@ class TestTheCiGateResolvesTheSchemaFromTheConstant:
         )
 
     def test_the_schema_url_is_built_from_the_reporter_constant(self):
-        text = SCAN_TEST_ACTION.read_text()
+        text = SCHEMA_SCRIPT.read_text()
         assert "GITLAB_SAST_SCHEMA_VERSION" in text, (
             "the schema-compliance step does not read GITLAB_SAST_SCHEMA_VERSION. "
             "Hardcoding the version in the workflow puts the same fact in two files."
@@ -144,7 +167,7 @@ class TestTheCiGateResolvesTheSchemaFromTheConstant:
         """An unpinned `npm install -g ajv-cli` lets a validator release fail the gate."""
         installs = [
             line
-            for line in self._command_lines(SCAN_TEST_ACTION.read_text())
+            for line in self._command_lines(SCHEMA_SCRIPT.read_text())
             if re.search(r"npm install\s+-g\s+ajv-cli", line)
         ]
         assert installs, "the ajv-cli install disappeared; the gate needs a validator"
@@ -156,13 +179,7 @@ class TestTheCiGateResolvesTheSchemaFromTheConstant:
 
     def test_both_network_operations_are_retried(self):
         """The npm fetch is what ECONNRESET took down on run 35177045049."""
-        text = SCAN_TEST_ACTION.read_text()
-        # Anchored on the step DECLARATION, not on its name. An earlier comment in this
-        # file names the step in prose, and slicing from there put the window 160 lines
-        # short of the commands -- so the first version of this test reported the npm
-        # install missing when it was present.
-        start = text.index("- name: Validate GitLab SAST Report Schema Compliance")
-        step = "\n".join(self._command_lines(text[start : start + 5000]))
+        step = "\n".join(self._command_lines(SCHEMA_SCRIPT.read_text()))
         for command in (
             "npm install -g ajv-cli",
             "curl -sSfL -o gitlab-sast-schema.json",

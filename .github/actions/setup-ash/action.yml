@@ -10,6 +10,15 @@ inputs:
     required: false
     default: "true"
 
+outputs:
+  scripts-dir:
+    description: >-
+      Directory holding the installed `ash` entry point (ash.exe on Windows). Empty
+      when install-ash is false. setup-ash does not edit PATH: the directory is the
+      interpreter's scripts directory, which setup-python already puts on PATH, and
+      the action fails if `ash` on PATH resolves anywhere else.
+    value: ${{ steps.entry-point.outputs.scripts-dir }}
+
 runs:
   using: "composite"
   steps:
@@ -98,20 +107,35 @@ runs:
       shell: bash
       run: pip install .
 
-    # GITHUB_PATH stays here. `pip install .` on Windows puts ash.exe in the user
-    # scheme's Scripts directory, which is not on PATH, and every caller step that
-    # runs `ash` afterwards, in bash or pwsh, needs it there. A step output cannot
-    # stand in: `env:` cannot prepend to PATH, because the expression context does
-    # not hold the runner's PATH, so each consumer would have to edit PATH in its
-    # own script, in two shell dialects, and one that forgot would find no `ash`, or
-    # on a leg with the MSYS2 toolchain would run its Almquist shell instead. The
-    # value is a runner path ($env:APPDATA), not anything from the event.
+    # No GITHUB_PATH write. This step used to append "$env:APPDATA\Python\Scripts",
+    # on the theory that `pip install .` puts ash.exe in the user scheme. Measured on
+    # scan (python-local, windows-latest) at 8445a2c0 (run 37794853293), it does not:
+    # ash.exe lands in C:\hostedtoolcache\windows\Python\3.12.10\x64\Scripts, the
+    # interpreter's own scripts directory, which setup-python had already put on
+    # PATH. setup-python also adds the real user-scheme directory
+    # (%APPDATA%\Python\Python312\Scripts). The appended directory is not either of
+    # those (the user scheme has carried a PythonXY component since Python 3.10), so
+    # the write added a path that held nothing, and zizmor's github-env audit
+    # reports any GITHUB_PATH write in a composite action. The next step asserts
+    # the contract the write was meant to provide instead of assuming it.
     - name: Install ASH package (Windows)
       if: inputs.install-ash == 'true' && runner.os == 'Windows'
       shell: pwsh
+      run: pip install .
+
+    # The contract callers rely on: after this action, `ash` on PATH is the ASH that
+    # was just installed. Checked here so a runner image that installs console
+    # scripts somewhere setup-python did not put on PATH fails in this step, by
+    # name, rather than as "ash: command not found" in some caller step later. The
+    # directory is also this action's `scripts-dir` output. pwsh rather than bash so
+    # the check sees the runner's PATH and not one Git Bash has rearranged.
+    - name: Locate ASH's entry point
+      id: entry-point
+      if: inputs.install-ash == 'true'
+      shell: pwsh
       run: |
-        pip install .
-        echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+        python (Join-Path $env:GITHUB_ACTION_PATH 'locate_entry_point.py')
+        exit $LASTEXITCODE
 
     - name: Save pip's download cache (main only)
       if: >-
