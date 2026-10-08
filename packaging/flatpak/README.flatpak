@@ -359,7 +359,17 @@ so in its first few lines.
     ubuntu:24.04 bash -c 'REPO=/src bash /src/packaging/build-test-wheels.sh /work &&
       DIST=/work/dist PREV_DIST=/work/dist-prev bash /src/packaging/flatpak/verify-in-container.sh'
 
-builds the head wheel and an N-1 wheel (the same tree with a lower version), then builds
-both bundles, installs the head one fresh, runs the findings, clean and incomplete cases
-from tests/e2e/fixtures/cases.json, uninstalls, and upgrades N-1 to N through a local
-remote with `flatpak update`. Every scan is judged by scripts/e2e/assert_outcome.py.
+builds the head wheel and an N-1 wheel, then builds both bundles, installs the head one
+fresh, runs the findings, clean and incomplete cases from tests/e2e/fixtures/cases.json,
+uninstalls, and upgrades N-1 to N through a local remote with `flatpak update`. Every
+scan is judged by scripts/e2e/assert_outcome.py. N-1 is the previous commit with its
+version lowered (packaging/n1-source.sh), and its bundle is built by that commit's own
+packaging/flatpak/build.sh, so the checkout needs its history: a shallow clone fails and
+says so.
+
+The runtime is pinned by OSTree commit as well as by branch: the script deploys the
+commit RUNTIME_COMMIT_X86_64 names with `flatpak update --commit` and refuses to build
+unless `flatpak info --show-commit` reports it, because Flathub rebuilds a branch in
+place. To move the pin, take the Commit line of
+`flatpak remote-info flathub org.freedesktop.Sdk//24.08`. As of 2026-10-08 Flathub
+marks the 24.08 Platform end-of-life, so the pinned commit is that branch's last one.
