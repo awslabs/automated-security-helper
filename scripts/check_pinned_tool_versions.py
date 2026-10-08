@@ -428,6 +428,9 @@ REPO_PINS: tuple[RepoPin, ...] = (
             PinSite(
                 ".github/workflows/ash-jetbrains-ci.yml", _image_ref("gradle"), count=3
             ),
+            # The release build of the plugin zip uses the same image, so it moves with
+            # the three above.
+            PinSite(".github/workflows/ash-release-assets.yml", _image_ref("gradle")),
             PinSite(_JETBRAINS_UI, _image_ref("gradle")),
         ),
     ),
