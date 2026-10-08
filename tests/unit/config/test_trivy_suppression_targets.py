@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -106,17 +107,39 @@ def has_target(rule_id: str, path: str, text: str) -> bool:
     return _tf_has_unkeyed(text, tf_type)
 
 
+def _tracked_files() -> list[str]:
+    """Tracked paths, or a test failure that says why they could not be listed.
+
+    The skip index must be built from tracked files only: a walk of the tree
+    would also read node_modules and build output, whose checkov comments are
+    not this repository's decisions. Outside a git checkout (a ``git archive``
+    extract, say) there is no such list, so the check fails rather than pass
+    on an empty index.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        pytest.fail("git is not installed; this check reads the tracked file list.")
+    if result.returncode != 0:
+        pytest.fail(
+            f"`git ls-files` failed in {REPO_ROOT} (exit {result.returncode}): "
+            f"{result.stderr.strip()}. This check needs a git checkout to know "
+            "which files are tracked."
+        )
+    return [name for name in result.stdout.split("\0") if name]
+
+
 @lru_cache(maxsize=1)
 def _inline_skips() -> dict[str, frozenset[str]]:
-    files = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split("\0")
+    files = _tracked_files()
     found: dict[str, set[str]] = {}
-    for name in filter(None, files):
+    for name in files:
         try:
             text = (REPO_ROOT / name).read_text(errors="ignore")
         except (IsADirectoryError, FileNotFoundError):
@@ -272,3 +295,13 @@ def test_stale_skip_citation_classifier():
     assert stale_skip_citations(
         {"path": "x.json", "reason": "the CKV_AWS_149 inline skips"}, skips
     ) == ["CKV_AWS_149"]
+
+
+def test_outside_a_checkout_the_skip_index_fails_with_a_reason(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys.modules[__name__], "REPO_ROOT", tmp_path)
+    _inline_skips.cache_clear()
+    try:
+        with pytest.raises(pytest.fail.Exception, match="needs a git checkout"):
+            _inline_skips()
+    finally:
+        _inline_skips.cache_clear()
