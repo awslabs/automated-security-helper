@@ -256,6 +256,29 @@ The legs call N-1's `build.sh` with N's calling convention (`build.sh <wheel>
 own upgrade leg until the next commit, whose N-1 then has the new interface too; keep
 the interface stable, or change it in two steps.
 
+## From the latest release, which shipped no package
+
+N-1 for the CLI channels (the wheel, the container image, Homebrew) is the latest
+published release (`--prev-ref latest-release`; v3.7.1 today). That release shipped no
+.deb or .rpm, so nobody upgrades to these packages from one: the package-to-package
+legs above keep taking N-1 from the history, and once a release ships a package, `auto`
+takes that release. What a user of the latest release has is its CLI from
+`uv tool install git+https://github.com/awslabs/automated-security-helper@<tag>`
+(its README), with `ash` in `~/.local/bin`, which uv's installer puts first on PATH.
+
+The `from-release` legs (one deb, one rpm) start there: the release's wheel, built from
+its tag by `packaging/build-test-wheels.sh` with `N1_BUILD_RELEASE=1`, is tool-installed
+as the unprivileged user and passes the findings case. The package is then installed,
+and as that user, on that user's PATH, the leg asserts that `ashx` is the package's
+`/usr/bin/ashx` at N and that `ash` is still the user's release in `~/.local/bin`: the
+package takes nothing the user installed and ships no `ash` of its own. `ashx` passes
+all three cases with the release beside it, the release still scans, and removing the
+package leaves the release working (`vl_from_release` in `packaging/verify-lib.sh`).
+The release's own scans are judged with `--allow-unselected-missing`: v3.7.1 reports
+every scanner whose tool is absent as MISSING, even ones the scan was not told to run
+(v4 reports those SKIPPED). Its selected scanner must still complete with the case's
+exit code and count, and every scan by the package keeps the full contract.
+
 ## Where the Flatpak differs, and why
 
 Flatpak has no post-install hook: an installed app is a read-only OSTree checkout and no

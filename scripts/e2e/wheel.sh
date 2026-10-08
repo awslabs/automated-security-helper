@@ -17,9 +17,11 @@
 #    N-1 is E2E_PREV_REF's tree at its own version when that sorts below head's (a
 #    release), else with its [project] version lowered (a development commit), so the
 #    upgrade crosses a real version change as well as a real code change.
-#    N-1 is installed with its `cdk` extra. v3.7.1 without it reports the cdk-nag
-#    scanner MISSING even when only detect-secrets is selected, which the cases count as
-#    an incomplete scan; v4 does not, and N is installed without extras.
+#    N-1 is installed the way its README says, with no extras. A v3 release reports
+#    every scanner whose tool is absent as MISSING, including scanners the scan was not
+#    told to run; v4 reports those SKIPPED. So the scan of a release N-1 alone is
+#    judged with --allow-unselected-missing: its selected scanner must still complete,
+#    with the case's exit code and count, and every scan of N keeps the full contract.
 # 2. Installs the head wheel into a fresh venv with --no-cache, checks the installed
 #    version, and runs the three cases from tests/e2e/fixtures/cases.json through
 #    scripts/e2e/run_case.py: findings (exit 2, 3 findings), clean (exit 0) and
@@ -74,9 +76,6 @@ venv_exe() {
 }
 
 venv_python() { venv_exe "$1" python; }
-# A file: URL for a local path, which a `name[extra] @ url` requirement needs. Built by
-# Python, so a Windows path comes out as file:///D:/... rather than Git Bash's /d/...
-file_url() { harness -c 'import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())' "$1" | tr -d '\r'; }
 
 # -I and a neutral cwd: run from the checkout, `python -c` would put the source tree's
 # automated_security_helper/ on sys.path and every import check would pass on the
@@ -195,14 +194,19 @@ run_case "$CLI" incomplete fresh-incomplete
 UPGRADE="$WORK/venv-upgrade"
 rm -rf "$UPGRADE"
 uv venv --quiet --python "$PYTHON" "$UPGRADE"
-uv pip install --quiet --no-cache --python "$(venv_python "$UPGRADE")" "automated-security-helper[cdk] @ $(file_url "$PREV_WHEEL")"
+uv pip install --quiet --no-cache --python "$(venv_python "$UPGRADE")" "$PREV_WHEEL"
 got="$(installed_version "$UPGRADE")"
 [ "$got" = "$PREV_VERSION" ] || fail "N-1 venv holds $got, expected $PREV_VERSION"
 # N-1 may predate the $ASH_CLI_NAME command; the v3 name is the one it is sure to have.
 PREV_CLI="$(venv_exe "$UPGRADE" "$ASH_CLI_NAME" || venv_exe "$UPGRADE" ash)" \
   || fail "the N-1 wheel installed neither $ASH_CLI_NAME nor ash"
 say "N-1 command: $(basename "$PREV_CLI")"
-run_case "$PREV_CLI" findings upgrade-before
+if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+  harness "$REPO/scripts/e2e/run_case.py" --cli "$PREV_CLI" --case findings --work "$WORK/scans" \
+    --label upgrade-before --allow-unselected-missing
+else
+  run_case "$PREV_CLI" findings upgrade-before
+fi
 
 uv pip install --quiet --no-cache --python "$(venv_python "$UPGRADE")" "$HEAD_WHEEL"
 got="$(installed_version "$UPGRADE")"

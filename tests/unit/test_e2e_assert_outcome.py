@@ -533,3 +533,55 @@ def test_cli_name_sources_agree():
     assert re.search(rf'^{re.escape(json_name)} = "', pyproject, re.MULTILINE), (
         f"{json_name} is not a [project.scripts] entry"
     )
+
+
+# -- --allow-unselected-missing: the scan of a v3 release N-1 ---------------------
+
+
+def _v3_output(tmp_path, statuses):
+    """A findings-shaped output (3 detect-secrets results) whose rows carry STATUSES."""
+    return _write(tmp_path, [ao._sarif_result("detect-secrets")] * 3, statuses)
+
+
+@pytest.mark.parametrize(
+    ("statuses", "allow", "rejected"),
+    [
+        # v3.7.1 on a clean host: unselected scanners whose tools are absent are MISSING.
+        (
+            {"detect-secrets": "FAILED", "grype": "MISSING", "cdk-nag": "MISSING"},
+            False,
+            True,
+        ),
+        (
+            {"detect-secrets": "FAILED", "grype": "MISSING", "cdk-nag": "MISSING"},
+            True,
+            False,
+        ),
+        # The allowance is for unselected MISSING only.
+        ({"detect-secrets": "MISSING"}, True, True),
+        ({"detect-secrets": "FAILED", "grype": "ERROR"}, True, True),
+    ],
+    ids=["v3-without-flag", "v3-with-flag", "selected-missing", "unselected-error"],
+)
+def test_unselected_missing_is_allowed_only_when_asked(
+    tmp_path, statuses, allow, rejected
+):
+    out = _v3_output(tmp_path, statuses)
+    expected = ao.Expectation(
+        2,
+        findings=3,
+        require_scanner="detect-secrets",
+        selected=["detect-secrets"],
+        allow_unselected_missing=allow,
+    )
+    problems = ao.check_outcome(out, 2, expected)
+    assert bool(problems) is rejected, problems
+
+
+def test_the_cli_flag_reaches_the_verdict(tmp_path):
+    out = _v3_output(
+        tmp_path, {"detect-secrets": "FAILED", "syft": "MISSING"}
+    )  # pragma: allowlist secret
+    argv = ["--case", "findings", "--output-dir", str(out), "--rc", "2"]
+    assert ao.main(argv) == 1
+    assert ao.main([*argv, "--allow-unselected-missing"]) == 0

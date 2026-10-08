@@ -86,6 +86,7 @@ class Expectation:
         require_scanner: Optional[str] = None,
         selected: Optional[List[str]] = None,
         incomplete_scanner: Optional[str] = None,
+        allow_unselected_missing: bool = False,
     ) -> None:
         self.expect_rc = expect_rc
         self.findings = findings
@@ -93,6 +94,11 @@ class Expectation:
         self.require_scanner = require_scanner
         self.selected = list(selected or [])
         self.incomplete_scanner = incomplete_scanner
+        # For an N-1 that is a v3 release only (--allow-unselected-missing). v3 reports
+        # every scanner whose tool is absent as MISSING, including scanners the scan
+        # was not told to run; v4 reports those SKIPPED. A selected scanner that is
+        # MISSING, and any ERROR, still fails.
+        self.allow_unselected_missing = allow_unselected_missing
 
     def usage_problems(self) -> List[str]:
         """Expectations that cannot be asserted meaningfully, refused before any check."""
@@ -266,6 +272,13 @@ def check_outcome(output_dir: Path, rc: int, expected: Expectation) -> List[str]
                 )
 
         incomplete = {n: s for n, s in statuses.items() if s in INCOMPLETE_STATUSES}
+        if expected.allow_unselected_missing:
+            chosen = {_norm(s) for s in expected.selected}
+            incomplete = {
+                n: s
+                for n, s in incomplete.items()
+                if not (s == "MISSING" and _norm(n) not in chosen)
+            }
         if expected.incomplete_scanner:
             want = _norm(expected.incomplete_scanner)
             got = statuses.get(want)
@@ -327,6 +340,7 @@ def expectation_from(args: argparse.Namespace) -> Expectation:
         require_scanner=args.require_scanner or base.get("require_scanner"),
         selected=[s for s in selected if s],
         incomplete_scanner=args.incomplete_scanner or base.get("incomplete_scanner"),
+        allow_unselected_missing=args.allow_unselected_missing,
     )
 
 
@@ -710,6 +724,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--incomplete-scanner",
         help="for exit 1: the scanner that must be MISSING or ERROR",
+    )
+    parser.add_argument(
+        "--allow-unselected-missing",
+        action="store_true",
+        help=(
+            "only for the scan of an N-1 that is a v3 release: a scanner the scan was "
+            "not told to run, reported MISSING because its tool is absent, does not "
+            "count as incomplete (v3 does this; v4 reports it SKIPPED)"
+        ),
     )
     parser.add_argument(
         "--expect-reject",

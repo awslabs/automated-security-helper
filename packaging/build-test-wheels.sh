@@ -10,6 +10,10 @@
 #   <outdir>/prev/src/   that commit's tree, whose packaging/ the upgrade legs build
 #                        the N-1 package with
 #   <outdir>/n1.env      N1_SHA, N1_REF, N1_HEAD and N1_VERSION, for the legs' logs
+#   <outdir>/dist-release/  with N1_BUILD_RELEASE=1 only: the wheel of the latest
+#                        published release, built from its tag at its own version, for
+#                        the from-release legs (verify-lib.sh vl_from_release). Needs the
+#                        GitHub releases API (GITHUB_TOKEN raises its rate limit).
 #
 #   packaging/build-test-wheels.sh <outdir>
 #
@@ -78,6 +82,22 @@ rm -rf "$TREE"
   printf 'N1_HEAD=%s\n' "$N1_HEAD"
   printf 'N1_VERSION=%s\n' "$N1_VERSION"
 } >"$OUTDIR/n1.env"
+
+rm -rf "$OUTDIR/dist-release" "$OUTDIR/release"
+if [ "${N1_BUILD_RELEASE:-}" = 1 ]; then
+  # The latest published release, as `uv tool install git+...@<tag>` builds it: its
+  # own tree at its own version. prev_tree.py fetches the tag if the clone lacks it.
+  vl_say "== building the latest published release's wheel"
+  release_json="$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO" \
+    vl_gate_python "$N1_PREV_TREE" --repo "$REPO" --prev-ref latest-release \
+    --require pyproject.toml --out "$OUTDIR/release")" \
+    || vl_fail "cannot derive the latest published release (scripts/e2e/prev_tree.py above says why)"
+  vl_say "   $release_json"
+  TREE="$(mktemp -d)"
+  cp -R "$OUTDIR/release/src" "$TREE/release"
+  uv build --quiet --wheel --out-dir "$OUTDIR/dist-release" "$TREE/release"
+  rm -rf "$TREE"
+fi
 
 N_WHEEL="$OUTDIR/dist/automated_security_helper-${VERSION}-py3-none-any.whl"
 PREV_WHEEL="$OUTDIR/dist-prev/automated_security_helper-${N1_VERSION}-py3-none-any.whl"

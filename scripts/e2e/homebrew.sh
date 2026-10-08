@@ -294,7 +294,14 @@ PY
     fail "the N-1 install linked neither $ASH_CLI_NAME nor ash"
   fi
   require_version_line "$prev_cli" "$prev_version"
-  run_case "$prev_cli" findings upgrade-before
+  if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+    # A v3 release reports scanners it was not told to run MISSING when their tools are
+    # absent (v4: SKIPPED); only its own scan is judged with that allowance.
+    harness "$REPO/scripts/e2e/run_case.py" --cli "$prev_cli" --case findings --work "$WORK/scans" \
+      --label upgrade-before --allow-unselected-missing
+  else
+    run_case "$prev_cli" findings upgrade-before
+  fi
 
   use_formula "$HEAD_FORMULA" "$REPO/Formula/ash.rb"
   brew upgrade --verbose --build-from-source --formula "$FORMULA"

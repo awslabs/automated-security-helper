@@ -384,7 +384,10 @@ vl_make_fixture() {
 # environment, and sets SCAN_RC and SCAN_CASE. Further arguments are appended to
 # `ashx scan` after the case's own; the negative controls use that.
 vl_scan() {
-  local case="$1" scan_args env_words extra=""
+  local case="$1" scan_args env_words extra="" cli="${VL_SCAN_CLI:-$ASH_CLI_NAME}"
+  # VL_SCAN_CLI and VL_SCAN_PATH run the scan with another command on another PATH:
+  # the release user's own `ash` in vl_from_release. Unset, the packaged command.
+  local path_word="${VL_SCAN_PATH:+PATH=$VL_SCAN_PATH }"
   shift
   scan_args="$(vl_case_field "$case" scan-args)" || vl_fail "cannot read case $case's scan arguments"
   env_words="$(vl_case_field "$case" env)" || vl_fail "cannot read case $case's environment"
@@ -393,16 +396,16 @@ vl_scan() {
   fi
   rm -rf "$SCAN_OUT"
   install -d -o "$SCAN_USER" -g "$SCAN_USER" -m 0755 "$SCAN_OUT"
-  vl_say "   [$case] ${env_words:+$env_words }$ASH_CLI_NAME scan --source-dir $FIXTURE_DIR --output-dir $SCAN_OUT --no-progress $scan_args$extra"
+  vl_say "   [$case] ${env_words:+$env_words }$cli scan --source-dir $FIXTURE_DIR --output-dir $SCAN_OUT --no-progress $scan_args$extra"
   set +e
   su -s /bin/bash "$SCAN_USER" -c \
-    "cd /tmp && env $env_words $ASH_CLI_NAME scan --source-dir '$FIXTURE_DIR' --output-dir '$SCAN_OUT' \
+    "cd /tmp && env $path_word$env_words $cli scan --source-dir '$FIXTURE_DIR' --output-dir '$SCAN_OUT' \
        --no-progress $scan_args$extra" >"$SCAN_LOG" 2>&1
   SCAN_RC=$?
   set -e
   SCAN_CASE="$case"
   tail -n 3 "$SCAN_LOG"
-  vl_say "   [$case] $ASH_CLI_NAME scan rc=$SCAN_RC"
+  vl_say "   [$case] $cli scan rc=$SCAN_RC"
 }
 
 # Judges the last scan's exit code and output directory as case $1 with
@@ -762,4 +765,105 @@ vl_assert_nothing_left() {
     vl_fail "left behind after removal: ${leftover[*]}"
   fi
   vl_say "   OK: $ASH_LIB, /usr/bin/$ASH_CLI_NAME and the package's doc and license directories are gone"
+}
+
+
+# --------------------------------------------------------------------------
+# From the latest release: a user of it installs this package.
+# --------------------------------------------------------------------------
+#
+#   vl_from_release INSTALL_FN REMOVE_FN
+#
+# The latest published release (v3.7.1 today) shipped no native package, so nobody
+# upgrades from its .deb or .rpm. A user of it has the CLI from its README instead:
+# `uv tool install git+https://github.com/awslabs/automated-security-helper@<tag>`,
+# which puts `ash` in ~/.local/bin, and uv's installer puts ~/.local/bin first on PATH.
+# The tag's wheel, built by packaging/build-test-wheels.sh with N1_BUILD_RELEASE=1 into
+# $RELEASE_DIST, is that same build, installed here from the file so the leg needs no
+# second network fetch. A v3 release reports every scanner whose tool is absent as
+# MISSING, even scanners the scan was not told to run (v4 reports them SKIPPED), so its
+# own scans alone are judged with --allow-unselected-missing; every scan by the package
+# keeps the full contract.
+#
+# That user then installs this package (INSTALL_FN), and what is ASSERTED, as that user,
+# on that user's PATH:
+#
+#   1. Before: `ash` is the release's, in ~/.local/bin, and passes the findings case.
+#      There is no `ashx`.
+#   2. After the install: `ashx` is the package's /usr/bin/ashx at N, and `ash` is
+#      still the user's release, in ~/.local/bin. The package must not take over a
+#      command the user installed, and ships no `ash` of its own.
+#   3. `ashx` passes all three cases with the release still installed, and the
+#      release's `ash` still passes the findings case beside it.
+#   4. REMOVE_FN removes the package: `ashx` is gone and the user's `ash` still works.
+#      `uv tool uninstall` then removes that too.
+vl_from_release() {
+  local install_fn="$1" remove_fn="$2" wheels rel_wheel rel_version home bin user_path
+  shopt -s nullglob
+  wheels=("${RELEASE_DIST:?RELEASE_DIST must name the directory of the release wheel}"/*.whl)
+  shopt -u nullglob
+  [ "${#wheels[@]}" -eq 1 ] || vl_fail "expected exactly one release wheel in $RELEASE_DIST, found ${#wheels[@]}"
+  rel_wheel="${wheels[0]}"
+  rel_version="$(basename "$rel_wheel" | sed -n 's/^automated_security_helper-\([^-]*\)-py3-none-any\.whl$/\1/p')"
+  [ -n "$rel_version" ] || vl_fail "cannot read a version from $(basename "$rel_wheel")"
+  id -u "$SCAN_USER" >/dev/null 2>&1 || useradd --create-home "$SCAN_USER"
+  home="$(getent passwd "$SCAN_USER" | cut -d: -f6)"
+  bin="$home/.local/bin"
+  user_path="$bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  vl_as_release_user() {
+    # Exported rather than passed through env(1), so shell builtins (`command -v`) run.
+    su -s /bin/bash "$SCAN_USER" -c "cd /tmp && export HOME='$home' PATH='$user_path' && $1"
+  }
+  vl_user_resolves() {
+    local cmd="$1" want_path="$2" want_version="$3" got reported
+    got="$(vl_as_release_user "command -v $cmd" || true)"
+    [ "$got" = "$want_path" ] \
+      || vl_fail "as $SCAN_USER, $cmd resolves to '${got:-nothing}', expected $want_path"
+    reported="$(vl_as_release_user "$cmd --version")" || vl_fail "as $SCAN_USER, $cmd --version exited non-zero"
+    case "$reported" in
+      *"v$want_version") vl_say "   as $SCAN_USER: $cmd is $got, $reported" ;;
+      *) vl_fail "as $SCAN_USER, $cmd --version reports '$reported', expected v$want_version" ;;
+    esac
+  }
+  vl_release_scan_findings() {
+    vl_make_fixture findings
+    VL_SCAN_CLI=ash VL_SCAN_PATH="$user_path" vl_scan findings
+    if ! vl_assert_case findings --allow-unselected-missing; then
+      tail -n 40 "$SCAN_LOG" >&2
+      vl_fail "the release's ash did not produce the findings case's outcome"
+    fi
+  }
+  vl_user_lacks() {
+    local got
+    got="$(vl_as_release_user "command -v $1" || true)"
+    [ -z "$got" ] || vl_fail "as $SCAN_USER, $1 resolves to $got, expected no such command"
+  }
+
+  vl_say "== 1. a user of the release ($rel_version) has it from uv tool install, as its README says"
+  vl_as_release_user "uv tool install --quiet --python 3.12 '$rel_wheel'" \
+    >/tmp/release-install.log 2>&1 \
+    || { tail -n 20 /tmp/release-install.log >&2; vl_fail "uv tool install of the $rel_version wheel failed"; }
+  vl_user_resolves ash "$bin/ash" "$rel_version"
+  vl_user_lacks "$ASH_CLI_NAME"
+  vl_release_scan_findings
+
+  vl_say "== 2. that user installs this package ($VERSION)"
+  "$install_fn"
+  vl_assert_installed_version "$VERSION"
+  vl_user_resolves "$ASH_CLI_NAME" "/usr/bin/$ASH_CLI_NAME" "$VERSION"
+  # The package took nothing the user had: their `ash` is still theirs, first on PATH.
+  vl_user_resolves ash "$bin/ash" "$rel_version"
+
+  vl_say "== 3. $ASH_CLI_NAME passes the three cases beside the release, and the release still scans"
+  VL_SCAN_PATH="$user_path" vl_scan_and_assert
+  vl_release_scan_findings
+
+  vl_say "== 4. removing the package leaves the user's release working"
+  "$remove_fn"
+  vl_user_lacks "$ASH_CLI_NAME"
+  vl_user_resolves ash "$bin/ash" "$rel_version"
+  vl_as_release_user "uv tool uninstall automated-security-helper" >/tmp/release-uninstall.log 2>&1 \
+    || { tail -n 20 /tmp/release-uninstall.log >&2; vl_fail "uv tool uninstall failed"; }
+  vl_user_lacks ash
+  vl_say "   OK: release $rel_version user -> $ASH_CLI_NAME $VERSION and back, each command where it belongs"
 }

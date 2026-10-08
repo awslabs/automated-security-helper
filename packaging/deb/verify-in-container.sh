@@ -34,6 +34,11 @@
 #                      a build that also installs /usr/bin/ash must FAIL the command
 #                      path check, and installing it beside the `ash` shell must
 #                      either be refused or FAIL the coexistence check
+#   from-release       a user of the latest published release, which shipped no
+#                      native package, has its CLI from `uv tool install` (its README);
+#                      install this package beside it and assert which `ash` and which
+#                      `ashx` that user's PATH resolves, scan with both, remove the
+#                      package (packaging/verify-lib.sh vl_from_release)
 #   version-map        PEP 440 pre/post/dev versions must sort correctly under the
 #                      distribution's own version comparator
 #
@@ -52,6 +57,7 @@ fi
 REPO="${REPO:-/src}"
 DIST="${DIST:-$REPO/dist}"
 PREV_DIST="${PREV_DIST:-$REPO/dist-prev}"
+RELEASE_DIST="${RELEASE_DIST:-$REPO/dist-release}"
 OUT="${OUT:-/tmp/debbuild}"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -393,6 +399,13 @@ if [ "$MODE" = upgrade ]; then
   echo "== 10. purge leaves nothing behind"
   purge_and_check
   echo; echo "DEB UPGRADE VERIFICATION PASSED"
+  exit 0
+fi
+
+if [ "$MODE" = from-release ]; then
+  deb_install_for_release_user() { deb_install "$DEB"; }
+  vl_from_release deb_install_for_release_user purge_and_check
+  echo; echo "DEB FROM-RELEASE VERIFICATION PASSED"
   exit 0
 fi
 
