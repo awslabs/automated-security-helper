@@ -84,6 +84,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
+from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.process_env import snapshot_environ
 
 from automated_security_helper.utils.subprocess_utils import spawn_run
@@ -429,7 +430,7 @@ def _verify(
             "unverifiable", executable, requirement, f"could not execute {executable}"
         )
     if probe.returncode != 0:
-        excerpt = (probe.stderr or probe.stdout or "").strip()[:500]
+        excerpt = head_and_tail((probe.stderr or probe.stdout or "").strip(), 500)
         return PreInstalledToolVerdict(
             "unsatisfied",
             executable,

@@ -99,6 +99,7 @@ from automated_security_helper.utils.content_databases import (
     parse_timestamp,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.subprocess_utils import spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -357,7 +358,7 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
     if not text:
         raise ValueError(
             f"`{' '.join(command)}` printed nothing (exit {proc.returncode}): "
-            f"{(proc.stderr or '').strip()[:300]}"
+            f"{head_and_tail((proc.stderr or '').strip(), 300)}"
         )
     return json.loads(text)
 

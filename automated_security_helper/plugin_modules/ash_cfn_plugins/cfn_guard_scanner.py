@@ -90,6 +90,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
     create_rules_bundle_install_command,
@@ -490,7 +491,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         if "error" in response:
             return f"cfn-guard could not be started: {response['error']}", None
         code = response.get("returncode")
-        stderr = (response.get("stderr") or "").strip()[:500]
+        stderr = head_and_tail((response.get("stderr") or "").strip(), 500)
         if code not in _SUCCESS_EXIT_CODES:
             return (
                 f"cfn-guard exited {code}" + (f": {stderr}" if stderr else ""),
