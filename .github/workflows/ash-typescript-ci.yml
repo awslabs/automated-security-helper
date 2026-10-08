@@ -144,6 +144,14 @@ on:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
       - "editors/vscode/**"
+      # Files outside editors/vscode that its jest suites read. The list is
+      # editors/vscode/test/repo-inputs.ts REPO_INPUTS, and repo-inputs.test.ts fails
+      # when an entry there is missing from this filter or from pull_request's.
+      # .github/** is there because snapshot-policy.test.ts scans every file under
+      # it for a snapshot update flag; it also puts this workflow and its helper
+      # scripts in their own filter, which the note above says is now safe.
+      - "tests/test_data/outputs/ash_aggregated_results.json"
+      - ".github/**"
       # .nvmrc is load-bearing for both jobs below: it is where setup-node reads the
       # Node version from, so editing it changes the toolchain this gate runs on. A
       # file that decides what a gate tests belongs in the gate's own filter.
@@ -158,6 +166,8 @@ on:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
       - "editors/vscode/**"
+      - "tests/test_data/outputs/ash_aggregated_results.json"
+      - ".github/**"
       - ".nvmrc"
   # THE MERGE QUEUE LEG, AND WHY IT CARRIES NO paths FILTER
   #

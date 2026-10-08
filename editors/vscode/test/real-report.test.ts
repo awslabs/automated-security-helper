@@ -39,9 +39,10 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { DIAGNOSTIC_SOURCE, publishFindings, resolveFindingUri } from '../src/diagnostics';
 import { parseAshSarif } from '../src/sarif';
+import { repoPath } from './repo-inputs';
 import { DiagnosticCollection } from './vscode-stub';
 
-const REPORT = path.resolve(__dirname, '..', '..', '..', 'tests', 'test_data', 'outputs', 'ash_aggregated_results.json');
+const REPORT = repoPath('tests/test_data/outputs/ash_aggregated_results.json');
 
 const ASH_DRIVER_NAME = 'AWS Labs - Automated Security Helper';
 
