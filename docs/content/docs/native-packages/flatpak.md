@@ -16,7 +16,7 @@ uv build --out-dir dist
 ./packaging/flatpak/build.sh dist/automated_security_helper-<version>-py3-none-any.whl out/
 ```
 
-`build.sh` writes `out/ash-<version>-<arch>.flatpak`, for example `ash-4.0.0-x86_64.flatpak`. `flatpak-builder` drives `bwrap`, which needs user namespaces; an ordinary Docker container does not allow them, so build on a host or in a privileged container.
+`build.sh` writes `out/ash-<version>-<arch>.flatpak`, where `<arch>` is what `flatpak --default-arch` prints, such as `x86_64`. `flatpak-builder` drives `bwrap`, which needs user namespaces; an ordinary Docker container does not allow them, so build on a host or in a privileged container.
 
 ## Install
 
