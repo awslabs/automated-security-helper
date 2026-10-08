@@ -908,18 +908,40 @@ def test_legitimate_javascript_is_not_a_misread(guard: ModuleType, text: str) ->
     assert not guard.js_misread(text)
 
 
-def test_a_suspect_javascript_line_is_also_read_with_its_comment(
-    guard: ModuleType,
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A regex decision, then a comment: the decision may have been wrong.
+        "x = /a/; // execSync('npx cdk deploy')\n",
+        # A division decision, then a comment.
+        "x = a / b; // execSync('npx cdk deploy')\n",
+        # A line that starts inside a template literal.
+        "const t = `\n`; // execSync('npx cdk deploy')\n",
+    ],
+)
+def test_a_line_with_a_regex_or_division_decision_is_read_with_its_comment(
+    guard: ModuleType, text: str
 ) -> None:
-    # A comment that starts after a string or regex on its line may be one the
-    # walker misplaced, so the whole line is read too.
-    text = "const u = 'x'; // execSync('npx cdk deploy')\n"
-    assert guard._js_walk(text).suspect == frozenset({1})
+    assert guard._js_walk(text).suspect
     assert any(guard.deploy_reason(c.text) for c in guard.shell_commands(text, js=True))
-    # A comment line on its own is not suspect, and is not read.
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "// npx cdk deploy\n",
+        "console.log('done'); // next: cdk deploy\n",
+        "go(); // execSync('npx cdk deploy')\n",
+        "const u = 'x'; /* cdk deploy */ run();\n",
+    ],
+)
+def test_a_comment_after_strings_or_plain_code_is_not_read(
+    guard: ModuleType, text: str
+) -> None:
+    # Strings and plain code are not guesses, so their comments stay comments.
+    assert not guard._js_walk(text).suspect
     assert not any(
-        guard.deploy_reason(c.text)
-        for c in guard.shell_commands("// npx cdk deploy\n", js=True)
+        guard.deploy_reason(c.text) for c in guard.shell_commands(text, js=True)
     )
 
 
@@ -959,8 +981,8 @@ def test_python_wrappers_reach_a_fixpoint(guard: ModuleType) -> None:
         "def c(w):\n    subprocess.run(w)\n"
     )
     wrappers = guard.python_wrappers(source)
-    assert {p.position for p in wrappers["a"]} == {1}
-    assert {p.position for p in wrappers["b"]} == {0}
+    assert [p.position for p in wrappers["a"].params] == [1]
+    assert [p.position for p in wrappers["b"].params] == [0]
 
 
 def test_a_wrapper_defined_in_another_followed_file_is_used(
@@ -1061,9 +1083,161 @@ def test_shell_functions_aliases_and_xargs(guard: ModuleType, script: str) -> No
     assert any(guard.deploy_reason(c.text) for c in guard.shell_commands(script))
 
 
-def test_a_comment_after_code_is_read_with_its_line(guard: ModuleType) -> None:
-    # No string or regex precedes the comment, yet a walker that misjudged a `/`
-    # earlier in the file could still have placed it wrongly, so it is read.
-    text = "go(); // execSync('npx cdk deploy')\n"
-    assert guard._js_walk(text).suspect == frozenset({1})
-    assert any(guard.deploy_reason(c.text) for c in guard.shell_commands(text, js=True))
+# -- round 4: deterministic output, wrappers with fixed words, scoped bounds ----
+
+
+DETERMINISM_SCRIPT = """
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec)
+sys.modules["g"] = g
+spec.loader.exec_module(g)
+out = []
+for name, files, _ in g.PLANTED_REPOS:
+    root = Path(sys.argv[2]) / str(len(out))
+    g.write_tree(root, files)
+    follower, _ = g.scan_repo_detailed(root)
+    out.append([name, follower.followed, [(h.path, h.line, h.text, h.reason) for h in follower.hits]])
+print(json.dumps(out))
+"""
+
+
+def test_the_output_does_not_depend_on_string_hashing(
+    guard: ModuleType, tmp_path: Path
+) -> None:
+    # Set and frozenset order changes with PYTHONHASHSEED. Any of it reaching the
+    # order of argv words, followed files or hits makes the same deploy pass on
+    # some runs and fail on others.
+    import os
+    import subprocess
+
+    outputs = set()
+    for seed in ("0", "1", "2", "3", "17", "4242"):
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                DETERMINISM_SCRIPT,
+                str(SCRIPT),
+                str(tmp_path / seed),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+        )
+        outputs.add(run.stdout)
+    assert len(outputs) == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import subprocess\ndef tool(name, *args):\n    subprocess.run([name, *args])\ntool("terraform", "apply")\n',
+        'import os\ndef tool(prog, *args):\n    os.execlp(prog, prog, *args)\ntool("terraform", "apply")\n',
+        'import subprocess\ndef cdk(action):\n    subprocess.run(["npx", "cdk", action, "--all"])\ncdk("deploy")\n',
+        'import subprocess\ndef cdk(*args):\n    subprocess.run(["npx", "cdk", *args])\ncdk("deploy", "--all")\n',
+        'import subprocess\ndef cdk(action):\n    subprocess.run(f"npx cdk {action} --all", shell=True)\ncdk("deploy")\n',
+        'import subprocess\ndef run2(prog, arg):\n    subprocess.run([prog, arg])\nrun2("terraform", "apply")\n',
+        'import functools, subprocess\nsh = functools.partial(subprocess.run, shell=True)\nsh("npx cdk deploy")\n',
+        'import subprocess\nsh = lambda c: subprocess.run(c, shell=True)\nsh("npx cdk deploy")\n',
+        'import subprocess\ndef cdk(action):\n    cmd = ["npx", "cdk"]\n    cmd.append(action)\n    subprocess.run(cmd)\ncdk("deploy")\n',
+        'import subprocess\ndef run(*argv):\n    subprocess.run(["npx", *argv])\ndef cdk(a):\n    run("cdk", a)\ncdk("deploy")\n',
+        'import subprocess\nclass C:\n    def cdk(self, action, *, stack="s"):\n        subprocess.run(["npx", "cdk", action, stack])\nC().cdk("deploy")\n',
+    ],
+)
+def test_a_wrapper_call_is_read_with_its_arguments_in_place(
+    guard: ModuleType, source: str
+) -> None:
+    assert any(guard.deploy_reason(c.text) for c in guard.python_commands(source))
+
+
+@pytest.mark.parametrize(
+    ("source", "position"),
+    [
+        (
+            "import subprocess\ndef sh(*, command):\n    subprocess.run(command, shell=True)\n",
+            None,
+        ),
+        (
+            "import subprocess\ndef sh(a, *, command):\n    subprocess.run(command, shell=True)\n",
+            None,
+        ),
+    ],
+)
+def test_a_keyword_only_parameter_is_a_wrapper_parameter(
+    guard: ModuleType, source: str, position: int | None
+) -> None:
+    wrapper = guard.python_wrappers(source)["sh"]
+    assert [(p.name, p.position) for p in wrapper.params] == [("command", position)]
+    calls = source + 'sh(command="npx cdk deploy")\n'
+    assert any(guard.deploy_reason(c.text) for c in guard.python_commands(calls))
+
+
+def test_a_wrapper_seen_only_where_it_is_defined_or_imported(
+    guard: ModuleType, tmp_path: Path
+) -> None:
+    # A same-named function in a file that does not import the wrapper's module
+    # is not read as the wrapper.
+    _write(
+        tmp_path,
+        {
+            ".github/workflows/w.yml": WORKFLOW
+            + "      - run: python3 scripts/a.py && python3 scripts/b.py\n",
+            "scripts/a.py": "import subprocess\ndef say(m):\n    subprocess.run(['npx', 'cdk', m])\n",
+            "scripts/b.py": 'def say(m):\n    print(m)\nsay("deploy")\n',
+        },
+    )
+    hits, _ = guard.scan_repo(tmp_path)
+    assert hits == []
+
+
+def test_another_actions_script_block_is_read_as_shell(guard: ModuleType) -> None:
+    text = (
+        "      - uses: appleboy/ssh-action@0123456789abcdef0123456789abcdef01234567\n"
+        "        with:\n          script: |\n            # restart (prod\n            npx cdk deploy\n"
+    )
+    assert guard.yaml_block_scalars(text) == text
+    assert guard.scan_text("w.yml", guard.yaml_block_scalars(text)) != []
+    github_script = text.replace("appleboy/ssh-action", "actions/github-script")
+    assert guard.yaml_block_scalars(github_script) != github_script
+
+
+def test_the_argument_list_bound_is_per_workflow(
+    guard: ModuleType, tmp_path: Path
+) -> None:
+    files = {
+        f".github/workflows/w{i}.yml": WORKFLOW
+        + f"      - run: npm run lint -- src/p{i}\n"
+        for i in range(40)
+    }
+    files["package.json"] = json.dumps({"scripts": {"lint": "eslint"}})
+    _write(tmp_path, files)
+    hits, _ = guard.scan_repo(tmp_path)
+    assert hits == []
+
+
+def test_an_argv_built_up_after_binding(guard: ModuleType) -> None:
+    for source in (
+        'import subprocess\ncmd = ["npx", "cdk"]\ncmd.append("deploy")\nsubprocess.run(cmd)\n',
+        'import subprocess\ncmd = ["npx", "cdk"]\ncmd.extend(["deploy"])\nsubprocess.run(cmd)\n',
+        'import subprocess\ncmd = ["npx", "cdk"]\ncmd += ["deploy"]\nsubprocess.run(cmd)\n',
+        'import subprocess\ncmd = ["npx", "deploy"]\ncmd.insert(1, "cdk")\nsubprocess.run(cmd)\n',
+    ):
+        assert any(
+            guard.deploy_reason(c.text) for c in guard.python_commands(source)
+        ), source
+
+
+def test_a_wrapper_call_is_read_by_its_own_strings_too(
+    guard: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A wrapper that keeps none of its runner inputs (past MAX_WRAPPER_INPUTS)
+    # is still read through the strings its call passes.
+    monkeypatch.setattr(guard, "MAX_WRAPPER_INPUTS", 0)
+    source = (
+        "import subprocess\ndef sh(c):\n    subprocess.run(c, shell=True)\n"
+        'sh("npx cdk deploy")\n'
+    )
+    assert any(guard.deploy_reason(c.text) for c in guard.python_commands(source))
