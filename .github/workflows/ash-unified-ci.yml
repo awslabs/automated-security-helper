@@ -970,7 +970,9 @@ jobs:
       # Every scanner runs twice over one fixture, with --sandbox off and under the
       # backend, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that
-      # is MISSING in both runs cannot pass parity by being absent.
+      # is MISSING in both runs cannot pass parity by being absent. The Trivy community
+      # module is loaded so trivy-repo, which shares the builtin trivy's code, is
+      # compared too.
       - name: Compare every scanner with and without the sandbox
         # The report path through the environment, not interpolated into the script,
         # which is this repository's convention for every context value a shell reads.
@@ -981,7 +983,8 @@ jobs:
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ash \
-            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy \
+            --ash-plugin-modules automated_security_helper.plugin_modules.ash_trivy_plugins \
+            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
       # each sandboxed scanner's stderr. System daemons log their own sandbox

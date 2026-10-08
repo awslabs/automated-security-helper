@@ -574,3 +574,19 @@ class TestToolVersionIsOnlyAVersionConstraint:
     )
     def test_specifier_sets_are_accepted(self, value):
         assert CfnLintScannerConfigOptions(tool_version=value).tool_version == value
+
+
+def test_an_outside_cfnlintrc_set_by_the_scanned_tree_is_ignored(repo, tmp_path):
+    """The operator rule on its own: outside the tree, but the tree's config chose it."""
+    outside = tmp_path / "elsewhere" / ".cfnlintrc"
+    outside.parent.mkdir()
+    outside.write_text("{}\n")
+    scanner = _scanner(repo, config_file=str(outside))
+    results = repo / "out"
+    results.mkdir()
+
+    (arg,) = [
+        a for a in scanner._option_args(results) if a.startswith("--config-file=")
+    ]
+
+    assert arg.endswith("/ash-empty.cfnlintrc")

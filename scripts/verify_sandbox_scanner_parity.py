@@ -19,15 +19,15 @@ pass trivially.
 
 The fixture is the snapshot fixture (tests/test_data/snapshot_fixture/repo), plus a
 CloudFormation template for cfn-nag and cdk-nag, a pinned old Python dependency for
-grype, and an npm lockfile for npm-audit, so each builtin scanner has something to
-find. For the community scanners it adds the actionlint and zizmor fixture workflows,
+grype, an npm lockfile for npm-audit, the actionlint and zizmor fixture workflows,
 the cfn-lint/cfn-guard insecure template, and the gitleaks fixture's fabricated
 tokens (materialized under ``secrets/``, where its ``.gitleaks.toml`` is not the
-root config). ``--ash-plugin-modules`` loads community modules in both runs, and
+root config), so each builtin scanner has something to find.
+``--ash-plugin-modules`` loads community modules in both runs, and
 ``--config-override`` passes ``--config-overrides`` to both, for a scanner that is
-off by default such as ``trivy``. Both runs use --offline as well, unless --online is passed, in which case the
-pair is run online too, so the network-allowed scanners are exercised with and
-without their network.
+off by default. Both runs use --offline as well, unless --online is passed, in which
+case the pair is run online too, so the network-allowed scanners are exercised with
+and without their network.
 
 Exit status is 0 on parity and 1 otherwise. A JSON report goes to --report.
 """

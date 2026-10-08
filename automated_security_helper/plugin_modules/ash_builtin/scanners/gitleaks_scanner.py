@@ -104,6 +104,7 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.scope import active_scope
 
 #: The text gitleaks writes in place of a secret under ``--redact``.
 REDACTED = "REDACTED"
@@ -226,7 +227,18 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         if options.config_file:
             return self._resolve_option_path(options.config_file, "config_file")
         set_vars = [name for name in CONFIG_ENV_VARS if os.environ.get(name)]
-        if set_vars:
+        if set_vars and active_scope() is not None:
+            # The sandbox does not pass these variables in (see
+            # sandbox_requirements), so gitleaks would not see them and would
+            # fall back to the scanned tree's .gitleaks.toml with nothing said.
+            # ASH's own discovery runs instead, and names what it picks.
+            self._plugin_log(
+                f"{', '.join(set_vars)} is not passed into the scanner sandbox; "
+                "gitleaks uses the config ASH discovers instead. Set "
+                "scanners.gitleaks.options.config_file to choose one.",
+                level=logging.WARNING,
+            )
+        elif set_vars:
             ASH_LOGGER.debug(
                 f"{', '.join(set_vars)} set; leaving gitleaks config resolution to gitleaks"
             )

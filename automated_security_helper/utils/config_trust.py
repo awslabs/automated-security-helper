@@ -14,8 +14,9 @@ or loads as code:
   ``run:`` script to;
 * cfn-lint's ``config_file``: a ``.cfnlintrc``, whose ``append_rules`` makes cfn-lint
   import Python files as rules;
-* trivy's ``config_file``: a ``trivy.yaml``, which can point trivy at a directory of
-  WASM modules and enable them.
+* trivy's and trivy-repo's ``config_file``: a ``trivy.yaml``, which can point trivy
+  at a directory of WASM modules and enable them, and trivy-repo's ``module_dir``,
+  which names that directory directly.
 
 Before a scanner hands such a value to its tool it asks ``set_by_operator``, and it
 refuses a path ``inside_scanned_tree`` whoever named it.

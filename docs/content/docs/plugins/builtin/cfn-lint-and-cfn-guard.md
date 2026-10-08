@@ -119,7 +119,7 @@ installs two pinned artifacts, each verified against a SHA256 recorded in ASH's 
 - the cfn-guard 3.2.1 release binary for your platform (Linux, macOS and Windows, amd64 and arm64), into `ASH_BIN_PATH`;
 - the AWS Guard Rules Registry release 1.0.2 rules archive, extracted into `$ASH_CFN_GUARD_RULES_DIR`, or `<ASH_BIN_PATH>/../share/cfn-guard-rules` when that is unset.
 
-A download whose bytes do not match the pinned digest is refused. The ASH container image ships both, installed read-only for the scan user. nixpkgs has no cfn-guard package, so `--mode nix` does not supply it; install it with the command above.
+A download whose bytes do not match the pinned digest is refused. The ASH container image ships both, installed read-only for the scan user. nixpkgs has no cfn-guard package, so the nix flake packages the same pinned release binary (`nix/cfn-guard.nix`), and the nix shell installs the rules bundle into `ASH_CFN_GUARD_RULES_DIR` on first entry.
 
 Before every scan ASH checks the installed rules against the manifest written at install time: a rules file that is missing, or no longer hashes to what was installed, makes the scanner MISSING with the reinstall command rather than scanning with whatever is left.
 
