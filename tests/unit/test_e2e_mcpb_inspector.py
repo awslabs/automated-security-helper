@@ -343,8 +343,93 @@ def test_wheel_version():
 
 
 # --------------------------------------------------------------------------
-# The Inspector pin
+# The Inspector's lockfile
 # --------------------------------------------------------------------------
+
+INSPECTOR_LOCK = REPO_ROOT / "scripts" / "e2e" / "inspector"
+NPM_REGISTRY = "https://registry.npmjs.org/"
+
+
+def lock_problems(package: dict, lock: dict) -> list:
+    """Every way the inspector lockfile fails to pin what npm ci installs."""
+    problems = []
+    wanted = package.get("dependencies", {})
+    if list(wanted) != ["@modelcontextprotocol/inspector"]:
+        problems.append(
+            f"package.json depends on {sorted(wanted)}, not the inspector alone"
+        )
+    version = wanted.get("@modelcontextprotocol/inspector", "")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        problems.append(f"the inspector is {version!r}, not an exact version")
+    packages = lock.get("packages", {})
+    if packages.get("", {}).get("dependencies") != wanted:
+        problems.append(
+            "the lockfile's root does not declare package.json's dependencies"
+        )
+    installed = packages.get("node_modules/@modelcontextprotocol/inspector", {})
+    if installed.get("version") != version:
+        problems.append(f"the lockfile installs inspector {installed.get('version')!r}")
+    for name, entry in packages.items():
+        if not name or entry.get("link"):
+            continue
+        if not str(entry.get("integrity", "")).startswith("sha512-"):
+            problems.append(f"{name} has no sha512 integrity hash")
+        if not str(entry.get("resolved", "")).startswith(NPM_REGISTRY):
+            problems.append(f"{name} resolves from {entry.get('resolved')!r}")
+    return problems
+
+
+def _lock_files():
+    package = json.loads((INSPECTOR_LOCK / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads(
+        (INSPECTOR_LOCK / "package-lock.json").read_text(encoding="utf-8")
+    )
+    return package, lock
+
+
+def test_the_inspector_lock_pins_every_dependency():
+    package, lock = _lock_files()
+    assert lock_problems(package, lock) == []
+    assert len(lock["packages"]) > 10, "the lock should carry the transitive closure"
+
+
+@pytest.mark.parametrize(
+    "plant, needle",
+    [
+        (
+            lambda p, l: p["dependencies"].update({"left-pad": "1.3.0"}),
+            "not the inspector alone",
+        ),
+        (
+            lambda p, l: p["dependencies"].update(
+                {"@modelcontextprotocol/inspector": "^2.9.0"}
+            ),
+            "not an exact version",
+        ),
+        (
+            lambda p, l: next(e for k, e in l["packages"].items() if k).pop(
+                "integrity"
+            ),
+            "no sha512 integrity hash",
+        ),
+        (
+            lambda p, l: next(e for k, e in l["packages"].items() if k).update(
+                {"resolved": "https://mirror.example.invalid/x.tgz"}
+            ),
+            "resolves from",
+        ),
+        (
+            lambda p, l: l["packages"][
+                "node_modules/@modelcontextprotocol/inspector"
+            ].update({"version": "0.0.1"}),
+            "the lockfile installs inspector",
+        ),
+    ],
+)
+def test_a_lock_that_does_not_pin_is_refused(plant, needle):
+    package, lock = _lock_files()
+    plant(package, lock)
+    assert any(needle in problem for problem in lock_problems(package, lock))
 
 
 def test_the_inspector_pin_matches_validate_mcp():
@@ -352,9 +437,155 @@ def test_the_inspector_pin_matches_validate_mcp():
         REPO_ROOT / ".github" / "actions" / "validate-mcp" / "action.yml"
     ).read_text(encoding="utf-8")
     # The pin step writes the version once to $GITHUB_OUTPUT, and both the install
-    # and the npm cache key read it from there.
+    # and the npm cache key read it from there. The MCPB leg's lock must agree.
     pinned = re.findall(r'echo "version=([^"]+)" >> "\$GITHUB_OUTPUT"', action)
+    package, _ = _lock_files()
+    assert len(pinned) == 1, pinned
+    assert package["dependencies"]["@modelcontextprotocol/inspector"] == pinned[0]
+
+
+def test_mcpb_sh_installs_the_inspector_from_the_lock_only():
     script = (REPO_ROOT / "scripts" / "e2e" / "mcpb.sh").read_text(encoding="utf-8")
-    ours = re.findall(r"E2E_INSPECTOR_VERSION:-([0-9][^}]*)\}", script)
-    assert len(pinned) == 1 and len(ours) == 1, (pinned, ours)
-    assert ours == pinned
+    code = [line for line in script.splitlines() if not line.lstrip().startswith("#")]
+    assert any(
+        re.search(r"\bnpm ci --prefix \"\$WORK/inspector\"", line) for line in code
+    )
+    assert not any(re.search(r"\bnpm (install|i)\b", line) for line in code), (
+        "an npm install next to the lock would resolve versions the lock does not record"
+    )
+    assert "E2E_INSPECTOR_VERSION" not in script, (
+        "a lock cannot be overridden by a version"
+    )
+
+
+# --------------------------------------------------------------------------
+# The bundle's own version and the bundle upgrade
+# --------------------------------------------------------------------------
+
+
+def _pyproject_version():
+    text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    return re.search(r'^version = "([^"]+)"$', text, re.MULTILINE).group(1)
+
+
+def test_the_committed_bundle_version_is_the_ash_version():
+    # What a desktop host compares, tied to what the bundle launches.
+    assert mi.read_bundle(COMMITTED_BUNDLE)["version"] == _pyproject_version()
+
+
+def _bundle(version, name="ash"):
+    return {"name": name, "version": version}
+
+
+def test_a_bundle_upgrade_that_moves_is_accepted():
+    assert (
+        mi.bundle_upgrade_problems(_bundle("3.0.0"), _bundle("4.0.0"), "3.0.0", "4.0.0")
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "prev, head, needle",
+    [
+        # The negative control the e2e run also shows: the head bundle kept N-1's version.
+        (_bundle("3.0.0"), _bundle("3.0.0"), "not raised"),
+        # The state this replaced: every bundle said 1.0.0.
+        (_bundle("1.0.0"), _bundle("1.0.0"), "must be the ASH release"),
+        (_bundle("4.0.0"), _bundle("3.0.0"), "not raised"),
+        (_bundle("3.0.0"), _bundle("4.0.0", name="ash-next"), "two extensions"),
+        (_bundle("3.0.0"), _bundle("4.0.0rc1"), "not both MAJOR.MINOR.PATCH"),
+    ],
+)
+def test_a_bundle_upgrade_a_host_would_not_apply_is_refused(prev, head, needle):
+    problems = mi.bundle_upgrade_problems(prev, head, "3.0.0", "4.0.0")
+    assert any(needle in problem for problem in problems), problems
+
+
+def test_mcpb_sh_builds_the_prev_bundle_and_hands_it_over():
+    script = (REPO_ROOT / "scripts" / "e2e" / "mcpb.sh").read_text(encoding="utf-8")
+    assert (
+        '"$PREV_TRANSPILER/_base/manifest.json" "v$VERSION" "v$PREV_VERSION"' in script
+    )
+    assert 'agentic-plugins release mcpb --dist "$WORK/bundle-prev"' in script
+    assert '--prev-bundle "$PREV_BUNDLE"' in script
+
+
+# --------------------------------------------------------------------------
+# StdioSession, against a scripted server
+# --------------------------------------------------------------------------
+
+FAKE_SERVER = r"""
+import json, sys
+mode = sys.argv[1]
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    method = message["method"]
+    if mode == "stray-print" and method == "tools/list":
+        print("Scanning...", flush=True)
+    if mode == "exit" and method == "tools/list":
+        sys.exit(3)
+    if method == "initialize":
+        result = {"protocolVersion": message["params"]["protocolVersion"], "capabilities": {}, "serverInfo": {"name": "fake", "version": "0"}}
+    elif method == "tools/list":
+        # A server-to-client request and a notification arrive before the reply.
+        print(json.dumps({"jsonrpc": "2.0", "id": "s1", "method": "roots/list"}), flush=True)
+        reply = json.loads(sys.stdin.readline())
+        sys.stderr.write("client answered roots/list with " + json.dumps(reply) + "\n")
+        assert reply["error"]["code"] == -32601, reply
+        print(json.dumps({"jsonrpc": "2.0", "method": "notifications/message", "params": {"level": "info", "data": "hi"}}), flush=True)
+        result = {"tools": [{"name": "check_installation"}]}
+    elif method == "tools/call":
+        result = {"content": [], "structuredContent": {"result": {"success": True, "version": "4.0.0"}}}
+    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+"""
+
+
+def _session(tmp_path, mode):
+    server = tmp_path / "fake_server.py"
+    server.write_text(FAKE_SERVER, encoding="utf-8")
+    return mi.StdioSession(
+        [sys.executable, str(server), mode], None, tmp_path, tmp_path / "server.log"
+    )
+
+
+def test_the_stdio_session_holds_one_session_across_calls(tmp_path):
+    session = _session(tmp_path, "ok")
+    try:
+        assert session.ready() == ["check_installation"]
+        assert session.call("check_installation") == {
+            "success": True,
+            "version": "4.0.0",
+        }
+        assert session.call("check_installation")["version"] == "4.0.0"
+    finally:
+        session.stop()
+    assert session.proc.returncode == 0, "closing stdin must end the session"
+    trace = (tmp_path / "server.jsonrpc").read_text(encoding="utf-8")
+    assert '"notifications/initialized"' in trace
+    assert "-32601" in trace, "a server request must get an answer, not silence"
+
+
+def test_the_stdio_session_refuses_a_stray_line_on_stdout(tmp_path):
+    session = _session(tmp_path, "stray-print")
+    try:
+        with pytest.raises(mi.Failure, match="not a JSON-RPC message: 'Scanning...'"):
+            session.ready()
+    finally:
+        session.stop()
+
+
+def test_the_stdio_session_reports_a_server_that_exits(tmp_path):
+    session = _session(tmp_path, "exit")
+    try:
+        with pytest.raises(mi.Failure, match="closed stdout"):
+            session.ready()
+    finally:
+        session.stop()
+
+
+def test_the_e2e_scans_one_case_over_stdio():
+    text = SCRIPT.read_text(encoding="utf-8")
+    call = re.search(r'"stdio-findings",\s*version,\s*transport="stdio",', text)
+    assert call, "the stdio scan must run the findings case with the head version"

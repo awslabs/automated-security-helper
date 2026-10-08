@@ -356,24 +356,34 @@ function Assert-CliVersion {
 }
 
 function Invoke-Case {
-    param([string] $Cli, [string] $Case, [string] $Label, [string[]] $Extra = @())
+    # -ExpectReject marks a negative control: its rejection prints as plain lines, not as
+    # error annotations on a green run. The exit code is unchanged and still judged.
+    param([string] $Cli, [string] $Case, [string] $Label, [string[]] $Extra = @(), [switch] $ExpectReject)
     $arguments = @(
         (Join-Path $repoRoot 'scripts/e2e/run_case.py'),
         '--cli', $Cli, '--case', $Case, '--work', (Join-Path $script:work 'scans'), '--label', $Label
     )
+    if ($ExpectReject) {
+        $arguments += '--expect-reject'
+    }
     if ($Extra.Count -gt 0) {
         $arguments += '--'
         $arguments += $Extra
     }
-    # Out-Host, so run_case.py's output is shown rather than returned alongside the
-    # exit code: a function returns everything its native commands write to stdout.
-    & python @arguments | Out-Host
-    return $LASTEXITCODE
+    # Written to a log and echoed, rather than returned alongside the result: a function
+    # returns everything its native commands write to stdout. The log is returned with the
+    # exit code, so a negative control reads WHY it was rejected from this call's own log
+    # (see step 7).
+    $log = Join-Path $script:work "run-case-$Label.log"
+    & python @arguments *> $log
+    $code = $LASTEXITCODE
+    Get-Content -LiteralPath $log | ForEach-Object { Write-Host "   | $_" }
+    return [pscustomobject]@{ Rc = $code; Log = $log }
 }
 
 function Assert-Case {
     param([string] $Cli, [string] $Case, [string] $Label)
-    $code = Invoke-Case -Cli $Cli -Case $Case -Label $Label
+    $code = (Invoke-Case -Cli $Cli -Case $Case -Label $Label).Rc
     if ($code -ne 0) {
         Fail "the $Case case ($Label) did not match tests/e2e/fixtures/cases.json; run_case.py exited $code"
     }
@@ -535,11 +545,17 @@ try {
     Assert-Case -Cli $cli -Case 'incomplete' -Label 'fresh-incomplete'
 
     Write-Step '7. NEGATIVE CONTROL: a findings scan that exits 0 must be rejected'
-    $code = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-no-fail-on-findings' -Extra @('--no-fail-on-findings')
-    if ($code -ne 1) {
-        Fail "run_case.py returned $code for a findings scan run with --no-fail-on-findings; expected 1"
+    $negative = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-no-fail-on-findings' -Extra @('--no-fail-on-findings') -ExpectReject
+    if ($negative.Rc -ne 1) {
+        Fail "run_case.py returned $($negative.Rc) for a findings scan run with --no-fail-on-findings; expected 1"
     }
-    Write-Host '   OK: the leg rejects a wrong exit code'
+    # rc 1 alone would also come from a missing report or a wrong count, and under
+    # --expect-reject those problems print as plain lines, so the reason is checked here,
+    # in the log this call wrote.
+    if (-not (Select-String -LiteralPath $negative.Log -SimpleMatch 'exit code 0 (nothing actionable), expected exactly 2' -Quiet)) {
+        Fail 'NEGATIVE CONTROL: run_case.py rejected the --no-fail-on-findings scan, but not for its exit code 0'
+    }
+    Write-Host '   OK: the leg rejects a wrong exit code, for that reason'
 
     Write-Step '8. winget uninstall'
     # uninstall opens the default sources to match the installed package, and the msstore

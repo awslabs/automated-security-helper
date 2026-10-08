@@ -10,8 +10,9 @@ The Windows counterpart of packaging/deb/verify-in-container.sh and
 packaging/rpm/verify-in-container.sh, held to the e2e bar in tests/e2e/README.md:
 
   1-3   Build the package from the wheel the build job made from this commit, assert
-        its metadata, count the bundled wheels (exactly one), and run the
-        package-contents gate on the .nupkg.
+        its metadata, count the bundled wheels (exactly one), run the
+        package-contents gate on the .nupkg, and require it to refuse a copy with a
+        scanner binary planted in it (packaging/assert-planted-scanner-rejected.py).
   3c    Build an N-1 package from E2E_PREV_REF's tree (scripts/e2e/prev_tree.py), with
         its version lowered, using that tree's own build.ps1 and install scripts, so
         the upgrade crosses a real code change and runs the new install script over a
@@ -27,6 +28,10 @@ packaging/rpm/verify-in-container.sh, held to the e2e bar in tests/e2e/README.md
         must be rejected for its exit code, a clean output judged as a findings
         outcome must be rejected, and the uninstall check must fail while ASH is
         installed.
+  7b    As a local account in Users and nothing else, `ashx dependencies install --tool
+        grype` through the installed shim: grype lands in that user's ~\.ash\bin with a
+        receipt matching this ASH's pin, runs, and `--tool <unknown>` exits
+        EXIT_BAD_SELECTION (scripts/e2e/assert_dependencies_install.py).
   8     Uninstall, and require the venv, every shim and the package record gone.
   9-10  Install N-1, scan with it, plant a sentinel in its venv, show the version and
         rebuild checks rejecting N-1, then `choco upgrade` to N and require N's
@@ -162,12 +167,16 @@ function Invoke-Case {
         [Parameter(Mandatory = $true)][string] $Cli,
         [Parameter(Mandatory = $true)][string] $Case,
         [Parameter(Mandatory = $true)][string] $Label,
-        [string[]] $Extra = @()
+        [string[]] $Extra = @(),
+        # A negative control: its rejection prints as plain lines, not as error
+        # annotations on a green run. The exit code is unchanged and still judged.
+        [switch] $ExpectReject
     )
     $arguments = @(
         (Join-Path $Repo 'scripts\e2e\run_case.py'),
         '--cli', $Cli, '--case', $Case, '--work', (Join-Path $Work 'scans'), '--label', $Label
     )
+    if ($ExpectReject) { $arguments += '--expect-reject' }
     if ($Extra.Count -gt 0) { $arguments += @('--') + $Extra }
     return Invoke-Harness -Arguments $arguments
 }
@@ -297,6 +306,121 @@ function Get-RebuildProblems {
     return $problems.ToArray()
 }
 
+# ------------------------------------------------------------------------------------------
+# An unprivileged user, for `ashx dependencies install` (step 7b).
+#
+# This package installs machine-wide, under ProgramData, from an elevated shell. The person
+# who then selects a scanner is usually not an administrator, and their install goes to
+# their own ~\.ash\bin. Running that step as the runner's account would prove nothing about
+# it: on hosted runners that account is an administrator with UAC off, so it can write
+# anywhere. So step 7b creates a local account in Users and nothing else, proves from that
+# account's own token that it is not an administrator, and runs the install as it.
+# ------------------------------------------------------------------------------------------
+
+# Through ADSI's WinNT provider rather than the LocalAccounts cmdlets, which PowerShell 7
+# may load through the Windows PowerShell compatibility layer and then hand back
+# deserialized objects. And not `net user`, which would put the password on a command line.
+function New-StandardUser {
+    param([Parameter(Mandatory = $true)][string] $Name)
+    $computer = [ADSI] "WinNT://$env:COMPUTERNAME,computer"
+    if ([ADSI]::Exists("WinNT://$env:COMPUTERNAME/$Name,user")) {
+        $computer.Delete('User', $Name) | Out-Null
+    }
+    # A random password, never printed and never written anywhere; the account lives for
+    # this step only. The suffix covers the complexity policy whatever the random part
+    # happens to contain.
+    $bytes = New-Object byte[] 24
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $plain = [Convert]::ToBase64String($bytes) + 'a1!A'
+    $account = $computer.Create('User', $Name)
+    # Out-Null on each COM call, so no return value leaks into this function's output.
+    $account.SetPassword($plain) | Out-Null
+    $account.Put('Description', 'ASH e2e: an unprivileged user for ashx dependencies install') | Out-Null
+    # Not "must change password at next logon", which would refuse the logon below.
+    $account.Put('PasswordExpired', 0) | Out-Null
+    $account.SetInfo() | Out-Null
+    # Users (S-1-5-32-545), by SID because the group's name is localized. It carries the
+    # right to log on locally, which the logon below needs.
+    $usersGroup = ([System.Security.Principal.SecurityIdentifier] 'S-1-5-32-545').Translate(
+        [System.Security.Principal.NTAccount]).Value.Split('\')[-1]
+    $group = [ADSI] "WinNT://$env:COMPUTERNAME/$usersGroup,group"
+    if (-not $group.IsMember("WinNT://$env:COMPUTERNAME/$Name")) {
+        $group.Add("WinNT://$env:COMPUTERNAME/$Name,user") | Out-Null
+    }
+    $sid = ([System.Security.Principal.NTAccount] "$env:COMPUTERNAME\$Name").Translate(
+        [System.Security.Principal.SecurityIdentifier]).Value
+    $secure = ConvertTo-SecureString $plain -AsPlainText -Force
+    $plain = $null
+    return [pscustomobject]@{ Name = $Name; Password = $secure; Sid = $sid }
+}
+
+# By name, not by the object New-StandardUser returns, so it also cleans up after a
+# New-StandardUser that failed partway (account created, group or SID step failed) and
+# returned nothing. Removing an account that does not exist is a no-op.
+function Remove-StandardUser {
+    param([Parameter(Mandatory = $true)][string] $Name)
+    if (-not [ADSI]::Exists("WinNT://$env:COMPUTERNAME/$Name,user")) {
+        return
+    }
+    $sid = ([System.Security.Principal.NTAccount] "$env:COMPUTERNAME\$Name").Translate(
+        [System.Security.Principal.SecurityIdentifier]).Value
+    Get-CimInstance -ClassName Win32_UserProfile -ErrorAction SilentlyContinue |
+        Where-Object { $_.SID -eq $sid } |
+        Remove-CimInstance -ErrorAction SilentlyContinue
+    ([ADSI] "WinNT://$env:COMPUTERNAME,computer").Delete('User', $Name) | Out-Null
+}
+
+# Runs one command as $User and returns its exit code and output.
+#
+# System.Diagnostics.Process with UserName, which is CreateProcessWithLogonW, and with
+# LoadUserProfile, so the child gets that user's profile. Its Environment is deliberately
+# never touched: then .NET passes no environment block, and Windows builds the child's from
+# the user's own profile, so USERPROFILE, TEMP and PATH are the user's, as they would be in
+# their shell. Copying this process's environment would point the child at the runner
+# account's home, and the install would be measuring that account's directory again.
+function Invoke-AsStandardUser {
+    param(
+        [Parameter(Mandatory = $true)] $User,
+        [Parameter(Mandatory = $true)][string] $FilePath,
+        [Parameter(Mandatory = $true)][string[]] $ArgumentList,
+        [Parameter(Mandatory = $true)][string] $WorkingDirectory
+    )
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $FilePath
+    foreach ($argument in $ArgumentList) { $info.ArgumentList.Add($argument) }
+    $info.UserName = $User.Name
+    $info.Domain = $env:COMPUTERNAME
+    $info.Password = $User.Password
+    $info.LoadUserProfile = $true
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.WorkingDirectory = $WorkingDirectory
+    Write-Host "   as $($User.Name): $FilePath $($ArgumentList -join ' ')"
+    try {
+        $process = [System.Diagnostics.Process]::Start($info)
+    } catch {
+        Fail-Verification @(
+            "could not start a process as $($User.Name): $($_.Exception.Message)",
+            'This is CreateProcessWithLogonW. It needs the Secondary Logon service and the',
+            "account's right to log on locally, which Users holds by default."
+        )
+    }
+    # Both streams drained concurrently, or a child that fills one pipe while this waits on
+    # the other never exits.
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(1200000)) {
+        $process.Kill($true)
+        Fail-Verification "$FilePath did not finish within 20 minutes as $($User.Name)"
+    }
+    $process.WaitForExit()
+    $out = $stdout.Result
+    $text = $out + $stderr.Result
+    $text -split "`r?`n" | Where-Object { $_ } | ForEach-Object { Write-Host "   $_" }
+    return [pscustomobject]@{ Rc = $process.ExitCode; Out = $out; Text = $text }
+}
+
 Write-Host '== 0. the e2e verdict can fail'
 $r = Invoke-Harness -Arguments @((Join-Path $Repo 'scripts\e2e\assert_outcome.py'), '--self-test')
 Assert-NativeSuccess -What 'assert_outcome.py --self-test' -ExitCode $r.Rc
@@ -352,6 +476,16 @@ Write-Host '== 3b. the package-contents gate'
 # to the gate the published wheel passes. The .nupkg checks are stdlib-only.
 $r = Invoke-Harness -Arguments @((Join-Path $Repo 'packaging\assert-package-contents.py'), $nupkg)
 Assert-NativeSuccess -What 'packaging/assert-package-contents.py' -ExitCode $r.Rc
+
+Write-Host '== 3b2. negative control: the gate must refuse this package with a scanner planted in it'
+# The gate's --self-test proves each check can fail on fixtures shaped like this package.
+# This proves it on the .nupkg just packed: a copy with tools/grype.exe (a native PE
+# image) added must be refused with the native-binary verdict on that member, and the
+# unmodified package must pass. The copy is written under $Work, never $OutDir.
+$r = Invoke-Harness -Arguments @((Join-Path $Repo 'packaging\assert-planted-scanner-rejected.py'), $nupkg, '--work', (Join-Path $Work 'planted'))
+if ($r.Rc -ne 0) {
+    Fail-Verification "NEGATIVE CONTROL: packaging/assert-planted-scanner-rejected.py exited $($r.Rc) on $nupkg; the gate did not refuse the real package with a scanner planted in it"
+}
 
 Write-Host "== 3c. build N-1 from $PrevRef"
 # N-1 is the older tree's own wheel, nuspec and install scripts, packed by its own
@@ -443,7 +577,7 @@ foreach ($case in @('findings', 'clean', 'incomplete')) {
 
 Write-Host '== 7. negative controls on the verdicts'
 Write-Host '   a findings scan with --no-fail-on-findings must be rejected for its exit code'
-$r = Invoke-Case -Cli $shim -Case 'findings' -Label 'negative-no-fail-on-findings' -Extra @('--no-fail-on-findings')
+$r = Invoke-Case -Cli $shim -Case 'findings' -Label 'negative-no-fail-on-findings' -Extra @('--no-fail-on-findings') -ExpectReject
 if ($r.Rc -ne 1) { Fail-Verification "NEGATIVE CONTROL: run_case returned $($r.Rc) for a findings scan that exited 0; expected 1" }
 # rc 1 alone would also come from a missing report or a wrong count. The control only
 # controls anything if the exit-code check is what fired.
@@ -456,15 +590,78 @@ Write-Host '   the clean output judged as a findings outcome must be rejected'
 $r = Invoke-Harness -Arguments @(
     (Join-Path $Repo 'scripts\e2e\assert_outcome.py'),
     '--output-dir', (Join-Path $Work 'scans\fresh-clean\out'), '--rc', '0',
-    '--expect-rc', '2', '--min-findings', '1', '--require-scanner', 'detect-secrets', '--selected', 'detect-secrets'
+    '--expect-rc', '2', '--min-findings', '1', '--require-scanner', 'detect-secrets', '--selected', 'detect-secrets', '--expect-reject'
 )
 if ($r.Rc -ne 1) { Fail-Verification "NEGATIVE CONTROL: assert_outcome returned $($r.Rc) on a clean output expected to hold findings" }
-Write-Host "   OK: rejected (exit $($r.Rc))"
+# For its exit code: under --expect-reject the problems are plain lines, so an rc of 1 for
+# some other reason would otherwise pass unnoticed.
+if ($r.Text -notmatch [regex]::Escape('[expect-rc 2] exit code 0 (nothing actionable), expected exactly 2')) {
+    Fail-Verification 'NEGATIVE CONTROL: assert_outcome rejected the clean output, but not for its exit code 0'
+}
+Write-Host "   OK: rejected for exit code 0 (exit $($r.Rc))"
 
 Write-Host '   the uninstall check must fail while ASH is installed'
 $p = @(Get-AbsenceProblems)
 if ($p.Count -eq 0) { Fail-Verification 'NEGATIVE CONTROL: the uninstall check passed on a machine that still holds ASH' }
 Write-Host "   OK: rejected ($($p.Count) problem(s), first: $($p[0]))"
+
+Write-Host '== 7b. an unprivileged user selects a scanner: ashx dependencies install --tool grype'
+# No package bundles a scanner; a user selects one after installing (README.chocolatey).
+# scripts/e2e/assert_dependencies_install.py runs under the installed venv's interpreter, as
+# that user, through the shim on PATH: it requires nothing installed yet, the install to
+# exit 0, grype at that user's ~\.ash\bin with a receipt recording this ASH's pinned
+# version and archive SHA-256 and the binary's own hash, `grype version` to name the pin,
+# and `--tool <unknown>` to exit EXIT_BAD_SELECTION. That last one is the negative control.
+# The account is created inside try and removed by name in finally, together with its
+# directory, so neither a failed check nor a New-StandardUser that failed partway leaves
+# them behind. PowerShell runs a finally block when exit leaves the try block.
+$standardUserName = 'ashe2estd'
+$userWork = Join-Path $env:SystemDrive 'ash-e2e-standard-user'
+try {
+    $standardUser = New-StandardUser -Name $standardUserName
+    if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
+    New-Item -ItemType Directory -Path $userWork | Out-Null
+    & icacls.exe $userWork /grant "$($standardUser.Name):(OI)(CI)M" | Out-Null
+    Assert-NativeSuccess -What "icacls $userWork" -ExitCode $LASTEXITCODE
+    # A copy the user can read. The checkout lives under the runner account's directories.
+    $depsScript = Join-Path $userWork 'assert_dependencies_install.py'
+    Copy-Item -LiteralPath (Join-Path $Repo 'scripts\e2e\assert_dependencies_install.py') -Destination $depsScript
+
+    # Proof from the account's own token, not from the group list it was created with: a token
+    # carrying BUILTIN\Administrators (S-1-5-32-544), even filtered, would make this an
+    # administrator's install again.
+    $r = Invoke-AsStandardUser -User $standardUser -FilePath (Join-Path $env:SystemRoot 'System32\whoami.exe') `
+        -ArgumentList @('/groups', '/fo', 'csv') -WorkingDirectory $userWork
+    Assert-NativeSuccess -What "whoami /groups as $($standardUser.Name)" -ExitCode $r.Rc
+    if ($r.Text -match 'S-1-5-32-544') {
+        Fail-Verification "$($standardUser.Name)'s token carries BUILTIN\Administrators, so it is not an unprivileged user"
+    }
+    if ($r.Text -notmatch 'S-1-5-32-545') {
+        Fail-Verification "$($standardUser.Name)'s token does not carry BUILTIN\Users; the logon is not the one intended"
+    }
+    Write-Host "   OK: $($standardUser.Name)'s token has Users and not Administrators"
+
+    $r = Invoke-AsStandardUser -User $standardUser -FilePath $venvPython `
+        -ArgumentList @('-I', $depsScript, '--cli', (Join-Path $chocoBin "$cli.exe"), '--tool', 'grype') `
+        -WorkingDirectory $userWork
+    if ($r.Rc -ne 0) {
+        Fail-Verification "ashx dependencies install --tool grype as the unprivileged user $($standardUser.Name) failed (assert_dependencies_install.py exit $($r.Rc))"
+    }
+    $installedTool = ($r.Out.Trim() -split "`r?`n" | Select-Object -Last 1) | ConvertFrom-Json
+    # The install went to that user's home and the file is theirs, which is what makes this an
+    # unprivileged install and not the runner account's.
+    if ($installedTool.home -ieq $HOME -or -not $installedTool.binary.StartsWith($installedTool.home, [StringComparison]::OrdinalIgnoreCase)) {
+        Fail-Verification "grype landed at $($installedTool.binary), not under $($standardUser.Name)'s home $($installedTool.home)"
+    }
+    $owner = (Get-Acl -LiteralPath $installedTool.binary).Owner
+    if ($owner -notlike "*\$($standardUser.Name)") {
+        Fail-Verification "$($installedTool.binary) is owned by $owner, not by $($standardUser.Name)"
+    }
+    Write-Host "   OK: $($installedTool.tool) $($installedTool.version) at $($installedTool.binary), owned by $owner"
+} finally {
+    Remove-StandardUser -Name $standardUserName
+    if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
+}
 
 Write-Host '== 8. uninstall drops the venv, the shims and the package record'
 $r = Invoke-Choco -Arguments @('uninstall', 'ash')

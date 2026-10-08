@@ -342,6 +342,12 @@ def capture(
     not cost the golden comparison: both verdicts are reported from one spawn.
     The other three methods run without `--strict`, measured to exit 0 against
     `ashx mcp` with inspector 2.8.0, so anything else from them is a failure.
+
+    The pin moved to 2.9.0 because 2.8.0 pins @modelcontextprotocol/client 2.0.0,
+    inside the >=2.0.0 <2.2.0 range of GHSA-6qxp-vccf-f47h. On that bump this whole comparison was run
+    under both versions against the same `ashx mcp`: all four methods exited 0, the
+    surface matched the golden, and the output, warnings included, was identical.
+    The exit-6 stub measurement above was not repeated.
     """
     cmd = [inspector, "--cli", ash, "mcp", "--method", surface.method]
     if surface.strict:

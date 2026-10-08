@@ -25,6 +25,10 @@ control either changes the scan (for example `-- --no-fail-on-findings` on the f
 case, which must then fail the exit-code check) or runs assert_outcome.py directly on a
 real output with a wrong expectation.
 
+A negative control passes --expect-reject, so its problems print as plain lines and do
+not become error annotations on a green run. That flag changes the printing only: the
+exit code is still 1 for a rejection, and the caller still checks the reason.
+
 Standard library only, like assert_outcome.py.
 """
 
@@ -70,6 +74,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--label", help="a name for this run in the output (default: the case name)"
+    )
+    parser.add_argument(
+        "--expect-reject",
+        action="store_true",
+        help=(
+            "this run is a negative control that must be rejected: print its problems "
+            "as plain lines, not error annotations (see assert_outcome.report_problems). "
+            "The exit code is unchanged"
+        ),
     )
     parser.add_argument(
         "extra", nargs="*", help="extra arguments for `scan`, after a --"
@@ -141,13 +154,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     problems = assert_outcome.check_outcome(out, rc, expected)
     if problems:
-        for problem in problems:
-            print(f"::error::[{label}] {problem}")
+        assert_outcome.report_problems(label, problems, args.expect_reject)
         tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-25:]
         print(f"--- last {len(tail)} lines of {log}")
         print("\n".join(tail))
-        print(f"FAIL: [{label}] {len(problems)} problem(s)")
+        verdict = "REJECTED, as the caller expected" if args.expect_reject else "FAIL"
+        print(f"{verdict}: [{label}] {len(problems)} problem(s)")
         return 1
+    if args.expect_reject:
+        assert_outcome.report_unexpected_match(label)
     summary = json.dumps({"case": args.case, "rc": rc, "findings": expected.findings})
     print(f"OK: [{label}] {summary}")
     return 0

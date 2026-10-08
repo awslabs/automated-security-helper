@@ -6,10 +6,6 @@
 #
 #   scripts/e2e/mcpb.sh <work-dir>
 #
-#   E2E_INSPECTOR_VERSION  the @modelcontextprotocol/inspector version (default below;
-#                          tests/unit/test_e2e_mcpb_inspector.py holds it equal to the
-#                          pin in .github/actions/validate-mcp/action.yml)
-#
 # 1. Builds the bundle from this commit the way the release does
 #    (.github/workflows/ash-tag-on-merge.yml, "Stage and verify the MCPB bundle"):
 #    `agentic-plugins check --drift-only` rebuilds every backend into a sandbox and
@@ -18,14 +14,21 @@
 # 2. Builds the head wheel and an N-1 wheel from `git archive` exports. N-1 is this
 #    tree with its [project] version lowered by packaging/verify-lib.sh's
 #    vl_lower_version, the derivation packaging/build-test-wheels.sh uses. Both are
-#    gated by the artifact-contents check.
-# 3. Installs the pinned MCP Inspector into <work-dir>, never globally.
+#    gated by the artifact-contents check. The N-1 export also builds its own bundle,
+#    with _base/manifest.json's ash_version lowered the same way, so the upgrade leg
+#    replaces bundle N-1 with bundle N the way a desktop host does, and the bundle's
+#    own version has to move.
+# 3. Installs the MCP Inspector into <work-dir>, never globally, with `npm ci` from
+#    the lockfile under scripts/e2e/inspector/, so every transitive dependency is the
+#    one the lockfile records and is checked against its integrity hash. The version
+#    is held equal to .github/actions/validate-mcp/action.yml's pin by
+#    tests/unit/test_e2e_mcpb_inspector.py.
 # 4. Runs the transpiler's archive-corruption tests, which prove the bundle's own
 #    smoke test rejects damaged archives.
 # 5. Hands everything to scripts/e2e/mcpb_inspector.py, which retargets the bundle at
-#    the wheels and drives it: upgrade, stdio handshake, the three scan cases,
-#    negative controls, uninstall. Its docstring says why the scans use
-#    streamable HTTP.
+#    the wheels and drives it: bundle and wheel upgrade, stdio handshake, a scan over
+#    stdio, the three scan cases, negative controls, uninstall. Its docstring says
+#    why most scans use streamable HTTP.
 #
 # Nothing is published. The bundle, the wheels and the Inspector stay under
 # <work-dir>; the N-1 wheel carries a version that was never released.
@@ -33,7 +36,7 @@ set -euo pipefail
 
 WORK="${1:?usage: mcpb.sh <work-dir>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-INSPECTOR_VERSION="${E2E_INSPECTOR_VERSION:-2.8.0}"
+INSPECTOR_LOCK="$REPO/scripts/e2e/inspector"
 TRANSPILER="$REPO/ash-agent-plugins/agentic-coding/transpiler"
 
 # vl_lower_version, and nothing else from it is used. Sourcing it only defines
@@ -94,13 +97,44 @@ say "artifact-contents gate on both wheels"
 harness "$REPO/.github/scripts/assert-artifact-contents.py" "$HEAD_WHEEL" "$PREV_WHEEL"
 say "N = $VERSION, N-1 = $PREV_VERSION"
 
+# The N-1 bundle, built by the N-1 export's own transpiler. Only ash_version is
+# lowered: it is what the bundle's version derives from
+# (transpiler/packagers.py, mcpb_bundle_version). The bundle's `--from=` still names
+# the head tag, and mcpb_inspector.py rewrites it to the N-1 wheel either way.
+PREV_TRANSPILER="$WORK/src-prev/ash-agent-plugins/agentic-coding/transpiler"
+harness - "$PREV_TRANSPILER/_base/manifest.json" "v$VERSION" "v$PREV_VERSION" <<'PY'
+import sys
+path, old, new = sys.argv[1:]
+text = open(path, encoding="utf-8").read()
+needle = f'"ash_version": "{old}"'
+if text.count(needle) != 1:
+    sys.exit(f"expected one {needle} in {path}, found {text.count(needle)}")
+open(path, "w", encoding="utf-8", newline="").write(text.replace(needle, f'"ash_version": "{new}"'))
+PY
+# The transpiler locates the repository root by its .git and refuses to build without
+# one (transpiler/orchestrator.py, find_repository_root). A `git archive` export has
+# none, so the export is made a repository of its own, empty, after its wheel was
+# built above: the marker is all the transpiler reads.
+git -c init.defaultBranch=main init -q "$WORK/src-prev"
+rm -rf "$WORK/bundle-prev"
+uv run --project "$PREV_TRANSPILER" agentic-plugins build mcpb
+uv run --project "$PREV_TRANSPILER" agentic-plugins release mcpb --dist "$WORK/bundle-prev"
+PREV_BUNDLES=("$WORK"/bundle-prev/*.mcpb)
+[ "${#PREV_BUNDLES[@]}" -eq 1 ] && [ -f "${PREV_BUNDLES[0]}" ] \
+  || fail "the N-1 release wrote ${#PREV_BUNDLES[@]} .mcpb files into $WORK/bundle-prev, expected 1"
+PREV_BUNDLE="${PREV_BUNDLES[0]}"
+say "N-1 bundle: $PREV_BUNDLE"
+
 # --------------------------------------------------------------------------
-# 3. The Inspector, pinned, local to this run.
+# 3. The Inspector, locked, local to this run.
 # --------------------------------------------------------------------------
+INSPECTOR_VERSION="$(node -p 'require(process.argv[1]).dependencies["@modelcontextprotocol/inspector"]' "$INSPECTOR_LOCK/package.json")"
+[ -n "$INSPECTOR_VERSION" ] || fail "no inspector version in $INSPECTOR_LOCK/package.json"
 rm -rf "$WORK/inspector"
 mkdir -p "$WORK/inspector"
-npm install --prefix "$WORK/inspector" --no-audit --no-fund --no-save \
-  "@modelcontextprotocol/inspector@${INSPECTOR_VERSION}"
+cp "$INSPECTOR_LOCK/package.json" "$INSPECTOR_LOCK/package-lock.json" "$WORK/inspector/"
+# npm ci installs exactly the lockfile, and fails if package.json disagrees with it.
+npm ci --prefix "$WORK/inspector" --no-audit --no-fund
 INSPECTOR="$WORK/inspector/node_modules/.bin/mcp-inspector"
 [ -x "$INSPECTOR" ] || fail "npm installed no mcp-inspector at $INSPECTOR"
 "$INSPECTOR" --cli --help >/dev/null || fail "mcp-inspector --cli does not run"
@@ -120,6 +154,7 @@ uv run --project "$TRANSPILER" --extra test pytest -p no:cacheprovider -o addopt
 rm -rf "$WORK/run"
 harness "$REPO/scripts/e2e/mcpb_inspector.py" \
   --bundle "$BUNDLE" \
+  --prev-bundle "$PREV_BUNDLE" \
   --wheel "$HEAD_WHEEL" \
   --prev-wheel "$PREV_WHEEL" \
   --inspector "$INSPECTOR" \
