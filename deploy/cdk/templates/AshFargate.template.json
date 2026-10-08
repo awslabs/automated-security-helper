@@ -935,7 +935,17 @@
    "DependsOn": [
     "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
     "ImageBootstrapStarterRole4262AC52"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "LAMBDA_INSIDE_VPC"
+     ],
+     "SuppressedRuleReasons": {
+      "LAMBDA_INSIDE_VPC": "Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data."
+     }
+    }
+   }
   },
   "ImageBootstrapBuildCBE6CA7A": {
    "Type": "Custom::AshImageBootstrap",
@@ -1091,7 +1101,17 @@
    },
    "DependsOn": [
     "VpcVPCGWBF912B6E"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "NO_UNRESTRICTED_ROUTE_TO_IGW"
+     ],
+     "SuppressedRuleReasons": {
+      "NO_UNRESTRICTED_ROUTE_TO_IGW": "Egress route for the NAT gateway, the only resource in this subnet. Nothing here has a public IP or listener; the ALB is internal and tasks run in private subnets."
+     }
+    }
+   }
   },
   "VpcPublicSubnet1EIPD7E02669": {
    "Type": "AWS::EC2::EIP",
@@ -1199,7 +1219,17 @@
    },
    "DependsOn": [
     "VpcVPCGWBF912B6E"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "NO_UNRESTRICTED_ROUTE_TO_IGW"
+     ],
+     "SuppressedRuleReasons": {
+      "NO_UNRESTRICTED_ROUTE_TO_IGW": "Egress route for the NAT gateway, the only resource in this subnet. Nothing here has a public IP or listener; the ALB is internal and tasks run in private subnets."
+     }
+    }
+   }
   },
   "VpcPrivateSubnet1Subnet536B997A": {
    "Type": "AWS::EC2::Subnet",
@@ -1970,6 +2000,16 @@
      ],
      "Version": "2012-10-17"
     }
+   },
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "S3_BUCKET_SSL_REQUESTS_ONLY"
+     ],
+     "SuppressedRuleReasons": {
+      "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+     }
+    }
    }
   },
   "AccessLogs8B620ECA": {
@@ -2097,6 +2137,16 @@
       }
      ],
      "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "S3_BUCKET_SSL_REQUESTS_ONLY"
+     ],
+     "SuppressedRuleReasons": {
+      "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
+     }
     }
    }
   },

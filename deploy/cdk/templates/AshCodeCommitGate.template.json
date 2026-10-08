@@ -74,6 +74,17 @@
    "Type": "String",
    "Default": "",
    "Description": "ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild republishes, so a replaced task adopts the newest image at no defined moment. Pin the build's version-qualified tag instead; its digest is only known after a build, so deploy empty, read the tag, then set this on a stack update."
+  },
+  "VpcId": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^vpc-[0-9a-f]{8,17}$",
+   "Description": "VPC for the scan function, with VpcSubnetIds. Empty (default): no VPC."
+  },
+  "VpcSubnetIds": {
+   "Type": "CommaDelimitedList",
+   "Default": "",
+   "Description": "Subnets for the scan function, with VpcId. Empty: no VPC. Set: a 443-only SG is created; your NACLs/routes must reach CodeCommit, ECR, SSM, Logs."
   }
  },
  "Conditions": {
@@ -107,6 +118,23 @@
      "Fn::Equals": [
       {
        "Ref": "AshImageTag"
+      },
+      ""
+     ]
+    }
+   ]
+  },
+  "ScanFunctionInVpc": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Fn::Select": [
+        0,
+        {
+         "Ref": "VpcSubnetIds"
+        }
+       ]
       },
       ""
      ]
@@ -865,7 +893,17 @@
    "DependsOn": [
     "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
     "ImageBootstrapStarterRole4262AC52"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "LAMBDA_INSIDE_VPC"
+     ],
+     "SuppressedRuleReasons": {
+      "LAMBDA_INSIDE_VPC": "Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data."
+     }
+    }
+   }
   },
   "ImageBootstrapBuildCBE6CA7A": {
    "Type": "Custom::AshImageBootstrap",
@@ -1182,13 +1220,155 @@
       "Arn"
      ]
     },
-    "Timeout": 900
+    "Tags": [
+     {
+      "Fn::If": [
+       "ScanFunctionInVpc",
+       {
+        "Key": "ash:vpc-access-policy",
+        "Value": {
+         "Ref": "ScanFunctionRoleEc2Access99A7E33E"
+        }
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    ],
+    "Timeout": 900,
+    "VpcConfig": {
+     "Fn::If": [
+      "ScanFunctionInVpc",
+      {
+       "SubnetIds": {
+        "Ref": "VpcSubnetIds"
+       },
+       "SecurityGroupIds": [
+        {
+         "Fn::GetAtt": [
+          "ScanSecurityGroup",
+          "GroupId"
+         ]
+        }
+       ]
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    }
    },
    "DependsOn": [
     "ImageBootstrapBuildCBE6CA7A",
     "ScanFunctionRoleDefaultPolicy885340FF",
     "ScanFunctionRoleD9323212"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "LAMBDA_INSIDE_VPC"
+     ],
+     "SuppressedRuleReasons": {
+      "LAMBDA_INSIDE_VPC": "Opt-in: set VpcId and VpcSubnetIds to confine egress to a 443-only SG and your NACLs. Empty (default) leaves egress open."
+     }
+    }
+   }
+  },
+  "ScanSecurityGroup": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "ASH pull-request scan function. Egress is TCP 443 only; widen it against ScanSecurityGroupId.",
+    "SecurityGroupEgress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "CodeCommit, ECR, SSM and CloudWatch Logs over HTTPS, via your NAT.",
+      "FromPort": 443,
+      "IpProtocol": "tcp",
+      "ToPort": 443
+     }
+    ],
+    "VpcId": {
+     "Ref": "VpcId"
+    }
+   },
+   "Metadata": {
+    "cfn_nag": {
+     "rules_to_suppress": [
+      {
+       "id": "W5",
+       "reason": "Egress is TCP 443 to public AWS endpoints (CodeCommit, ECR, SSM, CloudWatch Logs) through the adopter NAT. No AWS-managed prefix list covers ECR or Logs, and naming them needs interface endpoints. Widen via ScanSecurityGroupId."
+      }
+     ]
+    }
+   },
+   "Condition": "ScanFunctionInVpc"
+  },
+  "ScanFunctionRoleEc2Access99A7E33E": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:CreateNetworkInterface",
+        "ec2:DeleteNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeSubnets",
+        "ec2:UnassignPrivateIpAddresses"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestedRegion": {
+          "Ref": "AWS::Region"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "LambdaManagesNetworkInterfaces"
+      },
+      {
+       "Action": "ec2:*",
+       "Condition": {
+        "Null": {
+         "lambda:SourceFunctionArn": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Resource": "*",
+       "Sid": "FunctionCodeCannotUseThem"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ScanFunctionRoleEc2Access99A7E33E",
+    "Roles": [
+     {
+      "Ref": "ScanFunctionRoleD9323212"
+     }
+    ]
+   },
+   "Metadata": {
+    "cfn_nag": {
+     "rules_to_suppress": [
+      {
+       "id": "W12",
+       "reason": "Resource \"*\" on the network-interface actions Lambda documents as all-resources for VPC attachment; Region-pinned, created only when VpcSubnetIds is set, and ec2:* is denied to function code."
+      }
+     ]
+    },
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Resource \"*\" on the network-interface grants Lambda documents as all-resources for VPC attachment. Created only when VpcSubnetIds is set; denied to function code.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   },
+   "Condition": "ScanFunctionInVpc"
   },
   "PullRequestRule01EC9868": {
    "Type": "AWS::Events::Rule",
@@ -1251,7 +1431,78 @@
    }
   }
  },
+ "Rules": {
+  "VpcIdWithSubnets": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Or": [
+       {
+        "Fn::And": [
+         {
+          "Fn::Equals": [
+           {
+            "Ref": "VpcId"
+           },
+           ""
+          ]
+         },
+         {
+          "Fn::EachMemberEquals": [
+           {
+            "Ref": "VpcSubnetIds"
+           },
+           ""
+          ]
+         }
+        ]
+       },
+       {
+        "Fn::And": [
+         {
+          "Fn::Not": [
+           {
+            "Fn::Equals": [
+             {
+              "Ref": "VpcId"
+             },
+             ""
+            ]
+           }
+          ]
+         },
+         {
+          "Fn::Not": [
+           {
+            "Fn::EachMemberEquals": [
+             {
+              "Ref": "VpcSubnetIds"
+             },
+             ""
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "Set VpcId and VpcSubnetIds together, or neither."
+    }
+   ]
+  }
+ },
  "Outputs": {
+  "ScanSecurityGroupId": {
+   "Description": "The scan function's security group, created only when VpcId and VpcSubnetIds are set. Egress is TCP 443 only. To reach a registry on another port: aws ec2 authorize-security-group-egress --group-id <this> --protocol tcp --port 8080 --cidr <your-registry-cidr>. A missing rule shows up as a scan timing out.",
+   "Value": {
+    "Fn::GetAtt": [
+     "ScanSecurityGroup",
+     "GroupId"
+    ]
+   },
+   "Condition": "ScanFunctionInVpc"
+  },
   "ScanFunctionRoleArn": {
    "Description": "Grant this role approval authority to make the gate binding. Create an approval rule template naming it, then associate the template with the repository: `aws codecommit create-approval-rule-template` followed by `aws codecommit associate-approval-rule-template-with-repository`.",
    "Value": {

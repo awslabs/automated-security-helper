@@ -56,7 +56,10 @@ describe('parameter names are the contract', () => {
     //
     // - `KmsKeyArn` is live. Every stack declares it, and it encrypts the log
     //   groups, the ECR repository, the secret and the Lambda environment.
-    // - `VpcSubnetIds` and `CertificateArn` are RESERVED. `ash-config.ts` ships a
+    // - `VpcSubnetIds` was reserved here and is now LIVE, with `VpcId`
+    //   beside it: AshCodeCommitGate declares both, and they place the scan function
+    //   in the adopter's VPC when set. No other stack declares either.
+    // - `CertificateArn` is RESERVED, as `VpcSubnetIds` was until the gate consumed it. `ash-config.ts` ships a
     //   factory for each, with the type and pattern settled, and no stack calls
     //   either one. They are the opt-in names the `CKV_AWS_117` and
     //   `CKV_AWS_2`/`CKV_AWS_103` suppressions in `.ash/.ash.yaml` refer to, fixed
@@ -82,6 +85,7 @@ describe('parameter names are the contract', () => {
         'McpStatelessHttp',
         'RebuildSchedule',
         'ShardCount',
+        'VpcId',
         'VpcSubnetIds',
       ].sort(),
     );
@@ -103,16 +107,20 @@ describe('parameter names are the contract', () => {
       // cannot supply the name either: an Object.entries key is always a non-empty
       // string, so that assertion can never fail and never prints anything.
       //
-      // `kmsKeyArn` is the positive control. Without it the two reserved-name
-      // assertions would also hold for a template that declared no parameters at all.
+      // `kmsKeyArn` is the positive control. Without it the reserved-name assertion
+      // would also hold for a template that declared no parameters at all. The two VPC
+      // names are live on the gate stack only, so they are pinned to exactly it.
+      const isGate = id === 'AshCodeCommitGate';
       expect({
         stack: id,
         vpcSubnetIds: declared.includes(ASH_PARAMETER_NAMES.vpcSubnetIds),
+        vpcId: declared.includes(ASH_PARAMETER_NAMES.vpcId),
         certificateArn: declared.includes(ASH_PARAMETER_NAMES.certificateArn),
         kmsKeyArn: declared.includes(ASH_PARAMETER_NAMES.kmsKeyArn),
       }).toEqual({
         stack: id,
-        vpcSubnetIds: false,
+        vpcSubnetIds: isGate,
+        vpcId: isGate,
         certificateArn: false,
         kmsKeyArn: true,
       });

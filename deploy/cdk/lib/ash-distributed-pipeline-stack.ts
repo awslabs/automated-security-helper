@@ -111,6 +111,7 @@ import {
   suppressScanProjectRoleWildcards,
   suppressSecretRotation,
   suppressUnevaluableRules,
+  suppressBucketTlsLiteral,
 } from './ash-nag-suppressions';
 import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope, ashRoleSplitScopeOf } from './ash-policy-split';
 import { AshRuntimeConfig } from './ash-runtime-config';
@@ -250,6 +251,12 @@ export class AshDistributedPipelineStack extends Stack {
       // to inspect a failure and no more.
       lifecycleRules: [{ id: 'ExpireSupersededArtifacts', noncurrentVersionExpiration: Duration.days(30) }],
     });
+
+    // cfn-guard's S3_BUCKET_SSL_REQUESTS_ONLY, suppressed per policy: see
+    // GUARD_REASON_BUCKET_TLS. enforceSSL above is what actually enforces TLS.
+    for (const bucket of [logArchiveBucket, accessLogsBucket, sourceBucket, resultsBucket, artifactBucket]) {
+      suppressBucketTlsLiteral(bucket);
+    }
 
     /**
      * The ASH image as a CodeBuild environment image.

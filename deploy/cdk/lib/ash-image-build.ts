@@ -72,7 +72,11 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 import { AshCustomerKey, diagnosticLogGroupProps } from './ash-config';
-import { suppressImageBuildRoleWildcards, suppressLambdaLogWildcard } from './ash-nag-suppressions';
+import {
+  suppressGuardRule,
+  suppressImageBuildRoleWildcards,
+  suppressLambdaLogWildcard,
+} from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
 import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope } from './ash-policy-split';
 
@@ -540,6 +544,11 @@ export class AshImageBuild extends Construct {
     );
 
     suppressLambdaLogWildcard(starterRole);
+    suppressGuardRule(
+      starter,
+      'LAMBDA_INSIDE_VPC',
+      'Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data.',
+    );
 
     return new CustomResource(this, 'BootstrapBuild', {
       serviceToken: starter.functionArn,

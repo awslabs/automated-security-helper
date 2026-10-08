@@ -191,6 +191,15 @@
  *   AshFargate              68,502    over   17,302  76,674     over  25,474
  *   AshImagePipeline        61,183    over    9,983  68,435     over  17,235
  *
+ * AshCodeCommitGate HAS SINCE MOVED TO S3-ONLY. The optional VPC placement for its scan
+ * function (two parameters, a condition, a Rule, a conditional inline role policy and its
+ * suppressions) added about 3,200 bytes and put it over the cap at roughly 52,400. The
+ * trimming that remained available -- shorter reasons and descriptions -- was already
+ * done and recovered about 1,200, short of the 1,700 more the reserve needed, so it was
+ * reclassified rather than squeezed further. Console launches are unaffected, since the
+ * console reads every template from S3; only a scripted `--template-body` changes.
+ * AshAgentCore keeps the inline set non-empty.
+ *
  * PER-POLICY REASONS ARE CHEAPER THAN THE ROLE-SCOPED UNION THEY REPLACED, WHICH IS THE
  * OPPOSITE OF WHAT AN EARLIER NOTE HERE PREDICTED. A union reason has to describe every
  * wildcard shape anywhere on the role and then lands on each of that role's policies, so
@@ -276,10 +285,15 @@ const INLINE_TEMPLATE_BUDGET_BYTES = INLINE_TEMPLATE_BODY_MAX_BYTES - INLINE_RES
 const S3_TEMPLATE_BODY_MAX_BYTES = 1_048_576;
 
 /** Launchable with `--template-body`. Keep in step with README.md. */
-const INLINE_LAUNCHABLE = ['AshAgentCore', 'AshCodeCommitGate'];
+const INLINE_LAUNCHABLE = ['AshAgentCore'];
 
 /** Must be uploaded and launched with `--template-url`. Keep in step with README.md. */
-const S3_URL_ONLY = ['AshDistributedPipeline', 'AshFargate', 'AshImagePipeline'];
+const S3_URL_ONLY = [
+  'AshCodeCommitGate',
+  'AshDistributedPipeline',
+  'AshFargate',
+  'AshImagePipeline',
+];
 
 const ALL_STACKS = [...INLINE_LAUNCHABLE, ...S3_URL_ONLY];
 
@@ -315,14 +329,14 @@ const MAX_BYTES_PER_LINE = 512;
  */
 const SUPPRESSION_ENTRIES: Record<string, number> = {
   AshAgentCore: 10,
-  AshCodeCommitGate: 7,
+  AshCodeCommitGate: 8,
   AshDistributedPipeline: 55,
   AshFargate: 9,
   AshImagePipeline: 8,
 };
 
-/** 89, spelled out so the total is asserted and not merely derived from the map. */
-const SUPPRESSION_ENTRIES_TOTAL = 89;
+/** 90, spelled out so the total is asserted and not merely derived from the map. */
+const SUPPRESSION_ENTRIES_TOTAL = 90;
 
 /**
  * The entries no cdk-nag rule consults, named so the next reader can tell a known
@@ -507,7 +521,7 @@ describe('the shipped cdk-nag suppression population', () => {
     },
   );
 
-  test('the five templates ship 89 suppression entries between them', () => {
+  test('the five templates ship 90 suppression entries between them', () => {
     const total = ALL_STACKS.reduce((n, stack) => n + suppressionEntries(stack).length, 0);
     expect(total).toBe(SUPPRESSION_ENTRIES_TOTAL);
     // Non-vacuity for the map above: a typo that made every count 0 would satisfy

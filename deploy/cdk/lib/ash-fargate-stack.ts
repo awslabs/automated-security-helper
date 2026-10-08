@@ -68,6 +68,8 @@ import {
   suppressSecretRotation,
   suppressTaskDefinitionEnvironment,
   suppressTaskExecutionRoleWildcard,
+  suppressBucketTlsLiteral,
+  suppressGuardRule,
 } from './ash-nag-suppressions';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
@@ -214,6 +216,18 @@ export class AshFargateStack extends Stack {
         },
       },
     });
+    // cfn-guard's NO_UNRESTRICTED_ROUTE_TO_IGW, suppressed on each public subnet's
+    // default route and nowhere else. Those routes are the NAT gateway's egress, and
+    // test/ash-hardening.test.ts asserts the NAT gateway is the only resource placed
+    // in those subnets.
+    for (const subnet of vpc.publicSubnets) {
+      suppressGuardRule(
+        subnet.node.findChild('DefaultRoute'),
+        'NO_UNRESTRICTED_ROUTE_TO_IGW',
+        'Egress route for the NAT gateway, the only resource in this subnet. Nothing here ' +
+          'has a public IP or listener; the ALB is internal and tasks run in private subnets.',
+      );
+    }
 
     const cluster = new ecs.Cluster(this, 'Cluster', {
       vpc,
@@ -302,6 +316,11 @@ export class AshFargateStack extends Stack {
       // custom resource, which would make these templates need `cdk bootstrap`.
       removalPolicy: RemovalPolicy.RETAIN,
     });
+    // cfn-guard's S3_BUCKET_SSL_REQUESTS_ONLY, suppressed per policy: see
+    // GUARD_REASON_BUCKET_TLS. enforceSSL above is what actually enforces TLS.
+    for (const bucket of [logArchiveBucket, accessLogsBucket]) {
+      suppressBucketTlsLiteral(bucket);
+    }
 
     const loadBalancer = new elbv2.ApplicationLoadBalancer(this, 'LoadBalancer', {
       vpc,
