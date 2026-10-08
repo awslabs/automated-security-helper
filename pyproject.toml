@@ -50,7 +50,10 @@ dependencies = [
 ]
 [project.optional-dependencies]
 cdk = [
-    "aws-cdk-lib>=2.269.0,<3.0.0",
+    # The wheel bundles brace-expansion inside its jsii tarball, so uv.lock lists only
+    # aws-cdk-lib and a dependency scanner never sees the copy. 2.272.0 and earlier bundle
+    # 5.0.9 (CVE-2026-102276, CVE-2026-102277, CVE-2026-102278); 2.273.0 bundles 5.0.12.
+    "aws-cdk-lib>=2.273.0,<3.0.0",
     "cdk-nag>=3.0,<4.0.0",
     "constructs>=10.8,<11.0.0",
 ]
