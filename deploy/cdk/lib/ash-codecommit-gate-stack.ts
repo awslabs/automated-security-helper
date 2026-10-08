@@ -62,6 +62,7 @@ import {
   Stack,
   StackProps,
 } from 'aws-cdk-lib';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -79,7 +80,7 @@ import {
   codeCommitRepositoryArn,
   diagnosticLogGroupProps,
   rebuildSchedule,
-  vpcSecurityGroupIds,
+  ashVpcId,
   vpcSubnetIds,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
@@ -244,48 +245,86 @@ export class AshCodeCommitGateStack extends Stack {
     });
 
     /*
-     * OPTIONAL VPC PLACEMENT: VpcSubnetIds plus VpcSecurityGroupIds.
+     * OPTIONAL VPC PLACEMENT: VpcId plus VpcSubnetIds.
      *
      * Both empty, the default, leaves the function outside any VPC, as it always was:
      * egress is then open to the internet, which is how it reaches CodeCommit, ECR,
      * Systems Manager and CloudWatch Logs with nothing to configure. Both set attaches
-     * it to those subnets, and from then on its egress is exactly what the adopter's
-     * security groups, network ACLs and route tables allow -- this stack adds no rule
-     * of its own, and the function still needs a NAT gateway or interface endpoints
-     * for those four services or every scan fails. That is the way to confine what
-     * scanned repository code can send anywhere.
+     * it to those subnets with a security group this stack creates in that VPC,
+     * `ScanSecurityGroup`, whose only egress is TCP 443 -- the same shape as the
+     * Fargate task group. The function still needs a NAT gateway or interface
+     * endpoints for those four services, or every scan fails. Egress is then that
+     * group plus the adopter's network ACLs and route tables, and the group id is the
+     * `ScanSecurityGroupId` output, the handle for widening it.
+     *
+     * WHY THE STACK CREATES THE GROUP rather than taking adopter group ids. An optional
+     * list parameter needs an empty default, and CDK's CloudFormation validator (which
+     * ASH's cdk-nag scanner runs) substitutes parameter defaults into property values
+     * on every branch while treating parameter-keyed conditions as unknown. So a `Ref`
+     * to such a parameter in `SecurityGroupIds` always reads as an empty group id
+     * (E1150), whichever structure carries it: an `Fn::If`, a condition-gated second
+     * function, or a separate on/off parameter all still reported it. A `GetAtt` on a
+     * group the stack creates cannot be empty.
+     *
+     * KNOWN LIMITATION: the same substitution puts `[""]` into `SubnetIds` on that
+     * branch. The validator does not format-check Lambda subnet ids, so nothing reports
+     * it, but nothing proves that slot non-empty either. The Rule below is what keeps a
+     * real launch from reaching it empty.
      *
      * Conditions rather than a synth-time switch, so the one template serves both and
-     * a console launch with nothing filled in behaves as before.
-     *
-     * The Rule fails a launch that sets security groups without subnets before anything
-     * is created; otherwise the function would silently run outside the VPC. The other
-     * half-configuration, subnets without security groups, already fails loudly: the
-     * empty group id is rejected when Lambda creates the function.
+     * a console launch with nothing filled in behaves as before. The Rule refuses a
+     * launch that sets only one of the two, before anything is created.
      */
+    const vpcId = ashVpcId(this);
     const subnetIds = vpcSubnetIds(this);
-    const securityGroupIds = vpcSecurityGroupIds(this);
     const scanInVpc = new CfnCondition(this, 'ScanFunctionInVpc', {
       // A CommaDelimitedList left empty resolves to [""]; see vpcSubnetIds.
       expression: Fn.conditionNot(Fn.conditionEquals(Fn.select(0, subnetIds.valueAsList), '')),
     });
-    new CfnRule(this, 'VpcSubnetsWithSecurityGroups', {
-      ruleCondition: Fn.conditionNot(
-        Fn.conditionEachMemberEquals(securityGroupIds.valueAsList, ''),
-      ),
+    const vpcIdEmpty = Fn.conditionEquals(vpcId.valueAsString, '');
+    const subnetsEmpty = Fn.conditionEachMemberEquals(subnetIds.valueAsList, '');
+    new CfnRule(this, 'VpcIdWithSubnets', {
       assertions: [
         {
-          assert: Fn.conditionNot(Fn.conditionEachMemberEquals(subnetIds.valueAsList, '')),
-          assertDescription: 'VpcSecurityGroupIds needs VpcSubnetIds.',
+          assert: Fn.conditionOr(
+            Fn.conditionAnd(vpcIdEmpty, subnetsEmpty),
+            Fn.conditionAnd(Fn.conditionNot(vpcIdEmpty), Fn.conditionNot(subnetsEmpty)),
+          ),
+          assertDescription: 'Set VpcId and VpcSubnetIds together, or neither.',
         },
       ],
     });
+    const scanSecurityGroup = new ec2.CfnSecurityGroup(this, 'ScanSecurityGroup', {
+      vpcId: vpcId.valueAsString,
+      groupDescription:
+        'ASH pull-request scan function. Egress is TCP 443 only; widen it against ' +
+        'ScanSecurityGroupId.',
+      securityGroupEgress: [
+        {
+          ipProtocol: 'tcp',
+          fromPort: 443,
+          toPort: 443,
+          cidrIp: '0.0.0.0/0',
+          description: 'CodeCommit, ECR, SSM and CloudWatch Logs over HTTPS, via your NAT.',
+        },
+      ],
+    });
+    scanSecurityGroup.cfnOptions.condition = scanInVpc;
     const cfnScanFunction = scanFunction.node.defaultChild as lambda.CfnFunction;
     cfnScanFunction.vpcConfig = Fn.conditionIf(
       scanInVpc.logicalId,
-      { SubnetIds: subnetIds.valueAsList, SecurityGroupIds: securityGroupIds.valueAsList },
+      { SubnetIds: subnetIds.valueAsList, SecurityGroupIds: [scanSecurityGroup.attrGroupId] },
       Aws.NO_VALUE,
     );
+    const scanSecurityGroupOutput = new CfnOutput(this, 'ScanSecurityGroupId', {
+      description:
+        "The scan function's security group, created only when VpcId and VpcSubnetIds are " +
+        'set. Egress is TCP 443 only. To reach a registry on another port: aws ec2 ' +
+        'authorize-security-group-egress --group-id <this> --protocol tcp --port 8080 ' +
+        '--cidr <your-registry-cidr>. A missing rule shows up as a scan timing out.',
+      value: scanSecurityGroup.attrGroupId,
+    });
+    scanSecurityGroupOutput.condition = scanInVpc;
     /*
      * The network-interface permissions Lambda needs to attach the function, granted
      * only when it is attached. Lambda documents these as `Resource: "*"`:
@@ -367,7 +406,7 @@ export class AshCodeCommitGateStack extends Stack {
     suppressGuardRule(
       scanFunction,
       'LAMBDA_INSIDE_VPC',
-      'Opt-in: set VpcSubnetIds and VpcSecurityGroupIds to confine egress to your SGs and ' +
+      'Opt-in: set VpcId and VpcSubnetIds to confine egress to a 443-only SG and your ' +
         'NACLs. Empty (default) leaves egress open.',
     );
 

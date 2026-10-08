@@ -107,10 +107,12 @@ change for adopters and desynchronizes the two implementations.
 | `McpAuthHeaderValue` | empty | `NoEcho`. Stored in Secrets Manager; the container gets the ARN, never the value. |
 | `RebuildSchedule` | `rate(1 day)` | EventBridge schedule expression for the image rebuild. |
 | `CodeCommitRepositoryArn` | required | An **existing** repository. The gate stack never creates or deletes one. |
-| `VpcSubnetIds` | empty | Gate only. Comma-separated subnets for the scan function, set together with `VpcSecurityGroupIds`. Empty keeps the function outside any VPC, with open egress. See below. |
-| `VpcSecurityGroupIds` | empty | Gate only. Security groups for the scan function. Setting these without `VpcSubnetIds` is refused at launch. |
+| `VpcId` | empty | Gate only. The VPC for the scan function, set together with `VpcSubnetIds`; setting only one is refused at launch. The stack creates a security group there, egress TCP 443 only, exported as `ScanSecurityGroupId` so you can widen it. Empty keeps the function outside any VPC, with open egress. See below. |
+| `VpcSubnetIds` | empty | Gate only. Comma-separated subnets for the scan function, in `VpcId`. Your NACLs and routes there must reach CodeCommit, ECR, SSM and CloudWatch Logs (NAT or interface endpoints). |
 
 **VPC attachment for the gate has not been deploy-tested.** The network-interface grant it adds keeps `Resource: "*"`, as Lambda documents, and pins the calls to the stack's Region with `aws:RequestedRegion`. AWS does not document whether Lambda's service-side network-interface calls carry that key. It is a global key present on signed requests, so this is expected to work. If attaching the function fails with a permissions error on `ec2:CreateNetworkInterface`, please report it: the condition is the first suspect. The Terraform module carries the same condition.
+
+The stack creates the gate's security group rather than taking group ids from you because an optional list parameter needs an empty default, and CDK's CloudFormation validator substitutes that default into `SecurityGroupIds` on every branch. It reports that as an empty group id (E1150) whichever way the template is structured. The same substitution puts an empty entry into `SubnetIds`. The validator does not format-check Lambda subnet ids, so it reports nothing there, but it cannot prove that slot non-empty either. The launch-time Rule pairing `VpcId` with `VpcSubnetIds` is what stops a real launch reaching it empty.
 | `ShardCount` | 4 | **Not a CloudFormation parameter.** See below. |
 
 `AshBaseConfigYaml` is stored in an SSM parameter on the Advanced tier and written

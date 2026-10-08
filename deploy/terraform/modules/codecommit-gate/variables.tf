@@ -357,30 +357,30 @@ variable "log_retention_days" {
   default     = 30
 }
 
-variable "vpc_subnet_ids" {
+variable "vpc_id" {
   description = <<-EOT
-    Contract name: VpcSubnetIds. Subnets to attach the gate function to, set
-    together with vpc_security_group_ids. Empty (the default) leaves the function
-    outside any VPC, with open egress to the internet, as before this variable
-    existed.
+    Contract name: VpcId. The VPC to attach the gate function to, set together
+    with vpc_subnet_ids. Empty (the default) leaves the function outside any VPC,
+    with open egress to the internet, as before this variable existed.
 
-    When set, the function's egress is exactly what your security groups, network
-    ACLs and route tables allow; this module adds none. It still has to reach
-    CodeCommit, ECR, SSM and CloudWatch Logs, through a NAT gateway or interface
-    endpoints you provide, or every scan fails.
+    When set, the module creates a security group for the function in this VPC
+    whose only egress is TCP 443, exported as scan_security_group_id so you can
+    widen it. Your network ACLs and route tables must still reach CodeCommit, ECR,
+    SSM and CloudWatch Logs, through a NAT gateway or interface endpoints you
+    provide, or every scan fails.
   EOT
-  type        = list(string)
-  default     = []
+  type        = string
+  default     = ""
 }
 
-variable "vpc_security_group_ids" {
-  description = "Contract name: VpcSecurityGroupIds. Security groups for the gate function, set together with vpc_subnet_ids. Their egress rules are the function's egress."
+variable "vpc_subnet_ids" {
+  description = "Contract name: VpcSubnetIds. Subnets in vpc_id to attach the gate function to, set together with vpc_id."
   type        = list(string)
   default     = []
 
   validation {
-    condition     = (length(var.vpc_security_group_ids) == 0) == (length(var.vpc_subnet_ids) == 0)
-    error_message = "Set vpc_subnet_ids and vpc_security_group_ids together, or leave both empty."
+    condition     = (length(var.vpc_subnet_ids) == 0) == (var.vpc_id == "")
+    error_message = "Set vpc_id and vpc_subnet_ids together, or leave both empty."
   }
 }
 

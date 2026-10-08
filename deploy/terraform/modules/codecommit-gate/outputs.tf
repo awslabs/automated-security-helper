@@ -58,3 +58,8 @@ output "log_group_name" {
   description = "CloudWatch Logs group the gate writes to."
   value       = aws_cloudwatch_log_group.gate.name
 }
+
+output "scan_security_group_id" {
+  description = "The gate function's security group, created only when vpc_id and vpc_subnet_ids are set; null otherwise. Egress is TCP 443 only. Add an egress rule against it to reach a registry on another port. A missing rule shows up as a scan timing out."
+  value       = local.use_vpc ? aws_security_group.gate[0].id : null
+}

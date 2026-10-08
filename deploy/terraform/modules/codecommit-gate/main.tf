@@ -441,6 +441,28 @@ resource "aws_iam_role_policy" "gate" {
   policy = data.aws_iam_policy_document.gate.json
 }
 
+# Only when the function is attached to a VPC. Egress is TCP 443 only, the same
+# shape as the fargate module's task group; widen it against
+# scan_security_group_id. Mirrors the CDK stack, which creates the group rather
+# than taking adopter group ids (deploy/cdk/lib/ash-codecommit-gate-stack.ts).
+resource "aws_security_group" "gate" {
+  count = local.use_vpc ? 1 : 0
+
+  name_prefix = "${var.name_prefix}-"
+  description = "ASH pull-request scan function. Egress is TCP 443 only."
+  vpc_id      = var.vpc_id
+
+  egress {
+    description = "CodeCommit, ECR, SSM and CloudWatch Logs over HTTPS, via your NAT."
+    protocol    = "tcp"
+    from_port   = 443
+    to_port     = 443
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = var.tags
+}
+
 resource "aws_lambda_function" "gate" {
   # CKV_AWS_272 is not applicable rather than declined: Lambda code signing
   # covers .zip deployment packages only, and this function is package_type
@@ -530,7 +552,7 @@ resource "aws_lambda_function" "gate" {
 
     content {
       subnet_ids         = var.vpc_subnet_ids
-      security_group_ids = var.vpc_security_group_ids
+      security_group_ids = [aws_security_group.gate[0].id]
     }
   }
 

@@ -56,7 +56,7 @@ describe('parameter names are the contract', () => {
     //
     // - `KmsKeyArn` is live. Every stack declares it, and it encrypts the log
     //   groups, the ECR repository, the secret and the Lambda environment.
-    // - `VpcSubnetIds` was reserved here and is now LIVE, with `VpcSecurityGroupIds`
+    // - `VpcSubnetIds` was reserved here and is now LIVE, with `VpcId`
     //   beside it: AshCodeCommitGate declares both, and they place the scan function
     //   in the adopter's VPC when set. No other stack declares either.
     // - `CertificateArn` is RESERVED, as `VpcSubnetIds` was until the gate consumed it. `ash-config.ts` ships a
@@ -85,7 +85,7 @@ describe('parameter names are the contract', () => {
         'McpStatelessHttp',
         'RebuildSchedule',
         'ShardCount',
-        'VpcSecurityGroupIds',
+        'VpcId',
         'VpcSubnetIds',
       ].sort(),
     );
@@ -114,13 +114,13 @@ describe('parameter names are the contract', () => {
       expect({
         stack: id,
         vpcSubnetIds: declared.includes(ASH_PARAMETER_NAMES.vpcSubnetIds),
-        vpcSecurityGroupIds: declared.includes(ASH_PARAMETER_NAMES.vpcSecurityGroupIds),
+        vpcId: declared.includes(ASH_PARAMETER_NAMES.vpcId),
         certificateArn: declared.includes(ASH_PARAMETER_NAMES.certificateArn),
         kmsKeyArn: declared.includes(ASH_PARAMETER_NAMES.kmsKeyArn),
       }).toEqual({
         stack: id,
         vpcSubnetIds: isGate,
-        vpcSecurityGroupIds: isGate,
+        vpcId: isGate,
         certificateArn: false,
         kmsKeyArn: true,
       });

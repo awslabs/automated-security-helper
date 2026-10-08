@@ -485,18 +485,19 @@ run_case "max_comment_chars below 500 -> refused" must \
 run_case "ecr_image_tag_mutability lowercase -> refused" must \
   "ecr_image_tag_mutability must be either MUTABLE or IMMUTABLE" \
   "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var ecr_image_tag_mutability=mutable
-# Cross-variable rule on vpc_security_group_ids: both VPC lists or neither. Each
-# half-configuration is its own case, and the both-set case is the mustnot control.
-run_case "vpc_security_group_ids without vpc_subnet_ids -> refused" must \
-  "Set vpc_subnet_ids and vpc_security_group_ids together" \
-  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var 'vpc_security_group_ids=["sg-example"]'
-run_case "vpc_subnet_ids without vpc_security_group_ids -> refused" must \
-  "Set vpc_subnet_ids and vpc_security_group_ids together" \
+# Cross-variable rule on vpc_subnet_ids: vpc_id and the subnets together or
+# neither. Each half-configuration is its own case, and the both-set case is the
+# mustnot control.
+run_case "vpc_id without vpc_subnet_ids -> refused" must \
+  "Set vpc_id and vpc_subnet_ids together" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var vpc_id=vpc-example
+run_case "vpc_subnet_ids without vpc_id -> refused" must \
+  "Set vpc_id and vpc_subnet_ids together" \
   "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var 'vpc_subnet_ids=["subnet-example"]'
-run_case "both VPC lists set -> allowed" mustnot \
-  "Set vpc_subnet_ids and vpc_security_group_ids together" \
-  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var 'vpc_subnet_ids=["subnet-example"]' \
-  -var 'vpc_security_group_ids=["sg-example"]'
+run_case "both VPC inputs set -> allowed" mustnot \
+  "Set vpc_id and vpc_subnet_ids together" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var vpc_id=vpc-example \
+  -var 'vpc_subnet_ids=["subnet-example"]'
 
 echo
 echo "validate-inputs: pass=$PASS fail=$FAIL"

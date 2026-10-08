@@ -555,7 +555,7 @@ global_settings:
         Same cost and same reasoning as the AshAgentCore entry above. The finding is
         on the image-build bootstrap starter only. The pull-request scan function no
         longer reports it: it carries a conditional VpcConfig, opted into with the
-        VpcSubnetIds and VpcSecurityGroupIds parameters.
+        VpcId and VpcSubnetIds parameters.
     - rule_id: CKV_AWS_117
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
@@ -800,7 +800,7 @@ global_settings:
       reason: >-
         The image-build bootstrap starter, the one CKV_AWS_117 name left for this file.
         Same cost, recorded there. The pull-request scan function no longer reports
-        it: VpcSubnetIds and VpcSecurityGroupIds attach it to a VPC.
+        it: VpcId and VpcSubnetIds attach it to a VPC.
     - rule_id: CFN_NAG_W89
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-

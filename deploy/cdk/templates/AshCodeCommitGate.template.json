@@ -75,15 +75,16 @@
    "Default": "",
    "Description": "ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild republishes, so a replaced task adopts the newest image at no defined moment. Pin the build's version-qualified tag instead; its digest is only known after a build, so deploy empty, read the tag, then set this on a stack update."
   },
+  "VpcId": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^vpc-[0-9a-f]{8,17}$",
+   "Description": "VPC for the scan function, with VpcSubnetIds. Empty (default): no VPC."
+  },
   "VpcSubnetIds": {
    "Type": "CommaDelimitedList",
    "Default": "",
-   "Description": "Subnets for the scan function, with VpcSecurityGroupIds. Empty: no VPC. Set: egress is your SGs/NACLs/routes, which must reach CodeCommit, ECR, SSM, Logs."
-  },
-  "VpcSecurityGroupIds": {
-   "Type": "CommaDelimitedList",
-   "Default": "",
-   "Description": "Security groups for the scan function, with VpcSubnetIds."
+   "Description": "Subnets for the scan function, with VpcId. Empty: no VPC. Set: a 443-only SG is created; your NACLs/routes must reach CodeCommit, ECR, SSM, Logs."
   }
  },
  "Conditions": {
@@ -1243,9 +1244,14 @@
        "SubnetIds": {
         "Ref": "VpcSubnetIds"
        },
-       "SecurityGroupIds": {
-        "Ref": "VpcSecurityGroupIds"
-       }
+       "SecurityGroupIds": [
+        {
+         "Fn::GetAtt": [
+          "ScanSecurityGroup",
+          "GroupId"
+         ]
+        }
+       ]
       },
       {
        "Ref": "AWS::NoValue"
@@ -1264,10 +1270,29 @@
       "LAMBDA_INSIDE_VPC"
      ],
      "SuppressedRuleReasons": {
-      "LAMBDA_INSIDE_VPC": "Opt-in: set VpcSubnetIds and VpcSecurityGroupIds to confine egress to your SGs and NACLs. Empty (default) leaves egress open."
+      "LAMBDA_INSIDE_VPC": "Opt-in: set VpcId and VpcSubnetIds to confine egress to a 443-only SG and your NACLs. Empty (default) leaves egress open."
      }
     }
    }
+  },
+  "ScanSecurityGroup": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "ASH pull-request scan function. Egress is TCP 443 only; widen it against ScanSecurityGroupId.",
+    "SecurityGroupEgress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "CodeCommit, ECR, SSM and CloudWatch Logs over HTTPS, via your NAT.",
+      "FromPort": 443,
+      "IpProtocol": "tcp",
+      "ToPort": 443
+     }
+    ],
+    "VpcId": {
+     "Ref": "VpcId"
+    }
+   },
+   "Condition": "ScanFunctionInVpc"
   },
   "ScanFunctionRoleEc2Access99A7E33E": {
    "Type": "AWS::IAM::Policy",
@@ -1397,39 +1422,77 @@
   }
  },
  "Rules": {
-  "VpcSubnetsWithSecurityGroups": {
-   "RuleCondition": {
-    "Fn::Not": [
-     {
-      "Fn::EachMemberEquals": [
-       {
-        "Ref": "VpcSecurityGroupIds"
-       },
-       ""
-      ]
-     }
-    ]
-   },
+  "VpcIdWithSubnets": {
    "Assertions": [
     {
      "Assert": {
-      "Fn::Not": [
+      "Fn::Or": [
        {
-        "Fn::EachMemberEquals": [
+        "Fn::And": [
          {
-          "Ref": "VpcSubnetIds"
+          "Fn::Equals": [
+           {
+            "Ref": "VpcId"
+           },
+           ""
+          ]
          },
-         ""
+         {
+          "Fn::EachMemberEquals": [
+           {
+            "Ref": "VpcSubnetIds"
+           },
+           ""
+          ]
+         }
+        ]
+       },
+       {
+        "Fn::And": [
+         {
+          "Fn::Not": [
+           {
+            "Fn::Equals": [
+             {
+              "Ref": "VpcId"
+             },
+             ""
+            ]
+           }
+          ]
+         },
+         {
+          "Fn::Not": [
+           {
+            "Fn::EachMemberEquals": [
+             {
+              "Ref": "VpcSubnetIds"
+             },
+             ""
+            ]
+           }
+          ]
+         }
         ]
        }
       ]
      },
-     "AssertDescription": "VpcSecurityGroupIds needs VpcSubnetIds."
+     "AssertDescription": "Set VpcId and VpcSubnetIds together, or neither."
     }
    ]
   }
  },
  "Outputs": {
+  "ScanSecurityGroupId": {
+   "Description": "The scan function's security group, created only when VpcId and VpcSubnetIds are set. Egress is TCP 443 only. To reach a registry on another port: aws ec2 authorize-security-group-egress --group-id <this> --protocol tcp --port 8080 --cidr <your-registry-cidr>. A missing rule shows up as a scan timing out.",
+   "Value": {
+    "Fn::GetAtt": [
+     "ScanSecurityGroup",
+     "GroupId"
+    ]
+   },
+   "Condition": "ScanFunctionInVpc"
+  },
   "ScanFunctionRoleArn": {
    "Description": "Grant this role approval authority to make the gate binding. Create an approval rule template naming it, then associate the template with the repository: `aws codecommit create-approval-rule-template` followed by `aws codecommit associate-approval-rule-template-with-repository`.",
    "Value": {

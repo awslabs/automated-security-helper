@@ -163,8 +163,8 @@ fetch what it needs.
 | `image_retention_count` | — | `number` | `10` | |
 | `build_timeout_minutes` | — | `number` | `30` | |
 | `log_retention_days` | — | `number` | `30` | |
-| `vpc_subnet_ids` | `VpcSubnetIds` | `list(string)` | `[]` | Opt-in VPC placement, with `vpc_security_group_ids`. Empty leaves egress open. Set, egress is what your SGs, NACLs and routes allow; they must reach CodeCommit, ECR, SSM and Logs. |
-| `vpc_security_group_ids` | `VpcSecurityGroupIds` | `list(string)` | `[]` | Set together with `vpc_subnet_ids`, or neither. Not deploy-tested: the ENI grant is pinned with `aws:RequestedRegion`, which AWS does not document for Lambda's service-side calls. If VPC attachment fails on `ec2:CreateNetworkInterface`, please report it. |
+| `vpc_id` | `VpcId` | `string` | `""` | Opt-in VPC placement, with `vpc_subnet_ids`. Empty leaves egress open. Set, the module creates a security group in it with TCP 443 egress only (`scan_security_group_id` output, to widen it); your NACLs and routes must reach CodeCommit, ECR, SSM and Logs. Not deploy-tested: the ENI grant is pinned with `aws:RequestedRegion`, which AWS does not document for Lambda's service-side calls; if VPC attachment fails on `ec2:CreateNetworkInterface`, please report it. |
+| `vpc_subnet_ids` | `VpcSubnetIds` | `list(string)` | `[]` | Subnets in `vpc_id`. Set together with `vpc_id`, or neither. |
 | `tags` | — | `map(string)` | `{}` | |
 
 ## Outputs
@@ -172,7 +172,7 @@ fetch what it needs.
 `function_name`, `function_arn`, `role_arn`, `gate_image_uri`,
 `gate_ecr_repository_url`, `gate_image_codebuild_project_name`,
 `bootstrap_command`, `event_rule_arn`, `repository_name`,
-`approval_rule_template_name`, `log_group_name`.
+`approval_rule_template_name`, `log_group_name`, `scan_security_group_id` (null unless `vpc_id` is set).
 
 ## Constraints and known limitations
 

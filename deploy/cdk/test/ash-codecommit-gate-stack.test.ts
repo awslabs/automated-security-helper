@@ -149,6 +149,10 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
   const VPC_POLICY = Object.keys(json.Resources).find(
     (id) => json.Resources[id].Type === 'AWS::IAM::Policy' && json.Resources[id].Condition,
   )!;
+  const SCAN_SG = Object.keys(json.Resources).find(
+    (id) => json.Resources[id].Type === 'AWS::EC2::SecurityGroup',
+  )!;
+  const SET = { VpcId: 'vpc-0123456789abcdef0', VpcSubnetIds: 'subnet-0aaa,subnet-0bbb' };
   const NO_VALUE = Symbol('AWS::NoValue');
 
   function evaluate(parameters: Record<string, string>) {
@@ -217,20 +221,34 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
         )
         .map((r) => resolve(r.Properties)),
       tags: resolve(json.Resources[SCAN_FUNCTION].Properties.Tags ?? []),
+      // Every resource and output CloudFormation would create under these values.
+      created: Object.entries<any>(json.Resources)
+        .filter(([, r]) => r.Condition === undefined || conditions[r.Condition])
+        .map(([id]) => id),
+      outputs: Object.entries<any>(json.Outputs ?? {})
+        .filter(([, o]) => o.Condition === undefined || conditions[o.Condition])
+        .map(([id, o]) => [id, resolve(o.Value)] as const),
+      resolve,
       ruleViolations,
     };
   }
 
   test('the parameters exist, are optional, and default to empty', () => {
-    for (const name of [ASH_PARAMETER_NAMES.vpcSubnetIds, ASH_PARAMETER_NAMES.vpcSecurityGroupIds]) {
-      expect(json.Parameters[name]).toMatchObject({ Type: 'CommaDelimitedList', Default: '' });
-    }
+    expect(json.Parameters[ASH_PARAMETER_NAMES.vpcSubnetIds]).toMatchObject({
+      Type: 'CommaDelimitedList',
+      Default: '',
+    });
+    expect(json.Parameters[ASH_PARAMETER_NAMES.vpcId]).toMatchObject({ Type: 'String', Default: '' });
+    // Adopter-supplied group ids were removed on purpose; see the stack's comment.
+    expect(json.Parameters.VpcSecurityGroupIds).toBeUndefined();
   });
 
-  test('unset: no VpcConfig, no network-interface grant, and the launch is allowed', () => {
-    const { fn, rolePolicies, ruleViolations } = evaluate({});
+  test('unset: no security group, no VpcConfig, no grant, no output, launch allowed', () => {
+    const { fn, rolePolicies, ruleViolations, created, outputs } = evaluate({});
     expect(fn.VpcConfig).toBeUndefined();
+    expect(created).not.toContain(SCAN_SG);
     expect(rolePolicies).toEqual([]);
+    expect(outputs.map(([id]) => id)).not.toContain('ScanSecurityGroupId');
     expect(ruleViolations).toEqual([]);
   });
 
@@ -238,23 +256,28 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
     const guard = json.Resources[SCAN_FUNCTION].Metadata?.guard;
     expect(guard.SuppressedRules).toEqual(['LAMBDA_INSIDE_VPC']);
     expect(guard.SuppressedRuleReasons.LAMBDA_INSIDE_VPC).toMatch(/egress open/);
-    expect(guard.SuppressedRuleReasons.LAMBDA_INSIDE_VPC).toMatch(/VpcSecurityGroupIds/);
+    expect(guard.SuppressedRuleReasons.LAMBDA_INSIDE_VPC).toMatch(/VpcId and VpcSubnetIds/);
   });
 
-  test('set: VpcConfig carries exactly the supplied subnets and security groups', () => {
-    const { fn, ruleViolations } = evaluate({
-      VpcSubnetIds: 'subnet-0aaa,subnet-0bbb',
-      VpcSecurityGroupIds: 'sg-0ccc',
-    });
+  test('set: the stack creates a 443-only group in that VPC and wires VpcConfig to it', () => {
+    const { fn, ruleViolations, created, outputs, resolve } = evaluate(SET);
+    expect(created).toContain(SCAN_SG);
     expect(fn.VpcConfig).toEqual({
       SubnetIds: ['subnet-0aaa', 'subnet-0bbb'],
-      SecurityGroupIds: ['sg-0ccc'],
+      SecurityGroupIds: [{ 'Fn::GetAtt': [SCAN_SG, 'GroupId'] }],
     });
+    const sg = resolve(json.Resources[SCAN_SG].Properties);
+    expect(sg.VpcId).toBe(SET.VpcId);
+    expect(sg.SecurityGroupEgress).toEqual([
+      expect.objectContaining({ IpProtocol: 'tcp', FromPort: 443, ToPort: 443, CidrIp: '0.0.0.0/0' }),
+    ]);
+    expect(sg.SecurityGroupIngress).toBeUndefined();
+    expect(outputs).toContainEqual(['ScanSecurityGroupId', { 'Fn::GetAtt': [SCAN_SG, 'GroupId'] }]);
     expect(ruleViolations).toEqual([]);
   });
 
   test('set: the role gets the documented ENI grant, and function code is denied EC2', () => {
-    const { rolePolicies } = evaluate({ VpcSubnetIds: 'subnet-0aaa', VpcSecurityGroupIds: 'sg-0ccc' });
+    const { rolePolicies } = evaluate(SET);
     // Action lists sorted first: this file builds the stack without cdk.json's
     // minimizePolicies, which is what sorts them in the shipped template.
     for (const policy of rolePolicies) {
@@ -305,14 +328,12 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
     expect(json.Resources[SCAN_FUNCTION].DependsOn ?? []).not.toContain(VPC_POLICY);
     expect(evaluate({}).tags).toEqual([]);
     expect(
-      evaluate({ VpcSubnetIds: 'subnet-0aaa', VpcSecurityGroupIds: 'sg-0ccc' }).tags,
+      evaluate(SET).tags,
     ).toEqual([{ Key: 'ash:vpc-access-policy', Value: { Ref: VPC_POLICY } }]);
   });
 
-  test('security groups without subnets is refused before anything is created', () => {
-    // The one half-configuration that would otherwise run silently outside the VPC.
-    expect(evaluate({ VpcSecurityGroupIds: 'sg-0ccc' }).ruleViolations).toEqual([
-      'VpcSubnetsWithSecurityGroups',
-    ]);
+  test('setting only one of VpcId and VpcSubnetIds is refused before anything is created', () => {
+    expect(evaluate({ VpcId: SET.VpcId }).ruleViolations).toEqual(['VpcIdWithSubnets']);
+    expect(evaluate({ VpcSubnetIds: 'subnet-0aaa' }).ruleViolations).toEqual(['VpcIdWithSubnets']);
   });
 });
