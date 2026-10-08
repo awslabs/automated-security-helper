@@ -164,7 +164,7 @@ fetch what it needs.
 | `build_timeout_minutes` | — | `number` | `30` | |
 | `log_retention_days` | — | `number` | `30` | |
 | `vpc_subnet_ids` | `VpcSubnetIds` | `list(string)` | `[]` | Opt-in VPC placement, with `vpc_security_group_ids`. Empty leaves egress open. Set, egress is what your SGs, NACLs and routes allow; they must reach CodeCommit, ECR, SSM and Logs. |
-| `vpc_security_group_ids` | `VpcSecurityGroupIds` | `list(string)` | `[]` | Set together with `vpc_subnet_ids`, or neither. |
+| `vpc_security_group_ids` | `VpcSecurityGroupIds` | `list(string)` | `[]` | Set together with `vpc_subnet_ids`, or neither. Not deploy-tested: the ENI grant is pinned with `aws:RequestedRegion`, which AWS does not document for Lambda's service-side calls. If VPC attachment fails on `ec2:CreateNetworkInterface`, please report it. |
 | `tags` | — | `map(string)` | `{}` | |
 
 ## Outputs

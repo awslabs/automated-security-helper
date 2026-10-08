@@ -1283,6 +1283,13 @@
         "ec2:DescribeSubnets",
         "ec2:UnassignPrivateIpAddresses"
        ],
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestedRegion": {
+          "Ref": "AWS::Region"
+         }
+        }
+       },
        "Effect": "Allow",
        "Resource": "*",
        "Sid": "LambdaManagesNetworkInterfaces"
@@ -1309,6 +1316,14 @@
     ]
    },
    "Metadata": {
+    "cfn_nag": {
+     "rules_to_suppress": [
+      {
+       "id": "W12",
+       "reason": "Resource \"*\" on the network-interface actions Lambda documents as all-resources for VPC attachment; Region-pinned, created only when VpcSubnetIds is set, and ec2:* is denied to function code."
+      }
+     ]
+    },
     "cdk_nag": {
      "rules_to_suppress": [
       {

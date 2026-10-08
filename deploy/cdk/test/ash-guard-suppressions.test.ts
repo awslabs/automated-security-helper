@@ -152,3 +152,47 @@ describe('cfn-guard suppressions sit only on the approved resources', () => {
     expect(guardEntries(tampered)).not.toEqual(guardEntries(COMMITTED));
   });
 });
+
+/**
+ * cfn-nag's own per-resource suppressions, `Metadata.cfn_nag.rules_to_suppress`.
+ *
+ * The app writes exactly one: W12 on AshCodeCommitGate's conditional ENI policy. It is
+ * per-resource so that the file-level W12 entry in `.ash/.ash.yaml`, whose reason names
+ * only the image-build role's DefaultPolicy, did not have to be widened to cover it.
+ * Pinned the same way as the cfn-guard set above.
+ */
+function cfnNagEntries(templates: Record<string, any>): string[] {
+  const out: string[] = [];
+  for (const [template, body] of Object.entries(templates)) {
+    for (const [logicalId, resource] of Object.entries<any>(body.Resources ?? {})) {
+      for (const entry of resource?.Metadata?.cfn_nag?.rules_to_suppress ?? []) {
+        out.push(`${template}/${logicalId} [${resource.Type}] ${entry.id}`);
+      }
+    }
+  }
+  return out.sort();
+}
+
+describe('cfn-nag suppressions sit only on the approved resource', () => {
+  const VPC_POLICY = 'AshCodeCommitGate/ScanFunctionRoleEc2Access99A7E33E';
+
+  test('the W12 suppression is on the conditional ENI policy and nowhere else', () => {
+    expect(cfnNagEntries(COMMITTED)).toEqual([`${VPC_POLICY} [AWS::IAM::Policy] W12`]);
+  });
+
+  test('it carries a reason, and the policy it covers is the conditional one', () => {
+    const resource = COMMITTED.AshCodeCommitGate.Resources.ScanFunctionRoleEc2Access99A7E33E;
+    expect(resource.Condition).toBe('ScanFunctionInVpc');
+    const [entry] = resource.Metadata.cfn_nag.rules_to_suppress;
+    expect(entry.reason.length).toBeGreaterThan(40);
+  });
+
+  test('a W12 suppression on any other resource is caught', () => {
+    const tampered = structuredClone(COMMITTED);
+    const victim = Object.keys(tampered.AshFargate.Resources)[0];
+    tampered.AshFargate.Resources[victim].Metadata = {
+      cfn_nag: { rules_to_suppress: [{ id: 'W12', reason: 'x'.repeat(50) }] },
+    };
+    expect(cfnNagEntries(tampered)).not.toEqual(cfnNagEntries(COMMITTED));
+  });
+});

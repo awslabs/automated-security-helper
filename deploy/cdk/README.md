@@ -109,6 +109,8 @@ change for adopters and desynchronizes the two implementations.
 | `CodeCommitRepositoryArn` | required | An **existing** repository. The gate stack never creates or deletes one. |
 | `VpcSubnetIds` | empty | Gate only. Comma-separated subnets for the scan function, set together with `VpcSecurityGroupIds`. Empty keeps the function outside any VPC, with open egress. See below. |
 | `VpcSecurityGroupIds` | empty | Gate only. Security groups for the scan function. Setting these without `VpcSubnetIds` is refused at launch. |
+
+**VPC attachment for the gate has not been deploy-tested.** The network-interface grant it adds keeps `Resource: "*"`, as Lambda documents, and pins the calls to the stack's Region with `aws:RequestedRegion`. AWS does not document whether Lambda's service-side network-interface calls carry that key. It is a global key present on signed requests, so this is expected to work. If attaching the function fails with a permissions error on `ec2:CreateNetworkInterface`, please report it: the condition is the first suspect. The Terraform module carries the same condition.
 | `ShardCount` | 4 | **Not a CloudFormation parameter.** See below. |
 
 `AshBaseConfigYaml` is stored in an SSM parameter on the Advanced tier and written

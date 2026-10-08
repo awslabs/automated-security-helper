@@ -837,11 +837,8 @@ global_settings:
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
-        Two policies. The image-build role's CDK DefaultPolicy, whose only wildcard is
-        ecr:GetAuthorizationToken, for the same reasoning as the AshAgentCore entry
-        above. And ScanFunctionRoleEc2Access, created only when VpcSubnetIds is set,
-        whose Resource "*" is on the network-interface actions Lambda documents as
-        all-resources for VPC attachment, with ec2:* denied to function code.
+        One policy, the image-build role's CDK DefaultPolicy, whose only wildcard is
+        ecr:GetAuthorizationToken. Same reasoning as the AshAgentCore entry above.
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshDistributedPipeline.template.json
       reason: >-

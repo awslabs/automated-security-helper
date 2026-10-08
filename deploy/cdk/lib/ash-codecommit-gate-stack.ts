@@ -323,6 +323,13 @@ export class AshCodeCommitGateStack extends Stack {
             'ec2:UnassignPrivateIpAddresses',
           ],
           resources: ['*'],
+          // Keeps Resource "*" as Lambda documents, and pins the calls to this stack's
+          // Region, which is the only Region the function's interfaces can live in.
+          // NOT DEPLOY-TESTED: AWS does not document whether Lambda's service-side ENI
+          // calls carry aws:RequestedRegion. It is a global key present on signed
+          // requests, but if VPC attachment fails with a permissions error on
+          // CreateNetworkInterface, this condition is the first suspect.
+          conditions: { StringEquals: { 'aws:RequestedRegion': Aws.REGION } },
         }),
         new iam.PolicyStatement({
           sid: 'FunctionCodeCannotUseThem',
@@ -335,6 +342,20 @@ export class AshCodeCommitGateStack extends Stack {
     });
     const cfnVpcAccess = vpcAccess.node.defaultChild as iam.CfnPolicy;
     cfnVpcAccess.cfnOptions.condition = scanInVpc;
+    // cfn-nag W12 (Resource "*"), suppressed on this one policy rather than by
+    // widening the file-level entry in .ash/.ash.yaml, which covers only the image
+    // build role's DefaultPolicy.
+    cfnVpcAccess.addMetadata('cfn_nag', {
+      rules_to_suppress: [
+        {
+          id: 'W12',
+          reason:
+            'Resource "*" on the network-interface actions Lambda documents as all-resources ' +
+            'for VPC attachment; Region-pinned, created only when VpcSubnetIds is set, and ' +
+            'ec2:* is denied to function code.',
+        },
+      ],
+    });
     cfnScanFunction.addPropertyOverride('Tags', [
       Fn.conditionIf(
         scanInVpc.logicalId,

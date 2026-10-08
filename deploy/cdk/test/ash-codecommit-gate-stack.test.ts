@@ -282,6 +282,7 @@ describe('the scan function joins a VPC only when the adopter supplies one', () 
                 'ec2:UnassignPrivateIpAddresses',
               ],
               Resource: '*',
+              Condition: { StringEquals: { 'aws:RequestedRegion': { Ref: 'AWS::Region' } } },
             },
             {
               Sid: 'FunctionCodeCannotUseThem',

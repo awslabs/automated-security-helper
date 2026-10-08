@@ -402,6 +402,15 @@ data "aws_iam_policy_document" "gate" {
         "ec2:UnassignPrivateIpAddresses",
       ]
       resources = ["*"]
+
+      # Pins the calls to this Region. Not deploy-tested: AWS does not document
+      # whether Lambda's service-side ENI calls carry aws:RequestedRegion. If VPC
+      # attachment fails on CreateNetworkInterface, suspect this first and report it.
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = [data.aws_region.current.name]
+      }
     }
   }
 
