@@ -1767,6 +1767,336 @@ jobs:
           python3 .github/scripts/assert-no-aws-deploy.py
 
   # ---------------------------------------------------------------------------
+  # The unit-level planted-defect suites behind the checks above, on every push.
+  #
+  # Each gate in this workflow has negative controls: unit tests that plant the
+  # defect the gate exists to catch and assert the gate refuses it. Those tests
+  # live under tests/unit and ran only in ash-unified-ci.yml, whose push trigger
+  # is main alone. v4 work reaches v4-capabilities and v4/** by push, so on those
+  # branches the gates ran with no planted control behind them, and a change that
+  # made a gate accept everything would have stayed green there.
+  #
+  # A green pytest exit status cannot carry this job's verdict alone: a module
+  # that stops collecting, a renamed control, or a skip on an absent dependency
+  # all exit 0. So the run is judged by .github/scripts/assert-pytest-required-nodes.py:
+  # a passed-count floor, no skipped/xfailed/deselected tests, and every node id
+  # listed below present as a PASSED line. The guard's own controls run first
+  # (--self-test, plus tests/unit/test_assert_pytest_required_nodes.py inside the
+  # run), and the last step plants a missing node id and a lowered count into
+  # this run's real log and requires the guard to refuse both.
+  #
+  # Not conditional on discover: the suites are under tests/, not deploy/, and
+  # test_eks_operator_applier.py skips itself when its template is absent, which
+  # the no-skip rule turns into a failure rather than a quiet pass.
+  #
+  # Adding a test to one of these files needs no edit here (the floor is a
+  # floor). Renaming or deleting one needs its line below changed in the same
+  # commit, which is the point: that change is then visible in review.
+  # ---------------------------------------------------------------------------
+  planted-defect-suites:
+    name: planted-defect unit suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      # Every test in the suites below at the time of writing, which is also the
+      # length of the NODES list. Raise it when tests are added.
+      MIN_PASSED: "208"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Prove the guard refuses planted logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/assert-pytest-required-nodes.py --self-test
+
+      - name: Run the planted-defect suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --no-cov: pytest.ini's addopts measure coverage of the whole package and
+          # fail under 80%, which a six-file subset cannot meet. -rpfEsxX names
+          # every pass, failure, error, skip and xfail in the short test summary,
+          # which is what the guard reads. Piped through tee under pipefail, so a
+          # pytest failure still fails this step.
+          uv run pytest \
+            tests/unit/test_iac_equivalence_gate.py \
+            tests/unit/test_quick_create_links.py \
+            tests/unit/test_e2e_quick_create.py \
+            tests/unit/test_cfn_lint_guard.py \
+            tests/unit/deploy/test_eks_operator_applier.py \
+            tests/unit/test_validate_container_detection_gate.py \
+            tests/unit/test_assert_pytest_required_nodes.py \
+            --no-cov -rpfEsxX --color=no 2>&1 | tee "$RUNNER_TEMP/planted-defect-suites.log"
+
+      - name: Require the passed-count floor and every named test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/required-nodes.txt" <<'NODES'
+          tests/unit/deploy/test_eks_operator_applier.py::TestApplyForce::test_only_crds_skip_force
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_both_plurals_are_the_operators
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_metadata_name_is_plural_dot_group[ashmcpservers]
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_metadata_name_is_plural_dot_group[ashscans]
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_names_match_the_operator_manifest[ashmcpservers]
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_names_match_the_operator_manifest[ashscans]
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_printer_columns_include_phase[ashmcpservers]
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_printer_columns_include_phase[ashscans]
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_spec_validates_what_the_operator_needs[ashmcpservers]
+          tests/unit/deploy/test_eks_operator_applier.py::TestCrds::test_spec_validates_what_the_operator_needs[ashscans]
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeleteRule::test_deletes_exactly_the_namespaced_documents
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeleteRule::test_does_delete_the_deployment_so_the_operator_stops
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeleteRule::test_never_deletes[/clusterrolebindings/-the ClusterRoleBinding]
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeleteRule::test_never_deletes[/clusterroles/-the ClusterRole (shared with any second install)]
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeleteRule::test_never_deletes[customresourcedefinitions-a CRD (cascade-deletes CRs cluster-wide)]
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeleteRule::test_never_deletes_the_namespace
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeleteRule::test_only_deletes_and_reports_what_it_kept
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeployment::test_command_is_unset
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeployment::test_container_is_hardened
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeployment::test_namespace_arrives_by_fieldref_not_a_literal
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeployment::test_replicas_is_an_int
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeployment::test_runs_as_the_uid_the_image_has
+          tests/unit/deploy/test_eks_operator_applier.py::TestDeployment::test_selector_matches_the_pod_labels
+          tests/unit/deploy/test_eks_operator_applier.py::TestParityWithOperatorYaml::test_container_matches_except_the_image
+          tests/unit/deploy/test_eks_operator_applier.py::TestParityWithOperatorYaml::test_deployment_spec_matches_outside_the_pod_template
+          tests/unit/deploy/test_eks_operator_applier.py::TestParityWithOperatorYaml::test_network_policy_is_applied_before_the_deployment
+          tests/unit/deploy/test_eks_operator_applier.py::TestParityWithOperatorYaml::test_network_policy_matches
+          tests/unit/deploy/test_eks_operator_applier.py::TestParityWithOperatorYaml::test_network_policy_selects_the_installed_pod
+          tests/unit/deploy/test_eks_operator_applier.py::TestParityWithOperatorYaml::test_pod_spec_matches_outside_the_containers
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_bindings_name_the_operator_account
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_both_service_accounts_exist
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_namespaced_rules_are_set_equal_to_the_operator_table
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_never_asks_for_secrets
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_no_leases_rule
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_no_rule_is_empty_in_any_field
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_no_wildcards_anywhere
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_one_cluster_role_granting_only_crd_reads
+          tests/unit/deploy/test_eks_operator_applier.py::TestRbac::test_pods_is_read_only_and_jobs_has_no_patch
+          tests/unit/deploy/test_eks_operator_applier.py::TestResponseBound::test_a_pathological_reason_is_truncated_to_fit
+          tests/unit/deploy/test_eks_operator_applier.py::TestResponseBound::test_the_cap_is_declared
+          tests/unit/deploy/test_eks_operator_applier.py::test_eleven_documents_with_distinct_paths
+          tests/unit/deploy/test_eks_operator_applier.py::test_every_manifest_is_json_serializable
+          tests/unit/deploy/test_eks_operator_applier.py::test_module_defines_the_names_the_handler_uses
+          tests/unit/deploy/test_eks_operator_applier.py::test_scope_constants_are_distinct_and_non_empty
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_collection_error_is_rejected
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_dropped_test_lowers_the_count_below_the_floor
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_failing_test_is_rejected
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_real_colored_run_is_judged_like_a_plain_one
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_real_complete_run_is_accepted
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_renamed_test_is_rejected
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_run_without_rp_is_rejected
+          tests/unit/test_assert_pytest_required_nodes.py::test_a_skipped_test_is_rejected
+          tests/unit/test_assert_pytest_required_nodes.py::test_every_required_node_belongs_to_a_suite_the_job_runs
+          tests/unit/test_assert_pytest_required_nodes.py::test_main_exits_non_zero_on_a_missing_node
+          tests/unit/test_assert_pytest_required_nodes.py::test_self_test_passes
+          tests/unit/test_assert_pytest_required_nodes.py::test_the_workflow_job_gates_on_this_guard
+          tests/unit/test_cfn_lint_guard.py::test_a_mutant_that_changes_nothing_is_refused
+          tests/unit/test_cfn_lint_guard.py::test_a_tool_the_os_cannot_start_is_a_gate_error
+          tests/unit/test_cfn_lint_guard.py::test_cfn_lint_exit_zero_with_matches_is_refused
+          tests/unit/test_cfn_lint_guard.py::test_cfn_lint_match_fails_the_check
+          tests/unit/test_cfn_lint_guard.py::test_cfn_lint_non_json_is_refused
+          tests/unit/test_cfn_lint_guard.py::test_cfn_lint_nonzero_with_no_matches_is_refused
+          tests/unit/test_cfn_lint_guard.py::test_cfn_lint_warning_is_a_match
+          tests/unit/test_cfn_lint_guard.py::test_check_passes_when_every_rule_is_exercised_or_expected_idle
+          tests/unit/test_cfn_lint_guard.py::test_committed_templates_carry_no_suppression
+          tests/unit/test_cfn_lint_guard.py::test_empty_template_dir_is_refused
+          tests/unit/test_cfn_lint_guard.py::test_every_mutant_changes_its_committed_template
+          tests/unit/test_cfn_lint_guard.py::test_every_shipped_rule_has_a_failing_mutant
+          tests/unit/test_cfn_lint_guard.py::test_expected_idle_rule_that_starts_matching_fails
+          tests/unit/test_cfn_lint_guard.py::test_expected_unexercised_names_real_rules
+          tests/unit/test_cfn_lint_guard.py::test_failed_rule_fails_the_check
+          tests/unit/test_cfn_lint_guard.py::test_guard_rule_name_needs_the_measured_shape
+          tests/unit/test_cfn_lint_guard.py::test_inconsistent_guard_output_is_refused[fail-exit-zero]
+          tests/unit/test_cfn_lint_guard.py::test_inconsistent_guard_output_is_refused[fail-with-no-rule]
+          tests/unit/test_cfn_lint_guard.py::test_inconsistent_guard_output_is_refused[pass-exit-nonzero]
+          tests/unit/test_cfn_lint_guard.py::test_inconsistent_guard_output_is_refused[pass-with-failed-rule]
+          tests/unit/test_cfn_lint_guard.py::test_missing_eks_template_is_refused
+          tests/unit/test_cfn_lint_guard.py::test_missing_tool_is_a_gate_error
+          tests/unit/test_cfn_lint_guard.py::test_rule_that_matches_nothing_fails
+          tests/unit/test_cfn_lint_guard.py::test_suppression_detector_ignores_ordinary_metadata
+          tests/unit/test_cfn_lint_guard.py::test_template_suppression_fails_the_check
+          tests/unit/test_cfn_lint_guard.py::test_unknown_rule_in_report_is_refused
+          tests/unit/test_e2e_quick_create.py::TestARealRenderIsAccepted::test_accepted[hosting0-path]
+          tests/unit/test_e2e_quick_create.py::TestARealRenderIsAccepted::test_accepted[hosting1-virtual]
+          tests/unit/test_e2e_quick_create.py::TestARealRenderIsAccepted::test_the_dotted_render_is_path_style
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_different_bucket
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_document_with_no_links
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_duplicated_link
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[edit0-not declared]
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[edit1-stackName is]
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[edit2-same region]
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_hand_edited_link[edit3-fragment does not start]
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_link_whose_ash_version_disagrees_with_the_template
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_missing_launch_region
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_a_noecho_parameter
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_dotted_bucket_addressed_virtual_hosted
+          tests/unit/test_e2e_quick_create.py::TestEachDefectIsRejected::test_undotted_render_judged_as_path_style
+          tests/unit/test_e2e_quick_create.py::TestTheCommandLine::test_a_linter_that_cannot_start_is_a_usage_error
+          tests/unit/test_e2e_quick_create.py::TestTheCommandLine::test_an_empty_bucket_is_a_usage_error
+          tests/unit/test_e2e_quick_create.py::TestTheCommandLine::test_lint_failure_fails_the_assertion
+          tests/unit/test_e2e_quick_create.py::TestTheCommandLine::test_lint_receives_the_launch_regions
+          tests/unit/test_iac_equivalence_gate.py::test_a_baseline_entry_for_an_unknown_kind_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_baseline_entry_for_an_unpaired_stack_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_block_commented_module_is_not_composed
+          tests/unit/test_iac_equivalence_gate.py::test_a_block_commented_resource_is_not_counted
+          tests/unit/test_iac_equivalence_gate.py::test_a_declared_stack_with_no_template_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_declared_uncompared_stack_still_has_its_types_checked
+          tests/unit/test_iac_equivalence_gate.py::test_a_generic_custom_resource_in_a_paired_stack_is_reported
+          tests/unit/test_iac_equivalence_gate.py::test_a_genuinely_fixed_divergence_says_delete_the_entry
+          tests/unit/test_iac_equivalence_gate.py::test_a_kind_leaving_both_sides_is_not_reported_as_fixed
+          tests/unit/test_iac_equivalence_gate.py::test_a_kind_removed_from_terraform_alone_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_line_commented_module_source_is_not_read
+          tests/unit/test_iac_equivalence_gate.py::test_a_mapped_kind_added_to_cfn_alone_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_missing_template_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_missing_terraform_module_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_non_provider_lambda_is_still_counted
+          tests/unit/test_iac_equivalence_gate.py::test_a_pair_table_that_disagrees_with_its_example_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_resource_with_no_type_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_reversed_divergence_is_reported_as_reversed
+          tests/unit/test_iac_equivalence_gate.py::test_a_stack_in_both_tables_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_template_with_no_resources_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_terraform_module_with_no_resources_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_type_both_mapped_and_excluded_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_a_type_mapped_to_two_kinds_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_an_empty_kind_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_an_empty_template_directory_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_an_unclassified_template_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_an_unmapped_cfn_resource_type_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_an_unmapped_terraform_resource_type_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_an_unparseable_template_is_rejected
+          tests/unit/test_iac_equivalence_gate.py::test_comment_markers_inside_strings_and_heredocs_are_kept
+          tests/unit/test_iac_equivalence_gate.py::test_escapes_inside_strings_do_not_end_or_open_them
+          tests/unit/test_iac_equivalence_gate.py::test_fixing_a_baselined_divergence_is_rejected_as_stale
+          tests/unit/test_iac_equivalence_gate.py::test_line_comments_are_not_counted
+          tests/unit/test_iac_equivalence_gate.py::test_the_checker_reads_all_five_pairs
+          tests/unit/test_iac_equivalence_gate.py::test_the_committed_eks_stack_is_read_and_type_checked
+          tests/unit/test_iac_equivalence_gate.py::test_the_provider_lambda_really_is_excluded
+          tests/unit/test_iac_equivalence_gate.py::test_the_real_tree_parses_the_same_with_comments_stripped
+          tests/unit/test_iac_equivalence_gate.py::test_the_unmutated_tree_passes
+          tests/unit/test_quick_create_links.py::TestEveryTemplateIsClassified::test_an_unclassified_template_is_rejected
+          tests/unit/test_quick_create_links.py::TestEveryTemplateIsClassified::test_every_committed_template_is_classified
+          tests/unit/test_quick_create_links.py::TestEveryTemplateIsClassified::test_no_classification_outlives_its_template
+          tests/unit/test_quick_create_links.py::TestEveryTemplateIsClassified::test_the_eks_operator_is_a_prebuilt_image_consumer
+          tests/unit/test_quick_create_links.py::TestParametersAreUrlEncoded::test_the_template_url_and_every_value_round_trip
+          tests/unit/test_quick_create_links.py::TestRenderedLinksPointAtCommittedTemplates::test_render_refuses_an_invalid_bucket
+          tests/unit/test_quick_create_links.py::TestRenderedLinksPointAtCommittedTemplates::test_render_then_check[my-bucket-name]
+          tests/unit/test_quick_create_links.py::TestRenderedLinksPointAtCommittedTemplates::test_render_then_check[my.bucket.name]
+          tests/unit/test_quick_create_links.py::TestTheCommittedDocumentIsCurrent::test_check_passes_against_the_committed_templates
+          tests/unit/test_quick_create_links.py::TestTheCommittedDocumentIsCurrent::test_the_document_matches_a_fresh_render
+          tests/unit/test_quick_create_links.py::TestTheConsoleRegionIsConsistent::test_a_host_region_that_disagrees_is_rejected
+          tests/unit/test_quick_create_links.py::TestTheConsoleRegionIsConsistent::test_a_query_region_that_disagrees_is_rejected
+          tests/unit/test_quick_create_links.py::TestTheHostingAndOutputPathsAreOverridable::test_print_refuses_out
+          tests/unit/test_quick_create_links.py::TestTheHostingAndOutputPathsAreOverridable::test_render_and_check_take_the_paths
+          tests/unit/test_quick_create_links.py::TestTheHostingAndOutputPathsAreOverridable::test_the_committed_hosting_file_configures_no_bucket
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_a_bucket_without_a_region_is_rejected
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_a_region_outside_the_aws_partition_is_rejected[cn-north-1]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_a_region_outside_the_aws_partition_is_rejected[us-east-one]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_a_region_outside_the_aws_partition_is_rejected[us-gov-west-1]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[-bucket-begin and end]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[192.168.5.4-IP address]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[My-Bucket-lowercase]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-3 and 63]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[ab-3 and 63]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[amzn-s3-demo-ash-templates-prefix S3 reserves]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[ash-templates--ol-s3-suffix S3 reserves]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[ash-templates--table-s3-suffix S3 reserves]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[ash-templates--x-s3-suffix S3 reserves]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[ash-templates-s3alias-suffix S3 reserves]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[ash.templates.mrap-suffix S3 reserves]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[bucket.-begin and end]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[my..bucket-adjacent periods]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[my_bucket-lowercase]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[sthree-ash-templates-prefix S3 reserves]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_an_invalid_bucket_name_is_rejected[xn--ash-templates-prefix S3 reserves]
+          tests/unit/test_quick_create_links.py::TestTheHostingConfigIsValidated::test_the_shipping_default_is_valid
+          tests/unit/test_quick_create_links.py::TestThePlanIsNotEmpty::test_every_prepopulated_name_is_declared_and_not_noecho
+          tests/unit/test_quick_create_links.py::TestThePlanIsNotEmpty::test_the_plan_clears_its_floors
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_a_dotless_bucket_stays_virtual_hosted
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_a_dotted_bucket_link_passes_the_validator
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_a_dotted_bucket_uses_path_style
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_a_dotted_bucket_virtual_hosted_link_is_rejected
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_the_bucket_region_is_the_endpoint_region[ap-southeast-2]
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_the_bucket_region_is_the_endpoint_region[eu-west-2]
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_the_bucket_region_is_the_endpoint_region[us-east-1]
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_the_bucket_region_is_the_endpoint_region[us-west-2]
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_the_key_prefix_is_kept_and_encoded
+          tests/unit/test_quick_create_links.py::TestTheTemplateUrlIsAddressable::test_the_launch_region_is_independent_of_the_bucket_region
+          tests/unit/test_quick_create_links.py::TestTheValidatorCanFail::test_a_declared_parameter_outside_the_plan_is_rejected
+          tests/unit/test_quick_create_links.py::TestTheValidatorCanFail::test_an_unknown_parameter_name_is_rejected
+          tests/unit/test_quick_create_links.py::TestTheValidatorCanFail::test_self_test_rejects_every_planted_defect
+          tests/unit/test_quick_create_links.py::TestTheValidatorCanFail::test_self_test_survives_a_version_bump[v4.0.0]
+          tests/unit/test_quick_create_links.py::TestTheValidatorCanFail::test_self_test_survives_a_version_bump[v9.9.9]
+          tests/unit/test_validate_container_detection_gate.py::test_a_missing_report_fails
+          tests/unit/test_validate_container_detection_gate.py::test_a_non_secret_rule_from_detect_secrets_does_not_count
+          tests/unit/test_validate_container_detection_gate.py::test_a_suppressed_plant_does_not_count[B602]
+          tests/unit/test_validate_container_detection_gate.py::test_a_suppressed_plant_does_not_count[SECRET-AWS-ACCESS-KEY]
+          tests/unit/test_validate_container_detection_gate.py::test_an_unreadable_or_reshaped_report_fails[empty-file]
+          tests/unit/test_validate_container_detection_gate.py::test_an_unreadable_or_reshaped_report_fails[no-sarif]
+          tests/unit/test_validate_container_detection_gate.py::test_an_unreadable_or_reshaped_report_fails[no-scanner-name]
+          tests/unit/test_validate_container_detection_gate.py::test_an_unreadable_or_reshaped_report_fails[null-sarif]
+          tests/unit/test_validate_container_detection_gate.py::test_an_unreadable_or_reshaped_report_fails[runs-not-a-list]
+          tests/unit/test_validate_container_detection_gate.py::test_b602_from_another_scanner_does_not_count
+          tests/unit/test_validate_container_detection_gate.py::test_bandit_without_b602_fails
+          tests/unit/test_validate_container_detection_gate.py::test_both_scanners_missing_names_both
+          tests/unit/test_validate_container_detection_gate.py::test_detect_secrets_without_a_secret_rule_fails
+          tests/unit/test_validate_container_detection_gate.py::test_the_action_passes_the_script_path_through_env
+          tests/unit/test_validate_container_detection_gate.py::test_the_planted_fixture_passes
+          tests/unit/test_validate_container_detection_gate.py::test_usage_error_without_a_path
+          NODES
+          python3 .github/scripts/assert-pytest-required-nodes.py \
+            --log "$RUNNER_TEMP/planted-defect-suites.log" \
+            --nodes "$RUNNER_TEMP/required-nodes.txt" \
+            --min-passed "$MIN_PASSED"
+
+      # The self-test above uses synthetic logs. This uses the real one, so the
+      # guard is shown failing on exactly the output it just passed.
+      - name: Prove the guard refuses this run's log with a missing node and a lowered count
+        shell: bash
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/planted-defect-suites.log"
+          nodes="$RUNNER_TEMP/required-nodes.txt"
+          planted="tests/unit/test_iac_equivalence_gate.py::test_a_control_that_was_renamed"
+          { cat "$nodes"; echo "$planted"; } > "$RUNNER_TEMP/nodes-planted.txt"
+          if out="$(python3 .github/scripts/assert-pytest-required-nodes.py --log "$log" \
+                --nodes "$RUNNER_TEMP/nodes-planted.txt" --min-passed "$MIN_PASSED")"; then
+            echo "::error::the guard accepted a required node id that never ran: $planted"
+            exit 1
+          fi
+          grep -Fq "required test did not pass: $planted" <<<"$out" || {
+            echo "::error::the guard failed on the planted node id, but not for that reason: $out"
+            exit 1
+          }
+          # One test fewer than this run passed: its PASSED line removed and the
+          # summary count lowered by one, which is what a collection drop prints.
+          passed="$(grep -Eo '^=+ [0-9]+ passed' "$log" | tail -n1 | grep -Eo '[0-9]+')"
+          victim="$(grep -m1 '^PASSED ' "$log")"
+          grep -vxF "$victim" "$log" \
+            | sed -E "s/^(=+ )${passed} passed/\1$((passed - 1)) passed/" > "$RUNNER_TEMP/lowered.log"
+          # Judged against this run's own count rather than MIN_PASSED, so the plant
+          # stays below the floor after tests are added and the floor is not raised.
+          if out="$(python3 .github/scripts/assert-pytest-required-nodes.py --log "$RUNNER_TEMP/lowered.log" \
+                --nodes "$nodes" --min-passed "$passed")"; then
+            echo "::error::the guard accepted a run with one test fewer than the floor"
+            exit 1
+          fi
+          grep -Fq "below the floor of $passed" <<<"$out" || {
+            echo "::error::the guard failed on the lowered count, but not for that reason: $out"
+            exit 1
+          }
+          echo "the guard refused both plants on this run's real log"
+
+  # ---------------------------------------------------------------------------
   # One stable name for branch protection to require.
   #
   # Every check above except discover is conditional, and a required check that
@@ -1787,6 +2117,7 @@ jobs:
       - quick-create-link-drift
       - cfn-lint-guard
       - no-aws-deploy
+      - planted-defect-suites
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
