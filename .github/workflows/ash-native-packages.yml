@@ -67,7 +67,7 @@ name: ASH - Native Packages (deb, rpm)
 # these packages used, and requires a reinstall to migrate it to the symlink.
 #
 # N-1 is the previous commit, not this tree at a lower version: packaging/n1-source.sh
-# takes it from the history with scripts/e2e/prev_tree.py (`--prev-ref auto`, the
+# takes it from the history with scripts/e2e/prev_tree.py (--prev-ref auto, the
 # derivation every upgrade leg shares), refuses one with HEAD's tree, and the leg builds
 # N-1's package with N-1's own packaging scripts and gates it with N-1's own payload
 # checker. So the upgrade runs this commit's maintainer scripts over an install an older
