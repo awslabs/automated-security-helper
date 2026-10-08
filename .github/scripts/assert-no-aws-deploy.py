@@ -56,28 +56,52 @@ A deploy is as easy to hide in `run: bash scripts/release.sh` as in the run
 block itself, so the scan follows what a command executes:
 
   * Any token that names an existing file in the repository with a script
-    suffix (.sh, .bash, .zsh, .ps1, .py, .js, .mjs, .cjs), or a path to an
-    extensionless file that starts with `#!`, is scanned too. The interpreter
-    does not matter, so `bash x.sh`, `./x.sh`, `python3 x.py` and
-    `uv run python x.py` are all followed. A path is tried against the
-    repository root, the directory of the file that names it, every
+    suffix (.sh, .bash, .zsh, .ps1, .py, .js, .mjs, .cjs, .ts, .mts, .cts), or a
+    path to an extensionless file that starts with `#!`, is scanned too, and so
+    is the module `python -m pkg.mod` names (pkg/mod.py or pkg/mod/__main__.py).
+    The interpreter does not matter, so `bash x.sh`, `./x.sh`, `python3 x.py`,
+    `npx tsx x.ts` and `uv run python x.py` are all followed. A path is tried
+    against the repository root, the directory of the file that names it, every
     `working-directory:` value and every `cd <dir>` target in that file.
     `${{ github.action_path }}` and `$GITHUB_ACTION_PATH` are read as the
     composite action's own directory, and `$GITHUB_WORKSPACE` as the root.
-  * `npm run <name>` (also `npm run-script`, `pnpm run`, `yarn run`, with any
-    flags such as `--prefix`) is mapped through the `scripts` table of every
-    package.json that defines `<name>`, with its `pre<name>` and `post<name>`
-    hooks. `npm test` and `npm start` map to `test` and `start`, and `npm ci` and
-    a bare `npm install` to the install lifecycle (`preinstall`, `install`,
-    `postinstall`, `prepare`). A script value is a command line, so it is
+  * `npm run <name>` (also its aliases `run-script`, `rum`, `urn`, and `pnpm
+    run`, `yarn run`, `yarn <name>`, `pnpm <name>`, `yarn workspace <ws>
+    <name>`, `yarn workspaces run|foreach`, `pnpm recursive`) is mapped through
+    the `scripts` table of every package.json that defines `<name>`, with its
+    `pre<name>` and `post<name>` hooks. Flags are taken out first, each with the
+    value it takes: npm's from @npmcli/config's option definitions (`-w app`,
+    `--workspace app`, `--prefix x`, `-C x`, `--loglevel warn`, ...), pnpm's and
+    yarn's from their `--help`. A flag whose arity is not known (a pnpm or yarn
+    flag not in those lists, an npm abbreviation such as `--pref`) is read both
+    with and without a value, and both readings are followed. `--` ends the
+    flags. The lifecycle commands map to the scripts npm's scripts.md lists for
+    them: `npm ci` and a bare `npm install` (and their aliases) to `preinstall`,
+    `install`, `postinstall`, `prepublish`, `preprepare`, `prepare`,
+    `postprepare`; `npm test`, `start`, `stop`, `restart`, `install-test`,
+    `install-ci-test`, `rebuild`, `pack`, `publish`, `version` and `diff` to
+    theirs; a bare `yarn` installs. A script value is a command line, so it is
     scanned and followed the same way, relative to its package.
+  * A JavaScript or TypeScript file is read as shell text with its comment lines
+    dropped and each multi-line array literal joined onto one line, so a
+    `spawn("npx", [...])` argv written one word per line is one command.
   * A Python script is parsed rather than read as shell, because its docstrings
-    and messages name the forbidden commands in prose (this file does). What
-    it runs is an argv list or tuple of plain strings (`["npx", "cdk",
-    "deploy"]`; non-string elements are skipped) or the string passed to
-    `subprocess.run`/`call`/`check_call`/`check_output`/`Popen`/`getoutput`
-    or `os.system`/`os.popen`. Both are scanned as commands and followed. A
-    Python file that does not parse is a failure.
+    and messages name the forbidden commands in prose (this file does). What it
+    runs is the argv list or tuple, or the string, given to a runner:
+    `subprocess.run`/`call`/`check_call`/`check_output`/`Popen`/`getoutput`,
+    `os.system`/`os.popen`, the `os.exec*`/`os.spawn*` families,
+    `posix_spawn`, `pty.spawn` and asyncio's `create_subprocess_exec`/`_shell`.
+    An argv may be a literal or a name bound to one (`cmd = [...]`), of any
+    length, so `subprocess.run(["scripts/d.sh"])` and `subprocess.run(
+    [sys.executable, "scripts/d.py"])` follow the script. Its string words
+    without whitespace are joined into one command; each element with whitespace
+    is one argument, and is also read as a command line of its own, because the
+    program may run it (`["bash", "-c", "npx cdk deploy"]`). A list or tuple
+    that is not given to a runner may be data, so it counts as an argv only when
+    it has two or more string words and the first has no whitespace, and an
+    element with whitespace in it counts as a command line only after a command
+    flag (`-c`, `-lc`, `-e`, `--eval`, `-Command`, `/c`). A Python file that does
+    not parse is a failure.
 
 Every file is followed once. A hit in a followed file names the file and line
 and the chain of references that reached it.
@@ -89,12 +113,19 @@ script named only through a variable (`npm run "$script"`, `bash "$HELPER"` when
 the env value is set elsewhere). An env value written as a literal path in the
 same file (`HELPER: ${{ github.action_path }}/x.py`) is followed, because the path
 is a token on that line. Python commands built from f-strings or concatenation
-are not seen. `kubectl` and `helm` are not refused: the operator e2e applies to
-a local kind cluster with them, and which cluster a context names is decided at
-run time; `aws eks update-kubeconfig` and `eksctl`, which reach a real cluster,
-are refused. The workflows that touch deploy/ call `npx cdk synth`,
-`terraform init -backend=false` / `validate` and Python scripts under
-deploy/tests, all of which are read-only.
+are not seen, and neither is an argv bound to a name that is reassigned or
+built up after it is bound. An abbreviated npm subcommand (`npm ru`, which npm
+expands) is not followed. `make <target>` is not followed into the Makefile, and
+nothing in this repository's CI runs make. A script given by an absolute path,
+such as one a `docker run` names inside the container (`/w/x.sh`), is not
+mapped back to the repository file it was mounted from. A JavaScript argv
+assembled across lines other than as one array literal (an argument per line
+of the call itself) is read line by line. `kubectl` and `helm` are not refused:
+the operator e2e applies to a local kind cluster with them, and which cluster a
+context names is decided at run time; `aws eks update-kubeconfig` and `eksctl`,
+which reach a real cluster, are refused. The workflows that touch deploy/ call
+`npx cdk synth`, `terraform init -backend=false` / `validate` and Python scripts
+under deploy/tests, all of which are read-only.
 
 Run with --self-test to feed it planted deploy commands and planted look-alikes,
 and planted repositories whose deploy sits in a script a workflow calls.
@@ -192,10 +223,14 @@ GROUPING = re.compile(r"[`(){}\[\],]")
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}")
 
 # Files a token may name and the scan will follow.
-SCRIPT_SUFFIXES = frozenset(
-    {".sh", ".bash", ".zsh", ".ps1", ".py", ".js", ".mjs", ".cjs"}
-)
-JS_SUFFIXES = frozenset({".js", ".mjs", ".cjs"})
+JS_SUFFIXES = frozenset({".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"})
+SCRIPT_SUFFIXES = frozenset({".sh", ".bash", ".zsh", ".ps1", ".py", *JS_SUFFIXES})
+# A JavaScript array literal left open for more lines than this is not joined: an
+# unbalanced bracket in a regular expression or a string the scan misreads would
+# otherwise glue the rest of the file into one command.
+MAX_JOINED_LINES = 50
+# `python -m pkg.mod`: the module a `-m` names.
+PY_MODULE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 # Directory names never followed into: dependencies and VCS metadata.
 SKIP_DIRS = frozenset({"node_modules", ".git", ".venv", "venv", "__pycache__"})
@@ -212,18 +247,180 @@ WORKING_DIRECTORY = re.compile(r"^\s*-?\s*working-directory:\s*['\"]?([^'\"\s#]+
 YAML_SCALAR_ITEM = re.compile(r"^\s*-\s*['\"]?[^\s'\":]+['\"]?\s*$")
 CD = re.compile(r"(?:^|[\s;&|(])(?:cd|pushd)\s+['\"]?([^'\"\s;&|)]+)")
 
-# npm-family subcommands that run package.json scripts, and the scripts they run.
+# npm-family tools, how each reads its flags, and the package.json scripts each
+# subcommand runs.
 NPM_TOOLS = frozenset({"npm", "pnpm", "yarn"})
-NPM_LIFECYCLE = {
-    "ci": ("preinstall", "install", "postinstall", "prepare"),
-    "install": ("preinstall", "install", "postinstall", "prepare"),
-    "i": ("preinstall", "install", "postinstall", "prepare"),
-    "test": ("pretest", "test", "posttest"),
-    "t": ("pretest", "test", "posttest"),
-    "start": ("prestart", "start", "poststart"),
+
+
+@dataclass(frozen=True)
+class FlagSyntax:
+    """Which flags of one npm-family CLI take the next word as their value.
+
+    Reading a value as the subcommand or script name (`npm run -w app deploy` read
+    as script `app`) would follow the wrong script and miss the one that runs, so a
+    flag whose arity is not known is read both ways and both readings are followed.
+    """
+
+    long_values: frozenset[str]
+    short_values: frozenset[str]
+    # npm's option parser (nopt) reads an unknown flag as a boolean, so for npm a
+    # flag outside `long_values` takes no value unless it abbreviates one that does.
+    unknown_is_boolean: bool = False
+    # Single-dash shorthands longer than one letter that expand to a value flag.
+    long_shorthand_values: frozenset[str] = frozenset()
+    # Single-dash shorthands known to take no value.
+    short_booleans: frozenset[str] = frozenset()
+
+    def takes_value(self, flag: str, following: str) -> bool | None:
+        """Whether `flag` consumes `following`; None when it may or may not."""
+        if "=" in flag:
+            return False
+        if following.startswith("-") and len(following) > 1:
+            # A string option given no value leaves the next flag alone, but a path
+            # or number option takes it; either can happen.
+            return None if self._may_take(flag) else False
+        return self._takes(flag, following)
+
+    def _may_take(self, flag: str) -> bool:
+        return self._takes(flag, "x") is not False
+
+    def _takes(self, flag: str, following: str) -> bool | None:
+        if flag.startswith("--"):
+            name = flag[2:]
+            if name in self.long_values:
+                return True
+            if not self.unknown_is_boolean:
+                return None
+            if name.startswith("no-"):
+                return False  # `--no-x` is always the boolean false
+            if any(value.startswith(name) for value in self.long_values):
+                return None  # an abbreviation nopt may expand to a value flag
+            # A boolean also takes a following `true`/`false` (`--color always`).
+            return None if following in ("true", "false", "null", "always") else False
+        body = flag[1:]
+        if body in self.long_shorthand_values:
+            return True
+        if body in self.short_booleans:
+            return False
+        letters = self.short_values | self.short_booleans
+        if body and all(letter in letters for letter in body):
+            # `-C dir`, and combined letters (`-gC dir`): the last one decides.
+            return body[-1] in self.short_values
+        if not self.unknown_is_boolean:
+            return True if body[-1:] in self.short_values else None
+        if any(value.startswith(body) for value in self.long_values):
+            return None
+        return None if following in ("true", "false", "null") else False
+
+
+# npm 10: every option in @npmcli/config's definitions whose type does not include
+# Boolean, the one-letter shorthands that expand to one (-C --prefix, -w
+# --workspace, -L --location, -m --message, -c --call), and --browser, whose type is
+# Boolean or String and so takes a word that is not a flag.
+NPM_SYNTAX = FlagSyntax(
+    long_values=frozenset(
+        """
+        _auth access also audit-level auth-type before browser ca cache cache-max
+        cache-min cafile call cert cidr cpu depth diff
+        diff-dst-prefix diff-src-prefix diff-unified editor expect-result-count
+        fetch-retries fetch-retry-factor fetch-retry-maxtimeout fetch-retry-mintimeout
+        fetch-timeout git globalconfig heading https-proxy include init-author-email
+        init-author-name init-author-url init-license init-module init-version
+        init.author.email init.author.name init.author.url init.license init.module
+        init.version install-strategy key libc local-address location lockfile-version
+        loglevel logs-dir logs-max maxsockets message node-options noproxy omit only os
+        otp pack-destination package prefix preid provenance-file proxy registry
+        replace-registry-host save-prefix sbom-format sbom-type scope script-shell
+        searchexclude searchlimit searchopts searchstaleness shell tag
+        tag-version-prefix umask user-agent userconfig viewer which workspace
+        """.split()
+    ),
+    short_values=frozenset({"C", "w", "L", "m", "c"}),
+    unknown_is_boolean=True,
+    long_shorthand_values=frozenset({"reg", "enjoy-by"}),
+    # The other shorthands in @npmcli/config's definitions.
+    short_booleans=frozenset(
+        """
+        d dd ddd quiet q s silent verbose desc help local n no porcelain readonly iwr a
+        f g l p S B D E O P ? H h v ws y
+        """.split()
+    ),
+)
+# pnpm (`pnpm help`, `pnpm help run`, `pnpm help install`). Its `-w` is
+# --workspace-root, a boolean, unlike npm's.
+PNPM_SYNTAX = FlagSyntax(
+    long_values=frozenset(
+        """
+        dir filter filter-prod store-dir state-dir npmrc-auth-file userconfig
+        workspace-packages registry https-proxy http-proxy no-proxy reporter loglevel
+        test-pattern changed-files-ignore-pattern cpu os libc node-linker user-agent
+        pnpr-server merge-git-branch-lockfiles-branch-pattern
+        """.split()
+    ),
+    short_values=frozenset({"C", "F"}),
+)
+# yarn 1 (`yarn --help`).
+YARN_SYNTAX = FlagSyntax(
+    long_values=frozenset(
+        """
+        cwd cache-folder global-folder link-folder modules-folder preferred-cache-folder
+        mutex network-concurrency network-timeout otp proxy https-proxy registry
+        use-yarnrc
+        """.split()
+    ),
+    short_values=frozenset(),
+)
+NPM_FLAG_SYNTAX = {"npm": NPM_SYNTAX, "pnpm": PNPM_SYNTAX, "yarn": YARN_SYNTAX}
+
+# Lifecycle scripts, from npm's docs/content/using-npm/scripts.md.
+_INSTALL = (
+    "preinstall",
+    "install",
+    "postinstall",
+    "prepublish",
+    "preprepare",
+    "prepare",
+    "postprepare",
+)
+_TEST = ("pretest", "test", "posttest")
+_START = ("prestart", "start", "poststart")
+_STOP = ("prestop", "stop", "poststop")
+# Subcommand -> scripts it runs. Aliases are npm's lib/utils/cmd-list.js.
+_INSTALL_ALIASES = tuple(
+    "install i add in ins inst insta instal isnt isnta isntal isntall".split()
+)
+NPM_LIFECYCLE: dict[str, tuple[str, ...]] = {
+    **dict.fromkeys(_INSTALL_ALIASES, _INSTALL),
+    **dict.fromkeys(
+        ("ci", "clean-install", "ic", "install-clean", "isntall-clean"), _INSTALL
+    ),
+    **dict.fromkeys(("test", "t", "tst"), _TEST),
+    "start": _START,
+    "stop": _STOP,
+    "restart": ("prerestart", "restart", "postrestart", *_STOP, *_START),
+    **dict.fromkeys(("install-test", "it"), _INSTALL + _TEST),
+    **dict.fromkeys(
+        ("install-ci-test", "cit", "clean-install-test", "sit"), _INSTALL + _TEST
+    ),
+    **dict.fromkeys(
+        ("rebuild", "rb"), ("preinstall", "install", "postinstall", "prepare")
+    ),
+    "pack": ("prepack", "prepare", "postpack"),
+    "publish": (
+        "prepublishOnly",
+        "prepack",
+        "prepare",
+        "postpack",
+        "publish",
+        "postpublish",
+    ),
+    "version": ("preversion", "version", "postversion"),
+    "diff": ("prepare",),
 }
-# npm flags that take a separate value, so the value is not read as the subcommand.
-NPM_VALUE_FLAGS = frozenset({"--prefix", "-C", "--workspace", "-w", "--cwd"})
+# `install <package>` adds a dependency; only a bare install runs this package's
+# install lifecycle.
+NPM_BARE_ONLY = frozenset({*_INSTALL_ALIASES, "install-test", "it"})
+NPM_RUN = frozenset({"run", "run-script", "rum", "urn", "run-scripts"})
 
 # Python calls whose first argument is a command line.
 PY_SHELL_CALLS = frozenset(
@@ -237,8 +434,25 @@ PY_SHELL_CALLS = frozenset(
         "Popen",
         "getoutput",
         "getstatusoutput",
+        "create_subprocess_shell",
     }
 )
+# Python calls that take the program and its arguments as separate strings or as an
+# argv list: the os.exec*/os.spawn* families, posix_spawn, asyncio's
+# create_subprocess_exec and pty.spawn.
+PY_ARGV_CALLS = frozenset(
+    {
+        *(f"exec{s}" for s in ("l", "le", "lp", "lpe", "v", "ve", "vp", "vpe")),
+        *(f"spawn{s}" for s in ("l", "le", "lp", "lpe", "v", "ve", "vp", "vpe")),
+        "posix_spawn",
+        "posix_spawnp",
+        "create_subprocess_exec",
+        "spawn",
+    }
+)
+# The flag before an argv element that a shell or interpreter runs as a command
+# line: `sh -c`, `bash -lc`, `node -e`, `pwsh -Command`, `cmd /c`.
+PY_COMMAND_FLAG = re.compile(r"-[A-Za-z]*c|-e|--eval|-Command|/[cC]")
 
 
 @dataclass(frozen=True)
@@ -288,6 +502,14 @@ def command_tokens(command: str) -> list[str]:
     return [t for t in (t.strip("'\"") for t in bare.split()) if t]
 
 
+def command_word(tokens: list[str]) -> str:
+    """The program a command runs: its first token after a YAML `- run:` and `VAR=value`s."""
+    for token in tokens:
+        if token != "-" and not re.fullmatch(r"[\w-]+:|\w+=.*", token):
+            return token
+    return ""
+
+
 def deploy_reason(command: str) -> str | None:
     """Why `command` is a deploy, or None."""
     tokens = command_tokens(command)
@@ -326,12 +548,58 @@ class Command:
     text: str
 
 
+def _bracket_depth(line: str, depth: int, quote: str) -> tuple[int, str]:
+    """`depth` of open `[` after `line`, skipping strings; `quote` is an open string's quote."""
+    escaped = False
+    for char in line:
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+        elif char in "'\"`":
+            quote = char
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(depth - 1, 0)
+    # Only a template literal spans lines.
+    return depth, quote if quote == "`" else ""
+
+
+def join_js_arrays(text: str) -> str:
+    """JavaScript with each multi-line array literal on one line, its first, so
+    `spawn("npx", [\n "cdk",\n "deploy"\n])` reads as one command. Other lines keep
+    their numbers."""
+    out: list[str] = []
+    pending: list[str] = []
+    depth, quote = 0, ""
+    for line in text.splitlines():
+        depth, quote = _bracket_depth(line, depth, quote)
+        pending.append(line)
+        if depth == 0 or len(pending) > MAX_JOINED_LINES:
+            if len(pending) > MAX_JOINED_LINES:
+                out.extend(pending)
+                depth = 0
+            else:
+                out.append(" ".join(pending))
+                out.extend("" for _ in pending[1:])
+            pending = []
+    if pending:
+        out.extend(pending)
+    return "\n".join(out)
+
+
 def shell_commands(text: str, js: bool = False) -> list[Command]:
     """Every command in shell-like `text`. For JavaScript, `//` comment lines are dropped too."""
     if js:
-        text = "\n".join(
-            "" if raw.lstrip().startswith(("//", "/*", "*")) else raw
-            for raw in text.splitlines()
+        text = join_js_arrays(
+            "\n".join(
+                "" if raw.lstrip().startswith(("//", "/*", "*")) else raw
+                for raw in text.splitlines()
+            )
         )
     return [
         Command(number, command)
@@ -341,41 +609,90 @@ def shell_commands(text: str, js: bool = False) -> list[Command]:
     ]
 
 
+def _string_elements(node: ast.List | ast.Tuple) -> list[str]:
+    return [
+        e.value
+        for e in node.elts
+        if isinstance(e, ast.Constant) and isinstance(e.value, str)
+    ]
+
+
+def _command_lines(line: int, text: str) -> list[Command]:
+    return [Command(line, part) for part in SEPARATORS.split(text) if part.strip()]
+
+
+def _argv_commands(line: int, words: list[str], run: bool) -> list[Command]:
+    """The commands an argv runs.
+
+    The words without whitespace are the command, joined. An element with whitespace
+    is one argument, so it is not joined in; it is a command line of its own when a
+    shell or interpreter runs it (`bash -c "..."`). When the argv is passed to a
+    runner (`run` is true) every such element is read as a command line, because
+    which program interprets its arguments as commands is not known here. A bare
+    list or tuple may be data, so there only the element after a command flag is.
+    """
+    if not words:
+        return []
+    commands: list[Command] = []
+    plain = [w for w in words if not re.search(r"\s", w)]
+    if plain:
+        commands.append(Command(line, " ".join(plain)))
+    for previous, word in zip(["", *words], words):
+        if re.search(r"\s", word) and (run or PY_COMMAND_FLAG.fullmatch(previous)):
+            commands.extend(_command_lines(line, word))
+    return commands
+
+
 def python_commands(text: str) -> list[Command]:
-    """What a Python script runs: argv lists of plain strings, and command-line strings passed to a runner.
+    """What a Python script runs: argv lists of strings, and command-line strings passed to a runner.
 
     Raises SyntaxError when the file does not parse.
     """
+    tree = ast.parse(text)
+    # `cmd = [...]` then `subprocess.run(cmd)`: the list a name is bound to.
+    bound: dict[str, ast.List | ast.Tuple] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, (ast.List, ast.Tuple))
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            bound[node.targets[0].id] = node.value
+
     commands: list[Command] = []
-    for node in ast.walk(ast.parse(text)):
+    for node in ast.walk(tree):
         if isinstance(node, (ast.List, ast.Tuple)):
-            words = [
-                e.value
-                for e in node.elts
-                if isinstance(e, ast.Constant) and isinstance(e.value, str)
-            ]
-            # An argv is words, none with whitespace; a tuple of prose strings is data.
-            if len(words) >= 2 and not any(re.search(r"\s", w) for w in words):
-                commands.append(Command(node.lineno, " ".join(words)))
-        elif isinstance(node, ast.Call) and node.args:
-            func = node.func
-            name = (
-                func.attr
-                if isinstance(func, ast.Attribute)
-                else getattr(func, "id", "")
-            )
-            first = node.args[0]
-            if (
-                name in PY_SHELL_CALLS
-                and isinstance(first, ast.Constant)
-                and isinstance(first.value, str)
-            ):
+            words = _string_elements(node)
+            # A tuple of prose strings is data: an argv starts with a program.
+            if len(words) >= 2 and not re.search(r"\s", words[0]):
+                commands.extend(_argv_commands(node.lineno, words, run=False))
+            continue
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name not in PY_SHELL_CALLS and name not in PY_ARGV_CALLS:
+            continue
+        args = list(node.args) + [
+            k.value for k in node.keywords if k.arg in ("args", "cmd", "argv")
+        ]
+        positional_words: list[str] = []
+        for index, arg in enumerate(args):
+            if isinstance(arg, ast.Name) and arg.id in bound:
+                arg = bound[arg.id]
+            if isinstance(arg, (ast.List, ast.Tuple)):
                 commands.extend(
-                    Command(node.lineno, part)
-                    for part in SEPARATORS.split(first.value)
-                    if part.strip()
+                    _argv_commands(arg.lineno, _string_elements(arg), run=True)
                 )
-    return commands
+            elif isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                if name in PY_ARGV_CALLS:
+                    # `os.execlp("npx", "npx", "cdk", "deploy")`: one word each.
+                    positional_words.append(arg.value)
+                elif index == 0:
+                    commands.extend(_command_lines(node.lineno, arg.value))
+        commands.extend(_argv_commands(node.lineno, positional_words, run=True))
+    return list(dict.fromkeys(commands))
 
 
 def walk_files(root: Path, name: str) -> list[Path]:
@@ -386,6 +703,82 @@ def walk_files(root: Path, name: str) -> list[Path]:
         if name in files:
             found.append(Path(directory) / name)
     return sorted(found)
+
+
+# A command whose flags could be read more ways than this is read only this many ways.
+MAX_FLAG_READINGS = 64
+
+
+def flag_readings(words: list[str], syntax: FlagSyntax) -> list[list[str]]:
+    """Every way to read `words` as positional words once the flags are taken out.
+
+    A flag whose arity `syntax` cannot settle is read both with and without a value.
+    `--` ends the flags; every word after it is positional.
+    """
+    readings: list[list[str]] = []
+
+    def walk(index: int, positional: list[str]) -> None:
+        while index < len(words) and len(readings) < MAX_FLAG_READINGS:
+            word = words[index]
+            if re.fullmatch(r"-{2,}", word):
+                positional = positional + words[index + 1 :]
+                break
+            if len(word) > 1 and word.startswith("-"):
+                following = words[index + 1] if index + 1 < len(words) else None
+                takes = (
+                    syntax.takes_value(word, following)
+                    if following is not None
+                    else False
+                )
+                if takes is None:
+                    walk(index + 2, positional)
+                index += 2 if takes else 1
+                continue
+            positional = positional + [word]
+            index += 1
+        readings.append(positional)
+
+    walk(0, [])
+    return readings
+
+
+def _run_names(args: list[str]) -> list[str]:
+    if not args:
+        return []
+    name = args[0]
+    if "$" in name:
+        return [name]
+    return [f"pre{name}", name, f"post{name}"]
+
+
+def scripts_run(tool: str, words: list[str]) -> list[str]:
+    """The package.json scripts `<tool> <words...>` runs, `words` being its positional words."""
+    if not words:
+        # A bare `yarn` installs; a bare `npm` or `pnpm` prints help.
+        return list(_INSTALL) if tool == "yarn" else []
+    sub, args = words[0], words[1:]
+    if tool == "yarn" and sub == "workspace":
+        # `yarn workspace <name> <command...>` runs `yarn <command...>` in it.
+        return scripts_run(tool, args[1:])
+    if tool == "yarn" and sub == "workspaces":
+        # yarn 1 `workspaces run <script>`; yarn 2+ `workspaces foreach ... <command>`.
+        if args[:1] == ["run"]:
+            return _run_names(args[1:])
+        if args[:1] == ["foreach"]:
+            return scripts_run(tool, args[1:])
+        return []
+    if tool == "pnpm" and sub in ("recursive", "multi", "m"):
+        return scripts_run(tool, args)
+    if sub in NPM_RUN:
+        return _run_names(args)
+    if sub in NPM_LIFECYCLE:
+        if sub in NPM_BARE_ONLY and args:
+            return []
+        return list(NPM_LIFECYCLE[sub])
+    # yarn and pnpm run a script named as the subcommand (`yarn deploy`).
+    if tool in ("yarn", "pnpm"):
+        return _run_names([sub])
+    return []
 
 
 class Follower:
@@ -420,34 +813,15 @@ class Follower:
     def npm_scripts(self, tokens: list[str]) -> list[str] | None:
         """The package.json script names an npm-family command runs, or None if it is not one."""
         for index, token in enumerate(tokens):
-            if normalize_tool(token) not in NPM_TOOLS:
+            tool = normalize_tool(token)
+            if tool not in NPM_TOOLS:
                 continue
-            rest = tokens[index + 1 :]
-            position = 0
-            while position < len(rest) and rest[position].startswith("-"):
-                position += 2 if rest[position] in NPM_VALUE_FLAGS else 1
-            if position >= len(rest):
-                return []
-            sub = rest[position]
-            if sub in ("run", "run-script", "run-scripts"):
-                names = [t for t in rest[position + 1 :] if not t.startswith("-")]
-                if not names:
-                    return []
-                name = names[0]
-                if "$" in name:
-                    return [name]
-                return [f"pre{name}", name, f"post{name}"]
-            if sub in ("install", "i"):
-                # `npm install <package>` adds a dependency; only a bare install
-                # runs this package's install lifecycle.
-                extra = [t for t in rest[position + 1 :] if not t.startswith("-")]
-                return list(NPM_LIFECYCLE[sub]) if not extra else []
-            if sub in NPM_LIFECYCLE:
-                return list(NPM_LIFECYCLE[sub])
-            # yarn and pnpm run a script named as the subcommand (`yarn deploy`).
-            if normalize_tool(token) in ("yarn", "pnpm"):
-                return [sub]
-            return []
+            names: list[str] = []
+            for words in flag_readings(tokens[index + 1 :], NPM_FLAG_SYNTAX[tool]):
+                for name in scripts_run(tool, words):
+                    if name not in names:
+                        names.append(name)
+            return names
         return None
 
     # -- path resolution -----------------------------------------------------
@@ -507,9 +881,14 @@ class Follower:
 
     def referenced_scripts(self, tokens: list[str], bases: list[Path]) -> list[Path]:
         found: list[Path] = []
-        for token in tokens:
+        for previous, token in zip(["", *tokens], tokens):
             # `HELPER=x.py`, `-v x.sh:/tmp/x.sh:ro`: each piece may be a path.
-            for word in {token, *re.split(r"[=:]", token)}:
+            words = {token, *re.split(r"[=:]", token)}
+            if previous == "-m" and PY_MODULE.fullmatch(token):
+                # `python -m pkg.mod` runs pkg/mod.py, or pkg/mod/__main__.py.
+                module = token.replace(".", "/")
+                words |= {f"{module}.py", f"{module}/__main__.py"}
+            for word in words:
                 for path in self.resolve(word, bases):
                     if path not in found:
                         found.append(path)
@@ -550,6 +929,8 @@ class Follower:
             if names is None:
                 continue
             for name in names:
+                if "$" in name and command_word(tokens) in ("echo", "printf"):
+                    continue  # a message that names a command; nothing runs
                 self.follow_npm(name, here, package)
 
     def follow_npm(self, name: str, via: tuple[str, ...], package: Path | None) -> None:
@@ -797,6 +1178,112 @@ PLANTED_REPOS: tuple[tuple[str, dict[str, str], tuple[tuple[str, str], ...]], ..
         (("/go.mjs", "`cdk ... destroy`"),),
     ),
     (
+        "a Python script runs bash -c with a command line that deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: python3 scripts/ship.py\n",
+            "scripts/ship.py": 'import subprocess\n\nsubprocess.run(["bash", "-c", "npx cdk deploy --all"], check=True)\n',
+        },
+        (("scripts/ship.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python argv with an argument that has a space still deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: python3 scripts/ship.py\n",
+            "scripts/ship.py": 'import subprocess\n\nsubprocess.run(["npx", "cdk", "deploy", "--context", "a b"])\n',
+        },
+        (("scripts/ship.py", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python script runs a one-word argv, bound to a name, naming a script that deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: python3 scripts/ship.py\n",
+            "scripts/ship.py": 'import subprocess\n\nCMD = ["scripts/d.sh"]\nsubprocess.run(CMD, check=True)\n',
+            "scripts/d.sh": "#!/bin/sh\nnpx cdk deploy --all\n",
+        },
+        (("scripts/d.sh", "`cdk ... deploy`"),),
+    ),
+    (
+        "a Python script runs sys.executable on a Python script that deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: python3 scripts/ship.py\n",
+            "scripts/ship.py": 'import subprocess, sys\n\nsubprocess.check_call([sys.executable, "scripts/d.py"])\n',
+            "scripts/d.py": 'import os\n\nos.execlp("terraform", "terraform", "apply", "-auto-approve")\n',
+        },
+        (("scripts/d.py", "`terraform ... apply`"),),
+    ),
+    (
+        "npm run with a workspace flag before the script name",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: npm run -w app deploy\n",
+            "package.json": json.dumps(
+                {"workspaces": ["app"], "scripts": {"app": "echo app"}}
+            ),
+            "app/package.json": json.dumps({"scripts": {"deploy": "cdk deploy"}}),
+        },
+        (("app/package.json#scripts.deploy", "`cdk ... deploy`"),),
+    ),
+    (
+        "yarn workspace runs a script in a workspace that deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: yarn --cwd . workspace app ship\n",
+            "app/package.json": json.dumps({"scripts": {"ship": "sam deploy"}}),
+        },
+        (("app/package.json#scripts.ship", "`sam ... deploy`"),),
+    ),
+    (
+        "an extensionless script with a shebang that deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: ./scripts/release --all\n",
+            "scripts/release": '#!/bin/sh\nnpx cdk deploy "$@"\n',
+        },
+        (("scripts/release", "`cdk ... deploy`"),),
+    ),
+    (
+        "a script named relative to the directory a cd moved into",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: cd tools && ./ship.sh\n",
+            "tools/ship.sh": "#!/bin/sh\nterraform destroy -auto-approve\n",
+        },
+        (("tools/ship.sh", "`terraform ... destroy`"),),
+    ),
+    (
+        "a Node script spawns a multi-line argv that deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: node .github/scripts/go.js\n",
+            ".github/scripts/go.js": "const { spawnSync } = require('node:child_process');\n"
+            "spawnSync('npx', [\n  'cdk',\n  'deploy',\n  '--all',\n], { stdio: 'inherit' });\n",
+        },
+        (("/go.js", "`cdk ... deploy`"),),
+    ),
+    (
+        "a TypeScript script runs a command line that deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: npx tsx scripts/ship.ts\n",
+            "scripts/ship.ts": "import { execSync } from 'node:child_process';\nexecSync('npx cdk deploy --all');\n",
+        },
+        (("scripts/ship.ts", "`cdk ... deploy`"),),
+    ),
+    (
+        "python -m runs a module in the repository that deploys",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: python3 -m tools.ship\n",
+            "tools/__init__.py": "",
+            "tools/ship.py": 'import os\n\nos.system("aws cloudformation delete-stack --stack-name s")\n',
+        },
+        (("tools/ship.py", "`cloudformation ... delete-stack`"),),
+    ),
+    (
         "a followed Python file that does not parse",
         {
             ".github/workflows/w.yml": WORKFLOW_HEAD
@@ -828,7 +1315,8 @@ LOOK_ALIKE_REPOS: tuple[tuple[str, dict[str, str], str], ...] = (
             'PLANTS = ("run: cdk deploy --all", "run: terraform apply")\n'
             'VERBS = frozenset({"deploy", "destroy"})\n'
             'print("never run cdk deploy here")\n'
-            'ARGV = ["npx", "cdk", "synth"]\n',
+            'ARGV = ["npx", "cdk", "synth"]\n'
+            'NOTES = ["cdk", "never run cdk deploy here"]\n',
         },
         "scripts/guard.py",
     ),
@@ -852,6 +1340,48 @@ LOOK_ALIKE_REPOS: tuple[tuple[str, dict[str, str], str], ...] = (
             "scripts/ok.sh": "#!/bin/sh\necho ok\n",
         },
         "scripts/ok.sh",
+    ),
+    (
+        "an extensionless file without a shebang is not a script",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: cat ./scripts/notes && bash scripts/ok.sh\n",
+            "scripts/notes": "To ship by hand: npx cdk deploy --all\n",
+            "scripts/ok.sh": "#!/bin/sh\necho ok\n",
+        },
+        "scripts/ok.sh",
+    ),
+    (
+        "a cd target resolves the script there, not one of the same name elsewhere",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: cd tools && ./ship.sh\n",
+            "tools/ship.sh": "#!/bin/sh\nnpx cdk synth\n",
+            "elsewhere/ship.sh": "#!/bin/sh\nnpx cdk deploy\n",
+        },
+        "tools/ship.sh",
+    ),
+    (
+        "a dependency's package.json under node_modules is not a script CI runs",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD + "      - run: npm run deploy\n",
+            "package.json": json.dumps({"scripts": {"deploy": "tsc"}}),
+            "node_modules/dep/package.json": json.dumps(
+                {"scripts": {"deploy": "cdk deploy"}}
+            ),
+        },
+        "package.json#scripts.deploy",
+    ),
+    (
+        "a Node script that names deploy commands only in comments",
+        {
+            ".github/workflows/w.yml": WORKFLOW_HEAD
+            + "      - run: node .github/scripts/go.mjs\n",
+            ".github/scripts/go.mjs": "// never npx cdk deploy here\n"
+            "/*\n * terraform apply is forbidden\n */\n"
+            "import { execSync } from 'node:child_process';\nexecSync('npx cdk synth');\n",
+        },
+        ".github/scripts/go.mjs",
     ),
 )
 
