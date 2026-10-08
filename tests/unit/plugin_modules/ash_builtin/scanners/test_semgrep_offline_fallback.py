@@ -79,6 +79,57 @@ def test_semgrep_offline_empty_cache_records_actionable_reason(
     assert "ashx build-image --offline" in msg
 
 
+def test_semgrep_offline_missing_cache_guidance_is_a_command_that_seeds_it(
+    test_plugin_context, monkeypatch
+):
+    """The guidance must name a way to fill the cache that actually writes rules.
+
+    It used to suggest ``semgrep --config p/ci --dryrun``, which fetches the ruleset
+    and prints a plan but writes no rule file, so following it left the cache empty
+    and the scanner MISSING on the next run.
+    """
+    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+
+    scanner = _make_scanner(test_plugin_context)
+    scanner.validate_plugin_dependencies()
+    msg = scanner.dependency_unavailable_reason or ""
+
+    assert "--dryrun" not in msg
+    assert "https://semgrep.dev/c/" in msg
+    assert ".ash-rules-fetched-at" in msg
+    assert "advanced-usage.md" in msg
+
+
+def test_following_the_missing_cache_guidance_seeds_the_cache(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """Do what the guidance says, then the same scanner no longer declines.
+
+    The guidance names three things: set the cache variable to a directory,
+    download a ruleset from https://semgrep.dev/c/<ruleset> into it as a rule
+    file, and record the time in .ash-rules-fetched-at. The download is stood in
+    for by writing the YAML a ruleset URL returns, since unit tests do not reach
+    the network.
+    """
+    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+    declined = _make_scanner(test_plugin_context)
+    assert declined.validate_plugin_dependencies() is False
+    guidance = declined.dependency_unavailable_reason or ""
+    assert "SEMGREP_RULES_CACHE_DIR" in guidance
+    assert "https://semgrep.dev/c/" in guidance
+    assert ".ash-rules-fetched-at" in guidance
+
+    (tmp_path / "ci.yml").write_text("rules: []\n")
+    (tmp_path / ".ash-rules-fetched-at").write_text("2026-10-07T00:00:00Z\n")
+    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(tmp_path))
+
+    seeded = _make_scanner(test_plugin_context)
+    assert seeded.dependency_unavailable_reason is None
+    assert any(
+        a.key == "--config" and str(tmp_path) in a.value for a in seeded.args.extra_args
+    ), "the seeded cache directory is what the scanner is configured to read"
+
+
 def test_semgrep_offline_with_cache_does_not_decline(
     test_plugin_context, monkeypatch, tmp_path
 ):

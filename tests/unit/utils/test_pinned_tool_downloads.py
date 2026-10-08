@@ -30,6 +30,7 @@ import io
 import json
 import os
 import platform
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -58,6 +59,7 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.utils.tool_downloads import (
     _ASSET_TABLES,
     _DIGESTS,
+    _EXECUTABLE_DIGESTS,
     TOOL_VERSIONS,
     downloadable_tools,
     get_tool_asset,
@@ -106,6 +108,25 @@ def _serve(payload: bytes):
         "automated_security_helper.utils.download_utils.urllib.request.urlopen",
         side_effect=lambda *_a, **_k: _FakeResponse(payload),
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_executable_pins():
+    """Run this module's install tests with no executable digests pinned.
+
+    Every fixture here stands a few bytes of shell in for the real grype, and the
+    real ``_EXECUTABLE_DIGESTS`` entry names the real grype's SHA256, so with it in
+    place the extraction check refuses every fixture install -- correctly. It also
+    makes ``find_verified_pinned_executable`` return None before it looks anywhere,
+    so a grype that happens to be installed on the test machine cannot satisfy an
+    install these tests expect to perform.
+
+    What is given up is only coverage this module never claimed: the executable
+    digest check and the skip it enables are tested in
+    tests/unit/utils/test_verified_present_pinned_tool.py, which pins its own.
+    """
+    with patch.object(tool_downloads, "_EXECUTABLE_DIGESTS", {}):
+        yield
 
 
 @pytest.fixture
@@ -309,26 +330,25 @@ class TestIdempotence:
         assert served.called, "a replaced binary was trusted instead of reinstalled"
         assert installed.read_bytes() == PAYLOAD
 
-    def test_an_unpinned_download_is_never_cached(self, tmp_path):
-        """Without a pinned digest there is nothing to be idempotent against.
+    def test_an_unpinned_install_is_refused_before_anything_is_fetched(self, tmp_path):
+        """Without a pinned digest there is nothing to verify, so nothing installs.
 
-        opengrep is in this state: create_url_download_command passes no digest, so
-        its receipt records `sha256: null`. Comparing null to null matches, so a
-        substituted opengrep -- fetched behind only a `startswith("https://")` check
-        -- would be cached and skipped on every later install. Re-downloading is the
-        conservative answer until opengrep gets a pin.
+        This test used to assert that an unpinned install was merely never cached:
+        opengrep had no pin, its receipt recorded `sha256: null`, and re-downloading
+        on every install was the conservative answer. opengrep is pinned now and the
+        unpinned path is refused outright, so the stronger property is the one held.
         """
         bin_dir = tmp_path / "bin"
         url = "https://example.invalid/opengrep"
 
-        with _serve(PAYLOAD):
+        with (
+            _serve(PAYLOAD) as served,
+            pytest.raises(ToolDownloadIntegrityError, match="without a pinned SHA256"),
+        ):
             install_binary_from_url(url, bin_dir, "opengrep")
-        receipt = read_receipt(bin_dir, "opengrep")
-        assert receipt["sha256"] is None, "fixture assumes an unpinned install"
-
-        with _serve(PAYLOAD) as served:
-            install_binary_from_url(url, bin_dir, "opengrep")
-        assert served.called, "an unverified download was cached"
+        assert not served.called, "an unpinned install still reached the network"
+        assert not (bin_dir / "opengrep").exists()
+        assert read_receipt(bin_dir, "opengrep") is None
 
     def test_a_tampered_receipt_does_not_vouch_for_a_tampered_binary(
         self, tmp_path, monkeypatch, fake_grype_release
@@ -584,11 +604,10 @@ class TestArchiveExtraction:
 
 
 class TestUnarchivedDownloadPath:
-    """download_file / install_binary_from_url -- the opengrep path.
+    """download_file / install_binary_from_url -- the unarchived path.
 
-    A separate code path from the archive extraction, and the one that runs
-    unconditionally: opengrep passes no pinned digest, so idempotence never applies
-    and every install re-downloads. It needed the same symlink treatment and did not
+    A separate code path from the archive extraction, taken by an opengrep version
+    the configuration pins itself. It needed the same symlink treatment and did not
     have it.
     """
 
@@ -629,7 +648,10 @@ class TestUnarchivedDownloadPath:
 
         with _serve(PAYLOAD), patch("os.rename", side_effect=_cross_device):
             install_binary_from_url(
-                "https://example.invalid/opengrep", bin_dir, "opengrep"
+                "https://example.invalid/opengrep",
+                bin_dir,
+                "opengrep",
+                expected_sha256=hashlib.sha256(PAYLOAD).hexdigest(),
             )
 
         assert victim.read_bytes() == b"do not touch me", (
@@ -685,7 +707,11 @@ class TestStagingCannotBeRacedOrGuessed:
         for _ in range(2):
             with _serve(PAYLOAD), patch("os.replace", side_effect=capture):
                 install_binary_from_url(
-                    "https://example.invalid/opengrep", bin_dir, "opengrep", force=True
+                    "https://example.invalid/opengrep",
+                    bin_dir,
+                    "opengrep",
+                    force=True,
+                    expected_sha256=hashlib.sha256(PAYLOAD).hexdigest(),
                 )
 
         assert len(names) == 2
@@ -758,7 +784,10 @@ class TestStagingCannotBeRacedOrGuessed:
             pytest.raises(ToolDownloadIntegrityError, match="does not match the bytes"),
         ):
             install_binary_from_url(
-                "https://example.invalid/opengrep", bin_dir, "opengrep"
+                "https://example.invalid/opengrep",
+                bin_dir,
+                "opengrep",
+                expected_sha256=hashlib.sha256(PAYLOAD).hexdigest(),
             )
 
         assert not (bin_dir / "opengrep").exists(), (
@@ -880,7 +909,7 @@ class TestTheVerifiedDigestIsTheOneRecorded:
         """install_binary_from_url writes its own receipt, from its own call site.
 
         Two separate lines re-hashed the target, so fixing one proves nothing about the
-        other. A pin is passed here -- unlike opengrep, which has none -- because without
+        other. A pin is passed here, as every caller now must, because without
         one there is no verified digest for the receipt to disagree with.
         """
         home = tmp_path / "home"
@@ -1118,9 +1147,9 @@ class TestReceiptDirectoryPermissions:
 
 class TestAssetResolution:
     def test_downloadable_tools(self):
-        assert downloadable_tools() == ["grype", "syft", "trivy"]
+        assert downloadable_tools() == ["grype", "opengrep", "syft", "trivy", "uv"]
 
-    @pytest.mark.parametrize("tool", ["grype", "syft", "trivy"])
+    @pytest.mark.parametrize("tool", ["grype", "opengrep", "syft", "trivy"])
     def test_linux_and_darwin_are_provisionable_on_both_arches(self, tool):
         pairs = supported_platforms(tool)
         for target in [
@@ -1131,9 +1160,9 @@ class TestAssetResolution:
         ]:
             assert target in pairs, f"{tool} should be provisionable on {target}"
 
-    @pytest.mark.parametrize("tool", ["grype", "trivy"])
+    @pytest.mark.parametrize("tool", ["grype", "opengrep", "trivy"])
     def test_windows_arm64_is_refused_not_approximated(self, tool):
-        """Upstream publishes no windows/arm64 build for these two.
+        """Upstream publishes no windows/arm64 build for these three.
 
         Refusing is the point: falling back to the amd64 asset would install a
         binary that fails at exec time, and that shows up in a scan report as an
@@ -1182,13 +1211,40 @@ class TestAssetResolution:
         assert sorted(set(_DIGESTS) - referenced) == []
 
     def test_pinned_versions_appear_in_their_asset_filenames(self):
+        """A version bump has to move every digest lookup with it.
+
+        For a tool whose asset names carry the version, the filename is that
+        guarantee. opengrep and uv name their assets the same in every release, so
+        for those the guarantee is _DIGESTS_TAKEN_AT, which must name the pinned
+        version -- checked here rather than exempted, so neither tool is a hole.
+        """
         for tool, version in TOOL_VERSIONS.items():
+            if tool in tool_downloads._DIGESTS_TAKEN_AT:
+                assert tool_downloads._DIGESTS_TAKEN_AT[tool] == version, (
+                    f"{tool} is pinned to {version} but its digests were taken at "
+                    f"{tool_downloads._DIGESTS_TAKEN_AT[tool]}"
+                )
+                continue
             bare = version.lstrip("v")
             for filename in _ASSET_TABLES[tool].values():
                 assert bare in filename, (
                     f"{tool} is pinned to {version} but asset {filename} does not "
                     "carry that version"
                 )
+
+    def test_the_unversioned_exemption_covers_only_unversioned_names(self):
+        """_DIGESTS_TAKEN_AT must not become a way to skip the filename check.
+
+        A tool listed there whose asset names DO carry its version has no reason to
+        be listed, and listing it would only weaken the check above for that tool.
+        """
+        for tool in tool_downloads._DIGESTS_TAKEN_AT:
+            bare = TOOL_VERSIONS[tool].lstrip("v")
+            versioned = [f for f in _ASSET_TABLES[tool].values() if bare in f]
+            assert versioned == [], (
+                f"{tool} assets {versioned} carry the version; take {tool} out of "
+                "_DIGESTS_TAKEN_AT so the filename check applies to it"
+            )
 
     def test_the_ferret_suppression_range_still_bounds_the_digest_table(self):
         """The community config suppresses API_KEY_OR_SECRET over a line range.
@@ -1211,8 +1267,24 @@ class TestAssetResolution:
         opens = next(
             i + 1 for i, line in enumerate(source) if line.startswith("_DIGESTS")
         )
-        closes = next(
+        # The range covers _DIGESTS and _EXECUTABLE_DIGESTS, which sits directly
+        # after it so one suppression can cover both tables.
+        executable_opens = next(
+            i + 1
+            for i, line in enumerate(source)
+            if line.startswith("_EXECUTABLE_DIGESTS")
+        )
+        digests_close = next(
             i + 1 for i, line in enumerate(source[opens:], opens) if line == "}"
+        )
+        assert executable_opens - digests_close <= 3, (
+            "_EXECUTABLE_DIGESTS no longer follows _DIGESTS directly; the lines "
+            "between them are inside the suppression and would hide a real secret"
+        )
+        closes = next(
+            i + 1
+            for i, line in enumerate(source[executable_opens:], executable_opens)
+            if line == "}"
         )
 
         config = yaml.safe_load(
@@ -1224,6 +1296,9 @@ class TestAssetResolution:
             s
             for s in config["global_settings"]["suppressions"]
             if s.get("path", "").endswith("utils/tool_downloads.py")
+            # The license-hash block has its own entry, checked in
+            # tests/unit/utils/test_third_party_licenses.py.
+            and "_THIRD_PARTY_HASHES" not in s.get("reason", "")
         ]
         assert len(entries) == 1, "expected exactly one suppression for tool_downloads"
         entry = entries[0]
@@ -1231,11 +1306,161 @@ class TestAssetResolution:
             f"suppression starts at {entry['line_start']} but _DIGESTS opens at {opens}"
         )
         assert entry["line_end"] == closes, (
-            f"suppression ends at {entry['line_end']} but _DIGESTS closes at {closes}"
+            f"suppression ends at {entry['line_end']} but _EXECUTABLE_DIGESTS "
+            f"closes at {closes}"
         )
 
     def test_digests_are_well_formed_sha256(self):
-        for filename, digest in _DIGESTS.items():
+        for filename, digest in {**_DIGESTS, **_EXECUTABLE_DIGESTS}.items():
             assert len(digest) == 64, f"{filename} digest is not 64 hex chars"
             assert digest == digest.lower(), f"{filename} digest is not lowercase"
             int(digest, 16)
+
+
+class TestReleaseAssetCache:
+    """ASH_TOOL_DOWNLOAD_CACHE: verified release assets kept between CI runs.
+
+    A cached asset is trusted only if it hashes to the pin in tool_downloads, every
+    time it is read. The cache holds assets, not binaries or receipts, so the trust
+    anchor stays in the repository where the cache cannot reach it.
+    """
+
+    @pytest.fixture
+    def cache_dir(self, tmp_path, monkeypatch):
+        directory = tmp_path / "asset-cache"
+        monkeypatch.setenv("ASH_TOOL_DOWNLOAD_CACHE", str(directory))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        return directory
+
+    def test_a_download_is_stored_and_a_verified_copy_is_reused(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        asset_name = get_tool_asset("grype", "linux", "amd64").url.split("/")[-1]
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin-a")
+        assert (cache_dir / asset_name).read_bytes() == payload
+
+        exploding = patch(
+            "automated_security_helper.utils.download_utils.download_file",
+            side_effect=AssertionError(
+                "downloaded although a verified copy was cached"
+            ),
+        )
+        with _pin(_grype_asset_filename(), real_digest), exploding:
+            installed = install_pinned_tool(
+                "grype", "linux", "amd64", tmp_path / "bin-b"
+            )
+        assert installed.read_bytes() == PAYLOAD
+
+    def test_a_tampered_cached_asset_is_rejected_deleted_and_redownloaded(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        asset_name = get_tool_asset("grype", "linux", "amd64").url.split("/")[-1]
+        cache_dir.mkdir(parents=True)
+        # A well-formed archive whose `grype` is someone else's binary.
+        evil = b"#!/bin/sh\necho evil\n"
+        with tarfile.open(cache_dir / asset_name, "w:gz") as archive:
+            info = tarfile.TarInfo(name="grype")
+            info.size = len(evil)
+            archive.addfile(info, io.BytesIO(evil))
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            installed = install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert served.called, "the tampered asset was used instead of re-downloaded"
+        assert installed.read_bytes() == PAYLOAD
+        assert b"evil" not in installed.read_bytes()
+        # The cache now holds the verified download, not the tampered file.
+        assert (cache_dir / asset_name).read_bytes() == payload
+
+    def test_without_the_variable_nothing_is_cached(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        monkeypatch.delenv("ASH_TOOL_DOWNLOAD_CACHE", raising=False)
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        payload, real_digest = fake_grype_release
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+        assert not (tmp_path / "asset-cache").exists()
+
+
+_needs_symlinks = pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+
+
+class TestReleaseAssetCacheNeverFollowsLinks:
+    """The cache is restored from an untrusted store, so its entries' KIND is untrusted.
+
+    A symlink at an asset's name must be neither read through on restore nor written
+    through on store, and a symlinked cache root is refused outright.
+    """
+
+    @pytest.fixture
+    def cache_dir(self, tmp_path, monkeypatch):
+        directory = tmp_path / "asset-cache"
+        directory.mkdir()
+        monkeypatch.setenv("ASH_TOOL_DOWNLOAD_CACHE", str(directory))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+        return directory
+
+    @staticmethod
+    def _asset_name() -> str:
+        return get_tool_asset("grype", "linux", "amd64").url.split("/")[-1]
+
+    @_needs_symlinks
+    def test_a_symlinked_entry_is_not_followed_or_trusted_on_restore(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        # The link points at bytes that WOULD verify, so only refusing to follow it
+        # -- not the digest check -- can keep it from being used.
+        genuine = tmp_path / "elsewhere.tar.gz"
+        genuine.write_bytes(payload)
+        link = cache_dir / self._asset_name()
+        link.symlink_to(genuine)
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert served.called, "a symlinked cache entry was used instead of a download"
+        assert genuine.read_bytes() == payload, "the link's target was modified"
+        assert not (cache_dir / self._asset_name()).is_symlink()
+
+    @_needs_symlinks
+    def test_a_symlinked_entry_is_replaced_not_written_through_on_store(
+        self, tmp_path, cache_dir, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        victim = tmp_path / "victim.txt"
+        victim.write_bytes(b"must not change")
+        (cache_dir / self._asset_name()).symlink_to(victim)
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert victim.read_bytes() == b"must not change"
+        stored = cache_dir / self._asset_name()
+        assert not stored.is_symlink()
+        assert stored.read_bytes() == payload
+        assert not list(cache_dir.glob(".ash-asset-*")), "a temporary file was left"
+
+    @_needs_symlinks
+    def test_a_symlinked_cache_root_is_refused(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        real_root = tmp_path / "real-root"
+        real_root.mkdir()
+        root_link = tmp_path / "asset-cache-link"
+        root_link.symlink_to(real_root, target_is_directory=True)
+        monkeypatch.setenv("ASH_TOOL_DOWNLOAD_CACHE", str(root_link))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+
+        assert not any(real_root.iterdir()), "wrote through a symlinked cache root"

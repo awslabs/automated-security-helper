@@ -6,21 +6,27 @@ import json
 import os
 import platform
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
 import time
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 import urllib.error
 import urllib.request
 
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import run_command
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.core.constants import ASH_BIN_PATH
-from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
+from automated_security_helper.core.exceptions import (
+    ToolDownloadIntegrityError,
+    ToolNotProvisionableError,
+)
 
 # Name of the directory holding install receipts. See receipt_root() for why it is
 # NOT under the bin directory a tool is installed into: a receipt records the digest
@@ -273,9 +279,7 @@ def _download_verified(
     # follows a link at the destination. The source is a NamedTemporaryFile in
     # TMPDIR and the destination is ASH_BIN_PATH, so a relocated TMPDIR or a
     # `--tmpfs /tmp` container puts that fallback on the normal path rather than an
-    # exotic one. This matters most for opengrep, which reaches here through
-    # create_url_download_command, passes no digest, and therefore re-downloads on
-    # every single install.
+    # exotic one.
     #
     # The pin goes with it. The bytes verified above and the bytes copied below are two
     # separate reads of a file in TMPDIR, so the copy has to be checked against the pin
@@ -662,8 +666,8 @@ def _already_installed(
        not an install.
     2. There is a pinned digest at all. An unpinned download has nothing to be
        idempotent against, so ``sha256: null`` in a receipt would match every later
-       unpinned install and cache a substituted binary forever. opengrep is in that
-       state until it gets a pin, so it re-downloads.
+       unpinned install and cache a substituted binary forever. install_binary_from_url
+       now refuses an unpinned install outright; this stays as the second guard.
     3. A receipt exists. A file with no receipt came from somewhere else -- a
        package manager, a nix profile, an ASH that predates receipts -- and must not
        be assumed to be the pinned version.
@@ -733,12 +737,26 @@ def install_binary_from_url(
         url: The URL to download from
         destination: The directory to install the binary to
         rename_to: Optional name to rename the binary to
-        expected_sha256: Pinned SHA256 to verify the download against
+        expected_sha256: Pinned SHA256 to verify the download against. Required:
+            ``None`` is refused before anything is fetched.
         force: Re-download even when a matching receipt exists
 
     Returns:
         Path to the installed binary
+
+    Raises:
+        ToolDownloadIntegrityError: if no digest is given, or the download does not
+            match it.
     """
+    if not expected_sha256:
+        # This used to download, log "integrity was not verified", chmod +x and
+        # install. It was opengrep's only install path, so every opengrep ASH
+        # provisioned was an unverified binary. There is no caller left that has a
+        # reason to want that, so the parameter stays optional only in its type.
+        raise ToolDownloadIntegrityError(
+            f"Refusing to install {url} without a pinned SHA256: ASH installs no "
+            "binary it cannot verify."
+        )
     installed_as = rename_to if rename_to is not None else url.split("/")[-1]
     target = destination.joinpath(installed_as)
 
@@ -807,7 +825,12 @@ def _unreadable_archive(
     )
 
 
-def _extract_single_member(archive_path: Path, member_name: str, target: Path) -> str:
+def _extract_single_member(
+    archive_path: Path,
+    member_name: str,
+    target: Path,
+    expected_member_sha256: Optional[str] = None,
+) -> str:
     """Extract the one archive member named ``member_name`` to ``target``.
 
     ``member_name`` is matched against each entry's *basename*, and the archive is
@@ -840,6 +863,14 @@ def _extract_single_member(archive_path: Path, member_name: str, target: Path) -
 
     The mode is set explicitly on the staging file rather than left to
     ``make_executable``'s read-modify-write of whatever the umask produced.
+
+    ``expected_member_sha256``, when given, is the pinned digest of the member itself
+    (``ToolAsset.executable_digest``). A member that does not hash to it is refused
+    before it is renamed into place. The archive digest has already been checked by
+    then, so this can only fire on a wrong entry in ``_EXECUTABLE_DIGESTS`` or an
+    archive that holds a different executable than the one that was pinned. Either
+    way the pin no longer describes what would be installed, and a binary already on
+    disk could no longer be recognized by it, so the install stops.
 
     Returns:
         The SHA256 of the extracted member, verified after it landed at ``target``.
@@ -904,6 +935,18 @@ def _extract_single_member(archive_path: Path, member_name: str, target: Path) -
         except (tarfile.ReadError, zipfile.BadZipFile) as e:
             raise _unreadable_archive(archive_path, e) from e
 
+        if (
+            expected_member_sha256 is not None
+            and written.hexdigest() != expected_member_sha256.lower()
+        ):
+            raise ToolDownloadIntegrityError(
+                f"{member_name} in {archive_path.name} does not match its pinned "
+                f"executable digest (expected {expected_member_sha256.lower()}, found "
+                f"{written.hexdigest()}). The archive matched its own pin, so the "
+                "executable digest in tool_downloads.py is wrong or the archive holds "
+                "a different executable; refusing to install it."
+            )
+
         # 0o755, and the digest of what was written, are both handled here. See
         # _finalize_staged: the post-rename re-hash is what stops a race on the
         # staging path from getting an attacker's bytes recorded in the receipt as
@@ -929,6 +972,135 @@ def _require_one_match(matches: list, member_name: str, archive_path: Path) -> N
         f"Archive {archive_path.name} contains {len(matches)} members named "
         f"{member_name}; refusing to guess which is the executable"
     )
+
+
+# Directory of release assets kept between runs, set by CI (ASH_TOOL_DOWNLOAD_CACHE).
+#
+# It holds the downloaded release ASSETS, never extracted binaries and never install
+# receipts. That choice is what lets a restored copy be re-verified against a trust
+# anchor the cache cannot touch: the pinned digest in tool_downloads covers the asset
+# itself, and it lives in the repository. Caching the extracted executables would
+# need their digests from somewhere, and the only record of those is the install
+# receipt -- which receipt_root keeps out of every bin directory precisely so that
+# whatever can write binaries cannot also rewrite the digests they are checked
+# against. A cache holding both would be exactly that.
+#
+# So a cached asset is used only if it hashes to the pinned digest, every time it is
+# read. Anything else -- a tampered file, a truncated one, a stale version under the
+# same name -- is deleted and the asset is downloaded and verified as if the cache
+# were empty. The operator approved caching these public, digest-pinned upstream
+# release assets in the Actions cache; ASH's own wheel and image never go here.
+_TOOL_DOWNLOAD_CACHE_ENV = "ASH_TOOL_DOWNLOAD_CACHE"
+
+
+def _tool_download_cache() -> Optional[Path]:
+    value = os.environ.get(_TOOL_DOWNLOAD_CACHE_ENV, "").strip()
+    return Path(value) if value else None
+
+
+# The cache directory is restored from the Actions cache, so every entry in it is
+# untrusted -- including what KIND of entry it is. A symlink planted at an asset's
+# name would make a read follow it to any file on the runner, and a write follow it
+# to anywhere the job can write. So nothing here follows a link: entries are judged
+# by lstat, opened with O_NOFOLLOW where the platform has it, and written by
+# os.replace of a temporary file, which replaces whatever sits at the name -- link
+# included -- rather than writing through it.
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_BINARY = getattr(os, "O_BINARY", 0)
+
+
+def _usable_cache_dir(cache_dir: Path) -> bool:
+    """The cache root must be a real directory, not a link to one, if it exists."""
+    try:
+        st = os.lstat(cache_dir)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if stat.S_ISDIR(st.st_mode):
+        return True
+    ASH_LOGGER.warning(
+        f"{_TOOL_DOWNLOAD_CACHE_ENV}={cache_dir} is not a plain directory; "
+        "not using the tool download cache"
+    )
+    return False
+
+
+def _discard_cache_entry(path: Path, why: str) -> None:
+    """Remove a cache entry without following it, whatever it is."""
+    ASH_LOGGER.warning(f"Discarding cached {path.name}: {why}. Downloading it again.")
+    try:
+        os.unlink(path)  # removes a symlink itself, never its target
+    except OSError:
+        pass
+
+
+def _restore_cached_asset(
+    asset_name: str, expected_sha256: str, staging_dir: Path
+) -> Optional[Path]:
+    """A verified copy of a cached release asset in ``staging_dir``, or None.
+
+    The copy is hashed after it lands in the private staging directory, so the bytes
+    that get extracted are the bytes that were verified, whatever happens to the
+    cache directory in between. A cached entry that is anything but a regular file
+    -- a symlink above all -- is removed unread.
+    """
+    cache_dir = _tool_download_cache()
+    if cache_dir is None or not _usable_cache_dir(cache_dir):
+        return None
+    cached = cache_dir.joinpath(asset_name)
+    try:
+        st = os.lstat(cached)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not stat cached {asset_name}: {e}")
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        _discard_cache_entry(cached, "not a regular file")
+        return None
+    staged = staging_dir.joinpath(asset_name)
+    try:
+        # O_NOFOLLOW closes the gap between the lstat above and this open: a link
+        # swapped in meanwhile makes the open fail instead of being followed.
+        fd = os.open(cached, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+        with os.fdopen(fd, "rb") as source, open(staged, "wb") as target:
+            shutil.copyfileobj(source, target)
+        verify_sha256(staged, expected_sha256, f"cached asset {cached}")
+    except (OSError, ToolDownloadIntegrityError) as e:
+        staged.unlink(missing_ok=True)
+        _discard_cache_entry(cached, str(e))
+        return None
+    ASH_LOGGER.info(f"Using cached {asset_name}, verified against its pinned digest")
+    return staged
+
+
+def _store_cached_asset(archive: Path, asset_name: str) -> None:
+    """Keep a verified download for the next run. Best effort: a failure costs a download.
+
+    Written to a temporary file in the cache directory and moved into place with
+    os.replace, which swaps whatever is at the name -- a planted symlink included --
+    for the new file instead of writing through it.
+    """
+    cache_dir = _tool_download_cache()
+    if cache_dir is None or not _usable_cache_dir(cache_dir):
+        return
+    tmp_path: Optional[str] = None
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=cache_dir, prefix=".ash-asset-")
+        with os.fdopen(fd, "wb") as target, open(archive, "rb") as source:
+            shutil.copyfileobj(source, target)
+        os.replace(tmp_path, cache_dir.joinpath(asset_name))
+        tmp_path = None
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not cache {asset_name} in {cache_dir}: {e}")
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def install_pinned_tool(
@@ -975,15 +1147,44 @@ def install_pinned_tool(
         )
         return target
 
+    if not force:
+        present = find_verified_pinned_executable(tool, target_platform, arch, bin_dir)
+        if present is not None:
+            ASH_LOGGER.info(
+                f"{present.tool} {present.version} is already present at "
+                f"{present.path} (SHA256 {present.sha256} matches the pin); "
+                "not installing a second copy"
+            )
+            return present.path
+
     with tempfile.TemporaryDirectory(prefix="ash-tool-download-") as staging:
         staging_dir = Path(staging)
-        archive = download_file(
-            asset.url,
-            staging_dir,
-            rename_to=asset.url.split("/")[-1],
-            expected_sha256=asset.sha256,
-        )
-        installed_digest = _extract_single_member(archive, asset.member_name, target)
+        asset_name = asset.url.split("/")[-1]
+        # A verified cached copy, or a fresh verified download that is then cached.
+        # Both are hashed against the pin in this private directory before use.
+        downloaded = _restore_cached_asset(asset_name, asset.sha256, staging_dir)
+        if downloaded is None:
+            downloaded = download_file(
+                asset.url,
+                staging_dir,
+                rename_to=asset_name,
+                expected_sha256=asset.sha256,
+            )
+            _store_cached_asset(downloaded, asset_name)
+        if not asset.archive:
+            # The asset is the executable (opengrep). It goes to its final name through
+            # the same staged, symlink-safe, pin-checked rename the unarchived URL path
+            # uses; _replace_atomically refuses anything but the pinned digest.
+            installed_digest = _replace_atomically(
+                downloaded, target, expected_sha256=asset.sha256
+            )
+        else:
+            installed_digest = _extract_single_member(
+                downloaded,
+                asset.member_name,
+                target,
+                expected_member_sha256=asset.executable_digest,
+            )
 
     # _extract_single_member already set the mode on the staged file before renaming
     # it into place; this covers the Windows branch, where it does not.
@@ -1015,6 +1216,114 @@ def install_pinned_tool(
     return target
 
 
+@dataclass(frozen=True)
+class VerifiedPresentTool:
+    """A pinned tool found on disk whose bytes hash to its pinned executable digest."""
+
+    tool: str
+    version: str
+    path: Path
+    sha256: str
+
+
+def find_verified_pinned_executable(
+    tool: str, target_platform: str, arch: str, destination: Path
+) -> Optional[VerifiedPresentTool]:
+    """Find a copy of the pinned ``tool`` that is already installed, by its bytes.
+
+    Why this exists: ASH's container image installs syft, grype and trivy into
+    /usr/local/bin from their pinned release assets, and then runs
+    ``ash dependencies install`` twice -- once as root, once as the non-root user
+    -- which installed the pinned grype and syft again into ASH_BIN_PATH each time.
+    Each copy is a separate image layer, 167 MB for the two tools per stage.
+
+    A candidate is accepted only if it is a regular file (not a symlink), is
+    executable, and its bytes hash to ``executable_digest``, the pinned SHA256 of
+    the executable inside the verified release archive. The name proves nothing: a
+    same-named binary from a package manager, another version, or a file someone
+    replaced does not hash to the pin, so it is reported as not present and the
+    verified install runs exactly as it did before this existed. The version is
+    not checked separately because it does not need to be: the digest is pinned
+    per release asset, so a match is that release's binary.
+
+    Where it looks, and why only there:
+
+    1. ``destination``/``install_as``, where the install would write. If anything
+       is at that path -- a file, a symlink, a dangling symlink -- it is the only
+       candidate. A file there that does not verify is what the install is about
+       to replace, and accepting some other copy instead would leave it in place
+       to shadow that copy whenever ``destination`` is on PATH, which in the
+       image it is. A symlink there is never accepted, even to the right bytes:
+       its target can change after this check, and the install replaces the link
+       itself with a real file.
+    2. Otherwise, what ``find_executable(tool)`` resolves -- the lookup a scanner
+       makes at run time -- but only if that file sits in one of
+       ``subprocess_utils.path_independent_dirs()``. Skipping the install is only
+       correct if every later scan finds the verified copy, and a copy found only
+       through this process's PATH may be invisible to a scan run from another
+       shell, a CI job or a cron entry. One in ASH_BIN_PATH or /usr/local/bin is
+       found by ``find_executable`` whatever PATH holds.
+
+    The file is re-hashed on every call. Nothing is cached and no receipt is
+    consulted, so a binary replaced after a previous run is caught on the next one,
+    the same property ``_already_installed`` keeps for receipts.
+
+    Returns:
+        The verified copy, or None when there is no pinned executable digest for
+        this asset, no acceptable candidate, or the candidate's bytes do not match.
+
+    Raises:
+        ToolNotProvisionableError: as ``get_tool_asset`` does.
+    """
+    from automated_security_helper.utils.tool_downloads import get_tool_asset
+
+    asset = get_tool_asset(tool, target_platform, arch)
+    expected = asset.executable_digest
+    if expected is None:
+        return None
+
+    at_destination = Path(destination).joinpath(asset.install_as)
+    if os.path.lexists(at_destination):
+        candidate = at_destination
+    else:
+        found = subprocess_utils.find_executable(asset.tool)
+        if not found:
+            return None
+        candidate = Path(found)
+        try:
+            allowed = {d.resolve() for d in subprocess_utils.path_independent_dirs()}
+            in_allowed = candidate.parent.resolve() in allowed
+        except OSError:
+            in_allowed = False
+        if not in_allowed:
+            ASH_LOGGER.debug(
+                f"{candidate} is outside the directories every scan searches; "
+                f"installing {tool} rather than relying on this PATH"
+            )
+            return None
+
+    if candidate.is_symlink() or not candidate.is_file():
+        return None
+    if platform.system() != "Windows" and not os.access(candidate, os.X_OK):
+        return None
+
+    try:
+        actual = sha256_file(candidate)
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not hash {candidate} ({e}); installing {tool}")
+        return None
+    if actual != expected.lower():
+        ASH_LOGGER.debug(
+            f"{candidate} is named {asset.install_as} but is not the pinned "
+            f"{tool} {asset.version} (SHA256 {actual}, pinned {expected.lower()}); "
+            "installing the pinned build"
+        )
+        return None
+    return VerifiedPresentTool(
+        tool=asset.tool, version=asset.version, path=candidate, sha256=actual
+    )
+
+
 def current_bin_path() -> Path:
     """Resolve ASH_BIN_PATH at call time rather than at import time.
 
@@ -1027,6 +1336,15 @@ def current_bin_path() -> Path:
     return Path(from_env) if from_env else ASH_BIN_PATH
 
 
+# The script every pinned-tool install command runs. A constant so that
+# pinned_install_already_satisfied can recognize these commands by exact text.
+_PINNED_TOOL_INSTALL_SCRIPT = (
+    "import sys; from pathlib import Path; "
+    "from automated_security_helper.utils.download_utils import install_pinned_tool; "
+    "install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]))"
+)
+
+
 def create_pinned_tool_install_command(
     tool: str,
     target_platform: str,
@@ -1035,28 +1353,60 @@ def create_pinned_tool_install_command(
 ) -> CustomCommand:
     """Build the CustomCommand that installs a pinned tool in a subprocess.
 
-    Mirrors ``create_url_download_command``, which is how opengrep is provisioned,
-    so the installer keeps one execution model for every tool: plugins declare
-    commands, the CLI runs them and counts them.
+    Mirrors ``create_url_download_command``, which installs an opengrep version the
+    configuration pins itself, so the installer keeps one execution model for every
+    tool: plugins declare commands, the CLI runs them and counts them.
     """
     if destination is None:
         destination = str(current_bin_path()).replace("\\", "/")
 
-    script = (
-        "import sys; from pathlib import Path; "
-        "from automated_security_helper.utils.download_utils import install_pinned_tool; "
-        "install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]))"
-    )
     return CustomCommand(
-        args=[sys.executable, "-c", script, tool, target_platform, arch, destination],
+        args=[
+            sys.executable,
+            "-c",
+            _PINNED_TOOL_INSTALL_SCRIPT,
+            tool,
+            target_platform,
+            arch,
+            destination,
+        ],
         shell=False,
     )
+
+
+def pinned_install_already_satisfied(
+    args: "list[str]",
+) -> "Optional[VerifiedPresentTool]":
+    """For an argv built by ``create_pinned_tool_install_command``: is it a no-op?
+
+    ``ash dependencies install`` runs each plugin's install commands as argv lists
+    and only sees an exit code, so a pinned install that found its tool already
+    present would read as INSTALLED. Calling this first lets the installer skip
+    the subprocess and report the tool as present and verified instead, naming the
+    path and digest it checked.
+
+    Recognized by the exact script text, which only ``create_pinned_tool_install_command``
+    produces, rather than by sniffing tool names out of arbitrary commands. Any other
+    argv, or one whose tool has no pinned executable digest, returns None and is run
+    as before.
+    """
+    if len(args) != 7 or args[1] != "-c" or args[2] != _PINNED_TOOL_INSTALL_SCRIPT:
+        return None
+    tool, target_platform, arch, destination = args[3:7]
+    try:
+        return find_verified_pinned_executable(
+            tool, target_platform, arch, Path(destination)
+        )
+    except ToolNotProvisionableError:
+        # Let the install command itself report it, with its own message.
+        return None
 
 
 def create_url_download_command(
     url: str,
     destination: str | None = None,
     rename_to: str | None = None,
+    expected_sha256: str | None = None,
 ) -> CustomCommand:
     """Create a CustomCommand to download and install a binary from a URL.
 
@@ -1064,10 +1414,29 @@ def create_url_download_command(
         url: The URL to download from
         destination: The directory to install the binary to (defaults to ASH_BIN_PATH)
         rename_to: Optional name to rename the binary to
+        expected_sha256: SHA256 the download must match. Required; the default of
+            ``None`` exists only so a caller that omits it gets this error instead
+            of a TypeError that does not say why.
 
     Returns:
         CustomCommand object
+
+    Raises:
+        ValueError: if ``expected_sha256`` is missing or not 64 hex characters. The
+            command would be refused when it ran anyway; refusing here names the
+            caller that built it.
     """
+    if not expected_sha256 or len(expected_sha256) != 64:
+        raise ValueError(
+            f"create_url_download_command({url!r}) needs expected_sha256, a 64-character "
+            "hex SHA256: ASH installs no binary it cannot verify."
+        )
+    try:
+        int(expected_sha256, 16)
+    except ValueError:
+        raise ValueError(
+            f"expected_sha256 for {url!r} is not hex: {expected_sha256!r}"
+        ) from None
     # Use the provided destination or get the current ASH_BIN_PATH.
     #
     # Resolved from the environment rather than from the imported constant. The
@@ -1087,7 +1456,7 @@ def create_url_download_command(
     script = (
         "import sys; from pathlib import Path; "
         "from automated_security_helper.utils.download_utils import install_binary_from_url; "
-        "install_binary_from_url(sys.argv[1], Path(sys.argv[2]), sys.argv[3] if sys.argv[3] != 'None' else None)"
+        "install_binary_from_url(sys.argv[1], Path(sys.argv[2]), sys.argv[4] if sys.argv[4] != 'None' else None, expected_sha256=sys.argv[3])"
     )
     return CustomCommand(
         args=[
@@ -1096,6 +1465,7 @@ def create_url_download_command(
             script,
             url,
             str(destination),
+            expected_sha256.lower(),
             str(rename_to) if rename_to is not None else "None",
         ],
         shell=False,

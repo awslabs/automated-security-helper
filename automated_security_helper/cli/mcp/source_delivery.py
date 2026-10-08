@@ -65,6 +65,7 @@ from automated_security_helper.cli.mcp.session_paths import (
 from automated_security_helper.utils.path_containment import (
     validate_contained_path,
 )
+from automated_security_helper.utils.process_env import snapshot_environ
 
 # ---------------------------------------------------------------------------
 # Hard limits — enforced at finalize time.
@@ -263,6 +264,36 @@ def _validate_clone_url(url: str) -> str:
     return url
 
 
+def _is_windows_drive_path(url: str) -> bool:
+    return len(url) >= 2 and url[1] == ":" and url[0].isalpha()
+
+
+def local_clone_path(url: str) -> Optional[Path]:
+    """Return the local path ``url`` makes git clone from, or None for a remote.
+
+    git reads a clone source three ways, and this follows the same rule. A
+    ``scheme://`` URL is a URL, and only ``file://`` names this machine. Without
+    ``://``, a colon before the first slash is the scp-like ``host:path`` ssh form,
+    except for a Windows drive letter. Anything else is a local path, absolute or
+    relative to the server's working directory.
+
+    A local path matters because it reads the server's own filesystem, so the MCP
+    tool checks it against the session's scan roots before cloning.
+    """
+    from urllib.parse import unquote, urlsplit
+
+    if "://" in url:
+        parts = urlsplit(url)
+        if parts.scheme.lower() != "file":
+            return None
+        return Path(unquote(parts.path))
+    colon = url.find(":")
+    slash = url.find("/")
+    if colon > 0 and (slash == -1 or colon < slash) and not _is_windows_drive_path(url):
+        return None
+    return Path(url)
+
+
 def set_source_git(
     url: str,
     ref: Optional[str] = None,
@@ -312,7 +343,7 @@ def set_source_git(
         shutil.rmtree(target, ignore_errors=True)
     _ensure_dir(target)
 
-    env = os.environ.copy()
+    env = snapshot_environ()
     key_path = _resolve_ssh_key(ssh_key_id)
     if key_path is not None:
         env["GIT_SSH_COMMAND"] = (

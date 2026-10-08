@@ -33,9 +33,9 @@ Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: npm-audit
 Installing dependencies for scanner plugin: opengrep
 Running command: python3 -c import sys; from pathlib import Path; from
-automated_security_helper.utils.download_utils import install_binary_from_url;
-install_binary_from_url(sys.argv[1], Path(sys.argv[2]), sys.argv[3] if sys.argv[3] != 'None' else
-None) https://github.com/opengrep/opengrep/releases/download/v1.15.1/opengrep_osx_x86 bin opengrep
+automated_security_helper.utils.download_utils import install_pinned_tool;
+install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])) opengrep darwin amd64
+bin
 Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: semgrep
 Running command: uv tool install semgrep>=1.125.0,<2.0.0

@@ -4,7 +4,6 @@
 """Module containing the Ferret Scan sensitive data detection scanner implementation."""
 
 import json
-import os
 import shlex
 import logging
 import re
@@ -32,6 +31,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.process_env import snapshot_environ
 
 # Path to the default ferret-scan config bundled with this plugin
 DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
@@ -55,12 +55,15 @@ MAX_SUPPORTED_VERSION = "2.6.0"
 # Default version constraint for installation (if using uv tool)
 DEFAULT_VERSION_CONSTRAINT = f">={MIN_SUPPORTED_VERSION},<{MAX_SUPPORTED_VERSION}"
 
-# Recommended version for best compatibility. 2.4.5 and 2.5.2 were both run
-# through ASH against the same fixtures; 2.5.2 reports a subset of 2.4.5's
+# Recommended version for best compatibility. 2.4.5, 2.5.2 and 2.5.3 were run
+# through ASH against the same fixtures; 2.5.x reports a subset of 2.4.5's
 # findings on them (it drops PHONE false positives on card numbers and IBANs)
 # and applies ASH's ignore paths as written (see _resolve_sarif_uri_base_ids
-# and DEVELOPMENT.md section 9 for the two shape changes 2.5.x brought).
-RECOMMENDED_VERSION = "2.5.2"
+# and DEVELOPMENT.md section 9 for the two shape changes 2.5.x brought). 2.5.3
+# also fixes two secrets-detector defects: the API_KEY_OR_SECRET type-annotation
+# false positive (ferret-scan #742 via PR #745) and the list/collection matcher
+# false negatives (#749).
+RECOMMENDED_VERSION = "2.5.3"
 
 # ferret-scan switches into pre-commit mode from the environment alone
 # (PRE_COMMIT, PRE_COMMIT_HOOK, GIT_HOOK_TYPE, ...; before 2.5.2 also PRE_COMMIT_HOME).
@@ -634,6 +637,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=snapshot_environ(),
             )
 
             if result.returncode == 0:
@@ -1082,7 +1086,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 results_dir=target_results_dir,
                 stdout_preference="write",
                 stderr_preference="write",
-                env={**os.environ, **FERRET_SUBPROCESS_ENV_OVERRIDES},
+                env={**snapshot_environ(), **FERRET_SUBPROCESS_ENV_OVERRIDES},
                 timeout=self._effective_scan_timeout(),
             )
 

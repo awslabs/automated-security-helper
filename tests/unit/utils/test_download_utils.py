@@ -5,6 +5,7 @@ import pytest
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 
 from automated_security_helper.utils.download_utils import (
     download_file,
@@ -144,17 +145,18 @@ def test_install_binary_from_url(
     with patch("platform.system", return_value="Darwin"):
         # Call function
         result = install_binary_from_url(
-            "https://example.com/file", Path("/test/destination"), "renamed_file"
+            "https://example.com/file",
+            Path("/test/destination"),
+            "renamed_file",
+            expected_sha256="e" * 64,
         )
 
-        # Verify mocks were called correctly. expected_sha256 is threaded through
-        # explicitly; None here because this caller passes no pinned digest, and the
-        # download logs that it went unverified rather than passing silently.
+        # expected_sha256 is threaded through to the download that verifies it.
         mock_download_verified.assert_called_once_with(
             "https://example.com/file",
             Path("/test/destination"),
             "renamed_file",
-            expected_sha256=None,
+            expected_sha256="e" * 64,
         )
         mock_make_executable.assert_called_once_with(Path("/test/destination/file"))
         mock_unquarantine.assert_called_once_with(Path("/test/destination/file"))
@@ -172,7 +174,10 @@ def test_create_url_download_command(mock_mkdir, mock_exists):
 
     # Call function
     result = create_url_download_command(
-        "https://example.com/file", "/custom/destination", "renamed_file"
+        "https://example.com/file",
+        "/custom/destination",
+        "renamed_file",
+        expected_sha256="A" * 64,
     )
 
     # Verify mkdir was called
@@ -187,7 +192,27 @@ def test_create_url_download_command(mock_mkdir, mock_exists):
     assert "https://example.com/file" in result.args
     assert "/custom/destination" in result.args
     assert "renamed_file" in result.args
+    # Lowercased on the way in, and handed to the verified install as an argument.
+    assert "a" * 64 in result.args
+    assert "expected_sha256=sys.argv[3]" in result.args[2]
     assert result.shell is False
+
+
+@pytest.mark.parametrize("digest", [None, "", "a" * 63, "g" * 64])
+def test_create_url_download_command_refuses_a_missing_or_malformed_digest(digest):
+    """No command that installs an unverified binary can be built at all."""
+    with pytest.raises(ValueError, match="expected_sha256"):
+        create_url_download_command(
+            "https://example.com/file", "/custom/destination", expected_sha256=digest
+        )
+
+
+@patch("automated_security_helper.utils.download_utils._download_verified")
+def test_install_binary_from_url_refuses_without_a_digest(mock_download_verified):
+    """The unverified install this function used to perform is gone."""
+    with pytest.raises(ToolDownloadIntegrityError, match="without a pinned SHA256"):
+        install_binary_from_url("https://example.com/file", Path("/test/destination"))
+    mock_download_verified.assert_not_called()
 
 
 def test_get_opengrep_url():

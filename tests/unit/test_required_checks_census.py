@@ -34,6 +34,10 @@ What it does not cover
 Nothing here runs the gate on a runner, so it cannot prove ``${{ github.job }}``
 expands to ``required-checks`` -- that is GitHub's contract, asserted by reading the
 step's text rather than by executing it.
+
+Since the gate stopped taking a runner when every dependency succeeded, the census in
+``TestTheGateCoversItsWorkflow`` is also the one that runs on a green pull request: this
+file runs in every unit-test leg, and unit-test is in the gate's ``needs``.
 """
 
 from __future__ import annotations
@@ -373,6 +377,78 @@ class TestTheGateActuallyRunsTheScript:
             f"{GATE_JOB} does not check out the repository, but the census script reads "
             "the workflow off disk."
         )
+
+    def test_the_gate_runs_on_every_non_success_result(self):
+        """The gate is skipped only when every dependency succeeded.
+
+        GitHub reports a skipped job as Success, so the gate's `if:` decides the verdict
+        on its own whenever it skips the job. It must keep `always()` -- without it the
+        implicit `success()` skips the gate on exactly the failures it exists to report
+        -- and it must run on a failed or cancelled dependency and on a cancelled run.
+        A skipped dependency is reachable only through a cancelled run (see the next
+        test), so `cancelled()` is what covers it.
+
+        It does NOT name `skipped`: with a skipped job upstream of a dependency,
+        `contains(needs.*.result, 'skipped')` is true even when every direct dependency
+        succeeded (probe runs 37631261974 and 37631443473), which put the gate back on a
+        runner on every green pull request.
+        """
+        data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+        condition = re.sub(r"\s+", "", str(data["jobs"][GATE_JOB].get("if", "")))
+        assert condition.startswith("${{always()&&("), (
+            f"{GATE_JOB}'s `if:` no longer starts from always(): {condition!r}. "
+            "Without it a failed dependency skips the gate, and a skipped required "
+            "check is a pass."
+        )
+        for term in (
+            "cancelled()",
+            "contains(needs.*.result,'failure')",
+            "contains(needs.*.result,'cancelled')",
+        ):
+            assert term in condition, (
+                f"{GATE_JOB} does not carry {term!r}, so that outcome reaches the "
+                f"ruleset as a skipped gate, which GitHub counts as a pass. "
+                f"Condition: {condition!r}"
+            )
+        assert "'skipped'" not in condition, (
+            "the `skipped` term is true whenever any job upstream of a dependency was "
+            "skipped, so the gate would take a runner on every green run"
+        )
+        # Every term must widen when the gate runs, never narrow it.
+        assert "success()" not in condition and "!" not in condition, condition
+        assert condition.count("&&") == 1, condition
+
+    def test_no_gated_job_can_be_skipped_except_by_a_cancelled_run(self):
+        """What lets `cancelled()` stand in for a `skipped` term.
+
+        A job with `needs:` and no status function is skipped whenever a dependency
+        fails or is skipped -- and if that dependency is ungated, the gate would see
+        neither. So every gated job with `needs` must run under `!cancelled()` or
+        `always()`, and no gated job may carry any other job-level `if:`.
+        """
+        data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+        bad = []
+        for name in _needs_of(UNIFIED_CI, GATE_JOB):
+            job = data["jobs"][name]
+            condition = re.sub(r"\s+", "", str(job.get("if", "")))
+            if job.get("needs") or condition:
+                if condition not in ("${{!cancelled()}}", "${{always()}}"):
+                    bad.append(f"  {name}: needs={job.get('needs')} if={condition!r}")
+        assert not bad, (
+            "these gated jobs can be skipped without the run being cancelled, which "
+            "the gate's condition cannot see:\n" + "\n".join(bad)
+        )
+
+    def test_unit_test_carries_the_census_to_the_gate(self):
+        """The drift half of the census reaches the gate through unit-test.
+
+        When every dependency succeeds the gate does not run, so the script's census
+        is not taken on a runner. TestTheGateCoversItsWorkflow takes it instead, and it
+        only gates a merge because this file is collected by the unit-test legs and
+        unit-test is in the gate's `needs`.
+        """
+        assert "unit-test" in _needs_of(UNIFIED_CI, GATE_JOB)
+        assert Path(__file__).resolve().is_relative_to(REPO_ROOT / "tests" / "unit")
 
     def test_the_old_count_literal_is_gone(self):
         """A regression guard on the fix itself.

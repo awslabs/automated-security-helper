@@ -77,6 +77,15 @@ directory when the root config is inside it, otherwise the root config's own
 directory (the parent of ``.ash/`` for a file in ``.ash/``); see
 ``default_confinement_root``.
 
+A caller can narrow that further with ``permit_base``, a predicate every base
+must also pass after its symlinks are resolved. The MCP server passes one built
+from the calling session's allowed config roots
+(``cli/mcp/sandbox.config_base_gate``), so a grant naming a ``.ash/`` directory
+confines the chain to that directory rather than to its parent. The predicate is
+consulted before the confinement root, and its refusal,
+``ASHConfigInputNotPermittedError``, names the ``extends`` entry as written and
+not the path it resolved to. Without a predicate the rules above are unchanged.
+
 Bounds
 ------
 A file that appears twice on its own chain is a cycle and fails with the chain
@@ -111,7 +120,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # jsonpatch ships no type information (no py.typed, no stubs package).
 import jsonpatch  # type: ignore[import-untyped]
@@ -129,7 +138,10 @@ from automated_security_helper.core.constants import (
     ASH_PYPROJECT_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
-from automated_security_helper.core.exceptions import ASHConfigSourceError
+from automated_security_helper.core.exceptions import (
+    ASHConfigInputNotPermittedError,
+    ASHConfigSourceError,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 # tomllib is stdlib only from Python 3.11; requires-python starts at 3.10, so
@@ -155,6 +167,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10
 
 EXTENDS_KEY = "extends"
 PATCH_KEY = "patch"
+
+#: Decides whether one resolved base path may be read. True permits it. See
+#: "Base paths" in the module docstring.
+PermitBase = Callable[[Path], bool]
 
 SOURCE_KIND_EXPLICIT = "explicit"
 SOURCE_KIND_DEDICATED = "dedicated"
@@ -471,6 +487,7 @@ class ResolvedConfigDocument:
 @dataclass
 class _ChainState:
     root: Path
+    permit_base: Optional[PermitBase] = None
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
 
@@ -493,7 +510,20 @@ def _extends_refs(value: Any, path: Path) -> List[str]:
     return [r.strip() for r in refs]
 
 
-def _resolve_base_path(ref: str, extending: Path, root: Path) -> Path:
+def _base_not_permitted(ref: str, extending: Path) -> ASHConfigInputNotPermittedError:
+    # Names the ref as written, never what it resolves to; see "Base paths".
+    return ASHConfigInputNotPermittedError(
+        f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names a "
+        "file outside the directories this caller may read config from."
+    )
+
+
+def _resolve_base_path(
+    ref: str,
+    extending: Path,
+    root: Path,
+    permit_base: Optional[PermitBase] = None,
+) -> Path:
     if _URL_PATTERN.match(ref):
         raise ASHConfigSourceError(
             f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} looks like "
@@ -516,12 +546,22 @@ def _resolve_base_path(ref: str, extending: Path, root: Path) -> Path:
     # connection to the host it names. A POSIX absolute ref is resolved first,
     # since it may name a location inside the root through a symlinked prefix.
     if not lexical.is_relative_to(root) and (relative or os.name == "nt"):
+        if permit_base is not None:
+            # Under a caller's gate every refused base is reported one way, so
+            # the refusal does not depend on which check caught it -- or on the
+            # platform, since on Windows this check runs before resolve() for
+            # an absolute ref too.
+            raise _base_not_permitted(ref, extending)
         raise ASHConfigSourceError(
             f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names "
             f"{lexical.as_posix()}, which is outside the directory config bases "
             f"must stay inside ({root.as_posix()})."
         )
     resolved = candidate.resolve()
+    # Ahead of the root check, whose message names the resolved target: this
+    # refusal must read the same whether or not that target exists.
+    if permit_base is not None and not permit_base(resolved):
+        raise _base_not_permitted(ref, extending)
     if not resolved.is_relative_to(root):
         # `extending` is already resolved, so a lexically normalized candidate
         # that is inside the root got out only by following a symlink.
@@ -684,7 +724,9 @@ def _resolve(
         ops = own.pop(PATCH_KEY, None)
         merged: Any = {}
         for base_ref in refs:
-            base_path = _resolve_base_path(base_ref, real, state.root)
+            base_path = _resolve_base_path(
+                base_ref, real, state.root, state.permit_base
+            )
             merged = deep_merge(
                 merged, _resolve(base_path, stack + (real,), state, base_ref)
             )
@@ -707,19 +749,32 @@ def _resolve(
 
 
 def resolve_config_document(
-    config_path: Path, confine_to: Optional[Path] = None
+    config_path: Path,
+    confine_to: Optional[Path] = None,
+    permit_base: Optional[PermitBase] = None,
 ) -> ResolvedConfigDocument:
-    """Read `config_path` and every base it extends into one merged document."""
+    """Read `config_path` and every base it extends into one merged document.
+
+    `permit_base` is checked for every base, in addition to `confine_to`; see
+    "Base paths" in the module docstring. It is not checked for `config_path`
+    itself, which the caller chose and is responsible for having checked.
+    """
     config_path = Path(config_path)
     root = (
         Path(confine_to).resolve()
         if confine_to is not None
         else default_confinement_root(config_path)
     )
-    state = _ChainState(root=root)
+    state = _ChainState(root=root, permit_base=permit_base)
     data = _resolve(config_path, (), state)
     return ResolvedConfigDocument(data=data, chain=state.order, root=root)
 
 
-def load_config_document(config_path: Path, confine_to: Optional[Path] = None) -> Any:
-    return resolve_config_document(config_path, confine_to=confine_to).data
+def load_config_document(
+    config_path: Path,
+    confine_to: Optional[Path] = None,
+    permit_base: Optional[PermitBase] = None,
+) -> Any:
+    return resolve_config_document(
+        config_path, confine_to=confine_to, permit_base=permit_base
+    ).data

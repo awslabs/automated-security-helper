@@ -291,7 +291,7 @@ class TestValidateConfig:
     def test_inline_content_is_validated_through_a_temporary_file(self):
         seen = {}
 
-        def _capture(path, source_dir=None):
+        def _capture(path, source_dir=None, permit_base=None):
             seen["suffix"] = path.suffix
             seen["text"] = path.read_text()
             return (True, [])

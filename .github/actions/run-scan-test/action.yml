@@ -145,6 +145,15 @@ runs:
       shell: bash
       run: mkdir -p .ash/ash_output
 
+    # The python-local legs run `ash dependencies install`, which downloads the pinned
+    # scanner release assets. Restored here, re-verified by ASH on every use, saved
+    # after the scan from a push to main only. See the action for what it holds.
+    - name: Restore the tool download cache
+      if: inputs.method == 'python-local'
+      uses: ./.github/actions/tool-download-cache
+      with:
+        mode: restore
+
     # Ahead of any build, so the twenty-odd container cells that start together do not all
     # fetch the base image from ECR Public at once and cross its anonymous-pull data limit.
     # Skipped for python-local, which builds no image. See the action for what it will and
@@ -387,6 +396,14 @@ runs:
         ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
         ASH_TEST_OFFLINE: ${{ inputs.offline }}
+        # Layer-cache export: max from a push to main, nothing from anything else.
+        # Every run reads (cache-from); only main writes, so a pull request restores
+        # the layers main built and never adds a copy of its own. The maintainer
+        # accepted that these layers are restorable by any workflow run in this
+        # repository, approved fork pull requests included -- see the
+        # ASH_GHA_BUILD_CACHE_EXPORT entry in .github/scripts/assert-publish-surfaces.py.
+        # Only docker legs honor it; run_ash_container ignores it for other runtimes.
+        ASH_GHA_BUILD_CACHE_EXPORT: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'max' || 'none' }}
       run: |
         echo "Testing ASH using Python (Container) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         ashx --version
@@ -394,11 +411,36 @@ runs:
         if [ "${ASH_TEST_OFFLINE}" = "true" ]; then
           OFFLINE_FLAG="--offline"
         fi
+        # Teed so the cache report below can count the build steps the layer cache
+        # served. pipefail (bash's default here) keeps ash's exit status.
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml
+          ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         else
-          ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG
+          ashx --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         fi
+
+    - name: "Cache report: image-layers"
+      if: >-
+        !cancelled()
+        && inputs.method == 'python-container'
+        && inputs.oci-runner == 'docker'
+      shell: bash
+      run: |
+        # Same `cache <name>: ...` line as every other cache. buildkit prints
+        # `#N CACHED` for each step the cache served and `#N [stage x/y]` for every
+        # step, and names a failed cache import on its own line.
+        log="${RUNNER_TEMP}/ash-container-build.log"
+        if [ ! -s "$log" ]; then
+          echo "cache image-layers: no build log" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        total=$(grep -cE '^#[0-9]+ \[' "$log" || true)
+        cached=$(grep -cE '^#[0-9]+ CACHED' "$log" || true)
+        import=ok
+        if grep -qE 'importing cache manifest' "$log" && grep -qE '^#[0-9]+ ERROR' "$log"; then
+          import=error
+        fi
+        echo "cache image-layers: ${cached}/${total} build steps cached, import ${import}" | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Validate No Plugin Errors (Python Container)
       if: inputs.method == 'python-container'
@@ -417,6 +459,20 @@ runs:
         $REPORT_CMD
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
+
+    # The image this leg just built must carry the license and notice files of every
+    # third-party executable it bundles, under /usr/share/doc/ash/third-party, and
+    # every non-Debian executable on its PATH must belong to an entry in
+    # THIRD_PARTY_LICENSES (utils/tool_downloads.py). The build verifies the first
+    # half itself; this re-checks the finished image and adds the second, which the
+    # build cannot see. python-container only: it is the method whose image tag is
+    # known to be automated-security-helper:ci.
+    - name: Assert the image ships its bundled tools' license files
+      if: inputs.method == 'python-container'
+      shell: bash
+      env:
+        RUNNER: ${{ inputs.oci-runner }}
+      run: python3 .github/scripts/assert-image-third-party-licenses.py --runner "${RUNNER:-docker}"
 
     # Python Local scan (Windows)
     - name: Validate ASH using Python Local (Windows)
@@ -599,6 +655,12 @@ runs:
     # with it the method. Nothing was dropped from the platform matrix: every
     # `bash` cell had a `python-container` cell on the same os and oci-runner, so
     # the two differed only in which entrypoint typed the same container build.
+
+    - name: Save the tool download cache
+      if: success() && inputs.method == 'python-local'
+      uses: ./.github/actions/tool-download-cache
+      with:
+        mode: save
 
     # Companion to "Expose the Actions cache credentials to ASH's build". The build
     # is done by now, so clear the credentials back out rather than leaving them in

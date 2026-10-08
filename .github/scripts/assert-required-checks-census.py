@@ -51,7 +51,7 @@ could be mistaken for a job key.
 
 JOBS THAT MAY DELIBERATELY GO UNGATED
 -------------------------------------
-``_UNGATED`` below is the named, reasoned exemption list, and it is empty today.
+``_UNGATED`` below is the named, reasoned exemption list, and today it holds one entry, the image layer-cache warm-up.
 The mechanism exists rather than being omitted because there is a legitimate
 case for it -- an advisory job carrying ``continue-on-error``, whose failure is
 information rather than a verdict -- and the alternative when that case arrives
@@ -82,21 +82,28 @@ import sys
 from pathlib import Path
 
 # A job in the gate's workflow that is deliberately NOT part of the merge gate,
-# mapped to the reason it is not. Empty today: every job in ash-unified-ci.yml
-# other than the gate itself is in the gate's `needs`.
+# mapped to the reason it is not.
 #
 # State what makes the job's verdict advisory rather than required. "It is slow"
 # and "it is flaky" are not reasons -- a flaky required check is a flake to fix,
 # and a slow one is a budget to argue about.
 #
-# This is also where a job carrying a job-level `if:` belongs. Every job in the
-# gated workflow is unconditional today, and the result check below refuses
+# This is also where a job carrying a job-level `if:` that can be false belongs.
+# Every gated job runs on every run -- scan-validation's `if: ${{ !cancelled() }}`
+# is false only when the run itself is cancelled -- and the result check below refuses
 # 'skipped' precisely so a job that never ran cannot read as a pass. A
 # conditional job in `needs` would therefore take the gate red whenever its
 # condition was false, so it has to be named here instead -- and naming it is
 # the point, because "this job sometimes does not run" is a claim worth writing
 # down rather than inferring from a count.
-_UNGATED: dict[str, str] = {}
+_UNGATED: dict[str, str] = {
+    "warm-image-layers": (
+        "a layer-cache warm-up that runs only on pushes to main. Its result is how "
+        "fast the scan legs build, never whether they pass: scan-validation runs "
+        "under `!cancelled()` whether it succeeded, failed, was skipped or was "
+        "cancelled by its concurrency group, and scan-validation itself is gated."
+    ),
+}
 
 # A mapping key, optionally preceded by one or more sequence dashes. The dashes have to
 # be part of the pattern: a step is written `- run: |`, so without them the `run` key is
@@ -269,8 +276,9 @@ def check(workflow_text: str, gate_job: str, needs: dict[str, dict]) -> list[str
                 "the entry."
             )
 
-    # Every job in this workflow is unconditional -- none carries a job-level
-    # `if` -- so a result of anything other than success means something went
+    # Every gated job runs on every run -- the one job-level `if` among them,
+    # scan-validation's `!cancelled()`, is false only for a cancelled run -- so a
+    # result of anything other than success means something went
     # wrong, 'skipped' included. Tolerating 'skipped' would let a job that never
     # ran read as a pass.
     for name, data in sorted(needs.items()):
