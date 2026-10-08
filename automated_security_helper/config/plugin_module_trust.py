@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence
 
 from automated_security_helper.config.config_sources import describe_config_path
+from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.config.sandbox_grants import is_within
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -106,7 +107,7 @@ def refusal_reason(name: str, scanned_root: Path) -> Optional[str]:
         for location in _spec_locations(spec):
             if own is not None and is_within(location, own):
                 continue
-            if is_within(location, scanned_root):
+            if in_scanned_tree(location, scanned_root):
                 return "it resolves inside the scanned tree"
     return None
 

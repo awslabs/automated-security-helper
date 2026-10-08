@@ -35,6 +35,23 @@ def reset_path_refusal_warnings() -> None:
         _WARNED.clear()
 
 
+def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool:
+    """Whether ``path`` is in the tree the repository being scanned controls.
+
+    The one membership test this module and ``plugin_module_trust`` use, so the
+    rule for which tree that is (today ``sandbox_grants.scanned_tree`` of the scan
+    root) changes in one place.
+    """
+    # Imported here: sandbox_grants imports ash_config, which imports the scanners
+    # that import this module.
+    from automated_security_helper.config.sandbox_grants import (
+        is_within,
+        scanned_tree,
+    )
+
+    return is_within(Path(path), scanned_tree(Path(scan_root)))
+
+
 def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:
     """``value`` as the tool will read it: ``~`` expanded, a relative path taken from
     ``source_dir``, and symlinks and ``..`` resolved.
@@ -67,18 +84,11 @@ def honored_path(
             (``AshConfig._scanned_root``, the workspace root in workspace mode),
             the tree is taken from that instead of from ``source_dir``.
     """
-    # Imported here: sandbox_grants imports ash_config, which imports the scanners
-    # that import this module.
-    from automated_security_helper.config.sandbox_grants import (
-        is_within,
-        scanned_tree,
-    )
-
     if value is None or str(value).strip() == "":
         return None
     path = resolved_path(value, source_dir)
     root = getattr(config, "_scanned_root", None) or source_dir
-    if not is_within(path, scanned_tree(Path(root))):
+    if not in_scanned_tree(path, root):
         return path
     with _WARNED_LOCK:
         first = (key, path.as_posix()) not in _WARNED
