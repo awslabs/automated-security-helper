@@ -101,7 +101,7 @@
   errors. The default `scanners.opengrep.options.version` is now `v1.30.2`; a
   configuration that names v1.15.1 explicitly has to bring its own `sha256`.
 
-- **The container image pins bandit 1.9.4, checkov 3.3.26 and semgrep 1.179.0.**
+- **The container image pins bandit 1.9.4, checkov 3.3.26 and semgrep 1.180.0.**
   The image used to install the newest release each scanner's default version
   constraint allowed, which was whatever PyPI had on the day of the build. It now
   installs exactly the versions in their `THIRD_PARTY_LICENSES` entries in
@@ -736,7 +736,7 @@
   checked against the wheel's RECORD; a wheel that ships a file is always read before
   anything is fetched. So that these files describe the release in the image, the
   image now installs each of the three at exactly its entry's version (bandit 1.9.4,
-  checkov 3.3.26, semgrep 1.179.0) instead of the newest release its scanner's default
+  checkov 3.3.26, semgrep 1.180.0) instead of the newest release its scanner's default
   range allowed on the day of the build. Outside the image the defaults are unchanged.
 
 - **The ferret-scan plugin supports ferret-scan 2.5.x** (#684). The window moves from
