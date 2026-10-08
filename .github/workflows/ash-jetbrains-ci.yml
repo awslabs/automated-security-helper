@@ -80,6 +80,8 @@ on:
       - "scripts/e2e/**"
       - "packaging/cli-name.sh"
       - ".github/scripts/check-snapshot-trailers.py"
+      # assert-plugin-zip-contents.py imports its payload tables from this file.
+      - ".github/scripts/assert-artifact-contents.py"
   pull_request:
     branches:
       - "**"
