@@ -524,15 +524,27 @@ class SandboxExecBackend(SandboxBackend):
             f"(subpath {_sbpl_string(_real(p))})"
             for p in list(policy.writable) + list(policy.cache) + [private_tmp]
         )
+        # TEMPORARY (diagnostic): log every Mach lookup and exec the profile allows,
+        # so CI can record what the builtin scanners actually use.
+        report = os.environ.get("ASH_SANDBOX_EXEC_REPORT", "")
+        if report == "prefix":
+            exec_rule = "(allow (with report) process-exec)"
+            mach_rule = "(allow (with report) mach-lookup)"
+        elif report:
+            exec_rule = "(allow process-exec (with report))"
+            mach_rule = "(allow mach-lookup (with report))"
+        else:
+            exec_rule = "(allow process-exec)"
+            mach_rule = "(allow mach-lookup)"
         lines = [
             "(version 1)",
             "(deny default)",
             "(allow process-fork)",
-            "(allow process-exec)",
+            exec_rule,
             "(allow signal (target same-sandbox))",
             "(allow process-info* (target same-sandbox))",
             "(allow sysctl-read)",
-            "(allow mach-lookup)",
+            mach_rule,
             "(allow ipc-posix-shm)",
             "(allow ipc-posix-sem)",
             "(allow file-ioctl)",
