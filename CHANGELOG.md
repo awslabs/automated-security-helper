@@ -48,6 +48,14 @@
 
 ### Behavior changes
 
+- **`ash dependencies install --tool` selects the archive converter as `archive`.**
+  Every plugin is now listed and selected by its config key. The archive converter
+  was the one bundled plugin listed under its class name, so its canonical `--tool`
+  name is now `archive`; the other converters, scanners and reporters keep the names
+  they had. The old name `ArchiveConverter` is deprecated: it still selects the
+  archive converter, with the same result and exit code, and prints a warning to
+  stderr naming `archive`.
+
 - **grype, opengrep, syft and trivy are bumped to v0.120.1, v1.30.2, v1.54.1 and
   v0.75.0** (from v0.111.0, v1.15.1, v1.42.4 and v0.69.3), with every archive and
   executable digest in `utils/tool_downloads.py` re-taken from the new releases. No
@@ -577,6 +585,12 @@
   states coverage it does not have.
 
 ### Fixes
+
+- `ash dependencies install --tool ArchiveConverter` works again. Building each plugin
+  from its own config section renamed the archive converter's selector to `archive`,
+  so the old spelling exited 2 as an unknown tool. It is now accepted as a deprecated
+  alias for `archive` and prints a deprecation warning to stderr. An unknown name
+  still exits 2.
 
 - npm-audit no longer reads a failed audit as a clean one. npm exits 1 both for
   "vulnerabilities found" and for "audit endpoint returned an error", and the scanner

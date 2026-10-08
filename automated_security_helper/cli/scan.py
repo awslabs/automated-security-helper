@@ -35,7 +35,7 @@ from automated_security_helper.interactions.run_ash_scan import (
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.content_databases import (
-    content_db_staleness_override,
+    content_db_staleness_flag_overrides,
     get as get_content_database,
     go_duration,
 )
@@ -645,8 +645,8 @@ def run_ash_scan_cli_command(
     # which is handed config_overrides verbatim -- and overrides are applied after the
     # config file, which is what makes the flag win over `content_db_staleness` there.
     if allow_stale_content_db is not None:
-        config_overrides.append(
-            content_db_staleness_override(allow_stale=allow_stale_content_db)
+        config_overrides.extend(
+            content_db_staleness_flag_overrides(allow_stale=allow_stale_content_db)
         )
 
     workspace_plan: WorkspacePlan | None = None
