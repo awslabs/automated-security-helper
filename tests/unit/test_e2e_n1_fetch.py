@@ -364,6 +364,10 @@ def test_a_leg_derives_n_minus_1_and_runs_its_script(key):
 LEG_OVERRIDES = {("ash-package.yml", "chocolatey"): ("PrevRef",)}
 
 
+# PowerShell's common switch parameters, which take no value.
+_PS_SWITCHES = {"verbose", "debug", "whatif", "confirm"}
+
+
 def _ps1_argument_problems(run: str, overrides) -> list:
     """For a leg whose script takes overrides as parameters: every argument named.
 
@@ -385,15 +389,18 @@ def _ps1_argument_problems(run: str, overrides) -> list:
             continue
         expect_value = False
         for word in words:
-            if expect_value:
+            if expect_value and not word.startswith("-"):
                 expect_value = False
                 continue
+            expect_value = False
             if word.startswith("-"):
                 param = word[1:].split(":", 1)[0]
                 for name in overrides:
                     if len(param) > 1 and name.lower().startswith(param.lower()):
                         problems.append(f"passes {word}, which binds -{name}")
-                expect_value = ":" not in word
+                # A switch (-Verbose, -WhatIf, ...) takes no value, so the word after
+                # it would bind by position.
+                expect_value = ":" not in word and param.lower() not in _PS_SWITCHES
                 continue
             problems.append(f"passes {word} by position")
     return problems
@@ -556,9 +563,18 @@ ALLOWED_REVISIONS = {"HEAD", "$PREV_SHA", "$prev_sha"}
 # other word up to `--` a revision (archive: only the first). Anything else (checkout,
 # worktree, fetch, ...) can take a tree or a ref in a position this cannot read, and is
 # refused rather than parsed.
-GIT_SUBCOMMANDS = {"archive", "diff", "rev-parse", "log", "show", "status"}
+GIT_SUBCOMMANDS = {"archive", "diff", "rev-parse", "log", "show", "status", "describe"}
 # Options of those subcommands that take the next word as their value.
-_GIT_VALUE_OPTIONS = {"-o", "--output", "--format", "--prefix", "--remote", "--exec"}
+_GIT_VALUE_OPTIONS = {
+    "-o",
+    "--output",
+    "--format",
+    "--prefix",
+    "--remote",
+    "--exec",
+    "--match",
+    "--exclude",
+}
 
 
 def writes_to(name: str, text: str) -> list:
@@ -609,7 +625,10 @@ def dynamic_write_problems(text: str) -> list:
     builtins = r"(read|mapfile|readarray|printf|export|declare|local|typeset|readonly)"
     pattern = re.compile(_COMMAND_START + builtins + r"\b([^|;&)\n]*)")
     for number, line in _code_lines(text):
+        mask = _code_mask(line)
         for match in pattern.finditer(line):
+            if not mask[match.start(1)]:
+                continue
             builtin, rest = match.group(1), match.group(2)
             try:
                 words = shlex.split(rest)
@@ -651,13 +670,17 @@ def dynamic_write_problems(text: str) -> list:
 
 def _code_lines(text: str) -> list:
     """(first line number, code): comment lines dropped, backslash-continued lines joined."""
-    lines, pending, first, heredoc = [], "", 0, None
+    lines, pending, first, heredoc, expands = [], "", 0, None, False
     for number, line in enumerate(text.splitlines(), 1):
-        # The body of a <<'X' heredoc is data (here, Python), never shell; an unquoted
-        # <<X body still expands $(...), so it is read as code.
+        # The body of a <<'X' heredoc is data (here, Python), never shell. An unquoted
+        # <<X body is text too, but expands $(...) and `...`, so it is read as one
+        # double-quoted string: only those substitutions are code.
         if heredoc is not None:
             if line.strip() == heredoc:
                 heredoc = None
+            elif expands:
+                body = line.replace("\\", "\\\\").replace('"', '\\"')
+                lines.append((number, f'"{body}"'))
             continue
         if not pending and line.lstrip().startswith("#"):
             continue
@@ -667,9 +690,9 @@ def _code_lines(text: str) -> list:
             pending += line[:-1] + " "
             continue
         lines.append((first, pending + line))
-        quoted = re.search(r"""<<-?\s*(['"])(\w+)\1""", pending + line)
-        if quoted:
-            heredoc = quoted.group(2)
+        opened = re.search(r"""<<-?\s*(['"]?)([A-Za-z_]\w*)\1""", pending + line)
+        if opened and not re.search(r"<<<", pending + line):
+            heredoc, expands = opened.group(2), not opened.group(1)
         pending = ""
     if pending:
         lines.append((first, pending))
@@ -696,16 +719,19 @@ _COMMAND_WORD = re.compile(_COMMAND_START + r"([^\s;|&)`]+)")
 _REDIRECT = re.compile(r"^(?:\d*|&)[<>]{1,2}&?")
 
 
-def _live_git_words(line: str) -> list:
-    """Offsets of every `git` word bash would run as code: outside quotes, or inside a
-    $(...) or `...` within double quotes. A message ("... git archive ...") is not."""
-    offsets, stack, index = [], ["code"], 0
+def _code_mask(line: str) -> list:
+    """For each character of LINE, whether bash reads it as code: outside quotes, or
+    inside a $(...) or `...` within double quotes. Text inside quotes is a message."""
+    mask, stack, index = [False] * len(line), ["code"], 0
     while index < len(line):
         here, char = stack[-1], line[index]
+        mask[index] = here in ("code", "sub", "tick")
         if here == "sq":
             if char == "'":
                 stack.pop()
         elif char == "\\":
+            if index + 1 < len(line):
+                mask[index + 1] = mask[index]
             index += 1
         elif here == "dq":
             if char == '"':
@@ -722,6 +748,7 @@ def _live_git_words(line: str) -> list:
                 stack.append("dq")
             elif line.startswith("$(", index):
                 stack.append("sub")
+                mask[index + 1] = True
                 index += 1
             elif char == ")" and here == "sub":
                 stack.pop()
@@ -731,15 +758,30 @@ def _live_git_words(line: str) -> list:
                 else:
                     stack.append("tick")
             elif char == "#" and (index == 0 or line[index - 1] in " \t;"):
+                for rest in range(index, len(line)):
+                    mask[rest] = False
                 break
-            elif (
-                line.startswith("git", index)
-                and (index == 0 or line[index - 1] in " \t;|&({`!\\")
-                and (index + 3 == len(line) or line[index + 3] in " \t;|&)}`")
-            ):
-                offsets.append(index)
         index += 1
+    return mask
+
+
+def _live_git_words(line: str) -> list:
+    """Offsets of every `git` word bash would run as code, a backslashed one included."""
+    mask = _code_mask(line)
+    offsets = []
+    for match in re.finditer(r"git", line):
+        index = match.start()
+        if not mask[index]:
+            continue
+        before = line[index - 1] if index else " "
+        after = line[index + 3] if index + 3 < len(line) else " "
+        if before in " \t;|&({`!\\" and after in " \t;|&)}`":
+            offsets.append(index)
     return offsets
+
+
+# `command -v git`, `type git`, `which git`, `hash git`: git is looked up, not run.
+_LOOKUP = re.compile(r"(?:\bcommand\s+-[vV]|\btype(?:\s+-\w+)*|\bwhich|\bhash)\s+\\?$")
 
 
 def _allowed_revision(rev: str) -> bool:
@@ -766,14 +808,22 @@ def git_revision_problems(text: str) -> list:
     """
     problems = []
     for number, line in _code_lines(text):
-        parsed = {match.start(1) for match in _GIT_CALL.finditer(line)}
+        mask = _code_mask(line)
+        calls = [m for m in _GIT_CALL.finditer(line) if mask[m.start(1)]]
+        parsed = {match.start(1) for match in calls}
         for offset in _live_git_words(line):
+            if _LOOKUP.search(line[:offset]):
+                continue
             if offset not in parsed:
                 problems.append(
                     f"line {number}: git at column {offset + 1} is not a call this "
                     f"can read: {line.strip()!r}"
                 )
-        for match in _GIT_CALL.finditer(line):
+        for match in calls:
+            if _LOOKUP.search(line[: match.start(1)]) or re.search(
+                r"\bcommand\s+-[vV]\s+$", line[: match.start(1)]
+            ):
+                continue
             call = match.group(1).strip()
             try:
                 argv = shlex.split(call)
@@ -837,7 +887,10 @@ def git_spelling_problems(text: str) -> list:
             r"(?:^|[;&|{]\s*|\bfunction\s+)git\s*\(\s*\)|\bfunction\s+git\b", line
         ):
             problems.append(f"line {number}: defines a git function")
+        mask = _code_mask(line)
         for match in _COMMAND_WORD.finditer(line):
+            if not mask[match.start(1)]:
+                continue
             word = match.group(1)
             try:
                 plain = shlex.split(word)[0] if shlex.split(word) else ""
@@ -994,6 +1047,44 @@ _REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
             "an archive of some paths",
             'git -C "$REPO" archive "$PREV_SHA"',
             'git -C "$REPO" archive "$PREV_SHA" pyproject.toml src',
+        ),
+        (
+            "git after ( inside a message",
+            _REAL_CALL,
+            _REAL_CALL + 'echo "N-1 (git archive of the chosen commit) unpacked"\n',
+        ),
+        (
+            "git after ; inside a message",
+            _REAL_CALL,
+            _REAL_CALL + 'echo "step 2; git archive"\n',
+        ),
+        (
+            "git after && inside a message",
+            _REAL_CALL,
+            _REAL_CALL + 'echo "done && git is clean"\n',
+        ),
+        (
+            "an unquoted heredoc that mentions git",
+            _REAL_CALL,
+            _REAL_CALL
+            + "cat <<EOF2\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
+        ),
+        (
+            "a quoted heredoc that mentions git",
+            _REAL_CALL,
+            _REAL_CALL
+            + "cat <<'EOF2'\nnote: git archive HEAD~1 is not how N-1 is built\nEOF2\n",
+        ),
+        (
+            "a check that git is installed",
+            _REAL_CALL,
+            _REAL_CALL
+            + 'command -v git >/dev/null || { echo "git missing"; exit 1; }\n',
+        ),
+        (
+            "git describe of HEAD",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" describe --tags --always\n',
         ),
         (
             "a message that shows prev_sha=",
@@ -1359,6 +1450,19 @@ def test_an_ordinary_edit_to_a_shell_leg_passes(label, old, new):
             "git show is given 'HEAD~1:pyproject.toml'",
         ),
         (
+            "a substitution in an unquoted heredoc",
+            _REAL_CALL,
+            _REAL_CALL
+            + 'cat <<EOF2\nN-1: $(git -C "$REPO" archive HEAD~1 | wc -c)\nEOF2\n',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "git describe of another commit",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" describe --tags HEAD~1\n',
+            "git describe is given 'HEAD~1'",
+        ),
+        (
             "the helper not called",
             _REAL_CALL,
             "",
@@ -1422,7 +1526,12 @@ def ps1_leg_problems(text: str, require) -> list:
         )
     # The script runs no git itself; prev_tree.py does, and is what these tests hold.
     for line in lines:
-        if re.search(r"(?i)(?:^|[;|({]\s*|&\s*)(?:\S*[\\/])?git(?:\.exe)?\b", line):
+        # A string is a message, unless it is what the call operator runs (& "git").
+        called = re.search(r"""(?i)&\s*(['"])[^'"]*\bgit(?:\.exe)?\1""", line)
+        unquoted = re.sub(r"'[^']*'|\"(?:`.|[^\"`])*\"", "''", line)
+        if called or re.search(
+            r"(?i)(?:^|[;|({]\s*|&\s*)(?:\S*[\\/])?git(?:\.exe)?\b", unquoted
+        ):
             problems.append(f"runs git itself: {line}")
     for path in require:
         if f"'--require', '{path}'" not in code:
@@ -1446,6 +1555,22 @@ def test_the_chocolatey_script_takes_its_n_minus_1_only_from_auto():
 
 
 _PS1_CALL = "'--prev-ref', $PrevRef,"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'Write-Host "N-1 source (git archive of $PrevRef) ready"',
+        'Write-Verbose "step 3; git archive happens in prev_tree.py"',
+        "Write-Host 'see: git log'",
+        'if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "git is required" }',
+    ],
+)
+def test_an_ordinary_line_in_the_chocolatey_script_passes(line):
+    script, require = LEGS[CHOCO]
+    text = (REPO_ROOT / script).read_text(encoding="utf-8")
+    anchor = PS1_DEFAULT_LINE + "\n"
+    assert ps1_leg_problems(text.replace(anchor, anchor + line + "\n"), require) == []
 
 
 @pytest.mark.parametrize(
@@ -1542,6 +1667,7 @@ def test_a_planted_bypass_in_the_chocolatey_script_is_caught(label, old, new, ex
         (" -Prev $ref", "binds -PrevRef"),
         (" -Pr:$ref", "binds -PrevRef"),
         (' "$ref"', "by position"),
+        (' -Verbose "$ref"', "by position"),
     ],
 )
 def test_an_override_of_the_chocolatey_step_is_caught(planted, expect):
@@ -1551,6 +1677,13 @@ def test_an_override_of_the_chocolatey_step_is_caught(planted, expect):
     step["run"] = step["run"].rstrip() + planted
     problems = workflow_leg_problems(workflow, CHOCO[1])
     assert any(expect in problem for problem in problems), problems
+
+
+def test_a_common_switch_in_the_chocolatey_step_passes():
+    workflow = yaml.safe_load((WORKFLOWS / CHOCO[0]).read_text(encoding="utf-8"))
+    step = _prev_ref_steps(workflow["jobs"][CHOCO[1]]["steps"])[0][1]
+    step["run"] = step["run"].rstrip() + " -Verbose"
+    assert workflow_leg_problems(workflow, CHOCO[1]) == []
 
 
 def test_a_prevref_parameter_in_the_chocolatey_step_is_caught():
