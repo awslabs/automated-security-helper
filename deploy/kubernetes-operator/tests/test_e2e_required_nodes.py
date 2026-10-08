@@ -5,8 +5,10 @@ the list names passed. This file proves the list is worth requiring:
 
 - every id in it is still collected, so a renamed or deleted e2e test fails here, in
   the unit job, instead of when somebody next reads the e2e log;
-- every test marked ``negative_control`` is in it, and every test named like one is
-  marked, so a new negative control cannot be added without being required;
+- every test marked ``negative_control`` is in it, and a new negative control cannot be
+  added without being required. Two rules back that: every test named like one must be
+  marked, and every test in a class (or module) that holds a negative control must be
+  marked ``negative_control`` or ``positive_control``, so naming cannot dodge it;
 - the check itself rejects a log that lacks one required pass, or has it only as a
   FAILED line or inside a longer id.
 """
@@ -35,8 +37,32 @@ WORKFLOW = OPERATOR_DIR.parents[1] / ".github" / "workflows" / "ash-kubernetes-o
 # to carry the marker, so the census does not depend on remembering it. "not_refused" is
 # the positive assertion that a good run was accepted.
 NEGATIVE_NAME = re.compile(
-    r"Refused|(?<!not_)refused|rejected|NegativeControl|CanFail|Tampered|detects_a_removed"
+    r"Refus|(?<!not_)refus(?:e|es|ed|al)|reject|NegativeControl|CanFail|Tampered|tampered"
+    r"|Incomplete|detects_a_removed|cannot_take"
 )
+
+
+def group_of(node: str) -> str:
+    """The class a test belongs to, or its module for a test outside any class."""
+    path, _, rest = node.partition("::")
+    parts = rest.split("::")
+    return f"{path}::{parts[0]}" if len(parts) > 1 else path
+
+
+def unclassified(collected: list[str], negative: list[str], positive: list[str]) -> list[str]:
+    """Tests sharing a class (or module) with a negative control that are neither kind.
+
+    The name rule can be dodged by naming; this cannot. Once a class holds a negative
+    control, every test added to it must say which it is, with
+    @pytest.mark.negative_control or @pytest.mark.positive_control.
+    """
+    negative_set, positive_set = set(negative), set(positive)
+    groups = {group_of(node) for node in negative_set}
+    return sorted(
+        node
+        for node in collected
+        if group_of(node) in groups and node not in negative_set and node not in positive_set
+    )
 
 
 def collect(*args: str) -> list[str]:
@@ -80,6 +106,11 @@ def marked() -> list[str]:
     return collect("-m", "negative_control")
 
 
+@pytest.fixture(scope="module")
+def declared_positive() -> list[str]:
+    return collect("-m", "positive_control")
+
+
 class TestTheListMatchesTheSuite:
     def test_every_required_node_is_collected(self, collected):
         missing = sorted(set(required_nodes()) - set(collected))
@@ -96,6 +127,25 @@ class TestTheListMatchesTheSuite:
         unmarked = sorted(n for n in collected if NEGATIVE_NAME.search(n) and n not in marked)
         assert not unmarked, f"named like negative controls but not marked: {unmarked}"
 
+    def test_every_test_beside_a_negative_control_is_classified(
+        self, collected, marked, declared_positive
+    ):
+        loose = unclassified(collected, marked, declared_positive)
+        assert not loose, (
+            f"tests in a class that holds negative controls, marked as neither: {loose}. "
+            f"Mark each @pytest.mark.negative_control (and list it in {REQUIRED_FILE.name}) "
+            f"or @pytest.mark.positive_control."
+        )
+
+    def test_no_test_is_both(self, marked, declared_positive):
+        assert not set(marked) & set(declared_positive)
+
+    def test_every_marked_control_matches_the_name_rule_or_its_class_does(self, marked):
+        # The name rule is the backstop for a control added to a class with none; check
+        # it would have seen every control there is today, by its own name or its class's.
+        missed = sorted(n for n in marked if not NEGATIVE_NAME.search(n))
+        assert not missed, f"the name rule misses these marked controls: {missed}"
+
     def test_the_census_is_not_vacuous(self, collected, marked):
         # The name rule above would pass over a suite where nothing matched it.
         assert len([n for n in collected if NEGATIVE_NAME.search(n)]) >= 10
@@ -105,6 +155,48 @@ class TestTheListMatchesTheSuite:
         nodes = required_nodes()
         for module in ("test_e2e_eks_applier.py", "test_e2e_image_locks.py"):
             assert any(n.startswith(f"tests/e2e/{module}::") for n in nodes), module
+
+
+class TestTheCensusCanFail:
+    COLLECTED = [
+        "tests/e2e/m.py::TestTheVerdictCanFail::test_one_rejected",
+        "tests/e2e/m.py::TestTheVerdictCanFail::test_quietly_added",
+        "tests/e2e/m.py::TestMixed::test_detects_a_removed_field",
+        "tests/e2e/m.py::TestMixed::test_the_positive_half",
+        "tests/e2e/m.py::TestPositiveOnly::test_anything",
+        "tests/e2e/m.py::test_module_level_refusal",
+        "tests/e2e/m.py::test_module_level_other",
+    ]
+
+    def test_an_unmarked_test_beside_a_control_is_reported(self):
+        negative = [self.COLLECTED[0], self.COLLECTED[2], self.COLLECTED[5]]
+        positive = [self.COLLECTED[3]]
+        assert unclassified(self.COLLECTED, negative, positive) == [
+            "tests/e2e/m.py::TestTheVerdictCanFail::test_quietly_added",
+            "tests/e2e/m.py::test_module_level_other",
+        ]
+
+    def test_a_fully_classified_suite_passes(self):
+        negative = [self.COLLECTED[i] for i in (0, 1, 2, 5)]
+        positive = [self.COLLECTED[i] for i in (3, 6)]
+        assert unclassified(self.COLLECTED, negative, positive) == []
+
+    @pytest.mark.parametrize(
+        "node",
+        [
+            "tests/e2e/x.py::TestAPartialScanIsIncomplete::test_ash_merge_exited_one",
+            "tests/e2e/x.py::TestCrdUpgrade::test_the_api_server_refuses_dropping_it",
+            "tests/e2e/x.py::T::test_a_refusal_is_recorded",
+            "tests/e2e/x.py::T::test_it_is_refused",
+            "tests/e2e/x.py::T::test_the_bad_one_is_rejected",
+            "tests/e2e/x.py::T::test_without_the_crd_it_cannot_take_a_scan",
+        ],
+    )
+    def test_the_name_rule_sees_each_spelling(self, node):
+        assert NEGATIVE_NAME.search(node), node
+
+    def test_the_name_rule_spares_the_positive_spelling(self):
+        assert not NEGATIVE_NAME.search("tests/e2e/x.py::T::test_it_is_not_refused")
 
 
 ALL = ["tests/e2e/a.py::T::test_one", "tests/e2e/a.py::T::test_two[x-y z]"]

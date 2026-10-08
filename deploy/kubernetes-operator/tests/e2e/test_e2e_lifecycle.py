@@ -327,6 +327,7 @@ class TestPreviousVersion:
 
 
 class TestCrdUpgrade:
+    @pytest.mark.positive_control
     def test_heads_crd_strands_nothing_the_cluster_stored(self, upgraded):
         assert upgraded["compat"] == [], upgraded["compat"]
 
@@ -342,6 +343,7 @@ class TestCrdUpgrade:
         assert refusal["rc"] != 0, "the API server accepted a CRD without its stored version"
         assert "storedVersions" in refusal["stderr"], refusal["stderr"]
 
+    @pytest.mark.positive_control
     def test_the_stored_versions_are_still_valid(self, upgraded):
         crd = upgraded["crd"]
         served = {v["name"] for v in crd["spec"]["versions"] if v["served"]}
