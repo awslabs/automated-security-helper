@@ -1063,6 +1063,11 @@ class AshConfig(BaseModel):
     # Internal field to track config resolution warnings (not serialized)
     _resolution_warnings: List[str] = PrivateAttr(default_factory=list)
 
+    # The tree a scan with this config covers, when it is wider than the source
+    # directory: workspace mode sets the workspace root. config/path_trust.py
+    # refuses tool config files inside it. None means the source directory's tree.
+    _scanned_root: Optional[Path] = PrivateAttr(default=None)
+
     # Project information
     project_name: Annotated[
         str,

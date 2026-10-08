@@ -173,3 +173,39 @@ def test_a_workspace_project_cannot_add_a_module_from_elsewhere_in_the_workspace
 
     assert [p.ash_plugin_modules for p in plan.projects] == [[]]
     assert STANDIN not in sys.modules
+
+
+def _installed_package(tmp_path_factory, monkeypatch, with_child: bool) -> str:
+    """A package outside the tree, on sys.path, whose __init__ only defines a constant."""
+    site = tmp_path_factory.mktemp("site")
+    package = site / "standin_installed"
+    package.mkdir()
+    (package / "__init__.py").write_text("STANDIN_INSTALLED_LOADED = True\n")
+    if with_child:
+        (package / "child.py").write_text("")
+    monkeypatch.syspath_prepend(str(site))
+    return "standin_installed"
+
+
+@pytest.mark.parametrize("with_child", [False, True])
+def test_checking_a_dotted_name_does_not_import_its_parent(
+    tmp_path, tmp_path_factory, monkeypatch, with_child
+):
+    parent = _installed_package(tmp_path_factory, monkeypatch, with_child)
+    source = _tree(tmp_path, monkeypatch, [f"{parent}.child"])
+    try:
+        config = resolve_config(source_dir=source)
+        assert parent not in sys.modules
+        assert config.ash_plugin_modules == ([f"{parent}.child"] if with_child else [])
+    finally:
+        for name in [n for n in sys.modules if n.startswith(parent)]:
+            del sys.modules[name]
+
+
+def test_an_operator_override_with_the_dashed_key_is_honored(tmp_path, monkeypatch):
+    source = _tree(tmp_path, monkeypatch, [STANDIN])
+    config = resolve_config(
+        source_dir=source,
+        config_overrides=[f'ash-plugin-modules+=["{STANDIN}"]'],
+    )
+    assert STANDIN in config.ash_plugin_modules

@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import Optional, Set, Tuple, Union
+from typing import Any, Optional, Set, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -53,6 +53,7 @@ def honored_path(
     *,
     source_dir: Union[str, Path],
     key: str,
+    config: Any = None,
 ) -> Optional[Path]:
     """The resolved path to hand the tool, or None when it is inside the scanned tree.
 
@@ -62,6 +63,9 @@ def honored_path(
         value: The configured or discovered path. None or blank returns None.
         source_dir: The scan's source directory. Relative paths are taken from it.
         key: The option or file name the warning names.
+        config: The scan's AshConfig. When it records a wider scanned root
+            (``AshConfig._scanned_root``, the workspace root in workspace mode),
+            the tree is taken from that instead of from ``source_dir``.
     """
     # Imported here: sandbox_grants imports ash_config, which imports the scanners
     # that import this module.
@@ -73,7 +77,8 @@ def honored_path(
     if value is None or str(value).strip() == "":
         return None
     path = resolved_path(value, source_dir)
-    if not is_within(path, scanned_tree(Path(source_dir))):
+    root = getattr(config, "_scanned_root", None) or source_dir
+    if not is_within(path, scanned_tree(Path(root))):
         return path
     with _WARNED_LOCK:
         first = (key, path.as_posix()) not in _WARNED

@@ -392,16 +392,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         directory. So a relative ``file://`` entry is dropped, and an absolute one
         is kept only when the file is outside the scanned tree (see
         config/path_trust.py), rewritten to the resolved path that was checked.
-        This covers entries from the config and from the baseline file. Entries
-        naming detect-secrets' own plugins and filters are unaffected.
+        A path that is not ``file://`` is a module the worker imports, and is kept
+        only when it is one of detect-secrets' own (``detect_secrets.``). This
+        covers entries from the config and from the baseline file.
         """
         settings = self.config.options.scan_settings
         source_dir = Path(self.context.source_dir)
 
         def _checked(value: Any, key: str) -> tuple[bool, Any]:
             """(keep, value to use) for one entry's path."""
-            if not isinstance(value, str) or not value.startswith("file://"):
+            if value is None:
                 return True, value
+            if not isinstance(value, str) or not value.startswith("file://"):
+                # A dotted path is imported by the worker. Only detect-secrets'
+                # own modules are named that way; anything else needs file://.
+                if isinstance(value, str) and value.startswith("detect_secrets."):
+                    return True, value
+                ASH_LOGGER.warning(
+                    f"Ignoring {key} {value!r}: only detect-secrets' own plugins "
+                    "and filters may be named by module path. Name another one "
+                    "with an absolute file:// path outside the scanned tree."
+                )
+                return False, value
             file_part, separator, function = value[len("file://") :].partition("::")
             if not Path(file_part).is_absolute():
                 ASH_LOGGER.warning(
@@ -410,7 +422,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     "working directory."
                 )
                 return False, value
-            honored = honored_path(file_part, source_dir=source_dir, key=key)
+            honored = honored_path(
+                file_part, source_dir=source_dir, key=key, config=self.context.config
+            )
             if honored is None:
                 return False, value
             return True, f"file://{honored.as_posix()}{separator}{function}"

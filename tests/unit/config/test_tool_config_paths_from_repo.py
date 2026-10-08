@@ -311,3 +311,52 @@ def test_detect_secrets_keeps_exactly_the_path_that_was_checked(
         # Relative forms are dropped before any check: detect-secrets would read
         # them from its worker's working directory.
         assert paths == []
+
+
+def test_detect_secrets_module_paths_other_than_its_own_are_dropped(tmp_path):
+    source = _tree(tmp_path, "")
+    settings = _detect_secrets_settings(
+        source,
+        tmp_path,
+        {
+            "filters_used": [
+                {"path": "detect_secrets.filters.heuristic.is_sequential_string"},
+                {"path": "standin_module.check"},
+            ],
+            "plugins_used": [{"name": "StandIn", "path": "standin_module"}],
+        },
+    )
+    assert "standin_module" not in repr(settings)
+    assert [f["path"] for f in settings["filters_used"]] == [
+        "detect_secrets.filters.heuristic.is_sequential_string"
+    ]
+
+
+def test_in_workspace_mode_a_file_elsewhere_in_the_workspace_is_not_passed(tmp_path):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+        CheckovScanner,
+    )
+
+    workspace = tmp_path / "ws"
+    source = workspace / "app"
+    (source / ".git").mkdir(parents=True)
+    other = workspace / "other" / "ck.yaml"
+    other.parent.mkdir(parents=True)
+    other.write_text("")
+    config = resolve_config(
+        source_dir=source,
+        config_overrides=[f"scanners.checkov.options.config_file={other}"],
+    )
+
+    def argv(scanned_root):
+        config._scanned_root = scanned_root
+        scanner = CheckovScanner(
+            config=config.get_plugin_config("scanner", "checkov"),
+            context=_context(source, tmp_path, config),
+        )
+        return scanner._resolve_arguments(source, tmp_path / "r.sarif")
+
+    # A single-directory scan of app/ treats ../other as outside its tree.
+    assert other.resolve().as_posix() in argv(None)
+    # Workspace mode records the workspace root, and the same file is refused.
+    assert not any(other.resolve().as_posix() in a for a in argv(workspace))

@@ -18,8 +18,8 @@ Packages named this way keep working, which is what ASH's own
 kept even when that directory is in the tree, as it is for an editable install of
 the repository being scanned; that code is already running.
 
-Locating a dotted name imports its parent packages, so each level is checked
-before the next is looked up, and a parent that fails the check is never imported.
+Each level of a dotted name is located without importing its parent packages
+(``_spec_without_importing``), so checking a name runs no code.
 ``--ash-plugin-modules`` and ``ASH_PLUGIN_MODULES`` are the operator's and are not
 filtered here.
 """
@@ -27,7 +27,8 @@ filtered here.
 from __future__ import annotations
 
 import importlib.util
-from importlib.machinery import ModuleSpec
+import sys
+from importlib.machinery import ModuleSpec, PathFinder
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence
 
@@ -66,14 +67,38 @@ def _spec_locations(spec: ModuleSpec) -> List[Path]:
     return locations
 
 
+def _spec_without_importing(
+    name: str, parent: Optional[ModuleSpec]
+) -> Optional[ModuleSpec]:
+    """The spec for ``name``, found without running any package's ``__init__``.
+
+    A top-level name, or one whose parent is already imported, goes through
+    ``importlib.util.find_spec``, which then imports nothing. Otherwise the
+    parent's spec gives the directories to search, and ``PathFinder`` looks there
+    directly. A package that adds to its ``__path__`` when imported, or a submodule
+    only a custom finder can see, is then reported as not importable, which
+    refuses it.
+    """
+    parent_name = name.rpartition(".")[0]
+    if not parent_name or parent_name in sys.modules:
+        return importlib.util.find_spec(name)
+    if parent is None or not parent.submodule_search_locations:
+        return None
+    return PathFinder.find_spec(name, list(parent.submodule_search_locations))
+
+
 def refusal_reason(name: str, scanned_root: Path) -> Optional[str]:
-    """Why ``name`` may not be imported for a config in the scanned tree, or None."""
+    """Why ``name`` may not be imported for a config in the scanned tree, or None.
+
+    Imports nothing that is not already imported, so a refused name runs no code.
+    """
     own = _own_package_dir()
     parts = name.split(".")
+    spec: Optional[ModuleSpec] = None
     for depth in range(1, len(parts) + 1):
         prefix = ".".join(parts[:depth])
         try:
-            spec = importlib.util.find_spec(prefix)
+            spec = _spec_without_importing(prefix, spec)
         except (ImportError, ValueError):
             spec = None
         if spec is None:
@@ -112,7 +137,8 @@ def confine_plugin_modules(
     module_overrides = [
         override
         for override in config_overrides or []
-        if override.partition("=")[0].removesuffix("+").strip() == "ash_plugin_modules"
+        if override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        == "ash_plugin_modules"
     ]
     if module_overrides:
         trusted_config = apply_config_overrides(trusted_config, module_overrides)
