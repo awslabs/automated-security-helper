@@ -231,12 +231,15 @@ def _uv_directories() -> List[Path]:
             if not interpreter.is_symlink():
                 continue
             real = Path(os.path.realpath(interpreter))
-            too_broad = {Path("/"), Path(os.path.realpath(home))}
-            for directory in [h.parent for h in _symlink_hops(interpreter)[1:]] + (
-                [real.parent.parent] if real.parent.name in _BIN_DIR_NAMES else []
+            prefix = real.parent.parent
+            # Only an interpreter installation: a prefix with a lib/python*
+            # directory, never a broad directory a link happens to point into.
+            if (
+                real.parent.name in _BIN_DIR_NAMES
+                and any(prefix.glob("lib/python*"))
+                and not _broader_than_a_tool(prefix)
             ):
-                if Path(os.path.realpath(directory)) not in too_broad:
-                    found.append(directory)
+                found.append(prefix)
     return _existing(found)
 
 
@@ -276,12 +279,26 @@ def _path_directories(home: Path) -> List[Path]:
             resolved = path.resolve()
         except OSError:
             continue
-        if resolved in (Path("/"), home.resolve()):
+        if resolved in (Path("/"), home.resolve()) or _broader_than_a_tool(path):
             continue
         if _inside(path, home) and path.name not in _BIN_DIR_NAMES:
             continue
         entries.append(path)
     return _existing(entries)
+
+
+def _broader_than_a_tool(path: Path) -> bool:
+    """Whether mounting ``path`` would expose more than one tool installation.
+
+    True for /, for $HOME, for any directory that contains $HOME, and for any
+    directory directly under $HOME (~/.local, ~/.cargo): each of those holds
+    other files of the user's.
+    """
+    real = Path(os.path.realpath(path))
+    home = Path(os.path.realpath(Path.home()))
+    return (
+        real == Path("/") or real == home or real in home.parents or real.parent == home
+    )
 
 
 def _symlink_hops(path: Path) -> List[Path]:
@@ -365,7 +382,7 @@ def _ash_paths() -> List[Path]:
         if not entry or not os.path.isabs(entry) or not os.path.isdir(entry):
             return False
         real = Path(os.path.realpath(entry))
-        if real in (Path("/"), real_home):
+        if _broader_than_a_tool(real):
             return False
         if real_home not in real.parents:
             return True

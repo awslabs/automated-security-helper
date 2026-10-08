@@ -606,6 +606,7 @@ def test_a_uv_tool_interpreter_installed_elsewhere_is_readable(
     """
     pythons = tmp_path / "elsewhere" / "cpython-3.13" / "bin"
     pythons.mkdir(parents=True)
+    (pythons.parent / "lib" / "python3.13").mkdir(parents=True)
     interpreter = pythons / "python3.13"
     interpreter.write_text("")
     tool_bin = layout.home / ".local" / "share" / "uv" / "tools" / "bandit" / "bin"
@@ -613,3 +614,36 @@ def test_a_uv_tool_interpreter_installed_elsewhere_is_readable(
     (tool_bin / "python").symlink_to(interpreter)
     exposed = _resolved(_policy(layout).read_only)
     assert Path(os.path.realpath(pythons.parent)) in exposed
+
+
+class TestNothingBroaderThanATool:
+    """Paths taken from the environment never mount $HOME or anything above it."""
+
+    def test_a_tool_link_into_the_parent_of_home_is_not_mounted(self, layout):
+        tool_bin = layout.home / ".local" / "share" / "uv" / "tools" / "x" / "bin"
+        tool_bin.mkdir(parents=True)
+        (tool_bin / "python").symlink_to(layout.home.parent / "bin" / "python")
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(layout.home.parent)) not in exposed
+
+    def test_a_tool_link_to_a_prefix_without_a_python_library_is_not_mounted(
+        self, layout, tmp_path
+    ):
+        bare = tmp_path / "bare" / "bin"
+        bare.mkdir(parents=True)
+        (bare / "python").write_text("")
+        tool_bin = layout.home / ".local" / "share" / "uv" / "tools" / "x" / "bin"
+        tool_bin.mkdir(parents=True)
+        (tool_bin / "python").symlink_to(bare / "python")
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(bare.parent)) not in exposed
+
+    def test_an_import_path_entry_above_home_is_not_mounted(self, layout, monkeypatch):
+        monkeypatch.setattr(sys, "path", [*sys.path, str(layout.home.parent)])
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(layout.home.parent)) not in exposed
+
+    def test_a_path_entry_above_home_is_not_mounted(self, layout, monkeypatch):
+        monkeypatch.setenv("PATH", str(layout.home.parent))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(layout.home.parent)) not in exposed
