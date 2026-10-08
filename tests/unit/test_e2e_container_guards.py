@@ -12,14 +12,20 @@ rejecting what it exists to reject, and the publish census is run on this tree.
 The deprecated `ash` alias check (scripts/e2e/alias_check.sh) only shows up in a CI
 log, so a deleted call would pass unnoticed. The last tests hold container.sh and
 homebrew.sh to calling it where it runs: bash parses each script without running it,
-which drops comments, and a call has to be a whole command at the top level of the
-code path that runs (not commented out, not under an if, not behind `false &&`).
+which drops comments, and heredoc bodies are dropped after it. A call has to be a whole
+command at the top level of the script or of the leg function the top level dispatches
+to (not commented out, not under an if, not behind `false &&`), under `set -euo
+pipefail`, with no exit or return ahead of it. On Windows the parse runs in Git for
+Windows' bash, since `bash` on a runner's PATH is the WSL stub.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -154,28 +160,34 @@ def test_provenance_manifest_refuses_both_or_neither():
 
 
 # What each script must run, as bash prints it back with `declare -f` (comments gone,
-# continuation lines joined, four spaces per nesting level). A scope is "" for the top
-# level of the script or the name of a function the top level calls. The lines are in
-# the order the script runs them; `after` is a line that has to come first, because an
-# alias check run before the install or the image build checks nothing.
-_SELF_TEST = 'bash "$REPO/scripts/e2e/alias_check.sh" self-test "$ALIAS_ASSERT";'
+# continuation lines joined, four spaces per nesting level, heredoc bodies verbatim).
+# A scope is "" for the top level of the script or the name of a function the top level
+# dispatches to. `after` is a command that has to come first, because an alias check run
+# before the install or the image build checks nothing. A call is a command that starts
+# with `starts` and holds every one of `tokens`, in any order, so a benign edit (another
+# docker flag, the mounts reordered) still passes.
+_SELF_TEST = 'bash "$REPO/scripts/e2e/alias_check.sh" self-test "$ALIAS_ASSERT"'
 _ALIAS_CALLS = {
     "scripts/e2e/container.sh": [
-        ("", None, _SELF_TEST),
+        ("", None, _SELF_TEST, ()),
         (
             "",
             'provenance "$TAG_FRESH" "$SRC_HEAD" fresh ||',
+            '"$OCI" run ',
             (
-                '"$OCI" run --rm --network none'
-                ' -v "$REPO/scripts/e2e/alias_check.sh:/tmp/ash-alias/alias_check.sh:ro"'
-                ' -v "$ALIAS_ASSERT:/tmp/ash-alias/assert-deprecated-alias.sh:ro"'
-                ' "$TAG_FRESH" bash /tmp/ash-alias/alias_check.sh check'
-                " /tmp/ash-alias/assert-deprecated-alias.sh || fail "
+                " --rm ",
+                " --network none ",
+                ' -v "$REPO/scripts/e2e/alias_check.sh:/tmp/ash-alias/alias_check.sh:ro" ',
+                ' -v "$ALIAS_ASSERT:/tmp/ash-alias/assert-deprecated-alias.sh:ro" ',
+                (
+                    ' "$TAG_FRESH" bash /tmp/ash-alias/alias_check.sh check'
+                    " /tmp/ash-alias/assert-deprecated-alias.sh || fail "
+                ),
             ),
         ),
     ],
     "scripts/e2e/homebrew.sh": [
-        ("", None, _SELF_TEST),
+        ("", None, _SELF_TEST, ()),
         (
             "leg_fresh",
             "brew install --verbose --build-from-source --formula",
@@ -183,70 +195,155 @@ _ALIAS_CALLS = {
                 'PATH="$BREW_BIN:$PATH" bash "$REPO/scripts/e2e/alias_check.sh" check'
                 ' "$ALIAS_ASSERT" || fail '
             ),
+            (),
         ),
     ],
 }
 _ALIAS_ASSERT_LINE = (
-    'ALIAS_ASSERT="$REPO/.github/actions/validate-install/assert-deprecated-alias.sh";'
+    'ALIAS_ASSERT="$REPO/.github/actions/validate-install/assert-deprecated-alias.sh"'
 )
+# A command that leaves the scope before the call, outside quoted text: a bare
+# exit/return, or one behind `&&`. One behind `||` is a failure path and stays.
+_LEAVES = re.compile(r"(?:^|&&)\s*(?:exit|return)\b")
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"' + r"|'[^']*'")
+_HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)(\w+)\2")
+
+
+def _bash() -> str:
+    """A bash that runs scripts: on Windows, Git's, not the WSL stub on PATH.
+
+    C:\\Windows\\System32\\bash.exe comes first on a Windows runner's PATH and exits 1
+    without a WSL distribution. Git for Windows ships bash.exe next to git.
+    """
+    if os.name != "nt":
+        found = shutil.which("bash")
+        assert found, "no bash on PATH"
+        return found
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("no git on PATH, so no Git for Windows bash to parse the scripts")
+    for parent in Path(git).resolve().parents:
+        candidate = parent / "bin" / "bash.exe"
+        if candidate.is_file():
+            return str(candidate)
+    pytest.skip(f"no Git for Windows bash.exe above {git}; the WSL stub cannot run")
 
 
 def _parse(text: str) -> list:
-    """The script as bash parses it, wrapped in a function so nothing runs."""
+    """The script as bash parses it, wrapped in a function so nothing runs.
+
+    The text goes in on stdin: a script is longer than a Windows command line allows.
+    """
     done = subprocess.run(
-        ["bash", "-c", 'eval "__e2e() {\n$1\n}" && declare -f __e2e', "_", text],
+        [_bash(), "-c", 'eval "__e2e() {\n$(cat)\n}" && declare -f __e2e'],
+        input=text.replace("\r\n", "\n"),
         capture_output=True,
         text=True,
         check=False,
     )
     assert done.returncode == 0, done.stderr
-    return done.stdout.splitlines()
+    return _without_heredocs(done.stdout.replace("\r\n", "\n").splitlines())
+
+
+def _without_heredocs(lines: list) -> list:
+    """The parsed lines with every heredoc body dropped, so text inside one is no
+    command."""
+    kept, ends = [], []
+    for line in lines:
+        if ends:
+            strip, word = ends[0]
+            if (line.lstrip("\t") if strip else line) == word:
+                ends.pop(0)
+            continue
+        kept.append(line)
+        ends = [(m.group(1) == "-", m.group(3)) for m in _HEREDOC.finditer(line)]
+    assert not ends, f"a heredoc ending {ends[0][1]} never ends"
+    return kept
+
+
+def _command(line: str, indent: int):
+    """The command on a line `indent` spaces deep, without bash's trailing `;`."""
+    if len(line) <= indent or line[:indent].strip() or line[indent] == " ":
+        return None
+    return line[indent:].rstrip().removesuffix(";").rstrip()
 
 
 def _scope(lines: list, name: str) -> list:
     """The commands at the top level of the script, or of one function in it."""
     if not name:
-        return [
-            line[4:] for line in lines if line.startswith("    ") and line[4] != " "
-        ]
+        return [c for c in (_command(line, 4) for line in lines) if c is not None]
     start = lines.index(f"    function {name} () ")
     assert lines[start + 1] == "    { ", lines[start + 1]
     body = []
     for line in lines[start + 2 :]:
-        if line == "    }" or line == "    };":
+        if line.rstrip().removesuffix(";") == "    }":
             return body
-        if line.startswith("        ") and line[8] != " ":
-            body.append(line[8:])
+        command = _command(line, 8)
+        if command is not None:
+            body.append(command)
     raise AssertionError(f"{name} has no end")
+
+
+def _case_arms(lines: list, word: str) -> list:
+    """The patterns of the top-level `case "$<word>" in` the script checks usage with."""
+    head = f'    case "${word}" in'
+    starts = [i for i, line in enumerate(lines) if line.rstrip() == head]
+    if len(starts) != 1:
+        return []
+    arms = []
+    for line in lines[starts[0] + 1 :]:
+        if line.rstrip().removesuffix(";") == "    esac":
+            return arms
+        if _command(line, 8) is not None and line.rstrip().endswith(")"):
+            arms.append([p.strip() for p in line.strip()[:-1].split("|")])
+    return []
 
 
 def _alias_call_problems(rel: str, text: str) -> list:
     lines = _parse(text)
     top = _scope(lines, "")
     problems = []
+    first_call = None
     if _ALIAS_ASSERT_LINE not in top:
         problems.append("ALIAS_ASSERT is not set to the validate-install assert script")
-    for scope, after, call in _ALIAS_CALLS[rel]:
+    for scope, after, starts, tokens in _ALIAS_CALLS[rel]:
+        where = scope or "top level"
         commands = top if not scope else _scope(lines, scope)
-        at = [i for i, line in enumerate(commands) if line.startswith(call)]
+        at = [
+            i
+            for i, c in enumerate(commands)
+            if c.startswith(starts) and all(token in f"{c} " for token in tokens)
+        ]
         if not at:
-            problems.append(f"{scope or 'top level'}: no command starting {call!r}")
+            problems.append(f"{where}: no command {starts!r} holding {tokens!r}")
             continue
+        if not scope:
+            first_call = at[0] if first_call is None else min(first_call, at[0])
         if after is not None:
-            first = [i for i, line in enumerate(commands) if line.startswith(after)]
+            first = [i for i, c in enumerate(commands) if c.startswith(after)]
             if not first or first[0] > at[0]:
-                problems.append(
-                    f"{scope or 'top level'}: {call!r} runs before {after!r}"
-                )
+                problems.append(f"{where}: {starts!r} runs before {after!r}")
+        leaving = [c for c in commands[: at[0]] if _LEAVES.search(_QUOTED.sub("", c))]
+        if leaving:
+            problems.append(f"{where}: {leaving[0]!r} leaves before {starts!r}")
         if scope:
-            # The function has to be what the top level dispatches to.
+            # The function has to be what the top level dispatches to, for a leg the
+            # usage check lets through.
             leg = scope.removeprefix("leg_")
-            if top[-1] != '"leg_$LEG"' or not any(
-                line.startswith("case ") for line in top
-            ):
+            if top[-1] != '"leg_$LEG"':
                 problems.append(f"the top level does not dispatch to {scope}")
-            if f"{leg} | " not in text and f"| {leg} " not in text:
+            if not any(
+                leg in arm and "*" not in arm for arm in _case_arms(lines, "LEG")
+            ):
                 problems.append(f"the usage check does not accept the {leg} leg")
+            # ...and nothing at the top level may leave before that dispatch.
+            leaving = [c for c in top[:-1] if _LEAVES.search(_QUOTED.sub("", c))]
+            if leaving:
+                problems.append(f"top level: {leaving[0]!r} leaves before {scope}")
+    # A bare self-test line only stops the leg when it fails under `set -e`.
+    errexit = [i for i, c in enumerate(top) if c == "set -euo pipefail"]
+    if not errexit or (first_call is not None and errexit[0] > first_call):
+        problems.append("top level: no `set -euo pipefail` before the alias calls")
     return problems
 
 
@@ -370,17 +467,148 @@ def test_alias_check_self_test_survives_a_notice_with_shell_characters(tmp_path)
     assert len(at) == 1, "the assert script has no single NOTICE= line"
     lines[at[0]] = f'NOTICE="{_HOSTILE_NOTICE}"\n'
     planted = tmp_path / "assert-deprecated-alias.sh"
-    planted.write_text("".join(lines), encoding="utf-8")
+    planted.write_bytes("".join(lines).replace("\r\n", "\n").encode("utf-8"))
     done = subprocess.run(
         [
-            "bash",
-            str(REPO_ROOT / "scripts" / "e2e" / "alias_check.sh"),
+            _bash(),
+            (REPO_ROOT / "scripts" / "e2e" / "alias_check.sh").as_posix(),
             "self-test",
-            str(planted),
+            planted.as_posix(),
         ],
         capture_output=True,
         text=True,
         check=False,
     )
     assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.count("   OK: ") == 6, done.stdout
+    assert done.stdout.replace("\r\n", "\n").count("   OK: ") == 6, done.stdout
+
+
+def _top_level_exit_before_the_check(text: str) -> str:
+    # container.sh: the check is a top-level command; homebrew.sh: an exit before the
+    # dispatch to leg_fresh.
+    anchor = (
+        "ALIAS_ASSERT="
+        if "leg_$LEG" in text
+        else 'say "the image\'s deprecated ash alias"'
+    )
+    lines = text.splitlines()
+    at = next(i for i, line in enumerate(lines) if line.startswith(anchor))
+    lines.insert(at + 1, "exit 0")
+    return "\n".join(lines) + "\n"
+
+
+def _conditional_exit_before_the_check(text: str) -> str:
+    lines = text.splitlines()
+    at = next(i for i, line in enumerate(lines) if line.startswith("ALIAS_ASSERT="))
+    lines.insert(at + 1, '[ -n "$ALIAS_ASSERT" ] && exit 0')
+    return "\n".join(lines) + "\n"
+
+
+def _return_in_leg_fresh(text: str) -> str:
+    old = '  brew test --verbose "$FORMULA"\n'
+    assert old in text
+    return text.replace(old, old + "  return 0\n", 1)
+
+
+def _errexit_removed(text: str) -> str:
+    assert "\nset -euo pipefail\n" in text
+    return text.replace("\nset -euo pipefail\n", "\nset -u\n", 1)
+
+
+def _call_only_in_a_heredoc(text: str, mode: str, indent: int) -> str:
+    # bash prints a heredoc body verbatim, so the call joined onto one line and indented
+    # like a command at its depth would read as one if heredocs were not dropped.
+    pad = " " * indent
+    return _rewrite(
+        text,
+        mode,
+        lambda block: [
+            "cat >/dev/null <<'SH'",
+            pad + " ".join(line.strip().removesuffix("\\").strip() for line in block),
+            "SH",
+        ],
+    )
+
+
+def _usage_only_in_a_comment(text: str) -> str:
+    old = "  fresh | upgrade | negative) ;;"
+    assert old in text
+    return text.replace(old, "  upgrade | negative) ;;  # fresh | is gone", 1)
+
+
+_SCRIPT_PLANTS = [
+    ("scripts/e2e/container.sh", _top_level_exit_before_the_check),
+    ("scripts/e2e/homebrew.sh", _top_level_exit_before_the_check),
+    ("scripts/e2e/container.sh", _conditional_exit_before_the_check),
+    ("scripts/e2e/homebrew.sh", _conditional_exit_before_the_check),
+    ("scripts/e2e/homebrew.sh", _return_in_leg_fresh),
+    ("scripts/e2e/container.sh", _errexit_removed),
+    ("scripts/e2e/homebrew.sh", _errexit_removed),
+    ("scripts/e2e/container.sh", lambda t: _call_only_in_a_heredoc(t, "check", 4)),
+    ("scripts/e2e/homebrew.sh", lambda t: _call_only_in_a_heredoc(t, "check", 8)),
+    ("scripts/e2e/container.sh", lambda t: _call_only_in_a_heredoc(t, "self-test", 4)),
+    ("scripts/e2e/homebrew.sh", _usage_only_in_a_comment),
+]
+
+
+@pytest.mark.parametrize(
+    ("rel", "plant"),
+    _SCRIPT_PLANTS,
+    ids=[
+        "container-exit",
+        "homebrew-exit",
+        "container-and-exit",
+        "homebrew-and-exit",
+        "homebrew-return",
+        "container-no-errexit",
+        "homebrew-no-errexit",
+        "container-check-in-heredoc",
+        "homebrew-check-in-heredoc",
+        "container-self-test-in-heredoc",
+        "homebrew-usage-in-comment",
+    ],
+)
+def test_e2e_alias_guard_rejects_a_script_that_skips_the_call(rel, plant):
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    planted = plant(text)
+    assert planted != text
+    assert _alias_call_problems(rel, planted) != []
+
+
+def test_e2e_alias_guard_accepts_a_benign_edit_to_the_container_call():
+    rel = "scripts/e2e/container.sh"
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    mounts = (
+        '  -v "$REPO/scripts/e2e/alias_check.sh:/tmp/ash-alias/alias_check.sh:ro" \\\n'
+        '  -v "$ALIAS_ASSERT:/tmp/ash-alias/assert-deprecated-alias.sh:ro" \\\n'
+    )
+    assert mounts in text
+    swapped = "".join(reversed(mounts.splitlines(keepends=True)))
+    edited = text.replace(mounts, "  --cpus 1 \\\n" + swapped, 1)
+    assert edited != text
+    assert _alias_call_problems(rel, edited) == []
+
+
+def test_e2e_alias_guard_reads_crlf_like_lf():
+    rel = "scripts/e2e/homebrew.sh"
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    assert _alias_call_problems(rel, text.replace("\n", "\r\n")) == []
+
+
+def test_bash_on_windows_is_gits_not_the_wsl_stub(tmp_path, monkeypatch):
+    # A Windows runner's PATH finds C:\Windows\System32\bash.exe (the WSL stub) for
+    # `bash`; the guard has to take the bash.exe Git for Windows ships next to git.
+    git_root = tmp_path / "Git"
+    (git_root / "cmd").mkdir(parents=True)
+    (git_root / "bin").mkdir()
+    (git_root / "cmd" / "git.exe").write_bytes(b"")
+    (git_root / "bin" / "bash.exe").write_bytes(b"")
+    stub = tmp_path / "System32" / "bash.exe"
+    found = {"git": str(git_root / "cmd" / "git.exe"), "bash": str(stub)}
+    monkeypatch.setattr(shutil, "which", lambda name: found.get(name))
+    monkeypatch.setattr(sys.modules[__name__], "os", type("nt", (), {"name": "nt"}))
+    assert _bash() == str((git_root / "bin" / "bash.exe").resolve())
+
+    found.pop("git")
+    with pytest.raises(pytest.skip.Exception, match="no git on PATH"):
+        _bash()
