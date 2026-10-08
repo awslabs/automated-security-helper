@@ -24,13 +24,15 @@
  *      reads the manifests.
  */
 
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { basename, join } from 'path';
 
 import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 
 import {
+  AshCrd,
   ASH_OPERATOR_API_GROUP,
   ASH_OPERATOR_API_VERSION,
   ASH_OPERATOR_APPLIER,
@@ -706,88 +708,109 @@ describe('the Pod Identity agent precondition is observable', () => {
 });
 
 /*
- * THE OPERATOR'S RBAC AND CRD CONTRACT, HAND-TRANSCRIBED 2026-09-25 from its
- * `manifests/rbac.yaml` and `ash_operator/constants.py`.
+ * THE OPERATOR'S RBAC AND CRD CONTRACT, PARSED FROM THE OPERATOR'S OWN FILES.
  *
- * TRANSCRIBED, NOT READ — but the source is `deploy/kubernetes-operator/` in THIS
- * repository, on this commit. An earlier version of this comment said the operator lived
- * in a different repository, which was false; it is two directories away and should be
- * opened rather than recalled when this table is next checked.
- *
- * What the comparison below proves is that `lib/ash-eks-operator-stack.ts` agrees with
- * THIS TABLE, and nothing more. Nothing here parses `manifests/rbac.yaml`, so if the
- * operator's RBAC changes and this table is not updated, every test still passes.
- * Re-verify by hand whenever either side moves. An even earlier version claimed the test
- * compared against `rbac.yaml` directly, which read as an automated guarantee that does
- * not exist — so this comment has now been wrong in two different directions, which is
- * the argument for stating exactly what is and is not mechanical.
- *
- * This is a SECOND, INDEPENDENT copy of the table on purpose. The point of the
- * comparison below is that the constants in `lib/ash-eks-operator-stack.ts` equal
- * this table; deriving one from the other would make the test tautological.
+ * The other side of every comparison below is read from
+ * `deploy/kubernetes-operator/manifests/rbac.yaml` and
+ * `deploy/kubernetes-operator/generated/crd-*.yaml` on this commit. Until this was
+ * changed it was a second hand-transcribed copy of the table, and the comparison could
+ * only prove that the stack agreed with that copy: when the operator's AshScan CRD
+ * gained a `Coverage` printer column, the stack never installed it and every test
+ * stayed green. Parsing the operator's files is what makes a change on either side
+ * fail here.
  *
  * Compared as SETS, failing on any difference in EITHER direction. A "contains
  * everything required" assertion would pass while silently keeping an over-grant --
  * `jobs: patch` is the specific one that was here before and that the operator's
  * author deliberately removed when they moved from `kopf.on.field` to stateless
  * `on.event`. Over-grant on RBAC installed by a cluster-admin bootstrap matters as
- * much as under-grant, and set equality is what catches the two drifting apart
- * again, which is how this finding came to exist in the first place.
+ * much as under-grant.
+ *
+ * js-yaml is a direct devDependency for this. It was already in the lockfile through
+ * jest's coverage stack, and depending on a transitive copy would let an unrelated jest
+ * upgrade remove the parser this suite needs.
  */
-const AUTHORITATIVE_CLUSTER_RULES: RbacRule[] = [
-  {
-    apiGroups: ['apiextensions.k8s.io'],
-    resources: ['customresourcedefinitions'],
-    verbs: ['get', 'list', 'watch'],
-  },
-];
+const { loadAll: yamlLoadAll } = require('js-yaml') as { loadAll: (text: string) => unknown[] };
 
-const AUTHORITATIVE_NAMESPACED_RULES: RbacRule[] = [
-  {
-    apiGroups: ['ash.awslabs.github.io'],
-    resources: ['ashscans', 'ashmcpservers'],
-    verbs: ['get', 'list', 'watch', 'patch'],
-  },
-  {
-    apiGroups: ['ash.awslabs.github.io'],
-    resources: ['ashscans/status', 'ashmcpservers/status'],
-    verbs: ['get', 'patch'],
-  },
-  {
-    apiGroups: ['batch'],
-    resources: ['jobs'],
-    verbs: ['get', 'list', 'watch', 'create', 'delete'],
-  },
-  { apiGroups: [''], resources: ['pods'], verbs: ['get', 'list', 'watch'] },
-  {
-    apiGroups: [''],
-    resources: ['configmaps'],
-    verbs: ['get', 'list', 'watch', 'create', 'delete'],
-  },
-  {
-    apiGroups: [''],
-    resources: ['persistentvolumeclaims'],
-    verbs: ['get', 'list', 'watch', 'create', 'delete'],
-  },
-  { apiGroups: [''], resources: ['events'], verbs: ['create'] },
-  { apiGroups: ['events.k8s.io'], resources: ['events'], verbs: ['create'] },
-  {
-    apiGroups: ['apps'],
-    resources: ['deployments'],
-    verbs: ['get', 'list', 'watch', 'create', 'patch'],
-  },
-  {
-    apiGroups: [''],
-    resources: ['services'],
-    verbs: ['get', 'list', 'watch', 'create', 'patch'],
-  },
-  // No coordination.k8s.io/leases rule. It was granted on an invented reason ("kopf
-  // peering needs it") and measurement against the running operator showed it unused:
-  // a full three-shard scan completed without it, no leases existed in the namespace,
-  // and the e2e suite passed 38/0. It is being removed from the operator's rbac.yaml
-  // too. The five (group, resource, verb) triples it contributed were the only
-  // over-grant in this stack.
-];
+const OPERATOR_DIR = join(__dirname, '..', '..', 'kubernetes-operator');
+const OPERATOR_RBAC_YAML = join(OPERATOR_DIR, 'manifests', 'rbac.yaml');
+const OPERATOR_CRD_YAMLS = ['crd-ashscans.yaml', 'crd-ashmcpservers.yaml'].map((name) =>
+  join(OPERATOR_DIR, 'generated', name),
+);
+
+/** One Kubernetes document, as far as these tests read it. */
+interface K8sDoc {
+  readonly kind: string;
+  readonly metadata: { readonly name: string; readonly namespace?: string };
+  readonly rules?: RbacRule[];
+  readonly spec?: any;
+}
+
+function loadYamlDocs(path: string): K8sDoc[] {
+  // loadAll, and nulls dropped: a leading or trailing `---` yields an empty document.
+  return yamlLoadAll(readFileSync(path, 'utf8')).filter((d) => d != null) as K8sDoc[];
+}
+
+/** The one document of `kind` named `name`; anything else is a parse problem, not drift. */
+function only(docs: K8sDoc[], kind: string, name: string): K8sDoc {
+  const found = docs.filter((d) => d.kind === kind && d.metadata?.name === name);
+  if (found.length !== 1) {
+    throw new Error(`expected one ${kind}/${name} in the operator manifests, found ${found.length}`);
+  }
+  return found[0];
+}
+
+/** What the operator's own files declare, in the stack's vocabulary. */
+interface OperatorContract {
+  readonly clusterRules: RbacRule[];
+  readonly namespacedRules: RbacRule[];
+  readonly serviceAccounts: string[];
+  readonly crds: Array<{
+    readonly group: string;
+    readonly versions: string[];
+    readonly entry: AshCrd;
+  }>;
+}
+
+function loadOperatorContract(rbacPath: string, crdPaths: string[]): OperatorContract {
+  const rbac = loadYamlDocs(rbacPath);
+  const crds = crdPaths.flatMap(loadYamlDocs).filter((d) => d.kind === 'CustomResourceDefinition');
+  return {
+    clusterRules: only(rbac, 'ClusterRole', 'ash-operator-crd-reader').rules ?? [],
+    namespacedRules: only(rbac, 'Role', 'ash-operator').rules ?? [],
+    serviceAccounts: rbac
+      .filter((d) => d.kind === 'ServiceAccount')
+      .map((d) => d.metadata.name)
+      .sort(),
+    crds: crds.map((d) => {
+      const versions = d.spec.versions as any[];
+      // The stack installs exactly one version; a second one in the operator's CRD is
+      // drift, and is reported through `versions` rather than silently read from [0].
+      const v0 = versions[0];
+      return {
+        group: d.spec.group,
+        versions: versions.map((v) => v.name),
+        entry: {
+          kind: d.spec.names.kind,
+          listKind: d.spec.names.listKind,
+          plural: d.spec.names.plural,
+          singular: d.spec.names.singular,
+          shortNames: d.spec.names.shortNames ?? [],
+          required: v0.schema.openAPIV3Schema.properties.spec.required ?? [],
+          printerColumns: (v0.additionalPrinterColumns ?? []).map((c: any) => ({
+            name: c.name,
+            type: c.type,
+            jsonPath: c.jsonPath,
+          })),
+        },
+      };
+    }),
+  };
+}
+
+const OPERATOR = loadOperatorContract(OPERATOR_RBAC_YAML, OPERATOR_CRD_YAMLS);
+const AUTHORITATIVE_CLUSTER_RULES: RbacRule[] = OPERATOR.clusterRules;
+const AUTHORITATIVE_NAMESPACED_RULES: RbacRule[] = OPERATOR.namespacedRules;
 
 /**
  * How many rules the namespaced Role must carry.
@@ -942,6 +965,117 @@ describe('the RBAC it installs equals the operator contract exactly', () => {
     expect(ASH_OPERATOR_APPLIER).toContain(pythonLiteral(ASH_OPERATOR_NAMESPACED_RULES));
     expect(ASH_OPERATOR_APPLIER).toContain('"rules": CLUSTER_RULES');
     expect(ASH_OPERATOR_APPLIER).toContain('"rules": NAMESPACED_RULES');
+  });
+});
+
+/** One CRD entry as a canonical string, so the two sides compare field by field. */
+function canonicalCrd(entry: AshCrd): string {
+  return JSON.stringify({
+    kind: entry.kind,
+    listKind: entry.listKind,
+    plural: entry.plural,
+    singular: entry.singular,
+    shortNames: [...entry.shortNames].sort(),
+    required: [...entry.required].sort(),
+    // Order kept: it is the column order `kubectl get` prints.
+    printerColumns: entry.printerColumns.map((c) => [c.name, c.type, c.jsonPath]),
+  });
+}
+
+/**
+ * Every way the stack's constants disagree with an operator contract, as readable lines.
+ *
+ * One function, used both on the real files and on the planted copies below, so the
+ * negative controls exercise the same comparison the real assertion makes.
+ */
+function contractDrift(op: OperatorContract): string[] {
+  const drift: string[] = [];
+  const diffSets = (what: string, ours: string[], theirs: string[]) => {
+    for (const x of ours.filter((v) => !theirs.includes(v))) drift.push(`${what}: only in the stack: ${x}`);
+    for (const x of theirs.filter((v) => !ours.includes(v))) drift.push(`${what}: only in the operator: ${x}`);
+  };
+  diffSets('cluster rules', canonicalSet(ASH_OPERATOR_CLUSTER_RULES), canonicalSet(op.clusterRules));
+  diffSets('namespaced rules', canonicalSet(ASH_OPERATOR_NAMESPACED_RULES), canonicalSet(op.namespacedRules));
+  diffSets('service accounts', [OPERATOR_SERVICE_ACCOUNT, SCAN_SERVICE_ACCOUNT].sort(), op.serviceAccounts);
+  for (const crd of op.crds) {
+    if (crd.group !== ASH_OPERATOR_API_GROUP) drift.push(`${crd.entry.plural}: group ${crd.group}`);
+    if (JSON.stringify(crd.versions) !== JSON.stringify([ASH_OPERATOR_API_VERSION])) {
+      drift.push(`${crd.entry.plural}: versions ${crd.versions.join(',')}`);
+    }
+  }
+  diffSets('CRDs', ASH_OPERATOR_CRDS.map(canonicalCrd).sort(), op.crds.map((c) => canonicalCrd(c.entry)).sort());
+  return drift;
+}
+
+/** The operator contract re-read after one textual edit to a temp copy of a file. */
+function plantedContract(file: string, from: string, to: string): OperatorContract {
+  const original = readFileSync(file, 'utf8');
+  // The plant must land. A replacement that matched nothing would leave the copy equal
+  // to the original, and the "drift is reported" assertion would then be testing the
+  // real files under another name.
+  expect(original).toContain(from);
+  const planted = original.replace(from, to);
+  expect(planted).not.toBe(original);
+  const dir = mkdtempSync(join(tmpdir(), 'ash-eks-contract-'));
+  try {
+    const copy = join(dir, basename(file));
+    writeFileSync(copy, planted);
+    const rbac = file === OPERATOR_RBAC_YAML ? copy : OPERATOR_RBAC_YAML;
+    const crds = OPERATOR_CRD_YAMLS.map((p) => (p === file ? copy : p));
+    return loadOperatorContract(rbac, crds);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("the stack's operator contract equals the operator's own files", () => {
+  test('NON-VACUITY: the parsed side is populated', () => {
+    // Both CRD files parsed, each with its names and its columns, and both accounts.
+    expect(OPERATOR.crds.map((c) => c.entry.plural).sort()).toEqual(['ashmcpservers', 'ashscans']);
+    for (const crd of OPERATOR.crds) {
+      expect(crd.entry.printerColumns.length).toBeGreaterThan(0);
+      expect(crd.entry.required).toContain('image');
+    }
+    expect(OPERATOR.serviceAccounts).toEqual(['ash-operator', 'ash-scan']);
+  });
+
+  test('there is no drift in either direction', () => {
+    // toEqual([]) prints every drifted line, so a failure names what to change.
+    expect(contractDrift(OPERATOR)).toEqual([]);
+  });
+
+  test('NEGATIVE CONTROL: an extra verb planted in rbac.yaml is reported', () => {
+    const planted = plantedContract(
+      OPERATOR_RBAC_YAML,
+      'verbs: ["get", "list", "watch", "create", "delete"]\n\n  # Pods are read',
+      'verbs: ["get", "list", "watch", "create", "delete", "patch"]\n\n  # Pods are read',
+    );
+    const drift = contractDrift(planted);
+    expect(drift).toContain('namespaced rules: only in the operator: [batch] jobs -> create,delete,get,list,patch,watch');
+    expect(drift).toContain('namespaced rules: only in the stack: [batch] jobs -> create,delete,get,list,watch');
+  });
+
+  test('NEGATIVE CONTROL: a printer column removed from the operator CRD is reported', () => {
+    const planted = plantedContract(
+      OPERATOR_CRD_YAMLS[0],
+      "    - name: Coverage\n      type: boolean\n      jsonPath: .status.coverageComplete\n",
+      '',
+    );
+    const drift = contractDrift(planted);
+    expect(drift.filter((line) => line.startsWith('CRDs: only in the stack:'))).toHaveLength(1);
+    expect(drift.filter((line) => line.startsWith('CRDs: only in the operator:'))).toHaveLength(1);
+  });
+
+  test('NEGATIVE CONTROL: a renamed ServiceAccount in rbac.yaml is reported', () => {
+    const planted = plantedContract(
+      OPERATOR_RBAC_YAML,
+      'kind: ServiceAccount\nmetadata:\n  name: ash-scan\n',
+      'kind: ServiceAccount\nmetadata:\n  name: ash-scanner\n',
+    );
+    expect(contractDrift(planted)).toEqual([
+      'service accounts: only in the stack: ash-scan',
+      'service accounts: only in the operator: ash-scanner',
+    ]);
   });
 });
 

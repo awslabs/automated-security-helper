@@ -49,40 +49,69 @@ TEMPLATE = REPO_ROOT / "deploy/cdk/templates/AshEksOperator.template.json"
 OPERATOR_YAML = REPO_ROOT / "deploy/kubernetes-operator/manifests/operator.yaml"
 GROUP = "ash.awslabs.github.io"
 
-# Transcribed from the operator's own generated manifests at
-# deploy/kubernetes-operator/generated/. Hand-transcribed, not parsed: nothing couples
-# this table to those files, so re-check it when either moves.
-EXPECTED_CRDS = {
-    "ashscans": {
-        "kind": "AshScan",
-        "listKind": "AshScanList",
-        "singular": "ashscan",
-        "shortNames": ["ashscan"],
-        "required": ["image", "shardCount", "source"],
-        "columns": ["Phase", "Shards", "Actionable", "Coverage", "Incomplete", "Age"],
-    },
-    "ashmcpservers": {
-        "kind": "AshMcpServer",
-        "listKind": "AshMcpServerList",
-        "singular": "ashmcpserver",
-        "shortNames": ["ashmcp"],
-        "required": ["image"],
-        "columns": ["Phase", "Endpoint", "Age"],
-    },
-}
+OPERATOR_DIR = REPO_ROOT / "deploy/kubernetes-operator"
+RBAC_YAML = OPERATOR_DIR / "manifests/rbac.yaml"
+CRD_YAMLS = sorted((OPERATOR_DIR / "generated").glob("crd-*.yaml"))
 
-EXPECTED_NAMESPACED_RULES = [
-    ([GROUP], ["ashscans", "ashmcpservers"], ["get", "list", "patch", "watch"]),
-    ([GROUP], ["ashscans/status", "ashmcpservers/status"], ["get", "patch"]),
-    (["batch"], ["jobs"], ["create", "delete", "get", "list", "watch"]),
-    ([""], ["pods"], ["get", "list", "watch"]),
-    ([""], ["configmaps"], ["create", "delete", "get", "list", "watch"]),
-    ([""], ["persistentvolumeclaims"], ["create", "delete", "get", "list", "watch"]),
-    ([""], ["events"], ["create"]),
-    (["events.k8s.io"], ["events"], ["create"]),
-    (["apps"], ["deployments"], ["create", "get", "list", "patch", "watch"]),
-    ([""], ["services"], ["create", "get", "list", "patch", "watch"]),
-]
+
+def _yaml_docs(path: pathlib.Path) -> list:
+    return [doc for doc in yaml.safe_load_all(path.read_text()) if doc]
+
+
+def _operator_crds() -> dict:
+    """The operator's generated CRDs, by plural.
+
+    Parsed, not transcribed. This table used to be a hand copy of those files, and it
+    agreed with the template while both lacked the `Coverage` column the operator's
+    AshScan CRD had gained.
+    """
+    crds = {}
+    for path in CRD_YAMLS:
+        for doc in _yaml_docs(path):
+            if doc["kind"] == "CustomResourceDefinition":
+                crds[doc["spec"]["names"]["plural"]] = doc
+    return crds
+
+
+def _operator_role_rules() -> list:
+    roles = [
+        doc
+        for doc in _yaml_docs(RBAC_YAML)
+        if doc["kind"] == "Role" and doc["metadata"]["name"] == "ash-operator"
+    ]
+    assert len(roles) == 1, f"expected one Role/ash-operator in {RBAC_YAML}"
+    return [
+        (r["apiGroups"], r["resources"], sorted(r["verbs"])) for r in roles[0]["rules"]
+    ]
+
+
+def _spec_schema(crd: dict) -> dict:
+    """The `spec` schema of a CRD's one served version."""
+    return crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+
+
+OPERATOR_CRDS = _operator_crds()
+EXPECTED_CRDS = {
+    plural: {
+        "kind": crd["spec"]["names"]["kind"],
+        "listKind": crd["spec"]["names"]["listKind"],
+        "singular": crd["spec"]["names"]["singular"],
+        "shortNames": crd["spec"]["names"].get("shortNames", []),
+        "required": _spec_schema(crd).get("required", []),
+        "columns": crd["spec"]["versions"][0].get("additionalPrinterColumns", []),
+    }
+    for plural, crd in OPERATOR_CRDS.items()
+}
+EXPECTED_NAMESPACED_RULES = _operator_role_rules()
+
+
+def test_the_parsed_operator_contract_is_populated() -> None:
+    """Non-vacuity: a parser that found nothing would make every comparison below pass."""
+    assert sorted(EXPECTED_CRDS) == ["ashmcpservers", "ashscans"]
+    for want in EXPECTED_CRDS.values():
+        assert "image" in want["required"]
+        assert any(column["name"] == "Phase" for column in want["columns"])
+    assert len(EXPECTED_NAMESPACED_RULES) == 10
 
 
 def _flatten(node) -> str:
@@ -379,7 +408,9 @@ class TestCrds:
         """
         version = self._crds(docs)[plural]["spec"]["versions"][0]
         names = [column["name"] for column in version["additionalPrinterColumns"]]
-        assert names == EXPECTED_CRDS[plural]["columns"]
+        # Whole columns, in order: a column with the right name and the wrong jsonPath
+        # prints a blank cell in `kubectl get`.
+        assert version["additionalPrinterColumns"] == EXPECTED_CRDS[plural]["columns"]
         assert "Phase" in names
         for column in version["additionalPrinterColumns"]:
             assert set(column) == {"name", "type", "jsonPath"}
@@ -397,6 +428,31 @@ class TestCrds:
         # And unknown fields survive, so a richer spec still validates against the subset
         # schema this stack installs.
         assert spec_schema["x-kubernetes-preserve-unknown-fields"] is True
+
+    @pytest.mark.parametrize("plural", sorted(EXPECTED_CRDS))
+    def test_subset_constraints_equal_the_operator_crd(
+        self, docs: list, plural: str
+    ) -> None:
+        """Every constraint the subset schema states is the operator CRD's own.
+
+        The subset is deliberate (the full CRDs do not fit the inline template budget),
+        but what it DOES validate has to agree with the real schema. A `shardCount`
+        maximum of 50 here and 100 there would reject, at install time on EKS, a scan the
+        operator accepts everywhere else. Unknown-field preservation is the subset's own
+        mechanism and is the one key not compared.
+        """
+        subset = _spec_schema(self._crds(docs)[plural])["properties"]
+        real = _spec_schema(OPERATOR_CRDS[plural])["properties"]
+        assert subset, "the subset schema declares no spec properties"
+        for name, constraints in subset.items():
+            assert name in real, f"{plural}: spec.{name} is not in the operator CRD"
+            for key, value in constraints.items():
+                if key == "x-kubernetes-preserve-unknown-fields":
+                    continue
+                assert real[name].get(key) == value, (
+                    f"{plural}: spec.{name}.{key} is {value!r} in the stack and "
+                    f"{real[name].get(key)!r} in the operator CRD"
+                )
 
 
 class TestRbac:
