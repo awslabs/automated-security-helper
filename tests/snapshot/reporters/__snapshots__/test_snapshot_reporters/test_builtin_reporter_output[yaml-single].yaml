@@ -386,7 +386,7 @@ ash_config:
         severity: []
         severity_threshold: null
         sha256: {}
-        version: v1.15.1
+        version: v1.30.2
     semgrep:
       enabled: true
       name: semgrep

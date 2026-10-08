@@ -33,24 +33,24 @@ hand in two places drifts. Everything that needs a database's age bound reads it
 The inventory, and what each entry's bound is
 ---------------------------------------------
 Read from each tool's source at the version ASH pins. The Dockerfile's ``GRYPE_VERSION`` is
-v0.111.0 and its ``TRIVY_VERSION`` is v0.69.3. Each entry also says, in ``bound_source``,
+v0.120.1 and its ``TRIVY_VERSION`` is v0.75.0. Each entry also says, in ``bound_source``,
 where its number comes from, and ``bound_is_tool_default`` separates a number the tool itself
 enforces from one ASH chose.
 
 grype's vulnerability database
     grype's own default is ``time.Hour * 24 * 5, // 5 days``
-    (grype/db/v6/installation/curator.go:58 at v0.111.0), exposed as
+    (grype/db/v6/installation/curator.go:58 at v0.120.1), exposed as
     ``db.max-allowed-built-age`` / ``GRYPE_DB_MAX_ALLOWED_BUILT_AGE``, and enforced only while
     ``db.validate-age`` is true (its default, curator.go:56). With it true, a database older
     than the bound forces a download, and if the download fails the scan fails with "the
-    vulnerability database was built %s ago (max allowed age is %s)" (curator.go:613). That is
+    vulnerability database was built %s ago (max allowed age is %s)" (curator.go:615). That is
     loud, which is correct. ASH declares that same 120h here and passes it explicitly. Age is
     read from ``built`` in ``grype db status -o json``, the timestamp grype itself checks.
 
 trivy's vulnerability database
     trivy has no max-age option. Its freshness rule is the database's own ``NextUpdate``
     metadata: a database is current while ``now`` is before it, and is replaced once it passes
-    (``isNewDB``, pkg/db/db.go:172-183 at v0.69.3). The published database sets
+    (``isNewDB``, pkg/db/db.go:172-183 at v0.75.0). The published database sets
     ``NextUpdate`` to its build time plus the builder's ``--update-interval``
     (trivy-db pkg/vulndb/db.go:90), which the publishing build passes as ``24h``
     (trivy-db Makefile:94, and the flag's default in pkg/app.go:50, at trivy-db commit
@@ -73,7 +73,7 @@ Where a stale database used to be used SILENTLY
 Until the scan-time check existed, in ASH's offline mode:
 
 * grype: ``GrypeScanner`` sets ``GRYPE_DB_VALIDATE_AGE=false`` in offline mode, and grype's
-  ``validateAge`` then returns nil (curator.go:603), so any age was used. Measured with grype
+  ``validateAge`` then returns nil (curator.go:605), so any age was used. Measured with grype
   v0.111.0: a database built 10 days earlier scanned with exit 0 and no warning, and ASH's
   ``validate_grype_offline_mode`` reported it "0 days old" because it read file mtime.
 * trivy: ``--skip-db-update`` uses whatever database is present, with only a debug-level line.
@@ -203,7 +203,7 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
         max_age=GRYPE_DB_MAX_AGE,
         bound_source=(
             "grype's own default, `time.Hour * 24 * 5` "
-            "(grype/db/v6/installation/curator.go:58 at v0.111.0)"
+            "(grype/db/v6/installation/curator.go:58 at v0.120.1)"
         ),
         bound_is_tool_default=True,
         age_source="`built` in `grype db status -o json`, the database's own build time",
@@ -218,7 +218,7 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
         how_enforced=(
             "grype refuses a database built longer ago than db.max-allowed-built-age while "
             "db.validate-age is true: it downloads a newer one, and fails the scan if it "
-            "cannot (grype/db/v6/installation/curator.go:219-223,603-613 at v0.111.0). "
+            "cannot (grype/db/v6/installation/curator.go:221-225,605-615 at v0.120.1). "
             "Offline, validate-age is off, and ASH's scan-time check holds the same bound"
         ),
         cacheable_in_ci=True,
@@ -230,7 +230,7 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
         max_age=TRIVY_DB_MAX_AGE,
         bound_source=(
             "trivy's own rule: a database is current until its NextUpdate "
-            "(pkg/db/db.go:172-183 at v0.69.3), and the published database's NextUpdate is "
+            "(pkg/db/db.go:172-183 at v0.75.0), and the published database's NextUpdate is "
             "its UpdatedAt plus `--update-interval 24h` (trivy-db Makefile:94 and "
             "pkg/vulndb/db.go:90 at 650c4091)"
         ),
@@ -245,7 +245,7 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
         ),
         how_enforced=(
             "no max-age option exists; trivy refreshes on its own NextUpdate metadata unless "
-            "--skip-db-update is passed (pkg/db/db.go:145-174 at v0.69.3). ASH's scan-time "
+            "--skip-db-update is passed (pkg/db/db.go:145-174 at v0.75.0). ASH's scan-time "
             "check holds it to the bound in both modes"
         ),
     ),
