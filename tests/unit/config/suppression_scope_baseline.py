@@ -140,7 +140,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("CKV_AWS_116", "deploy/cdk/templates/AshCodeCommitGate.template.json"),
         ("CKV_AWS_117", "deploy/cdk/templates/AshCodeCommitGate.template.json"),
         ("CKV_AWS_51", "deploy/cdk/templates/AshCodeCommitGate.template.json"),
-        ("CKV_SECRET_6", "deploy/cdk/templates/AshCodeCommitGate.template.json"),
         ("F3031", "deploy/cdk/templates/AshCodeCommitGate.template.json"),
         ("F3033", "deploy/cdk/templates/AshCodeCommitGate.template.json"),
         (
@@ -157,10 +156,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ),
         (
             "HIPAA.Security-LambdaInsideVPC",
-            "deploy/cdk/templates/AshCodeCommitGate.template.json",
-        ),
-        (
-            "HIPAA.Security-SecretsManagerRotationEnabled",
             "deploy/cdk/templates/AshCodeCommitGate.template.json",
         ),
         (
@@ -188,10 +183,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
             "deploy/cdk/templates/AshCodeCommitGate.template.json",
         ),
         (
-            "NIST.800.53.R5-SecretsManagerRotationEnabled",
-            "deploy/cdk/templates/AshCodeCommitGate.template.json",
-        ),
-        (
             "PCI.DSS.321-CodeBuildProjectSourceRepoUrl",
             "deploy/cdk/templates/AshCodeCommitGate.template.json",
         ),
@@ -208,17 +199,12 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
             "deploy/cdk/templates/AshCodeCommitGate.template.json",
         ),
         (
-            "SECRET-SECRET-KEYWORD",
-            "deploy/cdk/templates/AshCodeCommitGate.template.json",
-        ),
-        (
             "AwsSolutions-CB5",
             "deploy/cdk/templates/AshDistributedPipeline.template.json",
         ),
         ("CFN_NAG_W12", "deploy/cdk/templates/AshDistributedPipeline.template.json"),
         ("CFN_NAG_W76", "deploy/cdk/templates/AshDistributedPipeline.template.json"),
         ("CKV_AWS_51", "deploy/cdk/templates/AshDistributedPipeline.template.json"),
-        ("CKV_SECRET_6", "deploy/cdk/templates/AshDistributedPipeline.template.json"),
         ("F3031", "deploy/cdk/templates/AshDistributedPipeline.template.json"),
         ("F3033", "deploy/cdk/templates/AshDistributedPipeline.template.json"),
         (
@@ -235,10 +221,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ),
         (
             "HIPAA.Security-S3DefaultEncryptionKMS",
-            "deploy/cdk/templates/AshDistributedPipeline.template.json",
-        ),
-        (
-            "HIPAA.Security-SecretsManagerRotationEnabled",
             "deploy/cdk/templates/AshDistributedPipeline.template.json",
         ),
         (
@@ -270,10 +252,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
             "deploy/cdk/templates/AshDistributedPipeline.template.json",
         ),
         (
-            "NIST.800.53.R5-SecretsManagerRotationEnabled",
-            "deploy/cdk/templates/AshDistributedPipeline.template.json",
-        ),
-        (
             "PCI.DSS.321-CodeBuildProjectSourceRepoUrl",
             "deploy/cdk/templates/AshDistributedPipeline.template.json",
         ),
@@ -291,10 +269,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ),
         (
             "SECRET-BASE64-HIGH-ENTROPY-STRING",
-            "deploy/cdk/templates/AshDistributedPipeline.template.json",
-        ),
-        (
-            "SECRET-SECRET-KEYWORD",
             "deploy/cdk/templates/AshDistributedPipeline.template.json",
         ),
         ("AwsSolutions-EC23", "deploy/cdk/templates/AshFargate.template.json"),

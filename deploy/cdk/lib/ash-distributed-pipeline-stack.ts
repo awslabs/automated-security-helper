@@ -110,7 +110,6 @@ import {
   suppressPipelineActionRoleWildcards,
   suppressPipelineRoleWildcards,
   suppressScanProjectRoleWildcards,
-  suppressSecretRotation,
   suppressUnevaluableRules,
 } from './ash-nag-suppressions';
 import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope, ashRoleSplitScopeOf } from './ash-policy-split';
@@ -376,7 +375,6 @@ export class AshDistributedPipelineStack extends Stack {
       ],
     });
 
-    suppressSecretRotation(config.authSecret);
     suppressPipelineRoleWildcards(pipeline.role);
     /*
      * The IAM5 wildcards are suppressed on `ashRoleSplitScopeOf(project)`, not on the

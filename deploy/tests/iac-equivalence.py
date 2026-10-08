@@ -714,26 +714,6 @@ BASELINE: dict[tuple[str, str, str], str] = {
         "`count = var.create_endpoint ? 1 : 0`. Same endpoint either way; only "
         "one of the two tools models it as a resource."
     ),
-    # --- the MCP auth secret on targets that cannot use it ---
-    ("AshCodeCommitGate", "cfn-only", "secret"): (
-        "CDK's shared Config construct creates the McpAuthHeaderValue secret "
-        "(`ConfigMcpAuthHeaderSecret`) in all four target stacks, including this "
-        "one -- which runs ASH as a one-shot Lambda and serves no MCP endpoint. "
-        "Measured: the secret's only reference in the template is "
-        "ScanFunctionRoleDefaultPolicy, an IAM grant to READ it. It reaches no "
-        "environment variable and no output, so nothing consumes its value. "
-        "deploy/terraform/README.md's variable contract lists McpAuthHeaderValue "
-        "as applying to agentcore and fargate only, and the Terraform modules "
-        "follow that. The divergence is CDK provisioning -- and granting read on "
-        "-- a secret this target cannot use, so the Terraform side is the one "
-        "that matches the documented contract."
-    ),
-    ("AshDistributedPipeline", "cfn-only", "secret"): (
-        "Same as AshCodeCommitGate, and wider: the secret is referenced by five "
-        "IAM policies (each shard project's role plus the merge project's), all "
-        "of them grants to read it, and by nothing that consumes its value. This "
-        "target runs sharded CodeBuild jobs and serves no MCP endpoint."
-    ),
     # --- a CloudFormation capability gap ---
     ("AshCodeCommitGate", "tf-only", "codecommit-approval-rule-template"): (
         "A platform gap, stated in the CDK source itself: "

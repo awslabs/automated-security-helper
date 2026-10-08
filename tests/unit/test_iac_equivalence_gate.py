@@ -583,30 +583,28 @@ def test_a_reversed_divergence_is_reported_as_reversed(tree: Path) -> None:
     cfn_before = load_checker(tree).load_cfn("AshCodeCommitGate")
     tf_before = load_checker(tree).load_tf("codecommit-gate")
 
-    # BASELINE carries ("AshCodeCommitGate", "cfn-only", "secret"). Take the
-    # secret off the CFN side and put one on the Terraform side.
+    # BASELINE carries ("AshCodeCommitGate", "cfn-only", "kms-key"). Take the
+    # key off the CFN side and put one on the Terraform side. (This used the
+    # "secret" entry until the gate stack stopped creating the MCP auth secret.)
     doc = json.loads(tpl.read_text())
     removed = [
         lid
         for lid, body in doc["Resources"].items()
-        if body.get("Type") == "AWS::SecretsManager::Secret"
+        if body.get("Type") == "AWS::KMS::Key"
     ]
     for lid in removed:
         del doc["Resources"][lid]
     tpl.write_text(json.dumps(doc, indent=1))
-    tf.write_text(
-        tf.read_text()
-        + '\nresource "aws_secretsmanager_secret" "planted" {\n  name = "x"\n}\n'
-    )
+    tf.write_text(tf.read_text() + '\nresource "aws_kms_key" "planted" {\n}\n')
 
     cfn_after = load_checker(tree).load_cfn("AshCodeCommitGate")
     tf_after = load_checker(tree).load_tf("codecommit-gate")
 
     # Both halves of the mutation landed in the parse, in opposite directions.
-    assert cfn_before.get("AWS::SecretsManager::Secret") == 1
-    assert "AWS::SecretsManager::Secret" not in cfn_after
-    assert "aws_secretsmanager_secret" not in tf_before
-    assert tf_after.get("aws_secretsmanager_secret") == 1
+    assert cfn_before.get("AWS::KMS::Key") == 1
+    assert "AWS::KMS::Key" not in cfn_after
+    assert "aws_kms_key" not in tf_before
+    assert tf_after.get("aws_kms_key") == 1
 
     result = run_checker(tree)
     assert result.returncode != 0
