@@ -108,6 +108,7 @@ jobs:
           tests/unit/test_release_notes_workflow.py
           tests/unit/test_floating_major_tag_workflow.py
           tests/unit/test_e2e_n1_fetch.py
+          tests/unit/test_e2e_prev_tree.py
           tests/unit/test_package_formats_workflow.py
 
       - name: The publish census can fail, then the real census
