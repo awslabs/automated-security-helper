@@ -22,6 +22,10 @@ across the CWD-sensitive suites, because the decomposition deliberately removed
 process-wide cwd dependence (see tests/unit/test_cwd_defaults_fix.py). Resolving the
 probe explicitly is, and it is also what scanning several projects in one process
 requires.
+
+A config file inside the scanned tree, found by name or named by the option, is no
+longer passed to checkov at all (config/path_trust.py), so the tests that check how
+a path is resolved use a file outside the source directory.
 """
 
 from pathlib import Path
@@ -64,21 +68,19 @@ def dirs(tmp_path):
 
 
 class TestConfigResolvedAgainstSourceDir:
-    def test_finds_config_in_source_dir(self, dirs):
+    def test_a_config_found_in_source_dir_is_not_passed(self, dirs):
         src, out = dirs
         cfg = src / ".ash" / ".checkov.yaml"
         cfg.write_text("skip-check:\n  - CKV_AWS_18\n")
 
-        args = _config_args(_scanner(src, out))
-        assert args, "config in source_dir was not discovered"
-        assert Path(args[0]) == cfg.resolve(), args
+        assert _config_args(_scanner(src, out)) == []
 
     def test_config_arg_is_absolute(self, dirs):
         """The subprocess cwd is source_dir; a cwd-relative arg is ambiguous."""
         src, out = dirs
-        (src / ".ash" / ".checkov.yaml").write_text("skip-check: []\n")
+        (out / "rel.yaml").write_text("skip-check: []\n")
 
-        args = _config_args(_scanner(src, out))
+        args = _config_args(_scanner(src, out, config_file="../out/rel.yaml"))
         assert args and Path(args[0]).is_absolute(), args
 
     def test_ignores_config_that_only_exists_in_process_cwd(self, dirs, monkeypatch):
@@ -105,10 +107,10 @@ class TestConfigResolvedAgainstSourceDir:
 
     def test_explicit_relative_config_file_resolves_against_source_dir(self, dirs):
         src, out = dirs
-        cfg = src / "custom.yaml"
+        cfg = out / "custom.yaml"
         cfg.write_text("skip-check: []\n")
 
-        args = _config_args(_scanner(src, out, config_file="custom.yaml"))
+        args = _config_args(_scanner(src, out, config_file="../out/custom.yaml"))
         assert args and Path(args[0]) == cfg.resolve(), args
 
     def test_explicit_absolute_config_file_is_used_as_given(self, dirs):

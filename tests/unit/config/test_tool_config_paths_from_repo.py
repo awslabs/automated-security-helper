@@ -234,3 +234,80 @@ def test_an_operator_ferret_config_given_relative_is_passed_resolved(tmp_path):
         source, tmp_path, {"config_file": "../operator/ferret.yaml"}
     )
     assert found == operator.resolve()
+
+
+# Each form of a configured path, and what honored_path makes of it. The tree also
+# holds a directory literally named "~", so a caller that rebuilt the path from the
+# option's value instead of using honored_path's result would land on a file inside
+# the tree.
+_FORMS = ["~/{name}", "./{name}", "../operator/{name}", "{absolute}"]
+
+
+def _forms_setup(tmp_path: Path, monkeypatch, name: str):
+    from automated_security_helper.config.path_trust import honored_path
+
+    source = _tree(tmp_path, "")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / name).write_text("")
+    monkeypatch.setenv("HOME", str(home))
+    (source / name).write_text("")
+    (source / "~").mkdir()
+    (source / "~" / name).write_text("")
+    operator = _outside(tmp_path, name)
+
+    def expected(value: str):
+        return honored_path(value, source_dir=source, key="expected")
+
+    def value_for(form: str) -> str:
+        return form.format(name=name, absolute=operator)
+
+    return source, value_for, expected
+
+
+@pytest.mark.parametrize("form", _FORMS)
+def test_checkov_passes_exactly_the_path_that_was_checked(tmp_path, monkeypatch, form):
+    source, value_for, expected = _forms_setup(tmp_path, monkeypatch, "ck.yaml")
+    value = value_for(form)
+    argv = _checkov_argv(
+        source,
+        tmp_path,
+        config_overrides=[f"scanners.checkov.options.config_file={value}"],
+    )
+    want = expected(value)
+    if want is None:
+        assert "--config-file" not in argv
+    else:
+        assert argv[argv.index("--config-file") + 1] == want.as_posix()
+
+
+@pytest.mark.parametrize("form", _FORMS)
+def test_ferret_passes_exactly_the_path_that_was_checked(tmp_path, monkeypatch, form):
+    source, value_for, expected = _forms_setup(tmp_path, monkeypatch, "fr.yaml")
+    value = value_for(form)
+    found = _ferret_config_file(source, tmp_path, {"config_file": value})
+    want = expected(value)
+    if want is None:
+        assert found is None or "ferret-config.yaml" in str(found)
+    else:
+        assert found == want
+
+
+@pytest.mark.parametrize("form", _FORMS)
+def test_detect_secrets_keeps_exactly_the_path_that_was_checked(
+    tmp_path, monkeypatch, form
+):
+    source, value_for, expected = _forms_setup(tmp_path, monkeypatch, "pl.py")
+    value = value_for(form)
+    settings = _detect_secrets_settings(
+        source,
+        tmp_path,
+        {"plugins_used": [{"name": "StandIn", "path": f"file://{value}"}]},
+    )
+    paths = [p.get("path") for p in settings["plugins_used"] if p.get("path")]
+    if Path(value).is_absolute() and expected(value) is not None:
+        assert paths == [f"file://{expected(value).as_posix()}"]
+    else:
+        # Relative forms are dropped before any check: detect-secrets would read
+        # them from its worker's working directory.
+        assert paths == []

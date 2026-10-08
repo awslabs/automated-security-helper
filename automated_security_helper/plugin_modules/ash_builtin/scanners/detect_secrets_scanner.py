@@ -413,7 +413,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             honored = honored_path(file_part, source_dir=source_dir, key=key)
             if honored is None:
                 return False, value
-            return True, f"file://{honored.resolve().as_posix()}{separator}{function}"
+            return True, f"file://{honored.as_posix()}{separator}{function}"
 
         plugins_key = (
             "scanners.detect-secrets.options.scan_settings.plugins_used[].path"

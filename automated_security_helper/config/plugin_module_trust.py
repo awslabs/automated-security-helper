@@ -27,12 +27,16 @@ filtered here.
 from __future__ import annotations
 
 import importlib.util
+from importlib.machinery import ModuleSpec
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence
 
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.sandbox_grants import is_within
 from automated_security_helper.utils.log import ASH_LOGGER
+
+if TYPE_CHECKING:
+    from automated_security_helper.config.ash_config import AshConfig
 
 
 def split_plugin_modules(entries: Optional[Iterable[object]]) -> List[str]:
@@ -55,7 +59,7 @@ def _own_package_dir() -> Optional[Path]:
     return Path(origin).resolve().parent if origin else None
 
 
-def _spec_locations(spec) -> List[Path]:
+def _spec_locations(spec: ModuleSpec) -> List[Path]:
     locations = [Path(p) for p in (spec.submodule_search_locations or [])]
     if spec.has_location and spec.origin:
         locations.append(Path(spec.origin))
@@ -83,8 +87,8 @@ def refusal_reason(name: str, scanned_root: Path) -> Optional[str]:
 
 
 def confine_plugin_modules(
-    config,
-    trusted_config,
+    config: "AshConfig",
+    trusted_config: "AshConfig",
     config_overrides: Optional[Sequence[str]],
     scanned_root: Path,
     in_tree: Sequence[Path],

@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.config.path_trust import anchored, honored_path
+from automated_security_helper.config.path_trust import honored_path, resolved_path
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
@@ -290,10 +290,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         source_dir = Path(self.context.source_dir)
         for index, conf_path in enumerate(possible_config_paths):
             configured = index == 0 and self.config.options.config_file is not None
-            if not anchored(conf_path, source_dir).exists():
+            if not resolved_path(conf_path, source_dir).exists():
                 continue
             # A config file inside the scanned tree is not passed to checkov; see
-            # config/path_trust.py.
+            # config/path_trust.py. The path passed is the one that was checked.
             candidate = honored_path(
                 conf_path,
                 source_dir=source_dir,
@@ -303,10 +303,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
             if candidate is not None:
                 self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--config-file",
-                        value=candidate.resolve().as_posix(),
-                    )
+                    ToolExtraArg(key="--config-file", value=candidate.as_posix())
                 )
                 break
 

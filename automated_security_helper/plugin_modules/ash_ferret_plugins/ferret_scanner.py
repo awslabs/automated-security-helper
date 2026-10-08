@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 from pydantic import Field, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.config.path_trust import anchored, honored_path
+from automated_security_helper.config.path_trust import honored_path, resolved_path
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
@@ -896,49 +896,32 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         """
         # A config file inside the scanned tree is not passed to ferret-scan,
         # whether the option names it or it is found by name below; see
-        # config/path_trust.py. The bundled default is used instead.
+        # config/path_trust.py. The bundled default is used instead. The path
+        # returned is the one honored_path checked, never one rebuilt from the
+        # option's value.
         source_dir = self.context.source_dir
 
         # 1. Check explicitly specified config file
         if config_file:
-            path = Path(config_file)
-            if (
-                anchored(path, source_dir).exists()
-                and honored_path(
-                    path,
-                    source_dir=source_dir,
-                    key="scanners.ferret-scan.options.config_file",
-                )
-                is None
-            ):
-                return self._bundled_config()
-            if path.is_absolute():
-                if path.exists():
-                    self._plugin_log(
-                        f"Using explicitly specified config file: {path}",
-                        level=logging.DEBUG,
-                    )
-                    return path.resolve()
-                else:
-                    self._plugin_log(
-                        f"Specified config file not found: {path}",
-                        level=logging.WARNING,
-                    )
-                    return None
-            # Relative to source directory
-            full_path = self.context.source_dir / path
-            if full_path.exists():
+            if not resolved_path(config_file, source_dir).exists():
                 self._plugin_log(
-                    f"Using config file relative to source: {full_path}",
-                    level=logging.DEBUG,
-                )
-                return full_path.resolve()
-            else:
-                self._plugin_log(
-                    f"Specified config file not found: {full_path}",
+                    f"Specified config file not found: "
+                    f"{resolved_path(config_file, source_dir)}",
                     level=logging.WARNING,
                 )
                 return None
+            path = honored_path(
+                config_file,
+                source_dir=source_dir,
+                key="scanners.ferret-scan.options.config_file",
+            )
+            if path is None:
+                return self._bundled_config()
+            self._plugin_log(
+                f"Using explicitly specified config file: {path}",
+                level=logging.DEBUG,
+            )
+            return path
 
         # 2. Search for config files in source directory
         possible_paths = [
@@ -950,12 +933,16 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             self.context.source_dir / ".ash" / "ferret-scan.yaml",
         ]
 
-        for path in possible_paths:
-            if path.exists() and honored_path(
-                path,
+        for candidate in possible_paths:
+            if not resolved_path(candidate, source_dir).exists():
+                continue
+            path = honored_path(
+                candidate,
                 source_dir=source_dir,
-                key=f"ferret-scan config file {path.relative_to(source_dir).as_posix()}",
-            ):
+                key="ferret-scan config file "
+                + candidate.relative_to(source_dir).as_posix(),
+            )
+            if path is not None:
                 self._plugin_log(
                     f"Found Ferret config file in source directory: {path}",
                     level=logging.DEBUG,

@@ -35,10 +35,17 @@ def reset_path_refusal_warnings() -> None:
         _WARNED.clear()
 
 
-def anchored(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:
-    """``value`` with ``~`` expanded and a relative path taken from ``source_dir``."""
+def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:
+    """``value`` as the tool will read it: ``~`` expanded, a relative path taken from
+    ``source_dir``, and symlinks and ``..`` resolved.
+
+    ``honored_path`` checks this path and returns it, so a caller that hands the
+    tool the returned value hands it exactly the file that was checked.
+    """
     path = Path(os.path.expanduser(str(value)))
-    return path if path.is_absolute() else Path(source_dir) / path
+    if not path.is_absolute():
+        path = Path(source_dir) / path
+    return Path(os.path.realpath(path))
 
 
 def honored_path(
@@ -47,10 +54,12 @@ def honored_path(
     source_dir: Union[str, Path],
     key: str,
 ) -> Optional[Path]:
-    """``value`` as a path to hand the tool, or None when it is inside the scanned tree.
+    """The resolved path to hand the tool, or None when it is inside the scanned tree.
+
+    Callers pass the tool this return value and nothing rebuilt from ``value``.
 
     Args:
-        value: The configured or discovered path. None returns None.
+        value: The configured or discovered path. None or blank returns None.
         source_dir: The scan's source directory. Relative paths are taken from it.
         key: The option or file name the warning names.
     """
@@ -63,7 +72,7 @@ def honored_path(
 
     if value is None or str(value).strip() == "":
         return None
-    path = anchored(value, source_dir)
+    path = resolved_path(value, source_dir)
     if not is_within(path, scanned_tree(Path(source_dir))):
         return path
     with _WARNED_LOCK:
