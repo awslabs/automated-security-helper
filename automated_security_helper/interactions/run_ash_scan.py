@@ -10,7 +10,17 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Set, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    cast,
+)
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -65,6 +75,10 @@ from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
+from automated_security_helper.utils.process_env import (
+    apply_environ_overrides,
+    restore_environ,
+)
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
@@ -106,6 +120,12 @@ class ScanOptions(BaseModel):
     # General scan options
     config: Optional[str] = None
     config_overrides: Optional[List[str]] = Field(default_factory=list)
+    # A check every `extends` base of the config must also pass, applied by every
+    # config read below. The MCP server passes the calling session's allowed
+    # config roots (cli/mcp/sandbox.config_base_gate); None keeps the CLI rule.
+    config_base_gate: Optional[Callable[[Path], bool]] = Field(
+        default=None, exclude=True
+    )
     offline: bool = False
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
@@ -1156,7 +1176,12 @@ def _discovered_config_path(
     return discovery.selected.path.as_posix()
 
 
-def _load_with_confinement(ash_config_cls, config_path_str: str, source_dir: Path):
+def _load_with_confinement(
+    ash_config_cls,
+    config_path_str: str,
+    source_dir: Path,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+):
     """Load a config file with its `extends` bases confined as a scan would."""
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
@@ -1166,6 +1191,7 @@ def _load_with_confinement(ash_config_cls, config_path_str: str, source_dir: Pat
     return ash_config_cls.from_file(
         config_path,
         confine_to=default_confinement_root(config_path, source_dir),
+        permit_base=permit_base,
     )
 
 
@@ -1194,7 +1220,9 @@ def _load_config_file(opts: ScanOptions):
         return None
 
     try:
-        return _load_with_confinement(AshConfig, config_path_str, opts.source_dir)
+        return _load_with_confinement(
+            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
+        )
     except Exception:
         return None
 
@@ -1745,10 +1773,14 @@ def _run_local_mode(
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
-    _offline_was_set = False
+    # Through utils/process_env.py rather than os.environ directly: an MCP server
+    # runs this in an executor thread while other scans may be spawning, and the
+    # helper's lock is what keeps their environment copies consistent. The
+    # previous value is restored rather than popped, so an ASH_OFFLINE=YES the
+    # process started with survives the scan.
+    _offline_previous = None
     if opts.offline:
-        os.environ["ASH_OFFLINE"] = "YES"
-        _offline_was_set = True
+        _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
 
     _changed_file_set = None
     if opts.changed_files_only:
@@ -1841,6 +1873,7 @@ def _run_local_mode(
             excluded_scanners=list(opts.excluded_scanners or []),
             config_path=config,
             config_overrides=opts.config_overrides or [],
+            config_base_gate=opts.config_base_gate,
             verbose=opts.verbose or opts.debug,
             debug=opts.debug,
             strategy=(
@@ -1949,8 +1982,8 @@ def _run_local_mode(
         )
         sys.exit(1)
     finally:
-        if _offline_was_set:
-            os.environ.pop("ASH_OFFLINE", None)
+        if _offline_previous is not None:
+            restore_environ(_offline_previous)
 
 
 # ---------------------------------------------------------------------------
@@ -1988,7 +2021,7 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
 
     try:
         return _load_with_confinement(
-            AshConfig, config_path_str, opts.source_dir
+            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
         ).workspace
     except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
         logging.getLogger(__name__).warning(
@@ -2151,10 +2184,10 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     # with the offline flag already in the environment is a different read.
     settings = build_project_scan_settings(opts)
 
-    _offline_was_set = False
+    # Set and restored through utils/process_env.py; see _run_local_mode.
+    _offline_previous = None
     if opts.offline:
-        os.environ["ASH_OFFLINE"] = "YES"
-        _offline_was_set = True
+        _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
 
     try:
         return execute_workspace(opts.workspace_plan, settings)
@@ -2175,8 +2208,8 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         )
         sys.exit(int(WorkspaceExitCode.INTERNAL_ERROR))
     finally:
-        if _offline_was_set:
-            os.environ.pop("ASH_OFFLINE", None)
+        if _offline_previous is not None:
+            restore_environ(_offline_previous)
 
 
 def _print_workspace_summary(
@@ -2823,6 +2856,7 @@ def run_ash_scan(
     container_network: str = "bridge",
     workspace_plan: "WorkspacePlan | None" = None,
     allow_missing_projects: bool = False,
+    config_base_gate: Optional[Callable[[Path], bool]] = None,
     *args,
     **kwargs,
 ):
@@ -2891,6 +2925,7 @@ def run_ash_scan(
         container_network=container_network,
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
+        config_base_gate=config_base_gate,
     )
 
     _apply_log_level_env(opts)

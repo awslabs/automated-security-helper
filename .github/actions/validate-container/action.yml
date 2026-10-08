@@ -515,6 +515,16 @@ runs:
         fi
         echo "scan exited $rc"
 
+    # The same image must carry the license and notice files of every third-party
+    # executable it bundles; see .github/scripts/assert-image-third-party-licenses.py.
+    # OCI_RUNNER_WRAPPER comes from "Resolve the OCI runner wrapper" above, so finch
+    # and nerdctl read the image store the build wrote to.
+    - name: "Assert the image ships its bundled tools' license files"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: python3 .github/scripts/assert-image-third-party-licenses.py --runner "${RUNTIME}"
+
     # WHY THE FLAG ABOVE IS LOAD-BEARING, AND WHY THIS STEP IS NOT REDUNDANT WITH IT
     #
     # `--fail-on-incomplete-scanners` is what makes an unusable image fail, and it is

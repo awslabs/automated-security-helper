@@ -64,10 +64,24 @@ ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
 
 # Install UV
+#
+# From its pinned release asset, verified against the SHA256 in
+# automated_security_helper/utils/tool_downloads.py, the same way the core stage
+# installs syft, grype and trivy. This was `curl -LsSf https://astral.sh/uv/install.sh
+# | sh`: a remote script piped into a shell, which pinned no version and no bytes and
+# gave astral.sh code execution in the stage that builds the wheel the image ships.
+# The installer and the two files it reads are copied here as well as in the core
+# stage because a stage starts from the base image and sees nothing the other copied.
 COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
 RUN chmod +x /usr/local/bin/with-retry
-RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/install-pinned-tool
+COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
+COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
+RUN chmod +x /usr/local/bin/install-pinned-tool
+ARG UV_VERSION="0.12.23"
+RUN ASH_PINS_DIR=/ash-pins with-retry 'install-pinned-tool uv -b /root/.local/bin'
 ENV PATH="/root/.local/bin:$PATH"
+RUN uv --version
 
 WORKDIR /src
 RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
@@ -191,15 +205,17 @@ RUN set -uex; \
     apt-get -qy update; \
     apt-get -qy install --no-install-recommends nodejs;
 #
-# Install UV in the core stage
+# uv is installed in the core stage below, after the pinned-tool installer is copied
+# in, from the same verified release asset as the uv-reqs stage.
 #
-RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ENV PATH="/root/.local/bin:$PATH"
 
 #
 # Python (no-op other than updating pip --- Python deps managed via Poetry @ pyproject.toml)
 #
-RUN with-retry 'curl -sSf https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py'
+# No get-pip.py. It was fetched from bootstrap.pypa.io and executed, unpinned and
+# unverified, to install a pip the python base image already ships -- the upgrade on
+# the next line is all this step ever needed.
 RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 
 # #
@@ -290,7 +306,17 @@ COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/inst
 COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
+# Every `install-pinned-tool <tool>` from here on also installs that tool's license and
+# notice files under this directory, read from the release archive it has just
+# verified, and refuses a tool with no license entry. THIRD_PARTY_LICENSES in
+# automated_security_helper/utils/tool_downloads.py says what goes there and why. An
+# ARG, not an ENV: only this stage's build steps read it.
+ARG ASH_THIRD_PARTY_DIR="/usr/share/doc/ash/third-party"
 ENV ASH_PINS_DIR="/ash-pins"
+
+ARG UV_VERSION="0.12.23"
+RUN with-retry 'install-pinned-tool uv -b /root/.local/bin'
+RUN uv --version
 
 ARG SYFT_VERSION="v1.42.4"
 RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'
@@ -380,6 +406,14 @@ ARG TRIVY_VERSION="v0.69.3"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
+# opengrep has no release archive for install-pinned-tool to read license files from:
+# it is a bare executable that `ashx dependencies install` puts in place below. So its
+# license files are fetched on their own, each pinned by SHA256 and by the upstream
+# commit of the release the image carries. uv is not listed: `install-pinned-tool uv`
+# above already fetched its URL-pinned license files, because ASH_THIRD_PARTY_DIR was
+# set by then.
+RUN with-retry 'install-pinned-tool --licenses-only opengrep'
+
 #
 # Setting default WORKDIR to /src
 #
@@ -417,8 +451,28 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-RUN ashx dependencies install --bin-path "${ASH_BIN_PATH}"
+# bandit, checkov and semgrep are installed with `uv tool install`, and each scanner's
+# own default is a version range, so on its own this would install whatever release
+# PyPI had on the day. `--uv-tool-pins` prints the --config-overrides that pin each to
+# the version of its THIRD_PARTY_LICENSES entry, so the license files and the source
+# commit below describe the release in the image. Assigned first so a failure stops
+# the build rather than leaving the install unpinned.
+RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
+    ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
 ENV PATH="${ASH_BIN_PATH}:$PATH"
+
+# The Python tools' license files, read from each installed wheel's dist-info and,
+# for semgrep, whose wheel carries none, fetched from its repository at the pinned
+# commit and checked against their SHA256.
+RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
+
+#
+# Every bundled third-party tool has its license files, they match their pins, and
+# they describe the release actually on PATH (each tool's --version is checked).
+# After `ashx dependencies install`, which is what puts opengrep in place. Writes
+# ${ASH_THIRD_PARTY_DIR}/index.json, the list of what the image bundles.
+#
+RUN install-pinned-tool --verify-third-party
 
 #
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
@@ -492,7 +546,10 @@ ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
-RUN ashx dependencies install --bin-path "${ASH_BIN_PATH}"
+# Pinned as in the core stage: this user's uv tool directory starts empty, so the
+# Python tools are installed again here and would otherwise float.
+RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
+    ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD command -v ashx || exit 1

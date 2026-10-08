@@ -1,0 +1,458 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ASH - Release Assets
+# Builds every file a GitHub Release of ASH attaches, runs every gate on the bytes about
+# to be attached, and holds the staged set to packaging/release-assets.py. It never
+# attests and never publishes: on a push or a dispatch it is the release's dry run, and
+# ash-tag-on-merge.yml calls it and does the attesting and publishing itself, in its own
+# job, on the artifact this one uploads.
+#
+# WHY THE BUILDS COME FROM THE TEST WORKFLOWS
+#
+# The .msix, .nupkg and Flatpak bundle come from ash-package.yml and the .deb and .rpm
+# from ash-native-packages.yml, called here, rather than from a second build. Each of
+# those jobs installs its package, scans with it, upgrades to it and uninstalls it, and
+# uploads the file it did that to. Building again for the release would publish bytes
+# nothing had installed. Calling the workflows also means a release runs their whole
+# suite on the released commit, negative controls included.
+#
+# The .vsix and the JetBrains zip are built in this file, with the same commands and
+# gates as ash-vscode-extension.yml and ash-jetbrains-ci.yml, because those workflows
+# also run pixel snapshots and a full IDE test suite that say nothing about the archive.
+#
+# WHAT THE DRY RUN PROVES
+#
+# That the full set builds from this commit, that every asset passes its gate (the
+# verdicts are in the assemble job's log and step summary), that the staged directory
+# is exactly the set packaging/release-assets.py names, and that the check fails when
+# an asset is missing or an ungated file is present. It does not prove the attestation
+# step works: attesting outside a release writes to this public repository's
+# attestation store, so that runs only in the release (OD-3, default: release-only).
+#
+# NOTHING IS PUBLISHED. The artifacts below are workflow artifacts, which anyone can
+# download from a public repository; .github/scripts/assert-publish-surfaces.py lists
+# each one with the reason it is acceptable. The container image is never among them.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/ash-release-assets.yml"
+      - ".github/workflows/ash-tag-on-merge.yml"
+      - ".github/workflows/ash-package.yml"
+      - ".github/workflows/ash-native-packages.yml"
+      - ".github/scripts/assert-publish-surfaces.py"
+      - "packaging/release-assets.py"
+      - "tests/unit/test_release_assets.py"
+      - "tests/unit/test_release_workflow_references.py"
+      - "tests/unit/fixtures/pinned_action_interfaces.json"
+  workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to build. Empty means the event's commit.
+        type: string
+        required: false
+        default: ""
+      release:
+        description: >-
+          True only from ash-tag-on-merge.yml. Decides whether the MSIX signing secrets
+          are handed to the build; nothing else changes.
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      MSIX_SIGNING_PFX_BASE64:
+        required: false
+      MSIX_SIGNING_PFX_PASSWORD:
+        required: false
+    outputs:
+      artifact-id:
+        description: >-
+          The numeric ID of the artifact holding the staged, gated release assets, for
+          actions/download-artifact's artifact-ids input. An ID rather than a name:
+          upload-artifact declares no name output, and a name carrying run_attempt
+          would not match after "re-run failed jobs".
+        value: ${{ jobs.assemble.outputs.artifact-id }}
+      version:
+        description: The project version the assets were built for
+        value: ${{ jobs.assemble.outputs.version }}
+      sums:
+        description: sha256sum lines for every staged asset, computed after the gates
+        value: ${{ jobs.assemble.outputs.sums }}
+
+permissions:
+  contents: read
+
+jobs:
+  # The static half, in a minute rather than an hour: the list covers every format
+  # directory, the release attests and attaches the one checked directory, the dry run
+  # holds no write scope, the release-step harnesses still run the real step scripts, and
+  # the publish census (with its own negative controls) still matches. Unified CI runs
+  # these too, but not on a push to a development branch.
+  unit:
+    name: "unit: release asset list, release workflow, publish surfaces"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Run the unit tests
+        run: >-
+          uv run pytest -o addopts= -p no:cacheprovider
+          tests/unit/test_release_assets.py
+          tests/unit/test_release_workflow_references.py
+          tests/unit/test_release_notes_workflow.py
+          tests/unit/test_floating_major_tag_workflow.py
+          tests/unit/test_e2e_n1_fetch.py
+          tests/unit/test_e2e_prev_tree.py
+          tests/unit/test_package_formats_workflow.py
+
+      - name: The publish census can fail, then the real census
+        run: |
+          set -euo pipefail
+          uv run python .github/scripts/assert-publish-surfaces.py --self-test
+          uv run python .github/scripts/assert-publish-surfaces.py
+
+  # The wheel, sdist, .msix, .nupkg and Flatpak bundle, each gated, installed and
+  # exercised. The signing secrets reach the build for a release only: on a push the
+  # expression is the empty string, and build.ps1 self-signs, as it does for
+  # ash-package-formats.yml (tests/unit/test_release_assets.py holds this).
+  package:
+    name: Packages
+    uses: ./.github/workflows/ash-package.yml
+    with:
+      ref: ${{ inputs.ref }}
+    secrets:
+      MSIX_SIGNING_PFX_BASE64: ${{ inputs.release && secrets.MSIX_SIGNING_PFX_BASE64 || '' }}
+      MSIX_SIGNING_PFX_PASSWORD: ${{ inputs.release && secrets.MSIX_SIGNING_PFX_PASSWORD || '' }}
+
+  native:
+    name: Native packages
+    uses: ./.github/workflows/ash-native-packages.yml
+    with:
+      ref: ${{ inputs.ref }}
+
+  vsix:
+    name: "build and gate the .vsix"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # No npm cache: a cache save is a publish surface, and a release build gains
+      # nothing from one.
+      - name: Install dependencies
+        run: npm ci
+
+      # The same manifest assertion ash-vscode-extension.yml makes, for its reason:
+      # vsce bundles runtime dependencies into the archive, and an archive check alone
+      # cannot tell "none declared" from "declared and excluded".
+      - name: Assert the extension declares no runtime dependencies
+        run: |
+          count="$(node -e 'process.stdout.write(String(Object.keys(require("./package.json").dependencies || {}).length))')"
+          echo "runtime dependencies declared: $count"
+          if [ "$count" -ne 0 ]; then
+            echo "::error::editors/vscode declares $count runtime dependency/dependencies, which vsce would bundle into a published .vsix."
+            exit 1
+          fi
+
+      - name: Build the .vsix
+        run: npm run package
+
+      - name: Assert the archive carries nothing but this extension's own output
+        run: npm run verify:vsix
+
+      # Renamed to carry its version, so the release page says which one it is and
+      # packaging/release-assets.py can refuse a stale one by name.
+      - name: Name the .vsix by its version
+        run: |
+          set -euo pipefail
+          version="$(node -e 'process.stdout.write(require("./package.json").version)')"
+          mkdir -p "$GITHUB_WORKSPACE/build/vsix"
+          cp ash-vscode.vsix "$GITHUB_WORKSPACE/build/vsix/ash-vscode-${version}.vsix"
+          ls -l "$GITHUB_WORKSPACE/build/vsix"
+
+      - name: Upload the gated .vsix
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-release-vsix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/vsix/*.vsix
+          if-no-files-found: error
+          retention-days: 14
+
+  # buildPlugin only: its finalizer, assertDistributionContents, runs
+  # assert-plugin-zip-contents.py on the zip it wrote. The test suite, coverage and the
+  # IDE cycle are ash-jetbrains-ci.yml's, and say nothing more about the archive. Same
+  # image, digest and unprivileged user as that workflow, for the reasons it gives.
+  jetbrains:
+    name: "build and gate the JetBrains plugin zip"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    container:
+      image: gradle:jdk21@sha256:4debe478645a3ad9208f3403ac021859fdf4d1a819d59970d75309b098f28f76
+      options: --init
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Confirm the image has git and python3
+        run: |
+          set -euo pipefail
+          git --version
+          python3 -V
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Hand the checkout to the image's unprivileged gradle user
+        run: chown -R gradle:gradle "$GITHUB_WORKSPACE"
+
+      - name: Build the plugin zip and check what it carries
+        run: |
+          set -euo pipefail
+          bash editors/jetbrains/run-unprivileged.sh bash -c \
+            'cd editors/jetbrains && ./gradlew --no-daemon --console=plain buildPlugin'
+          python3 editors/jetbrains/assert-plugin-zip-contents.py \
+            --dist-dir build/distributions --own-jar-prefix ash-jetbrains
+
+      - name: Upload the gated plugin zip
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-release-jetbrains-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: editors/jetbrains/build/distributions/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  # Stages every asset into one flat directory, adds the two that are rendered rather
+  # than built (the .mcpb from its committed archive, the winget manifests from the
+  # staged .msix), and runs every gate on the staged bytes. Then the negative controls:
+  # the same check must fail on a copy with an asset removed and on a copy with an
+  # ungated file added.
+  assemble:
+    name: "release assets: stage, gate, and hold to the asset list"
+    needs: [package, native, vsix, jetbrains]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    # Each `steps.<id>.outputs.<name>` here must name an output the step declares
+    # (tests/unit/test_release_workflow_references.py). upload-artifact's are
+    # artifact-id, artifact-url and artifact-digest; it has no `artifact` output.
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      version: ${{ steps.version.outputs.version }}
+      sums: ${{ steps.gate.outputs.sums }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Read the project version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(uv run --no-project python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "version: ${version}"
+
+      # The Flatpak gate imports the bundle into a scratch OSTree repository and checks
+      # the commit out, so the tree gate build.sh ran can run again on the published
+      # bytes. The vsix gate runs the extension's own verifier, compiled here.
+      - name: Install the tools the gates read the archives with
+        run: |
+          set -euo pipefail
+          sudo apt-get -qq update >/dev/null
+          sudo apt-get -qq install -y --no-install-recommends flatpak ostree >/dev/null
+          flatpak --version
+          ostree --version | head -2
+          (cd editors/vscode && npm ci && npm run compile)
+
+      - name: Download the wheel and sdist
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download the .msix
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download the .nupkg
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-nupkg-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download the Flatpak bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-flatpak-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download the .deb
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-deb-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download the .rpm
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-rpm-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download the .vsix
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-release-vsix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download the JetBrains plugin zip
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-release-jetbrains-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets
+
+      # The drift check is what makes the committed archive trustworthy: release
+      # copies it rather than rebuilding it, so this proves the committed bytes still
+      # equal what _base/ generates. The member count is the gate below.
+      - name: Stage the MCPB bundle
+        run: |
+          set -euo pipefail
+          uv run --project ash-agent-plugins/agentic-coding/transpiler \
+            agentic-plugins check --drift-only
+          uv run --project ash-agent-plugins/agentic-coding/transpiler \
+            agentic-plugins release mcpb --dist release-assets
+
+      # Rendered from the staged .msix, so InstallerSha256 is the digest of the file
+      # attached beside it. set-release-metadata.py validates the filled set itself;
+      # the gate below validates it again and checks the digest against the .msix.
+      - name: Render the winget manifests for the staged .msix
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          msix=(release-assets/*.msix)
+          [ "${#msix[@]}" -eq 1 ] || { echo "::error::expected one staged .msix, found ${#msix[@]}"; exit 1; }
+          uv run --script packaging/winget/set-release-metadata.py \
+            --msix "${msix[0]}" --out-dir release-assets --tag "v${VERSION}"
+
+      - name: Prove the asset check can fail
+        run: uv run --no-project python packaging/release-assets.py --self-test
+
+      # Every gate, on the staged bytes, with one verdict per asset in the log. The
+      # list and the sums are written only when everything passed.
+      - name: Gate every release asset
+        id: gate
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-meta"
+          uv run --no-project python packaging/release-assets.py gate release-assets \
+            --version "$VERSION" \
+            --list-out "$RUNNER_TEMP/release-meta/assets.txt" \
+            --sums-out "$RUNNER_TEMP/release-meta/SHA256SUMS" | tee "$RUNNER_TEMP/release-meta/verdicts.txt"
+          {
+            echo "### Release assets for ${VERSION}: $(wc -l < "$RUNNER_TEMP/release-meta/assets.txt") file(s)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/release-meta/verdicts.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "sums<<ASH_RELEASE_SUMS_EOF"
+            cat "$RUNNER_TEMP/release-meta/SHA256SUMS"
+            echo "ASH_RELEASE_SUMS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # The negative controls, on copies of the real staged set: one asset missing, and
+      # one file no gate knows. Each must fail the set check with a message naming it,
+      # or the check that guards the release would pass a release short an asset, or
+      # one carrying something unchecked.
+      #
+      # `|| rc=$?` rather than the command and then `rc=$?`: Actions runs bash with -e,
+      # which a `set -uo pipefail` does not turn off, so a bare failing command would end
+      # the step at the first expected failure. tests/unit/test_release_assets.py runs
+      # this step against the real check and against a check that does not refuse.
+      - name: "Negative control: a missing or ungated asset fails the check"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -uo pipefail
+          failures=0
+          expect_fail() {
+            local label="$1" dir="$2" needle="$3" rc=0
+            uv run --no-project python packaging/release-assets.py check "$dir" --version "$VERSION" \
+              > "$RUNNER_TEMP/neg.out" 2>&1 || rc=$?
+            if [ "$rc" -ne 1 ] || ! grep -qF -- "$needle" "$RUNNER_TEMP/neg.out"; then
+              echo "::error::${label}: exit ${rc}, expected 1 naming '${needle}'"
+              cat "$RUNNER_TEMP/neg.out"
+              failures=$((failures + 1))
+            else
+              echo "OK: ${label} failed (exit ${rc}): $(grep -F -- "$needle" "$RUNNER_TEMP/neg.out" | head -1)"
+            fi
+          }
+          missing="$RUNNER_TEMP/neg-missing"
+          cp -a release-assets "$missing"
+          rm -f "$missing"/*.deb
+          expect_fail "the set without its .deb" "$missing" "deb: expected 1 file(s)"
+          ungated="$RUNNER_TEMP/neg-ungated"
+          cp -a release-assets "$ungated"
+          printf 'not gated\n' > "$ungated/ash-extra-${VERSION}.bin"
+          expect_fail "the set with an ungated file" "$ungated" "ash-extra-${VERSION}.bin is not a release asset"
+          [ "$failures" -eq 0 ]
+
+      # The container image is never published. This census reads every CI file for a
+      # push or a registry login, and its self-test shows it can find one.
+      - name: Assert nothing here can publish a container image
+        run: |
+          set -euo pipefail
+          uv run --no-project python .github/scripts/assert-no-image-publish.py --self-test
+          uv run --no-project python .github/scripts/assert-no-image-publish.py
+
+      - name: Upload the staged release assets
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-release-assets-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 14

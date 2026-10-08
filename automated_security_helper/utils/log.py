@@ -8,6 +8,7 @@ from rich.logging import RichHandler
 from rich.console import Console
 from rich.theme import Theme
 from pathlib import Path
+from automated_security_helper.utils.process_env import setdefault_environ
 
 
 def addLoggingLevel(levelName, levelNum, methodName=None):
@@ -412,8 +413,9 @@ def configure_windows_safe_logging():
             except locale.Error:
                 pass  # Keep default locale
 
-        # Set environment variable for subprocess encoding
-        os.environ.setdefault("PYTHONIOENCODING", "utf-8:replace")
+        # Set environment variable for subprocess encoding. Under the shared
+        # environment lock: get_logger runs this from MCP scan threads too.
+        setdefault_environ("PYTHONIOENCODING", "utf-8:replace")
 
     except ImportError:
         pass  # codecs/locale not available

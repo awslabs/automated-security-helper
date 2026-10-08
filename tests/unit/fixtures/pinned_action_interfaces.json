@@ -1,0 +1,217 @@
+{
+  "about": "Inputs and outputs of each action the release workflows pin, read from action.yml at the pinned commit. Regenerate with `python tests/unit/test_release_workflow_references.py --refresh`.",
+  "actions": {
+    "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8": {
+      "inputs": [
+        "create-storage-record",
+        "github-token",
+        "predicate",
+        "predicate-path",
+        "predicate-type",
+        "push-to-registry",
+        "show-summary",
+        "subject-checksums",
+        "subject-digest",
+        "subject-name",
+        "subject-path"
+      ],
+      "outputs": [
+        "attestation-id",
+        "attestation-url",
+        "bundle-path",
+        "storage-record-ids"
+      ],
+      "source": "https://raw.githubusercontent.com/actions/attest-build-provenance/4d101475d8b20a2381f78447822ac1eab6504dd8/action.yml"
+    },
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": {
+      "inputs": [
+        "allow-unsafe-pr-checkout",
+        "clean",
+        "fetch-depth",
+        "fetch-tags",
+        "filter",
+        "github-server-url",
+        "lfs",
+        "path",
+        "persist-credentials",
+        "ref",
+        "repository",
+        "set-safe-directory",
+        "show-progress",
+        "sparse-checkout",
+        "sparse-checkout-cone-mode",
+        "ssh-key",
+        "ssh-known-hosts",
+        "ssh-strict",
+        "ssh-user",
+        "submodules",
+        "token"
+      ],
+      "outputs": [
+        "commit",
+        "ref"
+      ],
+      "source": "https://raw.githubusercontent.com/actions/checkout/3d3c42e5aac5ba805825da76410c181273ba90b1/action.yml"
+    },
+    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c": {
+      "inputs": [
+        "artifact-ids",
+        "digest-mismatch",
+        "github-token",
+        "merge-multiple",
+        "name",
+        "path",
+        "pattern",
+        "repository",
+        "run-id",
+        "skip-decompress"
+      ],
+      "outputs": [
+        "download-path"
+      ],
+      "source": "https://raw.githubusercontent.com/actions/download-artifact/3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c/action.yml"
+    },
+    "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": {
+      "inputs": [
+        "architecture",
+        "cache",
+        "cache-dependency-path",
+        "check-latest",
+        "mirror",
+        "mirror-token",
+        "node-version",
+        "node-version-file",
+        "package-manager-cache",
+        "registry-url",
+        "scope",
+        "token"
+      ],
+      "outputs": [
+        "cache-hit",
+        "cache-matched-key",
+        "cache-primary-key",
+        "node-version"
+      ],
+      "source": "https://raw.githubusercontent.com/actions/setup-node/820762786026740c76f36085b0efc47a31fe5020/action.yml"
+    },
+    "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97": {
+      "inputs": [
+        "allow-prereleases",
+        "architecture",
+        "cache",
+        "cache-dependency-path",
+        "check-latest",
+        "freethreaded",
+        "pip-version",
+        "python-version",
+        "python-version-file",
+        "token",
+        "update-environment"
+      ],
+      "outputs": [
+        "cache-hit",
+        "python-path",
+        "python-version"
+      ],
+      "source": "https://raw.githubusercontent.com/actions/setup-python/5fda3b95a4ea91299a34e894583c3862153e4b97/action.yml"
+    },
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a": {
+      "inputs": [
+        "archive",
+        "compression-level",
+        "if-no-files-found",
+        "include-hidden-files",
+        "name",
+        "overwrite",
+        "path",
+        "retention-days"
+      ],
+      "outputs": [
+        "artifact-digest",
+        "artifact-id",
+        "artifact-url"
+      ],
+      "source": "https://raw.githubusercontent.com/actions/upload-artifact/043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/action.yml"
+    },
+    "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78": {
+      "inputs": [
+        "activate-environment",
+        "add-problem-matchers",
+        "cache-dependency-glob",
+        "cache-local-path",
+        "cache-python",
+        "cache-suffix",
+        "checksum",
+        "enable-cache",
+        "github-token",
+        "ignore-empty-workdir",
+        "ignore-nothing-to-cache",
+        "manifest-file",
+        "prune-cache",
+        "python-version",
+        "resolution-strategy",
+        "restore-cache",
+        "save-cache",
+        "tool-bin-dir",
+        "tool-dir",
+        "venv-path",
+        "version",
+        "version-file",
+        "working-directory"
+      ],
+      "outputs": [
+        "cache-hit",
+        "cache-key",
+        "python-cache-hit",
+        "python-version",
+        "uv-path",
+        "uv-version",
+        "uvx-path",
+        "venv"
+      ],
+      "source": "https://raw.githubusercontent.com/astral-sh/setup-uv/37802adc94f370d6bfd71619e3f0bf239e1f3b78/action.yml"
+    },
+    "astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7": {
+      "inputs": [
+        "activate-environment",
+        "add-problem-matchers",
+        "cache-dependency-glob",
+        "cache-local-path",
+        "cache-python",
+        "cache-suffix",
+        "checksum",
+        "download-from-astral-mirror",
+        "enable-cache",
+        "github-token",
+        "ignore-empty-workdir",
+        "ignore-nothing-to-cache",
+        "manifest-file",
+        "no-project",
+        "prune-cache",
+        "python-version",
+        "quiet",
+        "resolution-strategy",
+        "restore-cache",
+        "save-cache",
+        "tool-bin-dir",
+        "tool-dir",
+        "venv-path",
+        "version",
+        "version-file",
+        "working-directory"
+      ],
+      "outputs": [
+        "cache-hit",
+        "cache-key",
+        "python-cache-hit",
+        "python-runtime-id",
+        "python-version",
+        "uv-path",
+        "uv-version",
+        "uvx-path",
+        "venv"
+      ],
+      "source": "https://raw.githubusercontent.com/astral-sh/setup-uv/c18668ad3cf93ea998bef934396af7bb5c839dc7/action.yml"
+    }
+  }
+}

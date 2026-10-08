@@ -351,7 +351,9 @@ def test_the_inspector_pin_matches_validate_mcp():
     action = (
         REPO_ROOT / ".github" / "actions" / "validate-mcp" / "action.yml"
     ).read_text(encoding="utf-8")
-    pinned = re.findall(r'INSPECTOR_VERSION:\s*"([^"]+)"', action)
+    # The pin step writes the version once to $GITHUB_OUTPUT, and both the install
+    # and the npm cache key read it from there.
+    pinned = re.findall(r'echo "version=([^"]+)" >> "\$GITHUB_OUTPUT"', action)
     script = (REPO_ROOT / "scripts" / "e2e" / "mcpb.sh").read_text(encoding="utf-8")
     ours = re.findall(r"E2E_INSPECTOR_VERSION:-([0-9][^}]*)\}", script)
     assert len(pinned) == 1 and len(ours) == 1, (pinned, ours)

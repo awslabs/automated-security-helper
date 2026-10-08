@@ -55,6 +55,7 @@ def in_actions(monkeypatch):
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("ACTIONS_RESULTS_URL", raising=False)
     monkeypatch.delenv("ASH_DISABLE_GHA_BUILD_CACHE", raising=False)
+    monkeypatch.delenv("ASH_GHA_BUILD_CACHE_EXPORT", raising=False)
 
 
 class TestCacheEnabled:
@@ -183,6 +184,8 @@ class TestExportIsFailSoftAndBounded:
 
         Against a 10 GB per-repository cap that evicts by least-recent access
         across all workflows, that risks evicting caches other jobs depend on.
+        So min stays the DEFAULT. max is available only as an explicit opt-in
+        (TestExportMode), which this repository's CI takes on pushes to main.
         """
         args = _gha_layer_cache_args("docker", "ci", force=False, offline=False)
         cache_to = args[args.index("--cache-to") + 1]
@@ -383,3 +386,53 @@ class TestRunnerArrivesResolved:
         runner that cannot honor it.
         """
         assert _gha_layer_cache_args(runner, "ci", force=False, offline=False) == []
+
+
+class TestCacheServiceVersion:
+    """buildkit's gha backend defaults to the v1 cache service, which github.com
+    no longer serves: every import and export came back as a 400 and, under
+    ignore-error, as a silent total miss. The v2 endpoint's presence selects v2."""
+
+    def test_results_url_selects_v2_in_both_directions(self, in_actions, monkeypatch):
+        monkeypatch.setenv("ACTIONS_RESULTS_URL", "https://example.invalid/results/")
+        args = _gha_layer_cache_args("docker", "ci", force=False, offline=False)
+        assert args == [
+            "--cache-from",
+            "type=gha,version=2,scope=ash-ci-x86_64-online",
+            "--cache-to",
+            "type=gha,version=2,mode=min,ignore-error=true,scope=ash-ci-x86_64-online",
+        ]
+
+    def test_cache_url_alone_keeps_v1(self, in_actions):
+        args = _gha_layer_cache_args("docker", "ci", force=False, offline=False)
+        assert all("version=" not in a for a in args)
+
+
+class TestExportMode:
+    @pytest.fixture(autouse=True)
+    def _clean(self, monkeypatch):
+        monkeypatch.delenv("ASH_GHA_BUILD_CACHE_EXPORT", raising=False)
+
+    def test_unset_exports_min(self, in_actions):
+        args = _gha_layer_cache_args("docker", "ci", force=False, offline=False)
+        assert "mode=min" in args[args.index("--cache-to") + 1]
+
+    def test_max_is_an_explicit_opt_in(self, in_actions, monkeypatch):
+        monkeypatch.setenv("ASH_GHA_BUILD_CACHE_EXPORT", "max")
+        args = _gha_layer_cache_args("docker", "ci", force=False, offline=False)
+        assert args[args.index("--cache-to") + 1] == (
+            "type=gha,mode=max,ignore-error=true,scope=ash-ci-x86_64-online"
+        )
+
+    def test_none_reads_without_writing(self, in_actions, monkeypatch):
+        """What a pull request gets: it restores main's layers and writes nothing."""
+        monkeypatch.setenv("ASH_GHA_BUILD_CACHE_EXPORT", "none")
+        args = _gha_layer_cache_args("docker", "ci", force=False, offline=False)
+        assert args == ["--cache-from", "type=gha,scope=ash-ci-x86_64-online"]
+
+    @pytest.mark.parametrize("value", ["maximum", "true", "1"])
+    def test_an_unknown_value_exports_nothing(self, in_actions, monkeypatch, value):
+        monkeypatch.setenv("ASH_GHA_BUILD_CACHE_EXPORT", value)
+        args = _gha_layer_cache_args("docker", "ci", force=False, offline=False)
+        assert "--cache-to" not in args
+        assert "--cache-from" in args

@@ -103,3 +103,52 @@ class TestInstallDependencies:
         result = runner.invoke(dependencies_app, ["install", "--help"])
         assert result.exit_code == 0
         assert "Install dependencies" in result.output
+
+
+class TestInstallHonorsConfiguredToolVersion:
+    """`dependencies install` installs the version the resolved config names.
+
+    The image build pins bandit, checkov and semgrep by passing
+    `--config-overrides scanners.<tool>.options.tool_version===<version>` (from
+    `install-pinned-tool --uv-tool-pins`). The scanners were constructed from the
+    context alone, without their own config section, so each one fell back to its
+    class default range and `uv tool install` took whatever PyPI had that day. The
+    license entry recorded the pinned version and the build failed when the two
+    disagreed.
+    """
+
+    def _installed_argvs(self, tmp_path, monkeypatch, overrides):
+        from typer.testing import CliRunner
+
+        monkeypatch.chdir(tmp_path)
+        captured = []
+
+        def fake_run(cmd, shell=False):
+            captured.append(list(cmd))
+            return 0
+
+        args = ["--tool", "semgrep", "--bin-path", str(tmp_path / "bin")]
+        for override in overrides:
+            args += ["--config-overrides", override]
+        with patch(
+            "automated_security_helper.cli.dependencies.run_command",
+            side_effect=fake_run,
+        ):
+            result = CliRunner().invoke(dependencies_app, args)
+        assert result.exit_code == 0, result.output
+        return [" ".join(c) for c in captured]
+
+    def test_pinned_tool_version_reaches_the_install_command(
+        self, tmp_path, monkeypatch
+    ):
+        argvs = self._installed_argvs(
+            tmp_path,
+            monkeypatch,
+            ["scanners.semgrep.options.tool_version===1.179.0"],
+        )
+        assert any("semgrep==1.179.0" in a for a in argvs), argvs
+
+    def test_without_a_pin_the_default_range_is_used(self, tmp_path, monkeypatch):
+        argvs = self._installed_argvs(tmp_path, monkeypatch, [])
+        assert argvs, "no install command was issued for semgrep"
+        assert not any("semgrep==" in a for a in argvs), argvs

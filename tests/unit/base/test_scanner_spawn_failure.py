@@ -15,9 +15,9 @@ scanner".
 A spawn failure now returns 127 (what shells use for "command not runnable") with
 ``spawn_failed`` set and a stderr naming the cause. No scanner accepts 127, the
 template ``scan()`` names the cause, and ``ScannerExecutor`` reports ERROR even for
-a scanner whose own ``scan()`` returned normally. EFAULT and ETXTBSY are retried
-once. These tests raise the OSError at ``subprocess.run``, underneath every layer
-that has to carry it.
+a scanner whose own ``scan()`` returned normally. A failed spawn is not retried:
+it is reported on the first attempt, whatever the errno. These tests raise the
+OSError at ``subprocess.run``, underneath every layer that has to carry it.
 """
 
 import errno
@@ -57,11 +57,6 @@ AshAggregatedResults.model_rebuild()
 _SUBPROCESS_RUN = "automated_security_helper.utils.subprocess_utils.subprocess.run"
 _SUBPROCESS_POPEN = "automated_security_helper.utils.subprocess_utils.subprocess.Popen"
 _EFAULT = OSError(errno.EFAULT, "Bad address", "/usr/local/bin/uv")
-
-
-@pytest.fixture(autouse=True)
-def _no_retry_delay(monkeypatch):
-    monkeypatch.setattr(subprocess_utils, "_SPAWN_RETRY_DELAY_SECONDS", 0)
 
 
 class TestSpawnFailureReturnCode:
@@ -129,35 +124,36 @@ class TestSpawnFailureReturnCode:
         assert "spawn_failed" not in response
 
 
-class TestTransientSpawnFailureIsRetriedOnce:
-    @pytest.mark.parametrize("code", [errno.EFAULT, errno.ETXTBSY])
-    def test_a_second_attempt_that_starts_is_used(self, code):
-        ran = MagicMock(returncode=0, stdout="ok", stderr="")
-        with patch(
-            _SUBPROCESS_RUN, side_effect=[OSError(code, "transient"), ran]
-        ) as run:
-            response = run_command_with_output_handling(
-                ["uv"], stdout_preference="return"
-            )
-
-        assert run.call_count == 2
-        assert response["returncode"] == 0
-        assert response["stdout"] == "ok"
-
-    def test_a_second_failure_is_reported(self):
-        with patch(_SUBPROCESS_RUN, side_effect=[_EFAULT, _EFAULT]) as run:
-            response = run_command_with_output_handling(["uv"])
-
-        assert run.call_count == 2
-        assert response["returncode"] == 127
-
-    def test_other_errnos_are_not_retried(self):
-        missing = FileNotFoundError(errno.ENOENT, "No such file", "uv")
-        with patch(_SUBPROCESS_RUN, side_effect=missing) as run:
+class TestASpawnFailureIsNotRetried:
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            OSError(errno.EFAULT, "Bad address", "uv"),
+            OSError(errno.ETXTBSY, "Text file busy", "uv"),
+            FileNotFoundError(errno.ENOENT, "No such file", "uv"),
+        ],
+        ids=["EFAULT", "ETXTBSY", "ENOENT"],
+    )
+    def test_run_command_with_output_handling(self, exc):
+        with patch(_SUBPROCESS_RUN, side_effect=exc) as run:
             response = run_command_with_output_handling(["uv"])
 
         assert run.call_count == 1
         assert response["returncode"] == 127
+        assert response["spawn_failed"] is True
+
+    def test_run_command(self):
+        with patch(_SUBPROCESS_RUN, side_effect=_EFAULT) as run:
+            result = run_command(["uv", "--version"])
+
+        assert run.call_count == 1
+        assert result.returncode == 127
+
+    def test_run_command_stream_output(self):
+        with patch(_SUBPROCESS_POPEN, side_effect=_EFAULT) as popen:
+            assert run_command_stream_output(["uv", "--version"]) == 127
+
+        assert popen.call_count == 1
 
 
 def test_uv_tool_runner_carries_the_flag(tmp_path):
@@ -199,7 +195,7 @@ def test_semgrep_through_uv_is_not_accepted(semgrep):
     ):
         scanner.scan(target=source, target_type="source")
 
-    assert run.call_count == 2, "EFAULT is retried once, then reported"
+    assert run.call_count == 1, "a spawn failure is reported, not retried"
     assert run.call_args.args[0][1:3] == ["tool", "run"]
     assert scanner.exit_code == 127
     assert not scanner._exit_code_accepted()

@@ -1,5 +1,6 @@
 """Extended tests for utils/uv_tool_runner.py — covers run_tool, get_tool_installation_info, caching, and validation."""
 
+import os
 import subprocess  # nosec B404
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -335,4 +336,5 @@ class TestGetToolVersionOffline:
         monkeypatch.delenv("ASH_OFFLINE", raising=False)
         _, call = self._probe(runner)
         assert "--offline" not in call.args[0]
-        assert call.kwargs["env"] is None
+        # An explicit copy of the environment, never None: see utils/process_env.py.
+        assert call.kwargs["env"] == dict(os.environ)

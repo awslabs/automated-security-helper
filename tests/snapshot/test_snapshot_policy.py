@@ -175,10 +175,10 @@ def test_self_test_writes_only_names_a_windows_checkout_can_hold(
 ) -> None:
     """The self-test runs on the Windows unit-test legs too.
 
-    The cases for a name git would quote need ``"`` and ``\\`` in a path, which NTFS
-    refuses, so they must build those commits from git objects and never write such a
-    name to the working tree. This makes every working-tree write behave as NTFS does,
-    so the Linux and macOS legs catch a case that would only fail on Windows.
+    A case that needs a path NTFS refuses (``"``, ``\\``, a trailing dot or space)
+    must build that commit from git objects rather than write the name to the working
+    tree. This makes every working-tree write behave as NTFS does, so the Linux and
+    macOS legs catch such a case before it fails only on Windows.
     """
     real_write = trailers._Repo.write
 

@@ -118,6 +118,7 @@ scanners:
       offline: false
       patterns: []
       version: v1.15.1
+      sha256: {}
   semgrep:
     enabled: false
     options:

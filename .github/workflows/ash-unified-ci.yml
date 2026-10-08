@@ -120,9 +120,34 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - id: setup-uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
+          # Restore everywhere, save only from main. This setup-uv major defaults
+          # prune-cache to false, so the entry is the full wheel set (~254 MB on
+          # x86_64), and a pull request saves it under its own ref, where no other
+          # pull request can read it. On 2026-10-06 that one key family was 43
+          # entries and 3.62 GB, one copy per open pull request, which put the
+          # repository at 10.84 GB against its 10 GB quota and evicting. A pull
+          # request falls back to its base branch's entry, so saving from main is
+          # what every pull request already reads; the per-PR copies only served
+          # a second push to the same pull request.
+          save-cache: ${{ github.event_name == 'push' }}
+
+      - name: "Cache report: uv-lint"
+        if: ${{ !cancelled() && steps.setup-uv.outcome == 'success' }}
+        shell: bash
+        env:
+          CACHE_NAME: uv-lint
+          CACHE_HIT: ${{ steps.setup-uv.outputs.cache-hit }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -283,6 +308,121 @@ jobs:
           uv run --group dev --with 'ty==0.0.84' ty --version
           uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/
 
+  # ---------------------------------------------------------------------------
+  # actionlint over every workflow, with shellcheck on every `run:` script
+  # ---------------------------------------------------------------------------
+  #
+  # Nothing in CI linted the workflows, and on 2026-10-06 main carried eight
+  # findings: two empty `needs:` in ash-repo-docs.yml, and six unquoted
+  # expansions in run-ash-security-scan.yml -- the published reusable workflow,
+  # where an unquoted `ash-args` was glob-expanded against the caller's checkout.
+  #
+  # Both binaries are pinned by version and sha256 and verified before they run.
+  # shellcheck is pinned too, not taken from the runner image, because actionlint
+  # reports whatever the shellcheck it finds reports and an image update would
+  # otherwise change this gate's verdict with no diff here.
+  #
+  # The self-test step is the reason this job can be trusted. actionlint SKIPS the
+  # shellcheck rule silently when it cannot find shellcheck, and reports nothing
+  # for a script it did not check, so a wrong path would turn this job green over
+  # no shell checking at all. The step lints a fixture with an unquoted `$VAR` and
+  # fails the job unless SC2086 is reported.
+  #
+  # One file per invocation, each under its own timeout. actionlint 1.7.12 writes a
+  # script into shellcheck's stdin pipe before starting shellcheck
+  # (process.go, cmdExecution.run), so a script larger than the pipe's capacity
+  # blocks forever. A hosted runner's pipes hold 64 KiB and the largest `run:`
+  # block in these workflows is about 9 KiB, so it should not happen here -- but on
+  # a host whose user has exceeded fs.pipe-user-pages-soft, new pipes hold a page or
+  # two and ash-iac-drift.yml's 8.9 KiB cdk-nag script hangs (measured: scripts of
+  # 8 KB pass, 9.6 KB hang). Per file, a hang names its file and fails instead of
+  # stalling the job.
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # The digests are release checksums, which detect-secrets reads as high-entropy
+    # hex. Marked with the trailing pragma, not the `nextline` form: detect-secrets
+    # parses YAML into values and drops comment lines, so in a .yml file a pragma on
+    # the line above is never seen (measured with detect-secrets 1.5.0).
+    env:
+      ACTIONLINT_VERSION: "1.7.12"
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  # pragma: allowlist secret
+      SHELLCHECK_VERSION: "0.11.0"
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  # pragma: allowlist secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install actionlint and shellcheck, verified against their pinned digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="${RUNNER_TEMP}/lint-bin"
+          mkdir -p "${bin}"
+          cd "${RUNNER_TEMP}"
+          curl -fsSL --retry 3 -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz -C "${bin}" actionlint
+          curl -fsSL --retry 3 -o shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz -C "${bin}" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          "${bin}/actionlint" -version
+          "${bin}/shellcheck" --version
+          echo "${bin}" >> "$GITHUB_PATH"
+      - name: Self-test -- an unquoted expansion must be reported
+        shell: bash
+        run: |
+          set -uo pipefail
+          fixture="${RUNNER_TEMP}/actionlint-selftest.yml"
+          cat > "${fixture}" <<'YAML'
+          on: push
+          jobs:
+            j:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo $UNQUOTED >> $GITHUB_ENV
+          YAML
+          # GitHub runs `shell: bash` as `bash -e -o pipefail`, and `set -uo pipefail`
+          # does not turn -e off, so a bare assignment from a command that exits 1 --
+          # which this one must -- ends the step before rc is read. Capture it instead.
+          rc=0
+          out="$(actionlint -no-color -shellcheck="$(command -v shellcheck)" "${fixture}" 2>&1)" || rc=$?
+          printf '%s\n' "${out}"
+          if [ "${rc}" -eq 0 ] || ! grep -q 'SC2086' <<< "${out}"; then
+            echo "::error::actionlint did not report SC2086 for an unquoted \$UNQUOTED (exit ${rc}). It skips the shellcheck rule silently when it cannot run shellcheck, so the lint below would pass without checking any script."
+            exit 1
+          fi
+          echo "self-test ok: the unquoted expansion was reported and actionlint exited ${rc}"
+      - name: Lint every workflow
+        shell: bash
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          files=(.github/workflows/*.yml .github/workflows/*.yaml)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no workflow files found; the lint would pass over nothing"
+            exit 1
+          fi
+          failed=0
+          for f in "${files[@]}"; do
+            # `|| rc=$?`, not a bare command then rc=$?: under the runner's -e the first
+            # file with a finding would end the loop, and every file after it would go
+            # unlinted while the job still reported only that one.
+            rc=0
+            timeout 120 actionlint -color -shellcheck="$(command -v shellcheck)" "${f}" || rc=$?
+            if [ "${rc}" -eq 124 ]; then
+              echo "::error file=${f}::actionlint timed out on ${f}. See the note on this job about scripts larger than a pipe's capacity."
+              failed=1
+            elif [ "${rc}" -ne 0 ]; then
+              failed=1
+            fi
+          done
+          echo "linted ${#files[@]} workflow file(s)"
+          exit "${failed}"
+
   # A changed snapshot or other golden file must arrive in a commit whose
   # `Snapshot-Update:` trailer says why the output changed; see DEVELOPMENT.md
   # "Snapshot tests" and the docstring of the script below.
@@ -383,11 +523,115 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
   # ---------------------------------------------------------------------------
+  # Warm the ASH image's layer cache before the scan legs build it
+  # ---------------------------------------------------------------------------
+  #
+  # The python-container docker legs build the ASH image with buildx and a GitHub
+  # Actions layer cache (run_ash_container._gha_layer_cache_args). On a push to
+  # main they would all start cold at once and each export the same layers. This
+  # job builds once per architecture first and exports with mode=max, and
+  # scan-validation `needs` it, so on main the legs restore a warm cache instead.
+  #
+  # Pushes to main only. A pull request never exports layers (the legs read with
+  # ASH_GHA_BUILD_CACHE_EXPORT=none), so warming would build an image for nothing.
+  # Skipped, this job costs no runner and delays nothing: scan-validation's
+  # `!cancelled()` runs it either way.
+  #
+  # The concurrency group is the cache key -- one per architecture -- so at most one
+  # cold build per key runs at a time across runs; a later push to main waits for
+  # the first to finish and then builds against a warm cache. GitHub keeps one
+  # pending job per group and cancels an older pending one when a newer queues,
+  # which is harmless here: the cancelled run's scan legs still run, against
+  # whatever the cache holds. That is also why this job is not in required-checks'
+  # `needs` -- its verdict is speed, never correctness (see _UNGATED in
+  # .github/scripts/assert-required-checks-census.py).
+  #
+  # Layers are exported to the repository's Actions cache, which any workflow run
+  # in this repository can restore, approved fork pull requests included. The
+  # maintainer accepted that exposure for build layers only; pushing the image to a
+  # registry and uploading it as an artifact stay forbidden. See the
+  # ASH_GHA_BUILD_CACHE_EXPORT entries in .github/scripts/assert-publish-surfaces.py.
+  warm-image-layers:
+    name: "warm image layers (${{ matrix.os }})"
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: ash-image-layer-cache-${{ matrix.os }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # Same hand-off, with the same masking, as run-scan-test's step of this name;
+      # its comment carries the trade-off.
+      - name: Expose the Actions cache credentials to ASH's build
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL']) {
+              const value = process.env[name]
+              if (value) {
+                core.setSecret(value)
+                core.exportVariable(name, value)
+              } else {
+                core.info(`${name} is not set on this runner; skipping`)
+              }
+            }
+      # The legs build FROM the verified base-image layout this action hands over,
+      # so the warm build has to as well, or its layers key differently and nothing
+      # it exports is ever reused.
+      - name: Pre-pull the base image
+        uses: ./.github/actions/prepull-base-image
+        with:
+          oci-runner: docker
+          runner-wrapper: ""
+      - name: Build the image and export its layers
+        shell: bash
+        env:
+          ASH_GHA_BUILD_CACHE_EXPORT: max
+        run: |
+          start=$(date +%s)
+          ashx build-image --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          echo "image build took $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: "Cache report: image-layers"
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          log="${RUNNER_TEMP}/ash-container-build.log"
+          total=$(grep -cE '^#[0-9]+ \[' "$log" || true)
+          cached=$(grep -cE '^#[0-9]+ CACHED' "$log" || true)
+          echo "cache image-layers: ${cached}/${total} build steps cached" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Revoke the Actions cache credentials from the job environment
+        if: always()
+        shell: bash
+        run: |
+          for name in ACTIONS_RUNTIME_TOKEN ACTIONS_CACHE_URL ACTIONS_RESULTS_URL; do
+            echo "${name}=" >> "$GITHUB_ENV"
+          done
+
+  # ---------------------------------------------------------------------------
   # Scan validation: method x platform (matches ash-repo-scan-validation.yml)
   # Uses Python 3.12 exclusively.
   # ---------------------------------------------------------------------------
   scan-validation:
     name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.offline && ' [offline]' || '' }}${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
+    # After the layer-cache warm-up on main; on a pull request that job is skipped
+    # and this runs at once. `!cancelled()` rather than the implicit success(), so
+    # a skipped, failed or concurrency-cancelled warm-up never stops a scan leg.
+    needs: [warm-image-layers]
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     # Container-runtime cells are far slower than docker/python-local and were
     # being cancelled at exactly 20.3 min by the previous flat 20. Measured:
@@ -547,9 +791,15 @@ jobs:
       # log rather than surfacing as "none of the scanners this gate asserts on
       # ran". On the Windows runner only bandit and checkov are available at all, so
       # a single failed install is the difference between green and a confusing red.
+      - uses: ./.github/actions/tool-download-cache
+        with:
+          mode: restore
       - name: Install scanner dependencies
         shell: bash
         run: ashx dependencies install
+      - uses: ./.github/actions/tool-download-cache
+        with:
+          mode: save
       # One shell for both platforms, so there is one command to reason about.
       # The path is relative, so Git Bash on Windows does not rewrite it.
       # --timeout is passed explicitly so it sits next to timeout-minutes above.
@@ -626,9 +876,15 @@ jobs:
       # bandit is the only producer this gate asserts on. Installing it here means
       # an install flake fails as a failed install step with its own log, rather
       # than surfacing as "the fixture produced zero findings".
+      - uses: ./.github/actions/tool-download-cache
+        with:
+          mode: restore
       - name: Install scanner dependencies
         shell: bash
         run: ashx dependencies install
+      - uses: ./.github/actions/tool-download-cache
+        with:
+          mode: save
       - name: Verify a workspace scan keeps its projects apart
         shell: bash
         # The gate builds its workspace with tempfile.mkdtemp(). Pointing the temp
@@ -1274,10 +1530,48 @@ jobs:
   #
   # THE TWO WAYS A GATE LIKE THIS FAILS OPEN
   #
-  # `if: always()` is load-bearing, not defensive. Without it a failed dependency makes this job
+  # `always()` is load-bearing, not defensive. Without it a failed dependency makes this job
   # *skipped*, and GitHub counts a skipped required check as a pass -- so the gate would
   # disappear at exactly the moment it is supposed to speak. That is the whole failure mode this
   # job exists to remove, so it must not reproduce it.
+  #
+  # WHY THE GATE ONLY TAKES A RUNNER WHEN SOMETHING DID NOT SUCCEED
+  #
+  # The rest of the condition is `cancelled()` or `contains(needs.*.result, ...)` over failure
+  # and cancelled, so the job runs -- and fails, in the census step below -- whenever the run
+  # was cancelled or any dependency failed or was cancelled. A dependency can be skipped only
+  # when the run is cancelled (scan-validation's `if: ${{ !cancelled() }}` is the one job-level
+  # condition among them, and tests/unit/test_required_checks_census.py requires every gated
+  # job with `needs` to carry `!cancelled()` or `always()`), so `cancelled()` covers skipped too.
+  #
+  # The condition used to name `skipped` directly, and that term had to go. With
+  # warm-image-layers skipped upstream of scan-validation, `contains(needs.*.result, 'skipped')`
+  # evaluated true while `toJSON(needs)` showed every direct dependency as success -- measured
+  # on throwaway probe runs 37631261974 and 37631443473 (a skipped grandparent; a gate with only
+  # the `skipped` term ran, gates without it skipped), and on run 37542075722, where this job
+  # waited 31 minutes for a runner to report nine successes.
+  #
+  # It is skipped in exactly one case: every dependency succeeded. That is the one case where
+  # running it could only print a pass, and GitHub reports a skipped job as Success and does
+  # not let it block a merge even when it is a required check:
+  # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions
+  # So the verdict is unchanged in both directions: red whenever it was red before, and green
+  # without waiting for a runner when it was green.
+  #
+  # The waiting was most of the wall clock. This job is created the moment its last dependency
+  # finishes and then queues for an ubuntu-latest runner like any other job, behind every other
+  # open pull request's legs, to run for about five seconds. Measured over nine pull_request and
+  # push runs on 2026-10-06 (37485671493 through 37499915881): it waited a median 84 minutes and
+  # up to 105, against a median of 129 minutes for the whole run, and the gate was the last job
+  # to start in every one of them. In run 37499915881, 102 of its 194 minutes were this job
+  # waiting to execute a five-second script.
+  #
+  # The drift half of the census does not depend on this job running. The census script still
+  # runs here whenever the gate does, and tests/unit/test_required_checks_census.py takes the
+  # same census against the committed `needs` list -- read with yaml.safe_load, a stronger
+  # instrument than the script's scanner -- inside every unit-test leg, and unit-test is one of
+  # this job's dependencies. A job added to the workflow without being added to `needs` fails
+  # those tests, which fails unit-test, which makes this job run and fail.
   #
   # The second way is drift: a job added to this workflow and not added to `needs` escapes the
   # gate silently, and the gate keeps reporting success over a shrinking share of the suite. So
@@ -1306,9 +1600,10 @@ jobs:
   # two apart.
   required-checks:
     name: required-checks
-    if: always()
+    if: ${{ always() && (cancelled() || contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     needs:
       - lint
+      - actionlint
       - snapshot-trailers
       - unit-test
       - scan-validation
