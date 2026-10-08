@@ -40,6 +40,8 @@ class VersionTemplateManager:
             "docs/content/docs/migration-guide.md",
             "docs/content/docs/advanced-usage.md",
             "docs/content/docs/troubleshooting.md",
+            "docs/content/docs/suppressions.md",
+            "docs/content/docs/building-your-own-image.md",
             "docs/content/tutorials/running-ash-in-ci.md",
             "docs/content/tutorials/running-ash-locally.md",
             "examples/streamlit_ui/README.md",
