@@ -78,6 +78,13 @@ echo "== 3b. the snapshot orphan check can fail"
 # degenerated into finding nothing exits 0 and reads as a clean tree.
 python3 assert-snapshots-used.py --self-test
 
+echo "== 3c. the distribution contents check refuses every planted shape"
+# Same reason as 3b, and the planted shapes are the ones a name-only check passes: a tarball and
+# an ELF renamed to a class inside our own jar, the same two renamed to our jar itself, a zip
+# appended to an executable, and the rest listed in the script's self_test_cases. The real
+# distribution is checked after the build, by assertDistributionContents and again in step 7.
+python3 assert-plugin-zip-contents.py --self-test
+
 echo "== 4. build, test, and gate coverage"
 # `check` pulls in test, assertTestsRan and assertCoverage; buildPlugin pulls in the
 # distribution and, via finalizedBy, assertDistributionContents. Every gate is a Gradle task
