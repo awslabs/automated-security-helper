@@ -121,7 +121,7 @@ harness "$REPO/scripts/e2e/assert_outcome.py" --self-test
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO/pyproject.toml" | head -n 1)"
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
 
-HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+HEAD_SHA="$(n1_head_sha)"
 # N-1 differs from HEAD's tree, so the upgrade crosses a code change. It must carry this
 # script: a release from before the wheel leg existed was never held to the cases this
 # leg scans N-1 with.
@@ -129,8 +129,8 @@ n1_resolve scripts/e2e/wheel.sh pyproject.toml
 
 rm -rf "$WORK/src-head" "$WORK/src-prev" "$WORK/dist-head" "$WORK/dist-prev"
 mkdir -p "$WORK/src-head" "$WORK/src-prev"
-git -C "$REPO" archive HEAD | tar -x -C "$WORK/src-head"
-git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"
+n1_export HEAD "$WORK/src-head"
+n1_export "$PREV_SHA" "$WORK/src-prev"
 
 PREV_BASE_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$WORK/src-prev/pyproject.toml" | head -n 1)"
 [ -n "$PREV_BASE_VERSION" ] || fail "no [project] version in $PREV_REF's pyproject.toml"

@@ -188,7 +188,7 @@ harness "$REPO/.github/scripts/assert-no-image-publish.py"
 # --------------------------------------------------------------------------
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO/pyproject.toml" | head -n 1)"
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
-HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+HEAD_SHA="$(n1_head_sha)"
 # N-1 must carry this script: N-1's own CLI builds N-1's image with the flags step 3
 # passes (`build-image --ash-revision LOCAL`), and a release from before this leg
 # existed has no such flag.
@@ -196,7 +196,7 @@ n1_resolve scripts/e2e/container.sh Dockerfile automated_security_helper/__init_
 # N-1's package often equals HEAD's: a branch that touches only packaging, editors or
 # workflows, and the merge of one. The marker below gives N-1 code of its own
 # either way, so the provenance checks can always tell the two images apart.
-if git -C "$REPO" diff --quiet "$PREV_SHA" HEAD -- automated_security_helper; then
+if n1_unchanged automated_security_helper; then
   PREV_SAME_PACKAGE=yes
 else
   PREV_SAME_PACKAGE=no
@@ -207,8 +207,8 @@ SRC_HEAD="$WORK/src-head"
 SRC_PREV="$WORK/src-prev"
 rm -rf "$SRC_HEAD" "$SRC_PREV" "$WORK/dist-head" "$WORK/dist-prev" "$WORK/venv-host" "$WORK/venv-upgrade"
 mkdir -p "$SRC_HEAD" "$SRC_PREV"
-git -C "$REPO" archive HEAD | tar -x -C "$SRC_HEAD"
-git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$SRC_PREV"
+n1_export HEAD "$SRC_HEAD"
+n1_export "$PREV_SHA" "$SRC_PREV"
 
 PREV_BASE_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$SRC_PREV/pyproject.toml" | head -n 1)"
 [ -n "$PREV_BASE_VERSION" ] || fail "no [project] version in $PREV_REF's pyproject.toml"

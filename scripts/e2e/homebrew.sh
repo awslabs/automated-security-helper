@@ -157,7 +157,7 @@ use_formula() {
 # A tarball of a tree, with the one top-level directory Homebrew expects to cd into.
 tarball_of_head() {
   local version="$1" out="$2"
-  git -C "$REPO" archive --format=tar.gz --prefix="automated-security-helper-$version/" -o "$out" HEAD
+  n1_tarball HEAD "automated-security-helper-$version/" "$out"
 }
 
 render() {
@@ -175,7 +175,7 @@ assert_uninstalled || fail "leftovers from an earlier install; a fresh-install l
 
 VERSION="$(version_of "$REPO")"
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
-HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+HEAD_SHA="$(n1_head_sha)"
 HEAD_TARBALL="$WORK/automated-security-helper-$VERSION.tar.gz"
 tarball_of_head "$VERSION" "$HEAD_TARBALL"
 HEAD_FORMULA="$WORK/formula-head/ash.rb"
@@ -234,7 +234,7 @@ leg_upgrade() {
   local prev_root="$WORK/src-prev" base_version prev_version
   rm -rf "$prev_root"
   mkdir -p "$prev_root/tree"
-  git -C "$REPO" archive "$prev_sha" | tar -x -C "$prev_root/tree"
+  n1_export "$prev_sha" "$prev_root/tree"
   base_version="$(version_of "$prev_root/tree")"
   [ -n "$base_version" ] || fail "no [project] version in $PREV_REF's pyproject.toml"
   # The last non-zero component decremented, the derivation scripts/e2e/wheel.sh and
