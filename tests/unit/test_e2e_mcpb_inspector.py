@@ -501,13 +501,16 @@ def test_a_bundle_upgrade_a_host_would_not_apply_is_refused(prev, head, needle):
     assert any(needle in problem for problem in problems), problems
 
 
-def test_mcpb_sh_builds_the_prev_bundle_and_hands_it_over():
+def test_mcpb_sh_upgrades_from_the_bundle_the_release_shipped():
     script = (REPO_ROOT / "scripts" / "e2e" / "mcpb.sh").read_text(encoding="utf-8")
+    assert 'PREV_REF="${E2E_PREV_REF:-latest-release}"' in script
+    # The release's committed bundle, byte for byte, and only a published release.
     assert (
-        '"$PREV_TRANSPILER/_base/manifest.json" "v$VERSION" "v$PREV_VERSION"' in script
+        'cp "$WORK/src-prev/$PREV_BUNDLE_PATH" "$WORK/bundle-prev/ash.mcpb"' in script
     )
-    assert 'agentic-plugins release mcpb --dist "$WORK/bundle-prev"' in script
+    assert '[ "$N1_IS_RELEASE" = yes ]' in script
     assert '--prev-bundle "$PREV_BUNDLE"' in script
+    assert '--prev-release "$PREV_RELEASE"' in script
 
 
 # --------------------------------------------------------------------------
@@ -589,3 +592,125 @@ def test_the_e2e_scans_one_case_over_stdio():
     text = SCRIPT.read_text(encoding="utf-8")
     call = re.search(r'"stdio-findings",\s*version,\s*transport="stdio",', text)
     assert call, "the stdio scan must run the findings case with the head version"
+
+
+# --------------------------------------------------------------------------
+# The release N-1 bundle's recorded defect, exempted for that bundle only
+# --------------------------------------------------------------------------
+
+V371_FROM = "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.0"
+
+
+def _shipped(version="1.0.0", source=V371_FROM):
+    """A manifest shaped as v3.7.1's committed ash.mcpb."""
+    return {
+        "name": "ash",
+        "version": version,
+        "server": {"mcp_config": {"command": "uvx", "args": [source, "ash", "mcp"]}},
+    }
+
+
+def _v4_head(version="4.0.0"):
+    from_ = (
+        f"--from=git+https://github.com/awslabs/automated-security-helper@v{version}"
+    )
+    return {
+        "name": "ash",
+        "version": version,
+        "server": {"mcp_config": {"command": "uvx", "args": [from_, "ashx", "mcp"]}},
+    }
+
+
+def test_the_shipped_v3_7_1_bundle_is_exempt_and_the_upgrade_passes():
+    reason = mi.release_defects.mcpb_bundle_exemption("v3.7.1", _shipped())
+    assert reason and "1.0.0" in reason and "v3.4.0" in reason
+    # Without the exemption the release's bundle fails the version-match check.
+    unexempt = mi.bundle_upgrade_problems(_shipped(), _v4_head(), "3.7.1", "4.0.0")
+    assert any("the N-1 bundle's version is '1.0.0'" in p for p in unexempt), unexempt
+    assert (
+        mi.bundle_upgrade_problems(_shipped(), _v4_head(), "3.7.1", "4.0.0", reason)
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "release, manifest",
+    [
+        ("v3.7.1", _shipped(version="1.0.1")),
+        ("v3.7.1", _shipped(source=V371_FROM.replace("v3.4.0", "v3.7.1"))),
+        ("v3.6.1", _shipped()),
+        ("v4.0.0", _shipped()),
+    ],
+    ids=["other-version", "other-from", "other-release", "a-v4-release"],
+)
+def test_only_the_recorded_manifest_of_the_recorded_release_is_exempt(
+    release, manifest
+):
+    assert mi.release_defects.mcpb_bundle_exemption(release, manifest) is None
+
+
+def test_the_exemption_never_covers_the_head_bundle():
+    reason = mi.release_defects.mcpb_bundle_exemption("v3.7.1", _shipped())
+    # A head bundle whose version is not its release still fails, exemption or not.
+    problems = mi.bundle_upgrade_problems(
+        _shipped(), _v4_head(version="4.0.1"), "3.7.1", "4.0.0", reason
+    )
+    assert any("the head bundle's version is '4.0.1'" in p for p in problems), problems
+    # And no head bundle matches a release's recorded defect.
+    assert mi.release_defects.mcpb_bundle_exemption("v3.7.1", _v4_head()) is None
+
+
+def test_the_unselected_missing_allowance_only_reaches_the_release_scan():
+    script = (REPO_ROOT / "scripts" / "e2e" / "mcpb_inspector.py").read_text(
+        encoding="utf-8"
+    )
+    # One run_case passes it, the upgrade-before scan of N-1, and only for a release.
+    assert script.count("allow_unselected_missing=bool(args.prev_release)") == 1
+    before = script.index('"upgrade-before"')
+    passed = script.index("allow_unselected_missing=bool(args.prev_release)")
+    assert 0 < passed - before < 200
+    # And run_case hands on exactly what it was given, never a constant: every other
+    # scan (the head bundle's, all three cases, the negative controls) gets the default.
+    body = script[script.index("def run_case(") :]
+    body = body[: body.index("\ndef ")]
+    assert "expected = expectation_of(case, allow_unselected_missing)" in body
+    assert "case, progress, summary, allow_unselected_missing" in body
+    assert "expectation_of(case, True)" not in script
+    assert (
+        script.count("allow_unselected_missing=") == 2
+    )  # Expectation(...) and the call
+
+
+# What v3.7.1's MCP server answered for the findings case (measured 2026-10-08): no
+# coverage_complete, no findings_summary, unselected scanners not in incomplete_scanners.
+V3_PROGRESS = {"status": "completed", "is_complete": True, "total_findings": 3}
+V3_SUMMARY = {
+    "status": "completed",
+    "actionable_findings": 3,
+    "summary_stats": {"actionable": 3},
+}
+FINDINGS_CASE = {"expect_rc": 2, "scanners": ["detect-secrets"], "findings": 3}
+
+
+def test_a_v3_release_servers_answers_derive_its_exit_code_only_when_allowed():
+    problems, rc = mi.verdict_problems(FINDINGS_CASE, V3_PROGRESS, V3_SUMMARY, True)
+    assert (problems, rc) == ([], 2)
+    problems, rc = mi.verdict_problems(FINDINGS_CASE, V3_PROGRESS, V3_SUMMARY)
+    assert rc is None
+    assert any("coverage_complete is None" in p for p in problems), problems
+
+
+def test_a_v4_server_keeps_every_field_check_even_with_the_allowance():
+    # coverage_complete present and wrong is still a problem, allowance or not.
+    progress = {**V3_PROGRESS, "coverage_complete": False, "incomplete_scanners": []}
+    summary = {"findings_summary": {"by_severity": {"actionable": 3}}}
+    problems, _ = mi.verdict_problems(FINDINGS_CASE, progress, summary, True)
+    assert (
+        problems == []
+    )  # unselected MISSING is the only row set aside, and none exist
+    progress = {
+        **progress,
+        "incomplete_scanners": [{"scanner": "detect-secrets", "status": "MISSING"}],
+    }
+    problems, _ = mi.verdict_problems(FINDINGS_CASE, progress, summary, True)
+    assert any("coverage_complete is False" in p for p in problems), problems

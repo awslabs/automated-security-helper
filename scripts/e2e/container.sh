@@ -10,11 +10,11 @@
 #
 #   E2E_PYTHON     interpreter for the host venv that drives `ashx scan --mode container`
 #                  (default 3.12)
-#   E2E_PREV_REF   the git ref the N-1 image is built from (default auto: the newest
-#                  release tag, else the newest ancestor of HEAD, that differs from HEAD
-#                  and carries this script and the Dockerfile; scripts/e2e/n1-ref.sh).
-#                  A named ref with HEAD's tree falls back to HEAD's first parent, as in
-#                  scripts/e2e/wheel.sh.
+#   E2E_PREV_REF   the git ref the N-1 image is built from (default latest-release:
+#                  the latest published GitHub release, drafts and prereleases skipped;
+#                  scripts/e2e/n1-ref.sh). N-1's own CLI builds N-1's image from N-1's
+#                  own Dockerfile, as a user on that release does. A named ref with
+#                  HEAD's tree falls back to HEAD's first parent, as in scripts/e2e/wheel.sh.
 #   E2E_IMAGE_TAG  the image repository:tag prefix to build under (default
 #                  ash-e2e-container:local). CI makes it unique per run. Two tags are
 #                  derived from it, <prefix>-fresh and <prefix>-upgrade, and both are
@@ -31,7 +31,7 @@
 #    channel is a host CLI plus the image it builds; the head wheel goes into a fresh
 #    host venv for step 2.
 # 2. Fresh install: requires the fresh tag to be absent, runs `ashx build-image --no-run
-#    --ash-revision LOCAL` from the head export, and proves the image carries head's code
+#    --ash-revision-to-install LOCAL` from the head export, and proves the image carries head's code
 #    byte for byte (scripts/e2e/image_provenance.py) and reports head's version. Then the
 #    three cases from tests/e2e/fixtures/cases.json through scripts/e2e/run_case.py with
 #    `--mode container --no-build`: findings (exit 2, 3 findings), clean (exit 0) and
@@ -70,7 +70,7 @@ set -euo pipefail
 WORK="${1:?usage: container.sh <work-dir>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON="${E2E_PYTHON:-3.12}"
-PREV_REF="${E2E_PREV_REF:-auto}"
+PREV_REF="${E2E_PREV_REF:-latest-release}"
 TAG_PREFIX="${E2E_IMAGE_TAG:-ash-e2e-container:local}"
 TAG_FRESH="${TAG_PREFIX}-fresh"
 TAG_UPGRADE="${TAG_PREFIX}-upgrade"
@@ -159,13 +159,14 @@ image_version() {
 }
 
 # build <cli> <export dir> <tag> [build-image args]: the user-facing build, from the
-# export so its Dockerfile and its source are the build context. --ash-revision LOCAL
-# keeps it from cloning a published revision instead; provenance() is what proves it
-# did not.
+# export so its Dockerfile and its source are the build context.
+# --ash-revision-to-install LOCAL keeps it from cloning a published revision instead;
+# provenance() is what proves it did not. The long name, because v3 has only that one
+# and N-1's CLI is v3 when N-1 is the latest v3 release.
 build() {
   local cli="$1" tree="$2" tag="$3"
   shift 3
-  (cd "$tree" && ASH_IMAGE_NAME="$tag" "$cli" build-image --no-run --ash-revision LOCAL "$@")
+  (cd "$tree" && ASH_IMAGE_NAME="$tag" "$cli" build-image --no-run --ash-revision-to-install LOCAL "$@")
 }
 
 # run_case <cli> <image> <case> <label> [scan args]
@@ -192,10 +193,9 @@ bash "$REPO/scripts/e2e/alias_check.sh" self-test "$ALIAS_ASSERT"
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO/pyproject.toml" | head -n 1)"
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
 HEAD_SHA="$(n1_head_sha)"
-# N-1 must carry this script: N-1's own CLI builds N-1's image with the flags step 3
-# passes (`build-image --ash-revision LOCAL`), and a release from before this leg
-# existed has no such flag.
-n1_resolve scripts/e2e/container.sh Dockerfile automated_security_helper/__init__.py
+# N-1 is the latest published release by default. It needs a Dockerfile and a package
+# to build an image from; its own CLI builds it, with flags v3 and v4 both take.
+n1_resolve Dockerfile automated_security_helper/__init__.py pyproject.toml
 # N-1's package often equals HEAD's: a branch that touches only packaging, editors or
 # workflows, and the merge of one. The marker below gives N-1 code of its own
 # either way, so the provenance checks can always tell the two images apart.
@@ -215,14 +215,10 @@ n1_export "$PREV_SHA" "$SRC_PREV"
 
 PREV_BASE_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$SRC_PREV/pyproject.toml" | head -n 1)"
 [ -n "$PREV_BASE_VERSION" ] || fail "no [project] version in $PREV_REF's pyproject.toml"
-# The same derivation as wheel.sh and packaging/verify-lib.sh vl_lower_version.
-PREV_VERSION="$(printf '%s\n' "$PREV_BASE_VERSION" | awk -F. '{
-  n = NF; while (n > 0 && $n == 0) n--;
-  if (n == 0) { exit 1 }
-  $n = $n - 1; for (i = n + 1; i <= NF; i++) $i = 0;
-  out = $1; for (i = 2; i <= NF; i++) out = out "." $i; print out }')" \
-  || fail "cannot derive a lower version from $PREV_BASE_VERSION"
-harness - "$SRC_PREV/pyproject.toml" "$PREV_BASE_VERSION" "$PREV_VERSION" <<'PY'
+# A release keeps its own version; a development commit is lowered (n1-ref.sh).
+PREV_VERSION="$(n1_prev_version "$PREV_BASE_VERSION" "$VERSION")"
+if [ "$PREV_VERSION" != "$PREV_BASE_VERSION" ]; then
+  harness - "$SRC_PREV/pyproject.toml" "$PREV_BASE_VERSION" "$PREV_VERSION" <<'PY'
 import sys
 path, old, new = sys.argv[1:]
 text = open(path, encoding="utf-8").read()
@@ -231,6 +227,7 @@ if needle not in text:
     sys.exit(f"no [project] version line {old!r} in {path}")
 open(path, "w", encoding="utf-8", newline="").write(text.replace(needle, f'\nversion = "{new}"\n', 1))
 PY
+fi
 [ "$PREV_VERSION" != "$VERSION" ] || fail "N-1 version equals head's ($VERSION)"
 # The same idea as the version: N-1's code is changed by a fixed, visible edit.
 PREV_INIT="$SRC_PREV/automated_security_helper/__init__.py"
@@ -250,7 +247,14 @@ HEAD_BASE="$(dockerfile_arg "$SRC_HEAD" BASE_IMAGE)@$(dockerfile_arg "$SRC_HEAD"
 PREV_BASE_REPO="$(dockerfile_arg "$SRC_PREV" BASE_IMAGE)"
 PREV_BASE_DIGEST="$(dockerfile_arg "$SRC_PREV" BASE_IMAGE_DIGEST)"
 PREV_BUILD_ARGS=()
-if [ "${PREV_BASE_REPO}@${PREV_BASE_DIGEST}" != "$HEAD_BASE" ]; then
+HEAD_BASE_REPO="$(dockerfile_arg "$SRC_HEAD" BASE_IMAGE)"
+if [ -z "$PREV_BASE_DIGEST" ] && [ "$PREV_BASE_REPO" = "$HEAD_BASE_REPO" ]; then
+  # A release from before the base image was digest-pinned (v3) names the same tag
+  # and no digest, so a user of it builds from whatever the tag points at today. Pinned
+  # to head's verified digest of that same tag, so the N-1 build is reproducible too.
+  PREV_BUILD_ARGS=(--custom-build-arg "BASE_IMAGE=${HEAD_BASE_REPO%:*}@$(dockerfile_arg "$SRC_HEAD" BASE_IMAGE_DIGEST)")
+  say "N-1's Dockerfile pins no digest for $PREV_BASE_REPO; pinning it to head's: ${PREV_BUILD_ARGS[1]}"
+elif [ "${PREV_BASE_REPO}@${PREV_BASE_DIGEST}" != "$HEAD_BASE" ]; then
   [ -n "$PREV_BASE_REPO" ] && [ -n "$PREV_BASE_DIGEST" ] \
     || fail "N-1's Dockerfile has no BASE_IMAGE / BASE_IMAGE_DIGEST pair"
   PREV_BUILD_ARGS=(--custom-build-arg "BASE_IMAGE=${PREV_BASE_REPO%:*}@${PREV_BASE_DIGEST}")

@@ -31,11 +31,19 @@ that packages ASH itself (Chocolatey, MSIX):
    pull request's own side. When nothing qualifies it fails and says whether the clone
    was too shallow to look (fetch with fetch-depth 0) or the history has no such
    commit.
+   `--prev-ref latest-release` is the latest published GitHub release: the releases
+   listing (GITHUB_REPOSITORY or origin's URL, GITHUB_TOKEN if set, or a saved listing
+   at $ASH_N1_RELEASES_URL, which may be a file:// URL), drafts and prereleases
+   skipped, the highest vX.Y.Z of the rest. Its tag is fetched from origin when the
+   clone lacks it, as it does for a release tagged on another branch. With no
+   listing it fails and says why; it never falls back to a guess. It too must differ
+   from HEAD's tree and carry every --require path.
 2. Exports that commit with `git archive` into DIR/src, so no build step writes into
    the checkout. Zip format and Python's zipfile, so it needs no tar on Windows.
-3. Lowers the [project] version in DIR/src/pyproject.toml by decrementing its last
-   non-zero component (3.7.0 -> 3.6.0), the derivation scripts/e2e/wheel.sh and
-   packaging/verify-lib.sh use, and refuses a result that does not sort below HEAD's
+3. Keeps a version that already sorts below HEAD's (a release is installed at its own
+   version). Otherwise lowers the [project] version in DIR/src/pyproject.toml by
+   decrementing its last non-zero component (3.7.0 -> 3.6.0), the derivation
+   packaging/verify-lib.sh uses, and refuses a result that does not sort below HEAD's
    version. Only the first `version = ` line changes, which is [project]'s.
 4. Prints one JSON object on stdout: prev_ref, prev_sha, head_sha, head_version,
    prev_base_version, prev_version and src. Progress goes to stderr.
@@ -57,8 +65,11 @@ import argparse
 import json
 import re
 import shutil
+import os
 import subprocess  # nosec B404 - runs git on the local checkout only
 import sys
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -70,6 +81,13 @@ AUTO = "auto"
 # batched `git cat-file`, so the bound is about not walking a whole unrelated history
 # when every commit predates the channel, not about speed.
 AUTO_WALK_LIMIT = 5000
+LATEST_RELEASE = "latest-release"
+# Where latest-release lists the repository's releases. A file:// URL (a saved
+# releases listing) is accepted, which is how the tests run it without a network.
+RELEASES_URL_ENV = "ASH_N1_RELEASES_URL"
+RELEASE_TAG = re.compile(r"v?(?P<v>[0-9]+(?:\.[0-9]+)*)")
+# Pages of 100 releases each; enough for any history this repository will have.
+RELEASE_PAGES = 10
 
 
 class DerivationError(Exception):
@@ -280,10 +298,118 @@ def resolve_auto(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
     )
 
 
+def github_slug(repo: Path) -> str:
+    """owner/name of the GitHub repository: $GITHUB_REPOSITORY, else origin's URL."""
+    slug = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if slug:
+        return slug
+    url = git(repo, "remote", "get-url", "origin")
+    match = re.search(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    if not match:
+        raise DerivationError(
+            f"cannot tell which GitHub repository origin ({url}) is; set "
+            f"GITHUB_REPOSITORY=owner/name or {RELEASES_URL_ENV}"
+        )
+    return match.group(1)
+
+
+def list_releases(url: str) -> List[Dict[str, object]]:
+    """Every release the listing at URL holds, following GitHub's Link: rel=next."""
+    releases: List[Dict[str, object]] = []
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "ash-e2e"}
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token and url.startswith("https://"):
+        headers["Authorization"] = f"Bearer {token}"
+    next_url: Optional[str] = url
+    for _ in range(RELEASE_PAGES):
+        if not next_url:
+            break
+        if not next_url.startswith(("https://", "file://")):
+            raise DerivationError(f"refusing to read releases from {next_url}")
+        request = urllib.request.Request(next_url, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - https or file only, checked above
+                page = json.loads(response.read().decode("utf-8"))
+                link = response.headers.get("Link", "") if response.headers else ""
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise DerivationError(
+                f"cannot list the releases at {next_url}: {exc}. latest-release needs "
+                "the GitHub API (network, and GITHUB_TOKEN against rate limits) or "
+                f"{RELEASES_URL_ENV} pointing at a saved listing; it does not guess"
+            ) from exc
+        if not isinstance(page, list):
+            raise DerivationError(
+                f"{next_url} did not return a list of releases: {page!r:.200}"
+            )
+        releases.extend(r for r in page if isinstance(r, dict))
+        found = re.search(r'<([^>]+)>;\s*rel="next"', link or "")
+        next_url = found.group(1) if found else None
+    return releases
+
+
+def latest_published_tag(releases: Sequence[Dict[str, object]]) -> str:
+    """The highest-versioned release that is published: not a draft, not a prerelease."""
+    best: Optional[Tuple[Tuple[int, ...], str]] = None
+    for release in releases:
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        tag = str(release.get("tag_name") or "")
+        match = RELEASE_TAG.fullmatch(tag)
+        if not match:
+            continue
+        key = tuple(int(part) for part in match.group("v").split("."))
+        if best is None or key > best[0]:
+            best = (key, tag)
+    if best is None:
+        raise DerivationError(
+            f"none of the {len(releases)} release(s) listed is published (each is a "
+            "draft, a prerelease, or not a vX.Y.Z tag), so there is no latest release"
+        )
+    return best[1]
+
+
+def resolve_latest_release(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
+    """The commit of the latest published release, fetching its tag if it is absent."""
+    url = os.environ.get(RELEASES_URL_ENV) or (
+        f"https://api.github.com/repos/{github_slug(repo)}/releases?per_page=100"
+    )
+    tag = latest_published_tag(list_releases(url))
+    ref = f"refs/tags/{tag}"
+    try:
+        sha = git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    except DerivationError:
+        sha = ""
+    if not sha:
+        # A release tag made on another branch is not in a clone of this one.
+        try:
+            git(repo, "fetch", "--no-tags", "--quiet", "origin", f"+{ref}:{ref}")
+            sha = git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+        except DerivationError as exc:
+            raise DerivationError(
+                f"{tag} is the latest published release, but its tag is not in this "
+                f"clone and cannot be fetched from origin: {exc}"
+            ) from exc
+    if git(repo, "rev-parse", f"{sha}^{{tree}}") == git(
+        repo, "rev-parse", "HEAD^{tree}"
+    ):
+        raise DerivationError(
+            f"HEAD is the latest published release {tag}; there is no earlier release "
+            "on this line to upgrade from"
+        )
+    absent = missing_paths(repo, [sha], require)[sha]
+    if absent:
+        raise DerivationError(
+            f"the latest published release {tag} ({sha}) has no {', '.join(absent)}"
+        )
+    return f"{tag} (latest published release)", sha
+
+
 def resolve(repo: Path, prev_ref: str, require: Sequence[str] = ()) -> Tuple[str, str]:
     """(label, sha) of the N-1 commit: step 1 of the module docstring."""
     if prev_ref == AUTO:
         return resolve_auto(repo, require)
+    if prev_ref == LATEST_RELEASE:
+        return resolve_latest_release(repo, require)
     used_ref, prev_sha = resolve_prev(repo, prev_ref)
     absent = missing_paths(repo, [prev_sha], require)[prev_sha]
     if absent:
@@ -323,7 +449,9 @@ def derive(
     with open(pyproject, encoding="utf-8", newline="") as handle:
         text = handle.read()
     base = project_version(text, f"{used_ref}'s pyproject.toml")
-    lowered = lower_version(base)
+    # A release is installed at its own version. Only an N-1 that shares HEAD's version
+    # (a development commit) is lowered, so the upgrade still moves forward.
+    lowered = base if sorts_below(base, head_version) else lower_version(base)
     if not sorts_below(lowered, head_version):
         raise DerivationError(
             f"N-1 version {lowered} does not sort below HEAD's {head_version}; "
@@ -353,7 +481,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--prev-ref",
         required=True,
-        help=f"the ref N-1 is built from, or {AUTO!r} to derive it from the history",
+        help=(
+            f"the ref N-1 is built from, {AUTO!r} to derive it from the history, or "
+            f"{LATEST_RELEASE!r} for the latest published GitHub release"
+        ),
     )
     parser.add_argument(
         "--require",

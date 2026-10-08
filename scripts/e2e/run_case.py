@@ -76,6 +76,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--label", help="a name for this run in the output (default: the case name)"
     )
     parser.add_argument(
+        "--allow-unselected-missing",
+        action="store_true",
+        help=(
+            "only for a v3 release N-1: an unselected scanner reported MISSING does not "
+            "count as incomplete (assert_outcome.py --allow-unselected-missing)"
+        ),
+    )
+    parser.add_argument(
         "--expect-reject",
         action="store_true",
         help=(
@@ -145,6 +153,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         require_scanner=case.get("require_scanner"),
         selected=list(case["scanners"]),
         incomplete_scanner=case.get("incomplete_scanner"),
+        allow_unselected_missing=args.allow_unselected_missing,
     )
     usage = expected.usage_problems()
     if usage:

@@ -35,6 +35,11 @@
 #                      a build that also installs /usr/bin/ash must FAIL the command
 #                      path check, and installing it beside the package that owns
 #                      /usr/bin/ash must either be refused or FAIL the coexistence check
+#   from-release       a user of the latest published release, which shipped no
+#                      native package, has its CLI from `uv tool install` (its README);
+#                      install this package beside it and assert which `ash` and which
+#                      `ashx` that user's PATH resolves, scan with both, remove the
+#                      package (packaging/verify-lib.sh vl_from_release)
 #   version-map        PEP 440 pre/post/dev versions must sort correctly under the
 #                      distribution's own version comparator
 #
@@ -53,6 +58,7 @@ fi
 REPO="${REPO:-/src}"
 DIST="${DIST:-$REPO/dist}"
 PREV_DIST="${PREV_DIST:-$REPO/dist-prev}"
+RELEASE_DIST="${RELEASE_DIST:-$REPO/dist-release}"
 OUT="${OUT:-/tmp/rpmbuild-out}"
 
 # shellcheck source=packaging/verify-lib.sh
@@ -416,6 +422,13 @@ if [ "$MODE" = upgrade ]; then
   echo "== 9. erase leaves nothing behind"
   erase_and_check
   echo; echo "RPM UPGRADE VERIFICATION PASSED"
+  exit 0
+fi
+
+if [ "$MODE" = from-release ]; then
+  rpm_install_for_release_user() { rpm_install install "$RPM" || vl_fail "dnf install $(basename "$RPM") failed"; }
+  vl_from_release rpm_install_for_release_user erase_and_check
+  echo; echo "RPM FROM-RELEASE VERIFICATION PASSED"
   exit 0
 fi
 

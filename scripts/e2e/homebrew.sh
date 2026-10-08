@@ -9,11 +9,13 @@
 #   E2E_HARNESS_PYTHON  the interpreter for the stdlib-only e2e scripts (default python3).
 #                       It is never the keg's Python: the uninstall checks have to run
 #                       after the keg is gone.
-#   E2E_PREV_REF        the git ref the N-1 formula and tarball come from (default
-#                       auto: the newest release tag, else the newest ancestor of HEAD,
-#                       that differs from HEAD and carries this script and
-#                       Formula/ash.rb; scripts/e2e/n1-ref.sh). A named ref with HEAD's
-#                       tree falls back to HEAD's first parent, as in scripts/e2e/wheel.sh.
+#   E2E_PREV_REF        the git ref the N-1 formula comes from (default latest-release:
+#                       the latest published GitHub release, drafts and prereleases
+#                       skipped; scripts/e2e/n1-ref.sh). A release's Formula/ash.rb is
+#                       installed verbatim, from the tag it names, as a user on that
+#                       release has it. Any other ref is rendered from a git archive of its
+#                       tree at a lowered version. A named ref with HEAD's tree falls back
+#                       to HEAD's first parent, as in scripts/e2e/wheel.sh.
 #
 # Formula/ash.rb builds from the release tag on its `url` line, so installing it
 # verbatim tests the last release. Every leg here installs a copy written by
@@ -45,7 +47,7 @@ LEG="${1:?usage: homebrew.sh fresh|upgrade|negative <work-dir>}"
 WORK="${2:?usage: homebrew.sh fresh|upgrade|negative <work-dir>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HARNESS_PYTHON="${E2E_HARNESS_PYTHON:-python3}"
-PREV_REF="${E2E_PREV_REF:-auto}"
+PREV_REF="${E2E_PREV_REF:-latest-release}"
 
 case "$LEG" in
   fresh | upgrade | negative) ;;
@@ -238,9 +240,8 @@ leg_fresh() {
 
 leg_upgrade() {
   local prev_sha
-  # N-1 must carry this script as well as its own formula: a release from before this
-  # leg existed was never held to the cases the leg scans N-1 with.
-  n1_resolve scripts/e2e/homebrew.sh Formula/ash.rb pyproject.toml
+  # N-1 is the latest published release by default, which carries its own formula.
+  n1_resolve Formula/ash.rb pyproject.toml
   prev_sha="$PREV_SHA"
 
   local prev_root="$WORK/src-prev" base_version prev_version
@@ -249,15 +250,18 @@ leg_upgrade() {
   n1_export "$prev_sha" "$prev_root/tree"
   base_version="$(version_of "$prev_root/tree")"
   [ -n "$base_version" ] || fail "no [project] version in $PREV_REF's pyproject.toml"
-  # The last non-zero component decremented, the derivation scripts/e2e/wheel.sh and
-  # packaging/verify-lib.sh use, so N-1 carries a version that was never released.
-  prev_version="$(printf '%s\n' "$base_version" | awk -F. '{
-    n = NF; while (n > 0 && $n == 0) n--;
-    if (n == 0) { exit 1 }
-    $n = $n - 1; for (i = n + 1; i <= NF; i++) $i = 0;
-    out = $1; for (i = 2; i <= NF; i++) out = out "." $i; print out }')" \
-    || fail "cannot derive a lower version from $base_version"
-  harness - "$prev_root/tree/pyproject.toml" "$base_version" "$prev_version" <<'PY'
+  # A release keeps its own version; a development commit is lowered (n1-ref.sh).
+  prev_version="$(n1_prev_version "$base_version" "$VERSION")"
+  if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+    # The release's formula verbatim: its url names the release tag on GitHub, and
+    # Homebrew fetches that, exactly as `brew install ash` did for a user of it.
+    say "N-1 = $prev_version, the published $PREV_REF's own formula, installed verbatim"
+    cp "$prev_root/tree/Formula/ash.rb" "$TAP_DIR/Formula/ash.rb"
+    grep -q "tag: \"v$prev_version\"" "$TAP_DIR/Formula/ash.rb" \
+      || fail "the $PREV_REF formula does not name tag v$prev_version"
+  else
+    if [ "$prev_version" != "$base_version" ]; then
+      harness - "$prev_root/tree/pyproject.toml" "$base_version" "$prev_version" <<'PY'
 import sys
 path, old, new = sys.argv[1:]
 text = open(path, encoding="utf-8").read()
@@ -266,28 +270,17 @@ if needle not in text:
     sys.exit(f"no [project] version line {old!r} in {path}")
 open(path, "w", encoding="utf-8", newline="").write(text.replace(needle, f'\nversion = "{new}"\n', 1))
 PY
-  harness - "$prev_version" "$VERSION" <<'PY' \
-    || fail "N-1 version $prev_version does not sort below head's $VERSION; the upgrade would not move forward"
-import re, sys
-prev, head = sys.argv[1:]
-for v in (prev, head):
-    if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", v):
-        sys.exit(f"version {v!r} is not dotted integers")
-def key(v):
-    parts = [int(p) for p in v.split(".")]
-    return parts + [0] * (8 - len(parts))
-sys.exit(0 if key(prev) < key(head) else 1)
-PY
-  mv "$prev_root/tree" "$prev_root/automated-security-helper-$prev_version"
-  local prev_tarball="$WORK/automated-security-helper-$prev_version.tar.gz"
-  tar -C "$prev_root" -czf "$prev_tarball" "automated-security-helper-$prev_version"
-  # N-1's own formula, so its resource block matches its own dependencies.
-  local prev_formula="$WORK/formula-prev/ash.rb"
-  render "$prev_root/automated-security-helper-$prev_version/Formula/ash.rb" \
-    "$prev_tarball" "$prev_version" "$prev_formula"
-  say "N-1 = $prev_version from $PREV_REF ($prev_sha)"
-
-  use_formula "$prev_formula" "$prev_root/automated-security-helper-$prev_version/Formula/ash.rb"
+    fi
+    mv "$prev_root/tree" "$prev_root/automated-security-helper-$prev_version"
+    local prev_tarball="$WORK/automated-security-helper-$prev_version.tar.gz"
+    tar -C "$prev_root" -czf "$prev_tarball" "automated-security-helper-$prev_version"
+    # N-1's own formula, so its resource block matches its own dependencies.
+    local prev_formula="$WORK/formula-prev/ash.rb"
+    render "$prev_root/automated-security-helper-$prev_version/Formula/ash.rb" \
+      "$prev_tarball" "$prev_version" "$prev_formula"
+    say "N-1 = $prev_version from $PREV_REF ($prev_sha)"
+    use_formula "$prev_formula" "$prev_root/automated-security-helper-$prev_version/Formula/ash.rb"
+  fi
   brew install --verbose --build-from-source --formula "$FORMULA"
   local got prev_cli
   got="$(installed_versions)" || fail "brew does not list $FORMULA after installing N-1"
@@ -300,8 +293,34 @@ PY
   else
     fail "the N-1 install linked neither $ASH_CLI_NAME nor ash"
   fi
-  require_version_line "$prev_cli" "$prev_version"
-  run_case "$prev_cli" findings upgrade-before
+  local defect_rc=2
+  if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+    # A release's keg may carry a defect it shipped with, recorded exactly in
+    # scripts/e2e/release_defects.py (v3.7.1's formula installs ASH without its
+    # dependencies). Exit 0 means it showed exactly that defect, 2 that the release has
+    # none recorded and must work, anything else that it failed some other way.
+    local version_rc=0
+    "$prev_cli" --version >"$WORK/n1-version.log" 2>&1 || version_rc=$?
+    cat "$WORK/n1-version.log"
+    defect_rc=0
+    harness "$REPO/scripts/e2e/release_defects.py" homebrew-version --release "${PREV_REF%% *}" \
+      --rc "$version_rc" --output "$WORK/n1-version.log" || defect_rc=$?
+    [ "$defect_rc" -eq 0 ] || [ "$defect_rc" -eq 2 ] \
+      || fail "the $PREV_REF keg did not show its recorded defect; see above"
+  fi
+  if [ "$defect_rc" -eq 0 ]; then
+    say "N-1 is the $PREV_REF keg as its users have it, which cannot start; the upgrade must repair it"
+  else
+    require_version_line "$prev_cli" "$prev_version"
+    if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+      # A v3 release reports scanners it was not told to run MISSING when their tools
+      # are absent (v4: SKIPPED); only its own scan is judged with that allowance.
+      harness "$REPO/scripts/e2e/run_case.py" --cli "$prev_cli" --case findings --work "$WORK/scans" \
+        --label upgrade-before --allow-unselected-missing
+    else
+      run_case "$prev_cli" findings upgrade-before
+    fi
+  fi
 
   use_formula "$HEAD_FORMULA" "$REPO/Formula/ash.rb"
   brew upgrade --verbose --build-from-source --formula "$FORMULA"
@@ -324,6 +343,8 @@ PY
   say "upgraded $prev_version -> $VERSION; cleanup removed the old keg"
 
   run_case "$cli" findings upgrade-after
+  # The formula's own test on the upgraded keg, the check v3.7.1's keg fails.
+  brew test --verbose "$FORMULA"
   uninstall_and_check
   say "Homebrew upgrade leg passed: $prev_version ($PREV_REF $prev_sha) -> $VERSION ($HEAD_SHA)"
 }

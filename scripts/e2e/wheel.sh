@@ -7,19 +7,21 @@
 #   scripts/e2e/wheel.sh <work-dir>
 #
 #   E2E_PYTHON    the interpreter version for the venvs (default 3.12)
-#   E2E_PREV_REF  the git ref the N-1 wheel is built from (default auto: the newest
-#                 release tag, else the newest ancestor of HEAD, that differs from HEAD
-#                 and carries this script and pyproject.toml; scripts/e2e/n1-ref.sh).
-#                 A named ref with HEAD's tree, as on a push to the branch it names,
-#                 falls back to HEAD's first parent, so the upgrade still crosses a code
-#                 change.
+#   E2E_PREV_REF  the git ref the N-1 wheel is built from (default latest-release: the
+#                 latest published GitHub release, drafts and prereleases skipped, its
+#                 tag fetched if the clone lacks it; scripts/e2e/n1-ref.sh). A named
+#                 ref with HEAD's tree falls back to HEAD's first parent.
 #
 # 1. Builds the head wheel and an N-1 wheel, from `git archive` exports so the build
 #    hook never writes into the checkout, and gates both with the artifact-contents check.
-#    N-1 is E2E_PREV_REF's tree with its [project] version lowered (3.7.0 -> 3.6.0), the
-#    same derivation packaging/build-test-wheels.sh uses, so the upgrade crosses a real
-#    version change as well as a real code change. The lowered version must sort below
-#    head's, or the "upgrade" would be a no-op or a downgrade.
+#    N-1 is E2E_PREV_REF's tree at its own version when that sorts below head's (a
+#    release), else with its [project] version lowered (a development commit), so the
+#    upgrade crosses a real version change as well as a real code change.
+#    N-1 is installed the way its README says, with no extras. A v3 release reports
+#    every scanner whose tool is absent as MISSING, including scanners the scan was not
+#    told to run; v4 reports those SKIPPED. So the scan of a release N-1 alone is
+#    judged with --allow-unselected-missing: its selected scanner must still complete,
+#    with the case's exit code and count, and every scan of N keeps the full contract.
 # 2. Installs the head wheel into a fresh venv with --no-cache, checks the installed
 #    version, and runs the three cases from tests/e2e/fixtures/cases.json through
 #    scripts/e2e/run_case.py: findings (exit 2, 3 findings), clean (exit 0) and
@@ -41,7 +43,7 @@ set -euo pipefail
 WORK="${1:?usage: wheel.sh <work-dir>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON="${E2E_PYTHON:-3.12}"
-PREV_REF="${E2E_PREV_REF:-auto}"
+PREV_REF="${E2E_PREV_REF:-latest-release}"
 
 # shellcheck source=packaging/cli-name.sh
 . "$REPO/packaging/cli-name.sh"
@@ -122,10 +124,10 @@ VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO/pyproject.toml" | head -n
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
 
 HEAD_SHA="$(n1_head_sha)"
-# N-1 differs from HEAD's tree, so the upgrade crosses a code change. It must carry this
-# script: a release from before the wheel leg existed was never held to the cases this
-# leg scans N-1 with.
-n1_resolve scripts/e2e/wheel.sh pyproject.toml
+# N-1 is the latest published release (latest-release, the default), built from its
+# tag the way `pip install git+https://github.com/awslabs/automated-security-helper@<tag>`
+# builds it. It differs from HEAD's tree, so the upgrade crosses a code change.
+n1_resolve pyproject.toml
 
 rm -rf "$WORK/src-head" "$WORK/src-prev" "$WORK/dist-head" "$WORK/dist-prev"
 mkdir -p "$WORK/src-head" "$WORK/src-prev"
@@ -134,15 +136,11 @@ n1_export "$PREV_SHA" "$WORK/src-prev"
 
 PREV_BASE_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$WORK/src-prev/pyproject.toml" | head -n 1)"
 [ -n "$PREV_BASE_VERSION" ] || fail "no [project] version in $PREV_REF's pyproject.toml"
-# The last non-zero component decremented, as packaging/verify-lib.sh vl_lower_version does.
-PREV_VERSION="$(printf '%s\n' "$PREV_BASE_VERSION" | awk -F. '{
-  n = NF; while (n > 0 && $n == 0) n--;
-  if (n == 0) { exit 1 }
-  $n = $n - 1; for (i = n + 1; i <= NF; i++) $i = 0;
-  out = $1; for (i = 2; i <= NF; i++) out = out "." $i; print out }')" \
-  || fail "cannot derive a lower version from $PREV_BASE_VERSION"
+# A release keeps its own version; a development commit is lowered (n1-ref.sh).
+PREV_VERSION="$(n1_prev_version "$PREV_BASE_VERSION" "$VERSION")"
 # Only the first `version = ` line, which is [project]'s; commitizen's stays as it was.
-harness - "$WORK/src-prev/pyproject.toml" "$PREV_BASE_VERSION" "$PREV_VERSION" <<'PY'
+if [ "$PREV_VERSION" != "$PREV_BASE_VERSION" ]; then
+  harness - "$WORK/src-prev/pyproject.toml" "$PREV_BASE_VERSION" "$PREV_VERSION" <<'PY'
 import sys
 path, old, new = sys.argv[1:]
 text = open(path, encoding="utf-8").read()
@@ -151,20 +149,7 @@ if needle not in text:
     sys.exit(f"no [project] version line {old!r} in {path}")
 open(path, "w", encoding="utf-8", newline="").write(text.replace(needle, f'\nversion = "{new}"\n', 1))
 PY
-# Release segments compared as integers, so 3.10.0 sorts above 3.9.0. A version that is
-# not plain dotted integers is refused rather than guessed at.
-harness - "$PREV_VERSION" "$VERSION" <<'PY' \
-  || fail "N-1 version $PREV_VERSION does not sort below head's $VERSION; the upgrade would not move forward"
-import re, sys
-prev, head = sys.argv[1:]
-for v in (prev, head):
-    if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", v):
-        sys.exit(f"version {v!r} is not dotted integers")
-def key(v):
-    parts = [int(p) for p in v.split(".")]
-    return parts + [0] * (8 - len(parts))
-sys.exit(0 if key(prev) < key(head) else 1)
-PY
+fi
 say "N = $VERSION at $HEAD_SHA; N-1 = $PREV_VERSION from $PREV_REF ($PREV_SHA)"
 
 uv build --quiet --wheel --out-dir "$WORK/dist-head" "$WORK/src-head"
@@ -174,8 +159,14 @@ PREV_WHEEL="$WORK/dist-prev/automated_security_helper-${PREV_VERSION}-py3-none-a
 [ -f "$HEAD_WHEEL" ] || fail "uv build did not write $HEAD_WHEEL"
 [ -f "$PREV_WHEEL" ] || fail "uv build did not write $PREV_WHEEL"
 
-say "artifact-contents gate on both wheels"
-harness "$REPO/.github/scripts/assert-artifact-contents.py" "$HEAD_WHEEL" "$PREV_WHEEL"
+if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+  # A published release is what it is; this tree's packaging rules gate what it builds.
+  say "artifact-contents gate on the head wheel (N-1 is the published $PREV_REF)"
+  harness "$REPO/.github/scripts/assert-artifact-contents.py" "$HEAD_WHEEL"
+else
+  say "artifact-contents gate on both wheels"
+  harness "$REPO/.github/scripts/assert-artifact-contents.py" "$HEAD_WHEEL" "$PREV_WHEEL"
+fi
 
 # --------------------------------------------------------------------------
 # 2. Fresh install of N and the three cases.
@@ -210,7 +201,12 @@ got="$(installed_version "$UPGRADE")"
 PREV_CLI="$(venv_exe "$UPGRADE" "$ASH_CLI_NAME" || venv_exe "$UPGRADE" ash)" \
   || fail "the N-1 wheel installed neither $ASH_CLI_NAME nor ash"
 say "N-1 command: $(basename "$PREV_CLI")"
-run_case "$PREV_CLI" findings upgrade-before
+if [ "${N1_IS_RELEASE:-no}" = yes ]; then
+  harness "$REPO/scripts/e2e/run_case.py" --cli "$PREV_CLI" --case findings --work "$WORK/scans" \
+    --label upgrade-before --allow-unselected-missing
+else
+  run_case "$PREV_CLI" findings upgrade-before
+fi
 
 uv pip install --quiet --no-cache --python "$(venv_python "$UPGRADE")" "$HEAD_WHEEL"
 got="$(installed_version "$UPGRADE")"
