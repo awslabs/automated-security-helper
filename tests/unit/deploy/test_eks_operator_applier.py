@@ -34,6 +34,7 @@ is deliberate and is the honest limit of this file.
 from __future__ import annotations
 
 import base64
+import copy
 import importlib.util
 import json
 import pathlib
@@ -51,9 +52,23 @@ GROUP = "ash.awslabs.github.io"
 
 OPERATOR_DIR = REPO_ROOT / "deploy/kubernetes-operator"
 RBAC_YAML = OPERATOR_DIR / "manifests/rbac.yaml"
-# RBAC is read from every manifest the operator ships, not rbac.yaml alone, so a Role
-# added to operator.yaml or to a new file is compared too.
-MANIFEST_YAMLS = sorted((OPERATOR_DIR / "manifests").glob("*.y*ml"))
+MANIFESTS_DIR = OPERATOR_DIR / "manifests"
+
+
+def _manifest_files(directory: pathlib.Path) -> list:
+    """Every file `kubectl apply -f manifests/` reads: .json, .yaml and .yml.
+
+    RBAC is read from all of them, not rbac.yaml alone, so a Role added to
+    operator.yaml, to a new file, or to a JSON file is compared too.
+    """
+    return sorted(
+        path
+        for path in directory.iterdir()
+        if path.suffix in (".json", ".yaml", ".yml")
+    )
+
+
+MANIFEST_YAMLS = _manifest_files(MANIFESTS_DIR)
 CRD_YAMLS = sorted((OPERATOR_DIR / "generated").glob("crd-*.yaml"))
 
 
@@ -78,74 +93,72 @@ def _operator_crds() -> dict:
 
 RBAC_KINDS = ("ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding")
 
+# Every top-level kind the operator's manifests may carry. A document of any other kind is
+# reported as drift, so a new kind, or a wrapper this file does not unwrap, cannot be
+# applied by `kubectl apply -f manifests/` while every comparison here skips it.
+MANIFEST_KINDS = {
+    "ClusterRole",
+    "ClusterRoleBinding",
+    "Deployment",
+    "Namespace",
+    "NetworkPolicy",
+    "Role",
+    "RoleBinding",
+    "ServiceAccount",
+}
 
-# The fields a PolicyRule can carry. Anything else is reported, never dropped.
-RULE_FIELDS = ("apiGroups", "resources", "verbs", "resourceNames", "nonResourceURLs")
+
+def _expand_lists(docs: list) -> list:
+    """Every `kind: *List` flattened into its `items`, the way kubectl's builder does."""
+    out = []
+    for doc in docs:
+        kind = doc.get("kind") if isinstance(doc, dict) else None
+        if isinstance(kind, str) and kind.endswith("List"):
+            out += _expand_lists(doc.get("items") or [])
+        else:
+            out.append(doc)
+    return out
 
 
-def _rule_text(rule: dict) -> str:
-    """One rule as a canonical string, with EVERY field in it.
+def _manifest_docs(paths: list) -> list:
+    """The documents of every manifest file, Lists expanded. YAML parses JSON too."""
+    return _expand_lists([doc for path in paths for doc in _yaml_docs(path)])
 
-    Projecting a rule down to apiGroups/resources/verbs let `resourceNames: [one]` on
-    the operator's side compare equal to the stack's grant on every object of that
-    resource. The two optional fields appear only when present, and a key outside
-    RULE_FIELDS is rendered as `?key=value`, so it can only make the sides differ.
-    Members are sorted within each field, since the API server treats `[a, b]` and
-    `[b, a]` alike; each field keeps its identity, so `pods: get` and
-    `configmaps: get` never collapse into each other.
+
+def _set_json(value) -> str:
+    """A value as canonical JSON: keys sorted and every array sorted, recursively.
+
+    Structural, not delimiter-joined. Joining members with a comma made `["a", "b"]`
+    and `["a,b"]` render alike, and RBAC matches those strings literally, so a rule
+    granting nothing compared equal to one granting two resources. Every array in an
+    RBAC object is a set to the API server, so sorting makes a reordering compare
+    equal and nothing else.
     """
 
-    def joined(field: str) -> str:
-        return ",".join(sorted(rule.get(field) or []))
+    def norm(v):
+        if isinstance(v, list):
+            return sorted(
+                (norm(x) for x in v), key=lambda x: json.dumps(x, sort_keys=True)
+            )
+        if isinstance(v, dict):
+            return {k: norm(v[k]) for k in sorted(v)}
+        return v
 
-    text = f"[{joined('apiGroups')}] {joined('resources')} -> {joined('verbs')}"
-    if "resourceNames" in rule:
-        text += f" names={joined('resourceNames')}"
-    if "nonResourceURLs" in rule:
-        text += f" urls={joined('nonResourceURLs')}"
-    for key in sorted(set(rule) - set(RULE_FIELDS)):
-        text += f" ?{key}={json.dumps(rule[key], sort_keys=True)}"
-    return text
+    return json.dumps(norm(value), sort_keys=True, separators=(",", ":"))
 
 
 def _canonical_rules(rules: list) -> list[str]:
-    """Rules as sorted canonical strings, so neither rule nor member order matters."""
-    return sorted(_rule_text(r) for r in rules)
+    """Rules as sorted canonical JSON, every key kept, so order never matters."""
+    return sorted(_set_json(r) for r in rules)
 
 
 def _rbac_key(doc: dict) -> str:
     """`Kind namespace/name`; a cluster-scoped object has no namespace."""
-    meta = doc["metadata"]
-    return f"{doc['kind']} {meta.get('namespace', '(cluster)')}/{meta['name']}"
+    meta = doc.get("metadata") or {}
+    return f"{doc.get('kind')} {meta.get('namespace', '(cluster)')}/{meta.get('name')}"
 
 
-def _role_ref(doc: dict) -> str:
-    """A binding's roleRef as `group/Kind/name`. A missing apiGroup is rbac's own."""
-    ref = doc.get("roleRef") or {}
-    group = ref.get("apiGroup", "rbac.authorization.k8s.io")
-    return f"{group}/{ref.get('kind')}/{ref.get('name')}"
-
-
-def _subjects(doc: dict) -> list:
-    """A binding's subjects as sorted `Kind namespace/name`.
-
-    A non-empty apiGroup is shown as `Kind[group]`, and any key beyond kind, apiGroup,
-    name and namespace as `?key=value`, so neither can be silently dropped.
-    """
-    out = []
-    for s in doc.get("subjects") or []:
-        group = f"[{s['apiGroup']}]" if s.get("apiGroup") else ""
-        extra = "".join(
-            f" ?{k}={json.dumps(s[k], sort_keys=True)}"
-            for k in sorted(set(s) - {"kind", "apiGroup", "name", "namespace"})
-        )
-        out.append(
-            f"{s['kind']}{group} {s.get('namespace', '(none)')}/{s['name']}{extra}"
-        )
-    return sorted(out)
-
-
-# The top-level keys an RBAC document may carry here; any other one is reported.
+# The top-level and metadata keys an RBAC document may carry here; others are reported.
 RBAC_DOC_FIELDS = {
     "apiVersion",
     "kind",
@@ -155,22 +168,44 @@ RBAC_DOC_FIELDS = {
     "roleRef",
     "subjects",
 }
+METADATA_FIELDS = {"name", "namespace", "labels", "annotations"}
 
 
-def _aggregation(doc: dict) -> str:
-    rule = doc.get("aggregationRule")
-    return "(none)" if rule is None else json.dumps(rule, sort_keys=True)
+def _invalidities(doc: dict) -> list[str]:
+    """Inputs the API server would reject, so they fail in CI and not at apply time.
+
+    Nothing is defaulted: a roleRef without apiGroup is invalid rather than rbac's
+    group, and `apiGroups: []` is not `[""]`.
+    """
+    out = []
+    for rule in doc.get("rules") or []:
+        if not rule.get("verbs"):
+            out.append(f"rule without verbs: {_set_json(rule)}")
+        if not rule.get("resources") and not rule.get("nonResourceURLs"):
+            out.append(f"rule without resources: {_set_json(rule)}")
+        if rule.get("resources") and not rule.get("apiGroups"):
+            out.append(f"rule with empty apiGroups: {_set_json(rule)}")
+    if str(doc.get("kind", "")).endswith("Binding"):
+        ref = doc.get("roleRef") or {}
+        out += [
+            f"roleRef without {k}"
+            for k in ("apiGroup", "kind", "name")
+            if not ref.get(k)
+        ]
+    return out
 
 
-def _rbac_drift(installed: list, operator: list) -> list[str]:
+def _rbac_drift(installed: list, operator: list, stack_labels: dict) -> list[str]:
     """Every way two lists of manifests disagree on RBAC, as readable lines.
 
-    ALL documents of the four RBAC kinds are compared, not the two roles the stack
-    happens to install: first the set of (kind, namespace, name) in both directions,
-    then, for each object on both sides, its rules, or its roleRef and subjects.
-    Selecting roles by name was the gap; a Role added to rbac.yaml under another name
-    was never read. One function serves the real files and the planted copies below,
-    so the negative controls exercise the comparison the real assertion makes.
+    ALL documents of the four RBAC kinds are compared: the set of (kind, namespace,
+    name) in both directions, then for each object on both sides its apiVersion,
+    labels, annotations and rules or aggregationRule, or its roleRef and subjects.
+    Every value is compared as structure (`_set_json`), nothing is projected or
+    defaulted, and a field this function does not know is reported rather than
+    skipped. An operator document whose kind is outside MANIFEST_KINDS is reported
+    too. One function serves the real files and the planted copies below, so the
+    controls exercise the comparison the real assertion makes.
     """
     drift: list[str] = []
 
@@ -186,39 +221,89 @@ def _rbac_drift(installed: list, operator: list) -> list[str]:
                 for x in sorted({x for x in items if items.count(x) > 1})
             )
 
+    drift += [
+        f"manifests: kind not in the allowlist: {_rbac_key(d)}"
+        for d in operator
+        if not isinstance(d, dict) or d.get("kind") not in MANIFEST_KINDS
+    ]
     keyed = {}
     for side, docs in (("stack", installed), ("operator", operator)):
-        rbac = [d for d in docs if d.get("kind") in RBAC_KINDS]
+        rbac = [d for d in docs if isinstance(d, dict) and d.get("kind") in RBAC_KINDS]
         keyed[side] = {_rbac_key(d): d for d in rbac}
         # Two documents with one key would collapse here and hide each other.
         if len(keyed[side]) != len(rbac):
             drift.append(f"RBAC objects: the {side} repeats a kind/namespace/name")
+        for doc in rbac:
+            key = _rbac_key(doc)
+            drift += [
+                f"{key}: unknown field in the {side}: {f}"
+                for f in sorted(set(doc) - RBAC_DOC_FIELDS)
+            ]
+            drift += [
+                f"{key}: unknown metadata field in the {side}: {f}"
+                for f in sorted(set(doc.get("metadata") or {}) - METADATA_FIELDS)
+            ]
+            drift += [f"{key}: invalid in the {side}: {x}" for x in _invalidities(doc)]
     ours, theirs = keyed["stack"], keyed["operator"]
-    for side, by_key in (("stack", ours), ("operator", theirs)):
-        for key, doc in sorted(by_key.items()):
-            for field in sorted(set(doc) - RBAC_DOC_FIELDS):
-                drift.append(f"{key}: unknown field in the {side}: {field}")
     diff("RBAC objects", sorted(ours), sorted(theirs))
+    stack_own = {_set_json([k, v]) for k, v in stack_labels.items()}
     for key in sorted(set(ours) & set(theirs)):
         mine, other = ours[key], theirs[key]
-        diff(f"{key} apiVersion", [mine.get("apiVersion")], [other.get("apiVersion")])
+        diff(
+            f"{key} apiVersion",
+            [_set_json(mine.get("apiVersion"))],
+            [_set_json(other.get("apiVersion"))],
+        )
+        # Every operator label must be on the stack's object with the same value, and
+        # every stack label other than its own bookkeeping LABELS on the operator's. An
+        # aggregate-to-admin label merges the role into a built-in one.
+        their_labels = [
+            _set_json([k, v])
+            for k, v in (other["metadata"].get("labels") or {}).items()
+        ]
+        my_labels = [
+            label
+            for label in (
+                _set_json([k, v])
+                for k, v in (mine["metadata"].get("labels") or {}).items()
+            )
+            if label not in stack_own or label in their_labels
+        ]
+        diff(f"{key} labels", my_labels, their_labels)
+        diff(
+            f"{key} annotations",
+            [_set_json(mine["metadata"].get("annotations") or {})],
+            [_set_json(other["metadata"].get("annotations") or {})],
+        )
         if mine["kind"].endswith("Binding"):
-            diff(f"{key} roleRef", [_role_ref(mine)], [_role_ref(other)])
-            diff(f"{key} subjects", _subjects(mine), _subjects(other))
+            diff(
+                f"{key} roleRef",
+                [_set_json(mine.get("roleRef"))],
+                [_set_json(other.get("roleRef"))],
+            )
+            diff(
+                f"{key} subjects",
+                sorted(_set_json(x) for x in mine.get("subjects") or []),
+                sorted(_set_json(x) for x in other.get("subjects") or []),
+            )
         else:
             diff(
                 f"{key} rules",
-                [_rule_text(r) for r in mine.get("rules") or []],
-                [_rule_text(r) for r in other.get("rules") or []],
+                _canonical_rules(mine.get("rules") or []),
+                _canonical_rules(other.get("rules") or []),
             )
-            diff(f"{key} aggregationRule", [_aggregation(mine)], [_aggregation(other)])
+            diff(
+                f"{key} aggregationRule",
+                [_set_json(mine.get("aggregationRule"))],
+                [_set_json(other.get("aggregationRule"))],
+            )
     return drift
 
 
 def _operator_role_rules(kind: str, name: str) -> list:
     roles = [
         doc
-        for doc in _yaml_docs(RBAC_YAML)
+        for doc in _manifest_docs([RBAC_YAML])
         if doc["kind"] == kind and doc["metadata"]["name"] == name
     ]
     assert len(roles) == 1, f"expected one {kind}/{name} in {RBAC_YAML}"
@@ -598,16 +683,151 @@ class TestCrds:
 
 
 # Names the planted-drift controls below report, kept short so each line reads whole.
-RBAC_GROUP = "rbac.authorization.k8s.io"
-CRB_NAME = "ash-operator-crd-reader"
-CRB = f"ClusterRoleBinding (cluster)/{CRB_NAME}"
-RB = "RoleBinding ash-system/ash-operator"
-CR = f"ClusterRole (cluster)/{CRB_NAME}"
+# Keys and values the planted-drift controls below report.
+EXTRA_CR = "ClusterRole (cluster)/ash-operator-extra"
+CR = "ClusterRole (cluster)/ash-operator-crd-reader"
+CRB = "ClusterRoleBinding (cluster)/ash-operator-crd-reader"
 ROLE = "Role ash-system/ash-operator"
-SA = "ServiceAccount ash-system/ash-operator"
-JOBS = "[batch] jobs -> create,delete,get,list,watch"
-CONFIGMAPS = "[] configmaps -> create,delete,get,list,watch"
-EXTRA = "ash-operator-extra"
+RB = "RoleBinding ash-system/ash-operator"
+SUBJECT = {"kind": "ServiceAccount", "name": "ash-operator", "namespace": "ash-system"}
+CRB_REF = {
+    "apiGroup": "rbac.authorization.k8s.io",
+    "kind": "ClusterRole",
+    "name": "ash-operator-crd-reader",
+}
+SECRETS_ROLE = {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "Role",
+    "metadata": {"name": "ash-secrets", "namespace": "ash-system"},
+    "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["get", "list"]}],
+}
+SECRETS_BINDING = {
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "RoleBinding",
+    "metadata": {"name": "ash-secrets", "namespace": "ash-system"},
+    "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Role",
+        "name": "ash-secrets",
+    },
+    "subjects": [SUBJECT],
+}
+
+
+def _find(docs: list, kind: str, name: str) -> dict:
+    found = [d for d in docs if d.get("kind") == kind and d["metadata"]["name"] == name]
+    assert len(found) == 1, f"expected one {kind}/{name}"
+    return found[0]
+
+
+def _rule(doc: dict, resource: str) -> dict:
+    return next(r for r in doc["rules"] if resource in (r.get("resources") or []))
+
+
+def _add_verb(docs: list) -> None:
+    _rule(_find(docs, "Role", "ash-operator"), "jobs")["verbs"].append("patch")
+
+
+def _comma_resources(docs: list) -> None:
+    rule = _rule(_find(docs, "Role", "ash-operator"), "ashscans")
+    rule["resources"] = ["ashscans,ashmcpservers"]
+
+
+def _comma_verbs(docs: list) -> None:
+    rule = _rule(_find(docs, "Role", "ash-operator"), "configmaps")
+    rule["verbs"] = ["create,delete,get,list,watch"]
+
+
+def _resource_names(docs: list) -> None:
+    _rule(_find(docs, "Role", "ash-operator"), "configmaps")["resourceNames"] = ["one"]
+
+
+def _non_resource_urls(docs: list) -> None:
+    _find(docs, "ClusterRole", "ash-operator-crd-reader")["rules"].append(
+        {"nonResourceURLs": ["/metrics"], "verbs": ["get"]}
+    )
+
+
+AGGREGATION = {"clusterRoleSelectors": [{"matchLabels": {"ash-aggregate": "true"}}]}
+
+
+def _aggregation_rule(docs: list) -> None:
+    _find(docs, "ClusterRole", "ash-operator-crd-reader")["aggregationRule"] = (
+        AGGREGATION
+    )
+
+
+ADMIN_LABEL = "rbac.authorization.k8s.io/aggregate-to-admin"
+
+
+def _admin_label(docs: list) -> None:
+    _find(docs, "ClusterRole", "ash-operator-crd-reader")["metadata"]["labels"] = {
+        ADMIN_LABEL: "true"
+    }
+
+
+def _annotation(docs: list) -> None:
+    _find(docs, "Role", "ash-operator")["metadata"]["annotations"] = {"note": "x"}
+
+
+def _rule_unknown_key(docs: list) -> None:
+    _rule(_find(docs, "Role", "ash-operator"), "pods")["futureField"] = ["x"]
+
+
+def _doc_unknown_field(docs: list) -> None:
+    _find(docs, "Role", "ash-operator")["futureField"] = 1
+
+
+def _metadata_unknown_field(docs: list) -> None:
+    _find(docs, "Role", "ash-operator")["metadata"]["finalizers"] = ["x"]
+
+
+def _subject_changed(docs: list) -> None:
+    _find(docs, "RoleBinding", "ash-operator")["subjects"][0]["name"] = "ash-scan"
+
+
+def _subject_api_group(docs: list) -> None:
+    _find(docs, "RoleBinding", "ash-operator")["subjects"][0]["apiGroup"] = "example.io"
+
+
+def _subject_duplicated(docs: list) -> None:
+    _find(docs, "RoleBinding", "ash-operator")["subjects"].append(dict(SUBJECT))
+
+
+def _role_ref_changed(docs: list) -> None:
+    _find(docs, "ClusterRoleBinding", "ash-operator-crd-reader")["roleRef"]["name"] = (
+        "view"
+    )
+
+
+def _role_ref_without_group(docs: list) -> None:
+    del _find(docs, "RoleBinding", "ash-operator")["roleRef"]["apiGroup"]
+
+
+def _empty_api_groups(docs: list) -> None:
+    _rule(_find(docs, "Role", "ash-operator"), "pods")["apiGroups"] = []
+
+
+def _rule_line(side: str, rule: dict) -> str:
+    return f"{ROLE} rules: only in the {side}: {_set_json(rule)}"
+
+
+JOBS = {
+    "apiGroups": ["batch"],
+    "resources": ["jobs"],
+    "verbs": ["get", "list", "watch", "create", "delete"],
+}
+SCANS = {
+    "apiGroups": ["ash.awslabs.github.io"],
+    "resources": ["ashscans", "ashmcpservers"],
+    "verbs": ["get", "list", "watch", "patch"],
+}
+CONFIGMAPS = {
+    "apiGroups": [""],
+    "resources": ["configmaps"],
+    "verbs": ["get", "list", "watch", "create", "delete"],
+}
+PODS = {"apiGroups": [""], "resources": ["pods"], "verbs": ["get", "list", "watch"]}
 
 
 class TestRbac:
@@ -622,7 +842,13 @@ class TestRbac:
         # narrowing its ClusterRole without this stack fails.
         assert _canonical_rules(roles[0]["rules"]) == EXPECTED_CLUSTER_RULES
         assert EXPECTED_CLUSTER_RULES == [
-            "[apiextensions.k8s.io] customresourcedefinitions -> get,list,watch"
+            _set_json(
+                {
+                    "apiGroups": ["apiextensions.k8s.io"],
+                    "resources": ["customresourcedefinitions"],
+                    "verbs": ["get", "list", "watch"],
+                }
+            )
         ]
 
     def test_namespaced_rules_are_set_equal_to_the_operator_table(
@@ -642,217 +868,277 @@ class TestRbac:
         assert len(rules) == len(EXPECTED_NAMESPACED_RULES)
         assert _canonical_rules(rules) == EXPECTED_NAMESPACED_RULES
 
-    def test_every_rbac_object_equals_the_operator_rbac_yaml(self, docs: list) -> None:
+    def test_every_rbac_object_equals_the_operator_rbac_yaml(
+        self, docs: list, applier: dict
+    ) -> None:
         """The full set of Roles, ClusterRoles and bindings, both ways, refs included."""
         installed = [manifest for _, manifest, _ in docs]
-        operator = [doc for path in MANIFEST_YAMLS for doc in _yaml_docs(path)]
+        operator = _manifest_docs(MANIFEST_YAMLS)
         assert RBAC_YAML in MANIFEST_YAMLS
         # Non-vacuity: two empty sides would agree.
-        want = [
-            "ClusterRole (cluster)/ash-operator-crd-reader",
-            "ClusterRoleBinding (cluster)/ash-operator-crd-reader",
-            "Role ash-system/ash-operator",
-            "RoleBinding ash-system/ash-operator",
-        ]
+        want = [CR, CRB, ROLE, RB]
         assert (
             sorted(_rbac_key(d) for d in installed if d["kind"] in RBAC_KINDS) == want
         )
         assert sorted(_rbac_key(d) for d in operator if d["kind"] in RBAC_KINDS) == want
-        assert _rbac_drift(installed, operator) == []
+        assert _rbac_drift(installed, operator, applier["LABELS"]) == []
 
     @pytest.mark.parametrize(
         ("edit", "expected"),
         [
             pytest.param(
-                lambda text: (
-                    text
-                    + "\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: Role\n"
-                    "metadata: {name: ash-scan, namespace: ash-system}\n"
-                    'rules: [{apiGroups: [""], resources: [secrets], verbs: [get]}]\n'
-                ),
-                ["RBAC objects: only in the operator: Role ash-system/ash-scan"],
-                id="extra-role",
-            ),
-            pytest.param(
-                lambda text: (
-                    text + "\n---\napiVersion: rbac.authorization.k8s.io/v1\n"
-                    "kind: ClusterRole\nmetadata: {name: ash-operator-extra}\n"
-                    'rules: [{apiGroups: [""], resources: [nodes], verbs: [get]}]\n'
-                ),
-                [f"RBAC objects: only in the operator: ClusterRole (cluster)/{EXTRA}"],
-                id="extra-cluster-role",
-            ),
-            pytest.param(
-                lambda text: text.replace(
-                    "  name: ash-operator\nsubjects:\n"
-                    "  - kind: ServiceAccount\n    name: ash-operator\n",
-                    "  name: ash-operator\nsubjects:\n"
-                    "  - kind: ServiceAccount\n    name: ash-scan\n",
-                ),
+                _add_verb,
                 [
-                    f"{RB} subjects: only in the stack: ServiceAccount ash-system/ash-operator",
-                    f"{RB} subjects: only in the operator: ServiceAccount ash-system/ash-scan",
-                ],
-                id="role-binding-subject",
-            ),
-            pytest.param(
-                lambda text: text.replace(
-                    "  kind: ClusterRole\n  name: ash-operator-crd-reader\nsubjects:",
-                    "  kind: ClusterRole\n  name: view\nsubjects:",
-                ),
-                [
-                    f"{CRB} roleRef: only in the stack: {RBAC_GROUP}/ClusterRole/{CRB_NAME}",
-                    f"{CRB} roleRef: only in the operator: {RBAC_GROUP}/ClusterRole/view",
-                ],
-                id="cluster-role-binding-roleref",
-            ),
-            pytest.param(
-                lambda text: text.replace(
-                    'verbs: ["get", "list", "watch", "create", "delete"]\n\n  # Pods',
-                    'verbs: ["get", "list", "watch", "create", "delete", "patch"]'
-                    "\n\n  # Pods",
-                ),
-                [
-                    f"{ROLE} rules: only in the stack: {JOBS}",
-                    (
-                        f"{ROLE} rules: only in the operator: [batch] jobs -> "
-                        "create,delete,get,list,patch,watch"
+                    _rule_line("stack", JOBS),
+                    _rule_line(
+                        "operator", {**JOBS, "verbs": [*JOBS["verbs"], "patch"]}
                     ),
                 ],
                 id="rule-extra-verb",
             ),
             pytest.param(
-                lambda text: text.replace(
-                    'resources: ["configmaps"]\n',
-                    'resources: ["configmaps"]\n    resourceNames: ["ash-only"]\n',
-                ),
+                _comma_resources,
                 [
-                    f"{ROLE} rules: only in the stack: {CONFIGMAPS}",
-                    f"{ROLE} rules: only in the operator: {CONFIGMAPS} names=ash-only",
+                    _rule_line("stack", SCANS),
+                    _rule_line(
+                        "operator", {**SCANS, "resources": ["ashscans,ashmcpservers"]}
+                    ),
+                ],
+                id="comma-joined-resources",
+            ),
+            pytest.param(
+                _comma_verbs,
+                [
+                    _rule_line("stack", CONFIGMAPS),
+                    _rule_line(
+                        "operator",
+                        {**CONFIGMAPS, "verbs": ["create,delete,get,list,watch"]},
+                    ),
+                ],
+                id="comma-joined-verbs",
+            ),
+            pytest.param(
+                _resource_names,
+                [
+                    _rule_line("stack", CONFIGMAPS),
+                    _rule_line("operator", {**CONFIGMAPS, "resourceNames": ["one"]}),
                 ],
                 id="rule-resource-names",
             ),
             pytest.param(
-                lambda text: text.replace(
-                    '    verbs: ["get", "list", "watch"]\n---\n'
-                    "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding",
-                    '    verbs: ["get", "list", "watch"]\n'
-                    '  - nonResourceURLs: ["/metrics"]\n    verbs: ["get"]\n---\n'
-                    "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding",
-                ),
-                [f"{CR} rules: only in the operator: []  -> get urls=/metrics"],
+                _non_resource_urls,
+                [
+                    f"{CR} rules: only in the operator: "
+                    + _set_json({"nonResourceURLs": ["/metrics"], "verbs": ["get"]})
+                ],
                 id="rule-non-resource-urls",
             ),
             pytest.param(
-                lambda text: text.replace(
-                    "  name: ash-operator-crd-reader\nrules:\n",
-                    "  name: ash-operator-crd-reader\naggregationRule:\n"
-                    "  clusterRoleSelectors:\n"
-                    '    - matchLabels: {ash-aggregate: "true"}\nrules:\n',
-                ),
+                _aggregation_rule,
                 [
-                    f"{CR} aggregationRule: only in the stack: (none)",
-                    (
-                        f"{CR} aggregationRule: only in the operator: "
-                        '{"clusterRoleSelectors": [{"matchLabels": {"ash-aggregate": "true"}}]}'
-                    ),
+                    f"{CR} aggregationRule: only in the stack: null",
+                    f"{CR} aggregationRule: only in the operator: "
+                    + _set_json(AGGREGATION),
                 ],
                 id="aggregation-rule",
             ),
             pytest.param(
-                lambda text: text.replace(
-                    'resources: ["pods"]\n    verbs: ["get", "list", "watch"]\n',
-                    'resources: ["pods"]\n    verbs: ["get", "list", "watch"]\n'
-                    '    futureField: ["x"]\n',
-                ),
+                _admin_label,
                 [
-                    f"{ROLE} rules: only in the stack: [] pods -> get,list,watch",
-                    (
-                        f"{ROLE} rules: only in the operator: [] pods -> get,list,watch "
-                        '?futureField=["x"]'
-                    ),
+                    f"{CR} labels: only in the operator: "
+                    + _set_json([ADMIN_LABEL, "true"])
+                ],
+                id="aggregate-to-admin-label",
+            ),
+            pytest.param(
+                _annotation,
+                [
+                    f"{ROLE} annotations: only in the stack: {{}}",
+                    f'{ROLE} annotations: only in the operator: {{"note":"x"}}',
+                ],
+                id="annotation",
+            ),
+            pytest.param(
+                _rule_unknown_key,
+                [
+                    _rule_line("stack", PODS),
+                    _rule_line("operator", {**PODS, "futureField": ["x"]}),
                 ],
                 id="rule-unknown-key",
             ),
             pytest.param(
-                lambda text: text.replace(
-                    "kind: Role\nmetadata:", "kind: Role\nfutureField: 1\nmetadata:"
-                ),
+                _doc_unknown_field,
                 [f"{ROLE}: unknown field in the operator: futureField"],
                 id="document-unknown-field",
             ),
             pytest.param(
-                lambda text: text.replace(
-                    "subjects:\n  - kind: ServiceAccount\n    name: ash-operator\n"
-                    "    namespace: ash-system\n---\n"
-                    "apiVersion: rbac.authorization.k8s.io/v1\nkind: Role\n",
-                    "subjects:\n  - kind: ServiceAccount\n    apiGroup: example.io\n"
-                    "    name: ash-operator\n    namespace: ash-system\n---\n"
-                    "apiVersion: rbac.authorization.k8s.io/v1\nkind: Role\n",
-                ),
+                _metadata_unknown_field,
+                [f"{ROLE}: unknown metadata field in the operator: finalizers"],
+                id="metadata-unknown-field",
+            ),
+            pytest.param(
+                _subject_changed,
                 [
-                    f"{CRB} subjects: only in the stack: {SA}",
-                    (
-                        f"{CRB} subjects: only in the operator: "
-                        "ServiceAccount[example.io] ash-system/ash-operator"
-                    ),
+                    f"{RB} subjects: only in the stack: {_set_json(SUBJECT)}",
+                    f"{RB} subjects: only in the operator: "
+                    + _set_json({**SUBJECT, "name": "ash-scan"}),
+                ],
+                id="role-binding-subject",
+            ),
+            pytest.param(
+                _subject_api_group,
+                [
+                    f"{RB} subjects: only in the stack: {_set_json(SUBJECT)}",
+                    f"{RB} subjects: only in the operator: "
+                    + _set_json({**SUBJECT, "apiGroup": "example.io"}),
                 ],
                 id="subject-api-group",
             ),
             pytest.param(
-                lambda text: text.replace(
-                    "  name: ash-operator\nsubjects:\n  - kind: ServiceAccount\n"
-                    "    name: ash-operator\n    namespace: ash-system\n",
-                    "  name: ash-operator\nsubjects:\n  - kind: ServiceAccount\n"
-                    "    name: ash-operator\n    namespace: ash-system\n"
-                    "  - kind: ServiceAccount\n"
-                    "    name: ash-operator\n    namespace: ash-system\n",
-                ),
-                [f"{RB} subjects: repeated in the operator: {SA}"],
+                _subject_duplicated,
+                [f"{RB} subjects: repeated in the operator: {_set_json(SUBJECT)}"],
                 id="subject-duplicated",
+            ),
+            pytest.param(
+                _role_ref_changed,
+                [
+                    f"{CRB} roleRef: only in the stack: {_set_json(CRB_REF)}",
+                    f"{CRB} roleRef: only in the operator: "
+                    + _set_json({**CRB_REF, "name": "view"}),
+                ],
+                id="cluster-role-binding-roleref",
             ),
         ],
     )
-    def test_controls_planted_rbac_yaml_edits(
-        self, docs: list, edit, expected: list
+    def test_controls_planted_rbac_edits(
+        self, docs: list, applier: dict, edit, expected: list
     ) -> None:
-        """A planted copy of rbac.yaml, read the way the real assertion reads it."""
-        original = RBAC_YAML.read_text()
-        planted = edit(original)
-        # The plant must land, or this would test the real file under another name.
-        assert planted != original
-        operator = [doc for doc in yaml.safe_load_all(planted) if doc] + [
-            doc
-            for path in MANIFEST_YAMLS
-            if path != RBAC_YAML
-            for doc in _yaml_docs(path)
-        ]
-        installed = [manifest for _, manifest, _ in docs]
-        assert _rbac_drift(installed, operator) == expected
+        """A planted edit to the parsed manifests, read the way the real assertion is.
 
-    def test_control_order_anywhere_in_rbac_yaml_is_not_drift(self, docs: list) -> None:
+        Structural rather than textual, so a control does not depend on one line of
+        rbac.yaml staying as it is: a text anchor that stops matching would fail as
+        "plant did not land", which reads as drift being caught when nothing was
+        compared.
+        """
+        operator = copy.deepcopy(_manifest_docs(MANIFEST_YAMLS))
+        before = json.dumps(operator, sort_keys=True)
+        edit(operator)
+        assert json.dumps(operator, sort_keys=True) != before, "the plant did not land"
+        installed = [manifest for _, manifest, _ in docs]
+        assert _rbac_drift(installed, operator, applier["LABELS"]) == expected
+
+    @pytest.mark.parametrize(
+        ("edit", "first"),
+        [
+            pytest.param(
+                _role_ref_without_group,
+                f"{RB}: invalid in the operator: roleRef without apiGroup",
+                id="role-ref-without-api-group",
+            ),
+            pytest.param(
+                _empty_api_groups,
+                f"{ROLE}: invalid in the operator: rule with empty apiGroups: "
+                + _set_json({**PODS, "apiGroups": []}),
+                id="empty-api-groups",
+            ),
+        ],
+    )
+    def test_controls_invalid_input_is_reported_not_defaulted(
+        self, docs: list, applier: dict, edit, first: str
+    ) -> None:
+        operator = copy.deepcopy(_manifest_docs(MANIFEST_YAMLS))
+        edit(operator)
+        installed = [manifest for _, manifest, _ in docs]
+        drift = _rbac_drift(installed, operator, applier["LABELS"])
+        assert drift[0] == first
+        # And the value itself differs from the stack's, so it is drift as well.
+        assert len(drift) == 3
+
+    @pytest.mark.parametrize(
+        ("files", "expected"),
+        [
+            pytest.param(
+                {"extra-rbac.json": json.dumps(SECRETS_ROLE)},
+                ["RBAC objects: only in the operator: Role ash-system/ash-secrets"],
+                id="json-manifest",
+            ),
+            pytest.param(
+                {
+                    "zz-list.yaml": json.dumps(
+                        {
+                            "apiVersion": "v1",
+                            "kind": "List",
+                            "items": [SECRETS_ROLE, SECRETS_BINDING],
+                        }
+                    )
+                },
+                [
+                    "RBAC objects: only in the operator: Role ash-system/ash-secrets",
+                    "RBAC objects: only in the operator: RoleBinding ash-system/ash-secrets",
+                ],
+                id="kind-list",
+            ),
+            pytest.param(
+                {
+                    "zz-other.yml": "apiVersion: v1\nkind: ConfigMap\n"
+                    "metadata: {name: surprise, namespace: ash-system}\n"
+                },
+                ["manifests: kind not in the allowlist: ConfigMap ash-system/surprise"],
+                id="kind-outside-allowlist",
+            ),
+            pytest.param(
+                {
+                    "rbac.yaml": RBAC_YAML.read_text()
+                    + "\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: Role\n"
+                    "metadata: {name: ash-scan, namespace: ash-system}\n"
+                    'rules: [{apiGroups: [""], resources: [secrets], verbs: [get]}]\n'
+                },
+                ["RBAC objects: only in the operator: Role ash-system/ash-scan"],
+                id="extra-role-in-rbac-yaml",
+            ),
+            pytest.param(
+                {
+                    "zz-extra.yaml": "apiVersion: rbac.authorization.k8s.io/v1\n"
+                    "kind: ClusterRole\nmetadata: {name: ash-operator-extra}\n"
+                    'rules: [{apiGroups: [""], resources: [nodes], verbs: [get]}]\n'
+                },
+                [f"RBAC objects: only in the operator: {EXTRA_CR}"],
+                id="extra-cluster-role",
+            ),
+        ],
+    )
+    def test_controls_planted_manifest_files(
+        self, docs: list, applier: dict, tmp_path: pathlib.Path, files: dict, expected
+    ) -> None:
+        """Files planted in a copy of manifests/, with file discovery run again on it."""
+        for path in MANIFEST_YAMLS:
+            (tmp_path / path.name).write_text(path.read_text())
+        for name, text in files.items():
+            (tmp_path / name).write_text(text)
+        operator = _manifest_docs(_manifest_files(tmp_path))
+        installed = [manifest for _, manifest, _ in docs]
+        assert _rbac_drift(installed, operator, applier["LABELS"]) == expected
+
+    def test_control_order_anywhere_in_rbac_yaml_is_not_drift(
+        self, docs: list, applier: dict
+    ) -> None:
         """A reordering is a no-op to the API server, so it must not go red here.
 
-        Every list is reversed in the parsed documents rather than in the text, so this
-        control does not depend on any one line of rbac.yaml staying as it is.
+        Every array in every document is reversed, recursively, and the documents too.
         """
 
-        def reversed_doc(doc: dict) -> dict:
-            doc = dict(doc)
-            if "rules" in doc:
-                doc["rules"] = [
-                    {field: list(reversed(rule[field])) for field in rule}
-                    for rule in reversed(doc["rules"])
-                ]
-            if "subjects" in doc:
-                doc["subjects"] = list(reversed(doc["subjects"]))
-            return doc
+        def reversed_all(value):
+            if isinstance(value, list):
+                return [reversed_all(x) for x in reversed(value)]
+            if isinstance(value, dict):
+                return {k: reversed_all(v) for k, v in value.items()}
+            return value
 
-        operator = [doc for path in MANIFEST_YAMLS for doc in _yaml_docs(path)]
-        shuffled = [reversed_doc(doc) for doc in reversed(operator)]
+        operator = _manifest_docs(MANIFEST_YAMLS)
+        shuffled = reversed_all(operator)
         assert shuffled != operator
         installed = [manifest for _, manifest, _ in docs]
-        assert _rbac_drift(installed, shuffled) == []
+        assert _rbac_drift(installed, shuffled, applier["LABELS"]) == []
 
     def test_no_rule_is_empty_in_any_field(self, docs: list) -> None:
         for manifest in self._by_kind(docs, "Role") + self._by_kind(
