@@ -20,7 +20,12 @@ pass trivially.
 The fixture is the snapshot fixture (tests/test_data/snapshot_fixture/repo), plus a
 CloudFormation template for cfn-nag and cdk-nag, a pinned old Python dependency for
 grype, and an npm lockfile for npm-audit, so each builtin scanner has something to
-find. Both runs use --offline as well, unless --online is passed, in which case the
+find. For the community scanners it adds the actionlint and zizmor fixture workflows,
+the cfn-lint/cfn-guard insecure template, and the gitleaks fixture's fabricated
+tokens (materialized under ``secrets/``, where its ``.gitleaks.toml`` is not the
+root config). ``--ash-plugin-modules`` loads community modules in both runs, and
+``--config-override`` passes ``--config-overrides`` to both, for a scanner that is
+off by default such as ``trivy``. Both runs use --offline as well, unless --online is passed, in which case the
 pair is run online too, so the network-allowed scanners are exercised with and
 without their network.
 
@@ -41,8 +46,24 @@ from typing import Dict, List, Set, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
 SNAPSHOT_REPO = REPO / "tests" / "test_data" / "snapshot_fixture" / "repo"
-CFN_TEMPLATE = (
-    REPO / "tests" / "test_data" / "scanners" / "cdk" / "insecure-s3-template.yaml"
+SCANNER_DATA = REPO / "tests" / "test_data" / "scanners"
+CFN_TEMPLATE = SCANNER_DATA / "cdk" / "insecure-s3-template.yaml"
+WORKFLOWS = {
+    "actionlint-vulnerable.yml": SCANNER_DATA
+    / "actionlint"
+    / "repo"
+    / ".github"
+    / "workflows"
+    / "vulnerable.yml",
+    "zizmor-vulnerable.yml": SCANNER_DATA
+    / "zizmor"
+    / "repo"
+    / ".github"
+    / "workflows"
+    / "vulnerable.yml",
+}
+CFN_LINT_GUARD_TEMPLATE = (
+    SCANNER_DATA / "cfn_lint_guard" / "repo" / "templates" / "insecure.yaml"
 )
 
 PACKAGE_JSON = {
@@ -82,11 +103,28 @@ def build_fixture(root: Path) -> Path:
     (source / "web" / "package-lock.json").write_text(
         json.dumps(PACKAGE_LOCK, indent=2)
     )
+    workflows = source / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    for name, origin in WORKFLOWS.items():
+        shutil.copy(origin, workflows / name)
+    shutil.copy(CFN_LINT_GUARD_TEMPLATE, source / "cfn" / "insecure.yaml")
+    # The gitleaks fixture's tokens are fabricated but token-shaped, so the tree is
+    # committed with markers and written out here (tests/utils/gitleaks_fixture.py).
+    sys.path.insert(0, str(REPO))
+    from tests.utils.gitleaks_fixture import materialize
+
+    materialize(source / "secrets")
     return source
 
 
 def run_scan(
-    ash: List[str], source: Path, output: Path, mode: str, offline: bool
+    ash: List[str],
+    source: Path,
+    output: Path,
+    mode: str,
+    offline: bool,
+    plugin_modules: List[str] = (),
+    config_overrides: List[str] = (),
 ) -> int:
     command = [
         *ash,
@@ -102,6 +140,10 @@ def run_scan(
         "false",
         "--no-fail-on-incomplete-scanners",
     ]
+    for module in plugin_modules:
+        command += ["--ash-plugin-modules", module]
+    for override in config_overrides:
+        command += ["--config-overrides", override]
     if offline:
         command.append("--offline")
     print(f"$ {' '.join(command)}", flush=True)
@@ -219,6 +261,17 @@ def main() -> int:
     )
     parser.add_argument("--min-findings", type=int, default=10)
     parser.add_argument(
+        "--ash-plugin-modules",
+        default="",
+        help="comma-separated community plugin modules to load in both runs",
+    )
+    parser.add_argument(
+        "--config-override",
+        action="append",
+        default=[],
+        help="a --config-overrides value for both runs; repeatable",
+    )
+    parser.add_argument(
         "--ash", default=None, help="ash command, default: this interpreter's"
     )
     args = parser.parse_args()
@@ -232,8 +285,11 @@ def main() -> int:
     for label, offline in pairs:
         off = work / f"out-{label}-off"
         boxed = work / f"out-{label}-{args.sandbox}"
-        run_scan(ash, source, off, "off", offline)
-        run_scan(ash, source, boxed, args.sandbox, offline)
+        modules = [m.strip() for m in args.ash_plugin_modules.split(",") if m.strip()]
+        run_scan(ash, source, off, "off", offline, modules, args.config_override)
+        run_scan(
+            ash, source, boxed, args.sandbox, offline, modules, args.config_override
+        )
         pair_rows, pair_problems = compare(label, off, boxed)
         rows += pair_rows
         problems += pair_problems

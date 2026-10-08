@@ -110,6 +110,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     run_command,
@@ -420,6 +421,20 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # at its neutral value so _resolve_arguments is never surprised.
         self.args = ToolArgs()
         super().model_post_init(context)
+
+    @property
+    def sandbox_requirements(self) -> SandboxRequirements:
+        """A network and a GitHub token only when ``online_audits`` is true.
+
+        Offline (the default) zizmor runs with ``--offline`` and ``_child_env``
+        removes the token variables, so it needs neither. With ``online_audits``
+        its online audits call the GitHub API with the token, which the sandbox
+        would otherwise drop as credential-shaped. Under --offline the sandbox
+        grants no network whatever this says, and ``_online`` runs zizmor offline.
+        """
+        if not self._options.online_audits:
+            return SandboxRequirements()
+        return SandboxRequirements(network=True, env_names=GITHUB_TOKEN_ENV_VARS)
 
     @property
     def _options(self) -> ZizmorScannerConfigOptions:

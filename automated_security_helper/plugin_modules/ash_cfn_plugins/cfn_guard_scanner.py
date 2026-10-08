@@ -93,8 +93,11 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
     create_rules_bundle_install_command,
+    rules_root,
     verify_installed_bundle,
 )
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
@@ -174,6 +177,21 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     """Evaluates CloudFormation templates against cfn-guard rules."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    @property
+    def sandbox_requirements(self) -> SandboxRequirements:
+        """Read access to the installed rules bundle, and nothing else.
+
+        The bundle lives under ``rules_root()``: ``$ASH_CFN_GUARD_RULES_DIR``, or
+        ``<ASH_BIN_PATH>/../share/cfn-guard-rules``. The baseline policy exposes ASH's
+        bin directory but not that ``share`` directory beside it, so without this
+        every ``--rules`` path would be missing inside the sandbox. A property
+        because the location is read from the environment at scan time, as
+        ``rule_files`` reads it. ``rules_paths`` entries outside the source tree are
+        not granted here: the scanned repository can set them, so reading them
+        takes ``sandbox.extra_read_paths`` from a config outside the tree.
+        """
+        return SandboxRequirements(read_paths=(rules_root().as_posix(),))
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -430,10 +448,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     ),
                 )
             ]
-            results_dir.joinpath("cfn-guard.sarif").write_text(
-                report.model_dump_json(exclude_none=True, exclude_unset=True),
-                encoding="utf-8",
-            )
+            with open_for_write(results_dir.joinpath("cfn-guard.sarif")) as handle:
+                handle.write(
+                    report.model_dump_json(exclude_none=True, exclude_unset=True)
+                )
             return report
         except RulesBundleUnavailable as exc:
             raise ScannerError(str(exc)) from exc

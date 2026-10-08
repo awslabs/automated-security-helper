@@ -138,6 +138,8 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
@@ -442,6 +444,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     """Lints GitHub Actions workflow files with actionlint."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+    # The strict default, declared so the choice is visible: actionlint reads the
+    # workflows and ASH's config file, and needs no network, cache or variables. An
+    # enabled shellcheck or pyflakes is found through PATH, which the baseline mounts.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -599,11 +605,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             if candidate.is_file():
                 return candidate.absolute()
         empty = results_dir / "ash-default-actionlint.yaml"
-        empty.write_text(
-            "# Written by ASH so actionlint does not discover a config outside the "
-            "scan root.\n",
-            encoding="utf-8",
-        )
+        with open_for_write(empty) as handle:
+            handle.write(
+                "# Written by ASH so actionlint does not discover a config outside "
+                "the scan root.\n"
+            )
         return empty.absolute()
 
     def _execute_scan(
@@ -723,14 +729,14 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             except json.JSONDecodeError as exc:
                 # Kept verbatim for diagnosis: output that does not parse cannot
                 # be redacted, and is not findings.
-                raw_output.write_text(stdout, encoding="utf-8")
+                with open_for_write(raw_output) as handle:
+                    handle.write(stdout)
                 raise ScannerError(
                     f"actionlint output is not JSON ({exc}); raw output kept at "
                     f"{raw_output.as_posix()}"
                 ) from exc
-            raw_output.write_text(
-                json.dumps(redact_credentials(payload), indent=2), encoding="utf-8"
-            )
+            with open_for_write(raw_output) as handle:
+                handle.write(json.dumps(redact_credentials(payload), indent=2))
 
             sarif_dict = build_sarif(payload, self.exit_code)
             self.tool_version = sarif_dict["runs"][0]["tool"]["driver"]["version"]
@@ -745,12 +751,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 )
             sarif_report = SarifReport.model_validate(sarif_dict)
             self._inject_invocation(sarif_report, final_args, target)
-            (results_dir / "actionlint.sarif").write_text(
-                sarif_report.model_dump_json(
-                    by_alias=True, exclude_none=True, exclude_unset=True, indent=2
-                ),
-                encoding="utf-8",
-            )
+            with open_for_write(results_dir / "actionlint.sarif") as handle:
+                handle.write(
+                    sarif_report.model_dump_json(
+                        by_alias=True, exclude_none=True, exclude_unset=True, indent=2
+                    )
+                )
             return sarif_report
         except Exception as exc:
             self.targets_failed = self.targets_attempted

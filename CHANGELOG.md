@@ -105,7 +105,8 @@
   names scanners that did load warns with the same advice and runs those, as any
   partly unresolved `--scanners` list does. The container image ships every tool,
   pinned, digest-verified and with its license files, and `ash dependencies install
-  --tool <name>` installs the same pinned build locally. See [Community
+  --tool <name>` installs the same pinned build locally. Under `--sandbox` each gets
+  what it declares, listed in `docs/content/docs/scanner-sandbox.md`. See [Community
   Plugins](docs/content/docs/plugins/community/index.md).
   - `ash_actionlint_plugins`: actionlint 1.7.12 on `.github/workflows` files. Script
     injection from untrusted event data and hard-coded container credentials are

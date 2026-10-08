@@ -169,9 +169,26 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
     )
 ```
 
-The community scanners declare theirs: snyk-code asks for a network, its `SNYK_`
-variables and `SNYK_TOKEN`, and read access to its token file; trivy-repo asks for a
-network and its database cache; ferret-scan asks only for its `FERRET_` variables.
+The community scanners declare theirs:
+
+- snyk-code asks for a network, its `SNYK_` variables and `SNYK_TOKEN`, and read
+  access to its token file.
+- trivy-repo and trivy ask for a network, their database cache and their `TRIVY_`
+  variables.
+- ferret-scan asks only for its `FERRET_` variables.
+- cfn-guard asks for read access to its rules bundle: `$ASH_CFN_GUARD_RULES_DIR`, or
+  `share/cfn-guard-rules` beside ASH's bin directory.
+- gitleaks passes its `GITLEAKS_` variables through and reads the file
+  `GITLEAKS_CONFIG` names.
+- zizmor asks for a network and `GH_TOKEN`, `GITHUB_TOKEN` and `ZIZMOR_GITHUB_TOKEN`
+  only when `options.online_audits` is true; otherwise it gets neither.
+- actionlint and cfn-lint take the strict default.
+
+A file outside the source tree that a scanner option names is not mounted: a
+cfn-guard `rules_paths` entry, a `config_file` of gitleaks, cfn-lint, zizmor or trivy,
+or an absolute actionlint `shellcheck` or `pyflakes`. The scanned repository can set
+some of those options, and the sandbox does not take its grants from them. List such
+a path in `sandbox.extra_read_paths`, from a config outside the tree.
 
 detect-secrets needs a network only to verify candidate secrets with their issuers,
 which it does when its settings list the verification filter. Those settings come
