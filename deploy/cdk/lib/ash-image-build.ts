@@ -849,8 +849,13 @@ fi`;
 /**
  * Inline handler that starts the build and stays silent on success.
  *
- * Kept small on purpose: `lambda.Code.fromInline` writes into the template's
- * `ZipFile`, which CloudFormation caps at 4096 characters.
+ * Kept small on purpose. `lambda.Code.fromInline` writes this source into the
+ * template's `ZipFile`. That property allows up to 4 MB once zipped
+ * (https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-lambda-function-code.html),
+ * so it is not the constraint. The constraint is the template itself: every
+ * byte here lands in a committed template that must stay under CloudFormation's
+ * 51,200-byte `--template-body` quota
+ * (https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html).
  */
 const BOOTSTRAP_STARTER_CODE = `import json
 import urllib.request
