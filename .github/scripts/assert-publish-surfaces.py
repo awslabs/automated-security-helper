@@ -321,6 +321,13 @@ _BASE_IMAGE_CACHE_REASON = (
     "before any build reads it, and discards the entry on any mismatch."
 )
 
+_MKDOCS_PRIVACY_CACHE_REASON = (
+    "Third-party assets the published docs site already links to (the "
+    "mermaid bundle, twemoji images, a star-history badge), fetched from "
+    "their public CDNs by mkdocs-material's privacy plugin. Nothing this "
+    "project builds goes in it; the site that embeds them is itself public."
+)
+
 _GRYPE_DB_CACHE_REASON = (
     "grype's published vulnerability database, fetched from upstream and "
     "re-verified by grype on start. Third-party public data; this project builds "
@@ -878,22 +885,28 @@ ALLOWLIST: tuple[Entry, ...] = (
     ),
     # mkdocs-material's privacy plugin cache: the external assets the docs site
     # references, downloaded so --strict does not fail on a transient fetch. Both jobs
-    # of the workflow carry the step, hence count=2.
+    # of the workflow restore it, hence count=2; only deploy-docs saves it, gated to a
+    # push to main.
     Entry(
         file=".github/workflows/ash-repo-docs.yml",
         kind=KIND_CACHE,
-        action="actions/cache",
+        action="actions/cache/restore",
         publishes=(
             "path=.cache/plugin/privacy "
             "key=mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}"
         ),
         count=2,
-        reason=(
-            "Third-party assets the published docs site already links to (the "
-            "mermaid bundle, twemoji images, a star-history badge), fetched from "
-            "their public CDNs by mkdocs-material's privacy plugin. Nothing this "
-            "project builds goes in it; the site that embeds them is itself public."
+        reason=_MKDOCS_PRIVACY_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-docs.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=.cache/plugin/privacy "
+            "key=mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}"
         ),
+        reason=_MKDOCS_PRIVACY_CACHE_REASON,
     ),
     # The build base image, as a verified OCI layout. The only cache the maintainer has
     # approved for image bytes, and deliberately not ASH's own image or layers. Restore runs

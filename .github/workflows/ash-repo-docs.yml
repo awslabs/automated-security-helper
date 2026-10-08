@@ -57,13 +57,32 @@ jobs:
       # directory means a transient fetch failure only matters on a cold cache. The
       # key rolls with the lockfile and mkdocs.yml, which is where the asset set
       # changes; restore-keys reuse the last cache when only one of them moved.
-      - name: Cache the privacy plugin's downloaded assets
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      #
+      # Restored here and saved only by deploy-docs on a push to main: a cache saved
+      # from a pull request is scoped to that ref, so no other pull request could
+      # read it (tests/unit/test_ci_cache_saves_from_main_only.py).
+      - name: Restore the privacy plugin's downloaded assets
+        id: privacy-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/plugin/privacy
           key: mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}
           restore-keys: |
             mkdocs-privacy-
+
+      - name: "Cache report: mkdocs-privacy"
+        if: ${{ !cancelled() && steps.privacy-cache.outcome == 'success' }}
+        env:
+          CACHE_NAME: mkdocs-privacy
+          CACHE_HIT: ${{ steps.privacy-cache.outputs.cache-hit }}
+          CACHE_MATCHED: ${{ steps.privacy-cache.outputs.cache-matched-key }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # --strict turns every mkdocs warning into a failure: a link to a file outside
       # docs_dir, a nav entry naming a missing page, an unknown anchor. Without it the
@@ -103,15 +122,42 @@ jobs:
       # directory means a transient fetch failure only matters on a cold cache. The
       # key rolls with the lockfile and mkdocs.yml, which is where the asset set
       # changes; restore-keys reuse the last cache when only one of them moved.
-      - name: Cache the privacy plugin's downloaded assets
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      #
+      # This job is the cache's only writer, from a push to main; see build-docs.
+      - name: Restore the privacy plugin's downloaded assets
+        id: privacy-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/plugin/privacy
           key: mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}
           restore-keys: |
             mkdocs-privacy-
 
+      - name: "Cache report: mkdocs-privacy"
+        if: ${{ !cancelled() && steps.privacy-cache.outcome == 'success' }}
+        env:
+          CACHE_NAME: mkdocs-privacy
+          CACHE_HIT: ${{ steps.privacy-cache.outputs.cache-hit }}
+          CACHE_MATCHED: ${{ steps.privacy-cache.outputs.cache-matched-key }}
+        run: |
+          # One line per cache per job, same shape everywhere, so hit rates can be
+          # counted across runs from job summaries.
+          if [ "${CACHE_HIT}" = "true" ]; then result=hit
+          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+          else result=miss; fi
+          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Strict here too, so a warning that reached main without the pull request
       # build (a ruleset bypass) stops the deploy instead of publishing it.
       - name: Deploy documentation
         run: uv run mkdocs gh-deploy --clean --force --strict
+
+      - name: Save the privacy plugin's downloaded assets (main only)
+        if: >-
+          github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+          && steps.privacy-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/plugin/privacy
+          key: mkdocs-privacy-${{ hashFiles('uv.lock', 'mkdocs.yml') }}
