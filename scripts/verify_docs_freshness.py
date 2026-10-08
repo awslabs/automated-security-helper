@@ -1088,10 +1088,31 @@ def _release_asset_keys() -> set[str]:
     of that are read here: a `gh release create` that attached anything other than
     the checked directory would make the table say nothing about the release.
     """
-    text = read_text(RELEASE_WORKFLOW)
+    import yaml
+
+    # Only what a step runs counts, not a YAML comment or a shell comment inside a
+    # run: block, which a text search would credit.
+    workflow = yaml.safe_load(read_text(RELEASE_WORKFLOW)) or {}
+    runs: list[str] = []
+    for job in (workflow.get("jobs") or {}).values():
+        for step in (job or {}).get("steps") or []:
+            run = (step or {}).get("run")
+            if isinstance(run, str):
+                runs.append(
+                    "\n".join(
+                        line
+                        for line in run.splitlines()
+                        if not line.lstrip().startswith("#")
+                    )
+                )
+    creates = [run for run in runs if "gh release create" in run]
+    if len(creates) != 1:
+        raise ValueError(
+            f"expected one step running `gh release create` in "
+            f"{RELEASE_WORKFLOW.name}, found {len(creates)}"
+        )
+    text = creates[0]
     start = text.find("gh release create")
-    if start < 0:
-        raise ValueError(f"no `gh release create` in {RELEASE_WORKFLOW.name}")
     command: list[str] = []
     for line in text[start:].splitlines():
         command.append(line)
@@ -1108,7 +1129,9 @@ def _release_asset_keys() -> set[str]:
             f"`gh release create` in {RELEASE_WORKFLOW.name} attaches {attached}, "
             "not the release-assets/* directory packaging/release-assets.py checks"
         )
-    if not re.search(r"release-assets\.py check release-assets\b", text):
+    if not any(
+        re.search(r"release-assets\.py check release-assets\b", run) for run in runs
+    ):
         raise ValueError(
             f"{RELEASE_WORKFLOW.name} does not run `release-assets.py check` on the "
             "directory it attaches"
