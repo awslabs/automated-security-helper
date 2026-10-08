@@ -166,10 +166,17 @@ def installed(cluster):
 
 
 # The lifecycle module uninstalls the operator and reinstalls it from N-1, so it has
-# to run after every module that relies on the session's fresh install. Ordered here
-# rather than by file name, which a rename would silently change.
+# to run after every module that relies on the session's fresh install. The EKS
+# applier module installs the operator the way the EKS stack does, CRDs and cluster
+# RBAC included, so it needs the cluster the lifecycle module's last uninstall leaves:
+# none of the operator's objects at all. Ordered here rather than by file name, which
+# a rename would silently change; every other module keeps its collected order.
 LIFECYCLE_MODULE = "test_e2e_lifecycle.py"
+EKS_APPLIER_MODULE = "test_e2e_eks_applier.py"
+RUN_LAST = (LIFECYCLE_MODULE, EKS_APPLIER_MODULE)
 
 
 def pytest_collection_modifyitems(session, config, items):
-    items.sort(key=lambda item: item.path.name == LIFECYCLE_MODULE)
+    items.sort(
+        key=lambda item: RUN_LAST.index(item.path.name) + 1 if item.path.name in RUN_LAST else 0
+    )

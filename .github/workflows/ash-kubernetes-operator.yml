@@ -25,7 +25,10 @@ on:
       # The shared e2e contract the kind job scans and judges with.
       - "tests/e2e/**"
       - "scripts/e2e/**"
-      # The lock the e2e ASH image's runtime is exported from.
+      # The EKS stack's inline applier, which e2e-kind runs against the cluster
+      # (tests/e2e/test_e2e_eks_applier.py), and the lock the e2e ASH image's
+      # runtime is exported from.
+      - "deploy/cdk/templates/AshEksOperator.template.json"
       - "uv.lock"
       - ".github/workflows/ash-kubernetes-operator.yml"
   pull_request:
@@ -36,7 +39,10 @@ on:
       # The shared e2e contract the kind job scans and judges with.
       - "tests/e2e/**"
       - "scripts/e2e/**"
-      # The lock the e2e ASH image's runtime is exported from.
+      # The EKS stack's inline applier, which e2e-kind runs against the cluster
+      # (tests/e2e/test_e2e_eks_applier.py), and the lock the e2e ASH image's
+      # runtime is exported from.
+      - "deploy/cdk/templates/AshEksOperator.template.json"
       - "uv.lock"
       - ".github/workflows/ash-kubernetes-operator.yml"
   # A merge queue runs every required check on the merged result, and accepts no
@@ -190,7 +196,8 @@ jobs:
   e2e-kind:
     runs-on: ubuntu-latest
     # The fresh-install suite, the shared contract cases, then uninstall, an N-1
-    # build and install, the upgrade, and a second uninstall, all on one cluster.
+    # build and install, the upgrade, and a second uninstall, then the EKS stack's
+    # applier installing, scanning with and deleting the operator, all on one cluster.
     timeout-minutes: 120
     env:
       # Unique per run, so a re-run or a parallel job never shares a cluster or an
