@@ -156,9 +156,10 @@ describe('cfn-guard suppressions sit only on the approved resources', () => {
 /**
  * cfn-nag's own per-resource suppressions, `Metadata.cfn_nag.rules_to_suppress`.
  *
- * The app writes exactly one: W12 on AshCodeCommitGate's conditional ENI policy. It is
- * per-resource so that the file-level W12 entry in `.ash/.ash.yaml`, whose reason names
- * only the image-build role's DefaultPolicy, did not have to be widened to cover it.
+ * The app writes exactly two, both on AshCodeCommitGate resources that exist only when
+ * VPC placement is on: W12 on the conditional ENI policy, and W5 on the 443-only
+ * security group. Per-resource so that no file-level entry in `.ash/.ash.yaml` had to
+ * be widened to cover them.
  * Pinned the same way as the cfn-guard set above.
  */
 function cfnNagEntries(templates: Record<string, any>): string[] {
@@ -176,8 +177,23 @@ function cfnNagEntries(templates: Record<string, any>): string[] {
 describe('cfn-nag suppressions sit only on the approved resource', () => {
   const VPC_POLICY = 'AshCodeCommitGate/ScanFunctionRoleEc2Access99A7E33E';
 
-  test('the W12 suppression is on the conditional ENI policy and nowhere else', () => {
-    expect(cfnNagEntries(COMMITTED)).toEqual([`${VPC_POLICY} [AWS::IAM::Policy] W12`]);
+  const SCAN_SG = 'AshCodeCommitGate/ScanSecurityGroup';
+
+  test('W12 is on the conditional ENI policy, W5 on the scan group, and nothing else', () => {
+    expect(cfnNagEntries(COMMITTED)).toEqual(
+      [`${VPC_POLICY} [AWS::IAM::Policy] W12`, `${SCAN_SG} [AWS::EC2::SecurityGroup] W5`].sort(),
+    );
+  });
+
+  test('the W5 group is conditional, egress-only and pinned to TCP 443', () => {
+    const sg = COMMITTED.AshCodeCommitGate.Resources.ScanSecurityGroup;
+    expect(sg.Condition).toBe('ScanFunctionInVpc');
+    expect(sg.Properties.SecurityGroupIngress).toBeUndefined();
+    expect(sg.Properties.SecurityGroupEgress).toEqual([
+      expect.objectContaining({ IpProtocol: 'tcp', FromPort: 443, ToPort: 443 }),
+    ]);
+    const [entry] = sg.Metadata.cfn_nag.rules_to_suppress;
+    expect(entry.reason).toMatch(/prefix list/);
   });
 
   test('it carries a reason, and the policy it covers is the conditional one', () => {
@@ -187,7 +203,7 @@ describe('cfn-nag suppressions sit only on the approved resource', () => {
     expect(entry.reason.length).toBeGreaterThan(40);
   });
 
-  test('a W12 suppression on any other resource is caught', () => {
+  test('a W5 or W12 suppression on any other resource is caught', () => {
     const tampered = structuredClone(COMMITTED);
     const victim = Object.keys(tampered.AshFargate.Resources)[0];
     tampered.AshFargate.Resources[victim].Metadata = {

@@ -310,6 +310,21 @@ export class AshCodeCommitGateStack extends Stack {
       ],
     });
     scanSecurityGroup.cfnOptions.condition = scanInVpc;
+    // cfn-nag W5 (egress to 0.0.0.0/0), suppressed on this one group, for the reason
+    // the Fargate task group's .ash/.ash.yaml entry records: the destinations are
+    // public AWS endpoints reached through NAT, and no AWS-managed prefix list covers
+    // ECR or CloudWatch Logs. Protocol and port are already pinned to TCP 443.
+    scanSecurityGroup.addMetadata('cfn_nag', {
+      rules_to_suppress: [
+        {
+          id: 'W5',
+          reason:
+            'Egress is TCP 443 to public AWS endpoints (CodeCommit, ECR, SSM, CloudWatch ' +
+            'Logs) through the adopter NAT. No AWS-managed prefix list covers ECR or Logs, ' +
+            'and naming them needs interface endpoints. Widen via ScanSecurityGroupId.',
+        },
+      ],
+    });
     const cfnScanFunction = scanFunction.node.defaultChild as lambda.CfnFunction;
     cfnScanFunction.vpcConfig = Fn.conditionIf(
       scanInVpc.logicalId,

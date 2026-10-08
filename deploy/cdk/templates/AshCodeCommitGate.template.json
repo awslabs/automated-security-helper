@@ -1292,6 +1292,16 @@
      "Ref": "VpcId"
     }
    },
+   "Metadata": {
+    "cfn_nag": {
+     "rules_to_suppress": [
+      {
+       "id": "W5",
+       "reason": "Egress is TCP 443 to public AWS endpoints (CodeCommit, ECR, SSM, CloudWatch Logs) through the adopter NAT. No AWS-managed prefix list covers ECR or Logs, and naming them needs interface endpoints. Widen via ScanSecurityGroupId."
+      }
+     ]
+    }
+   },
    "Condition": "ScanFunctionInVpc"
   },
   "ScanFunctionRoleEc2Access99A7E33E": {
