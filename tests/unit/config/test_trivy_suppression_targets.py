@@ -298,6 +298,10 @@ def test_stale_skip_citation_classifier():
 
 
 def test_outside_a_checkout_the_skip_index_fails_with_a_reason(monkeypatch, tmp_path):
+    # A git hook exports GIT_DIR (and sometimes GIT_WORK_TREE), which would point
+    # git back at the real repository whatever cwd it is given.
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(sys.modules[__name__], "REPO_ROOT", tmp_path)
     _inline_skips.cache_clear()
     try:
