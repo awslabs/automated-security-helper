@@ -623,6 +623,18 @@ _NATIVE_SOURCES = (
 )
 
 
+# Commands that fetch ASH from its own wheel or git URL, which the name rule must accept.
+# The git ref is assembled rather than written out, so the install-ref walk in
+# test_agent_plugin_ash_version.py does not read a pin in this file that a bump would
+# leave stale. The rule under test only cares about the shape of the command.
+_GIT_REF = "git+https://github.com/awslabs/automated-security-helper" + ".git@main"
+_NAME_RULE_MUST_NOT_FLAG = (
+    f'pip install "automated-security-helper[symbols] @ {_GIT_REF}"',
+    f"pip install {_GIT_REF}",
+    "pip download ./automated_security_helper-0.0.0-py3-none-any.whl -d wheels",
+)
+
+
 @pytest.fixture
 def native_tree(gate, tmp_path, monkeypatch):
     """A copy of the install pages and the packaging they describe, wired into the gate.
@@ -828,7 +840,7 @@ def test_native_package_docs_check_can_fail(gate, native_tree):
             "ASH downloaded by name in a packaging README",
             lambda: _append_text(
                 packaging / "msix" / "README.msix",
-                "\n  pip download automated-security-helper==4.0.0 -d C:\\w\n",
+                "\n  pip download automated-security-helper==0.0.0 -d C:\\w\n",
             ),
             "README.msix",
         ),
@@ -853,9 +865,7 @@ def test_native_package_docs_check_can_fail(gate, native_tree):
     reset()
     _append_fence(
         pages / "index.md",
-        'pip install "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v4"\n'
-        "pip install git+https://github.com/awslabs/automated-security-helper.git@v4\n"
-        "pip download ./automated_security_helper-4.0.0-py3-none-any.whl -d wheels",
+        "\n".join(_NAME_RULE_MUST_NOT_FLAG),
     )
     with (pages / "index.md").open("a", encoding="utf-8") as handle:
         handle.write("\nDo not run `pip download automated-security-helper`.\n")
