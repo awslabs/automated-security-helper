@@ -213,16 +213,28 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
 
     @staticmethod
     def _package_from_message(message: str | None) -> tuple[str | None, str | None]:
-        """Name and version from trivy's vulnerability message.
+        """Name and version from trivy's vulnerability or license message.
 
-        trivy writes ``Package: <name>`` and ``Installed Version: <version>``
-        as their own lines. A message without them (a misconfiguration or
-        secret finding) is not about a package.
+        A vulnerability message has ``Package: <name>`` and ``Installed
+        Version: <version>`` on their own lines. A license message has
+        ``PkgName: <name>`` and no version, for example::
+
+            Artifact: scripts/e2e/inspector/package-lock.json
+            License MPL-2.0
+            PkgName: lightningcss
+             Classification: reciprocal
+
+        Reading it gives license findings a ``package_name``, so a license
+        approval can name the package it covers rather than the whole file.
+        A message with neither line (a misconfiguration or secret finding) is
+        not about a package.
         """
         name = version = None
         for line in (message or "").splitlines():
             if line.startswith("Package: "):
                 name = line[len("Package: ") :].strip() or None
+            elif line.startswith("PkgName: "):
+                name = line[len("PkgName: ") :].strip() or None
             elif line.startswith("Installed Version: "):
                 version = line[len("Installed Version: ") :].strip() or None
         return name, version
