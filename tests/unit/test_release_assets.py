@@ -588,7 +588,10 @@ def _git(repo: Path, *args: str) -> str:
 
 
 @needs_bash
-@pytest.mark.parametrize("case", ["merge", "empty", "not-github-sha", "not-head"])
+@pytest.mark.parametrize(
+    "case",
+    ["merge", "empty", "both-empty", "abbreviated", "not-github-sha", "not-head"],
+)
 def test_the_resolve_job_pins_the_merge_commit(tmp_path: Path, case):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -611,6 +614,11 @@ def test_the_resolve_job_pins_the_merge_commit(tmp_path: Path, case):
     env = {"MERGE_SHA": head, "GITHUB_SHA": head}
     if case == "empty":
         env["MERGE_SHA"] = ""
+    elif case == "both-empty":
+        # No format check exists: the HEAD comparison is what refuses this.
+        env["MERGE_SHA"] = env["GITHUB_SHA"] = ""
+    elif case == "abbreviated":
+        env["MERGE_SHA"] = env["GITHUB_SHA"] = head[:12]
     elif case == "not-github-sha":
         env["GITHUB_SHA"] = first
     elif case == "not-head":
