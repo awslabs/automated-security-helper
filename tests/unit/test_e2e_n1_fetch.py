@@ -41,6 +41,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -351,8 +352,90 @@ def test_a_leg_derives_n_minus_1_and_runs_its_script(key):
     users = _prev_ref_steps(N1[key]["steps"])
     assert users, key
     for _, step in users:
-        assert step["env"]["E2E_PREV_REF"] == "auto", (key, step["env"])
         assert script.rsplit("/", 1)[-1] in str(step.get("run", "")), (key, script)
+    workflow = yaml.safe_load((WORKFLOWS / key[0]).read_text(encoding="utf-8"))
+    assert workflow_leg_problems(workflow, key[1]) == [], key
+
+
+def workflow_leg_problems(workflow: dict, job_name: str) -> list:
+    """How an N-1 job could hand its script an E2E_PREV_REF other than `auto`.
+
+    Every env that can reach a step (the workflow's, the job's, each step's) may set it
+    only to `auto`, and no step's run: text may mention it at all: a command-prefix
+    assignment (`E2E_PREV_REF=x bash leg.sh`) or a write to $GITHUB_ENV overrides the
+    pinned env without touching it.
+    """
+    problems = []
+    job = workflow["jobs"][job_name]
+    scopes = [("workflow env", workflow.get("env")), ("job env", job.get("env"))]
+    scopes += [
+        (f"step {step.get('name', index)!r} env", step.get("env"))
+        for index, step in enumerate(job.get("steps") or [])
+    ]
+    for where, env in scopes:
+        if env and "E2E_PREV_REF" in env and env["E2E_PREV_REF"] != "auto":
+            problems.append(f"{where} sets E2E_PREV_REF to {env['E2E_PREV_REF']!r}")
+    for index, step in enumerate(job.get("steps") or []):
+        if "E2E_PREV_REF" in str(step.get("run", "")):
+            problems.append(
+                f"step {step.get('name', index)!r} run: mentions E2E_PREV_REF"
+            )
+    if not _prev_ref_steps(job.get("steps") or []):
+        problems.append("no step sets E2E_PREV_REF")
+    return problems
+
+
+@pytest.mark.parametrize(
+    ("label", "mutate", "expect"),
+    [
+        (
+            "a command-prefix assignment in run: (mB)",
+            lambda wf: wf["jobs"]["wheel"]["steps"][-1].update(
+                run=wf["jobs"]["wheel"]["steps"][-1]["run"].replace(
+                    'bash scripts/e2e/wheel.sh "$work"',
+                    'E2E_PREV_REF="${{ vars.N1_REF }}" bash scripts/e2e/wheel.sh "$work"',
+                )
+            ),
+            "run: mentions E2E_PREV_REF",
+        ),
+        (
+            "a write to GITHUB_ENV in an earlier step",
+            lambda wf: wf["jobs"]["wheel"]["steps"].insert(
+                1, {"name": "pick", "run": 'echo "E2E_PREV_REF=$X" >> "$GITHUB_ENV"'}
+            ),
+            "run: mentions E2E_PREV_REF",
+        ),
+        (
+            "a job env value",
+            lambda wf: wf["jobs"]["wheel"].update(
+                env={"E2E_PREV_REF": "${{ vars.R }}"}
+            ),
+            "job env sets E2E_PREV_REF",
+        ),
+        (
+            "a workflow env value",
+            lambda wf: wf.setdefault("env", {}).update(E2E_PREV_REF="origin/main"),
+            "workflow env sets E2E_PREV_REF",
+        ),
+        (
+            "a step env expression",
+            lambda wf: wf["jobs"]["wheel"]["steps"][-1]["env"].update(
+                E2E_PREV_REF="${{ vars.N1_REF }}"
+            ),
+            "env sets E2E_PREV_REF",
+        ),
+    ],
+)
+def test_a_planted_bypass_in_a_real_workflow_leg_is_caught(label, mutate, expect):
+    workflow = yaml.safe_load((WORKFLOWS / "ash-e2e.yml").read_text(encoding="utf-8"))
+    assert workflow_leg_problems(workflow, "wheel") == []
+    assert (
+        'bash scripts/e2e/wheel.sh "$work"'
+        in workflow["jobs"]["wheel"]["steps"][-1]["run"]
+    )
+    mutate(workflow)
+    problems = workflow_leg_problems(workflow, "wheel")
+    assert any(expect in problem for problem in problems), (label, problems)
 
 
 @pytest.mark.parametrize("key", sorted(LEGS), ids=IDS)
@@ -395,37 +478,117 @@ BRANCH_SPELLINGS = re.compile(r"v4-capabilities|origin/|refs/heads/")
 DEFAULT_LINE = 'PREV_REF="${E2E_PREV_REF:-auto}"'
 # The one sanctioned copy of the commit n1_resolve sets (homebrew.sh's leg function).
 SANCTIONED_SHA = 'prev_sha="$PREV_SHA"'
-# Other ways bash writes a variable: `read [-r] NAME`, `printf -v NAME`.
-_WRITES = r"(?:\bread\b[^\n;|&]*\s|\bprintf\s+-v\s+)"
+# The only revisions a leg script may hand git: N, and the N-1 n1_resolve chose.
+ALLOWED_REVISIONS = {"HEAD", "$PREV_SHA", "$prev_sha"}
+# The git subcommands the legs use. Anything else (show, checkout, worktree, ...) could
+# read another tree and is refused rather than parsed.
+GIT_SUBCOMMANDS = {"archive", "diff", "rev-parse"}
+# Options of those subcommands that take the next word as their value.
+_GIT_VALUE_OPTIONS = {"-o", "--output", "--format", "--prefix", "--remote", "--exec"}
+
+
+def writes_to(name: str, text: str) -> list:
+    """Code lines that write the shell variable NAME, by any form bash offers cheaply.
+
+    A plain or appending assignment (also after declare, local, export or readonly),
+    ${NAME:=...}, read/mapfile/readarray/printf -v into NAME (its name quoted or not),
+    and a nameref (declare/local/typeset -n) bound to NAME. Comment lines are skipped.
+    Not covered, and banned outright by shell_leg_problems instead: eval.
+    """
+    q = r"""["']?"""
+    forms = [
+        rf"(?<![\w$]){q}{name}{q}\s*\+?=",
+        rf"\$\{{{name}:?=",
+        rf"\b(?:read|mapfile|readarray)\b[^\n;|&]*\s{q}{name}{q}(?![\w])",
+        rf"\bprintf\s+(?:-\S+\s+)*-v\s*{q}{name}{q}(?![\w])",
+        rf"\b(?:declare|local|typeset)\s+(?:-\w+\s+)*-\w*n\w*\s+\w+={q}{name}{q}(?![\w])",
+    ]
+    pattern = re.compile("|".join(forms), re.IGNORECASE)
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if not line.lstrip().startswith("#") and pattern.search(line)
+    ]
+
+
+def git_revision_problems(text: str) -> list:
+    """Every git call in a leg script whose revisions are not HEAD or the chosen N-1.
+
+    A deny-list of branch spellings cannot enumerate split strings, other remotes,
+    tags or SHAs; checking what each git call is given catches all of them.
+    """
+    problems = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        for match in re.finditer(r"(?<![\w./-])git\s+[^|;&)\n]*", line):
+            call = match.group(0)
+            try:
+                argv = shlex.split(call)
+            except ValueError:
+                problems.append(f"line {number}: cannot read the git call {call!r}")
+                continue
+            # Quoted words come back unquoted; compare the variable names as written.
+            index = 1
+            while index < len(argv) and argv[index] in ("-C", "-c"):
+                index += 2
+            if index >= len(argv):
+                problems.append(f"line {number}: git call with no subcommand {call!r}")
+                continue
+            sub, args = argv[index], argv[index + 1 :]
+            if sub not in GIT_SUBCOMMANDS:
+                problems.append(f"line {number}: git {sub} is not one the legs use")
+                continue
+            revisions, skip = [], False
+            for arg in args:
+                if skip:
+                    skip = False
+                    continue
+                if arg == "--":
+                    break
+                if arg in _GIT_VALUE_OPTIONS:
+                    skip = True
+                    continue
+                if arg.startswith("-"):
+                    continue
+                revisions.append(arg)
+            if sub == "archive":
+                # git archive <tree-ish> [<path>...]: only the first word is a revision.
+                revisions = revisions[:1]
+            if not revisions and sub != "diff":
+                problems.append(f"line {number}: git {sub} with no revision {call!r}")
+            for rev in revisions:
+                if rev not in ALLOWED_REVISIONS:
+                    problems.append(f"line {number}: git {sub} is given {rev!r}")
+    return problems
 
 
 def shell_leg_problems(text: str, require) -> list:
     """Every way a shell leg's text could pick an N-1 other than through n1_resolve."""
     problems = []
-    assigns = [
-        line.strip()
-        for line in text.splitlines()
-        if re.search(
-            r"(?<![\w$])PREV_REF\s*=|\$\{PREV_REF:?=|" + _WRITES + r"PREV_REF\b", line
-        )
-    ]
+    code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    # E2E_PREV_REF is only ever read, once, on the default line.
+    reads = [line.strip() for line in code if "E2E_PREV_REF" in line]
+    if reads != [DEFAULT_LINE]:
+        problems.append(f"E2E_PREV_REF is used other than by the default line: {reads}")
+    assigns = writes_to("PREV_REF", text)
     if assigns != [DEFAULT_LINE]:
         problems.append(
             f"PREV_REF is assigned other than by the default line: {assigns}"
         )
-    shas = [
-        line.strip()
-        for line in text.splitlines()
-        if re.search(
-            r"(?i)(?<![\w$])prev_sha\s*=|\$\{prev_sha:?=|" + _WRITES + r"prev_sha\b",
-            line,
-        )
-    ]
+    shas = writes_to("PREV_SHA", text)
     if any(line != SANCTIONED_SHA for line in shas):
         problems.append(f"the N-1 commit is set outside n1_resolve: {shas}")
+    if any(re.search(r"\beval\b", line) for line in code):
+        problems.append("uses eval, which can write any variable unseen")
+    if any(re.search(r"\bn1_resolve\s*\(\)", line) for line in code):
+        problems.append("redefines n1_resolve")
+    if len([line for line in code if re.match(r"\s*harness\s*\(\)", line)]) != 1:
+        problems.append("defines harness other than exactly once")
     for match in BRANCH_SPELLINGS.finditer(text):
         line = text.count("\n", 0, match.start()) + 1
         problems.append(f"line {line} names a branch: {match.group(0)}")
+    problems += git_revision_problems(text)
     if '. "$REPO/scripts/e2e/n1-ref.sh"' not in text:
         problems.append("does not source scripts/e2e/n1-ref.sh")
     calls = re.findall(r"^\s*n1_resolve (.+)$", text, re.MULTILINE)
@@ -516,6 +679,114 @@ _REAL_CALL = "n1_resolve scripts/e2e/wheel.sh pyproject.toml\n"
             _REAL_CALL,
             _REAL_CALL + 'printf -v PREV_SHA %s "$other"\n',
             "set outside n1_resolve",
+        ),
+        (
+            "E2E_PREV_REF through a variable (mA)",
+            _REAL_DEFAULT,
+            "N1_BRANCH=main-line\nE2E_PREV_REF=$N1_BRANCH\n" + _REAL_DEFAULT,
+            "E2E_PREV_REF is used other than by the default line",
+        ),
+        (
+            "E2E_PREV_REF exported with a default",
+            _REAL_DEFAULT,
+            ': "${E2E_PREV_REF:=$N1}"\n' + _REAL_DEFAULT,
+            "E2E_PREV_REF is used other than by the default line",
+        ),
+        (
+            "a hard-coded N-1 revision in the export (mC)",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'git -C "$REPO" archive HEAD~1',
+            "git archive is given 'HEAD~1'",
+        ),
+        (
+            "a split branch name in the export",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'git -C "$REPO" archive "$R""/main"',
+            "git archive is given '$R/main'",
+        ),
+        (
+            "another remote's ref",
+            'git -C "$REPO" archive "$PREV_SHA"',
+            'git -C "$REPO" archive refs/remotes/upstream/main',
+            "git archive is given 'refs/remotes/upstream/main'",
+        ),
+        (
+            "a commit taken from rev-parse",
+            _REAL_CALL,
+            _REAL_CALL + 'OTHER="$(git -C "$REPO" rev-parse HEAD~1)"\n',
+            "git rev-parse is given 'HEAD~1'",
+        ),
+        (
+            "a tree read some other way",
+            _REAL_CALL,
+            _REAL_CALL + 'git -C "$REPO" worktree add "$WORK/old" v3.7.0\n',
+            "git worktree is not one the legs use",
+        ),
+        (
+            "a nameref to the commit",
+            _REAL_CALL,
+            _REAL_CALL + 'declare -n _r=PREV_SHA\n_r="$other"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "printf -v with the name quoted",
+            _REAL_CALL,
+            _REAL_CALL + 'printf -v "PREV_SHA" %s "$other"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "read with the name quoted",
+            _REAL_CALL,
+            _REAL_CALL + 'read -r "PREV_SHA" <<<"$other"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "mapfile",
+            _REAL_CALL,
+            _REAL_CALL + 'mapfile -t PREV_SHA < "$WORK/n1"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "readarray",
+            _REAL_CALL,
+            _REAL_CALL + 'readarray -t PREV_SHA < "$WORK/n1"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "an append after unset",
+            _REAL_CALL,
+            _REAL_CALL + 'unset PREV_SHA; PREV_SHA+="$other"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "declare -g",
+            _REAL_CALL,
+            _REAL_CALL + 'declare -g PREV_SHA="$other"\n',
+            "set outside n1_resolve",
+        ),
+        (
+            "a nameref to PREV_REF",
+            _REAL_DEFAULT,
+            _REAL_DEFAULT + "declare -n _p=PREV_REF; _p=main\n",
+            "PREV_REF is assigned",
+        ),
+        (
+            "eval",
+            _REAL_CALL,
+            _REAL_CALL + 'eval "PREV_""SHA=$other"\n',
+            "uses eval",
+        ),
+        (
+            "n1_resolve redefined",
+            _REAL_CALL,
+            'n1_resolve() { PREV_SHA="$other"; }\n' + _REAL_CALL,
+            "redefines n1_resolve",
+        ),
+        (
+            "harness redefined before the call",
+            _REAL_CALL,
+            'harness() { echo "$other x"; }\n' + _REAL_CALL,
+            "defines harness other than exactly once",
         ),
         (
             "the helper not called",

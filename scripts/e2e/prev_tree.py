@@ -195,9 +195,11 @@ def missing_paths(
 
 
 def resolve_auto(repo: Path, require: Sequence[str]) -> Tuple[str, str]:
-    """The newest release tag, else the newest ancestor, that can be an N-1.
+    """The first commit that can be an N-1: the newest release tag, then HEAD's first
+    parent, then the newest ancestor in --date-order.
 
     Qualifies when its tree differs from HEAD's and it carries every REQUIRE path.
+    Each commit is considered once, under the first of those labels it gets.
     """
     if not require:
         raise DerivationError(
