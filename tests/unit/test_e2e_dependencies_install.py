@@ -221,12 +221,17 @@ def test_the_chocolatey_leg_installs_grype_as_an_unprivileged_user():
 
 def test_the_throwaway_account_is_removed_even_when_a_check_fails():
     # Fail-Verification exits, and PowerShell runs a finally block on exit, so the
-    # removal belongs there rather than after the last check.
+    # removal belongs there rather than after the last check. The account is created
+    # inside the try, and removed by name, so a New-StandardUser that failed partway is
+    # cleaned up too.
     text = CHOCOLATEY_LEG.read_text(encoding="utf-8")
     start = text.index("Write-Host '== 7b.")
     step = text[start : text.index("Write-Host '== 8.", start)]
-    created = step.index("New-StandardUser -Name")
-    opened = step.index("\ntry {", created)
-    cleanup = step[step.index("} finally {", opened) :]
-    assert "Remove-StandardUser -User $standardUser" in cleanup
+    opened = step.index("\ntry {")
+    finally_at = step.index("} finally {", opened)
+    assert "New-StandardUser -Name $standardUserName" in step[opened:finally_at]
+    assert "Remove-StandardUser -Name $standardUserName" in step[finally_at:]
     assert step.count("Remove-StandardUser") == 1, "only in the finally block"
+    helper = text[text.index("function Remove-StandardUser") :]
+    helper = helper[: helper.index("\n}\n")]
+    assert "[string] $Name" in helper and "[ADSI]::Exists" in helper

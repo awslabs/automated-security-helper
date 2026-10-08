@@ -232,8 +232,15 @@ def test_windows_negative_controls_ask_for_their_rejection(leg):
 # What a rejected exit code reads like in the verdict. Every negative control on the
 # shared verdict plants a wrong exit code, so this is the reason each must check.
 EXIT_CODE_REASON = "exit code 0 (nothing actionable), expected exactly 2"
-# How far after the call its reason check may sit.
+# How far after the call its reason check may sit. A window also ends at the next call
+# that asks for a rejection, so one control's check can never stand in for another's.
 REASON_WINDOW = 25
+# Where a call puts what it printed: `... *> $log`, or `$r = Invoke-...` (whose .Text or
+# .Log the check then reads).
+_REDIRECT = re.compile(r"\*>\s*\$(\w+)")
+_ASSIGN = re.compile(r"^\s*\$(\w+)\s*=\s*(Invoke-|&)")
+# How many lines back the assignment may start, for a call spread over continuation lines.
+_STATEMENT_LOOKBACK = 6
 
 
 def _rejection_calls(text):
@@ -248,21 +255,52 @@ def _rejection_calls(text):
     ]
 
 
+def _output_of(lines, index):
+    """(kind, variable) naming where the call at `index` left its output, or None."""
+    redirect = _REDIRECT.search(lines[index])
+    if redirect:
+        return "log", redirect.group(1)
+    for back in range(index, max(index - _STATEMENT_LOOKBACK, -1), -1):
+        assigned = _ASSIGN.match(lines[back])
+        if assigned:
+            return "object", assigned.group(1)
+    return None
+
+
+def _judges(line, kind, variable):
+    """Whether `line` is a failing check of the reason in that call's own output."""
+    code = line.strip()
+    if (
+        code.startswith("#")
+        or EXIT_CODE_REASON not in code
+        or not code.startswith("if")
+    ):
+        return False
+    if kind == "log":
+        return re.search(rf"-LiteralPath \${variable}\b(?!\.)", code) is not None
+    return re.search(rf"\${variable}\.(Text|Log)\b", code) is not None
+
+
 def _unjudged_rejections(text):
-    """Calls asking for a rejection with no check of its reason soon after.
+    """Calls asking for a rejection without a check of their own reason.
 
     Under --expect-reject the problems print as plain lines, so a control that checks only
     the exit code passes when the rejection happened for another reason (a missing report,
-    a wrong count). Each call must be followed by a check that the planted exit code is
-    what was rejected.
+    a wrong count). Each call must be followed, before the next such call, by an `if` that
+    looks for the planted exit-code reason in the output that call wrote: the log it
+    redirected to, or the .Text or .Log of the object it assigned. Mentioning the text
+    anywhere else (a Write-Host, another file) does not count.
     """
     lines = text.splitlines()
+    calls = _rejection_calls(text)
     unjudged = []
-    for index in _rejection_calls(text):
-        after = lines[index + 1 : index + 1 + REASON_WINDOW]
-        if not any(
-            EXIT_CODE_REASON in line and not line.lstrip().startswith("#")
-            for line in after
+    for n, index in enumerate(calls):
+        end = index + 1 + REASON_WINDOW
+        if n + 1 < len(calls):
+            end = min(end, calls[n + 1])
+        output = _output_of(lines, index)
+        if output is None or not any(
+            _judges(line, *output) for line in lines[index + 1 : end]
         ):
             unjudged.append(lines[index].strip())
     return unjudged
@@ -275,21 +313,61 @@ def test_every_expected_rejection_is_judged_for_its_reason(leg):
     assert _unjudged_rejections(text) == []
 
 
+def _check(target):
+    """A reason check of the kind the legs write, reading `target`."""
+    return (
+        f"if (-not (Select-String -LiteralPath {target} -SimpleMatch "
+        f"'{EXIT_CODE_REASON}' -Quiet)) {{ Fail 'x' }}"
+    )
+
+
 def test_a_rejection_judged_by_exit_code_alone_is_caught():
     # The planted negative: the shape winget's control had, rc checked and reason not.
     planted = """
-$code = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-x' -ExpectReject
-if ($code -ne 1) {
+$negative = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-x' -ExpectReject
+if ($negative.Rc -ne 1) {
     Fail "expected 1"
 }
 """
     assert _unjudged_rejections(planted) == [
-        "$code = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-x' -ExpectReject"
+        "$negative = Invoke-Case -Cli $cli -Case 'findings' -Label 'negative-x' -ExpectReject"
     ]
-    judged = planted + (
-        f"if (-not (Select-String -SimpleMatch '{EXIT_CODE_REASON}' -Quiet)) {{ Fail 'x' }}\n"
+    assert _unjudged_rejections(planted + _check("$negative.Log") + "\n") == []
+
+
+def test_one_check_cannot_serve_two_rejections():
+    # Two controls and one reason check, the check after the second: the first control is
+    # unjudged even though the check is inside its 25-line window.
+    planted = "\n".join(
+        [
+            "Invoke-Harness a.py --expect-reject *> $first",
+            "if ($LASTEXITCODE -ne 1) { Fail 'x' }",
+            "Invoke-Harness b.py --expect-reject *> $second",
+            _check("$second"),
+        ]
     )
-    assert _unjudged_rejections(judged) == []
+    assert _unjudged_rejections(planted) == [
+        "Invoke-Harness a.py --expect-reject *> $first"
+    ]
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        # Another call's log.
+        _check("$elsewhere"),
+        # The text printed rather than checked.
+        f"Write-Host '   OK: {EXIT_CODE_REASON}'",
+        # The text only in a comment.
+        f"# if (-not (Select-String -LiteralPath $first -SimpleMatch '{EXIT_CODE_REASON}'))",
+    ],
+)
+def test_a_check_of_anything_but_the_calls_own_output_does_not_count(check):
+    planted = f"Invoke-Harness a.py --expect-reject *> $first\n{check}"
+    assert _unjudged_rejections(planted) == [
+        "Invoke-Harness a.py --expect-reject *> $first"
+    ]
+    assert _unjudged_rejections(planted + "\n" + _check("$first")) == []
 
 
 def test_cli_incomplete_case_requires_the_named_scanner(tmp_path):

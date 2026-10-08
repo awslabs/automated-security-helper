@@ -351,12 +351,20 @@ function New-StandardUser {
     return [pscustomobject]@{ Name = $Name; Password = $secure; Sid = $sid }
 }
 
+# By name, not by the object New-StandardUser returns, so it also cleans up after a
+# New-StandardUser that failed partway (account created, group or SID step failed) and
+# returned nothing. Removing an account that does not exist is a no-op.
 function Remove-StandardUser {
-    param([Parameter(Mandatory = $true)] $User)
+    param([Parameter(Mandatory = $true)][string] $Name)
+    if (-not [ADSI]::Exists("WinNT://$env:COMPUTERNAME/$Name,user")) {
+        return
+    }
+    $sid = ([System.Security.Principal.NTAccount] "$env:COMPUTERNAME\$Name").Translate(
+        [System.Security.Principal.SecurityIdentifier]).Value
     Get-CimInstance -ClassName Win32_UserProfile -ErrorAction SilentlyContinue |
-        Where-Object { $_.SID -eq $User.Sid } |
+        Where-Object { $_.SID -eq $sid } |
         Remove-CimInstance -ErrorAction SilentlyContinue
-    ([ADSI] "WinNT://$env:COMPUTERNAME,computer").Delete('User', $User.Name) | Out-Null
+    ([ADSI] "WinNT://$env:COMPUTERNAME,computer").Delete('User', $Name) | Out-Null
 }
 
 # Runs one command as $User and returns its exit code and output.
@@ -601,11 +609,13 @@ Write-Host '== 7b. an unprivileged user selects a scanner: ashx dependencies ins
 # exit 0, grype at that user's ~\.ash\bin with a receipt recording this ASH's pinned
 # version and archive SHA-256 and the binary's own hash, `grype version` to name the pin,
 # and `--tool <unknown>` to exit EXIT_BAD_SELECTION. That last one is the negative control.
-$standardUser = New-StandardUser -Name 'ashe2estd'
-# The account and its directory are removed in finally, so a failed check below does not
-# leave them behind. PowerShell runs a finally block when exit leaves the try block.
+# The account is created inside try and removed by name in finally, together with its
+# directory, so neither a failed check nor a New-StandardUser that failed partway leaves
+# them behind. PowerShell runs a finally block when exit leaves the try block.
+$standardUserName = 'ashe2estd'
 $userWork = Join-Path $env:SystemDrive 'ash-e2e-standard-user'
 try {
+    $standardUser = New-StandardUser -Name $standardUserName
     if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
     New-Item -ItemType Directory -Path $userWork | Out-Null
     & icacls.exe $userWork /grant "$($standardUser.Name):(OI)(CI)M" | Out-Null
@@ -646,7 +656,7 @@ try {
     }
     Write-Host "   OK: $($installedTool.tool) $($installedTool.version) at $($installedTool.binary), owned by $owner"
 } finally {
-    Remove-StandardUser -User $standardUser
+    Remove-StandardUser -Name $standardUserName
     if (Test-Path -LiteralPath $userWork) { Remove-Item -LiteralPath $userWork -Recurse -Force }
 }
 
