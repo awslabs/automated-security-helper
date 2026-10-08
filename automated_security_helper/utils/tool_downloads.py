@@ -143,10 +143,10 @@ class ToolAsset:
 # pins -- NOT the v1.1.5 default in get_opengrep_url's signature, which no caller
 # reaches because the scanner always passes its configured version.
 TOOL_VERSIONS: dict[str, str] = {
-    "grype": "v0.111.0",
-    "opengrep": "v1.15.1",
-    "syft": "v1.42.4",
-    "trivy": "v0.69.3",
+    "grype": "v0.120.1",
+    "opengrep": "v1.30.2",
+    "syft": "v1.54.1",
+    "trivy": "v0.75.0",
     # Tagged without a leading "v" upstream, so the release URL has none either.
     "uv": "0.12.23",
 }
@@ -162,21 +162,21 @@ CFN_NAG_GEM_VERSION = "0.8.10"
 # ---------------------------------------------------------------------------
 
 _GRYPE_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "grype_0.111.0_linux_amd64.tar.gz",
-    ("linux", "arm64"): "grype_0.111.0_linux_arm64.tar.gz",
-    ("darwin", "amd64"): "grype_0.111.0_darwin_amd64.tar.gz",
-    ("darwin", "arm64"): "grype_0.111.0_darwin_arm64.tar.gz",
-    ("windows", "amd64"): "grype_0.111.0_windows_amd64.zip",
+    ("linux", "amd64"): "grype_0.120.1_linux_amd64.tar.gz",
+    ("linux", "arm64"): "grype_0.120.1_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "grype_0.120.1_darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "grype_0.120.1_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "grype_0.120.1_windows_amd64.zip",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
 _SYFT_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "syft_1.42.4_linux_amd64.tar.gz",
-    ("linux", "arm64"): "syft_1.42.4_linux_arm64.tar.gz",
-    ("darwin", "amd64"): "syft_1.42.4_darwin_amd64.tar.gz",
-    ("darwin", "arm64"): "syft_1.42.4_darwin_arm64.tar.gz",
-    ("windows", "amd64"): "syft_1.42.4_windows_amd64.zip",
-    ("windows", "arm64"): "syft_1.42.4_windows_arm64.zip",
+    ("linux", "amd64"): "syft_1.54.1_linux_amd64.tar.gz",
+    ("linux", "arm64"): "syft_1.54.1_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "syft_1.54.1_darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "syft_1.54.1_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "syft_1.54.1_windows_amd64.zip",
+    ("windows", "arm64"): "syft_1.54.1_windows_arm64.zip",
 }
 
 # Bare executables, not archives. The names carry no version; see _DIGESTS_TAKEN_AT.
@@ -196,11 +196,11 @@ _UV_ASSETS: dict[PlatformArch, str] = {
 }
 
 _TRIVY_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "trivy_0.69.3_Linux-64bit.tar.gz",
-    ("linux", "arm64"): "trivy_0.69.3_Linux-ARM64.tar.gz",
-    ("darwin", "amd64"): "trivy_0.69.3_macOS-64bit.tar.gz",
-    ("darwin", "arm64"): "trivy_0.69.3_macOS-ARM64.tar.gz",
-    ("windows", "amd64"): "trivy_0.69.3_windows-64bit.zip",
+    ("linux", "amd64"): "trivy_0.75.0_Linux-64bit.tar.gz",
+    ("linux", "arm64"): "trivy_0.75.0_Linux-ARM64.tar.gz",
+    ("darwin", "amd64"): "trivy_0.75.0_macOS-64bit.tar.gz",
+    ("darwin", "arm64"): "trivy_0.75.0_macOS-ARM64.tar.gz",
+    ("windows", "amd64"): "trivy_0.75.0_windows-64bit.zip",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
@@ -210,18 +210,18 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #
 # Transcribed verbatim from the checksums file published with each release, so a
 # reviewer can diff this block against the upstream file line for line:
-#   https://github.com/anchore/grype/releases/download/v0.111.0/grype_0.111.0_checksums.txt
-#   https://github.com/anchore/syft/releases/download/v1.42.4/syft_1.42.4_checksums.txt
-#   https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_checksums.txt
+#   https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_checksums.txt
+#   https://github.com/anchore/syft/releases/download/v1.54.1/syft_1.54.1_checksums.txt
+#   https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_checksums.txt
 #
-# opengrep publishes no checksums file. Its five digests were obtained three ways on
-# 2026-10-06 and all three agreed byte for byte: the `digest` field GitHub reports for
-# each asset of the v1.15.1 release (`gh api repos/opengrep/opengrep/releases/tags/
-# v1.15.1`), sha256sum over each asset downloaded once, and -- for the four non-Windows
-# assets -- the SRI hashes nix/opengrep.nix already pinned, decoded from base64. The
-# third is an independent witness: nix verified those hashes on its own fetch, earlier,
-# from a different machine. tests/unit/utils/test_pinned_tool_downloads.py keeps the
-# nix copy and this one equal.
+# opengrep publishes no checksums file. Its five digests were obtained two ways on
+# 2026-10-07 and both agreed byte for byte: the `digest` field GitHub reports for
+# each asset of the v1.30.2 release (`gh api repos/opengrep/opengrep/releases/tags/
+# v1.30.2`) and sha256sum over each asset downloaded once. Each asset's `.sig` was
+# also checked against the public key in its `.cert`, whose identity is opengrep's
+# rolling-release.yml workflow at release-v1.30.2; that check is not repeated at
+# install time (see the module docstring). tests/unit/utils/test_pinned_tool_downloads.py
+# keeps nix/opengrep.nix's SRI copy of the four non-Windows digests equal to this one.
 #
 # uv publishes a `<asset>.sha256` beside each asset. Those two files were downloaded
 # with the assets, and each agreed with sha256sum over its asset and with the `digest`
@@ -259,31 +259,31 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # ---------------------------------------------------------------------------
 
 _DIGESTS: dict[str, str] = {
-    # grype v0.111.0
-    "grype_0.111.0_linux_amd64.tar.gz": "18ed2048d7a233566b681121d4632364f5f25d72cca86acc4c7ac57210d78a87",  # pragma: allowlist secret
-    "grype_0.111.0_linux_arm64.tar.gz": "1a8b9bd691ce274e44056e7572cdf8c6970bdf9ec694001f7b4b17962b121b43",  # pragma: allowlist secret
-    "grype_0.111.0_darwin_amd64.tar.gz": "8fefd00f6ddd6407275be31b228089820e91c7a8cd2d046e877601773ac5062f",  # pragma: allowlist secret
-    "grype_0.111.0_darwin_arm64.tar.gz": "62d005a1e36ac7ec0b7be801ebc8eab0053fd831a227e1dc8ea9c356d38fa361",  # pragma: allowlist secret
-    "grype_0.111.0_windows_amd64.zip": "17f3bfb758b3c18426a89060344d9569f4344b0a606d42b60bd89792f996e3bd",  # pragma: allowlist secret
-    # syft v1.42.4
-    "syft_1.42.4_linux_amd64.tar.gz": "590650c2743b83f327d1bf9bec64f6f83b7fec504187bb84f500c862bf8f2a0f",  # pragma: allowlist secret
-    "syft_1.42.4_linux_arm64.tar.gz": "5029bad1ed372649527b1e443cbceef7f5d6ae1cfe52c16e721559f94267128b",  # pragma: allowlist secret
-    "syft_1.42.4_darwin_amd64.tar.gz": "4a14affad1b90f0bfa38fdb784279f01598b6099df40686391d814620e9de226",  # pragma: allowlist secret
-    "syft_1.42.4_darwin_arm64.tar.gz": "0797b64cf8841c904682e6007a695f9cd3e72103f064dd286723c0a56a2273e2",  # pragma: allowlist secret
-    "syft_1.42.4_windows_amd64.zip": "a712f912e8fc83ce2bf6a7cea213c2d5185778d66ea2e07d42c767817f77e381",  # pragma: allowlist secret
-    "syft_1.42.4_windows_arm64.zip": "6596227b24729d54e727917d5d59e3a6a49fc59cd505aae5a6d7eb630d871e82",  # pragma: allowlist secret
-    # trivy v0.69.3
-    "trivy_0.69.3_Linux-64bit.tar.gz": "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75",  # pragma: allowlist secret
-    "trivy_0.69.3_Linux-ARM64.tar.gz": "7e3924a974e912e57b4a99f65ece7931f8079584dae12eb7845024f97087bdfd",  # pragma: allowlist secret
-    "trivy_0.69.3_macOS-64bit.tar.gz": "fec4a9f7569b624dd9d044fca019e5da69e032700edbb1d7318972c448ec2f4e",  # pragma: allowlist secret
-    "trivy_0.69.3_macOS-ARM64.tar.gz": "a2f2179afd4f8bb265ca3c7aefb56a666bc4a9a411663bc0f22c3549fbc643a5",  # pragma: allowlist secret
-    "trivy_0.69.3_windows-64bit.zip": "74362dc711383255308230ecbeb587eb1e4e83a8d332be5b0259afac6e0c2224",  # pragma: allowlist secret
-    # opengrep v1.15.1
-    "opengrep_manylinux_x86": "c4f6aab1edc8130c7a46e8f5e5215763420740fb94198fc9301215135a372900",  # pragma: allowlist secret
-    "opengrep_manylinux_aarch64": "08932db32f4cbfd6e3af6bda82adac41754275d18a91c0fe065181e6a5291be7",  # pragma: allowlist secret
-    "opengrep_osx_x86": "afb2d508a501e3a7eb73d919af102f6764353955631ee5856efb214fee5e3432",  # pragma: allowlist secret
-    "opengrep_osx_arm64": "a833323d87cfe87f292498d0ccdc037adfa07905f11f2eb2dca7fbcc8b803cc5",  # pragma: allowlist secret
-    "opengrep_windows_x86.exe": "307ca6bd6852b38c8fa52d65f5066f780e61545c0e777ca5849a5cd517d688da",  # pragma: allowlist secret
+    # grype v0.120.1
+    "grype_0.120.1_linux_amd64.tar.gz": "0a9ee97ef5ae2ee953b0a80098105052e846cdbe319a57d808b519c33cd1343d",  # pragma: allowlist secret
+    "grype_0.120.1_linux_arm64.tar.gz": "29f47391dc283aa79fcc38e65224cd61f64dec0ecfd0db7074128ebf8ff23514",  # pragma: allowlist secret
+    "grype_0.120.1_darwin_amd64.tar.gz": "5313004ccbc524c8757521dc3913f1edf4309f56bef06a2fb2d0c0eeade7cc62",  # pragma: allowlist secret
+    "grype_0.120.1_darwin_arm64.tar.gz": "cf97957fa467d25575ec2cc3228289f391ea51cf88b9cffc5f83dc03d4cbc732",  # pragma: allowlist secret
+    "grype_0.120.1_windows_amd64.zip": "32e3c811f31822d17592908bafdc6288aaaca3d52583c479167a8dc8399ed65d",  # pragma: allowlist secret
+    # syft v1.54.1
+    "syft_1.54.1_linux_amd64.tar.gz": "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47",  # pragma: allowlist secret
+    "syft_1.54.1_linux_arm64.tar.gz": "dfdf0537610113edbefe1f1fc6548bc957b2d77439636ec824fcf0e10d46d054",  # pragma: allowlist secret
+    "syft_1.54.1_darwin_amd64.tar.gz": "2956322838b2f64e470eea474495f0cd96be4f222b1ac037258cdc47d965064e",  # pragma: allowlist secret
+    "syft_1.54.1_darwin_arm64.tar.gz": "b4319c3abaa87a0170ab76ee83ea2260ca34b53aecfa3ab0dd5428d2319d744f",  # pragma: allowlist secret
+    "syft_1.54.1_windows_amd64.zip": "8b56e8285e295e0bbed26eeea9b16ed51c493be97ccdf42dae6326c84fe8e19f",  # pragma: allowlist secret
+    "syft_1.54.1_windows_arm64.zip": "440019acac7c5b3b44edb8d224aa226b52aadca66a1c3a0a8d58a9525f675e36",  # pragma: allowlist secret
+    # trivy v0.75.0
+    "trivy_0.75.0_Linux-64bit.tar.gz": "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f",  # pragma: allowlist secret
+    "trivy_0.75.0_Linux-ARM64.tar.gz": "a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a132956751a13b3",  # pragma: allowlist secret
+    "trivy_0.75.0_macOS-64bit.tar.gz": "291edaa9778acbe4693d067b5ad60ee11570e5ac68296e85595417528ca641e4",  # pragma: allowlist secret
+    "trivy_0.75.0_macOS-ARM64.tar.gz": "4a77108cccf8e55c8d6823e1e759939a622277e66cd0daa3c1fc621ed69e4568",  # pragma: allowlist secret
+    "trivy_0.75.0_windows-64bit.zip": "4e43bd71a30f51aee39525f60f2b47043af77eb8df8fe082aae4372b69c6660f",  # pragma: allowlist secret
+    # opengrep v1.30.2
+    "opengrep_manylinux_x86": "a66aa3278457f02b287b985a45b6762aebcaba5000f2689245fd1ed86d1456c7",  # pragma: allowlist secret
+    "opengrep_manylinux_aarch64": "90acea5df4b733083f388d4feeb250ca802f671b33d1f222653d1e571dd2b0d8",  # pragma: allowlist secret
+    "opengrep_osx_x86": "fcf47da30d5c3a11119f2ec4e0d1ee55e3c3822e8f90d909bf9f33dfce99044a",  # pragma: allowlist secret
+    "opengrep_osx_arm64": "f1aaa30b88959cb82522c4e1475816278a1f161f994509a518453c0455f9d24b",  # pragma: allowlist secret
+    "opengrep_windows_x86.exe": "523b1074a81006436fec457e2daccf7cf7cacc04000d4482f1072a1b19bc6372",  # pragma: allowlist secret
     # uv 0.12.23
     "uv-x86_64-unknown-linux-gnu.tar.gz": "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6",  # pragma: allowlist secret
     "uv-aarch64-unknown-linux-gnu.tar.gz": "6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f",  # pragma: allowlist secret
@@ -291,25 +291,25 @@ _DIGESTS: dict[str, str] = {
 
 # SHA256 of the executable inside each archive above; see the comment before _DIGESTS.
 _EXECUTABLE_DIGESTS: dict[str, str] = {
-    # grype v0.111.0
-    "grype_0.111.0_linux_amd64.tar.gz": "e2ab3d4d7ffad9548d901f15f899cc5a2c4e124041d2b795f1758e8b1dd6a816",  # pragma: allowlist secret
-    "grype_0.111.0_linux_arm64.tar.gz": "ef49e19156b5fea0623f3c0fb46fbbcce9cff65101e4a2d62d3afd68caa2adb5",  # pragma: allowlist secret
-    "grype_0.111.0_darwin_amd64.tar.gz": "62a874ecfc906c25b83fb818ad196d9520725ba2c3a4a0980b3c4a3989ab6a49",  # pragma: allowlist secret
-    "grype_0.111.0_darwin_arm64.tar.gz": "f52812683329db690e96531d889143f6fa684bf394532a49d57f8054f234d1cf",  # pragma: allowlist secret
-    "grype_0.111.0_windows_amd64.zip": "47a39da8ec97407b78ede4afedb7ba31c286d0e649a7d89e566f0b5933df76aa",  # pragma: allowlist secret
-    # syft v1.42.4
-    "syft_1.42.4_linux_amd64.tar.gz": "04db0f882928929381ab5503bcb25ea0a062e487481483b8a8a60c9f6c4af353",  # pragma: allowlist secret
-    "syft_1.42.4_linux_arm64.tar.gz": "8cedfeeb2554ba7901410508dfbe0edff240e808feb05a41aef344974c8f6d4c",  # pragma: allowlist secret
-    "syft_1.42.4_darwin_amd64.tar.gz": "ad9f97b39122da2f4c350fed9c84d56d7153a4e47b9475c201bdb91bfe643184",  # pragma: allowlist secret
-    "syft_1.42.4_darwin_arm64.tar.gz": "be3f91123ec317c579abaaa6025702b863807bb87e315c9101812267e7572040",  # pragma: allowlist secret
-    "syft_1.42.4_windows_amd64.zip": "34ede462272b8ffc66077e790d83511e9b6041ae794fea41fc706f512397b0f3",  # pragma: allowlist secret
-    "syft_1.42.4_windows_arm64.zip": "10e2b452eabade7571729f77a8e29a4c6202ebd6eb756df0cc75a4c7c8536b71",  # pragma: allowlist secret
-    # trivy v0.69.3
-    "trivy_0.69.3_Linux-64bit.tar.gz": "8266084a71d2e6a2333bc2c69b91c93c26dee9ef39ac2587ace2df54cc9b746b",  # pragma: allowlist secret
-    "trivy_0.69.3_Linux-ARM64.tar.gz": "d860265c7ebd8128c349d063c91e8f32b26b730d14c2ce85e187fef8be70d72d",  # pragma: allowlist secret
-    "trivy_0.69.3_macOS-64bit.tar.gz": "50368fbf0a1bce2b297049e0a0cf879f1f2ba24c302975380c6907910be69b30",  # pragma: allowlist secret
-    "trivy_0.69.3_macOS-ARM64.tar.gz": "bef08bfe2644873257d75585dd62e1409eb5c53403075c4bc83d54279dffd812",  # pragma: allowlist secret
-    "trivy_0.69.3_windows-64bit.zip": "8d0d0a4abe3f30485d9e89d88660a685ecc3769a37be8a6d25759ad1d80070ea",  # pragma: allowlist secret
+    # grype v0.120.1
+    "grype_0.120.1_linux_amd64.tar.gz": "d6e3248b0e788b4da7450a9e03d1e72811771cf97de3640a18e6517bf6507eb7",  # pragma: allowlist secret
+    "grype_0.120.1_linux_arm64.tar.gz": "94afbea0a9b65a3a83b820e622e8ac337e26608c860315208d58dad9a80b25db",  # pragma: allowlist secret
+    "grype_0.120.1_darwin_amd64.tar.gz": "4042c050aa6581f6c852d611c51ec62577dff24059547307063a317b975cb075",  # pragma: allowlist secret
+    "grype_0.120.1_darwin_arm64.tar.gz": "1de9d74fff477a652408406b45786ed5694e3030c89dc75805ffe9424c802d36",  # pragma: allowlist secret
+    "grype_0.120.1_windows_amd64.zip": "96373670a07b8b6cbcfff4331c8b3d8ffb70d570f072450f8548d04bbe2db537",  # pragma: allowlist secret
+    # syft v1.54.1
+    "syft_1.54.1_linux_amd64.tar.gz": "dbf75864e7a7ff9e1fbf00552c31483f693188632a9f68f343cd7653dac513d6",  # pragma: allowlist secret
+    "syft_1.54.1_linux_arm64.tar.gz": "7d3cc523a2652d26568b9b2b94b5419dbf05f34ce896cf29904a0073d84eecf2",  # pragma: allowlist secret
+    "syft_1.54.1_darwin_amd64.tar.gz": "9de0c19c5e6bf06884c4699c11449fcf97cfe68b7d0451730dfc38894c6b3bda",  # pragma: allowlist secret
+    "syft_1.54.1_darwin_arm64.tar.gz": "bc08d98ac3ca9cf475952b8eab22dfda70f3ab475ceb4e0113b9f77b24b75e26",  # pragma: allowlist secret
+    "syft_1.54.1_windows_amd64.zip": "b7e78564e72dc550301ff221c9e034d9ece77d16f8e5cc0f7782caa302addbc6",  # pragma: allowlist secret
+    "syft_1.54.1_windows_arm64.zip": "a6dc42b0802fcad9582b178bc6117e4c3fe7cd94912d14054bb489717f34e223",  # pragma: allowlist secret
+    # trivy v0.75.0
+    "trivy_0.75.0_Linux-64bit.tar.gz": "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e",  # pragma: allowlist secret
+    "trivy_0.75.0_Linux-ARM64.tar.gz": "869e310e208f0f2e3e90e4f842cc6adaa2b2c046fecbaade481e6b23fcc8f2a9",  # pragma: allowlist secret
+    "trivy_0.75.0_macOS-64bit.tar.gz": "484287e06ab2e4038c42ba396da8637aaaca0967e3e65840563706a0284169b4",  # pragma: allowlist secret
+    "trivy_0.75.0_macOS-ARM64.tar.gz": "32b84c068e11e5381fc85d3fe2e8ac238659ab22524ce1b2b9dfcbd0b1f7331a",  # pragma: allowlist secret
+    "trivy_0.75.0_windows-64bit.zip": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6",  # pragma: allowlist secret
     # uv 0.12.23
     "uv-x86_64-unknown-linux-gnu.tar.gz": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",  # pragma: allowlist secret
     "uv-aarch64-unknown-linux-gnu.tar.gz": "ed797a095bf9aea58135fa7081c290e51a14cfd3a7b1f24e55cb1d1a0c1007b0",  # pragma: allowlist secret
@@ -326,7 +326,7 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
 # message that means "possible supply-chain substitution", for what is a half-applied
 # edit. Recording the version here turns it into the same refusal by name instead.
 _DIGESTS_TAKEN_AT: dict[str, str] = {
-    "opengrep": "v1.15.1",
+    "opengrep": "v1.30.2",
     "uv": "0.12.23",
 }
 
@@ -638,15 +638,15 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 _THIRD_PARTY_HASHES: dict[str, str] = {
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
     "checkov commit": "e5f995a6e2dd033e99354b6c477d056eb5eaf2d0",  # pragma: allowlist secret
-    "grype commit": "1f19355a7ee2d7e2bd58da6255bdeb618eb0c0d1",  # pragma: allowlist secret
-    "opengrep commit": "84c6da40995b0e15803401e44d16a745b3656df8",  # pragma: allowlist secret
+    "grype commit": "6f8d854af29d3a3086b11a84afa51554a2a245fe",  # pragma: allowlist secret
+    "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "semgrep commit": "fed96460fd67f504ea59342eba8f921f4d74fe17",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
-    "syft commit": "f6189175279981a79d8d8c15669c570f15a00568",  # pragma: allowlist secret
-    "trivy commit": "6fb20c8edd70745d6b34bff0387b53b03c8a760a",  # pragma: allowlist secret
+    "syft commit": "b254e6d92f28c3868a755f62fb3ca8f26e9fee76",  # pragma: allowlist secret
+    "trivy commit": "591e9799316a602e703f0b484f6c6d7b234ec8f3",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
     "uv commit": "46b84fd0bfec23b72f29e8e2185ba68a65052f48",  # pragma: allowlist secret
     "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
@@ -687,7 +687,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     "grype": ThirdPartyLicense(
         tool="grype",
-        version="v0.111.0",
+        version="v0.120.1",
         license="Apache-2.0",
         repository="https://github.com/anchore/grype",
         commit=_THIRD_PARTY_HASHES["grype commit"],
@@ -697,7 +697,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
         tool="opengrep",
-        version="v1.15.1",
+        version="v1.30.2",
         # COPYRIGHT: "GNU Lesser General Public License (LGPL) version 2.1", with
         # no "or later".
         license="LGPL-2.1-only",
@@ -728,7 +728,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     "syft": ThirdPartyLicense(
         tool="syft",
-        version="v1.42.4",
+        version="v1.54.1",
         license="Apache-2.0",
         repository="https://github.com/anchore/syft",
         commit=_THIRD_PARTY_HASHES["syft commit"],
@@ -736,7 +736,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     "trivy": ThirdPartyLicense(
         tool="trivy",
-        version="v0.69.3",
+        version="v0.75.0",
         license="Apache-2.0",
         repository="https://github.com/aquasecurity/trivy",
         commit=_THIRD_PARTY_HASHES["trivy commit"],
