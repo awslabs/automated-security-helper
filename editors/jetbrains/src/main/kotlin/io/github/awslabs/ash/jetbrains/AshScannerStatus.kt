@@ -63,13 +63,18 @@ import com.google.gson.JsonSyntaxException
  *  * Statuses are compared case-insensitively, and the legacy `metadata.scanner_status` roster is
  *    read when `scanner_results` is absent. ASH's model rejects a lowercase status outright, so
  *    ASH cannot assess such a file at all, and ASH 4 never writes either form.
- *  * A field ASH's model would reject (a `failure` that is not a string, a count that is not a
- *    whole number, an `excluded` that is not a boolean) makes the file one ASH cannot assess.
- *    Here it reads toward a gap. The values pydantic coerces (`"false"`, `1`, `"0"`, `0.0`) are
- *    coerced the same way, so those files reach ASH's verdict.
+ *  * A converter field ASH's model would reject makes the file one ASH cannot assess, and here
+ *    each reads toward a gap: a `failure` that is not a string or null is a failure, a
+ *    `dependencies_satisfied` that is not a pydantic bool (`2`, `{}`, `null`) is unsatisfied, a
+ *    `candidate_inputs` that is not a whole number is not the claim of nothing to convert, and
+ *    an `excluded` that is not a pydantic bool does not exclude. The values pydantic coerces
+ *    (`"false"`, `1`, `"0"`, `0.0`) are coerced the same way, so those files reach ASH's verdict.
  *  * An error-level staleness notification with a readable record counts as stale. ASH also
  *    recomputes staleness from the record against its registry's bound, but it writes the error
- *    level only for a record it found stale, so on a file ASH wrote the two agree.
+ *    level only for a record it found stale, so on a file ASH wrote the two agree. "Readable"
+ *    accepts exactly the timestamp forms ASH's `parse_timestamp` accepts on Python 3.10-3.14
+ *    (see [isTimestamp]), but does not check field ranges: an hour of 25 or an offset of 24
+ *    hours, which ASH refuses and skips, is counted here, toward a gap.
  */
 object AshScannerStatus {
 
@@ -411,15 +416,16 @@ object AshScannerStatus {
             val reason = when {
                 failure == null || failure.isJsonNull -> null
                 failure.isJsonPrimitive && failure.asJsonPrimitive.isString -> failure.asString.trim().ifEmpty { null }
-                // Not a string, so ASH's model rejects the file. Python truthiness, as
-                // coverage.ts reads it, so the two plugins agree on such a file.
-                else -> failure.takeIf { truthy(it) }?.toString()
+                // Not a string, so ASH's model rejects the file: read toward a gap.
+                else -> failure.toString()
             }
+            // Absent is the model's default, true. Present and not a pydantic bool, ASH's model
+            // rejects the file: read toward a gap, as unsatisfied.
+            val dependencies = row.get("dependencies_satisfied")
+            val unsatisfied = dependencies != null && pydanticBool(dependencies) != true
             if (reason != null) {
                 listed += Converter(name, reason)
-            } else if (pydanticBool(row.get("dependencies_satisfied")) == false &&
-                pydanticInt(row.get("candidate_inputs")) != 0
-            ) {
+            } else if (unsatisfied && pydanticInt(row.get("candidate_inputs")) != 0) {
                 listed += Converter(name, "dependencies unavailable, so it never ran")
             }
         }
@@ -538,19 +544,35 @@ object AshScannerStatus {
         val primitive = value?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive ?: return null
         if (primitive.isBoolean) return if (primitive.asBoolean) 1 else 0
         val number = if (primitive.isNumber) primitive.asBigDecimal else primitive.asString.trim().toBigDecimalOrNull()
-        return number?.takeIf { it.stripTrailingZeros().scale() <= 0 }?.toInt()
+        // intValueExact, not toInt: toInt keeps the low 32 bits, so 4294967296 would read as 0,
+        // the one value that exempts a converter. Out of range is null, which is not 0.
+        val whole = number?.takeIf { it.stripTrailingZeros().scale() <= 0 } ?: return null
+        return try {
+            whole.intValueExact()
+        } catch (e: ArithmeticException) {
+            null
+        }
     }
 
     /**
-     * An RFC 3339 date-time with an offset, which is what ASH's `parse_timestamp` accepts in
-     * practice: `datetime.fromisoformat` after `Z` becomes `+00:00`, and refused without a zone.
+     * A timestamp ASH's `parse_timestamp` accepts: `datetime.fromisoformat` after every `Z`
+     * becomes `+00:00`, refused without a zone. [TIMESTAMP] is the union of the forms Python
+     * 3.10 through 3.14 accept (3.11 widened fromisoformat to most of ISO 8601; 3.10 accepts a
+     * subset of it and 3.14 a subset of 3.11's), measured by running ASH's own function under
+     * each interpreter over 16,642 generated strings: basic and extended dates, week dates, any
+     * one separator but `Z`, hours alone or with minutes and seconds in one style, a `.` or `,`
+     * fraction after any of them, and the same grammar for the offset. It matched on every form;
+     * the only disagreements left were field ranges, which this does not check.
      */
     private fun isTimestamp(value: JsonElement?): Boolean {
         val text = value?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString?.trim() ?: return false
         return TIMESTAMP.matches(text)
     }
 
-    private val TIMESTAMP = Regex("""\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})""")
+    private const val CLOCK = """\d{2}(:\d{2}(:\d{2})?|\d{2}(\d{2})?)?([.,]\d+)?"""
+    private val TIMESTAMP = Regex(
+        """(\d{4}-\d{2}-\d{2}|\d{8}|\d{4}-W\d{2}(-\d)?|\d{4}W\d{2}\d?)[^Z]$CLOCK(Z|[+-]$CLOCK)""",
+    )
 
     /** Python's truthiness for a JSON value. */
     private fun truthy(value: JsonElement?): Boolean = when {

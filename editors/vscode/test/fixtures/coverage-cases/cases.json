@@ -877,6 +877,124 @@
           ]
         ]
       ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [
+          "jupyter"
+        ],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "candidate_inputs past 32 bits is not zero",
+      "set": [
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "dependencies_satisfied"
+          ],
+          false
+        ],
+        [
+          [
+            "converter_results",
+            "jupyter",
+            "candidate_inputs"
+          ],
+          4294967296
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": false,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [
+          "grype-db"
+        ],
+        "unevaluated_rules": []
+      },
+      "name": "a staleness record timed in hours and an offset only is readable",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolConfigurationNotifications"
+          ],
+          [
+            {
+              "descriptor": {
+                "id": "ASH-CONTENT-DB-STALE"
+              },
+              "level": "error",
+              "message": {
+                "text": "Content database grype-db is stale"
+              },
+              "properties": {
+                "content_database": {
+                  "measured_at": "2026-10-01T00+00:00",
+                  "name": "grype-db",
+                  "policy": "fail"
+                }
+              }
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "base": "scans/clean/ash_aggregated_results.json",
+      "expect": {
+        "coverage_complete": true,
+        "incomplete_converters": [],
+        "incomplete_scanners": [],
+        "no_scanner_ran": false,
+        "stale_content_databases": [],
+        "unevaluated_rules": []
+      },
+      "name": "a staleness record whose measured_at uses Z as the separator is unreadable",
+      "set": [
+        [
+          [
+            "sarif",
+            "runs",
+            0,
+            "invocations",
+            0,
+            "toolConfigurationNotifications"
+          ],
+          [
+            {
+              "descriptor": {
+                "id": "ASH-CONTENT-DB-STALE"
+              },
+              "level": "error",
+              "message": {
+                "text": "Content database grype-db is stale"
+              },
+              "properties": {
+                "content_database": {
+                  "measured_at": "2026-10-01Z00:00Z",
+                  "name": "grype-db",
+                  "policy": "fail"
+                }
+              }
+            }
+          ]
+        ]
+      ]
     }
   ]
 }

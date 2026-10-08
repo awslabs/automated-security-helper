@@ -76,7 +76,7 @@ class AshScannerStatusGapsTest {
     // ---- converters ----
 
     @Test
-    fun convertersAreReadWithPythonTruthiness() {
+    fun aConverterFailureIsAnyValueButAnEmptyStringOrNull() {
         val report = parse(
             passed,
             """"converter_results": {
@@ -99,13 +99,19 @@ class AshScannerStatusGapsTest {
                 AshScannerStatus.Converter("a", "raised"),
                 AshScannerStatus.Converter("b", """{"code":3}"""),
                 AshScannerStatus.Converter("c", "dependencies unavailable, so it never ran"),
+                // Not a string, so ASH's model rejects the file: each reads as a failure.
+                AshScannerStatus.Converter("d", "0"),
+                AshScannerStatus.Converter("e", "false"),
+                AshScannerStatus.Converter("g", "[]"),
+                AshScannerStatus.Converter("h", "{}"),
                 AshScannerStatus.Converter("k", "7"),
             ),
             report.incompleteConverters,
         )
         assertTrue(
             report.describeIncompleteness()!!.contains(
-                "4 converter(s) did not run: a (raised), b ({\"code\":3}), c (dependencies unavailable, so it never ran), k (7).",
+                "8 converter(s) did not run: a (raised), b ({\"code\":3}), c (dependencies unavailable, so it never ran), " +
+                    "d (0), e (false), g ([]), h ({}), k (7).",
             ),
         )
     }
@@ -130,11 +136,15 @@ class AshScannerStatusGapsTest {
                 "cand-true": {"dependencies_satisfied": false, "candidate_inputs": true},
                 "cand-half": {"dependencies_satisfied": false, "candidate_inputs": 0.5},
                 "cand-word": {"dependencies_satisfied": false, "candidate_inputs": "none"},
+                "cand-huge": {"dependencies_satisfied": false, "candidate_inputs": 4294967296},
                 "blank-failure": {"failure": "   "}
             }""",
         )
         assertEquals(
-            listOf("excluded-junk", "deps-word", "deps-zero", "cand-true", "cand-half", "cand-word"),
+            listOf(
+                "excluded-junk", "deps-word", "deps-zero", "deps-two", "deps-object",
+                "cand-true", "cand-half", "cand-word", "cand-huge",
+            ),
             report.incompleteConverters.map { it.name },
         )
     }
@@ -216,6 +226,28 @@ class AshScannerStatusGapsTest {
                 "4 content database(s) are past their age bound: , a-db, built, grype-db.",
             ),
         )
+    }
+
+    @Test
+    fun everyTimestampFormAshAcceptsIsReadable() {
+        // Forms Python's fromisoformat accepts (3.11 and later), and three it refuses: Z as the
+        // separator (ASH turns every Z into +00:00 first), mixed time styles, and no zone.
+        val forms = mapOf(
+            "basic" to "20261001T000000Z",
+            "hour-only" to "2026-10-01T00+00:00",
+            "comma" to "2026-10-01 00:00:00,5+0530",
+            "week" to "2026-W40-4T12:30-05",
+            "any-separator" to "2026-10-01x00:00:00.123456789+00:00:00.5",
+            "z-separator" to "2026-10-01Z00:00Z",
+            "mixed" to "2026-10-01T00:0000Z",
+            "date-only" to "2026-10-01",
+        )
+        val notifications = forms.entries.joinToString(",") { (name, at) ->
+            """{"descriptor": {"id": "ASH-CONTENT-DB-STALE"}, "level": "error",
+                "properties": {"content_database": {"name": "$name", "measured_at": "$at"}}}"""
+        }
+        val report = parse(passed, sarif("""{"toolConfigurationNotifications": [$notifications]}"""))
+        assertEquals(listOf("any-separator", "basic", "comma", "hour-only", "week"), report.staleContentDatabases)
     }
 
     // ---- roster shapes ----

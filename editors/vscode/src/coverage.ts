@@ -154,10 +154,18 @@ function asPydanticInt(value: unknown): number | undefined {
 }
 
 /**
- * An RFC 3339 date-time with an offset, which is what ASH's `parse_timestamp` accepts
- * in practice (`datetime.fromisoformat`, refused without a zone).
+ * A timestamp ASH's `parse_timestamp` accepts: `datetime.fromisoformat` after every
+ * `Z` becomes `+00:00`, refused without a zone. The union of the forms Python 3.10
+ * through 3.14 accept, measured by running ASH's own function under each interpreter
+ * over 16,642 generated strings; the JetBrains plugin's AshScannerStatus.TIMESTAMP is
+ * the same pattern. Field ranges are not checked, so an hour of 25, which ASH refuses
+ * and skips, is counted here, toward a gap.
  */
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
+const CLOCK = String.raw`\d{2}(:\d{2}(:\d{2})?|\d{2}(\d{2})?)?([.,]\d+)?`;
+const TIMESTAMP = new RegExp(
+  String.raw`^(\d{4}-\d{2}-\d{2}|\d{8}|\d{4}-W\d{2}(-\d)?|\d{4}W\d{2}\d?)[^Z]` + `${CLOCK}(Z|[+-]${CLOCK})$`,
+  'u',
+);
 
 function isTimestamp(value: unknown): boolean {
   return typeof value === 'string' && TIMESTAMP.test(value.trim());
@@ -292,13 +300,17 @@ function incompleteConverters(converterResults: unknown): IncompleteConverter[] 
     if (!isRecord(row) || asPydanticBool(row.excluded) === true) {
       continue;
     }
+    // A failure that is not a string or null, or a dependencies_satisfied that is not a
+    // pydantic bool, makes the file one ASH's model rejects: read toward a gap.
     const failure = typeof row.failure === 'string' ? row.failure.trim() : row.failure;
-    if (isTruthy(failure)) {
+    const unsatisfied =
+      'dependencies_satisfied' in row && asPydanticBool(row.dependencies_satisfied) !== true;
+    if (typeof failure === 'string' ? failure !== '' : failure !== undefined && failure !== null) {
       listed.push({
         converter: name,
         reason: typeof failure === 'string' ? failure : JSON.stringify(failure),
       });
-    } else if (asPydanticBool(row.dependencies_satisfied) === false) {
+    } else if (unsatisfied) {
       if (asPydanticInt(row.candidate_inputs) === 0) {
         continue;
       }
