@@ -61,6 +61,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
       # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
@@ -107,6 +109,7 @@ jobs:
       # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
@@ -148,6 +151,7 @@ jobs:
       # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # No uv cache, for the reason given in the contract job.
@@ -210,6 +214,7 @@ jobs:
       # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # Recorded, not assumed: the harness runs on the image's python3, never on the
@@ -243,6 +248,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
       # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
@@ -278,6 +285,8 @@ jobs:
       # Checked out for the census: the gate reads this file's own jobs so a channel job
       # added without being added to `needs` fails here instead of going ungated.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Require every channel to have passed
         env:

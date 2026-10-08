@@ -167,6 +167,8 @@ jobs:
           python3 -V
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The build must not run as root, and the container does (gradle:jdk21 has no USER, and
       # actions/checkout and the Docker-side plumbing expect root, so the job is not started
@@ -233,6 +235,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Not as root, for the reason the build job gives; run-unprivileged.sh runs Gradle as the
       # checkout's owner, and this makes that the image's gradle user.
@@ -290,6 +294,7 @@ jobs:
       # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # No uv cache: the install has to be fresh, and a saved Actions cache is a publish surface
@@ -349,6 +354,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       # --self-test first: a checker that has degenerated into finding nothing exits 0 and
       # reads as a clean tree. --policy is the second lock on the update flag: the suites
@@ -385,6 +391,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build the pinned visual-test image
         run: docker build -t "ash-jetbrains-ui:${GITHUB_RUN_ID}" editors/jetbrains/ui-test

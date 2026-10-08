@@ -206,6 +206,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ inputs.ref }}
 
       - name: Install uv
@@ -363,6 +364,7 @@ jobs:
       # and in a shallow clone the derivation fails and says so.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
@@ -425,6 +427,7 @@ jobs:
       # Checked out for the census: the gate reads this file's own jobs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ inputs.ref }}
 
       - name: The gate's verdict rejects planted failed, skipped and missing jobs
