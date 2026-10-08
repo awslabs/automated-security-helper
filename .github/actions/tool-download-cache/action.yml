@@ -1,5 +1,5 @@
 name: "ASH tool download cache"
-description: "Restore or save the digest-pinned release assets `ash dependencies install` downloads. Use mode restore before the install and mode save after it."
+description: "Restore or save the digest-pinned release assets `ashx dependencies install` downloads. Use mode restore before the install and mode save after it."
 
 # What this caches, and why it is allowed to.
 #

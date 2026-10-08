@@ -67,7 +67,7 @@ installer = _load_script()
 
 # Pinned tools the image does NOT install with install-pinned-tool, and why.
 #
-# opengrep reaches the image through `RUN ash dependencies install`, which resolves it
+# opengrep reaches the image through `RUN ashx dependencies install`, which resolves it
 # from the same table through OpengrepScanner's pinned install commands -- the path it
 # always took, now verified. Installing it a second time with install-pinned-tool
 # would add a ~42 MB copy to /usr/local/bin for no gain. Named here, rather than
@@ -199,7 +199,7 @@ class TestOpengrepReachesTheImageThroughThePin:
         assert "install_pinned_tool" in argv[2]
 
     def test_the_image_runs_ash_dependencies_install(self):
-        assert 'ash dependencies install --bin-path "${ASH_BIN_PATH}"' in (
+        assert 'ashx dependencies install --bin-path "${ASH_BIN_PATH}"' in (
             DOCKERFILE.read_text()
         )
 
@@ -453,7 +453,7 @@ class TestABareExecutableAsset:
 class TestTheExecutableDigestIsChecked:
     """The extracted executable is checked against its own pin, not only the archive.
 
-    That second check is what lets ``ash dependencies install`` later recognize the
+    That second check is what lets ``ashx dependencies install`` later recognize the
     binary this script put in /usr/local/bin and leave it alone instead of writing
     another copy into ASH_BIN_PATH. If the check could not fail, a wrong entry in
     ``_EXECUTABLE_DIGESTS`` would ship unnoticed and the dedupe would silently never
@@ -1265,7 +1265,7 @@ class TestTheGuardsTheReviewFoundUntested:
 # ---------------------------------------------------------------------------
 # The Python tools: bandit, checkov and semgrep
 #
-# `ash dependencies install` installs them with `uv tool install`, so there is no
+# `ashx dependencies install` installs them with `uv tool install`, so there is no
 # release archive; the archive is the wheel, and what it shipped is in the installed
 # dist-info under `uv tool dir`. These tests stand a fake uv tool directory up in
 # tmp_path and point the installer at it, so nothing touches the real one.
@@ -1479,7 +1479,7 @@ class TestPythonToolLicenses:
         assert not (tmp_path / "tp" / "bandit").exists()
 
     def test_another_installed_version_is_refused(self, tmp_path, tool_dir):
-        """What an unpinned `ash dependencies install` would leave behind."""
+        """What an unpinned `ashx dependencies install` would leave behind."""
         _uv_tool_env(tool_dir, "semgrep", "1.0.0", {})
 
         with pytest.raises(SystemExit) as raised:
@@ -1543,7 +1543,7 @@ class TestUvToolPins:
             )
 
     def test_the_mode_prints_them_under_a_bare_interpreter(self, tmp_path):
-        """The Dockerfile word-splits this output into `ash dependencies install`."""
+        """The Dockerfile word-splits this output into `ashx dependencies install`."""
         pins = _pins_dir(tmp_path)
         result = subprocess.run(  # nosec B603 - fixed interpreter and script path
             [

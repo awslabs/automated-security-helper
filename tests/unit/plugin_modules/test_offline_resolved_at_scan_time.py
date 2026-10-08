@@ -8,7 +8,7 @@ The defect these tests pin
 Every scanner with an ``offline`` option used to default it to ``is_offline_mode()``,
 evaluated when the options object was constructed. ``ScannerConfigSegment`` constructs
 its default scanner configs when ``automated_security_helper.config.ash_config`` is
-imported. In local mode ``ash scan --offline`` sets ``ASH_OFFLINE`` after that import,
+imported. In local mode ``ashx scan --offline`` sets ``ASH_OFFLINE`` after that import,
 so checkov, grype, npm-audit, opengrep, semgrep, syft and trivy-repo all kept
 ``offline=False`` and went to the network during an ``--offline`` scan (a strace of
 checkov showed three connections to port 443).
@@ -219,7 +219,7 @@ def test_explicit_option_true_forces_offline_while_ash_is_online(
 def test_explicit_option_false_does_not_override_ash_offline(
     case, online, test_plugin_context
 ):
-    """Precedence 1: ``offline: false`` (what ``ash config init`` writes) follows ASH."""
+    """Precedence 1: ``offline: false`` (what ``ashx config init`` writes) follows ASH."""
     config = case.config_cls(options=case.options_cls(offline=False))
     _go_offline(online)
 

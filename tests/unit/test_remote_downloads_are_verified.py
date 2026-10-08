@@ -26,7 +26,7 @@ and every shell script under scripts/ and .github/:
   ``sha256sum`` whose output is compared with ``=`` or ``!=``. A check *before* the
   fetch does not count, and neither does one in a different step -- a later step is
   not guaranteed to run, and the binary is on disk in between.
-* Going through ASH's verified installers (``ash dependencies install``,
+* Going through ASH's verified installers (``ashx dependencies install``,
   ``install-pinned-tool``) is compliant by construction, because neither is a raw
   fetch: they resolve the URL and digest from utils/tool_downloads.py and refuse a
   mismatch.
@@ -236,7 +236,7 @@ def test_no_remote_download_goes_unverified():
     assert not bad, (
         "these steps fetch a remote file without verifying it. Pin a version and a "
         "SHA256 and check it before the file is used (see "
-        "automated_security_helper/utils/tool_downloads.py, `ash dependencies "
+        "automated_security_helper/utils/tool_downloads.py, `ashx dependencies "
         "install --tool`, assets/install-pinned-tool.py), or, if the file is data "
         "rather than code, add it to _ALLOWED with the reason:\n"
         + "\n".join(str(f) for f in bad)

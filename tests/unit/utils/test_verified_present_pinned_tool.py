@@ -6,7 +6,7 @@
 Why this exists
 ---------------
 ASH's container image installs syft, grype and trivy into /usr/local/bin from their
-pinned release assets, then runs ``ash dependencies install`` as root and again as
+pinned release assets, then runs ``ashx dependencies install`` as root and again as
 the non-root user. Both runs installed the same pinned assets into ASH_BIN_PATH, so
 each binary landed in the image up to three times. grype and syft measured 167 MB
 of duplicates per stage, and trivy, at 162 MB, would have added 324 MB once it is
@@ -193,7 +193,7 @@ class TestIdenticalBinaryIsNotReinstalled:
     ):
         """The non-root image stage: the binary is there, the receipt is not.
 
-        Receipts live under $HOME, and the second `ash dependencies install` in the
+        Receipts live under $HOME, and the second `ashx dependencies install` in the
         image runs as a different user with a different $HOME, so it never saw the
         first one's receipts and rewrote every binary into a new layer.
         """
@@ -550,7 +550,7 @@ class TestTheVerdictForAVerifiedTool:
 
 
 class TestDependenciesInstall:
-    """`ash dependencies install --tool grype`, through the CLI.
+    """`ashx dependencies install --tool grype`, through the CLI.
 
     Assertions read the commands run and the results panel, which go to a console
     this class owns; see TestToolSelection in test_dependencies_verdict.py for why

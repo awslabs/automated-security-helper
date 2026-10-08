@@ -241,7 +241,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # the SHA256 of the executable inside it (the member ``member_name`` selects). The
 # archive digest says nothing about a binary already on disk, because that binary was
 # extracted from the archive and is not the archive. The executable digest is what
-# lets ``ash dependencies install`` recognize a copy that is already present -- the
+# lets ``ashx dependencies install`` recognize a copy that is already present -- the
 # container image installs these three tools into /usr/local/bin before ASH runs --
 # and leave it alone, instead of writing a second copy of every binary into
 # ASH_BIN_PATH. trivy alone is 162 MB uncompressed.
@@ -359,7 +359,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 # ---------------
 # The image redistributes upstream release binaries -- every tool in TOOL_VERSIONS,
 # plus opengrep and uv -- and the Python scanners bandit, checkov and semgrep, which
-# ``ash dependencies install`` puts in place with ``uv tool install``. Every one of
+# ``ashx dependencies install`` puts in place with ``uv tool install``. Every one of
 # those licenses makes redistribution conditional on shipping something with the
 # binary: Apache-2.0 section 4(a) and (d) a copy of the license and the upstream
 # NOTICE, MIT the copyright and permission notice, LGPL and GPL the license and a
@@ -440,7 +440,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 # For a Python tool installed with ``uv tool install``, set ``distribution`` to its
 # PyPI name and ``version`` to its release tag, list the wheel's dist-info (``unzip
 # -l``; PEP 639 wheels keep license files under ``licenses/``), and add the tool to
-# the ``--licenses-only`` line that follows ``ash dependencies install``. A license
+# the ``--licenses-only`` line that follows ``ashx dependencies install``. A license
 # file the wheel lacks is URL-pinned as in step 3. The entry's ``tool`` must be the
 # scanner's name, because it is also the key ``--uv-tool-pins`` overrides.
 #
@@ -523,7 +523,7 @@ class ThirdPartyLicense:
     ASH dependency from PyPI, at whatever version pyproject's range resolves to,
     and that copy carries its own license metadata in its dist-info.
 
-    ``distribution`` is set for a tool ``ash dependencies install`` installs with
+    ``distribution`` is set for a tool ``ashx dependencies install`` installs with
     ``uv tool install``: the PyPI name of the distribution, whose installed
     dist-info the license files are read from. ``version`` is still the upstream
     release tag; without its leading ``v`` it is the version installed.
@@ -693,7 +693,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["grype commit"],
         files=(LicenseFile("LICENSE"),),
     ),
-    # Installed by `ash dependencies install`, which publishes a bare executable
+    # Installed by `ashx dependencies install`, which publishes a bare executable
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
         tool="opengrep",
