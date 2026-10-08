@@ -47,74 +47,18 @@ on:
     # this repository actually uses. Three other workflows here carry the same note.
     branches:
       - "**"
-    paths:
-      - "editors/vscode/**"
-      # setup-node reads the Node version from .nvmrc, so editing it changes the
-      # toolchain this job builds on.
-      - ".nvmrc"
-      - ".github/workflows/ash-vscode-extension.yml"
-      # The editor-snapshots job runs this, and its self-test is the only test of it.
-      - ".github/scripts/check-snapshot-trailers.py"
-      # editor-snapshots runs the whole jest suite, so the files it reads outside
-      # editors/vscode belong here. The list is editors/vscode/test/repo-inputs.ts
-      # REPO_INPUTS; repo-inputs.test.ts fails when one is missing from this filter
-      # or pull_request's. Its .github/** entry is exempted here, with the reason.
-      - "tests/test_data/outputs/ash_aggregated_results.json"
-      - ".github/workflows/ash-typescript-ci.yml"
-      - ".github/scripts/assert-artifact-contents.py"
-      # The coverage-parity job below runs ASH's own coverage rule over the
-      # extension's fixtures, so a change to that rule must run it. These are the
-      # modules `assess_coverage` reads its verdict through.
-      - "tests/unit/test_vscode_coverage_parity.py"
-      - "automated_security_helper/interactions/run_ash_scan.py"
-      - "automated_security_helper/core/resource_management/scan_tracking.py"
-      - "automated_security_helper/core/unified_metrics.py"
-      - "automated_security_helper/core/scanner_statistics_calculator.py"
-      - "automated_security_helper/utils/content_db_staleness.py"
-      - "automated_security_helper/models/asharp_model.py"
-      # The integration-real job installs ASH from this commit and scans with it, so
-      # any change to the product, its build, or the shared e2e contract has to run
-      # it. These are broader than the coverage-parity entries above and include them.
-      - "automated_security_helper/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "scripts/e2e/**"
-      - "tests/e2e/**"
-      # The integration-real job sources this for the CLI name it installs and
-      # checks, so a rename there alone changes what that job runs.
-      - "packaging/cli-name.sh"
+    # No paths filter, here or on pull_request. All six jobs are required checks, and
+    # a required check whose workflow a paths filter skipped never reports, so its rule
+    # is never satisfied. Every push runs them. A paths filter added back fails
+    # tests/unit/test_required_checks_run_on_every_push.py.
   pull_request:
     branches:
       - "**"
-    paths:
-      - "editors/vscode/**"
-      - ".nvmrc"
-      - ".github/workflows/ash-vscode-extension.yml"
-      - ".github/scripts/check-snapshot-trailers.py"
-      - "tests/test_data/outputs/ash_aggregated_results.json"
-      - ".github/workflows/ash-typescript-ci.yml"
-      - ".github/scripts/assert-artifact-contents.py"
-      - "tests/unit/test_vscode_coverage_parity.py"
-      - "automated_security_helper/interactions/run_ash_scan.py"
-      - "automated_security_helper/core/resource_management/scan_tracking.py"
-      - "automated_security_helper/core/unified_metrics.py"
-      - "automated_security_helper/core/scanner_statistics_calculator.py"
-      - "automated_security_helper/utils/content_db_staleness.py"
-      - "automated_security_helper/models/asharp_model.py"
-      - "automated_security_helper/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "scripts/e2e/**"
-      - "tests/e2e/**"
-      - "packaging/cli-name.sh"
-  # merge_group takes no paths filter -- GitHub scopes paths to push, pull_request
-  # and pull_request_target only. So this leg runs on every queue entry, including
-  # entries that touch nothing here. That costs a build on unrelated entries and
-  # buys the case a per-entry filter cannot see: a queue entry is a merge of several
-  # pull requests, so the change that breaks the package may have touched none of
-  # the filtered paths.
+  # merge_group takes no paths filter either -- GitHub scopes paths to push,
+  # pull_request and pull_request_target only -- so a queue entry is judged on the
+  # merged result whatever it touched.
   #
-  # Omitting it would be worse than either. A required check with no merge_group
+  # Omitting merge_group would be worse. A required check with no merge_group
   # trigger never reports for a queue entry, and a required check that cannot report
   # does not fail the merge, it blocks it silently.
   merge_group:

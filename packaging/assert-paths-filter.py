@@ -69,6 +69,13 @@ refused, because this check models neither.
 It also requires the push and pull_request lists to be identical, which the
 workflow's comment asks for and nothing checked.
 
+An event with no `paths:` filter runs on every change, so it covers every input;
+that is the workflow's state today, because its gate is a required check and a
+check a filter skipped never reports. Both events must still be triggers: a
+workflow that does not trigger on push or pull_request at all covers nothing
+there. The lists are compared as they are, so one filtered event and one
+unfiltered event is refused as a difference rather than read as coverage.
+
 Opens are resolved when they happen, so a symlink is attributed to the file it
 named during the build. A path under /proc or /dev/fd is refused outright: it
 names a descriptor or a working directory, and reopening a file the build opened
@@ -135,8 +142,13 @@ def glob_to_regex(pattern: str) -> re.Pattern[str]:
     return re.compile(rf"^{out}$")
 
 
-def read_paths_filters(workflow_text: str) -> dict[str, list[str]]:
-    """Returns {event: [paths]} for the events under `on:` that carry `paths:`.
+# The events GitHub applies a `paths` filter to.
+FILTERED_EVENTS = ("push", "pull_request", "pull_request_target")
+
+
+def read_paths_filters(workflow_text: str) -> dict[str, list[str] | None]:
+    """Returns {event: [paths]} for the events under `on:`; None for an event
+    that carries no `paths:`, which runs on every change.
 
     Parsed by indentation rather than with a YAML library, so this has no
     dependency beyond the standard library. It reads only the shape the workflow
@@ -144,10 +156,11 @@ def read_paths_filters(workflow_text: str) -> dict[str, list[str]]:
     quoted `- "pattern"` per line at six. A `paths-ignore:` list is returned under
     the key `paths-ignore:<event>` so that check() can refuse it.
     """
-    filters: dict[str, list[str]] = {}
+    filters: dict[str, list[str] | None] = {}
     in_on = False
     event = None
     key = None
+    current: list[str] = []
     for line in workflow_text.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -162,6 +175,7 @@ def read_paths_filters(workflow_text: str) -> dict[str, list[str]]:
         if match:
             event = match.group(1)
             key = None
+            filters.setdefault(event, None)
             continue
         match = re.match(r"^    (paths|paths-ignore):(.*)$", line)
         if match:
@@ -170,12 +184,19 @@ def read_paths_filters(workflow_text: str) -> dict[str, list[str]]:
                 if match.group(1) == "paths"
                 else f"paths-ignore:{event or ''}"
             )
-            filters.setdefault(key, [])
+            current = filters.get(key) or []
+            filters[key] = current
             if match.group(2).strip():
                 # A flow-style list (`paths: ["a"]`) is a shape this parser does
                 # not read; refusing it is safer than reading it as empty.
                 raise ValueError(f"unreadable {match.group(1)} under {event}: {line!r}")
             continue
+        if event in FILTERED_EVENTS and re.match(
+            r"""^\s+["']?(paths|paths-ignore)["']?\s*:""", line
+        ):
+            # A filter in a shape the match above does not read (another indent, a
+            # quoted key) would otherwise read as no filter, which covers everything.
+            raise ValueError(f"unreadable paths filter under {event}: {line!r}")
         if re.match(r"^    \S", line):
             key = None
             continue
@@ -183,7 +204,7 @@ def read_paths_filters(workflow_text: str) -> dict[str, list[str]]:
             item = re.match(r"""^      - ["']?([^"']+)["']?\s*$""", line)
             if item is None:
                 raise ValueError(f"unreadable paths entry under {event}: {line!r}")
-            filters[key].append(item.group(1))
+            current.append(item.group(1))
     return filters
 
 
@@ -808,12 +829,15 @@ def wheel_inputs(repo: str, out_dir: str, layers: tuple[str, ...] = LAYERS) -> s
     return {as_probe(repo, path) for path in inputs}
 
 
-def check(filters: dict[str, list[str]], inputs: set[str]) -> list[str]:
+def check(filters: dict[str, list[str] | None], inputs: set[str]) -> list[str]:
     problems: list[str] = []
     for event in ("push", "pull_request"):
         if event not in filters:
-            problems.append(f"the workflow has no `paths:` filter under {event}")
-    for key, entries in sorted(filters.items()):
+            problems.append(
+                f"the workflow does not trigger on {event}, so no {event} runs the legs"
+            )
+    for key, listed in sorted(filters.items()):
+        entries = listed or []
         if key.startswith("paths-ignore:"):
             problems.append(
                 f"the workflow has a paths-ignore list under {key.split(':', 1)[1]}; "
@@ -826,16 +850,26 @@ def check(filters: dict[str, list[str]], inputs: set[str]) -> list[str]:
                     f"{key} paths entry {entry!r} is a negation, which removes files "
                     "the entries before it matched; this check does not model that"
                 )
-    push = filters.get("push", [])
-    pull = filters.get("pull_request", [])
-    if push != pull:
+    push = filters.get("push")
+    pull = filters.get("pull_request")
+    if (push is None) != (pull is None):
+        problems.append(
+            "one of push and pull_request has a paths filter and the other has none: "
+            f"push {'is unfiltered' if push is None else 'is filtered'}, pull_request "
+            f"{'is unfiltered' if pull is None else 'is filtered'}"
+        )
+    elif push is not None and pull is not None and push != pull:
         problems.append(
             "the push and pull_request paths lists differ: only in push "
             f"{sorted(set(push) - set(pull))}, only in pull_request "
             f"{sorted(set(pull) - set(push))}, or the same entries in another order"
         )
     for event in ("push", "pull_request"):
-        patterns = [glob_to_regex(p) for p in filters.get(event, [])]
+        listed = filters.get(event)
+        if listed is None:
+            # No filter (or no such trigger, reported above): nothing to match.
+            continue
+        patterns = [glob_to_regex(p) for p in listed]
         for name in sorted(inputs):
             if not any(p.match(name) for p in patterns):
                 problems.append(
@@ -1070,8 +1104,43 @@ def self_test() -> int:
         '      - "README.md"\n  pull_request:\n    paths:\n      - "a/**"\n'
         '      - "README.md"\n  workflow_dispatch: {}\n'
     )
+    unfiltered = (
+        "on:\n  push:\n    branches: ['**']\n  pull_request:\n    branches: ['**']\n"
+        "  workflow_dispatch: {}\n"
+    )
     cases = [
         ("both lists cover every input", good, {"a/b/c.py", "README.md"}, False),
+        (
+            "neither event has a paths filter, so every input is covered",
+            unfiltered,
+            {"a/x.py", "Dockerfile", "anything/at/all"},
+            False,
+        ),
+        (
+            "push is unfiltered and pull_request is filtered",
+            unfiltered.replace(
+                "  pull_request:\n    branches: ['**']\n",
+                '  pull_request:\n    paths:\n      - "a/**"\n',
+            ),
+            {"a/x.py"},
+            True,
+        ),
+        (
+            "the workflow does not trigger on pull_request",
+            unfiltered.replace("  pull_request:\n    branches: ['**']\n", ""),
+            {"a/x.py"},
+            True,
+        ),
+        (
+            "an unfiltered event with a paths-ignore list",
+            unfiltered.replace(
+                "  pull_request:\n    branches: ['**']\n",
+                "  pull_request:\n    branches: ['**']\n"
+                '    paths-ignore:\n      - "docs/**"\n',
+            ),
+            {"a/x.py"},
+            True,
+        ),
         ("an input no entry matches", good, {"a/x.py", "Dockerfile"}, True),
         (
             "the two lists differ",
@@ -1087,6 +1156,30 @@ def self_test() -> int:
         ),
     ]
     failures = 0
+    for label, text in (
+        (
+            "a paths filter at another indent",
+            unfiltered.replace(
+                "  pull_request:\n", '  pull_request:\n      paths:\n        - "a/**"\n'
+            ),
+        ),
+        (
+            "a quoted paths key",
+            unfiltered.replace(
+                "  pull_request:\n", '  pull_request:\n    "paths":\n      - "a/**"\n'
+            ),
+        ),
+    ):
+        try:
+            read_paths_filters(text)
+            refused = False
+        except ValueError:
+            refused = True
+        if not refused:
+            failures += 1
+            print(f"  FAILED {label}: read as no filter instead of refused")
+        else:
+            print(f"  ok {label} (refused)")
     for label, text, inputs, should_fail in cases:
         problems = check(read_paths_filters(text), inputs)
         if bool(problems) != should_fail:
@@ -1729,6 +1822,14 @@ def self_test() -> int:
             "problems",
         ),
         ("both: the fixture's filter covers the inputs", {}, "ok"),
+        (
+            "both: a workflow with no paths filter covers every input",
+            {
+                "workflow": "on:\n  push:\n    branches: ['**']\n  pull_request:\n"
+                "  workflow_dispatch: {}\n"
+            },
+            "ok",
+        ),
     ]
     with tempfile.TemporaryDirectory(prefix="paths-filter-") as scratch:
         units = unit_checks(scratch)
@@ -1746,7 +1847,7 @@ def self_test() -> int:
                 print(f"  FAILED {label}: expected {expected}, got {got}")
             else:
                 print(f"  ok {label} ({got.split(':', 1)[0]})")
-    total = len(cases) + len(units) + len(wheel_cases)
+    total = len(cases) + 2 + len(units) + len(wheel_cases)
     print("self-test " + ("FAILED" if failures else f"OK ({total} cases)"))
     return 1 if failures else 0
 
@@ -1774,10 +1875,16 @@ def main(argv: list[str]) -> int:
             print(f"  - {problem}")
         return 1
     outside = sorted(i for i in inputs if not i.startswith(f"{PACKAGE_DIR}/"))
+    push = filters["push"]
+    listed = (
+        "carry no paths filter, so every change runs the legs"
+        if push is None
+        else f"list the same {len(push)} entries"
+    )
     print(
-        f"paths filter OK: push and pull_request list the same {len(filters['push'])} "
-        f"entries, and they match all {len(inputs)} wheel inputs; outside "
-        f"{PACKAGE_DIR}/ those are {', '.join(outside)}."
+        f"paths filter OK: push and pull_request {listed}, and they match all "
+        f"{len(inputs)} wheel inputs; outside {PACKAGE_DIR}/ those are "
+        f"{', '.join(outside)}."
     )
     return 0
 

@@ -18,14 +18,16 @@
  * Two workflows run these suites: ash-typescript-ci.yml ("ts (vscode)") runs
  * jest with coverage, and ash-vscode-extension.yml's editor-snapshots job runs
  * `npm run snapshots -- structural`, which runs the whole jest suite
- * (test/snapshots.ts). Both are in GUARDED_WORKFLOWS.
+ * (test/snapshots.ts). Both are in GUARDED_WORKFLOWS. ash-vscode-extension.yml has
+ * no paths filter (its jobs are required checks, so it runs on every push), and an
+ * event with no filter covers every input; ash-typescript-ci.yml still filters.
  *
  * So every such read goes through `repoPath`, which refuses a path that is not
  * declared in REPO_INPUTS, and test/repo-inputs.test.ts checks that every entry is
- * covered by the push and pull_request filters of every guarded workflow (or is
- * exempted from one, with the reason, and the exemption still holds), and that no
- * suite climbs out of the package except through this module. The second check is
- * a heuristic; see `packageEscapes`.
+ * covered by the push and pull_request triggers of every guarded workflow (by a
+ * filter entry, by having no filter, or by an exemption from one, with the reason,
+ * that still holds), and that no suite climbs out of the package except through
+ * this module. The second check is a heuristic; see `packageEscapes`.
  */
 
 import * as path from 'path';
@@ -71,12 +73,6 @@ export const REPO_INPUTS: readonly RepoInput[] = [
   {
     pattern: '.github/**',
     readBy: 'snapshot-policy.test.ts scans every file under .github/ for a snapshot update flag',
-    exemptFrom: {
-      [VSCODE_EXTENSION]:
-        'that workflow also runs integration-real and the .vsix e2e, which install and run ASH; ' +
-        'running them on every .github edit buys nothing for this scan, because ash-typescript-ci ' +
-        'runs the same jest suite on every .github edit',
-    },
   },
 ];
 
@@ -109,23 +105,27 @@ export function repoPath(relative: string, inputs: readonly RepoInput[] = REPO_I
     throw new Error(
       `${relative} is outside editors/vscode and not declared in test/repo-inputs.ts REPO_INPUTS. ` +
         'Declare it there and add it to the push and pull_request paths of every workflow in ' +
-        'GUARDED_WORKFLOWS, so a change to it runs this suite.',
+        'GUARDED_WORKFLOWS that has a paths filter, so a change to it runs this suite.',
     );
   }
   return path.join(REPO_ROOT, ...relative.split('/'));
 }
 
 /**
- * The `paths:` entries under `on.<event>` of a workflow, read line by line.
+ * The `paths:` entries under `on.<event>` of a workflow, read line by line, or
+ * `null` when the event has no paths filter and so runs on every change.
  *
  * Not a YAML parser, and it does not need to be one: it reads one fixed shape
- * (`  <event>:` then `    paths:` then `      - "<entry>"`) and THROWS when that
- * shape is missing or empty, so a reformatted workflow fails here instead of
- * reading as "no filter entries". A negated (`!`) entry also throws: it can
- * withdraw what an earlier entry covers, and crediting the earlier entry would
- * pass a filter GitHub would not run on.
+ * (`  <event>:` then `    paths:` then `      - "<entry>"`). Because `null`
+ * credits every input, anything that could be a filter in another shape THROWS
+ * rather than reading as `null`: a `paths` or `paths-ignore` key at another
+ * indent or quoted, a `paths-ignore` list (it withdraws files this check would
+ * credit), an empty or unreadable `paths:` block, and a missing `on:` or event.
+ * A negated (`!`) entry also throws: it can withdraw what an earlier entry
+ * covers, and crediting the earlier entry would pass a filter GitHub would not
+ * run on.
  */
-export function workflowPaths(workflow: string, event: string): string[] {
+export function workflowPaths(workflow: string, event: string): string[] | null {
   const lines = workflow.split('\n');
   const isContent = (line: string): boolean => line.trim() !== '' && !line.trim().startsWith('#');
   const indentOf = (line: string): number => line.length - line.trimStart().length;
@@ -153,12 +153,21 @@ export function workflowPaths(workflow: string, event: string): string[] {
       break;
     }
     if (/^ {4}paths:\s*$/.test(lines[i])) {
+      if (pathsIndex >= 0) {
+        throw new Error(`"on.${event}" has two "paths:" keys`);
+      }
       pathsIndex = i;
-      break;
+      continue;
+    }
+    if (/^\s+["']?paths-ignore["']?\s*:/.test(lines[i])) {
+      throw new Error(`"on.${event}" has a paths-ignore list, which this check does not model`);
+    }
+    if (/^\s+["']?paths["']?\s*:/.test(lines[i])) {
+      throw new Error(`cannot read the "on.${event}" paths filter: ${lines[i].trim()}`);
     }
   }
   if (pathsIndex < 0) {
-    throw new Error(`"on.${event}" has no "paths:" filter`);
+    return null;
   }
   const entries: string[] = [];
   for (let i = pathsIndex + 1; i < lines.length; i += 1) {
@@ -200,13 +209,17 @@ export function filterCovers(filter: string, pattern: string): boolean {
   return false;
 }
 
-/** Whether some entry of `filters` covers `pattern`. */
-export function isCovered(filters: readonly string[], pattern: string): boolean {
-  return filters.some((filter) => filterCovers(filter, pattern));
+/** Whether some entry of `filters` covers `pattern`; `null` (no filter) covers everything. */
+export function isCovered(filters: readonly string[] | null, pattern: string): boolean {
+  return filters === null || filters.some((filter) => filterCovers(filter, pattern));
 }
 
 /** The REPO_INPUTS patterns that `workflow` must cover and `filters` does not. */
-export function uncovered(inputs: readonly RepoInput[], filters: readonly string[], workflow?: string): string[] {
+export function uncovered(
+  inputs: readonly RepoInput[],
+  filters: readonly string[] | null,
+  workflow?: string,
+): string[] {
   return inputs
     .filter((input) => workflow === undefined || input.exemptFrom?.[workflow] === undefined)
     .map((input) => input.pattern)

@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Every file outside editors/vscode that a jest suite here reads must be in the
- * push and pull_request `paths:` filters of the workflow that runs the suite, or
- * a change to that file alone runs nothing. See test/repo-inputs.ts.
+ * Every file outside editors/vscode that a jest suite here reads must be covered
+ * by the push and pull_request triggers of the workflow that runs the suite (a
+ * `paths:` entry, or no paths filter at all), or a change to that file alone runs
+ * nothing. See test/repo-inputs.ts.
  */
 
 import * as fs from 'fs';
@@ -59,9 +60,11 @@ describe('the repo inputs the vscode jest suites read', () => {
 
   it.each(CASES)('are all covered by %s on.%s.paths', (workflow, event) => {
     const filters = workflowPaths(fs.readFileSync(repoPath(workflow), 'utf8'), event);
-    // The package itself must still be there, so this cannot pass by reading the
-    // wrong block.
-    expect(filters).toContain('editors/vscode/**');
+    if (filters !== null) {
+      // The package itself must still be there, so this cannot pass by reading the
+      // wrong block. With no filter (null) the event runs on every change.
+      expect(filters).toContain('editors/vscode/**');
+    }
     expect(uncovered(REPO_INPUTS, filters, workflow)).toEqual([]);
   });
 
@@ -162,12 +165,41 @@ describe('the checks, against planted defects', () => {
     expect(uncovered(REPO_INPUTS, workflowPaths(workflow, 'push'))).toEqual([]);
   });
 
+  it('reads an event with no paths block as running on every change', () => {
+    const unfiltered = 'on:\n  push:\n    branches:\n      - "**"\n  pull_request:\njobs: {}\n';
+    expect(workflowPaths(unfiltered, 'push')).toBeNull();
+    expect(workflowPaths(unfiltered, 'pull_request')).toBeNull();
+    // null covers every input, so nothing is reported missing...
+    expect(uncovered(REPO_INPUTS, null)).toEqual([]);
+    expect(isCovered(null, 'anything/at/all.json')).toBe(true);
+    // ...and an exemption from an unfiltered workflow is stale, because it is covered.
+    const stale = [{ pattern: 'a/**', readBy: 't', exemptFrom: { 'w.yml': 'why' } }].filter(
+      (input) => isCovered(workflowPaths(unfiltered, 'push'), input.pattern),
+    );
+    expect(stale).toHaveLength(1);
+  });
+
+  it('throws rather than reading a filter in another shape as no filter', () => {
+    expect(() => workflowPaths('on:\n  push:\n      paths:\n        - "a/**"\n', 'push')).toThrow(
+      /cannot read the "on.push" paths filter/,
+    );
+    expect(() => workflowPaths('on:\n  push:\n    "paths":\n      - "a/**"\n', 'push')).toThrow(
+      /cannot read the "on.push" paths filter/,
+    );
+    expect(() => workflowPaths('on:\n  push:\n    paths: ["a/**"]\n', 'push')).toThrow(
+      /cannot read the "on.push" paths filter/,
+    );
+    expect(() => workflowPaths('on:\n  push:\n    paths-ignore:\n      - "docs/**"\n', 'push')).toThrow(
+      /paths-ignore/,
+    );
+    expect(() =>
+      workflowPaths('on:\n  push:\n    paths:\n      - "a/**"\n    paths:\n      - "b/**"\n', 'push'),
+    ).toThrow(/two "paths:" keys/);
+  });
+
   it('throws rather than reading a missing or empty block as no entries', () => {
     expect(() => workflowPaths('name: x\njobs: {}', 'push')).toThrow(/no top-level "on:"/);
     expect(() => workflowPaths(workflow, 'merge_group')).toThrow(/no "on.merge_group"/);
-    expect(() => workflowPaths('on:\n  push:\n    branches:\n      - "**"\n', 'push')).toThrow(
-      /no "paths:"/,
-    );
     expect(() => workflowPaths('on:\n  push:\n    paths:\njobs: {}\n', 'push')).toThrow(/is empty/);
     expect(() => workflowPaths('on:\n  push:\n    paths:\n      - [a, b]\n', 'push')).toThrow(
       /cannot read/,
