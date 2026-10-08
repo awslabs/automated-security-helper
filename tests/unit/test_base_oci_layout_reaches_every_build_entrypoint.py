@@ -435,17 +435,27 @@ class TestEveryBuildEntrypointIsCovered:
 
     def test_only_the_prepull_action_sets_it(self):
         writer = (ACTION_DIR / "use_cached_layout.sh").read_text(encoding="utf-8")
-        assert f"{VAR}=${{LAYOUT_DIR}}@${{manifest}}" in writer
-        assert "GITHUB_ENV" in writer
+        # The writer produces the step output `oci-layout`; the action exposes it, and callers
+        # map it to the variable in each build step's env (checked, per step, by
+        # tests/unit/test_build_handoffs_reach_every_consumer.py).
+        assert 'set_output "oci-layout=${LAYOUT_DIR}@${manifest}"' in writer
+        assert "GITHUB_ENV" not in writer
+        workflows = REPO_ROOT / ".github"
         # An assignment from a shell expansion, which is what a writer looks like; the prose in
         # the action's header names the variable as `VAR=<layout dir>@...` and is not one.
-        workflows = REPO_ROOT / ".github"
         setters = [
             p.relative_to(REPO_ROOT).as_posix()
             for p in workflows.rglob("*")
             if p.is_file()
             and f"{VAR}=${{" in p.read_text(encoding="utf-8", errors="ignore")
         ]
-        assert setters == [".github/actions/prepull-base-image/use_cached_layout.sh"], (
-            setters
-        )
+        assert setters == [], setters
+        # Every env mapping of the variable reads the action's oci-layout output.
+        mappings = [
+            line.strip()
+            for p in workflows.rglob("*.yml")
+            for line in p.read_text(encoding="utf-8").splitlines()
+            if line.strip().startswith(f"{VAR}:")
+        ]
+        assert mappings, "no step maps the variable, so no build can read it"
+        assert all("outputs.oci-layout" in m for m in mappings), mappings

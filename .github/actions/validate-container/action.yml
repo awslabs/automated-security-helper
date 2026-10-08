@@ -161,6 +161,7 @@ runs:
       shell: bash
       run: podman --version
     - name: "podman: pre-pull the base image"
+      id: prepull-podman
       if: inputs.runtime == 'podman'
       uses: ./.github/actions/prepull-base-image
       with:
@@ -168,6 +169,9 @@ runs:
     - name: "podman: build image"
       if: inputs.runtime == 'podman'
       shell: bash
+      env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override }}
       run: ash build-image --oci-runner podman --force --no-run
 
     # === finch ===
@@ -188,6 +192,7 @@ runs:
     # OCI_RUNNER_WRAPPER comes from the resolve step above rather than an inline `env:`
     # here, so this build and the scan below read one value.
     - name: "finch: pre-pull the base image"
+      id: prepull-finch
       if: inputs.runtime == 'finch'
       uses: ./.github/actions/prepull-base-image
       with:
@@ -196,6 +201,9 @@ runs:
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
+      env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-finch.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-finch.outputs.base-image-override }}
       run: ash build-image --oci-runner finch --force --no-run
 
     # === nerdctl ===
@@ -342,6 +350,7 @@ runs:
     # first keeps the two failures separate rather than widening that loop's condition, which
     # would make a rate-limited build look like the GC race in the warnings.
     - name: "nerdctl: pre-pull the base image"
+      id: prepull-nerdctl
       if: inputs.runtime == 'nerdctl'
       uses: ./.github/actions/prepull-base-image
       with:
@@ -351,6 +360,8 @@ runs:
       if: inputs.runtime == 'nerdctl'
       shell: bash
       env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-nerdctl.outputs.base-image-override }}
         # The tag ash build-image applies: build_target is forced to "ci" whenever
         # CI is set, so this is the image the load above would have created.
         IMAGE: automated-security-helper:ci
@@ -447,6 +458,10 @@ runs:
     - name: "Scan with the built image"
       shell: bash
       env:
+        # `ash scan --mode container` rebuilds the image (from cache), so it gets the
+        # same base-image hand-off as the build; only one runtime's pre-pull ran.
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
         RUNTIME: ${{ inputs.runtime }}
       # WHY THE ONLY ACCEPTED STATUS IS 0
       #

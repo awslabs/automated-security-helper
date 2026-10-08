@@ -204,6 +204,12 @@ _UV_CACHE_REASON = (
     "so it redistributes nothing this project builds -- anyone who can read the "
     "cache could already have fetched the same wheels from the index."
 )
+_UV_SPLIT_CACHE_REASON = (
+    _UV_CACHE_REASON + " Restored with actions/cache/restore except on a tag push, "
+    "and saved from a push to main only, in place of setup-uv's own cache, which "
+    "restored on every event and saved from every ref. The workflows that use it "
+    "run on tag pushes, and a tag run reads no cache entry."
+)
 _NPM_CACHE_REASON = (
     "npm's download cache, keyed on a committed lockfile. Holds third-party "
     "packages already published on the npm registry, so it redistributes nothing "
@@ -293,7 +299,8 @@ ALLOWLIST: tuple[Entry, ...] = (
         action="actions/github-script",
         publishes=("exports ACTIONS_RUNTIME_TOKEN to later steps"),
         reason=_LAYER_CACHE_REASON
-        + " The hand-off the python-container docker legs build with; revoked after the scan.",
+        + " The hand-off the docker container legs build with: step outputs that only"
+        " the build steps map into their env.",
     ),
     Entry(
         file=".github/actions/run-scan-test/action.yml",
@@ -639,47 +646,15 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/actions/setup-ash/action.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-agent-plugins-drift.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-cdk-extra-drift.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-create-release.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
+        publishes=(
+            "enable-cache=true "
+            "save-cache=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
+        ),
+        reason=_UV_CACHE_REASON
+        + " Saved from a push to main only; every other ref restores and writes nothing.",
     ),
     Entry(
         file=".github/workflows/ash-package.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-repo-docs.yml",
-        kind=KIND_BUILTIN_CACHE,
-        action=_SETUP_UV,
-        publishes="enable-cache=true",
-        count=2,
-        reason=_UV_CACHE_REASON + " Twice: this workflow has two jobs.",
-    ),
-    Entry(
-        file=".github/workflows/ash-tag-on-merge.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
         publishes="enable-cache=true",
@@ -771,6 +746,73 @@ ALLOWLIST: tuple[Entry, ...] = (
             "key=npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('deploy/{0}/package-lock.json', matrix.package)) }}"
         ),
         reason=_NPM_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-agent-plugins-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-agent-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ash-agent-plugins/agentic-coding/transpiler/uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-agent-plugins-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-agent-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ash-agent-plugins/agentic-coding/transpiler/uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-cdk-extra-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-cdk-extra-drift.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-docs.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
+        ),
+        count=2,
+        reason=_UV_SPLIT_CACHE_REASON
+        + (
+            " Twice: build-docs restores it, and deploy-docs only looks the key up"
+            " (lookup-only: true, nothing downloaded) so its save can skip an entry"
+            " main already wrote. deploy-docs publishes the site and restores nothing."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-docs.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/uv "
+            "key=uv-docs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
+        ),
+        reason=_UV_SPLIT_CACHE_REASON
+        + " Saved by deploy-docs, the only job here that runs on main.",
     ),
 )
 
@@ -907,9 +949,13 @@ def _walk_mappings(node: object):
 def _layer_cache_sites(document: object):
     """(mapping, kind, action, publishes) for the two layer-cache site shapes.
 
-    A step exporting ACTIONS_RUNTIME_TOKEN to GITHUB_ENV is censused whatever it
-    exports it for: with that token in the environment, ASH's build exports layers
-    at its default (min) without any ASH_GHA_BUILD_CACHE_EXPORT in sight. And a
+    A step handing ACTIONS_RUNTIME_TOKEN to later steps is censused whatever it
+    hands it over for: with that token in the environment, ASH's build exports
+    layers at its default (min) without any ASH_GHA_BUILD_CACHE_EXPORT in sight.
+    Both spellings count: GITHUB_ENV or core.exportVariable, which reach every later
+    step, and GITHUB_OUTPUT or core.setOutput, which reach the steps that map the
+    output into their `env:`. A step that only maps such an output is not a second
+    site; the step that produced it is. And a
     mapping (step, job or workflow) whose `env` sets ASH_GHA_BUILD_CACHE_EXPORT to
     anything but none is censused with the value, expressions included.
     """
@@ -934,7 +980,15 @@ def _layer_cache_sites(document: object):
             if (
                 isinstance(text, str)
                 and "ACTIONS_RUNTIME_TOKEN" in text
-                and ("exportVariable" in text or "GITHUB_ENV" in text)
+                and any(
+                    verb in text
+                    for verb in (
+                        "exportVariable",
+                        "GITHUB_ENV",
+                        "setOutput",
+                        "GITHUB_OUTPUT",
+                    )
+                )
             ):
                 # The revoke steps write an empty value back; those publish nothing.
                 if re.search(r'echo "\$\{name\}=" >> "\$GITHUB_ENV"', text):
