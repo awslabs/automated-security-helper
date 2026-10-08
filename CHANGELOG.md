@@ -92,6 +92,22 @@
 
 ### Behavior changes
 
+- **A config file inside the scanned tree can no longer choose what ASH installs,
+  imports or hands a scanner as its own configuration.** It applies to a discovered
+  `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`:
+  - `tool_version` (bandit, checkov, semgrep, ferret-scan, the jupyter converter)
+    must be a PEP 440 version specifier set such as `>=1.2,<2`, from any source.
+    Any other value is replaced by the default, with a warning naming the key.
+  - `ash_plugin_modules` entries such a file adds are imported only when they name
+    an installed module outside the tree. `--ash-plugin-modules`,
+    `--config-overrides` and a config file outside the tree are unaffected.
+  - checkov's and ferret-scan's `config_file`, the `.checkov.yaml` and `ferret.yaml`
+    files they find by name, and detect-secrets plugins and filters that name a
+    file are passed to the tool only when the file is outside the scanned tree.
+
+  Each value that is not honored is logged once as a warning naming the key. See
+  [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+
 - **`ash dependencies install --tool` selects the archive converter as `archive`.**
   Every plugin is now listed and selected by its config key. The archive converter
   was the one bundled plugin listed under its class name, so its canonical `--tool`

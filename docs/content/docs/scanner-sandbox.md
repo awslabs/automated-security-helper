@@ -231,9 +231,11 @@ Out of scope:
   ASH code, not third-party tools. `git` runs only for `--changed-files-only` and
   workspace planning, never inside a scanner.
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
-  its own process, so they run unsandboxed. That includes a config file committed to
-  the scanned repository. The sandbox doesn't change this; review the plugin modules a
-  repository's config names before you scan it.
+  its own process, so they run unsandboxed. From a config file inside the scanned
+  tree, only installed modules outside the tree are imported (see
+  [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)),
+  but an installed package still runs with ASH's access. The sandbox doesn't change
+  this; review the plugin modules a repository's config names before you scan it.
 - Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
   fork until a limit stops it; the existing per-scanner `scan_timeout` bounds how long.
 - A scanner allowed a network under bwrap shares the host's network namespace, which
