@@ -51,6 +51,9 @@ GROUP = "ash.awslabs.github.io"
 
 OPERATOR_DIR = REPO_ROOT / "deploy/kubernetes-operator"
 RBAC_YAML = OPERATOR_DIR / "manifests/rbac.yaml"
+# RBAC is read from every manifest the operator ships, not rbac.yaml alone, so a Role
+# added to operator.yaml or to a new file is compared too.
+MANIFEST_YAMLS = sorted((OPERATOR_DIR / "manifests").glob("*.y*ml"))
 CRD_YAMLS = sorted((OPERATOR_DIR / "generated").glob("crd-*.yaml"))
 
 
@@ -73,16 +76,101 @@ def _operator_crds() -> dict:
     return crds
 
 
-def _operator_role_rules() -> list:
+RBAC_KINDS = ("ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding")
+
+
+def _canonical_rules(rules: list) -> list:
+    """Rules as sorted tuples, every member list sorted, so order is never load-bearing.
+
+    The API server treats `resources: [a, b]` and `[b, a]` alike, so a reordering in
+    rbac.yaml must not read as drift. Each field keeps its identity, so `pods: get` and
+    `configmaps: get` never collapse into each other.
+    """
+    return sorted(
+        (
+            tuple(sorted(r["apiGroups"])),
+            tuple(sorted(r["resources"])),
+            tuple(sorted(r["verbs"])),
+        )
+        for r in rules
+    )
+
+
+def _rbac_key(doc: dict) -> str:
+    """`Kind namespace/name`; a cluster-scoped object has no namespace."""
+    meta = doc["metadata"]
+    return f"{doc['kind']} {meta.get('namespace', '(cluster)')}/{meta['name']}"
+
+
+def _role_ref(doc: dict) -> str:
+    """A binding's roleRef as `group/Kind/name`. A missing apiGroup is rbac's own."""
+    ref = doc.get("roleRef") or {}
+    group = ref.get("apiGroup", "rbac.authorization.k8s.io")
+    return f"{group}/{ref.get('kind')}/{ref.get('name')}"
+
+
+def _subjects(doc: dict) -> list:
+    """A binding's subjects as sorted `Kind namespace/name`."""
+    return sorted(
+        f"{s['kind']} {s.get('namespace', '(none)')}/{s['name']}"
+        for s in doc.get("subjects") or []
+    )
+
+
+def _rule_text(rule: tuple) -> str:
+    groups, resources, verbs = rule
+    return f"[{','.join(groups)}] {','.join(resources)} -> {','.join(verbs)}"
+
+
+def _rbac_drift(installed: list, operator: list) -> list[str]:
+    """Every way two lists of manifests disagree on RBAC, as readable lines.
+
+    ALL documents of the four RBAC kinds are compared, not the two roles the stack
+    happens to install: first the set of (kind, namespace, name) in both directions,
+    then, for each object on both sides, its rules, or its roleRef and subjects.
+    Selecting roles by name was the gap; a Role added to rbac.yaml under another name
+    was never read. One function serves the real files and the planted copies below,
+    so the negative controls exercise the comparison the real assertion makes.
+    """
+    drift: list[str] = []
+
+    def diff(what: str, ours: list, theirs: list) -> None:
+        drift.extend(f"{what}: only in the stack: {x}" for x in ours if x not in theirs)
+        drift.extend(
+            f"{what}: only in the operator: {x}" for x in theirs if x not in ours
+        )
+
+    keyed = {}
+    for side, docs in (("stack", installed), ("operator", operator)):
+        rbac = [d for d in docs if d.get("kind") in RBAC_KINDS]
+        keyed[side] = {_rbac_key(d): d for d in rbac}
+        # Two documents with one key would collapse here and hide each other.
+        if len(keyed[side]) != len(rbac):
+            drift.append(f"RBAC objects: the {side} repeats a kind/namespace/name")
+    ours, theirs = keyed["stack"], keyed["operator"]
+    diff("RBAC objects", sorted(ours), sorted(theirs))
+    for key in sorted(set(ours) & set(theirs)):
+        mine, other = ours[key], theirs[key]
+        if mine["kind"].endswith("Binding"):
+            diff(f"{key} roleRef", [_role_ref(mine)], [_role_ref(other)])
+            diff(f"{key} subjects", _subjects(mine), _subjects(other))
+        else:
+            diff(
+                f"{key} rules",
+                [_rule_text(r) for r in _canonical_rules(mine.get("rules") or [])],
+                [_rule_text(r) for r in _canonical_rules(other.get("rules") or [])],
+            )
+    return drift
+
+
+def _operator_role_rules(kind: str, name: str) -> list:
     roles = [
         doc
         for doc in _yaml_docs(RBAC_YAML)
-        if doc["kind"] == "Role" and doc["metadata"]["name"] == "ash-operator"
+        if doc["kind"] == kind and doc["metadata"]["name"] == name
     ]
-    assert len(roles) == 1, f"expected one Role/ash-operator in {RBAC_YAML}"
-    return [
-        (r["apiGroups"], r["resources"], sorted(r["verbs"])) for r in roles[0]["rules"]
-    ]
+    assert len(roles) == 1, f"expected one {kind}/{name} in {RBAC_YAML}"
+    return _canonical_rules(roles[0]["rules"])
 
 
 def _spec_schema(crd: dict) -> dict:
@@ -102,7 +190,8 @@ EXPECTED_CRDS = {
     }
     for plural, crd in OPERATOR_CRDS.items()
 }
-EXPECTED_NAMESPACED_RULES = _operator_role_rules()
+EXPECTED_NAMESPACED_RULES = _operator_role_rules("Role", "ash-operator")
+EXPECTED_CLUSTER_RULES = _operator_role_rules("ClusterRole", "ash-operator-crd-reader")
 
 
 def test_the_parsed_operator_contract_is_populated() -> None:
@@ -112,6 +201,7 @@ def test_the_parsed_operator_contract_is_populated() -> None:
         assert "image" in want["required"]
         assert any(column["name"] == "Phase" for column in want["columns"])
     assert len(EXPECTED_NAMESPACED_RULES) == 10
+    assert len(EXPECTED_CLUSTER_RULES) == 1
 
 
 def _flatten(node) -> str:
@@ -455,6 +545,14 @@ class TestCrds:
                 )
 
 
+# Names the planted-drift controls below report, kept short so each line reads whole.
+RBAC_GROUP = "rbac.authorization.k8s.io"
+CRB_NAME = "ash-operator-crd-reader"
+CRB = f"ClusterRoleBinding (cluster)/{CRB_NAME}"
+RB = "RoleBinding ash-system/ash-operator"
+EXTRA = "ash-operator-extra"
+
+
 class TestRbac:
     @staticmethod
     def _by_kind(docs: list, kind: str) -> list:
@@ -463,12 +561,15 @@ class TestRbac:
     def test_one_cluster_role_granting_only_crd_reads(self, docs: list) -> None:
         roles = self._by_kind(docs, "ClusterRole")
         assert len(roles) == 1
-        assert roles[0]["rules"] == [
-            {
-                "apiGroups": ["apiextensions.k8s.io"],
-                "resources": ["customresourcedefinitions"],
-                "verbs": ["get", "list", "watch"],
-            }
+        # Parsed from rbac.yaml, not written here, so the operator widening or
+        # narrowing its ClusterRole without this stack fails.
+        assert _canonical_rules(roles[0]["rules"]) == EXPECTED_CLUSTER_RULES
+        assert EXPECTED_CLUSTER_RULES == [
+            (
+                ("apiextensions.k8s.io",),
+                ("customresourcedefinitions",),
+                ("get", "list", "watch"),
+            )
         ]
 
     def test_namespaced_rules_are_set_equal_to_the_operator_table(
@@ -486,15 +587,114 @@ class TestRbac:
         # assertion below and would report clean RBAC having installed nothing.
         rules = roles[0]["rules"]
         assert len(rules) == len(EXPECTED_NAMESPACED_RULES)
-        got = sorted(
-            (tuple(r["apiGroups"]), tuple(r["resources"]), tuple(sorted(r["verbs"])))
-            for r in rules
+        assert _canonical_rules(rules) == EXPECTED_NAMESPACED_RULES
+
+    def test_every_rbac_object_equals_the_operator_rbac_yaml(self, docs: list) -> None:
+        """The full set of Roles, ClusterRoles and bindings, both ways, refs included."""
+        installed = [manifest for _, manifest, _ in docs]
+        operator = [doc for path in MANIFEST_YAMLS for doc in _yaml_docs(path)]
+        assert RBAC_YAML in MANIFEST_YAMLS
+        # Non-vacuity: two empty sides would agree.
+        want = [
+            "ClusterRole (cluster)/ash-operator-crd-reader",
+            "ClusterRoleBinding (cluster)/ash-operator-crd-reader",
+            "Role ash-system/ash-operator",
+            "RoleBinding ash-system/ash-operator",
+        ]
+        assert (
+            sorted(_rbac_key(d) for d in installed if d["kind"] in RBAC_KINDS) == want
         )
-        want = sorted(
-            (tuple(groups), tuple(resources), tuple(sorted(verbs)))
-            for groups, resources, verbs in EXPECTED_NAMESPACED_RULES
-        )
-        assert got == want
+        assert sorted(_rbac_key(d) for d in operator if d["kind"] in RBAC_KINDS) == want
+        assert _rbac_drift(installed, operator) == []
+
+    @pytest.mark.parametrize(
+        ("edit", "expected"),
+        [
+            pytest.param(
+                lambda text: (
+                    text
+                    + "\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: Role\n"
+                    "metadata: {name: ash-scan, namespace: ash-system}\n"
+                    'rules: [{apiGroups: [""], resources: [secrets], verbs: [get]}]\n'
+                ),
+                ["RBAC objects: only in the operator: Role ash-system/ash-scan"],
+                id="extra-role",
+            ),
+            pytest.param(
+                lambda text: (
+                    text + "\n---\napiVersion: rbac.authorization.k8s.io/v1\n"
+                    "kind: ClusterRole\nmetadata: {name: ash-operator-extra}\n"
+                    'rules: [{apiGroups: [""], resources: [nodes], verbs: [get]}]\n'
+                ),
+                [f"RBAC objects: only in the operator: ClusterRole (cluster)/{EXTRA}"],
+                id="extra-cluster-role",
+            ),
+            pytest.param(
+                lambda text: text.replace(
+                    "  name: ash-operator\nsubjects:\n"
+                    "  - kind: ServiceAccount\n    name: ash-operator\n",
+                    "  name: ash-operator\nsubjects:\n"
+                    "  - kind: ServiceAccount\n    name: ash-scan\n",
+                ),
+                [
+                    f"{RB} subjects: only in the stack: ServiceAccount ash-system/ash-operator",
+                    f"{RB} subjects: only in the operator: ServiceAccount ash-system/ash-scan",
+                ],
+                id="role-binding-subject",
+            ),
+            pytest.param(
+                lambda text: text.replace(
+                    "  kind: ClusterRole\n  name: ash-operator-crd-reader\nsubjects:",
+                    "  kind: ClusterRole\n  name: view\nsubjects:",
+                ),
+                [
+                    f"{CRB} roleRef: only in the stack: {RBAC_GROUP}/ClusterRole/{CRB_NAME}",
+                    f"{CRB} roleRef: only in the operator: {RBAC_GROUP}/ClusterRole/view",
+                ],
+                id="cluster-role-binding-roleref",
+            ),
+        ],
+    )
+    def test_controls_planted_rbac_yaml_edits(
+        self, docs: list, edit, expected: list
+    ) -> None:
+        """A planted copy of rbac.yaml, read the way the real assertion reads it."""
+        original = RBAC_YAML.read_text()
+        planted = edit(original)
+        # The plant must land, or this would test the real file under another name.
+        assert planted != original
+        operator = [doc for doc in yaml.safe_load_all(planted) if doc] + [
+            doc
+            for path in MANIFEST_YAMLS
+            if path != RBAC_YAML
+            for doc in _yaml_docs(path)
+        ]
+        installed = [manifest for _, manifest, _ in docs]
+        assert _rbac_drift(installed, operator) == expected
+
+    def test_control_order_anywhere_in_rbac_yaml_is_not_drift(self, docs: list) -> None:
+        """A reordering is a no-op to the API server, so it must not go red here.
+
+        Every list is reversed in the parsed documents rather than in the text, so this
+        control does not depend on any one line of rbac.yaml staying as it is.
+        """
+
+        def reversed_doc(doc: dict) -> dict:
+            doc = dict(doc)
+            if "rules" in doc:
+                doc["rules"] = [
+                    {field: list(reversed(rule[field])) for field in rule}
+                    for rule in reversed(doc["rules"])
+                ]
+            if "subjects" in doc:
+                doc["subjects"] = list(reversed(doc["subjects"]))
+            return doc
+
+        operator = [doc for path in MANIFEST_YAMLS for doc in _yaml_docs(path)]
+        shuffled = [reversed_doc(doc) for doc in reversed(operator)]
+        assert shuffled != operator
+        installed = [manifest for _, manifest, _ in docs]
+        assert _rbac_drift(installed, shuffled) == []
 
     def test_no_rule_is_empty_in_any_field(self, docs: list) -> None:
         for manifest in self._by_kind(docs, "Role") + self._by_kind(

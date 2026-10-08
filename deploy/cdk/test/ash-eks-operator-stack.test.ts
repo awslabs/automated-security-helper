@@ -24,7 +24,8 @@
  *      reads the manifests.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { spawnSync } from 'child_process';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, join } from 'path';
 
@@ -40,6 +41,7 @@ import {
   ASH_OPERATOR_CRDS,
   ASH_OPERATOR_NAMESPACED_RULES,
   AshEksOperatorStack,
+  DEFAULT_OPERATOR_NAMESPACE,
   OPERATOR_SERVICE_ACCOUNT,
   pythonLiteral,
   RbacRule,
@@ -734,6 +736,15 @@ const { loadAll: yamlLoadAll } = require('js-yaml') as { loadAll: (text: string)
 
 const OPERATOR_DIR = join(__dirname, '..', '..', 'kubernetes-operator');
 const OPERATOR_RBAC_YAML = join(OPERATOR_DIR, 'manifests', 'rbac.yaml');
+/**
+ * Every manifest the operator ships. RBAC and ServiceAccounts are read from all of them,
+ * not from rbac.yaml alone, so a Role added to operator.yaml (or a new file) is compared
+ * too rather than sitting outside the one file this suite happens to open.
+ */
+const OPERATOR_MANIFEST_YAMLS = readdirSync(join(OPERATOR_DIR, 'manifests'))
+  .filter((name) => name.endsWith('.yaml') || name.endsWith('.yml'))
+  .sort()
+  .map((name) => join(OPERATOR_DIR, 'manifests', name));
 const OPERATOR_CRD_YAMLS = ['crd-ashscans.yaml', 'crd-ashmcpservers.yaml'].map((name) =>
   join(OPERATOR_DIR, 'generated', name),
 );
@@ -743,8 +754,20 @@ interface K8sDoc {
   readonly kind: string;
   readonly metadata: { readonly name: string; readonly namespace?: string };
   readonly rules?: RbacRule[];
+  readonly roleRef?: { readonly apiGroup?: string; readonly kind: string; readonly name: string };
+  readonly subjects?: Array<{ readonly kind: string; readonly name: string; readonly namespace?: string }>;
   readonly spec?: any;
 }
+
+/**
+ * Every kind that grants or binds a permission.
+ *
+ * The comparison below is over ALL documents of these kinds, not over the two roles this
+ * stack happens to install. Selecting by name was the gap: a Role, ClusterRole or binding
+ * added to rbac.yaml under any other name was never read, so the stack could under-install
+ * the operator's RBAC with every test green.
+ */
+const RBAC_KINDS = ['ClusterRole', 'ClusterRoleBinding', 'Role', 'RoleBinding'];
 
 function loadYamlDocs(path: string): K8sDoc[] {
   // loadAll, and nulls dropped: a leading or trailing `---` yields an empty document.
@@ -762,8 +785,8 @@ function only(docs: K8sDoc[], kind: string, name: string): K8sDoc {
 
 /** What the operator's own files declare, in the stack's vocabulary. */
 interface OperatorContract {
-  readonly clusterRules: RbacRule[];
-  readonly namespacedRules: RbacRule[];
+  /** Every Role, ClusterRole, RoleBinding and ClusterRoleBinding in the operator's manifests. */
+  readonly rbac: K8sDoc[];
   readonly serviceAccounts: string[];
   readonly crds: Array<{
     readonly group: string;
@@ -772,12 +795,11 @@ interface OperatorContract {
   }>;
 }
 
-function loadOperatorContract(rbacPath: string, crdPaths: string[]): OperatorContract {
-  const rbac = loadYamlDocs(rbacPath);
+function loadOperatorContract(manifestPaths: string[], crdPaths: string[]): OperatorContract {
+  const rbac = manifestPaths.flatMap(loadYamlDocs);
   const crds = crdPaths.flatMap(loadYamlDocs).filter((d) => d.kind === 'CustomResourceDefinition');
   return {
-    clusterRules: only(rbac, 'ClusterRole', 'ash-operator-crd-reader').rules ?? [],
-    namespacedRules: only(rbac, 'Role', 'ash-operator').rules ?? [],
+    rbac: rbac.filter((d) => RBAC_KINDS.includes(d.kind)),
     serviceAccounts: rbac
       .filter((d) => d.kind === 'ServiceAccount')
       .map((d) => d.metadata.name)
@@ -808,9 +830,52 @@ function loadOperatorContract(rbacPath: string, crdPaths: string[]): OperatorCon
   };
 }
 
-const OPERATOR = loadOperatorContract(OPERATOR_RBAC_YAML, OPERATOR_CRD_YAMLS);
-const AUTHORITATIVE_CLUSTER_RULES: RbacRule[] = OPERATOR.clusterRules;
-const AUTHORITATIVE_NAMESPACED_RULES: RbacRule[] = OPERATOR.namespacedRules;
+const OPERATOR = loadOperatorContract(OPERATOR_MANIFEST_YAMLS, OPERATOR_CRD_YAMLS);
+const OPERATOR_RBAC_DOCS = loadYamlDocs(OPERATOR_RBAC_YAML);
+const AUTHORITATIVE_CLUSTER_RULES: RbacRule[] =
+  only(OPERATOR_RBAC_DOCS, 'ClusterRole', 'ash-operator-crd-reader').rules ?? [];
+const AUTHORITATIVE_NAMESPACED_RULES: RbacRule[] =
+  only(OPERATOR_RBAC_DOCS, 'Role', 'ash-operator').rules ?? [];
+
+/**
+ * The documents the applier actually builds, got by RUNNING its `documents()`.
+ *
+ * The stack's side of the RBAC comparison has to be what it installs, and that is built
+ * in Python: the binding names, roleRefs and subjects exist nowhere in the TypeScript. A
+ * TypeScript description of them would be one more hand copy that agrees with itself.
+ * So the rendered applier is executed with python3, with boto3 and botocore stubbed (the
+ * document builders use neither), and `documents()` is called the way `handler()` calls
+ * it. The pytest suite does the same against the committed template.
+ *
+ * Fails, rather than skips, when python3 is missing: a skipped comparison is the
+ * green-with-nothing-checked outcome this exists to prevent.
+ */
+function installedDocuments(namespace: string): K8sDoc[] {
+  const driver = [
+    'import json, sys, types',
+    'boto3 = types.ModuleType("boto3")',
+    'signers = types.ModuleType("botocore.signers")',
+    'signers.RequestSigner = object',
+    'sys.modules.update({"boto3": boto3, "botocore": types.ModuleType("botocore"),',
+    '                    "botocore.signers": signers})',
+    'scope = {"__name__": "ash_eks_applier"}',
+    'exec(compile(sys.stdin.read(), "applier", "exec"), scope)',
+    'docs = scope["documents"](sys.argv[1], "registry.example/op:v1")',
+    'print(json.dumps([manifest for _, manifest, _ in docs]))',
+  ].join('\n');
+  const run = spawnSync(process.env.ASH_TEST_PYTHON ?? 'python3', ['-c', driver, namespace], {
+    input: ASH_OPERATOR_APPLIER,
+    encoding: 'utf8',
+  });
+  if (run.error || run.status !== 0) {
+    throw new Error(`running the applier's documents() failed: ${run.error ?? run.stderr}`);
+  }
+  return JSON.parse(run.stdout) as K8sDoc[];
+}
+
+// The operator's rbac.yaml installs into ash-system, which is this stack's default.
+const INSTALLED = installedDocuments(DEFAULT_OPERATOR_NAMESPACE);
+const INSTALLED_RBAC = INSTALLED.filter((d) => RBAC_KINDS.includes(d.kind));
 
 /**
  * How many rules the namespaced Role must carry.
@@ -982,11 +1047,32 @@ function canonicalCrd(entry: AshCrd): string {
   });
 }
 
+/** Where an RBAC object lives, as `Kind namespace/name`; cluster-scoped ones have no namespace. */
+function rbacKey(doc: K8sDoc): string {
+  return `${doc.kind} ${doc.metadata.namespace ?? '(cluster)'}/${doc.metadata.name}`;
+}
+
+/** A binding's roleRef as one string. A missing apiGroup is rbac's own group. */
+function canonicalRoleRef(doc: K8sDoc): string {
+  const ref = doc.roleRef;
+  if (ref == null) return '(none)';
+  return `${ref.apiGroup ?? 'rbac.authorization.k8s.io'}/${ref.kind}/${ref.name}`;
+}
+
+/** A binding's subjects, each as `Kind namespace/name`, sorted. */
+function canonicalSubjects(doc: K8sDoc): string[] {
+  return (doc.subjects ?? []).map((s) => `${s.kind} ${s.namespace ?? '(none)'}/${s.name}`).sort();
+}
+
 /**
- * Every way the stack's constants disagree with an operator contract, as readable lines.
+ * Every way the stack disagrees with an operator contract, as readable lines.
  *
  * One function, used both on the real files and on the planted copies below, so the
  * negative controls exercise the same comparison the real assertion makes.
+ *
+ * The RBAC half compares what the applier BUILDS (`INSTALLED_RBAC`) against every RBAC
+ * document in rbac.yaml: the set of (kind, namespace, name) in both directions, then for
+ * each object present on both sides its rules, or its roleRef and subjects.
  */
 function contractDrift(op: OperatorContract): string[] {
   const drift: string[] = [];
@@ -994,9 +1080,26 @@ function contractDrift(op: OperatorContract): string[] {
     for (const x of ours.filter((v) => !theirs.includes(v))) drift.push(`${what}: only in the stack: ${x}`);
     for (const x of theirs.filter((v) => !ours.includes(v))) drift.push(`${what}: only in the operator: ${x}`);
   };
-  diffSets('cluster rules', canonicalSet(ASH_OPERATOR_CLUSTER_RULES), canonicalSet(op.clusterRules));
-  diffSets('namespaced rules', canonicalSet(ASH_OPERATOR_NAMESPACED_RULES), canonicalSet(op.namespacedRules));
-  diffSets('service accounts', [OPERATOR_SERVICE_ACCOUNT, SCAN_SERVICE_ACCOUNT].sort(), op.serviceAccounts);
+  const ours = new Map(INSTALLED_RBAC.map((d) => [rbacKey(d), d]));
+  const theirs = new Map(op.rbac.map((d) => [rbacKey(d), d]));
+  // Two documents with one key would collapse in the maps and hide each other.
+  if (theirs.size !== op.rbac.length) drift.push('RBAC objects: the operator repeats a kind/namespace/name');
+  diffSets('RBAC objects', [...ours.keys()].sort(), [...theirs.keys()].sort());
+  for (const [key, mine] of ours) {
+    const other = theirs.get(key);
+    if (other === undefined) continue;
+    if (mine.kind.endsWith('Binding')) {
+      diffSets(`${key} roleRef`, [canonicalRoleRef(mine)], [canonicalRoleRef(other)]);
+      diffSets(`${key} subjects`, canonicalSubjects(mine), canonicalSubjects(other));
+    } else {
+      diffSets(`${key} rules`, canonicalSet(mine.rules ?? []), canonicalSet(other.rules ?? []));
+    }
+  }
+  diffSets(
+    'service accounts',
+    INSTALLED.filter((d) => d.kind === 'ServiceAccount').map((d) => d.metadata.name).sort(),
+    op.serviceAccounts,
+  );
   for (const crd of op.crds) {
     if (crd.group !== ASH_OPERATOR_API_GROUP) drift.push(`${crd.entry.plural}: group ${crd.group}`);
     if (JSON.stringify(crd.versions) !== JSON.stringify([ASH_OPERATOR_API_VERSION])) {
@@ -1007,25 +1110,36 @@ function contractDrift(op: OperatorContract): string[] {
   return drift;
 }
 
-/** The operator contract re-read after one textual edit to a temp copy of a file. */
-function plantedContract(file: string, from: string, to: string): OperatorContract {
+/** The operator contract re-read after `edit` is applied to a temp copy of one file. */
+function plantedContractBy(file: string, edit: (text: string) => string): OperatorContract {
   const original = readFileSync(file, 'utf8');
-  // The plant must land. A replacement that matched nothing would leave the copy equal
-  // to the original, and the "drift is reported" assertion would then be testing the
-  // real files under another name.
-  expect(original).toContain(from);
-  const planted = original.replace(from, to);
+  const planted = edit(original);
+  // The plant must land. An edit that changed nothing would leave the copy equal to
+  // the original, and the "drift is reported" assertion would then be testing the real
+  // files under another name.
   expect(planted).not.toBe(original);
   const dir = mkdtempSync(join(tmpdir(), 'ash-eks-contract-'));
   try {
     const copy = join(dir, basename(file));
     writeFileSync(copy, planted);
-    const rbac = file === OPERATOR_RBAC_YAML ? copy : OPERATOR_RBAC_YAML;
-    const crds = OPERATOR_CRD_YAMLS.map((p) => (p === file ? copy : p));
-    return loadOperatorContract(rbac, crds);
+    const swap = (p: string) => (p === file ? copy : p);
+    return loadOperatorContract(OPERATOR_MANIFEST_YAMLS.map(swap), OPERATOR_CRD_YAMLS.map(swap));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** The operator contract re-read after one textual replacement, which must match. */
+function plantedContract(file: string, from: string, to: string): OperatorContract {
+  return plantedContractBy(file, (text) => {
+    expect(text).toContain(from);
+    return text.replace(from, to);
+  });
+}
+
+/** The operator contract with YAML documents appended to rbac.yaml. */
+function plantedRbacAppend(yaml: string): OperatorContract {
+  return plantedContractBy(OPERATOR_RBAC_YAML, (text) => `${text}\n---\n${yaml}`);
 }
 
 describe("the stack's operator contract equals the operator's own files", () => {
@@ -1039,6 +1153,27 @@ describe("the stack's operator contract equals the operator's own files", () => 
     expect(OPERATOR.serviceAccounts).toEqual(['ash-operator', 'ash-scan']);
   });
 
+  test('NON-VACUITY: both sides of the RBAC comparison carry all four objects', () => {
+    // Two empty lists are set-equal. The executed applier and rbac.yaml must each yield
+    // the two roles and the two bindings, every binding with a roleRef and a subject.
+    const keys = [
+      'ClusterRole (cluster)/ash-operator-crd-reader',
+      'ClusterRoleBinding (cluster)/ash-operator-crd-reader',
+      'Role ash-system/ash-operator',
+      'RoleBinding ash-system/ash-operator',
+    ];
+    expect(INSTALLED_RBAC.map(rbacKey).sort()).toEqual(keys);
+    expect(OPERATOR.rbac.map(rbacKey).sort()).toEqual(keys);
+    for (const doc of [...INSTALLED_RBAC, ...OPERATOR.rbac]) {
+      if (doc.kind.endsWith('Binding')) {
+        expect(doc.roleRef?.name).toBeTruthy();
+        expect(canonicalSubjects(doc).length).toBeGreaterThan(0);
+      } else {
+        expect((doc.rules ?? []).length).toBeGreaterThan(0);
+      }
+    }
+  });
+
   test('there is no drift in either direction', () => {
     // toEqual([]) prints every drifted line, so a failure names what to change.
     expect(contractDrift(OPERATOR)).toEqual([]);
@@ -1050,9 +1185,79 @@ describe("the stack's operator contract equals the operator's own files", () => 
       'verbs: ["get", "list", "watch", "create", "delete"]\n\n  # Pods are read',
       'verbs: ["get", "list", "watch", "create", "delete", "patch"]\n\n  # Pods are read',
     );
-    const drift = contractDrift(planted);
-    expect(drift).toContain('namespaced rules: only in the operator: [batch] jobs -> create,delete,get,list,patch,watch');
-    expect(drift).toContain('namespaced rules: only in the stack: [batch] jobs -> create,delete,get,list,watch');
+    expect(contractDrift(planted)).toEqual([
+      'Role ash-system/ash-operator rules: only in the stack: [batch] jobs -> create,delete,get,list,watch',
+      'Role ash-system/ash-operator rules: only in the operator: [batch] jobs -> create,delete,get,list,patch,watch',
+    ]);
+  });
+
+  test('NEGATIVE CONTROL: an extra Role planted in rbac.yaml is reported', () => {
+    // The reviewer's m3: a Role under a name the stack does not install.
+    const planted = plantedRbacAppend(
+      [
+        'apiVersion: rbac.authorization.k8s.io/v1',
+        'kind: Role',
+        'metadata:',
+        '  name: ash-scan',
+        '  namespace: ash-system',
+        'rules:',
+        '  - apiGroups: [""]',
+        '    resources: ["secrets"]',
+        '    verbs: ["get"]',
+      ].join('\n'),
+    );
+    expect(contractDrift(planted)).toEqual(['RBAC objects: only in the operator: Role ash-system/ash-scan']);
+  });
+
+  test('NEGATIVE CONTROL: an extra ClusterRole and its binding planted in rbac.yaml are reported', () => {
+    const planted = plantedRbacAppend(
+      [
+        'apiVersion: rbac.authorization.k8s.io/v1',
+        'kind: ClusterRole',
+        'metadata:',
+        '  name: ash-operator-extra',
+        'rules:',
+        '  - apiGroups: [""]',
+        '    resources: ["nodes"]',
+        '    verbs: ["get"]',
+        '---',
+        'apiVersion: rbac.authorization.k8s.io/v1',
+        'kind: ClusterRoleBinding',
+        'metadata:',
+        '  name: ash-operator-extra',
+        'roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ash-operator-extra}',
+        'subjects: [{kind: ServiceAccount, name: ash-operator, namespace: ash-system}]',
+      ].join('\n'),
+    );
+    expect(contractDrift(planted)).toEqual([
+      'RBAC objects: only in the operator: ClusterRole (cluster)/ash-operator-extra',
+      'RBAC objects: only in the operator: ClusterRoleBinding (cluster)/ash-operator-extra',
+    ]);
+  });
+
+  test("NEGATIVE CONTROL: a RoleBinding's subject changed in rbac.yaml is reported", () => {
+    // The reviewer's m10: the binding is still there under its name, bound to another account.
+    const planted = plantedContract(
+      OPERATOR_RBAC_YAML,
+      '  name: ash-operator\nsubjects:\n  - kind: ServiceAccount\n    name: ash-operator\n',
+      '  name: ash-operator\nsubjects:\n  - kind: ServiceAccount\n    name: ash-scan\n',
+    );
+    expect(contractDrift(planted)).toEqual([
+      'RoleBinding ash-system/ash-operator subjects: only in the stack: ServiceAccount ash-system/ash-operator',
+      'RoleBinding ash-system/ash-operator subjects: only in the operator: ServiceAccount ash-system/ash-scan',
+    ]);
+  });
+
+  test("NEGATIVE CONTROL: a ClusterRoleBinding's roleRef changed in rbac.yaml is reported", () => {
+    const planted = plantedContract(
+      OPERATOR_RBAC_YAML,
+      '  kind: ClusterRole\n  name: ash-operator-crd-reader\nsubjects:',
+      '  kind: ClusterRole\n  name: view\nsubjects:',
+    );
+    expect(contractDrift(planted)).toEqual([
+      'ClusterRoleBinding (cluster)/ash-operator-crd-reader roleRef: only in the stack: rbac.authorization.k8s.io/ClusterRole/ash-operator-crd-reader',
+      'ClusterRoleBinding (cluster)/ash-operator-crd-reader roleRef: only in the operator: rbac.authorization.k8s.io/ClusterRole/view',
+    ]);
   });
 
   test('NEGATIVE CONTROL: a printer column removed from the operator CRD is reported', () => {
@@ -1076,6 +1281,26 @@ describe("the stack's operator contract equals the operator's own files", () => 
       'service accounts: only in the stack: ash-scan',
       'service accounts: only in the operator: ash-scanner',
     ]);
+  });
+
+  test('CONTROL: ORDER anywhere in rbac.yaml is not drift', () => {
+    // A reordering is a no-op to the API server, so it must not go red here. Every list
+    // is reversed in the parsed documents rather than in the text, so this control does
+    // not depend on any one line of rbac.yaml staying as it is.
+    const reversed = (doc: K8sDoc): K8sDoc => ({
+      ...doc,
+      rules: doc.rules
+        ?.map((r) => ({
+          apiGroups: [...r.apiGroups].reverse(),
+          resources: [...r.resources].reverse(),
+          verbs: [...r.verbs].reverse(),
+        }))
+        .reverse(),
+      subjects: doc.subjects ? [...doc.subjects].reverse() : undefined,
+    });
+    const shuffled = { ...OPERATOR, rbac: [...OPERATOR.rbac].reverse().map(reversed) };
+    expect(JSON.stringify(shuffled.rbac)).not.toBe(JSON.stringify(OPERATOR.rbac));
+    expect(contractDrift(shuffled)).toEqual([]);
   });
 });
 
