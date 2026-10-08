@@ -10,16 +10,21 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  GUARDED_WORKFLOWS,
   REPO_INPUTS,
+  RepoInput,
+  TYPESCRIPT_CI,
+  VSCODE_EXTENSION,
   filterCovers,
+  isCovered,
   packageEscapes,
   repoPath,
   uncovered,
   workflowPaths,
 } from './repo-inputs';
 
-const WORKFLOW = '.github/workflows/ash-typescript-ci.yml';
 const EVENTS = ['push', 'pull_request'] as const;
+const CASES = GUARDED_WORKFLOWS.flatMap((workflow) => EVENTS.map((event) => [workflow, event] as const));
 
 /**
  * The test sources jest loads: every *.test.ts outside the ignored integration/
@@ -48,14 +53,32 @@ function jestLoadedSources(): string[] {
 }
 
 describe('the repo inputs the vscode jest suites read', () => {
-  const workflow = fs.readFileSync(repoPath(WORKFLOW), 'utf8');
+  it('are guarded in both workflows that run the suites', () => {
+    expect(GUARDED_WORKFLOWS).toEqual([TYPESCRIPT_CI, VSCODE_EXTENSION]);
+  });
 
-  it.each(EVENTS)('are all covered by on.%s.paths', (event) => {
-    const filters = workflowPaths(workflow, event);
+  it.each(CASES)('are all covered by %s on.%s.paths', (workflow, event) => {
+    const filters = workflowPaths(fs.readFileSync(repoPath(workflow), 'utf8'), event);
     // The package itself must still be there, so this cannot pass by reading the
     // wrong block.
     expect(filters).toContain('editors/vscode/**');
-    expect(uncovered(REPO_INPUTS, filters)).toEqual([]);
+    expect(uncovered(REPO_INPUTS, filters, workflow)).toEqual([]);
+  });
+
+  it.each(CASES)('have no stale exemption in %s on.%s.paths', (workflow, event) => {
+    const filters = workflowPaths(fs.readFileSync(repoPath(workflow), 'utf8'), event);
+    const stale = REPO_INPUTS.filter(
+      (input) => input.exemptFrom?.[workflow] !== undefined && isCovered(filters, input.pattern),
+    ).map((input) => input.pattern);
+    expect(stale).toEqual([]);
+  });
+
+  it('exempt only from workflows that are guarded', () => {
+    for (const input of REPO_INPUTS) {
+      for (const workflow of Object.keys(input.exemptFrom ?? {})) {
+        expect(GUARDED_WORKFLOWS).toContain(workflow);
+      }
+    }
   });
 
   it('are only reached through repoPath', () => {
@@ -112,6 +135,25 @@ describe('the checks, against planted defects', () => {
     expect(workflowPaths(workflow, 'pull_request')).toEqual(['editors/vscode/**']);
   });
 
+  it('throws on a negated entry rather than crediting the entries before it', () => {
+    const negated = workflow.replace(
+      "      - '.github/**'",
+      "      - '.github/**'\n      - \"!.github/workflows/**\"",
+    );
+    expect(negated).not.toBe(workflow);
+    expect(() => workflowPaths(negated, 'push')).toThrow(/negated entry/);
+    expect(workflowPaths(negated, 'pull_request')).toEqual(['editors/vscode/**']);
+  });
+
+  it('honors an exemption only for the workflow it names', () => {
+    const inputs: RepoInput[] = [
+      { pattern: 'a/**', readBy: 't', exemptFrom: { 'w1.yml': 'why' } },
+      { pattern: 'b.json', readBy: 't' },
+    ];
+    expect(uncovered(inputs, ['x/**'], 'w1.yml')).toEqual(['b.json']);
+    expect(uncovered(inputs, ['x/**'], 'w2.yml')).toEqual(['a/**', 'b.json']);
+  });
+
   it('reports an input missing from a filter', () => {
     // The planted negative: pull_request lacks both repo inputs.
     expect(uncovered(REPO_INPUTS, workflowPaths(workflow, 'pull_request'))).toEqual(
@@ -153,9 +195,40 @@ describe('the checks, against planted defects', () => {
     expect(packageEscapes(call('join', '__dirname', "'fixtures'"))).toEqual([]);
   });
 
+  it('flags the escapes a flat match would miss', () => {
+    const UP = `'${'..'}'`;
+    const call = (fn: string, ...args: string[]): string => `path.${fn}(${args.join(', ')})`;
+    // A nested call: the inner parenthesis ended the old capture.
+    expect(packageEscapes(call('join', call('resolve', '__dirname'), UP, UP))).toHaveLength(1);
+    // Template literals, assembled so this file's own text does not match.
+    const template = (base: string, rest: string): string => '`$' + `{${base}}${rest}` + '`';
+    expect(packageEscapes(template('__dirname', `/${'..'}/${'..'}/x`))).toHaveLength(1);
+    expect(packageEscapes(template('PACKAGE_ROOT', `/${'..'}/x`))).toHaveLength(1);
+    expect(packageEscapes(template('__dirname', '/fixtures/x'))).toEqual([]);
+    const dirname = (inner: string): string => `path.dirname(${inner})`;
+    expect(packageEscapes(dirname(dirname('__dirname')))).toHaveLength(1);
+    // A parenthesis inside a string argument does not unbalance the call.
+    expect(packageEscapes(call('join', '__dirname', "')'", UP, UP))).toHaveLength(1);
+  });
+
   it('refuses an undeclared repo path', () => {
     expect(() => repoPath('tests/test_data/outputs/other.json')).toThrow(/not declared/);
     expect(() => repoPath('.githubx/a')).toThrow(/not declared/);
     expect(repoPath('.github/scripts/x.py')).toMatch(/\.github[\\/]scripts[\\/]x\.py$/);
+  });
+
+  it('refuses a path that is not normal, even under a declared directory', () => {
+    // `.github/../tests/unit/x.py` matches `.github/**` by prefix and names an
+    // undeclared file once joined.
+    for (const bad of [
+      `.github/${'..'}/tests/unit/x.py`,
+      '.github/./x',
+      '.github//x',
+      '/.github/x',
+      '.github\\x',
+      `${'..'}/x`,
+    ]) {
+      expect(() => repoPath(bad)).toThrow(/not a normal repo-relative path/);
+    }
   });
 });

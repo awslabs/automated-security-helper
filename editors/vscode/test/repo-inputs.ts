@@ -15,18 +15,36 @@
  * under tests/test_data came to be read by real-report.test.ts with no filter
  * entry.
  *
+ * Two workflows run these suites: ash-typescript-ci.yml ("ts (vscode)") runs
+ * jest with coverage, and ash-vscode-extension.yml's editor-snapshots job runs
+ * `npm run snapshots -- structural`, which runs the whole jest suite
+ * (test/snapshots.ts). Both are in GUARDED_WORKFLOWS.
+ *
  * So every such read goes through `repoPath`, which refuses a path that is not
- * declared in REPO_INPUTS, and test/repo-inputs.test.ts checks two things: every
- * REPO_INPUTS entry is covered by both filters, and no suite climbs out of the
- * package except through this module.
+ * declared in REPO_INPUTS, and test/repo-inputs.test.ts checks that every entry is
+ * covered by the push and pull_request filters of every guarded workflow (or is
+ * exempted from one, with the reason, and the exemption still holds), and that no
+ * suite climbs out of the package except through this module. The second check is
+ * a heuristic; see `packageEscapes`.
  */
 
 import * as path from 'path';
+
+/** The workflows that run this package's jest suites, and so must run when an input changes. */
+export const TYPESCRIPT_CI = '.github/workflows/ash-typescript-ci.yml';
+export const VSCODE_EXTENSION = '.github/workflows/ash-vscode-extension.yml';
+export const GUARDED_WORKFLOWS: readonly string[] = [TYPESCRIPT_CI, VSCODE_EXTENSION];
 
 /** A repo-relative path or `<dir>/**` pattern, and why a suite reads it. */
 export interface RepoInput {
   readonly pattern: string;
   readonly readBy: string;
+  /**
+   * Guarded workflows that deliberately do not filter on this input, each with the
+   * reason. The test fails if a workflow listed here starts covering the input,
+   * so an exemption cannot outlive its reason unnoticed.
+   */
+  readonly exemptFrom?: Readonly<Record<string, string>>;
 }
 
 export const REPO_INPUTS: readonly RepoInput[] = [
@@ -35,10 +53,26 @@ export const REPO_INPUTS: readonly RepoInput[] = [
     readBy: 'real-report.test.ts parses it as the real multi-scanner report',
   },
   {
+    pattern: VSCODE_EXTENSION,
+    readBy: 'snapshot-policy.test.ts checks its VS Code version pin; repo-inputs.test.ts reads its filters',
+  },
+  {
+    pattern: TYPESCRIPT_CI,
+    readBy: 'repo-inputs.test.ts reads its filters',
+  },
+  {
+    pattern: '.github/scripts/check-snapshot-trailers.py',
+    readBy: 'snapshot-policy.test.ts reads it to confirm the update-flag forms it mirrors',
+  },
+  {
     pattern: '.github/**',
-    readBy:
-      'snapshot-policy.test.ts scans every file under .github/ for a snapshot update flag, and reads ' +
-      'check-snapshot-trailers.py and ash-vscode-extension.yml by name',
+    readBy: 'snapshot-policy.test.ts scans every file under .github/ for a snapshot update flag',
+    exemptFrom: {
+      [VSCODE_EXTENSION]:
+        'that workflow also runs integration-real and the .vsix e2e, which install and run ASH; ' +
+        'running them on every .github edit buys nothing for this scan, because ash-typescript-ci ' +
+        'runs the same jest suite on every .github edit',
+    },
   },
 ];
 
@@ -56,14 +90,22 @@ export function patternMatches(pattern: string, relative: string): boolean {
 
 /**
  * The absolute path of a repo-relative file, refusing one that is not declared.
- * `relative` uses forward slashes.
+ *
+ * `relative` uses forward slashes and must already be normal: a `..`, `.` or
+ * empty segment, a backslash or a leading `/` is refused rather than normalized,
+ * because `.github/../tests/x` would otherwise match the `.github/**` entry and
+ * name an undeclared file.
  */
 export function repoPath(relative: string, inputs: readonly RepoInput[] = REPO_INPUTS): string {
+  const abnormal = relative.split('/').some((seg) => seg === '' || seg === '.' || seg === '..');
+  if (abnormal || relative.includes('\\')) {
+    throw new Error(`${relative} is not a normal repo-relative path; write it without "..", "." or empty segments`);
+  }
   if (!inputs.some((input) => patternMatches(input.pattern, relative))) {
     throw new Error(
       `${relative} is outside editors/vscode and not declared in test/repo-inputs.ts REPO_INPUTS. ` +
-        'Declare it there and add it to the push and pull_request paths of ' +
-        '.github/workflows/ash-typescript-ci.yml, so a change to it runs this suite.',
+        'Declare it there and add it to the push and pull_request paths of every workflow in ' +
+        'GUARDED_WORKFLOWS, so a change to it runs this suite.',
     );
   }
   return path.join(REPO_ROOT, ...relative.split('/'));
@@ -75,7 +117,9 @@ export function repoPath(relative: string, inputs: readonly RepoInput[] = REPO_I
  * Not a YAML parser, and it does not need to be one: it reads one fixed shape
  * (`  <event>:` then `    paths:` then `      - "<entry>"`) and THROWS when that
  * shape is missing or empty, so a reformatted workflow fails here instead of
- * reading as "no filter entries".
+ * reading as "no filter entries". A negated (`!`) entry also throws: it can
+ * withdraw what an earlier entry covers, and crediting the earlier entry would
+ * pass a filter GitHub would not run on.
  */
 export function workflowPaths(workflow: string, event: string): string[] {
   const lines = workflow.split('\n');
@@ -125,7 +169,13 @@ export function workflowPaths(workflow: string, event: string): string[] {
     if (match === null) {
       throw new Error(`cannot read the "on.${event}.paths" entry: ${line.trim()}`);
     }
-    entries.push(match[1] ?? match[2] ?? match[3]);
+    const entry = match[1] ?? match[2] ?? match[3];
+    if (entry.startsWith('!')) {
+      // A negated entry subtracts from the entries before it, so a positive entry
+      // that appears to cover an input may not. Refused rather than modelled.
+      throw new Error(`"on.${event}.paths" has a negated entry, which this check does not model: ${entry}`);
+    }
+    entries.push(entry);
   }
   if (entries.length === 0) {
     throw new Error(`"on.${event}.paths" is empty`);
@@ -146,30 +196,88 @@ export function filterCovers(filter: string, pattern: string): boolean {
   return false;
 }
 
-/** The REPO_INPUTS patterns no entry of `filters` covers. */
-export function uncovered(inputs: readonly RepoInput[], filters: readonly string[]): string[] {
+/** Whether some entry of `filters` covers `pattern`. */
+export function isCovered(filters: readonly string[], pattern: string): boolean {
+  return filters.some((filter) => filterCovers(filter, pattern));
+}
+
+/** The REPO_INPUTS patterns that `workflow` must cover and `filters` does not. */
+export function uncovered(inputs: readonly RepoInput[], filters: readonly string[], workflow?: string): string[] {
   return inputs
+    .filter((input) => workflow === undefined || input.exemptFrom?.[workflow] === undefined)
     .map((input) => input.pattern)
-    .filter((pattern) => !filters.some((filter) => filterCovers(filter, pattern)));
+    .filter((pattern) => !isCovered(filters, pattern));
 }
 
 /**
- * A `path.join(...)` or `path.resolve(...)` call that climbs out of the package:
- * two or more `'..'` levels, or any `'..'` from a base other than `__dirname`
- * (`PACKAGE_ROOT, '..'` is already outside). One level from `__dirname` is
- * test/ to the package root and stays inside. REPO_ROOT above is the one
- * legitimate escape, and this module is exempt from the scan.
+ * The text between the parentheses of a call whose `(` is at `open`, with nested
+ * parentheses balanced and string contents skipped. Undefined when unbalanced.
  */
-const ESCAPE = /path\.(?:join|resolve)\(([^()]*)\)/g;
+function callArguments(source: string, open: number): string | undefined {
+  let depth = 0;
+  let quote: string | undefined;
+  for (let i = open; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quote !== undefined) {
+      if (ch === '\\') {
+        i += 1;
+      } else if (ch === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+    } else if (ch === '(') {
+      depth += 1;
+    } else if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(open + 1, i);
+      }
+    }
+  }
+  return undefined;
+}
 
-/** The lines of `source` that climb out of the package without going through `repoPath`. */
+const PATH_CALL = /path\.(?:join|resolve)\(/g;
+const TEMPLATE_ESCAPE = /`[^`]*\$\{\s*(?:__dirname|PACKAGE_ROOT|REPO_ROOT)\s*\}[^`]*\.\.[^`]*`/g;
+const DIRNAME_CHAIN = /path\.dirname\(\s*path\.dirname\(/g;
+
+/**
+ * Places in `source` that climb out of the package without going through `repoPath`.
+ *
+ * A HEURISTIC, NOT A GUARANTEE. It catches the shapes a test here would plausibly
+ * write:
+ *
+ *   - a `path.join(...)`/`path.resolve(...)` whose arguments (nested calls
+ *     included) carry two or more `'..'` levels, or any `'..'` from a base other
+ *     than `__dirname` (`PACKAGE_ROOT, '..'` is already outside; one level from
+ *     `__dirname` is test/ to the package root and stays inside);
+ *   - a template literal that puts `..` after `${__dirname}`, `${PACKAGE_ROOT}` or
+ *     `${REPO_ROOT}`;
+ *   - `path.dirname(path.dirname(...))`.
+ *
+ * It does not see a path built in a variable over several statements, a
+ * cwd-relative read (`readFileSync('../../x')`), or `fs` called with a URL. Those
+ * need review; the runtime `repoPath` check only catches reads that use it.
+ */
 export function packageEscapes(source: string): string[] {
   const out: string[] = [];
-  for (const match of source.matchAll(ESCAPE)) {
-    const ups = (match[1].match(/['"]\.\.['"]/g) ?? []).length;
-    const slashedUps = (match[1].match(/\.\.\//g) ?? []).length;
-    const fromDirname = /^\s*__dirname\s*,/.test(match[1]);
-    if (ups + slashedUps >= 2 || (ups + slashedUps >= 1 && !fromDirname)) {
+  for (const match of source.matchAll(PATH_CALL)) {
+    const open = (match.index ?? 0) + match[0].length - 1;
+    const args = callArguments(source, open);
+    if (args === undefined) {
+      continue;
+    }
+    const ups = (args.match(/['"]\.\.['"]/g) ?? []).length + (args.match(/\.\.\//g) ?? []).length;
+    const fromDirname = /^\s*__dirname\s*,/.test(args);
+    if (ups >= 2 || (ups >= 1 && !fromDirname)) {
+      out.push(`${match[0]}${args})`);
+    }
+  }
+  for (const pattern of [TEMPLATE_ESCAPE, DIRNAME_CHAIN]) {
+    for (const match of source.matchAll(pattern)) {
       out.push(match[0]);
     }
   }
