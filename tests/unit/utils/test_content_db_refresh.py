@@ -319,7 +319,9 @@ class TestScannersUseThePreparedDatabase:
             context=test_plugin_context, config=TrivyRepoScannerConfig()
         )
         scanner._process_config_options()
-        scanner.dependencies_satisfied = True
+        # trivy need not be installed for this: what is asserted is the command
+        # the scanner builds, and the run itself is replaced below.
+        monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
         commands = []
         monkeypatch.setattr(
             scanner,
