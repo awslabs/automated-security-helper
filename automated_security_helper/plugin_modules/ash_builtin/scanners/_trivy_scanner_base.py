@@ -148,6 +148,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # The in-tree trivy input files already reported as ignored.
     _warned_inputs: Set[str] = PrivateAttr(default_factory=set)
 
+    # The cache directory the last online scan was pointed at (--cache-dir), so
+    # the staleness probe reads the same one (content_database_probe_context).
+    _pinned_cache_dir: Optional[str] = PrivateAttr(default=None)
+
     def _ignore_file(self) -> str:
         """The file trivy reads finding IDs to ignore from (``--ignorefile``)."""
         return self._trivy_input_file(
@@ -310,12 +314,28 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             executable=find_executable(command[0]),
             config_file=operator_config,
         )
+        self._pinned_cache_dir = Path(os.path.abspath(cache)).as_posix()
         return [
             "--skip-db-update",
             "--skip-java-db-update",
             *(["--skip-check-update"] if wants_checks else []),
-            f"--cache-dir={Path(os.path.abspath(cache)).as_posix()}",
+            f"--cache-dir={self._pinned_cache_dir}",
         ]
+
+    def content_database_probe_context(self):  # type: ignore[no-untyped-def]
+        """The base's probe context, pointed at the cache the scan read.
+
+        An online scan is given ``--cache-dir`` (``_shared_update_flags``), which is
+        not where trivy looks on its own on every platform: on Windows trivy's
+        default is ``%LocalAppData%\\trivy``. The post-scan ``trivy version`` probe
+        runs without that flag, so it gets ``TRIVY_CACHE_DIR`` set to the same
+        directory instead. Offline nothing is pinned and both use trivy's default.
+        """
+        context = super().content_database_probe_context()
+        if self._pinned_cache_dir:
+            context.env = {**context.env, "TRIVY_CACHE_DIR": self._pinned_cache_dir}
+            context.cache_dir = self._pinned_cache_dir
+        return context
 
     def _operator_path(
         self, option: str, value: Path | str, why: str
