@@ -95,8 +95,12 @@ it needs.
   the source directory (a committed `build -> /some/host/dir` scanned with
   `--output-dir build/ash`), or whose real path differs from where its path inside
   the source directory reads. A sandboxed scan stops with an error before ASH writes
-  anything there. Links at or above the source directory are your own and are not
-  examined, and with the sandbox off the output goes where you send it, as before.
+  anything there. Whether the sandbox is on is resolved the way the scan resolves
+  it, so a config file in the scanned tree or one an MCP client supplied cannot
+  turn the check off where it cannot turn the sandbox off; in workspace mode the
+  check applies when any project's scan is sandboxed. Links at or above the source
+  directory are your own and are not examined, and with the sandbox off the output
+  goes where you send it, as before.
 - ASH writes into the results directory after the scanner exits, and ASH is not
   sandboxed. So after every sandboxed spawn, and again after the scan, ASH removes
   every symlink and special file the scanner left there, and ASH's own writes there
