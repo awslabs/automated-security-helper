@@ -201,25 +201,56 @@ def test_enabling_in_the_project_config_runs_it_without_a_selection(
     assert _results(output)["scanner_results"]["hadolint"]["status"] == "PASSED"
 
 
-def test_the_projects_hadolint_yaml_is_honored(fixture_copy, tmp_path):
+def _by_rule(output: Path) -> dict:
+    sarif = json.loads((output / "reports" / "ash.sarif").read_text(encoding="utf-8"))
+    return {r["ruleId"]: r for run in sarif["runs"] for r in run.get("results") or []}
+
+
+def test_the_projects_hadolint_yaml_is_not_read(fixture_copy, tmp_path):
+    """The tree's .hadolint.yaml would ignore DL3007; hadolint gets ASH's empty
+    config instead, so the finding is reported."""
     _hadolint()
     source = fixture_copy("configured")
     output = tmp_path / "out"
     _ash_scan(source, output, "--scanners", "hadolint")
-    sarif = json.loads((output / "reports" / "ash.sarif").read_text())
-    by_rule = {
-        r["ruleId"]: r for run in sarif["runs"] for r in run.get("results") or []
-    }
-    assert "DL3007" not in by_rule, "ignored in .hadolint.yaml"
+    assert "DL3007" in _by_rule(output), "the tree's .hadolint.yaml was applied"
+
+
+def test_an_operator_config_outside_the_tree_is_honored(fixture_copy, tmp_path):
+    _hadolint()
+    source = fixture_copy("configured")
+    operator = tmp_path / "operator" / "hadolint.yaml"
+    operator.parent.mkdir()
+    shutil.move(source / ".hadolint.yaml", operator)
+    output = tmp_path / "out"
+    _ash_scan(
+        source,
+        output,
+        "--scanners",
+        "hadolint",
+        "--config-overrides",
+        f"scanners.hadolint.options.config_file={operator.as_posix()}",
+    )
+    by_rule = _by_rule(output)
+    assert "DL3007" not in by_rule, "ignored in the operator's config"
     assert by_rule["DL3008"]["properties"]["issue_severity"] == "INFO"
 
 
 def test_an_unparseable_config_is_an_error_not_a_silent_default(fixture_copy, tmp_path):
     _hadolint()
     source = fixture_copy("configured")
-    (source / ".hadolint.yaml").write_text("ignored: [\n")
+    operator = tmp_path / "operator" / "hadolint.yaml"
+    operator.parent.mkdir()
+    operator.write_text("ignored: [\n", encoding="utf-8")
     output = tmp_path / "out"
-    proc = _ash_scan(source, output, "--scanners", "hadolint")
+    proc = _ash_scan(
+        source,
+        output,
+        "--scanners",
+        "hadolint",
+        "--config-overrides",
+        f"scanners.hadolint.options.config_file={operator.as_posix()}",
+    )
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert _results(output)["scanner_results"]["hadolint"]["status"] == "ERROR"
 

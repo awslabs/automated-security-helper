@@ -65,10 +65,11 @@ scanners:
   hadolint:
     enabled: true
     options:
-      # A hadolint config file, relative to the source directory. When unset,
-      # ASH uses the first of .hadolint.yaml, .hadolint.yml, .ash/.hadolint.yaml
-      # and .ash/hadolint.yaml that exists. A path that is set but missing fails
-      # the scan instead of silently running with hadolint's defaults.
+      # A hadolint config file outside the scanned tree, honored only when set
+      # with --config-overrides or an ASH config file outside the tree. Unset,
+      # hadolint gets an empty config: a .hadolint.yaml in the scanned repository
+      # is not read. A path that is honored but missing fails the scan instead of
+      # silently running with hadolint's defaults.
       config_file: null
       # Seconds for the whole hadolint scan (default 1800; null for no limit).
       # Every hadolint process the scan starts shares this one budget.
@@ -77,12 +78,23 @@ scanners:
       severity_threshold: null
 ```
 
+hadolint reads `.hadolint.yaml` or `.hadolint.yml` from its working directory,
+which is the source directory, and that file belongs to the scanned repository: it
+can ignore rules or lower their severity with nothing in the report saying so. So
+ASH always passes `--config`, your `config_file` when it is honored, or otherwise an
+empty config, and a `.hadolint.yaml` in the tree is noted in the scan log and not
+read. Tune findings with ASH suppressions, which are reported and counted, or
+hadolint's inline `# hadolint ignore=` pragmas. An explicit `--config` also means
+hadolint does not read a user-level config under `$XDG_CONFIG_HOME` or `$HOME`;
+name that file in `config_file` to use it.
+
 Everything hadolint's own [configuration file](https://github.com/hadolint/hadolint#configure)
-supports works: `ignored`, `override`, `trustedRegistries`, `label-schema`,
-`strict-labels` and `disable-ignore-pragma`. For example:
+supports works in your `config_file`: `ignored`, `override`, `trustedRegistries`,
+`label-schema`, `strict-labels` and `disable-ignore-pragma`. For example:
 
 ```yaml
-# .hadolint.yaml
+# /etc/ash/hadolint.yaml, passed with
+# --config-overrides 'scanners.hadolint.options.config_file=/etc/ash/hadolint.yaml'
 ignored:
   - DL3008
 override:

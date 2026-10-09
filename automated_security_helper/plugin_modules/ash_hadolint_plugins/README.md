@@ -39,10 +39,11 @@ scanners:
   hadolint:
     enabled: true
     options:
-      # A hadolint config file, relative to the source directory. When unset,
-      # ASH uses the first of .hadolint.yaml, .hadolint.yml, .ash/.hadolint.yaml
-      # and .ash/hadolint.yaml that exists. A path that is set but missing fails
-      # the scan instead of silently running with hadolint's defaults.
+      # A hadolint config file outside the scanned tree, honored only when set
+      # with --config-overrides or an ASH config file outside the tree. Unset,
+      # hadolint gets an empty config: a .hadolint.yaml in the scanned repository
+      # is not read. A path that is honored but missing fails the scan instead of
+      # silently running with hadolint's defaults.
       config_file: null
       # Seconds for the whole hadolint scan (default 1800; null for no limit).
       # Every hadolint process the scan starts shares this one budget.

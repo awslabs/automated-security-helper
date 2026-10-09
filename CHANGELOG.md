@@ -155,8 +155,11 @@
   parse is an unevaluated target, named, which makes the scan incomplete (exit 1),
   and not a DL1000 finding. The container image ships hadolint, pinned and
   digest-verified; `ash dependencies install --tool hadolint`, with the module
-  loaded, installs the same build locally; nix mode supplies it. See
-  [hadolint Plugin](docs/content/docs/plugins/community/hadolint-plugin.md).
+  loaded, installs the same build locally; nix mode supplies it. hadolint always
+  gets an explicit `--config`, the operator's `config_file` (from
+  `--config-overrides` or a config outside the scanned tree, for a file outside
+  it) or an empty one, so a `.hadolint.yaml` in the scanned repository is not read.
+  See [hadolint Plugin](docs/content/docs/plugins/community/hadolint-plugin.md).
 - **A GuardDog community plugin, `ash_guarddog_plugins`.** It runs GuardDog 3.2.0
   over every PyPI, npm, Go, GitHub Action, RubyGems and crates package root,
   looking for malicious-package heuristics, when the module is listed in

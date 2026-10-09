@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -35,6 +36,7 @@ from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scan
     is_dockerfile_name,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.config_trust import record_provenance
 
 FIXTURES = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "hadolint"
 CAPTURED = FIXTURES / "captured"
@@ -362,13 +364,22 @@ class FakeHadolint:
         return run
 
 
-def _scanner(source: Path, tmp_path: Path, **options) -> HadolintScanner:
+def _scanner(
+    source: Path, tmp_path: Path, *, operator: bool = True, **options
+) -> HadolintScanner:
+    """``operator``: the options came from the operator, or from the scanned tree."""
+    config = get_default_config()
+    record_provenance(
+        config,
+        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+    )
     return HadolintScanner(
         context=PluginContext(
             source_dir=source,
             output_dir=tmp_path / "out",
             work_dir=tmp_path / "out" / "converted",
-            config=get_default_config(),
+            config=config,
         ),
         config=HadolintScannerConfig(
             enabled=True, options=HadolintScannerConfigOptions(**options)
@@ -420,7 +431,6 @@ class TestScan:
     def test_json_pass_runs_with_the_same_files_and_config(
         self, tree, tmp_path, on_path, monkeypatch
     ):
-        (tree / ".hadolint.yaml").write_text("ignored: []\n")
         scanner = _scanner(tree, tmp_path)
         fake = FakeHadolint()
         _run(scanner, fake, monkeypatch)
@@ -429,8 +439,7 @@ class TestScan:
         assert (
             sarif_argv[sarif_argv.index("--") :] == json_argv[json_argv.index("--") :]
         )
-        cfg = (tree / ".hadolint.yaml").resolve().as_posix()
-        assert sarif_argv[sarif_argv.index("--config") + 1] == cfg
+        cfg = sarif_argv[sarif_argv.index("--config") + 1]
         assert json_argv[json_argv.index("--config") + 1] == cfg
 
     def test_json_pass_is_skipped_when_there_is_no_note(
@@ -545,8 +554,10 @@ class TestScan:
         self, tree, tmp_path, on_path, monkeypatch
     ):
         """hadolint ignores a bad config and exits 0; ASH must not."""
-        (tree / ".hadolint.yaml").write_text("ignored: [\n")
-        scanner = _scanner(tree, tmp_path)
+        bad = tmp_path / "shared" / "hadolint.yaml"
+        bad.parent.mkdir()
+        bad.write_text("ignored: [\n")
+        scanner = _scanner(tree, tmp_path, config_file=str(bad))
         fake = FakeHadolint(
             stderr="\"Error parsing your config file in  '.hadolint.yaml':\\n...\""
         )
@@ -556,11 +567,28 @@ class TestScan:
     def test_a_configured_config_file_that_is_missing_fails_the_scan(
         self, tree, tmp_path, on_path, monkeypatch
     ):
-        scanner = _scanner(tree, tmp_path, config_file="nope/.hadolint.yaml")
+        missing = tmp_path / "shared" / "nope.yaml"
+        scanner = _scanner(tree, tmp_path, config_file=str(missing))
         fake = FakeHadolint()
         with pytest.raises(ScannerError, match="does not exist"):
             _run(scanner, fake, monkeypatch)
         assert fake.calls == []
+
+    def test_a_long_or_control_character_stderr_is_excerpted(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        bad = tmp_path / "shared" / "hadolint.yaml"
+        bad.parent.mkdir()
+        bad.write_text("ignored: [\n")
+        scanner = _scanner(tree, tmp_path, config_file=str(bad))
+        noise = "\x1b[2J\x1b[31m" + "x" * 5000 + "\x07\x00"
+        fake = FakeHadolint(stderr="Error parsing your config file " + noise)
+        with pytest.raises(ScannerError) as raised:
+            _run(scanner, fake, monkeypatch)
+        message = str(raised.value)
+        assert "\x1b" not in message and "\x07" not in message and "\x00" not in message
+        assert "characters omitted" in message
+        assert len(message) < 1500
 
     def test_a_non_zero_exit_fails_the_scan(self, tree, tmp_path, on_path, monkeypatch):
         scanner = _scanner(tree, tmp_path)
@@ -740,14 +768,68 @@ class TestLargeTreesAndBudgets:
         stub = Path(argv[argv.index("--config") + 1])
         assert stub.read_text().strip() == "{}"
 
-    def test_no_config_at_all_passes_no_config(
+    def test_without_an_operator_config_hadolint_gets_an_empty_one(
         self, tree, tmp_path, on_path, monkeypatch
     ):
-        """No --config, so hadolint's user-level config still applies."""
+        """An explicit --config, so hadolint reads no .hadolint.yaml from its cwd."""
         scanner = _scanner(tree, tmp_path)
         fake = FakeHadolint()
         _run(scanner, fake, monkeypatch)
-        assert all("--config" not in call["argv"] for call in fake.calls)
+        for call in fake.calls:
+            stub = Path(call["argv"][call["argv"].index("--config") + 1])
+            assert stub.read_text().strip() == "{}"
+            assert not stub.resolve().is_relative_to(tree.resolve())
+
+    @pytest.mark.parametrize(
+        "name", [".hadolint.yaml", ".hadolint.yml", ".ash/hadolint.yaml"]
+    )
+    def test_a_config_the_tree_carries_is_not_read(
+        self, tree, tmp_path, on_path, monkeypatch, caplog, name
+    ):
+        planted = tree / name
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text("ignored: [DL3007]\n")
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeHadolint()
+        with caplog.at_level("INFO"):
+            _run(scanner, fake, monkeypatch)
+        argv = fake.calls[0]["argv"]
+        stub = Path(argv[argv.index("--config") + 1])
+        assert stub.read_text().strip() == "{}"
+        assert planted.resolve().as_posix() not in " ".join(argv)
+        assert "is not read" in caplog.text
+
+    @pytest.mark.parametrize("where", ["outside", "inside"])
+    def test_a_config_file_set_by_the_tree_is_not_used(
+        self, tree, tmp_path, on_path, monkeypatch, caplog, where
+    ):
+        chosen = (
+            tmp_path / "shared" / "hadolint.yaml"
+            if where == "outside"
+            else tree / "lint" / "hadolint.yaml"
+        )
+        chosen.parent.mkdir(parents=True)
+        chosen.write_text("ignored: [DL3007]\n")
+        scanner = _scanner(tree, tmp_path, operator=False, config_file=str(chosen))
+        fake = FakeHadolint()
+        with caplog.at_level("WARNING"):
+            _run(scanner, fake, monkeypatch)
+        argv = fake.calls[0]["argv"]
+        assert Path(argv[argv.index("--config") + 1]).read_text().strip() == "{}"
+        assert chosen.resolve().as_posix() not in " ".join(argv)
+        assert "scanners.hadolint.options.config_file" in caplog.text
+
+    def test_the_operator_cannot_name_a_config_inside_the_tree(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        inside = tree / "lint" / "hadolint.yaml"
+        inside.parent.mkdir()
+        inside.write_text("ignored: [DL3007]\n")
+        scanner = _scanner(tree, tmp_path, config_file="lint/hadolint.yaml")
+        fake = FakeHadolint()
+        _run(scanner, fake, monkeypatch)
+        argv = fake.calls[0]["argv"]
+        assert inside.resolve().as_posix() not in " ".join(argv)
 
     @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
     def test_an_explicitly_configured_config_outside_the_tree_is_used(

@@ -80,6 +80,22 @@ For a user who configured ignored rules or severity overrides that silently
 changes the report, so ASH reads stderr for hadolint's "Error parsing your
 config file" message and fails the scan instead.
 
+Configuration
+-------------
+hadolint reads ``.hadolint.yaml`` or ``.hadolint.yml`` from its working
+directory, which is the source directory, when no ``--config`` is given
+(measured on 2.15.1: a ``.hadolint.yaml`` there dropped three rules; one beside a
+Dockerfile in a subdirectory, or in another working directory, was not read).
+That file belongs to the scanned repository and can ignore rules or lower
+their severity, so ASH always passes ``--config``: the operator's
+``options.config_file``, honored only from ``--config-overrides`` or an ASH
+config outside the scanned tree and only for a file outside the tree
+(``utils/config_trust.operator_path``), or otherwise an empty one ASH writes.
+An explicit ``--config`` also stops hadolint reading a user-level config under
+``$XDG_CONFIG_HOME`` or ``$HOME``, so that one is not used either; name it with
+``options.config_file``. Findings are tuned with ASH suppressions, which are
+reported and counted, and hadolint's inline ``# hadolint ignore=`` pragmas.
+
 Suppressions
 ------------
 ASH's own rule, path and line suppressions apply to these results the same way
@@ -99,8 +115,8 @@ one deadline.
 
 Environment
 -----------
-hadolint reads ``HADOLINT_*`` environment variables and, when no ``--config``
-is given, a user-level config file under ``$XDG_CONFIG_HOME`` or ``$HOME``.
+hadolint reads ``HADOLINT_*`` environment variables (and, were no ``--config``
+given, a user-level config file; see "Configuration").
 
 The variables that decide WHAT is reported -- ``HADOLINT_IGNORE``,
 ``HADOLINT_OVERRIDE_*``, ``HADOLINT_TRUSTED_REGISTRIES``,
@@ -147,8 +163,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.utils.config_trust import operator_path
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import find_executable
@@ -193,9 +211,11 @@ _INVOCATION_ENV_VARS = frozenset(
     }
 )
 
-#: Config files looked for, in order, relative to the source directory, when
-#: ``options.config_file`` is not set. ``.hadolint.yaml`` and ``.hadolint.yml``
-#: are the names hadolint itself reads from its working directory.
+#: Config files a repository may carry for hadolint, relative to the source
+#: directory. None is read: hadolint gets an explicit --config (see
+#: "Configuration"), and finding one is noted in the scan log.
+#: ``.hadolint.yaml`` and ``.hadolint.yml`` are the names hadolint itself reads
+#: from its working directory.
 DEFAULT_CONFIG_CANDIDATES = (
     ".hadolint.yaml",
     ".hadolint.yml",
@@ -230,11 +250,13 @@ class HadolintScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "Path to a hadolint configuration file, relative to the source "
-                "directory. When unset, ASH looks for .hadolint.yaml, "
-                ".hadolint.yml, .ash/.hadolint.yaml and .ash/hadolint.yaml in the "
-                "source directory and passes the first it finds. A path that is "
-                "set and does not exist fails the scan rather than running with "
+                "Path to a hadolint configuration file; a relative path is taken "
+                "from the source directory. Honored only when set by "
+                "--config-overrides or a config file outside the scanned tree, for "
+                "a file outside that tree; otherwise ignored with a warning. When "
+                "it is not used, hadolint gets an empty config, so a .hadolint.yaml "
+                "in the scanned repository is not read. A path that is honored "
+                "and does not exist fails the scan rather than running with "
                 "hadolint's defaults."
             ),
         ),
@@ -310,73 +332,62 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             options.model_dump() if options is not None else {}
         )
 
-    def _resolve_config_file(self) -> Optional[Path]:
-        """The hadolint config to pass with ``--config``, or None for none.
+    def _resolve_config_file(self) -> Path:
+        """The hadolint config to pass with ``--config``; always one.
 
-        Resolved against the source directory rather than the process working
-        directory, for the reason grype and checkov give for the same lookup.
+        The operator's ``options.config_file`` (``operator_path``), or an empty
+        config ASH writes. See "Configuration" in the module docstring.
 
         Raises:
-            ScannerError: when ``options.config_file`` names a file that does not
-                exist. Running with hadolint's defaults instead would drop the
-                ignores and severity overrides the user asked for, and nothing in
-                the report would say so.
+            ScannerError: when the operator's ``options.config_file`` names a file
+                that does not exist. Running with hadolint's defaults instead would
+                drop the ignores and severity overrides the operator asked for, and
+                nothing in the report would say so.
         """
         source_dir = Path(self._ctx.source_dir)
         configured = self._options.config_file
         if configured is not None and str(configured).strip():
-            candidate = Path(configured)
-            if not candidate.is_absolute():
-                candidate = source_dir / candidate
-            if not candidate.is_file():
-                raise ScannerError(
-                    f"scanners.hadolint.options.config_file is {configured!s}, "
-                    f"which does not exist (looked for {candidate.as_posix()}). "
-                    "Fix the path, or unset it to use hadolint's defaults."
-                )
-            return candidate.resolve()
-        rejected = False
-        for name in DEFAULT_CONFIG_CANDIDATES:
-            candidate = source_dir / name
-            if not os.path.lexists(candidate):
-                continue
-            try:
-                resolved = candidate.resolve()
-            except (OSError, RuntimeError):
-                # A symlink loop: RuntimeError before Python 3.13. is_file() is
-                # False for it, so it is rejected below rather than fatal.
-                resolved = candidate
-            # Discovered in the scanned tree, so held to it, as Dockerfiles are:
-            # a regular file inside the tree, or nothing. Anything else -- a link
-            # out of the tree, or to a device or FIFO, which hadolint would read
-            # from (/dev/zero exhausts its memory) -- is rejected. A config the
-            # operator names explicitly (above) may live anywhere.
-            if not candidate.is_file() or not resolved.is_relative_to(
-                source_dir.resolve()
-            ):
-                self._plugin_log(
-                    f"Ignoring {candidate.as_posix()}: it is not a regular file "
-                    f"inside the scanned tree (resolves to {resolved.as_posix()}).",
-                    level=logging.WARNING,
-                )
-                rejected = True
-                continue
-            return resolved
-        if rejected:
-            # Passing no --config is not enough to ignore it: hadolint runs in the
-            # source directory and reads ./.hadolint.yaml there itself, following
-            # the symlink. An explicit config stops that lookup. "{}" and not an
-            # empty file, which hadolint reports as a parse error. Only in this
-            # case, because an explicit config also stops hadolint reading the
-            # user-level config under $XDG_CONFIG_HOME, which otherwise applies.
-            stub = Path(self.results_dir or self._ctx.output_dir).joinpath(
-                "hadolint-no-config.yaml"
+            chosen = operator_path(
+                self._ctx.config,
+                "scanners.hadolint.options.config_file",
+                configured,
+                source_dir,
             )
-            stub.parent.mkdir(parents=True, exist_ok=True)
-            with open_for_write(stub) as handle:
-                handle.write("{}\n")
-            return stub.resolve()
-        return None
+            if chosen.path is not None:
+                if not chosen.path.is_file():
+                    raise ScannerError(
+                        f"scanners.hadolint.options.config_file is {configured!s}, "
+                        f"which does not exist (looked for {chosen.path.as_posix()}). "
+                        "Fix the path, or unset it to use hadolint's defaults."
+                    )
+                return chosen.path
+            self._plugin_log(
+                f"Ignoring scanners.hadolint.options.config_file ({str(configured)!r}): "
+                f"{chosen.refusal}. hadolint runs with an empty config instead.",
+                level=logging.WARNING,
+            )
+        present = [
+            name
+            for name in DEFAULT_CONFIG_CANDIDATES
+            if os.path.lexists(source_dir / name)
+        ]
+        if present:
+            self._plugin_log(
+                f"{', '.join(present)} in the scanned tree is not read: hadolint runs "
+                "with an empty config, so its findings are reported and tuned with "
+                "ASH suppressions. Set scanners.hadolint.options.config_file with "
+                "--config-overrides or a config file outside the scanned tree to use "
+                "a hadolint config.",
+                level=logging.INFO,
+            )
+        # "{}" and not an empty file, which hadolint reports as a parse error.
+        stub = Path(self.results_dir or self._ctx.output_dir).joinpath(
+            "hadolint-no-config.yaml"
+        )
+        stub.parent.mkdir(parents=True, exist_ok=True)
+        with open_for_write(stub) as handle:
+            handle.write("{}\n")
+        return Path(os.path.abspath(stub))
 
     def _dockerfiles(
         self,
@@ -487,10 +498,9 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             k: v for k, v in snapshot_environ().items() if k not in _INVOCATION_ENV_VARS
         }
 
-    def _base_args(self, config_file: Optional[Path]) -> List[str]:
+    def _base_args(self, config_file: Path) -> List[str]:
         args = [self.command or "hadolint", "--no-fail", "--no-color"]
-        if config_file is not None:
-            args.extend(["--config", config_file.as_posix()])
+        args.extend(["--config", config_file.as_posix()])
         return args
 
     # ------------------------------------------------------------------
@@ -562,12 +572,11 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 return self._empty_report()
 
             config_file = self._resolve_config_file()
-            if config_file is not None:
-                self._plugin_log(
-                    f"Using hadolint config {config_file.as_posix()}",
-                    target_type=target_type,
-                    level=logging.INFO,
-                )
+            self._plugin_log(
+                f"Using hadolint config {config_file.as_posix()}",
+                target_type=target_type,
+                level=logging.INFO,
+            )
 
             self.targets_attempted = len(dockerfiles)
             argv_paths = [self._argv_path(p) for p in dockerfiles]
@@ -684,7 +693,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         self,
         response: Dict[str, Any],
         timeout: Optional[float],
-        config_file: Optional[Path],
+        config_file: Path,
     ) -> None:
         if response.get("timed_out"):
             raise ScannerError(
@@ -696,9 +705,9 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         if _CONFIG_PARSE_ERROR_MARKER in stderr:
             raise ScannerError(
                 "hadolint could not parse its configuration file "
-                f"({config_file.as_posix() if config_file else 'auto-discovered'}) "
-                "and would have run with its defaults instead, ignoring any rules "
-                f"and severity overrides it sets. hadolint said: {stderr.strip()}"
+                f"({config_file.as_posix()}) and would have run with its defaults "
+                "instead, ignoring any rules and severity overrides it sets. "
+                f"hadolint said: {tool_output_excerpt(stderr.strip(), 500)}"
             )
         if self.exit_code not in self.success_exit_codes:
             raise ScannerError(
