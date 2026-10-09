@@ -199,6 +199,7 @@ def resolve_config(
     permit_base: Optional[Callable[[Path], bool]] = None,
     scanned_root: Path | str | None = None,
     trusted_config_path: Path | str | None = None,
+    untrusted_config: bool = False,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -222,6 +223,13 @@ def resolve_config(
             which a project's own config file replaces). Used in place of the
             defaults as the trusted base the grants come from, unless it is
             inside the scanned tree as well.
+        untrusted_config: The selected config file was written by the caller,
+            not the operator: an MCP client's upload named as ``config_path``.
+            Every file of its chain is then treated as a file inside the scanned
+            tree is, wherever it is: its sandbox grants come from the trusted
+            base instead, its ``network_scanners`` list only removes network,
+            and its ``sandbox.mode`` cannot turn off or replace a mode the
+            trusted base sets. Nothing else about the config changes.
 
     Returns:
         The resolved AshConfig object
@@ -241,7 +249,7 @@ def resolve_config(
         scanned_root = source_dir if source_dir is not None else Path.cwd()
     trees = scanned_trees(Path(scanned_root))
     if chain:
-        in_tree = files_inside(chain, trees)
+        in_tree = list(chain) if untrusted_config else files_inside(chain, trees)
         if not in_tree:
             return config
         default_in_tree = files_inside(default_config_chain(), trees)
