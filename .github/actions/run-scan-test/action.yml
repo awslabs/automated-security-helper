@@ -293,13 +293,21 @@ runs:
         # would fail for a working install and pass for none.
         # GuardDog and hadolint, community scanners whose modules that config lists,
         # come the same way: hadolint's pinned binary, checked against its SHA256, and
-        # GuardDog's uv tool at its declared constraint. GuardDog is skipped on
-        # Windows, where it cannot be installed and its scanner reports SKIPPED.
-        ash dependencies install \
-          --config .ash/.ash_community_plugins.yaml \
-          --tool trivy-repo \
-          --tool guarddog \
-          --tool hadolint
+        # GuardDog's uv tool at its declared constraint. GuardDog is not requested on
+        # Windows: it has no install path there and its scanner reports SKIPPED, and
+        # an explicitly requested tool that cannot be installed fails the install.
+        if [ "${RUNNER_OS}" = "Windows" ]; then
+          ash dependencies install \
+            --config .ash/.ash_community_plugins.yaml \
+            --tool trivy-repo \
+            --tool hadolint
+        else
+          ash dependencies install \
+            --config .ash/.ash_community_plugins.yaml \
+            --tool trivy-repo \
+            --tool guarddog \
+            --tool hadolint
+        fi
 
     # Validate config
     - name: Validate ASH config files
