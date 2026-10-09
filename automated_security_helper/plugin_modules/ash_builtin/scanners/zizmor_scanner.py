@@ -124,7 +124,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     SarifReport,
 )
-from automated_security_helper.utils.config_trust import set_by_operator
+from automated_security_helper.utils.config_trust import (
+    operator_path,
+    set_by_operator,
+)
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -716,17 +719,26 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """
         configured = self._options.config_file
         if configured is not None and str(configured).strip() != "":
-            if set_by_operator(
+            # outside_tree is off: the operator may keep their own config in the
+            # tree. See config_trust.operator_path.
+            chosen = operator_path(
                 self._plugin_context.config,
                 "scanners.zizmor.options.config_file",
                 configured,
-            ):
-                return self._resolve_config_file(configured)
+                self._plugin_context.source_dir,
+                outside_tree=False,
+            )
+            if chosen.path is not None:
+                if not chosen.path.is_file():
+                    raise FileNotFoundError(
+                        f"scanners.zizmor.options.config_file {str(configured)!r} "
+                        f"does not exist (looked for {chosen.path.as_posix()})"
+                    )
+                return chosen.path.as_posix()
             self._plugin_log(
-                f"scanners.zizmor.options.config_file ({str(configured)!r}) is set "
-                "by a config in the scanned tree, so it is ignored and zizmor runs "
-                "with --no-config. Set it with --config-overrides or a config file "
-                "outside the scanned tree, or tune findings with ASH suppressions.",
+                f"Ignoring scanners.zizmor.options.config_file ({str(configured)!r}): "
+                f"{chosen.refusal}. zizmor runs with --no-config; tune findings "
+                "with ASH suppressions.",
                 level=logging.WARNING,
             )
         source = Path(self._plugin_context.source_dir)
@@ -741,17 +753,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 level=logging.INFO,
             )
         return None
-
-    def _resolve_config_file(self, configured: Path | str) -> str:
-        candidate = Path(configured)
-        if not candidate.is_absolute():
-            candidate = Path(self._plugin_context.source_dir) / candidate
-        if not candidate.is_file():
-            raise FileNotFoundError(
-                f"scanners.zizmor.options.config_file {str(configured)!r} does not "
-                f"exist (looked for {candidate.as_posix()})"
-            )
-        return candidate.resolve().as_posix()
 
     # ------------------------------------------------------------------
     # Scan template hooks

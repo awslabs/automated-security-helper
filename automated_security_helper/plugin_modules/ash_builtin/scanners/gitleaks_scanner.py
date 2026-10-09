@@ -117,7 +117,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
-from automated_security_helper.utils.config_trust import set_by_operator
+from automated_security_helper.utils.config_trust import operator_path
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -242,38 +242,41 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             raise ScannerError("GitleaksScanner has no plugin context")
         return Path(self.context.source_dir)
 
-    def _resolve_option_path(self, value: Path | str, option: str) -> Path:
-        """An option path, anchored on the source directory, which must exist."""
-        candidate = Path(value)
-        if not candidate.is_absolute():
-            candidate = self._source_dir() / candidate
-        if not candidate.is_file():
-            raise ScannerError(
-                f"scanners.gitleaks.options.{option} is {str(value)!r}, which is "
-                f"not a file (resolved to {candidate.as_posix()}). Fix the path or "
-                f"unset the option; gitleaks is not run without it."
-            )
-        return candidate.resolve()
-
-    def _set_by_operator(self, option: str, value: Any) -> bool:
-        config = self.context.config if self.context is not None else None
-        return set_by_operator(config, f"scanners.gitleaks.options.{option}", value)
-
     def _operator_option_path(self, option: str) -> Optional[Path]:
-        """``option``'s path when the operator set it, else None (with a warning)."""
+        """``option``'s path when the operator set it, else None (with a warning).
+
+        Through ``config_trust.operator_path``, with ``outside_tree`` off: the
+        operator may keep their own config or baseline in the tree. The resolved
+        path it returns is the one passed to gitleaks.
+
+        Raises:
+            ScannerError: the operator's path is not a file.
+        """
         value = getattr(self._options(), option)
         if not value:
             return None
-        if not self._set_by_operator(option, value):
+        config = self.context.config if self.context is not None else None
+        chosen = operator_path(
+            config,
+            f"scanners.gitleaks.options.{option}",
+            value,
+            self._source_dir(),
+            outside_tree=False,
+        )
+        if chosen.path is None:
             self._plugin_log(
-                f"scanners.gitleaks.options.{option} ({str(value)!r}) is set by a "
-                "config in the scanned tree, so it is ignored. Set it with "
-                "--config-overrides or a config file outside the scanned tree, or "
-                "tune findings with ASH suppressions.",
+                f"Ignoring scanners.gitleaks.options.{option} ({str(value)!r}): "
+                f"{chosen.refusal}. Tune findings with ASH suppressions.",
                 level=logging.WARNING,
             )
             return None
-        return self._resolve_option_path(value, option)
+        if not chosen.path.is_file():
+            raise ScannerError(
+                f"scanners.gitleaks.options.{option} is {str(value)!r}, which is "
+                f"not a file (resolved to {chosen.path.as_posix()}). Fix the path "
+                f"or unset the option; gitleaks is not run without it."
+            )
+        return chosen.path
 
     def _resolve_config_file(self, results_dir: Path) -> Optional[Path]:
         """The config to pass as ``--config``; None leaves it to the environment.

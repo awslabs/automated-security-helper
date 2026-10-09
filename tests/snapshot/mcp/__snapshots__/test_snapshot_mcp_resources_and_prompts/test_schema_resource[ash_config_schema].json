@@ -55,7 +55,7 @@
             }
           ],
           "default": null,
-          "description": "Command name or absolute path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Accepted as for shellcheck: from the scanned tree only 'pyflakes'. When set and not found, the scanner reports MISSING.",
+          "description": "Command name or path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Accepted as for shellcheck: from the scanned tree only 'pyflakes'. When set and not found, the scanner reports MISSING.",
           "title": "Pyflakes"
         },
         "scan_timeout": {
@@ -102,7 +102,7 @@
             }
           ],
           "default": null,
-          "description": "Command name or absolute path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. A config file in the scanned tree may set only 'shellcheck', looked up on PATH; another program or an absolute path outside the scanned tree needs --config-overrides or a config file outside the tree. Anything else is ignored with a warning. When set and not found, the scanner reports MISSING.",
+          "description": "Command name or path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. A config file in the scanned tree may set only 'shellcheck', looked up on PATH; another program, or a path that resolves outside the scanned tree, needs --config-overrides or a config file outside the tree. Anything else is ignored with a warning. When set and not found, the scanner reports MISSING.",
           "title": "Shellcheck"
         }
       },

@@ -45,7 +45,8 @@ Decisions, and why
    in the scanned tree, each option accepts only its own name (``shellcheck``,
    ``pyflakes``), looked up on PATH and ASH's bin directory. The operator, through
    ``--config-overrides`` or a config file outside the scanned tree
-   (``utils/config_trust.py``), may name another program or an absolute path.
+   (``utils/config_trust.py``), may name another program or a path, absolute or
+   relative to the source directory, checked by ``config_trust.operator_path``.
    Whoever sets it, a program that resolves inside the scanned tree is
    refused. A refused value is logged and the integration stays off.
 
@@ -148,6 +149,8 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.utils.config_trust import (
+    INSIDE_THE_TREE,
+    operator_path,
     scan_root,
     set_by_operator,
 )
@@ -428,12 +431,12 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "Command name or absolute path of shellcheck, which actionlint runs "
+                "Command name or path of shellcheck, which actionlint runs "
                 "on every run: script. Unset (the default) disables the integration so "
                 "results do not depend on what is installed on the host. A config file "
                 "in the scanned tree may set only 'shellcheck', looked up on PATH; "
-                "another program or an absolute path outside the scanned tree "
-                "needs --config-overrides or a config file outside the tree. "
+                "another program, or a path that resolves outside the scanned "
+                "tree, needs --config-overrides or a config file outside the tree. "
                 "Anything else is ignored with a warning. When set and not "
                 "found, the scanner reports MISSING."
             ),
@@ -443,7 +446,7 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "Command name or absolute path of pyflakes, which actionlint runs on "
+                "Command name or path of pyflakes, which actionlint runs on "
                 "'shell: python' steps. Unset (the default) disables the integration. "
                 "Accepted as for shellcheck: from the scanned tree only 'pyflakes'. "
                 "When set and not found, the scanner reports MISSING."
@@ -569,14 +572,17 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     f"it resolves to {found}, inside the scanned tree"
                 )
             return found
-        candidate = Path(configured)
-        if not candidate.is_absolute():
-            raise _RefusedIntegration(
-                "a relative path resolves inside the scanned tree; use a "
-                "command name or an absolute path outside it"
-            )
-        if in_scanned_tree(candidate, root):
-            raise _RefusedIntegration("it is inside the scanned tree")
+        # A path: the operator's only (checked above), resolved, and never inside
+        # the tree, through the rule every option that names a file follows.
+        chosen = operator_path(
+            context_config,
+            f"scanners.actionlint.options.{flag}",
+            configured,
+            source_dir,
+        )
+        if chosen.path is None:
+            raise _RefusedIntegration(chosen.refusal or INSIDE_THE_TREE)
+        candidate = chosen.path
         # A file that is not executable counts as absent: actionlint would
         # otherwise drop the integration silently.
         usable = candidate.is_file() and os.access(candidate, os.X_OK)
@@ -666,28 +672,30 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         """The config file actionlint is given, always explicitly. See decision 3."""
         configured = self._options().config_file
         context_config = self.context.config if self.context is not None else None
-        if configured and not set_by_operator(
-            context_config, "scanners.actionlint.options.config_file", configured
-        ):
-            self._plugin_log(
-                f"scanners.actionlint.options.config_file ({configured!r}) is set by "
-                "a config in the scanned tree, so it is ignored and actionlint runs "
-                "with an empty config. Set it with --config-overrides or a config "
-                "file outside the scanned tree, or tune findings with ASH "
-                "suppressions.",
-                level=logging.WARNING,
-            )
-            configured = None
         if configured:
-            candidate = Path(configured)
-            if not candidate.is_absolute():
-                candidate = self._source_dir() / candidate
-            if not candidate.is_file():
+            # The operator's own findings config may live in the tree, so
+            # outside_tree is off; see config_trust.operator_path.
+            chosen = operator_path(
+                context_config,
+                "scanners.actionlint.options.config_file",
+                configured,
+                self._source_dir(),
+                outside_tree=False,
+            )
+            if chosen.path is None:
+                self._plugin_log(
+                    f"Ignoring scanners.actionlint.options.config_file "
+                    f"({configured!r}): {chosen.refusal}. actionlint runs with an "
+                    "empty config; tune findings with ASH suppressions.",
+                    level=logging.WARNING,
+                )
+            elif not chosen.path.is_file():
                 raise ScannerError(
                     f"scanners.actionlint.options.config_file is {configured!r}, "
-                    f"which does not exist (resolved to {candidate.as_posix()})."
+                    f"which does not exist (resolved to {chosen.path.as_posix()})."
                 )
-            return candidate.absolute()
+            else:
+                return chosen.path
         present = [
             name for name in _DEFAULT_CONFIG_CANDIDATES if (target / name).is_file()
         ]
