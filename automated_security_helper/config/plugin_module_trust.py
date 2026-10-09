@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence
 
 from automated_security_helper.config.config_sources import describe_config_path
-from automated_security_helper.config.path_trust import in_scanned_tree
+from automated_security_helper.config.path_trust import scanned_tree_reason
 from automated_security_helper.config.sandbox_grants import is_within
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -107,8 +107,9 @@ def refusal_reason(name: str, scanned_root: Path) -> Optional[str]:
         for location in _spec_locations(spec):
             if own is not None and is_within(location, own):
                 continue
-            if in_scanned_tree(location, scanned_root):
-                return "it resolves inside the scanned tree"
+            why = scanned_tree_reason(location, scanned_root)
+            if why is not None:
+                return f"it is at {location.as_posix()}, and {why}"
     return None
 
 
@@ -162,7 +163,9 @@ def confine_plugin_modules(
     files = ", ".join(describe_config_path(path) for path in in_tree)
     ASH_LOGGER.warning(
         f"Ignoring ash_plugin_modules entries {', '.join(refused)} from {files}: "
-        "the file is inside the scanned tree, so only installed modules outside the "
-        "tree are imported from it. Name other modules with --ash-plugin-modules, "
-        "--config-overrides or a config file outside the tree."
+        "that config file could have been written by the scanned repository or an "
+        "MCP client, so it may only import installed modules outside every git "
+        "checkout and the scanned directory. A virtualenv inside a git checkout "
+        "counts as inside it. Name other modules with --ash-plugin-modules, "
+        "--config-overrides or a config file outside every checkout."
     )

@@ -13,9 +13,10 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
@@ -82,6 +83,13 @@ class SandboxRequirements:
             executable for it alone and removed afterwards, so nothing it unpacks
             reaches another run. Other backends give the tool a private home
             directory and do not restrict exec, and leave the variable alone.
+        read_paths_require_grant: ``read_paths`` and ``cache_paths`` follow the
+            scanner's options, which the scanned repository can write (a rules
+            file or baseline path, for example). They are mounted only when
+            ``sandbox.read_path_scanners`` names the scanner.
+        env_requires_grant: ``env_prefixes`` and ``env_names`` follow the
+            scanner's options (a token for an online check, for example). They are
+            passed only when ``sandbox.env_scanners`` names the scanner.
     """
 
     network: bool = False
@@ -94,6 +102,8 @@ class SandboxRequirements:
     system_trust_roots: bool = False
     sandbox_exec_env: Tuple[Tuple[str, str], ...] = ()
     unpack_dir_env: Optional[str] = None
+    read_paths_require_grant: bool = False
+    env_requires_grant: bool = False
 
 
 #: The baseline environment allowlist. Exact names, then prefixes. Anything else in
@@ -376,6 +386,44 @@ def _path_directories(home: Path) -> List[Path]:
     return _existing(entries)
 
 
+def _contained_option_paths(
+    spelled: Sequence[str], roots: Sequence[Path]
+) -> Tuple[str, ...]:
+    """The paths a scanner's options name that may be mounted, as resolved paths.
+
+    Options are repository-writable, so a path they name is mounted only when it
+    resolves inside one of ``roots`` (the source tree and the operator's
+    ``extra_read_paths``) and is a regular file or directory, never a socket or
+    device. The resolved path is what goes into the policy, so a link swapped after
+    this check is not followed later.
+    """
+    real_roots = [Path(os.path.realpath(root)) for root in roots]
+    kept: List[str] = []
+    for value in spelled:
+        path = _expand(value)
+        if path is None:
+            continue
+        real = Path(os.path.realpath(path))
+        try:
+            mode = os.stat(real).st_mode
+        except OSError:
+            continue
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            continue
+        if _inside_any(real, real_roots):
+            kept.append(str(real))
+    return tuple(kept)
+
+
+def _inside_any(real: PurePath, roots: Sequence[PurePath]) -> bool:
+    """Whether ``real`` is one of ``roots`` or below one, by path comparison alone.
+
+    Both sides are already resolved. Pure-path comparison follows the platform's
+    rules: on Windows, case-insensitive, and never equal across drives.
+    """
+    return any(real == root or root in real.parents for root in roots)
+
+
 def _broader_than_a_tool(path: Path) -> bool:
     """Whether mounting ``path`` would expose more than one tool installation.
 
@@ -637,6 +685,8 @@ def build_scanner_policy(
     network_scanners: Optional[Sequence[str]],
     extra_read_paths: Sequence[str] = (),
     network_limit: Optional[Sequence[str]] = None,
+    read_path_scanners: Sequence[str] = (),
+    env_scanners: Sequence[str] = (),
 ) -> SandboxPolicy:
     """The policy one scanner gets for one spawn.
 
@@ -646,8 +696,32 @@ def build_scanner_policy(
         network_limit: When not None, a scanner not named here gets no network
             whatever the rest says. Set from a config file in the scanned tree,
             which may take network away but not grant it.
+        read_path_scanners: Scanners whose ``read_paths_require_grant`` paths
+            are granted.
+        env_scanners: Scanners whose ``env_requires_grant`` variables are
+            granted.
     """
     real_home = Path.home()
+    read_granted = not requirements.read_paths_require_grant or scanner_name in set(
+        read_path_scanners
+    )
+    env_granted = not requirements.env_requires_grant or scanner_name in set(
+        env_scanners
+    )
+    declared_read = requirements.read_paths if read_granted else ()
+    declared_cache = requirements.cache_paths if read_granted else ()
+    if requirements.read_paths_require_grant:
+        # Paths taken from options the repository can write. Even when granted,
+        # only what the trusted policy already reaches: the source tree and the
+        # operator's extra_read_paths. Never a writable cache.
+        declared_read = _contained_option_paths(
+            declared_read,
+            [source_dir]
+            + [p for p in (_expand(e) for e in extra_read_paths) if p is not None],
+        )
+        declared_cache = ()
+    declared_prefixes = requirements.env_prefixes if env_granted else ()
+    declared_names = requirements.env_names if env_granted else ()
     if network_scanners is None:
         network = requirements.network and not requirements.network_requires_grant
     else:
@@ -663,14 +737,12 @@ def build_scanner_policy(
         + _uv_directories()
         + _ash_paths()
         + _executable_prefix(argv0)
-        + [_expand(p) for p in requirements.read_paths]
+        + [_expand(p) for p in declared_read]
         + [_expand(p) for p in extra_read_paths]
         + [source_dir, output_dir, scan_target, _readable_cwd(cwd)]
     )
 
-    cache = _existing(
-        [uv_cache_directory()] + [_expand(p) for p in requirements.cache_paths]
-    )
+    cache = _existing([uv_cache_directory()] + [_expand(p) for p in declared_cache])
 
     refuse_symlinked_output_dir(source_dir, output_dir)
     _refuse_symlinked_results_dir(output_dir, results_dir)
@@ -711,8 +783,8 @@ def build_scanner_policy(
         network=network,
         home=real_home,
         cwd=cwd.absolute() if cwd else None,
-        env_prefixes=tuple(requirements.env_prefixes),
-        env_names=tuple(requirements.env_names),
+        env_prefixes=tuple(declared_prefixes),
+        env_names=tuple(declared_names),
         extra_env=extra_env,
         cache_env=cache_env,
         executable=tuple(executable),

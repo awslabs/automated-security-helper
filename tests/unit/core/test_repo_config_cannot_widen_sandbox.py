@@ -35,6 +35,24 @@ def _repo(tmp_path: Path, config: str = REPO_CONFIG) -> Path:
     return source
 
 
+def _ignored_keys(message: str) -> set:
+    """The settings a confinement warning names, from its "Ignoring ... from" clause."""
+    if not message.startswith("Ignoring ") or " from " not in message:
+        return set()
+    return {
+        key.strip() for key in message[len("Ignoring ") :].split(" from ")[0].split(",")
+    }
+
+
+@pytest.fixture(autouse=True)
+def _tmp_path_is_outside_every_checkout(tmp_path):
+    # A basetemp inside a repository, or a home that is a checkout with TMPDIR
+    # under it, would make every refusal here pass for the wrong reason.
+    assert not sandbox_grants.in_any_checkout(tmp_path), (
+        f"{tmp_path} is inside a git checkout; run with --basetemp outside one"
+    )
+
+
 def _symlink(link: Path, target: Path) -> None:
     try:
         link.symlink_to(target, target_is_directory=target.is_dir())
@@ -780,8 +798,8 @@ def test_dropping_a_grant_says_which_file_and_which_settings(tmp_path, caplog):
     resolve_config(source_dir=source)
     messages = [record.getMessage() for record in caplog.records]
     assert any(
-        "sandbox.network_scanners" in message
-        and "sandbox.extra_read_paths" in message
+        _ignored_keys(message)
+        == {"sandbox.network_scanners", "sandbox.extra_read_paths"}
         and ".ash.yaml" in message
         for message in messages
     ), messages
@@ -881,3 +899,852 @@ def test_ash_config_in_a_checkout_found_only_through_the_resolved_root(
     sandbox = resolve_config(source_dir=link).sandbox
     assert sandbox.network_scanners is None
     assert sandbox.extra_read_paths == []
+
+
+def _confined(sandbox) -> bool:
+    return sandbox.network_scanners is None and sandbox.extra_read_paths == []
+
+
+@pytest.mark.parametrize("spelling", ["..", "../other"])
+def test_a_root_above_a_symlinked_cwd_counts_the_checkout(
+    tmp_path, monkeypatch, spelling
+):
+    # From `cd checkout/vendor/sub`, the CLI turns `--source-dir ..` into an
+    # absolute path under the physical working directory, outside the checkout.
+    checkout, ci = _vendor_link_out(tmp_path)
+    (tmp_path / "elsewhere" / "other").mkdir()
+    monkeypatch.chdir(checkout / "vendor" / "sub")
+    monkeypatch.setenv("PWD", str(checkout / "vendor" / "sub"))
+    root = Path(spelling).absolute()
+    assert _confined(resolve_config(config_path=ci, source_dir=root).sandbox)
+
+
+def test_a_symlink_below_a_symlinked_cwd_counts_the_checkout(tmp_path, monkeypatch):
+    checkout, ci = _vendor_link_out(tmp_path)
+    far = tmp_path / "far"
+    far.mkdir()
+    _symlink(tmp_path / "elsewhere" / "x", far)
+    monkeypatch.chdir(checkout / "vendor")
+    monkeypatch.setenv("PWD", str(checkout / "vendor"))
+    root = Path("x").absolute()
+    assert _confined(resolve_config(config_path=ci, source_dir=root).sandbox)
+
+
+def test_a_pwd_naming_another_directory_does_not_replace_the_given_names(
+    tmp_path, monkeypatch
+):
+    # $PWD names the working directory through another path: it may add a name for
+    # the scan root, but the root as given and as resolved stay.
+    plain = tmp_path / "plain"
+    (plain / "a").mkdir(parents=True)
+    out = tmp_path / "out"
+    out.mkdir()
+    _symlink(plain / "a" / "vendor", out)
+    other = tmp_path / "other"
+    other.mkdir()
+    _symlink(other / "link", plain / "a")
+    monkeypatch.chdir(plain / "a")
+    monkeypatch.setenv("PWD", str(other / "link"))
+    for root in (Path("vendor"), Path("vendor").absolute()):
+        names = sandbox_grants.scan_root_names(root)
+        assert Path(os.path.abspath(root)) in names, root
+        assert Path(os.path.realpath(root)) in names, root
+        assert other / "link" / "vendor" in names, root
+
+
+def test_a_fresh_pwd_does_not_replace_the_resolved_path(tmp_path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".ash").mkdir()
+    rogue = checkout / ".ash" / "rogue.yaml"
+    rogue.write_text(REPO_CONFIG)
+    (checkout / "src" / ".ash").mkdir(parents=True)
+    (checkout / "src" / ".ash" / ".ash.yaml").write_text("project_name: src\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    _symlink(work / "link", checkout / "src")
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PWD", str(work))
+    monkeypatch.setenv("ASH_CONFIG", str(rogue))
+    for root in (Path("link"), Path("link").absolute()):
+        assert _confined(resolve_config(source_dir=root).sandbox), root
+
+
+def test_a_pwd_naming_a_deleted_directory_is_ignored(tmp_path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("PWD", str(tmp_path / "gone"))
+    assert sandbox_grants._logical_paths(Path(".")) == []
+    assert Path(os.path.realpath(checkout)) in sandbox_grants.scan_root_names(Path("."))
+
+
+# The checkout rule. A config file inside any git checkout cannot grant, however the
+# scan root is named; outside every checkout, the scan root's own names decide.
+
+
+def test_a_trusted_config_kept_in_its_own_checkout_cannot_grant(tmp_path, caplog):
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    operator = ops / "ash.yaml"
+    operator.write_text(REPO_CONFIG)
+    target = tmp_path / "target"
+    target.mkdir()
+    caplog.set_level("WARNING")
+    sandbox = resolve_config(config_path=operator, source_dir=target).sandbox
+    assert sandbox.mode == "bwrap"
+    assert _confined(sandbox)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        _ignored_keys(message)
+        == {"sandbox.network_scanners", "sandbox.extra_read_paths"}
+        and "ash.yaml" in message
+        and "--config-overrides" in message
+        for message in messages
+    ), messages
+
+
+def test_a_config_outside_every_checkout_and_the_target_still_grants(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    operator = tmp_path / "etc" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(REPO_CONFIG)
+    sandbox = resolve_config(config_path=operator, source_dir=target).sandbox
+    assert sandbox.network_scanners == ["checkov"]
+    assert sandbox.extra_read_paths == ["~"]
+
+
+def test_an_override_still_grants_beside_a_checkout_config(tmp_path):
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    operator = ops / "ash.yaml"
+    operator.write_text(REPO_CONFIG)
+    sandbox = resolve_config(
+        config_path=operator,
+        source_dir=tmp_path,
+        config_overrides=[
+            "sandbox.network_scanners=[checkov]",
+            "sandbox.read_path_scanners=[zizmor]",
+            "sandbox.env_scanners=[zizmor]",
+        ],
+    ).sandbox
+    assert sandbox.network_scanners == ["checkov"]
+    assert sandbox.read_path_scanners == ["zizmor"]
+    assert sandbox.env_scanners == ["zizmor"]
+
+
+def test_a_checkout_config_cannot_grant_read_paths_or_environment(tmp_path, caplog):
+    source = _repo(
+        tmp_path,
+        "project_name: x\nsandbox:\n  mode: bwrap\n"
+        "  read_path_scanners: [zizmor]\n  env_scanners: [zizmor]\n",
+    )
+    (source / ".git").mkdir()
+    caplog.set_level("WARNING")
+    sandbox = resolve_config(source_dir=source).sandbox
+    assert any(
+        _ignored_keys(record.getMessage())
+        == {"sandbox.read_path_scanners", "sandbox.env_scanners"}
+        for record in caplog.records
+    ), [record.getMessage() for record in caplog.records]
+    assert sandbox.read_path_scanners == []
+    assert sandbox.env_scanners == []
+
+
+def test_a_checkout_config_found_only_by_its_own_name(tmp_path):
+    # The config file's name is inside a checkout; its resolved path is not.
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    real = tmp_path / "real.yaml"
+    real.write_text(REPO_CONFIG)
+    _symlink(ops / "ash.yaml", real)
+    target = tmp_path / "target"
+    target.mkdir()
+    sandbox = resolve_config(config_path=ops / "ash.yaml", source_dir=target).sandbox
+    assert _confined(sandbox)
+
+
+def test_a_target_outside_every_checkout_still_confines_its_own_config(tmp_path):
+    # An extracted archive: no .git anywhere, so the scan root's names decide.
+    extract = tmp_path / "pkg-1.0"
+    (extract / ".ash").mkdir(parents=True)
+    (extract / ".ash" / ".ash.yaml").write_text(REPO_CONFIG)
+    assert _confined(resolve_config(source_dir=extract).sandbox)
+
+
+def test_a_symlinked_target_outside_every_checkout_confines_its_config(
+    tmp_path, monkeypatch
+):
+    # No .git anywhere. The scan root is a symlink to the extract, so its config is
+    # inside the root only by the root's resolved name or by $PWD.
+    extract = tmp_path / "pkg-1.0"
+    (extract / ".ash").mkdir(parents=True)
+    (extract / ".ash" / ".ash.yaml").write_text(REPO_CONFIG)
+    link = tmp_path / "pkg"
+    _symlink(link, extract)
+    assert _confined(resolve_config(source_dir=link).sandbox)
+    monkeypatch.chdir(link)
+    monkeypatch.setenv("PWD", str(link))
+    assert _confined(resolve_config(source_dir=Path.cwd()).sandbox)
+    assert _confined(resolve_config(source_dir=Path(".")).sandbox)
+
+
+def test_in_any_checkout_sees_git_files_and_dangling_links(tmp_path):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    (worktree / ".git").write_text("gitdir: /elsewhere\n")
+    assert sandbox_grants.in_any_checkout(worktree / "a" / "ash.yaml")
+    dangling = tmp_path / "dangling"
+    dangling.mkdir()
+    _symlink(dangling / ".git", tmp_path / "gone")
+    assert sandbox_grants.in_any_checkout(dangling / "ash.yaml")
+    assert not sandbox_grants.in_any_checkout(tmp_path / "plain" / "ash.yaml")
+    # A name outside every checkout that resolves into one counts as inside: the
+    # helper is public, and callers may pass a path as the operator spelled it.
+    (tmp_path / "plain").mkdir()
+    (worktree / "a").mkdir()
+    (worktree / "a" / "ash.yaml").write_text("project_name: x\n")
+    _symlink(tmp_path / "plain" / "into.yaml", worktree / "a" / "ash.yaml")
+    assert sandbox_grants.in_any_checkout(tmp_path / "plain" / "into.yaml")
+
+
+def test_a_settings_derived_read_path_is_not_granted_by_default(tmp_path):
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    sandbox = resolve_config(source_dir=tmp_path / "t").sandbox
+    results = tmp_path / "results"
+    results.mkdir()
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    requirements = SandboxRequirements(
+        read_paths=(str(rules),),
+        cache_paths=(str(cache),),
+        env_names=("ZIZMOR_GITHUB_TOKEN",),
+        read_paths_require_grant=True,
+        env_requires_grant=True,
+    )
+
+    def policy(**grants):
+        return build_scanner_policy(
+            "zizmor",
+            requirements,
+            argv0="/bin/true",
+            source_dir=tmp_path,
+            output_dir=tmp_path,
+            results_dir=results,
+            scan_target=None,
+            cwd=None,
+            offline=False,
+            network_scanners=sandbox.network_scanners,
+            **grants,
+        )
+
+    denied = policy()
+    assert Path(os.path.realpath(rules)) not in [
+        Path(os.path.realpath(p)) for p in denied.read_only
+    ]
+    assert "ZIZMOR_GITHUB_TOKEN" not in denied.env_names
+    assert Path(os.path.realpath(cache)) not in [
+        Path(os.path.realpath(p)) for p in denied.cache
+    ]
+    granted = policy(read_path_scanners=["zizmor"], env_scanners=["zizmor"])
+    # A granted option path is still mounted only inside the source tree or an
+    # extra_read_paths entry; rules lives in tmp_path, which is the source tree here.
+    # Option-derived caches are never writable.
+    assert Path(os.path.realpath(cache)) not in [
+        Path(os.path.realpath(p)) for p in granted.cache
+    ]
+    assert Path(os.path.realpath(rules)) in [
+        Path(os.path.realpath(p)) for p in granted.read_only
+    ]
+    assert "ZIZMOR_GITHUB_TOKEN" in granted.env_names
+
+
+def test_the_confinement_refuses_to_compare_settings_with_themselves(tmp_path):
+    sandbox = resolve_config(source_dir=tmp_path).sandbox
+    with pytest.raises(ValueError):
+        sandbox_grants.confine_sandbox_grants(sandbox, sandbox, [])
+
+
+def test_read_and_environment_grants_reach_the_policy_of_a_real_spawn(
+    tmp_path, monkeypatch, caplog
+):
+    import sys
+    from types import SimpleNamespace
+
+    from automated_security_helper.utils.sandbox import scope as scope_module
+    from automated_security_helper.utils.sandbox.backends import SpawnPlan
+
+    class Recorder:
+        name = "recorder"
+
+        def __init__(self):
+            self.policies = []
+
+        def plan(self, argv, env, policy):
+            self.policies.append(policy)
+            return SpawnPlan(argv=list(argv), env=dict(env))
+
+    recorder = Recorder()
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: recorder)
+    monkeypatch.setattr(
+        "automated_security_helper.core.constants.is_offline_mode", lambda: False
+    )
+    target = tmp_path / "target"
+    target.mkdir()
+    # Inside the scanned tree: a granted option path is mounted only there or in an
+    # extra_read_paths entry.
+    rules = target / "rules"
+    rules.mkdir()
+    plugin = SimpleNamespace(
+        config=SimpleNamespace(name="zizmor"),
+        sandbox_requirements=SandboxRequirements(
+            read_paths=(str(rules),),
+            env_names=("ZIZMOR_GITHUB_TOKEN",),
+            read_paths_require_grant=True,
+            env_requires_grant=True,
+        ),
+        results_dir=None,
+    )
+
+    def policy_for(overrides):
+        config = resolve_config(
+            source_dir=target,
+            config_overrides=["sandbox.mode=bwrap", *overrides],
+        )
+        context = SimpleNamespace(
+            config=config, source_dir=target, output_dir=tmp_path / "out"
+        )
+        scope = scope_module.scanner_sandbox_scope(plugin, context, target)
+        with scope_module.sandbox_scope(scope):
+            scope_module.prepare_spawn([sys.executable, "--version"], {}, None)
+        return recorder.policies[-1]
+
+    def reads(policy):
+        return [Path(os.path.realpath(p)) for p in policy.read_only]
+
+    caplog.set_level("WARNING")
+    denied = policy_for([])
+    assert Path(os.path.realpath(rules)) not in reads(denied)
+    assert "ZIZMOR_GITHUB_TOKEN" not in denied.env_names
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("sandbox.read_path_scanners" in m for m in messages), messages
+    assert any("sandbox.env_scanners" in m for m in messages), messages
+
+    granted = policy_for(
+        ["sandbox.read_path_scanners=[zizmor]", "sandbox.env_scanners=[zizmor]"]
+    )
+    assert Path(os.path.realpath(rules)) in reads(granted)
+    assert "ZIZMOR_GITHUB_TOKEN" in granted.env_names
+
+    # Each list grants only its own kind of access, all the way to the spawn.
+    read_only = policy_for(["sandbox.read_path_scanners=[zizmor]"])
+    assert Path(os.path.realpath(rules)) in reads(read_only)
+    assert "ZIZMOR_GITHUB_TOKEN" not in read_only.env_names
+    env_only = policy_for(["sandbox.env_scanners=[zizmor]"])
+    assert Path(os.path.realpath(rules)) not in reads(env_only)
+    assert "ZIZMOR_GITHUB_TOKEN" in env_only.env_names
+
+
+# Tenth review.
+
+
+def test_a_config_symlinked_out_of_a_target_outside_every_checkout_is_inside(
+    tmp_path,
+):
+    # No .git anywhere: the discovered config's own name is in the scan root, even
+    # though the file it resolves to sits beside it.
+    pkg = tmp_path / "pkg"
+    (pkg / ".ash").mkdir(parents=True)
+    data = tmp_path / "pkg-data" / "x.yaml"
+    data.parent.mkdir()
+    data.write_text(REPO_CONFIG)
+    _symlink(pkg / ".ash" / ".ash.yaml", data)
+    assert _confined(resolve_config(source_dir=pkg).sandbox)
+
+
+def test_a_subdirectory_config_symlinked_elsewhere_in_the_repository_is_inside(
+    tmp_path,
+):
+    repo = tmp_path / "repo"
+    api = repo / "services" / "api"
+    (api / ".ash").mkdir(parents=True)
+    shared = repo / "shared" / "x.yaml"
+    shared.parent.mkdir()
+    shared.write_text(REPO_CONFIG)
+    _symlink(api / ".ash" / ".ash.yaml", shared)
+    assert _confined(resolve_config(source_dir=api).sandbox)
+
+
+def test_the_workspace_plan_keeps_a_project_configs_own_name(tmp_path):
+    import json
+
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        _project_config_with_policy,
+    )
+    from automated_security_helper.workspace.resolver import resolve_workspace
+
+    workspace = tmp_path / "workspace"
+    api = workspace / "api"
+    (api / ".ash").mkdir(parents=True)
+    (api / "app.py").write_text("x = 1\n")
+    outside = tmp_path / "outside.yaml"
+    outside.write_text(REPO_CONFIG)
+    _symlink(api / ".ash" / ".ash.yaml", outside)
+    definition = workspace / "ws.code-workspace"
+    definition.write_text(json.dumps({"folders": [{"path": "api"}]}))
+    plan = resolve_workspace(definition)
+    (project,) = plan.projects
+    assert Path(project.config_source).name == ".ash.yaml"
+    sandbox = _project_config_with_policy(
+        project, ProjectScanSettings(output_dir=tmp_path / "out")
+    ).sandbox
+    assert _confined(sandbox)
+
+
+def test_an_extends_base_in_another_checkout_cannot_grant(tmp_path):
+    # The root config is outside every checkout and the scan root; its base is in
+    # someone's checkout elsewhere.
+    # Bases must stay under the root config's directory, so the other checkout is
+    # vendored there.
+    other = tmp_path / "etc" / "vendor"
+    (other / ".git").mkdir(parents=True)
+    (other / "base.yaml").write_text(REPO_CONFIG)
+    root = tmp_path / "etc" / "ash.yaml"
+    root.write_text("project_name: x\nextends: vendor/base.yaml\n")
+    target = tmp_path / "target"
+    target.mkdir()
+    sandbox = resolve_config(config_path=root, source_dir=target).sandbox
+    assert _confined(sandbox)
+
+
+def test_an_operator_config_named_inside_a_checkout_is_not_the_trusted_base(
+    tmp_path,
+):
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        _project_config_with_policy,
+    )
+
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    real = tmp_path / "elsewhere.yaml"
+    real.write_text(TRUSTED_BWRAP)
+    _symlink(ops / "operator.yaml", real)
+    project = _workspace_project(tmp_path / "workspace", "project_name: api\n")
+    settings = ProjectScanSettings(
+        output_dir=tmp_path / "out", default_config_path=str(ops / "operator.yaml")
+    )
+    sandbox = _project_config_with_policy(project, settings).sandbox
+    assert sandbox.mode == "bwrap"
+    assert sandbox.network_scanners is None
+
+
+def test_ash_config_named_inside_a_checkout_cannot_grant(tmp_path, monkeypatch):
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    real = tmp_path / "elsewhere.yaml"
+    real.write_text(REPO_CONFIG)
+    _symlink(ops / "ash.yaml", real)
+    monkeypatch.setenv("ASH_CONFIG", str(ops / "ash.yaml"))
+    target = tmp_path / "target"
+    target.mkdir()
+    assert _confined(resolve_config(source_dir=target).sandbox)
+    # With a config of the target's own in the tree, ASH_CONFIG is the trusted
+    # base, and its lexical name keeps it from granting there too.
+    (target / ".ash").mkdir()
+    (target / ".ash" / ".ash.yaml").write_text("project_name: t\n")
+    assert _confined(resolve_config(source_dir=target).sandbox)
+
+
+def _zizmor_policy(tmp_path, requirements, source_dir=None, **grants):
+    results = tmp_path / "results"
+    results.mkdir(exist_ok=True)
+    return build_scanner_policy(
+        "zizmor",
+        requirements,
+        argv0="/bin/true",
+        source_dir=source_dir or tmp_path,
+        output_dir=tmp_path,
+        results_dir=results,
+        scan_target=None,
+        cwd=None,
+        offline=False,
+        network_scanners=None,
+        **grants,
+    )
+
+
+def test_read_and_environment_grants_are_independent(tmp_path):
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    requirements = SandboxRequirements(
+        read_paths=(str(rules),),
+        env_prefixes=("ZIZMOR_",),
+        env_names=("GH_TOKEN",),
+        read_paths_require_grant=True,
+        env_requires_grant=True,
+    )
+    rules_real = Path(os.path.realpath(rules))
+    read_only = _zizmor_policy(tmp_path, requirements, read_path_scanners=["zizmor"])
+    assert rules_real in [Path(os.path.realpath(p)) for p in read_only.read_only]
+    assert "GH_TOKEN" not in read_only.env_names
+    assert "ZIZMOR_" not in read_only.env_prefixes
+    env_only = _zizmor_policy(tmp_path, requirements, env_scanners=["zizmor"])
+    assert rules_real not in [Path(os.path.realpath(p)) for p in env_only.read_only]
+    assert "GH_TOKEN" in env_only.env_names
+    assert "ZIZMOR_" in env_only.env_prefixes
+
+
+def test_a_granted_option_path_is_mounted_only_inside_trusted_roots(
+    tmp_path, monkeypatch
+):
+    import shutil
+    import socket
+    import tempfile
+
+    source = tmp_path / "src"
+    (source / "rules").mkdir(parents=True)
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    company = tmp_path / "opt" / "company-rules"
+    company.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _symlink(source / "escape", elsewhere)
+    # A socket inside a trusted root, so only the socket check can refuse it. Bound
+    # under a short temporary directory: a socket path has a platform length limit
+    # (108 bytes on Linux) that a long basetemp would exceed.
+    sockets = Path(tempfile.mkdtemp(prefix="ash-s-"))
+    sock_path = sockets / "a.sock"
+    listener = None
+    if hasattr(socket, "AF_UNIX"):
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(sock_path))
+    try:
+        requirements = SandboxRequirements(
+            read_paths=(
+                str(home),
+                str(home / ".ssh"),
+                str(source / "rules"),
+                str(company),
+                str(source / "escape"),
+                str(sock_path),
+            ),
+            cache_paths=(str(source / "rules"),),
+            read_paths_require_grant=True,
+        )
+        policy = _zizmor_policy(
+            tmp_path,
+            requirements,
+            source_dir=source,
+            read_path_scanners=["zizmor"],
+            extra_read_paths=[str(company), str(sockets)],
+        )
+        mounted = [Path(os.path.realpath(p)) for p in policy.read_only]
+        assert Path(os.path.realpath(source / "rules")) in mounted
+        assert Path(os.path.realpath(company)) in mounted
+        assert Path(os.path.realpath(home)) not in mounted
+        assert Path(os.path.realpath(home / ".ssh")) not in mounted
+        # Resolved before the check: a link inside the tree pointing out is outside.
+        assert Path(os.path.realpath(elsewhere)) not in mounted
+        assert Path(os.path.realpath(sock_path)) not in mounted
+        # The resolved path is what the policy carries, not the spelling.
+        assert str(source / "escape") not in [str(p) for p in policy.read_only]
+        # Option-derived caches are never mounted, even inside the tree.
+        assert Path(os.path.realpath(source / "rules")) not in [
+            Path(os.path.realpath(p)) for p in policy.cache
+        ]
+    finally:
+        if listener is not None:
+            listener.close()
+        shutil.rmtree(sockets, ignore_errors=True)
+
+
+def test_a_scanner_renamed_by_a_config_file_is_not_sandboxed(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from pydantic import BaseModel
+
+    from automated_security_helper.utils.sandbox import scope as scope_module
+    from automated_security_helper.utils.sandbox.backends import SandboxUnavailable
+
+    class MyScannerConfig(BaseModel):
+        name: str = "my-scanner"
+
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: None)
+    config = resolve_config(
+        source_dir=tmp_path, config_overrides=["sandbox.mode=bwrap"]
+    )
+    context = SimpleNamespace(
+        config=config, source_dir=tmp_path, output_dir=tmp_path / "out"
+    )
+    renamed = SimpleNamespace(
+        config=MyScannerConfig(name="grype"),
+        sandbox_requirements=SandboxRequirements(network=True),
+        results_dir=None,
+    )
+    with pytest.raises(SandboxUnavailable):
+        scope_module.scanner_sandbox_scope(renamed, context, tmp_path)
+    honest = SimpleNamespace(
+        config=MyScannerConfig(),
+        sandbox_requirements=SandboxRequirements(),
+        results_dir=None,
+    )
+    assert scope_module.scanner_sandbox_scope(honest, context, tmp_path) is not None
+
+
+def _detect_secrets(source: Path, overrides, baseline: Path):
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        DetectSecretsScanner,
+    )
+
+    config = resolve_config(
+        source_dir=source,
+        config_overrides=[
+            f"scanners.detect-secrets.options.baseline_file={baseline}",
+            *overrides,
+        ],
+    )
+    context = PluginContext(
+        source_dir=source,
+        output_dir=source / "out",
+        work_dir=source / "out" / "work",
+        config=config,
+    )
+    return DetectSecretsScanner(
+        context=context,
+        config=config.get_plugin_config(
+            plugin_type="scanner", plugin_name="detect-secrets"
+        ),
+    )
+
+
+def test_a_baseline_outside_the_tree_is_not_read_under_the_sandbox(tmp_path, caplog):
+    source = tmp_path / "src"
+    source.mkdir()
+    host = tmp_path / "host.json"
+    host.write_text('{"results": {}, "plugins_used": [], "filters_used": []}')
+    caplog.set_level("WARNING")
+    scanner = _detect_secrets(source, ["sandbox.mode=bwrap"], host)
+    assert scanner.config.options.baseline_file is None
+    assert any("baseline" in r.getMessage() for r in caplog.records)
+    granted = _detect_secrets(
+        source,
+        ["sandbox.mode=bwrap", "sandbox.read_path_scanners=[detect-secrets]"],
+        host,
+    )
+    assert granted.config.options.baseline_file is not None
+    unsandboxed = _detect_secrets(source, [], host)
+    assert unsandboxed.config.options.baseline_file is not None
+    inside = source / ".secrets.baseline"
+    inside.write_text('{"results": {}, "plugins_used": [], "filters_used": []}')
+    in_tree = _detect_secrets(source, ["sandbox.mode=bwrap"], inside)
+    assert in_tree.config.options.baseline_file is not None
+
+
+# Eleventh review.
+
+
+def test_a_plugin_renamed_through_its_config_dict_is_not_sandboxed(
+    tmp_path, monkeypatch
+):
+    # Built the way scan_phase builds a plugin: from the raw config dict. A name the
+    # plugin's own config class rejects falls back to the generic config class.
+    from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+        SnykCodeScanner,
+    )
+    from automated_security_helper.utils.sandbox import scope as scope_module
+    from automated_security_helper.utils.sandbox.backends import SandboxUnavailable
+
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: None)
+    config = resolve_config(
+        source_dir=tmp_path,
+        config_overrides=["sandbox.mode=bwrap", "sandbox.network_scanners=[grype]"],
+    )
+    from automated_security_helper.base.plugin_context import PluginContext
+
+    context = PluginContext(
+        source_dir=tmp_path,
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "work",
+        config=config,
+    )
+    renamed = SnykCodeScanner(
+        context=context, config={"name": "grype", "enabled": True}
+    )
+    assert renamed.config.name == "grype"
+    with pytest.raises(SandboxUnavailable):
+        scope_module.scanner_sandbox_scope(renamed, context, tmp_path)
+    honest = SnykCodeScanner(
+        context=context, config={"name": "snyk-code", "enabled": True}
+    )
+    assert scope_module.scanner_sandbox_scope(honest, context, tmp_path) is not None
+
+
+def test_a_scan_root_spelled_through_a_link_and_dot_dot_still_counts(tmp_path):
+    # No .git. "top/link/../api" names data/api: the kernel follows link before the
+    # "..", which a lexical fold of the path would not.
+    data = tmp_path / "data"
+    (data / "sub").mkdir(parents=True)
+    (data / "api" / ".ash").mkdir(parents=True)
+    (data / "x.yaml").write_text(REPO_CONFIG)
+    _symlink(data / "api" / ".ash" / ".ash.yaml", data / "x.yaml")
+    top = tmp_path / "top"
+    top.mkdir()
+    _symlink(top / "link", data / "sub")
+    spelled = Path(f"{top}/link/../api")
+    assert _confined(resolve_config(source_dir=spelled).sandbox)
+
+
+def test_the_baseline_is_read_once_and_not_reopened_for_the_scan(tmp_path):
+    import json
+
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        DetectSecretsScanner,
+        DetectSecretsScannerConfig,
+    )
+
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "app.py").write_text("x = 1\n")
+    entry = {
+        "type": "Secret Keyword",
+        "filename": "original.py",
+        "hashed_secret": "0" * 40,
+        "is_verified": False,
+        "line_number": 1,
+    }
+    baseline = source / ".secrets.baseline"
+    baseline.write_text(json.dumps({"results": {"original.py": [entry]}}))
+    config = DetectSecretsScannerConfig()
+    config.options.baseline_file = baseline
+    scanner = DetectSecretsScanner(
+        context=PluginContext(
+            source_dir=source,
+            output_dir=tmp_path / "out",
+            work_dir=tmp_path / "out" / "work",
+            config=get_default_config(),
+        ),
+        config=config,
+    )
+    # Swap the checked file for a link to a different document before the scan.
+    swapped = tmp_path / "swapped.json"
+    swapped.write_text(
+        json.dumps({"results": {"swapped.py": [dict(entry, filename="swapped.py")]}})
+    )
+    baseline.unlink()
+    _symlink(baseline, swapped)
+    scanner.scan(target=source, target_type="source")
+    loaded = {str(name) for name in scanner._secrets_collection.files}
+    assert "swapped.py" not in loaded
+
+
+def test_option_path_containment_follows_windows_path_rules():
+    from pathlib import PureWindowsPath
+
+    from automated_security_helper.utils.sandbox.policy import _inside_any
+
+    roots = [PureWindowsPath("C:/Work/Repo"), PureWindowsPath("D:/Company/Rules")]
+    # Case-insensitive, as NTFS is.
+    assert _inside_any(PureWindowsPath("c:/work/repo/rules/x.yml"), roots)
+    assert _inside_any(PureWindowsPath("C:/WORK/REPO"), roots)
+    assert _inside_any(PureWindowsPath("d:/company/rules/sub/a.yml"), roots)
+    # Same tail on another drive is outside.
+    assert not _inside_any(PureWindowsPath("E:/Work/Repo/rules"), roots)
+    # A sibling sharing a prefix is outside.
+    assert not _inside_any(PureWindowsPath("C:/Work/Repo-other/x"), roots)
+    # A drive root is never inside a directory on it.
+    assert not _inside_any(PureWindowsPath("C:/"), roots)
+
+
+def test_option_paths_are_carried_resolved_and_contained_in_extra_entries(tmp_path):
+    source = tmp_path / "src"
+    (source / "rules").mkdir(parents=True)
+    (source / "rules" / "r.yml").write_text("rules: []\n")
+    _symlink(source / "rules-link", source / "rules")
+    company = tmp_path / "opt" / "company"
+    (company / "sub").mkdir(parents=True)
+    (company / "sub" / "c.yml").write_text("rules: []\n")
+    requirements = SandboxRequirements(
+        read_paths=(str(source / "rules-link"), str(company / "sub" / "c.yml")),
+        read_paths_require_grant=True,
+    )
+    policy = _zizmor_policy(
+        tmp_path,
+        requirements,
+        source_dir=source,
+        read_path_scanners=["zizmor"],
+        extra_read_paths=[str(company)],
+    )
+    carried = [str(p) for p in policy.read_only]
+    # The resolved path goes into the policy, not the link's spelling.
+    assert str(Path(os.path.realpath(source / "rules"))) in carried
+    assert str(source / "rules-link") not in carried
+    # A file below an extra_read_paths entry counts as inside it.
+    assert str(Path(os.path.realpath(company / "sub" / "c.yml"))) in carried
+
+
+def test_a_config_named_through_an_alias_of_the_scan_root_is_inside(tmp_path):
+    # No .git. The config is passed through an alias of the scan root, and is
+    # itself a link out of it: only comparing files, not spellings, catches it.
+    pkg = tmp_path / "pkg"
+    (pkg / ".ash").mkdir(parents=True)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text(REPO_CONFIG)
+    _symlink(pkg / ".ash" / ".ash.yaml", outside)
+    alias = tmp_path / "alias"
+    _symlink(alias, pkg)
+    sandbox = resolve_config(
+        config_path=alias / ".ash" / ".ash.yaml", source_dir=pkg
+    ).sandbox
+    assert _confined(sandbox)
+
+
+def test_a_baseline_in_the_tree_that_links_out_is_not_read(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    host = tmp_path / "host.json"
+    host.write_text('{"results": {}, "plugins_used": [], "filters_used": []}')
+    _symlink(source / ".secrets.baseline", host)
+    scanner = _detect_secrets(
+        source, ["sandbox.mode=bwrap"], source / ".secrets.baseline"
+    )
+    assert scanner.config.options.baseline_file is None
+
+
+def test_a_plugin_whose_config_is_not_its_own_class_is_not_sandboxed(
+    tmp_path, monkeypatch
+):
+    # Unreachable through validation today; kept so a fallback config class with
+    # the plugin's own name cannot pass the identity check.
+    from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+        SnykCodeScanner,
+    )
+    from automated_security_helper.utils.sandbox import scope as scope_module
+    from automated_security_helper.utils.sandbox.backends import SandboxUnavailable
+
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: None)
+    config = resolve_config(
+        source_dir=tmp_path, config_overrides=["sandbox.mode=bwrap"]
+    )
+    context = PluginContext(
+        source_dir=tmp_path,
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "work",
+        config=config,
+    )
+    plugin = SnykCodeScanner.model_construct(
+        context=context, config=ScannerPluginConfigBase(name="snyk-code")
+    )
+    with pytest.raises(SandboxUnavailable):
+        scope_module.scanner_sandbox_scope(plugin, context, tmp_path)

@@ -240,9 +240,7 @@ def _scan(
     (source / "app.py").write_text("print('hello')\n")
     shutil.copy(FIXTURE / "escape_probe.py", source / "escape_probe.py")
     (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text(
-        "project_name: sandbox-escape\nash_plugin_modules:\n  - escape_plugins\n"
-    )
+    (source / ".ash" / ".ash.yaml").write_text("project_name: sandbox-escape\n")
     output = source / output_in_source if output_in_source else tmp_path / "out"
     if plant is not None:
         plant(source)
@@ -314,6 +312,10 @@ def _scan(
         # The listeners' directory is visible in every sandbox; see _Listeners.
         "--config-overrides",
         f"sandbox.extra_read_paths=[{listeners.directory}]",
+        # The fixture plugin, as an operator installs one. Its module sits in this
+        # git checkout, which an in-tree config may not import from.
+        "--config-overrides",
+        "ash_plugin_modules=[escape_plugins]",
     ]
     if online:
         # The fixture scanner declares no network need, so it is granted one the

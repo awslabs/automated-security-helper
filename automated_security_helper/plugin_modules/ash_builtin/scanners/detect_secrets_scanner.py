@@ -4,13 +4,14 @@ import logging
 
 from importlib.metadata import version
 import json
+import os
 import multiprocessing
 from pathlib import Path
 import re
 import sys
-from typing import Annotated, Any, ClassVar, Dict, List, Literal
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -172,6 +173,11 @@ class DetectSecretsScannerConfig(ScannerPluginConfigBase):
 class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     """DetectSecretsScanner implements SECRET scanning using detect-secrets."""
 
+    # The baseline as parsed when the scanner was configured, read once from its
+    # checked path. The scan uses this copy and never reopens the file, so a path
+    # swapped for a link after the check is not followed.
+    _baseline_document: Optional[Dict[str, Any]] = PrivateAttr(default=None)
+
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
@@ -262,6 +268,26 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
         return True
 
+    def _baseline_allowed(self, baseline: Path) -> bool:
+        """Whether ASH may read ``baseline`` on this scanner's behalf.
+
+        ASH reads the baseline itself, outside the sandbox, and hands its contents
+        to the sandboxed worker. Under a sandbox it does that only for a file inside
+        the source tree, unless sandbox.read_path_scanners names detect-secrets.
+        """
+        context = getattr(self, "context", None)
+        sandbox = getattr(getattr(context, "config", None), "sandbox", None)
+        if sandbox is None or getattr(sandbox, "mode", "off") == "off":
+            return True
+        if "detect-secrets" in (getattr(sandbox, "read_path_scanners", None) or []):
+            return True
+        source_dir = getattr(context, "source_dir", None)
+        if source_dir is None:
+            return False
+        from automated_security_helper.config.sandbox_grants import is_within
+
+        return is_within(baseline.absolute(), Path(os.path.realpath(source_dir)))
+
     def _process_config_options(self):
         # Check detect-secrets baseline path
         possible_baseline_paths = [
@@ -289,14 +315,30 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 self.config.options.baseline_file = Path(baseline_path)
                 break
 
+        if self.config.options.baseline_file is not None and not self._baseline_allowed(
+            Path(self.config.options.baseline_file)
+        ):
+            ASH_LOGGER.warning(
+                f"Not reading the detect-secrets baseline "
+                f"{Path(self.config.options.baseline_file).absolute()}: it is outside "
+                "the source tree, and under the sandbox a file outside the tree is "
+                "read only for a scanner named in sandbox.read_path_scanners. "
+                "Candidates the baseline would have marked are reported."
+            )
+            self.config.options.baseline_file = None
+
         # If a baseline file was found, load its plugins_used and filters_used
         # into scan_settings so they are applied during scanning.
         # SecretsCollection.load_from_baseline() only loads results, not settings,
         # so we must propagate the baseline's configuration explicitly.
         if self.config.options.baseline_file is not None:
             try:
-                with open(Path(self.config.options.baseline_file).absolute(), "r") as f:
+                real_baseline = Path(
+                    os.path.realpath(Path(self.config.options.baseline_file).absolute())
+                )
+                with open(real_baseline, "r") as f:
                     baseline_data = json.load(f)
+                self._baseline_document = baseline_data
 
                 # Only apply baseline settings if scan_settings was not explicitly
                 # configured by the user (i.e. still at defaults)
@@ -744,9 +786,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             if (
                 target_type == "source"
                 and self.config.options.baseline_file is not None
+                and self._baseline_document is not None
             ):
-                with open(self.config.options.baseline_file, "r") as f:
-                    baseline_document = json.load(f)
+                baseline_document = self._baseline_document
                 self._secrets_collection = secrets_collection_cls.load_from_baseline(
                     baseline=baseline_document,
                 )

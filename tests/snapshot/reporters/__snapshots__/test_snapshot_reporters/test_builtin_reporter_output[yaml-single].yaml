@@ -298,9 +298,11 @@ ash_config:
       name: yaml
       options: {}
   sandbox:
+    env_scanners: []
     extra_read_paths: []
     mode: 'off'
     network_scanners: null
+    read_path_scanners: []
   scanners:
     bandit:
       enabled: true
