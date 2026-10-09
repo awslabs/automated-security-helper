@@ -67,7 +67,12 @@ there is nothing to race.
 from __future__ import annotations
 
 import ast
+import importlib.util
+import json
+import subprocess
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -286,6 +291,162 @@ class TestTheGuardWouldCatchANewOffender:
             "exempting, so either that test was converted -- in which case drop "
             "the entry from _ALLOWED -- or the detector is blind"
         )
+
+
+#: Walkers outside tests/ that tests run against the real checkout. The AST sweep
+#: above reads tests/ only, so it cannot see them.
+_SCRIPT_WALKERS = {
+    "docs-corpus": REPO_ROOT / "scripts" / "verify_docs_freshness.py",
+    "snapshot-orphans": REPO_ROOT
+    / ".github"
+    / "scripts"
+    / "check-snapshot-trailers.py",
+}
+
+
+def _load_script(which: str) -> ModuleType:
+    path = _SCRIPT_WALKERS[which]
+    name = f"_walker_under_test_{which.replace('-', '_')}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader, f"cannot load {path}"
+    module = importlib.util.module_from_spec(spec)
+    # check-snapshot-trailers declares dataclasses, which resolve through sys.modules.
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_walker(which: str) -> list[str]:
+    """The walker's output as strings: collected files, or orphan problems."""
+    module = _load_script(which)
+    if which == "docs-corpus":
+        return [str(path) for path in module.collect_md_files()]
+    return list(module.find_orphans(REPO_ROOT))
+
+
+def _plant(scratch: Path) -> Path:
+    """A directory in the scratch tree holding what each walker would pick up."""
+    planted = scratch / "planted"
+    (planted / "inner" / "__snapshots__").mkdir(parents=True)
+    (planted / "inner" / "planted_probe.md").write_text("# probe\n", encoding="utf-8")
+    return planted
+
+
+# Runs in a child interpreter, because an audit hook cannot be removed and a test
+# worker should not keep one. The hook watches every directory listing. The first
+# listing of the planted directory, or of anything under it, removes the planted
+# directory before the listing proceeds: what another worker's ash_temp_path teardown
+# does mid-walk, made deterministic. ``entered`` records every such listing.
+_MID_WALK_REMOVAL = r"""
+import importlib.util, json, os, shutil, sys
+from pathlib import Path
+
+repo, planted, script, which = sys.argv[1:5]
+planted = os.path.realpath(planted)
+sys.path.insert(0, repo)
+state = {"armed": False, "entered": [], "removed": False}
+
+
+def hook(event, args):
+    if not state["armed"] or event not in ("os.scandir", "os.listdir"):
+        return
+    target = args[0] if args else None
+    if target is None or isinstance(target, int):
+        return
+    path = os.path.realpath(os.fsdecode(target))
+    if path != planted and not path.startswith(planted + os.sep):
+        return
+    state["entered"].append(path)
+    if not state["removed"]:
+        state["removed"] = True
+        state["armed"] = False
+        shutil.rmtree(planted)
+        state["armed"] = True
+
+
+sys.addaudithook(hook)
+spec = importlib.util.spec_from_file_location("walker", script)
+module = importlib.util.module_from_spec(spec)
+sys.modules["walker"] = module
+spec.loader.exec_module(module)
+state["armed"] = True
+try:
+    if which == "docs-corpus":
+        result = [str(p) for p in module.collect_md_files()]
+    else:
+        result = list(module.find_orphans(Path(repo)))
+    error = None
+except Exception as exc:
+    result, error = None, f"{type(exc).__name__}: {exc}"
+state["armed"] = False
+print(json.dumps({"error": error, "entered": state["entered"],
+                  "removed": state["removed"],
+                  "returned": None if result is None else len(result)}))
+"""
+
+
+@pytest.mark.parametrize("which", sorted(_SCRIPT_WALKERS))
+class TestScriptWalkersStayOutOfTheScratchTree:
+    """Two walkers in scripts that tests run on the real checkout, under xdist.
+
+    ``scripts/verify_docs_freshness.py``'s ``collect_md_files`` walked
+    ``REPO_ROOT.rglob("*.md")``, and ``test_docs_freshness_gate_can_fail`` runs it.
+    ``.github/scripts/check-snapshot-trailers.py``'s ``find_orphans`` walked
+    ``(root / "tests").rglob("__snapshots__")``, and ``test_snapshot_policy`` runs it
+    on the repository. Both descended into ``tests/pytest-temp`` while other workers
+    created and removed directories there: the scandir-during-descent race described
+    at the top of this file, from code the AST sweep does not read.
+
+    Each walker now takes its file list from git, which does not enter an ignored
+    directory, and the scratch tree is ignored. The first test shows nothing in the
+    scratch tree reaches a walker's output; the second removes a scratch directory at
+    the moment a walker lists it and shows the walker never got there.
+    """
+
+    def test_nothing_in_the_scratch_tree_reaches_the_output(self, which, ash_temp_path):
+        planted = _plant(ash_temp_path)
+
+        output = _run_walker(which)
+
+        assert planted.exists(), "the walker removed the planted directory"
+        leaked = [entry for entry in output if "pytest-temp" in entry]
+        assert leaked == [], f"{which} read the scratch tree: {leaked}"
+
+    def test_a_scratch_directory_removed_mid_walk_is_never_entered(
+        self, which, ash_temp_path
+    ):
+        planted = _plant(ash_temp_path)
+
+        child = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                _MID_WALK_REMOVAL,
+                str(REPO_ROOT),
+                str(planted),
+                str(_SCRIPT_WALKERS[which]),
+                which,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=REPO_ROOT,
+        )
+        assert child.returncode == 0, child.stdout + child.stderr
+        report = json.loads(child.stdout.strip().splitlines()[-1])
+
+        assert report["error"] is None, (
+            f"{which} raised when a scratch directory vanished mid-walk: "
+            f"{report['error']}"
+        )
+        assert report["entered"] == [], (
+            f"{which} listed a scratch directory, so it races any worker removing "
+            f"one: {report['entered']}"
+        )
+        assert report["returned"] is not None
+        if which == "docs-corpus":
+            assert report["returned"] > 100, "the corpus came back nearly empty"
+        assert planted.exists()
 
 
 if __name__ == "__main__":  # pragma: no cover
