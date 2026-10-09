@@ -621,10 +621,10 @@ def test_config_file_is_passed_only_when_the_operator_set_it(
     config = Path(argv[argv.index("-config-file") + 1])
     if operator:
         assert config == (repo / "ci" / "actionlint.yaml").absolute()
-        assert "is set by a config in the scanned tree" not in caplog.text
+        assert "Ignoring scanners.actionlint.options.config_file" not in caplog.text
     else:
         assert config.is_relative_to(Path(scanner.results_dir))
-        assert "is set by a config in the scanned tree" in caplog.text
+        assert "Ignoring scanners.actionlint.options.config_file" in caplog.text
 
 
 def test_an_operator_config_file_that_does_not_exist_is_an_error(
