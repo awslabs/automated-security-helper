@@ -313,7 +313,7 @@ legacy_tag_formats = [
 line-length = 88
 target-version = "py310"
 
-# Floor matches the `ruff>=0.16.8` in [dependency-groups].dev. It is here because the
+# Floor matches the `ruff>=0.16.10` in [dependency-groups].dev. It is here because the
 # select below is only meaningful against a ruff that knows these rules, and this
 # repository had TWO ruffs when that select was written: .pre-commit-config.yaml pinned
 # astral-sh/ruff-pre-commit at v0.11.8, five minor versions behind the dev floor. Ruff's
@@ -321,11 +321,11 @@ target-version = "py310"
 # what an error IS -- a contributor would see a clean hook, then a red build. That pin
 # was moved to v0.16.7 in this same pull request, so the two agree again as of now; this
 # line is what keeps them from drifting apart a second time, by making the mismatch fail
-# loudly ("Required version `>=0.16.8` does not match the running version", exit 2)
+# loudly ("Required version `>=0.16.10` does not match the running version", exit 2)
 # instead of silently linting with a different rule set.
 # No upper bound: [dependency-groups].dev already caps at <1.0.0, and duplicating the
 # cap here would mean editing two places to adopt a new ruff.
-required-version = ">=0.16.8"
+required-version = ">=0.16.10"
 
 # tests/test_data/ is SCANNER INPUT, not source. ASH is a security scanner and these
 # files exist to be analyzed: their content IS the test oracle. A linter that edits them
