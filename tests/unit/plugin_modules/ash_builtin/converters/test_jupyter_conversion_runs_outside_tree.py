@@ -102,7 +102,7 @@ class TestHowNbconvertIsRun:
             notebook(language, f"{PROBE_MODULE}.ProbeExporter")
         )
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kw: [str(tree / "nb.ipynb")])
-        # Run from inside the tree, as `cd repo && ash scan` does.
+        # Run from inside the tree, as `cd repo && ashx scan` does.
         monkeypatch.chdir(tree)
         seen = []
 

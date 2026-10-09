@@ -39,7 +39,7 @@ scanned controls all of it, not only the part being scanned. The root is looked 
 from the scan root as given, from its resolved path, and, when the scan root is the
 working directory or below it, from the shell's logical working directory
 (``$PWD``). That way a scan root that is a symlink out of the repository still counts
-the repository, including after ``cd vendor && ash scan``, where the operating system
+the repository, including after ``cd vendor && ashx scan``, where the operating system
 reports only the physical directory. ``$PWD`` is used only when it names the working
 directory, and it can only add a tree, never remove one. The check looks for the
 entry on disk and does not run git, which reads configuration from the repository.

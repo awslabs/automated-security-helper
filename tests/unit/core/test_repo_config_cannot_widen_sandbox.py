@@ -833,7 +833,7 @@ def _vendor_link_out(tmp_path: Path):
 def test_scanning_the_working_directory_inside_a_symlink_counts_the_checkout(
     tmp_path, monkeypatch
 ):
-    # `cd checkout/vendor && ash scan`: the operating system reports the physical
+    # `cd checkout/vendor && ashx scan`: the operating system reports the physical
     # directory, outside the checkout; only $PWD still says where the shell is.
     checkout, ci = _vendor_link_out(tmp_path)
     monkeypatch.chdir(checkout / "vendor")

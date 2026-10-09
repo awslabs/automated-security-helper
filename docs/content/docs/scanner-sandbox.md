@@ -224,7 +224,7 @@ checkout: its grants are dropped, but its mode stays, because a mode other than
 `off` grants nothing. Only `--sandbox off` or a `sandbox.mode` override turns it off.
 
 The checkout is also looked up from the shell's working directory (`$PWD`), so
-`cd vendor && ash scan`, where `vendor` is a symlink out of the checkout, still
+`cd vendor && ashx scan`, where `vendor` is a symlink out of the checkout, still
 counts the checkout. A bind mount of a directory inside a checkout can't be traced
 back to it; scan the checkout itself, or keep its config out of the grants with
 `--config-overrides`. When none of them does, an in-tree `mode` applies, because a

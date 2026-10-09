@@ -102,7 +102,7 @@ class TestAccepted:
     def test_a_root_spelled_with_dotdot_is_the_operators_and_is_honored(
         self, walk, layout
     ):
-        """``ash scan --source-dir ../proj`` yields scan-set paths that contain '..'.
+        """``ashx scan --source-dir ../proj`` yields scan-set paths that contain '..'.
 
         The scan root is made absolute without folding '..', and scan_set joins onto
         it, so every path it returns carries the root's '..'. Only a '..' below the

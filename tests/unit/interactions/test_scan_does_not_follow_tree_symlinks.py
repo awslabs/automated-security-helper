@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A whole ``ash scan`` over a tree whose converter inputs are symlinks to host files.
+"""A whole ``ashx scan`` over a tree whose converter inputs are symlinks to host files.
 
 The unit tests next to each reader drive it in isolation. This one runs the real
 command, in a child process, over a tree built for it, and inspects everything the run
@@ -80,7 +80,7 @@ DRIVER = textwrap.dedent(
 
     from automated_security_helper.cli.main import app
 
-    sys.argv = ["ash", "scan", *sys.argv[1:]]
+    sys.argv = ["ashx", "scan", *sys.argv[1:]]
     app()
     """
 )
