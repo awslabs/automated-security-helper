@@ -2,10 +2,15 @@
 
 import pytest
 from pathlib import Path
+import subprocess
+import types
 import zipfile
 import tarfile
 import json
 
+from automated_security_helper.plugin_modules.ash_builtin.converters import (
+    jupyter_converter as jupyter_converter_module,
+)
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
     ArchiveConverterConfig,
@@ -473,19 +478,31 @@ class TestJupyterConverter:
             result.stderr = ""
             return result
 
+        # Built before anything is patched. Construction probes uv through the
+        # process-wide uv runner, which memoizes the answers; a probe that reached
+        # the stand-in below would leave "uv is available" and "nbconvert has no
+        # version" behind for every later test on the worker.
+        converter = JupyterConverter(
+            context=test_plugin_context,
+            config=JupyterConverterConfig(),
+        )
+
         # Apply the monkeypatches
         monkeypatch.setattr(
             "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.scan_set",
             mock_scan_set,
         )
+        # The converter module's own `subprocess` name, not the standard library
+        # module that every other caller in the process shares.
         monkeypatch.setattr(
-            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.subprocess.run",
-            mock_subprocess_run,
-        )
-
-        converter = JupyterConverter(
-            context=test_plugin_context,
-            config=JupyterConverterConfig(),
+            jupyter_converter_module,
+            "subprocess",
+            types.SimpleNamespace(
+                run=mock_subprocess_run,
+                CalledProcessError=subprocess.CalledProcessError,
+                SubprocessError=subprocess.SubprocessError,
+                TimeoutExpired=subprocess.TimeoutExpired,
+            ),
         )
 
         # Mock the validate method to return True (skip UV tool validation for test)
