@@ -134,7 +134,8 @@
   delivered, named or found beside the definition, is refused.
   `/ash_plugin_modules` joins the default `denied_paths`, and `denied_paths` and
   `denied_value_patterns` now match a key spelled with either `-` or `_`, and a
-  plugin's section under every spelling ASH reads as that plugin's config.
+  plugin's section under every spelling ASH reads as that plugin's config,
+  including when the entry names plugins with a glob such as `trivy-*`.
 
   Each value that is not honored is logged once as a warning naming the key. See
   [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).

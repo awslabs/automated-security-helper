@@ -554,3 +554,24 @@ def test_a_denied_plugin_section_is_refused_in_every_spelling(
         ), result["error"]
     _assert_unbound("patch")
     _assert_unbound("override")
+
+
+@pytest.mark.parametrize("spelling", ["TrivyRepo", "trivyrepo", "TRIVY-REPO"])
+def test_a_glob_denial_on_a_plugin_section_is_refused_in_every_spelling(
+    tmp_path: Path, spelling: str
+) -> None:
+    denial = "/scanners/trivy-*/options/ignore_file"
+    document = _profile(allowed_paths=["/**"], denied_paths=[denial])
+    _install(tmp_path, document)
+    section = {"options": {"ignore_file": "standin.txt"}}
+
+    patched, overridden = _both_routes(
+        {"op": "add", "path": f"/scanners/{spelling}", "value": section},
+        _override_for(document, {"scanners": {spelling: section}}),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert f"denied_paths entry {denial!r}" in result["error"], result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")

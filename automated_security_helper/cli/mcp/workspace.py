@@ -548,6 +548,7 @@ def _gate_client_overrides(
                 }
             ],
             allowlist=allowlist,
+            config=base,
         )
     after = apply_config_overrides(base, list(config_overrides))
     apply_runtime_override(base, after, allowlist=allowlist)
