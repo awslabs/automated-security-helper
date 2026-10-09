@@ -170,6 +170,8 @@ A delivered tree can carry its own `.ash.yaml`, and a client can name any file i
 
 Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`.
 
+`get_config` shows the sandbox section the same way, as a scan of the session's delivered source (or, with none delivered, the working directory) would apply it.
+
 ### Restricting scan targets
 
 `run_ash_scan` also accepts a server-side path directly, and ASH writes its

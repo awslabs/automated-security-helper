@@ -1149,15 +1149,25 @@ def mcp_get_config(
 
     Returns:
         Dict representation of the resolved AshConfig, or raw YAML dict if raw=True.
-        A refused path returns ``success`` False with ``error_type``
+        Its ``sandbox`` section is the one a scan of this session's default
+        target would apply, so a file the client delivered shows no grants of
+        its own. A refused path returns ``success`` False with ``error_type``
         ``config_input_not_permitted``.
     """
     import yaml as _yaml
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+        resolve_session_config_path,
+    )
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
         config_base_gate,
         config_chain_refusal,
+        config_is_client_supplied,
         validate_config_input,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        get_session_source_dir,
     )
     from automated_security_helper.config.resolve_config import (
         resolve_config,
@@ -1214,15 +1224,36 @@ def mcp_get_config(
     # `extends` bases must stay, so it is the searched directory when the file
     # was discovered, and otherwise the file's own project directory (the
     # parent of .ash/ for a file in .ash/), never .ash/ itself.
+    #
+    # The sandbox section is shown as a scan would apply it. A discovered file is
+    # resolved for the directory searched, which is what a scan of it would find.
+    # A named file is resolved for the target run_ash_scan() takes when none is
+    # named, this session's delivered source or else the working directory, not
+    # for the file's own directory: no scan targets the directory of a bound
+    # profile or a config root, so treating the file as inside its own scanned
+    # tree would hide grants a scan applies. A file the client delivered is
+    # restrict-only wherever it is, with the bound profile as the trusted base,
+    # as the scan runner resolves it.
     if config_path is None:
         source_dir = Path(search_dir) if search_dir else Path.cwd()
+        scanned_root = source_dir
     else:
         source_dir = default_confinement_root(path)
+        delivered = get_session_source_dir(session_id or DEFAULT_SESSION_ID)
+        scanned_root = (
+            delivered if delivered is not None and delivered.is_dir() else Path.cwd()
+        )
+    untrusted_config = config_is_client_supplied(path)
     try:
         resolved = resolve_config(
             config_path=path,
             source_dir=source_dir,
             permit_base=config_base_gate(session_id),
+            scanned_root=scanned_root,
+            untrusted_config=untrusted_config,
+            trusted_config_path=(
+                resolve_session_config_path(session_id) if untrusted_config else None
+            ),
         )
     except ASHConfigInputNotPermittedError as exc:
         return _config_refusal(config_chain_refusal(path, exc), "get_config")

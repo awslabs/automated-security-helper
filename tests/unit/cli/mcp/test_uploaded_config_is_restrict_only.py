@@ -293,3 +293,79 @@ def test_the_orchestrator_refuses_untrusted_config_with_a_resolved_config(
             resolved_config=AshConfig(),
             untrusted_config=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# get_config shows the sandbox section a scan would apply
+# ---------------------------------------------------------------------------
+
+_PROFILE_WITH_GRANTS = (
+    "sandbox:\n  mode: firejail\n  network_scanners: [grype]\n"
+    "  extra_read_paths: ['/opt/ca']\n"
+)
+
+
+def _shown(config_path: str) -> Dict[str, Any]:
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    result = mcp_get_config(config_path=config_path, session_id=SESSION)
+    assert "sandbox" in result, result
+    return result["sandbox"]
+
+
+def test_get_config_does_not_show_an_uploaded_configs_grants(_server) -> None:
+    source = _upload({"ash.yaml": GRANTS_AND_OFF})
+    uploaded = str(source / "ash.yaml")
+
+    shown = _shown(uploaded)
+
+    assert shown == {"mode": "bwrap", "network_scanners": None, "extra_read_paths": []}
+    assert shown == _resolved_by_scan(_server["target"], uploaded).sandbox.model_dump()
+
+
+def test_get_config_shows_the_bound_profile_as_the_base_for_an_upload(
+    _server,
+) -> None:
+    _bind_profile(_server["tmp"], _PROFILE_WITH_GRANTS)
+    source = _upload({"ash.yaml": GRANTS_AND_OFF})
+    uploaded = str(source / "ash.yaml")
+
+    shown = _shown(uploaded)
+
+    assert shown == {
+        "mode": "firejail",
+        "network_scanners": ["grype"],
+        "extra_read_paths": ["/opt/ca"],
+    }
+    assert shown == _resolved_by_scan(_server["target"], uploaded).sandbox.model_dump()
+
+
+def test_get_config_still_shows_the_operator_profiles_grants(_server) -> None:
+    bound = _bind_profile(_server["tmp"], _PROFILE_WITH_GRANTS)
+    _upload({"README.md": "delivered source\n"})
+
+    shown = _shown(bound)
+
+    assert shown == {
+        "mode": "firejail",
+        "network_scanners": ["grype"],
+        "extra_read_paths": ["/opt/ca"],
+    }
+    assert shown == _resolved_by_scan(_server["target"], bound).sandbox.model_dump()
+
+
+def test_get_config_discovering_an_uploaded_config_does_not_show_its_grants(
+    _server,
+) -> None:
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    _bind_profile(_server["tmp"], _PROFILE_WITH_GRANTS)
+    source = _upload({".ash/.ash.yaml": GRANTS_AND_OFF})
+
+    result = mcp_get_config(search_dir=str(source), session_id=SESSION)
+
+    assert result["sandbox"] == {
+        "mode": "firejail",
+        "network_scanners": ["grype"],
+        "extra_read_paths": ["/opt/ca"],
+    }
