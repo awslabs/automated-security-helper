@@ -97,9 +97,12 @@ import re
 from pathlib import Path, PurePath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
-from pydantic import Field, PrivateAttr, field_validator
+from pydantic import Field, PrivateAttr
 
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -120,9 +123,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.config_trust import set_by_operator
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.pre_installed_tool import (
-    validate_version_constraint,
-)
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
@@ -387,6 +387,7 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
     ] = False
     tool_version: Annotated[
         str | None,
+        tool_version_constraint("scanners.zizmor.options.tool_version"),
         Field(
             description=(
                 "Version constraint for zizmor installation, in pip requirement "
@@ -398,12 +399,6 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
         int,
         Field(description="Timeout in seconds for tool installation"),
     ] = 300
-
-    @field_validator("tool_version")
-    @classmethod
-    def _valid_tool_version(cls, value: Optional[str]) -> Optional[str]:
-        # Appended to the package name for uv; see validate_version_constraint.
-        return validate_version_constraint(value)
 
 
 class ZizmorScannerConfig(ScannerPluginConfigBase):

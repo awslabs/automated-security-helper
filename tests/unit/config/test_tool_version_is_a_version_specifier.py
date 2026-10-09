@@ -97,6 +97,16 @@ _OPTION_CLASSES = [
     ),
     (
         "scanners",
+        "cfn-lint",
+        "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner.CfnLintScannerConfigOptions",
+    ),
+    (
+        "scanners",
+        "zizmor",
+        "automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner.ZizmorScannerConfigOptions",
+    ),
+    (
+        "scanners",
         "ferret-scan",
         "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScannerConfigOptions",
     ),

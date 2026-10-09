@@ -565,9 +565,12 @@ class TestToolVersionIsOnlyAVersionConstraint:
             "1.57.2",
         ],
     )
-    def test_a_value_that_is_not_a_specifier_set_is_rejected(self, value):
-        with pytest.raises(ValidationError, match="not a version constraint"):
-            CfnLintScannerConfigOptions(tool_version=value)
+    def test_a_value_that_is_not_a_specifier_set_is_replaced_by_the_default(
+        self, value
+    ):
+        """As for every uv-installed tool (tests/unit/config/test_tool_version_is_a_version_specifier.py)."""
+        default = CfnLintScannerConfigOptions().tool_version
+        assert CfnLintScannerConfigOptions(tool_version=value).tool_version == default
 
     @pytest.mark.parametrize(
         "value", [">=1.43.3,<2.0.0", "==1.57.2", "~=1.57", "==1.*", None, ""]

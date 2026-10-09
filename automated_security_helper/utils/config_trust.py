@@ -19,11 +19,13 @@ or loads as code:
   which names that directory directly.
 
 Before a scanner hands such a value to its tool it asks ``set_by_operator``, and it
-refuses a path ``inside_scanned_tree`` whoever named it.
+refuses a path inside the scanned tree whoever named it, with
+``config/path_trust.py``'s ``in_scanned_tree`` (from ``scan_root``), the test every
+other scanner's tool config and plugin paths go through.
 
 This module and ``config/sandbox_grants.py`` share their idea of the tree and of the
-trusted base; ``set_by_operator`` and ``inside_scanned_tree`` are the only calls the
-scanners make, so a shared implementation can replace this one behind them.
+trusted base. ``set_by_operator`` is the only provenance call the scanners make, so a
+shared implementation can replace this one behind it.
 
 How the answer is reached
 -------------------------
@@ -206,17 +208,10 @@ def set_by_operator(config: Any, key: str, value: Any) -> bool:
     return _same_value(expected, value)
 
 
-def inside_scanned_tree(path: PathLike, source_dir: PathLike) -> bool:
-    """Whether ``path`` is in the tree the scanned repository controls.
+def scan_root(config: Any, source_dir: PathLike) -> Path:
+    """The root ``config/path_trust.py``'s ``in_scanned_tree`` takes for this scan.
 
-    The trees are the outermost checkouts holding ``source_dir`` under each name it
-    has (or ``source_dir`` itself outside a repository), and membership is decided
-    on the real path with ``samefile``; both as ``config/sandbox_grants.py`` decides
-    them.
+    The config's recorded scanned root (the workspace root in workspace mode), else
+    ``source_dir``, as ``path_trust.honored_path`` decides it.
     """
-    from automated_security_helper.config.sandbox_grants import (
-        is_within,
-        scanned_trees,
-    )
-
-    return any(is_within(Path(path), tree) for tree in scanned_trees(Path(source_dir)))
+    return Path(getattr(config, "_scanned_root", None) or source_dir)

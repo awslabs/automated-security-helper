@@ -798,11 +798,10 @@ def test_post_process_leaves_the_input_report_intact_for_other_runs(repo):
         "1.30.1",
     ],
 )
-def test_a_tool_version_that_is_not_a_specifier_set_is_rejected(value):
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError, match="not a version constraint"):
-        ZizmorScannerConfigOptions(tool_version=value)
+def test_a_tool_version_that_is_not_a_specifier_set_is_replaced_by_the_default(value):
+    """As for every uv-installed tool (tests/unit/config/test_tool_version_is_a_version_specifier.py)."""
+    default = ZizmorScannerConfigOptions().tool_version
+    assert ZizmorScannerConfigOptions(tool_version=value).tool_version == default
 
 
 @pytest.mark.parametrize("value", [">=1.29.0,<2.0.0", "==1.30.1", None])

@@ -81,12 +81,14 @@ default. Measured on v0.69.3 against the fixture repository (10 findings): a
 A scanned repository should not be able to quietly shape its own report, so ASH
 passes ``--config``, ``--ignorefile`` and ``--secret-config`` pointing at files of
 its own that set nothing. ``config_file``, ``ignore_file`` and
-``secret_config_file`` opt in to real ones, and each is honored only from the
-operator and only for a file outside the scanned tree (see
-``TrivyScannerBase._operator_path``): a trivy.yaml can load WASM modules
-(``module.dir``), and any of the three can drop findings that then appear neither
-in the results nor as suppressed. ``trivy-repo`` passes its own ``--config`` and
-``--module-dir`` under the same rule. trivy 0.75.0 reads nothing else from a
+``secret_config_file`` opt in to real ones. ``config_file`` is honored only from the
+operator and only for a file outside the scanned tree
+(``TrivyScannerBase._operator_path``), because a trivy.yaml can also load WASM
+modules (``module.dir``); ``trivy-repo`` passes its own ``--config`` and
+``--module-dir`` under the same rule. ``ignore_file`` and ``secret_config_file``
+(or ``TRIVY_IGNOREFILE`` and ``TRIVY_SECRET_CONFIG``) are honored for a file outside
+the scanned tree, which is how ``trivy-repo`` treats them too: both scanners take
+them from ``TrivyScannerBase._trivy_input_file``. trivy 0.75.0 reads nothing else from a
 default location: ``--ignore-policy`` (a Rego file) has none, and an ignore policy
 named by the tree's ``trivy.yaml`` does not apply because that file is not read
 (``tests/integration/scanners/test_trivy_real_binary.py``).
@@ -152,19 +154,6 @@ def skip_dirs_value(path: str) -> str:
     return escaped
 
 
-#: Why each trivy file option is honored only from the operator, for a file outside
-#: the scanned tree. Logged when a value is ignored.
-_OPERATOR_ONLY: Dict[str, str] = {
-    "config_file": "A trivy.yaml can load WASM modules and drop findings, so trivy "
-    "runs with ASH's empty config instead.",
-    "ignore_file": "An ignore file drops findings that then appear neither in the "
-    "results nor as suppressed, so trivy runs with ASH's empty one instead; use ASH "
-    "suppressions.",
-    "secret_config_file": "A secret config can disable secret rules, so trivy runs "
-    "with ASH's empty one instead.",
-}
-
-
 class TrivyScannerConfigOptions(ScannerOptionsBase):
     scanners: Annotated[
         List[Literal["vuln", "misconfig", "secret", "license"]],
@@ -223,13 +212,11 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy ignore file (.trivyignore or .trivyignore.yaml), relative to "
-                "the source directory, passed as --ignorefile. Unset, ASH passes an "
-                "empty one, so a .trivyignore in the scanned repository does not hide "
-                "findings; use ASH suppressions, which are reported. Honored only "
-                "when set by --config-overrides or a config file outside the scanned "
-                "tree, for a file outside that tree; otherwise ignored with a "
-                "warning. A path that does not exist fails the scan."
+                "A trivy ignore file, passed as --ignorefile. Used only when it is "
+                "outside the scanned tree; a relative path is taken from the source "
+                "directory. Unset, TRIVY_IGNOREFILE is used the same way, and "
+                "otherwise trivy gets an empty one, so a .trivyignore in the scanned "
+                "repository does not remove findings. As for trivy-repo."
             ),
         ),
     ] = None
@@ -237,13 +224,13 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy secret-scanning config (trivy-secret.yaml), relative to the "
-                "source directory, passed as --secret-config. Only read when scanners "
-                "includes secret. Unset, ASH passes its own empty one, so a "
-                "trivy-secret.yaml in the scanned repository cannot disable rules. "
-                "Honored only when set by --config-overrides or a config file outside "
-                "the scanned tree, for a file outside that tree; otherwise ignored "
-                "with a warning. A path that does not exist fails the scan."
+                "A trivy secret scanning config (trivy-secret.yaml), passed as "
+                "--secret-config. Only read when scanners includes secret. Used only "
+                "when it is outside the scanned tree; a relative path is taken from "
+                "the source directory. Unset, TRIVY_SECRET_CONFIG is used the same "
+                "way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in "
+                "the scanned repository does not disable secret rules. As for "
+                "trivy-repo."
             ),
         ),
     ] = None
@@ -385,15 +372,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # is the scanned repository. Either can drop findings with nothing in the
         # report saying so, so ASH passes its own unless the operator chose one.
         extra.append(f"--config={self._trivy_file('config_file', 'trivy-config.yaml')}")
-        extra.append(
-            f"--ignorefile={self._trivy_file('ignore_file', 'trivyignore.txt')}"
-        )
-        # trivy-secret.yaml in the working directory can disable secret rules. An
-        # empty file is a decode error in trivy, so ASH's holds an empty mapping.
-        extra.append(
-            "--secret-config="
-            + self._trivy_file("secret_config_file", "trivy-secret.yaml", "{}\n")
-        )
+        # .trivyignore and trivy-secret.yaml as trivy-repo passes them
+        # (TrivyScannerBase._trivy_input_file).
+        extra.append(f"--ignorefile={self._ignore_file()}")
+        extra.append(f"--secret-config={self._secret_config_file()}")
         # Before the target, which _resolve_arguments places after the options.
         target_index = final_args.index(Path(target).as_posix())
         final_args[target_index:target_index] = extra
@@ -404,15 +386,24 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         return final_args, results_file, subprocess_env
 
     def _trivy_file(self, option: str, ash_name: str, ash_content: str = "") -> str:
-        """The trivy config or ignore file to pass, as an absolute POSIX path.
+        """The trivy config file to pass, as an absolute POSIX path.
 
-        The configured one, a relative path anchored on the source directory, which
-        must exist: a missing file would otherwise mean scanning without the rules
-        the operator asked for. Unset, an empty one ASH writes next to its results,
-        so nothing in the scanned repository is read as trivy configuration.
+        The operator's (see ``_operator_path``), which must exist: a missing file
+        would otherwise mean scanning without the rules the operator asked for.
+        Otherwise an empty one ASH writes next to its results, so nothing in the
+        scanned repository is read as trivy configuration.
         """
         value = getattr(self._options(), option)
-        if value and self._operator_path(option, value, _OPERATOR_ONLY[option]) is None:
+        if (
+            value
+            and self._operator_path(
+                option,
+                value,
+                "A trivy.yaml can load WASM modules and drop findings, so trivy runs "
+                "with ASH's empty config instead.",
+            )
+            is None
+        ):
             value = None
         if value:
             candidate = Path(value)
