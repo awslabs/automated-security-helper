@@ -53,6 +53,13 @@ class SandboxRequirements:
             so the scanner's own declaration does not grant it. It gets a network
             only when ``sandbox.network_scanners``, which only a trusted source
             can set, names it.
+        system_trust_roots: The tool reads the system's root certificates itself
+            rather than through the OS's TLS stack: semgrep-core uses OCaml's
+            ca-certs, which on macOS runs ``security find-certificate`` against the
+            system keychains. The sandbox-exec profile keeps the keychain daemon
+            out of reach, so for such a tool ASH exports the same certificates to
+            a read-only file before the spawn and sets ``SSL_CERT_FILE`` to it,
+            which ca-certs reads instead. Other backends leave the tool alone.
     """
 
     network: bool = False
@@ -61,6 +68,7 @@ class SandboxRequirements:
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
     network_requires_grant: bool = False
+    system_trust_roots: bool = False
 
 
 #: The baseline environment allowlist. Exact names, then prefixes. Anything else in
@@ -176,6 +184,7 @@ class SandboxPolicy:
     extra_env: Dict[str, str] = field(default_factory=dict)
     executable: Tuple[Path, ...] = ()
     scan_data: Tuple[Path, ...] = ()
+    system_trust_roots: bool = False
 
     def filter_env(self, env: Mapping[str, str]) -> Dict[str, str]:
         """Reduce ``env`` to the allowlist, then point HOME inside."""
@@ -558,4 +567,5 @@ def build_scanner_policy(
         extra_env=extra_env,
         executable=tuple(executable),
         scan_data=tuple(scan_data),
+        system_trust_roots=requirements.system_trust_roots,
     )

@@ -739,6 +739,7 @@ class TestSandboxExecProfile:
                 '(global-name "com.apple.CoreServices.coreservicesd")',
                 '(global-name-prefix "com.apple.lsd.")',
                 '(global-name-prefix "com.apple.pasteboard.")',
+                '(global-name "com.apple.SecurityServer")',
             ):
                 assert denied in rule
             # In SBPL the last matching rule wins, so the deny has to come last.
@@ -763,6 +764,7 @@ class TestSandboxExecProfile:
             assert name not in (
                 "com.apple.coreservices.launchservicesd",
                 "com.apple.CoreServices.coreservicesd",
+                "com.apple.SecurityServer",
             ), name
             assert not name.startswith(("com.apple.lsd.", "com.apple.pasteboard.")), (
                 name
@@ -833,3 +835,104 @@ class TestSandboxExecProfile:
         assert len(allows) == 2, allows
         assert allows[1][0] > deny_at
         assert _subpaths(allows[1][1]) == {_as_argv(venv_bin)}
+
+    def test_the_keychain_files_are_denied_after_every_file_allow(
+        self, layout, tmp_path
+    ):
+        keychains = Path(os.path.realpath(layout.home)) / "Library" / "Keychains"
+        for requirements in (SandboxRequirements(), self.NETWORK):
+            lines = _sbpl(layout, tmp_path, requirements=requirements)
+            ((where, rule),) = _indexed(lines, "(deny file-read* file-write* ")
+            assert _subpaths(rule) == {"/Library/Keychains", keychains.as_posix()}
+            # Last of the file rules, so no path the policy grants can reopen them.
+            assert where > max(i for i, _ in _indexed(lines, "(allow file-"))
+
+
+class TestSystemTrustRoots:
+    """semgrep-core reads root certificates from a file instead of the keychain."""
+
+    PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+
+    def _plan(self, layout, monkeypatch, env=None, declared=True, pem=PEM):
+        monkeypatch.setattr(backends_module, "_system_trust_roots", lambda: pem)
+        policy = _policy(layout, SandboxRequirements(system_trust_roots=declared))
+        return SandboxExecBackend().plan(["/usr/bin/true"], env or {}, policy)
+
+    @staticmethod
+    def _profile(plan):
+        return plan.argv[plan.argv.index("-p") + 1].splitlines()
+
+    def test_semgrep_declares_it(self):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            semgrep_scanner,
+        )
+
+        requirements = semgrep_scanner.SemgrepScanner.sandbox_requirements
+        assert requirements.system_trust_roots is True
+
+    def test_the_roots_are_a_read_only_file_named_by_ssl_cert_file(
+        self, layout, monkeypatch
+    ):
+        plan = self._plan(layout, monkeypatch)
+        try:
+            roots = Path(plan.env["SSL_CERT_FILE"])
+            assert roots.read_text() == self.PEM
+            profile = self._profile(plan)
+            assert f'(allow file-read* (literal "{_as_argv(roots)}"))' in profile
+            writable = set().union(
+                *(
+                    _subpaths(line)
+                    for line in profile
+                    if line.startswith("(allow") and "file-write*" in line
+                )
+            )
+            assert not any(
+                _as_argv(roots).startswith(path.rstrip("/") + "/") for path in writable
+            ), writable
+        finally:
+            plan.run_cleanup()
+        assert not roots.exists()
+
+    def test_an_operator_ssl_cert_file_wins(self, layout, monkeypatch):
+        plan = self._plan(layout, monkeypatch, env={"SSL_CERT_FILE": "/etc/corp.pem"})
+        try:
+            assert plan.env["SSL_CERT_FILE"] == "/etc/corp.pem"
+        finally:
+            plan.run_cleanup()
+
+    def test_nothing_is_set_unless_declared_and_exported(self, layout, monkeypatch):
+        for declared, pem in ((False, self.PEM), (True, None)):
+            plan = self._plan(layout, monkeypatch, declared=declared, pem=pem)
+            try:
+                assert "SSL_CERT_FILE" not in plan.env
+                assert not any(
+                    line.startswith("(allow file-read* (literal ")
+                    for line in self._profile(plan)
+                )
+            finally:
+                plan.run_cleanup()
+
+    def test_the_export_runs_security_once_per_process(self, monkeypatch, tmp_path):
+        keychains = [tmp_path / "roots.keychain", tmp_path / "system.keychain"]
+        for keychain in keychains:
+            keychain.write_text("")
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            ok = argv[-1] == str(keychains[0])
+            return SimpleNamespace(
+                returncode=0 if ok else 44, stdout=self.PEM if ok else "", stderr=""
+            )
+
+        monkeypatch.setattr(
+            backends_module, "_TRUST_ROOT_KEYCHAINS", tuple(map(str, keychains))
+        )
+        monkeypatch.setattr(backends_module, "_trust_roots_cache", [])
+        monkeypatch.setattr(backends_module.subprocess, "run", fake_run)
+        assert backends_module._system_trust_roots() == self.PEM
+        assert backends_module._system_trust_roots() == self.PEM
+        # One call per keychain, and none the second time.
+        assert [argv[:4] for argv in calls] == [
+            ["/usr/bin/security", "find-certificate", "-a", "-p"]
+        ] * 2

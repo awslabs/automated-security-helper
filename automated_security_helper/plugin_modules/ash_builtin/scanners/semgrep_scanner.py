@@ -102,6 +102,9 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         network=True,
         cache_paths=("~/.semgrep",),
         env_prefixes=("SEMGREP_",),
+        # semgrep-core loads root certificates through OCaml's ca-certs, which on
+        # macOS runs /usr/bin/security against the system keychains.
+        system_trust_roots=True,
     )
 
     def model_post_init(self, context):

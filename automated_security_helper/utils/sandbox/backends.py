@@ -508,11 +508,13 @@ _SETSID_EXEC = "import os,sys;os.setsid();os.execv(sys.argv[1],sys.argv[1:])"
 #: The Mach services every sandboxed scanner may look up. Measured: the ten builtin
 #: scanners were run through the scanner parity fixture on the macOS 14.8, 15.7 and
 #: 26.6 CI runners with every lookup reported, and they looked up the same thirteen
-#: services on all three. Ten are allowed, here and in the network list. Not
+#: services on all three. Nine are allowed, here and in the network list. Not
 #: allowed: LaunchServices (denied below), which node looks up on start and does
-#: without, and com.apple.analyticsd, telemetry from /usr/bin/security, which works
-#: without it. See docs/content/docs/scanner-sandbox.md for finding a service that
-#: is missing.
+#: without, and the two that /usr/bin/security looks up, com.apple.SecurityServer
+#: (the keychain daemon, denied below) and com.apple.analyticsd. semgrep-core runs
+#: security only to read the system root certificates, and gets them from a file
+#: instead (see ``system_trust_roots``). See docs/content/docs/scanner-sandbox.md
+#: for finding a service that is missing.
 MACH_SERVICES: Tuple[str, ...] = (
     # CFPreferences, which CoreFoundation reads on start (Python, Go, node, ruby).
     "com.apple.cfprefsd.agent",
@@ -531,12 +533,6 @@ MACH_SERVICES_WITH_NETWORK: Tuple[str, ...] = (
     "com.apple.SystemConfiguration.DNSConfiguration",
     "com.apple.SystemConfiguration.configd",
     "com.apple.trustd.agent",
-    # The keychain daemon. semgrep-core runs /usr/bin/security to read the system
-    # root certificates, and semgrep's online scan fails without it. Keychain items
-    # stay out of reach: with this service allowed, CI measured an item that
-    # security itself had added coming back as "could not be found", and the
-    # keychain files are under the home directory, which the profile hides.
-    "com.apple.SecurityServer",
 )
 
 #: Denied after every allow, so no allowlist entry can ever reach them: in SBPL the
@@ -544,13 +540,60 @@ MACH_SERVICES_WITH_NETWORK: Tuple[str, ...] = (
 #: starts it outside the sandbox, so a scanner that can reach it can run code that is
 #: not sandboxed (a .command file opened in Terminal). The pasteboard holds whatever
 #: the user last copied. node looks up launchservicesd and com.apple.lsd.modifydb on
-#: start and carries on without them.
+#: start and carries on without them. SecurityServer is the keychain daemon.
 _DENIED_MACH_SERVICES = (
     '(global-name "com.apple.coreservices.launchservicesd")'
     ' (global-name "com.apple.CoreServices.coreservicesd")'
     ' (global-name-prefix "com.apple.lsd.")'
     ' (global-name-prefix "com.apple.pasteboard.")'
+    ' (global-name "com.apple.SecurityServer")'
 )
+
+#: The keychains that hold root certificates, in the order and form OCaml's ca-certs
+#: reads them on macOS when SSL_CERT_FILE is not set: Apple's roots, then the ones an
+#: administrator added (a corporate proxy's, for example).
+_TRUST_ROOT_KEYCHAINS = (
+    "/System/Library/Keychains/SystemRootCertificates.keychain",
+    "/Library/Keychains/System.keychain",
+)
+
+_trust_roots_cache: List[Optional[str]] = []
+
+
+def _system_trust_roots() -> Optional[str]:
+    """The system's root certificates as PEM, exported once per process.
+
+    Runs outside the sandbox, as ASH, with the same command ca-certs runs. None when
+    neither keychain gave a certificate, in which case the tool is left to find its
+    own and fails the way it would have without the export.
+    """
+    if _trust_roots_cache:
+        return _trust_roots_cache[0]
+    exported = []
+    for keychain in _TRUST_ROOT_KEYCHAINS:
+        if not Path(keychain).exists():
+            continue
+        try:
+            result = subprocess.run(  # nosec B603 - fixed argv, run by ASH itself
+                ["/usr/bin/security", "find-certificate", "-a", "-p", keychain],
+                capture_output=True,
+                text=True,
+                timeout=PROBE_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            ASH_LOGGER.debug(f"Exporting root certificates from {keychain}: {e}")
+            continue
+        if result.returncode == 0 and "BEGIN CERTIFICATE" in result.stdout:
+            exported.append(result.stdout)
+    pem = "\n".join(exported) if exported else None
+    if pem is None:
+        ASH_LOGGER.warning(
+            "Could not export the system root certificates; a sandboxed scanner "
+            "that reads them itself (semgrep) may fail to verify TLS."
+        )
+    _trust_roots_cache.append(pem)
+    return pem
 
 
 def _sbpl_subpaths(paths: Sequence[Path]) -> str:
@@ -603,7 +646,12 @@ class SandboxExecBackend(SandboxBackend):
             [self.executable, "-p", "(version 1)(allow default)", "/usr/bin/true"]
         )
 
-    def profile(self, policy: SandboxPolicy, private_tmp: Path) -> str:
+    def profile(
+        self,
+        policy: SandboxPolicy,
+        private_tmp: Path,
+        trust_roots: Optional[Path] = None,
+    ) -> str:
         home = _real(policy.home)
         readable = " ".join(
             f"(subpath {_sbpl_string(_real(p))})" for p in policy.read_only
@@ -644,6 +692,20 @@ class SandboxExecBackend(SandboxBackend):
             '(allow file-read* file-write* (literal "/dev/null") (literal "/dev/zero")'
             ' (literal "/dev/dtracehelper") (regex #"^/dev/fd/"))'
         )
+        if trust_roots is not None:
+            lines.append(
+                f"(allow file-read* (literal {_sbpl_string(_real(trust_roots))}))"
+            )
+        # TEMPORARY (diagnostic, removed before merge): lift the file rules other
+        # than the keychain deny, so CI can run every scanner to the end.
+        if os.environ.get("ASH_SANDBOX_EXEC_DIAG_OPEN_FILES"):
+            lines.append('(allow file-read* file-write* (subpath "/"))')
+        # Last of the file rules, so no path the policy grants can reopen them: the
+        # system and login keychains, whatever the keychain daemon would allow.
+        lines.append(
+            '(deny file-read* file-write* (subpath "/Library/Keychains")'
+            f" (subpath {_sbpl_string(home / 'Library' / 'Keychains')}))"
+        )
         if policy.network:
             # IP only. Unix-domain sockets stay denied (Docker Desktop's socket, the
             # launchd SSH agent) except the resolver's, which name lookup needs.
@@ -661,6 +723,24 @@ class SandboxExecBackend(SandboxBackend):
         self, argv: Sequence[str], env: Mapping[str, str], policy: SandboxPolicy
     ) -> SpawnPlan:
         private_tmp = Path(tempfile.mkdtemp(prefix="ash-sandbox-tmp-"))
+        cleanup: List[Callable[[], None]] = [
+            lambda: shutil.rmtree(private_tmp, ignore_errors=True)
+        ]
+        child_env = policy.filter_env(env)
+        child_env["TMPDIR"] = private_tmp.as_posix()
+        trust_roots = None
+        # An SSL_CERT_FILE the operator set is passed through and wins, as it
+        # would unsandboxed.
+        if policy.system_trust_roots and "SSL_CERT_FILE" not in child_env:
+            pem = _system_trust_roots()
+            if pem is not None:
+                # A directory of its own, outside the writable private TMPDIR, so
+                # the profile can grant it read-only.
+                roots_dir = Path(tempfile.mkdtemp(prefix="ash-sandbox-roots-"))
+                cleanup.append(lambda: shutil.rmtree(roots_dir, ignore_errors=True))
+                trust_roots = roots_dir / "roots.pem"
+                trust_roots.write_text(pem, encoding="ascii", errors="replace")
+                child_env["SSL_CERT_FILE"] = trust_roots.as_posix()
         cmd = [
             sys.executable,
             "-I",
@@ -668,16 +748,10 @@ class SandboxExecBackend(SandboxBackend):
             _SETSID_EXEC,
             self.executable,
             "-p",
-            self.profile(policy, private_tmp),
+            self.profile(policy, private_tmp, trust_roots),
             *argv,
         ]
-        child_env = policy.filter_env(env)
-        child_env["TMPDIR"] = private_tmp.as_posix()
-        return SpawnPlan(
-            argv=cmd,
-            env=child_env,
-            cleanup=[lambda: shutil.rmtree(private_tmp, ignore_errors=True)],
-        )
+        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
 
 
 BACKENDS: Dict[str, type] = {
