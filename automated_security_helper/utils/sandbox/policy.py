@@ -137,6 +137,15 @@ SYSTEM_READ_PATHS = (
 )
 
 
+#: System read paths that hold configuration and data, not programs, so they are
+#: readable and never executable.
+_DATA_SYSTEM_PATHS = (
+    Path("/etc"),
+    Path("/private/etc"),
+    Path("/private/var/db/timezone"),
+)
+
+
 @dataclass(frozen=True)
 class SandboxPolicy:
     """A resolved policy for one scanner invocation. All paths are absolute.
@@ -144,6 +153,15 @@ class SandboxPolicy:
     ``read_only`` and ``writable`` keep the caller's spelling of each path (which may
     run through a symlink, such as a home directory that links elsewhere); backends
     that need real paths resolve them, and recreate the symlinks, themselves.
+
+    ``executable`` and ``scan_data`` are for a backend that can restrict which files
+    a process may execute (sandbox-exec). ``executable`` is ``read_only`` without the
+    scan's own data, so the system and tool paths, plus uv's cache, which is where
+    ``uv tool run`` keeps the environments of tools it was not asked to install.
+    Programs run from there and from nowhere else. ``scan_data`` is the scan's data
+    (the source tree, the output directory, the scan target and the working
+    directory), which stays non-executable even where a tool path contains it, so a
+    repository checked out under ``/opt`` cannot have its own binaries run.
     """
 
     scanner_name: str
@@ -156,6 +174,8 @@ class SandboxPolicy:
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
     extra_env: Dict[str, str] = field(default_factory=dict)
+    executable: Tuple[Path, ...] = ()
+    scan_data: Tuple[Path, ...] = ()
 
     def filter_env(self, env: Mapping[str, str]) -> Dict[str, str]:
         """Reduce ``env`` to the allowlist, then point HOME inside."""
@@ -506,6 +526,19 @@ def build_scanner_policy(
     read_only = [p for p in read_only if not _inside_writable(p)]
     cache = [p for p in cache if not _inside_writable(p)]
 
+    scan_data = _existing([source_dir, output_dir, scan_target, cwd])
+    not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
+    executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
+    # The only writable place programs may run from: `uv tool run --from <req>`
+    # (bandit, checkov and semgrep without `ash dependencies install`) builds the
+    # tool's environment under the cache and runs its entry point from there.
+    uv_cache = uv_cache_directory()
+    executable += [
+        p
+        for p in cache
+        if uv_cache and os.path.realpath(p) == os.path.realpath(uv_cache)
+    ]
+
     extra_env: Dict[str, str] = {}
     if not network:
         # uv otherwise tries the index before using what it has cached, and fails
@@ -523,4 +556,6 @@ def build_scanner_policy(
         env_prefixes=tuple(requirements.env_prefixes),
         env_names=tuple(requirements.env_names),
         extra_env=extra_env,
+        executable=tuple(executable),
+        scan_data=tuple(scan_data),
     )

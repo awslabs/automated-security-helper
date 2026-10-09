@@ -4,6 +4,7 @@
 """The backend-neutral sandbox policy and the scope that decides when it applies."""
 
 import os
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,9 +20,11 @@ from automated_security_helper.utils.sandbox import (
     sandbox_scope,
     scanner_sandbox_scope,
 )
+from automated_security_helper.utils.sandbox import backends as backends_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import (
     BwrapBackend,
+    SandboxExecBackend,
     SpawnPlan,
 )
 from automated_security_helper.utils.sandbox.policy import build_scanner_policy
@@ -145,6 +148,40 @@ class TestPaths:
         monkeypatch.setenv("ASH_TEST_CA", str(extra))
         policy = _policy(layout, extra_read_paths=["$ASH_TEST_CA", "/does/not/exist"])
         assert Path(os.path.realpath(extra)) in _resolved(policy.read_only)
+
+
+class TestExecutable:
+    def test_tool_paths_are_executable_and_the_scan_data_is_not(self, layout):
+        policy = _policy(layout)
+        executable = _resolved(policy.executable)
+        assert Path(os.path.realpath(sys.executable)).parent in executable
+        for data in (layout.source, layout.output):
+            assert Path(os.path.realpath(data)) not in executable
+            assert Path(os.path.realpath(data)) in _resolved(policy.scan_data)
+
+    def test_system_configuration_is_readable_and_not_executable(self, layout):
+        policy = _policy(layout)
+        if not Path("/etc").is_dir():
+            pytest.skip("no /etc on this platform")
+        etc = Path(os.path.realpath("/etc"))
+        assert etc in _resolved(policy.read_only)
+        assert etc not in _resolved(policy.executable)
+
+    def test_nothing_writable_is_executable_but_the_uv_cache(
+        self, layout, monkeypatch, tmp_path
+    ):
+        uv_cache = tmp_path / "uv-cache"
+        other_cache = tmp_path / "grype-cache"
+        uv_cache.mkdir()
+        other_cache.mkdir()
+        monkeypatch.setenv("UV_CACHE_DIR", str(uv_cache))
+        policy = _policy(layout, SandboxRequirements(cache_paths=(str(other_cache),)))
+        executable = _resolved(policy.executable)
+        # `uv tool run` keeps the environments of tools it was not asked to install
+        # in its cache and runs their entry points from there.
+        assert Path(os.path.realpath(uv_cache)) in executable
+        assert Path(os.path.realpath(other_cache)) not in executable
+        assert Path(os.path.realpath(layout.results)) not in executable
 
 
 class TestEnvironment:
@@ -650,3 +687,149 @@ class TestNothingBroaderThanATool:
         monkeypatch.setenv("PATH", str(layout.home.parent))
         exposed = _resolved(_policy(layout).read_only)
         assert Path(os.path.realpath(layout.home.parent)) not in exposed
+
+
+def _sbpl(layout, tmp_path, **overrides):
+    """The sandbox-exec profile for one policy, one rule per line."""
+    policy = _policy(layout, **overrides)
+    return SandboxExecBackend().profile(policy, tmp_path / "private-tmp").splitlines()
+
+
+def _subpaths(rule):
+    return set(re.findall(r'\(subpath "([^"]*)"\)', rule))
+
+
+def _indexed(lines, prefix):
+    return [(i, line) for i, line in enumerate(lines) if line.startswith(prefix)]
+
+
+class TestSandboxExecProfile:
+    """The macOS profile names the Mach services and the exec paths it allows.
+
+    Profile text only, so these run on every platform. The profile itself is run on
+    macOS by tests/integration/sandbox/test_sandbox_exec_services.py and by the
+    scanner parity job.
+    """
+
+    NETWORK = SandboxRequirements(network=True)
+
+    def test_no_rule_allows_every_mach_lookup(self, layout, tmp_path):
+        for requirements in (SandboxRequirements(), self.NETWORK):
+            lines = _sbpl(layout, tmp_path, requirements=requirements)
+            assert "(allow default)" not in lines
+            allows = _indexed(lines, "(allow mach-lookup")
+            assert allows, "no Mach service is allowed at all"
+            for _, rule in allows:
+                # Exact names only: no unfiltered rule, no prefix, no regex.
+                assert rule.startswith("(allow mach-lookup (global-name "), rule
+                assert set(re.findall(r"\((global-name\S*) ", rule)) == {
+                    "global-name"
+                }, rule
+
+    def test_launch_services_and_the_pasteboard_are_denied_after_every_allow(
+        self, layout, tmp_path
+    ):
+        for requirements in (SandboxRequirements(), self.NETWORK):
+            lines = _sbpl(layout, tmp_path, requirements=requirements)
+            denies = _indexed(lines, "(deny mach-lookup")
+            assert len(denies) == 1, denies
+            where, rule = denies[0]
+            for denied in (
+                '(global-name "com.apple.coreservices.launchservicesd")',
+                '(global-name "com.apple.CoreServices.coreservicesd")',
+                '(global-name-prefix "com.apple.lsd.")',
+                '(global-name-prefix "com.apple.pasteboard.")',
+            ):
+                assert denied in rule
+            # In SBPL the last matching rule wins, so the deny has to come last.
+            assert where > max(i for i, _ in _indexed(lines, "(allow mach-lookup"))
+
+    def test_resolver_services_are_allowed_only_with_a_network(self, layout, tmp_path):
+        offline = "\n".join(_sbpl(layout, tmp_path))
+        online = "\n".join(_sbpl(layout, tmp_path, requirements=self.NETWORK))
+        assert backends_module.MACH_SERVICES_WITH_NETWORK
+        for name in backends_module.MACH_SERVICES_WITH_NETWORK:
+            assert f'"{name}"' not in offline, name
+            assert f'"{name}"' in online, name
+        for name in backends_module.MACH_SERVICES:
+            assert f'"{name}"' in offline, name
+            assert f'"{name}"' in online, name
+
+    def test_the_allowlists_name_no_denied_service_and_no_duplicate(self):
+        always = list(backends_module.MACH_SERVICES)
+        network = list(backends_module.MACH_SERVICES_WITH_NETWORK)
+        assert len(set(always + network)) == len(always) + len(network)
+        for name in always + network:
+            assert name not in (
+                "com.apple.coreservices.launchservicesd",
+                "com.apple.CoreServices.coreservicesd",
+            ), name
+            assert not name.startswith(("com.apple.lsd.", "com.apple.pasteboard.")), (
+                name
+            )
+
+    def test_exec_is_allowed_only_from_tool_and_system_paths(self, layout, tmp_path):
+        lines = _sbpl(layout, tmp_path)
+        assert "(allow process-exec)" not in lines
+        allows = _indexed(lines, "(allow process-exec ")
+        assert len(allows) == 1, allows
+        allowed = _subpaths(allows[0][1])
+        interpreter = Path(os.path.realpath(sys.executable)).as_posix()
+        assert any(
+            interpreter.startswith(path.rstrip("/") + "/") for path in allowed
+        ), (
+            interpreter,
+            allowed,
+        )
+        for never in (
+            layout.results,
+            tmp_path / "private-tmp",
+            layout.source,
+            layout.output,
+            layout.home,
+        ):
+            assert _as_argv(never) not in allowed, never
+        ((_, deny),) = _indexed(lines, "(deny process-exec ")
+        for denied in (layout.results, tmp_path / "private-tmp", layout.source):
+            assert _as_argv(denied) in _subpaths(deny), denied
+
+    def test_the_uv_cache_is_executable_and_other_caches_are_not(
+        self, layout, monkeypatch, tmp_path
+    ):
+        uv_cache = tmp_path / "uv-cache"
+        other_cache = tmp_path / "grype-cache"
+        uv_cache.mkdir()
+        other_cache.mkdir()
+        monkeypatch.setenv("UV_CACHE_DIR", str(uv_cache))
+        lines = _sbpl(
+            layout,
+            tmp_path,
+            requirements=SandboxRequirements(cache_paths=(str(other_cache),)),
+        )
+        ((_, allow),) = _indexed(lines, "(allow process-exec ")
+        ((_, deny),) = _indexed(lines, "(deny process-exec ")
+        assert _as_argv(uv_cache) in _subpaths(allow)
+        assert _as_argv(uv_cache) not in _subpaths(deny)
+        assert _as_argv(other_cache) in _subpaths(deny)
+        assert _as_argv(other_cache) not in _subpaths(allow)
+
+    def test_the_scan_data_is_not_executable_inside_a_tool_path(self, layout, tmp_path):
+        # A tool path that holds the scanned tree, as /opt holds a repository
+        # checked out under it.
+        lines = _sbpl(layout, tmp_path, extra_read_paths=[str(tmp_path)])
+        ((allow_at, allow),) = _indexed(lines, "(allow process-exec ")
+        ((deny_at, deny),) = _indexed(lines, "(deny process-exec ")
+        assert _as_argv(tmp_path) in _subpaths(allow)
+        assert {_as_argv(layout.source), _as_argv(layout.output)} <= _subpaths(deny)
+        assert deny_at > allow_at
+
+    def test_a_tool_path_inside_the_scan_data_stays_executable(self, layout, tmp_path):
+        # A virtualenv inside the scanned project that ASH itself runs from.
+        venv_bin = layout.source / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        lines = _sbpl(layout, tmp_path, extra_read_paths=[str(venv_bin)])
+        allows = _indexed(lines, "(allow process-exec ")
+        ((deny_at, _),) = _indexed(lines, "(deny process-exec ")
+        assert len(allows) == 2, allows
+        assert allows[1][0] > deny_at
+        assert _subpaths(allows[1][1]) == {_as_argv(venv_bin)}

@@ -924,7 +924,7 @@ jobs:
           if-no-files-found: warn
 
   sandbox-scanner-parity:
-    name: "sandbox scanner parity (${{ matrix.sandbox }}, ${{ matrix.os }})"
+    name: "sandbox scanner parity (${{ matrix.sandbox }}, ${{ matrix.os }}${{ matrix.files && format(', files {0}', matrix.files) || '' }}${{ matrix.extra && format(', {0}', matrix.extra) || '' }})"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     permissions:
@@ -935,12 +935,17 @@ jobs:
         include:
           - os: ubuntu-latest
             sandbox: bwrap
-          - os: macos-latest
-            sandbox: sandbox-exec
-          - os: macos-15
-            sandbox: sandbox-exec
-          - os: macos-14
-            sandbox: sandbox-exec
+          # TEMPORARY (diagnostic): the file rules as they are, to compare with the
+          # first measurement, and lifted, to check the Mach and exec rules against
+          # complete scanner runs. "fallback" adds configd always and SecurityServer
+          # with a network, in case the narrower lists break a scanner.
+          - { os: macos-latest, sandbox: sandbox-exec, files: real }
+          - { os: macos-15, sandbox: sandbox-exec, files: real }
+          - { os: macos-14, sandbox: sandbox-exec, files: real }
+          - { os: macos-latest, sandbox: sandbox-exec, files: open }
+          - { os: macos-15, sandbox: sandbox-exec, files: open }
+          - { os: macos-14, sandbox: sandbox-exec, files: open }
+          - { os: macos-14, sandbox: sandbox-exec, files: open, extra: fallback }
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -987,7 +992,9 @@ jobs:
           DIAG_DIR: ${{ runner.temp }}/sandbox-exec-diag
           # TEMPORARY (diagnostic): lift the file rules so every scanner runs to the
           # end and its whole Mach and exec use is reported.
-          ASH_SANDBOX_EXEC_REPORT: ${{ runner.os == 'macOS' && 'open-files' || '' }}
+          ASH_SANDBOX_EXEC_REPORT: ${{ matrix.files == 'open' && 'open-files' || (runner.os == 'macOS' && '1' || '') }}
+          ASH_SANDBOX_EXEC_DIAG_ALWAYS: ${{ matrix.extra == 'fallback' && 'com.apple.SystemConfiguration.configd' || '' }}
+          ASH_SANDBOX_EXEC_DIAG_NETWORK: ${{ matrix.extra == 'fallback' && 'com.apple.SecurityServer' || '' }}
         run: |
           set -o pipefail
           mkdir -p "$DIAG_DIR"
@@ -1006,7 +1013,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sandbox-scanner-parity-${{ matrix.os }}
+          name: sandbox-scanner-parity-${{ matrix.os }}${{ matrix.files && format('-{0}', matrix.files) || '' }}${{ matrix.extra && format('-{0}', matrix.extra) || '' }}
           path: |
             ${{ runner.temp }}/sandbox-parity.json
             ${{ runner.temp }}/ash-sandbox-parity-*

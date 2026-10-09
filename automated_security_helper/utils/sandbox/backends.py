@@ -492,7 +492,10 @@ def _sbpl_string(path: Path) -> str:
     into \\uXXXX, which SBPL does not decode, so a deny on a home directory with a
     non-ASCII name would silently match nothing.
     """
-    text = path.as_posix()
+    return _sbpl_literal(path.as_posix())
+
+
+def _sbpl_literal(text: str) -> str:
     if any(ord(ch) < 0x20 for ch in text):
         raise SandboxUnavailable(f"cannot express {text!r} in a sandbox-exec profile")
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -501,6 +504,83 @@ def _sbpl_string(path: Path) -> str:
 #: Starts a new session, so there is no controlling terminal to inject keystrokes
 #: into through TIOCSTI, then execs the rest of argv. macOS ships no setsid(1).
 _SETSID_EXEC = "import os,sys;os.setsid();os.execv(sys.argv[1],sys.argv[1:])"
+
+#: The Mach services every sandboxed scanner may look up. Each one was looked up by
+#: the builtin scanners under the scanner parity job on the macOS 14, 15 and 26 CI
+#: runners, which recorded every lookup the profile allowed; the list was the same
+#: on all three. See docs/content/docs/scanner-sandbox.md for finding one that is
+#: missing on another macOS.
+MACH_SERVICES: Tuple[str, ...] = (
+    # CFPreferences, which CoreFoundation reads on start (Python, Go, node, ruby).
+    "com.apple.cfprefsd.agent",
+    "com.apple.cfprefsd.daemon",
+    # os_log and notify(3), both used by libSystem in every process.
+    "com.apple.logd",
+    "com.apple.system.notification_center",
+    # User and group lookups: getpwuid(3) and friends, and group membership (ruby).
+    "com.apple.system.opendirectoryd.libinfo",
+    "com.apple.system.opendirectoryd.membership",
+)
+
+#: Allowed only to a scanner with a network: name resolution, network and proxy
+#: configuration, and certificate trust for TLS.
+MACH_SERVICES_WITH_NETWORK: Tuple[str, ...] = (
+    "com.apple.SystemConfiguration.DNSConfiguration",
+    "com.apple.SystemConfiguration.configd",
+    "com.apple.trustd.agent",
+)
+
+#: Denied after every allow, so no allowlist entry can ever reach them: in SBPL the
+#: last matching rule wins. LaunchServices asks launchd to start an app, and launchd
+#: starts it outside the sandbox, so a scanner that can reach it can run code that is
+#: not sandboxed (a .command file opened in Terminal). The pasteboard holds whatever
+#: the user last copied. node looks up launchservicesd and com.apple.lsd.modifydb on
+#: start and carries on without them.
+_DENIED_MACH_SERVICES = (
+    '(global-name "com.apple.coreservices.launchservicesd")'
+    ' (global-name "com.apple.CoreServices.coreservicesd")'
+    ' (global-name-prefix "com.apple.lsd.")'
+    ' (global-name-prefix "com.apple.pasteboard.")'
+)
+
+
+def _sbpl_subpaths(paths: Sequence[Path]) -> str:
+    return " ".join(f"(subpath {_sbpl_string(path)})" for path in paths)
+
+
+def _mach_rule(names: Sequence[str], modifier: str = "") -> str:
+    filters = " ".join(f"(global-name {_sbpl_literal(name)})" for name in names)
+    return f"(allow mach-lookup{modifier} {filters})"
+
+
+def _exec_rules(
+    policy: SandboxPolicy, private_tmp: Path, modifier: str = ""
+) -> List[str]:
+    """Programs run from the policy's executable paths, and from nowhere else.
+
+    Then exec is denied again in the scan's own data, which the scanned repository
+    wrote, and everywhere else the scanner can write (the results directory, its
+    caches, the private TMPDIR), even where a tool path contains one of them: a
+    checkout under /opt is not executable because /opt is. A tool path inside one of
+    those (a virtualenv in the scanned project that ASH itself runs from) is given
+    back last. In SBPL the last matching rule wins.
+    """
+    executable = sorted({_real(p) for p in policy.executable})
+    denied = sorted(
+        {
+            _real(p)
+            for p in [*policy.scan_data, *policy.writable, *policy.cache, private_tmp]
+        }
+        - set(executable)
+    )
+    rules = [
+        f"(allow process-exec{modifier} {_sbpl_subpaths(executable)})",
+        f"(deny process-exec {_sbpl_subpaths(denied)})",
+    ]
+    nested = [path for path in executable if any(_is_within(path, d) for d in denied)]
+    if nested:
+        rules.append(f"(allow process-exec{modifier} {_sbpl_subpaths(nested)})")
+    return rules
 
 
 class SandboxExecBackend(SandboxBackend):
@@ -524,29 +604,34 @@ class SandboxExecBackend(SandboxBackend):
             f"(subpath {_sbpl_string(_real(p))})"
             for p in list(policy.writable) + list(policy.cache) + [private_tmp]
         )
-        # TEMPORARY (diagnostic): log every Mach lookup and exec the profile allows,
-        # so CI can record what the builtin scanners actually use. "open-files" also
-        # lifts every file restriction, so scanners that the file rules stop early
-        # run to the end and their full Mach and exec use is recorded.
+        # TEMPORARY (diagnostic, removed before merge): report allowed lookups and
+        # execs; "open-files" lifts the file rules; the two DIAG lists add names.
         report = os.environ.get("ASH_SANDBOX_EXEC_REPORT", "")
-        if report == "prefix":
-            exec_rule = "(allow (with report) process-exec)"
-            mach_rule = "(allow (with report) mach-lookup)"
-        elif report:
-            exec_rule = "(allow process-exec (with report))"
-            mach_rule = "(allow mach-lookup (with report))"
-        else:
-            exec_rule = "(allow process-exec)"
-            mach_rule = "(allow mach-lookup)"
+        modifier = " (with report)" if report else ""
+
+        def _extra(var: str) -> List[str]:
+            return [n for n in os.environ.get(var, "").split(",") if n]
+
+        always = [*MACH_SERVICES, *_extra("ASH_SANDBOX_EXEC_DIAG_ALWAYS")]
+        network = [
+            *MACH_SERVICES_WITH_NETWORK,
+            *_extra("ASH_SANDBOX_EXEC_DIAG_NETWORK"),
+        ]
+        network = [n for n in network if n not in always]
         lines = [
             "(version 1)",
             "(deny default)",
             "(allow process-fork)",
-            exec_rule,
+            *_exec_rules(policy, private_tmp, modifier),
             "(allow signal (target same-sandbox))",
             "(allow process-info* (target same-sandbox))",
             "(allow sysctl-read)",
-            mach_rule,
+            _mach_rule(always, modifier),
+        ]
+        if policy.network:
+            lines.append(_mach_rule(network, modifier))
+        lines += [
+            f"(deny mach-lookup {_DENIED_MACH_SERVICES})",
             "(allow ipc-posix-shm)",
             "(allow ipc-posix-sem)",
             "(allow file-ioctl)",
@@ -577,8 +662,6 @@ class SandboxExecBackend(SandboxBackend):
             ]
         # Without a network nothing is allowed: (deny default) covers every socket.
         if report == "open-files":
-            # Filtered: an unfiltered rule is only the operation's default and
-            # loses to every filtered deny above it.
             lines.append('(allow file-read* file-write* (subpath "/"))')
         return "\n".join(lines)
 

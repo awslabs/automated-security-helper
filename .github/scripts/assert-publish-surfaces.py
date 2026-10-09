@@ -481,7 +481,7 @@ ALLOWLIST: tuple[Entry, ...] = (
         kind=KIND_UPLOAD,
         action=_UPLOAD,
         publishes=(
-            "name=sandbox-scanner-parity-${{ matrix.os }} "
+            "name=sandbox-scanner-parity-${{ matrix.os }}${{ matrix.files && format('-{0}', matrix.files) || '' }}${{ matrix.extra && format('-{0}', matrix.extra) || '' }} "
             "path=${{ runner.temp }}/sandbox-parity.json|${{ runner.temp }}/ash-sandbox-parity-*"
         ),
         reason=(
