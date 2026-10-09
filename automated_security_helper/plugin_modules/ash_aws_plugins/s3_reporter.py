@@ -16,6 +16,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
+    write_report_file,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -237,15 +238,11 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             ASH_LOGGER.info(f"Successfully uploaded report to {s3_url}")
 
             # The documented local copy of the uploaded content.
-            output_path = (
-                Path(self.context.output_dir)
-                / "reports"
-                / f"s3-report.{file_extension}"
+            reports_dir = Path(self.context.output_dir) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            local_copy = write_report_file(
+                reports_dir, f"s3-report.{file_extension}", output_content
             )
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(output_content)
 
             # What ReportPhase writes to reports/ash.s3.json: a receipt for the
             # upload, as JSON so the file matches its extension.
@@ -255,7 +252,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                     "bucket": self.config.options.bucket_name,
                     "key": s3_key,
                     "file_format": self.config.options.file_format,
-                    "local_copy": output_path.as_posix(),
+                    "local_copy": local_copy.as_posix() if local_copy else None,
                 },
                 indent=2,
             )

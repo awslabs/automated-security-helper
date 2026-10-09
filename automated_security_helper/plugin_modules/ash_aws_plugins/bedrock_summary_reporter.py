@@ -15,6 +15,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
+    write_report_file,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -885,10 +886,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         reports_dir = Path(self.context.output_dir) / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = reports_dir / opts.output_file
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(summary)
-        ASH_LOGGER.info(f"Bedrock summary written to {output_path}")
+        output_path = write_report_file(reports_dir, opts.output_file, summary)
+        if output_path is not None:
+            ASH_LOGGER.info(f"Bedrock summary written to {output_path}")
 
         if "executive_summary" in included:
             prompt = builder.prepare_prompt(
@@ -907,10 +907,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     "You are a security expert providing a concise executive summary of security scan results.",
                 ),
             )
-            exec_path = reports_dir / opts.output_executive_file
-            with open(exec_path, "w", encoding="utf-8") as f:
-                f.write(f"# Executive Security Summary\n\n{exec_content}")
-            ASH_LOGGER.info(f"Executive summary written to {exec_path}")
+            exec_path = write_report_file(
+                reports_dir,
+                opts.output_executive_file,
+                f"# Executive Security Summary\n\n{exec_content}",
+            )
+            if exec_path is not None:
+                ASH_LOGGER.info(f"Executive summary written to {exec_path}")
 
         if "technical_analysis" in included:
             tech_prompt = builder.prepare_prompt(
@@ -931,10 +934,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     "You are a security expert providing detailed technical analysis of security findings.",
                 ),
             )
-            tech_path = reports_dir / opts.output_technical_file
-            with open(tech_path, "w", encoding="utf-8") as f:
-                f.write(f"# Technical Security Analysis\n\n{tech_content}")
-            ASH_LOGGER.info(f"Technical analysis written to {tech_path}")
+            tech_path = write_report_file(
+                reports_dir,
+                opts.output_technical_file,
+                f"# Technical Security Analysis\n\n{tech_content}",
+            )
+            if tech_path is not None:
+                ASH_LOGGER.info(f"Technical analysis written to {tech_path}")
 
     # ------------------------------------------------------------------
     # Caching

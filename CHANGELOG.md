@@ -122,6 +122,30 @@
     `sandbox.extra_read_paths`.
   - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
     write `==1.2.3`, or leave it unset for the supported range.
+  - The AWS reporters' destinations and credentials come only from the defaults,
+    `--config-overrides` or a config file outside the tree: `aws_region` and
+    `aws_profile` of the Security Hub, Bedrock summary and S3 reporters, Security
+    Hub's `account_id`, the Bedrock reporter's `model_id` and its three output
+    files, S3's `bucket_name` and `key_prefix`, and CloudWatch Logs' `aws_region`,
+    `log_group_name` and `log_stream_name`. This covers the section under any
+    spelling ASH reads as that reporter's, such as `BedrockSummary`. The reporters'
+    other options still apply from the tree.
+  - Such a file can no longer add `automated_security_helper.plugin_modules.ash_aws_plugins`
+    (or a module inside it) to `ash_plugin_modules`. Its reporters are enabled by
+    default and send findings to AWS with the operator's credentials, so only
+    `--ash-plugin-modules`, `--config-overrides` or a config file outside the tree
+    can add it.
+  - A reporter's `extension` has to be a filename suffix, from any source: a value
+    with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
+    warning naming the key. Reports, the files the unused-suppressions, S3 and
+    Bedrock summary reporters write beside them, and the workspace report
+    manifest are written only when the resolved file is directly inside the
+    reports directory, and a symlink at the file's name is replaced rather than
+    written through. A file that cannot be written is logged and does not stop
+    the reporter's main report or the other reporters. The Bedrock summary
+    reporter's `output_file`, `output_executive_file` and `output_technical_file`
+    are file names in the reports directory: a path there is refused with a
+    warning, and that file is not written.
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's

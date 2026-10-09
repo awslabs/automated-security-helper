@@ -102,6 +102,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
     reporter_matches_requested_formats,
+    write_report_file,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.workspace.plan import WorkspacePlan
@@ -144,7 +145,8 @@ _EMITTING_BEHAVIOURS = frozenset(
 class WorkspaceReportOutcome:
     """What the workspace-level report step produced, and what it refused to."""
 
-    manifest_path: Path
+    #: None when the manifest could not be written; the reason is logged.
+    manifest_path: Optional[Path]
     workspace_artifacts: Dict[str, Path] = field(default_factory=dict)
     per_project_reporters: Tuple[str, ...] = ()
     unsupported_reporters: Tuple[str, ...] = ()
@@ -598,14 +600,21 @@ def emit_workspace_reports(
             ASH_LOGGER.verbose(f"Reporter {name} returned no content")
             continue
 
-        target = reports_dir / filename
-        target.write_text(content, encoding="utf-8")
+        target = write_report_file(reports_dir, filename, content)
+        if target is None:
+            failures[name] = (
+                f"report file {filename!r} could not be written in {reports_dir}"
+            )
+            entry["error"] = failures[name]
+            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}")
+            continue
         artifacts[name] = target
         entry["workspace_artifact"] = target.relative_to(output_dir).as_posix()
         ASH_LOGGER.info(f"Writing workspace {name} report to {target}")
 
-    manifest_path = reports_dir / MANIFEST_FILENAME
-    manifest_path.write_text(
+    manifest_path = write_report_file(
+        reports_dir,
+        MANIFEST_FILENAME,
         json.dumps(
             {
                 "workspace_file": plan.workspace_file,
@@ -615,7 +624,6 @@ def emit_workspace_reports(
             },
             indent=2,
         ),
-        encoding="utf-8",
     )
 
     return WorkspaceReportOutcome(

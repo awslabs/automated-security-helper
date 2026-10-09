@@ -262,6 +262,10 @@ The reporter also creates a local copy of the uploaded report in:
 }
 ```
 
+`local_copy` is `null` when the local copy could not be written, for example
+because `s3-report.json` in the reports directory is a symlink to a file outside
+it. A warning is logged and the upload still counts.
+
 If the upload fails, no receipt is written and the reporter is logged as having
 produced no report.
 
