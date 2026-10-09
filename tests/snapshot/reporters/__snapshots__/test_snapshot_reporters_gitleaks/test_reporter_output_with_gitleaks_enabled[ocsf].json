@@ -6,6 +6,54 @@
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
+      "desc": "github-pat has detected secret for file docs/example.md.",
+      "title": "github-pat in example.md - github-pat has detected secret for file docs/example.md.",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 5,
+            "file": {
+              "name": "example.md",
+              "path": "docs/example.md",
+              "type_id": 1
+            },
+            "start_line": 5
+          }
+        ],
+        "cve": {
+          "desc": "github-pat has detected secret for file docs/example.md.",
+          "uid": "github-pat"
+        },
+        "desc": "github-pat has detected secret for file docs/example.md.",
+        "severity": "ERROR",
+        "title": "github-pat"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
       "desc": "slack-bot-token has detected secret for file app/settings.py.",
       "title": "slack-bot-token in settings.py - slack-bot-token has detected secret for file app/settings.py.",
       "uid": "<UUID>"

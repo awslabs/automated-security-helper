@@ -146,13 +146,13 @@
             <tr>
                 <td>gitleaks</td>
                 <td>0</td>
-                <td>3</td>
+                <td>4</td>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
                 <td>500ms</td>
-                <td class="status-failed">3</td>
+                <td class="status-failed">4</td>
                 <td class="status-failed">FAILED</td>
                 <td>MEDIUM (global)</td>
             </tr>
@@ -160,9 +160,9 @@
 
         <h2>Summary</h2>
         <div class="summary-box">
-            <h3>Findings by Severity</h3><p>Statistics are calculated from the final aggregated SARIF report:</p><ul><li class="severity-error"><strong>ERROR</strong>: 3 finding(s)</li></ul>
-            <h3>Findings by Type</h3><ul><li>slack-bot-token: 1 finding(s)</li><li>github-pat: 1 finding(s)</li><li>aws-access-token: 1 finding(s)</li></ul>
-            <h3>Top 1 Hotspots</h3><p>Files with the highest number of security findings:</p>
+            <h3>Findings by Severity</h3><p>Statistics are calculated from the final aggregated SARIF report:</p><ul><li class="severity-error"><strong>ERROR</strong>: 4 finding(s)</li></ul>
+            <h3>Findings by Type</h3><ul><li>github-pat: 2 finding(s)</li><li>slack-bot-token: 1 finding(s)</li><li>aws-access-token: 1 finding(s)</li></ul>
+            <h3>Top 2 Hotspots</h3><p>Files with the highest number of security findings:</p>
         <table>
             <tr>
                 <th>Finding Count</th>
@@ -172,6 +172,11 @@
             <tr>
                 <td>3</td>
                 <td>app/settings.py</td>
+            </tr>
+
+            <tr>
+                <td>1</td>
+                <td>docs/example.md</td>
             </tr>
             </table>
         </div>
@@ -184,6 +189,13 @@
                 <th>Rule</th>
                 <th>Message</th>
                 <th>Location</th>
+            </tr>
+
+            <tr>
+                <td class="severity-error">ERROR</td>
+                <td>github-pat</td>
+                <td>github-pat has detected secret for file docs/example.md.</td>
+                <td>docs/example.md:5</td>
             </tr>
 
             <tr>
@@ -231,7 +243,7 @@
             </div>
 
             <div class="metadata-item">
-                <strong>summary_stats:</strong> {&#x27;severity_counts&#x27;: {&#x27;suppressed&#x27;: 0, &#x27;critical&#x27;: 3, &#x27;high&#x27;: 0, &#x27;medium&#x27;: 0, &#x27;low&#x27;: 0, &#x27;info&#x27;: 0}, &#x27;start&#x27;: None, &#x27;end&#x27;: None, &#x27;duration&#x27;: 0.0, &#x27;total&#x27;: 3, &#x27;actionable&#x27;: 3, &#x27;passed&#x27;: 0, &#x27;failed&#x27;: 1, &#x27;missing&#x27;: 0, &#x27;skipped&#x27;: 0, &#x27;error&#x27;: 0}
+                <strong>summary_stats:</strong> {&#x27;severity_counts&#x27;: {&#x27;suppressed&#x27;: 0, &#x27;critical&#x27;: 4, &#x27;high&#x27;: 0, &#x27;medium&#x27;: 0, &#x27;low&#x27;: 0, &#x27;info&#x27;: 0}, &#x27;start&#x27;: None, &#x27;end&#x27;: None, &#x27;duration&#x27;: 0.0, &#x27;total&#x27;: 4, &#x27;actionable&#x27;: 4, &#x27;passed&#x27;: 0, &#x27;failed&#x27;: 1, &#x27;missing&#x27;: 0, &#x27;skipped&#x27;: 0, &#x27;error&#x27;: 0}
             </div>
 
             <div class="metadata-item">

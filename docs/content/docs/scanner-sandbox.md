@@ -183,9 +183,10 @@ The community scanners declare theirs:
 - ferret-scan asks only for its `FERRET_` variables.
 
 A file outside the source tree that a scanner option names is not mounted: a
-cfn-guard `rules_paths` entry, a `config_file` of gitleaks, cfn-lint, zizmor, trivy or
-trivy-repo, gitleaks' `baseline_path`, trivy-repo's `module_dir`, or an absolute
-actionlint `shellcheck` or `pyflakes`. Nor do gitleaks' `GITLEAKS_*` variables or
+cfn-guard `rules_paths` entry, a `config_file` of actionlint, gitleaks, cfn-lint,
+zizmor, trivy or trivy-repo, gitleaks' `baseline_path`, trivy's `ignore_file`, a
+`secret_config_file` of trivy or trivy-repo, trivy-repo's `module_dir`, or an
+absolute actionlint `shellcheck` or `pyflakes`. Nor do gitleaks' `GITLEAKS_*` variables or
 zizmor's GitHub token reach a sandbox. Grants derived from options or the environment
 wait for the sandbox's grant gates; until then list such a path in
 `sandbox.extra_read_paths`, from a config outside the tree.

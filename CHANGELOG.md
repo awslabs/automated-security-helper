@@ -115,15 +115,14 @@
     templates cfn-nag reads, and neither needs the network.
   - gitleaks 8.30.1 (`gitleaks dir`, working tree only),
     CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,
-    which stays on and unchanged. `.gitleaks.toml`, `.gitleaksignore`,
-    `gitleaks:allow` and `options.baseline_path` apply alongside ASH suppressions.
+    which stays on and unchanged. Inline `gitleaks:allow` comments apply, and so
+    do an operator's `options.config_file` and `options.baseline_path`.
   - zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
     actions, run with `--offline`; GitHub tokens are withheld unless
     `options.online_audits` is true.
   - trivy: `trivy fs` (0.75.0), `vuln` only by default, held to
     the trivy database's 24h bound; offline with no database it is MISSING with the
-    reason. It does not read a `trivy.yaml` or `.trivyignore` from the scanned
-    repository. trivy and trivy-repo share trivy's cache and run at the same time, so
+    reason. trivy and trivy-repo share trivy's cache and run at the same time, so
     online ASH updates the database once per scan, under a lock in that cache, and
     both scanners then run with `--skip-db-update` (and `--skip-check-update` when
     `misconfig` is on). An image built with `OFFLINE=YES` ships the database, and the
@@ -135,6 +134,10 @@
   can import Python rules, a `trivy.yaml` can load WASM modules) are honored only
   from `--config-overrides` or a config file outside the tree, for a file outside
   it. cfn-lint's and zizmor's `tool_version` must be a version constraint.
+
+  None of the six reads its tool's own config from the scanned repository: see
+  "The scanned repository's own scanner configs are not read" under Behavior
+  changes.
 
   ASH does not deduplicate across scanners, so overlapping pairs (gitleaks and
   detect-secrets, trivy and grype or trivy-repo, zizmor and actionlint) report a
@@ -163,6 +166,25 @@
   database in its cache (`TRIVY_CACHE_DIR`). Configs that list the community Trivy
   plugin for `trivy-repo` now run trivy twice; set `scanners.trivy.enabled: false` to
   keep only `trivy-repo`.
+- **The scanned repository's own scanner configs are not read.** A tool config
+  committed to the repository can drop findings before ASH sees them, so they would
+  be neither reported nor counted as suppressed. Tune findings with ASH
+  suppressions, which are both. Unless the operator names a config, through
+  `--config-overrides` or an ASH config file outside the scanned tree:
+  - actionlint runs with an empty config ASH writes, not `.github/actionlint.yaml`;
+  - gitleaks runs with its default rules, not `.gitleaks.toml` or
+    `.ash/.gitleaks.toml`, and ASH re-scans each file a root `.gitleaksignore`
+    names (gitleaks always reads that file) and reports what it dropped;
+    `GITLEAKS_CONFIG` and `GITLEAKS_CONFIG_TOML` from the environment still apply
+    outside `--sandbox`;
+  - zizmor runs with `--no-config`, not `zizmor.yml` or `.github/zizmor.yml`;
+  - trivy runs with empty config, ignore and secret-config files, not
+    `trivy.yaml`, `.trivyignore` or `trivy-secret.yaml`.
+
+  Each of those scanners' `config_file` options, gitleaks' `baseline_path`, and
+  trivy's `ignore_file` and `secret_config_file`, set by an ASH config inside the
+  scanned tree, are ignored with a warning; trivy's also need a path outside the
+  tree. Inline comments (`gitleaks:allow`, `# zizmor: ignore[...]`) still apply.
 - **trivy-repo names its own config file and modules directory.** It always passes
   `--config` and `--module-dir`: by default an empty config file and an empty
   directory in its results directory, so trivy does not load a `trivy.yaml` from the

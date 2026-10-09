@@ -10,16 +10,16 @@
     {
       "scanner_name": "gitleaks",
       "suppressed": 0,
-      "critical": 3,
+      "critical": 4,
       "high": 0,
       "medium": 0,
       "low": 0,
       "info": 0,
-      "total": 3,
+      "total": 4,
       "passed": false,
       "threshold": "MEDIUM",
       "threshold_source": "global",
-      "actionable": 3,
+      "actionable": 4,
       "status": "FAILED",
       "excluded": false,
       "dependencies_missing": false,
@@ -33,9 +33,31 @@
     {
       "location": "app/settings.py",
       "count": 3
+    },
+    {
+      "location": "docs/example.md",
+      "count": 1
     }
   ],
   "findings": [
+    {
+      "id": "gitleaks-github-pat-4feb784f",
+      "title": "github-pat",
+      "description": "github-pat has detected secret for file docs/example.md.",
+      "severity": "HIGH",
+      "scanner": "gitleaks",
+      "scanner_type": "UNKNOWN",
+      "rule_id": "github-pat",
+      "file_path": "docs/example.md",
+      "line_start": 5,
+      "line_end": 5,
+      "is_suppressed": false,
+      "detected_at": "2026-01-15T12:00:42+00:00",
+      "code_snippet": "REDACTED",
+      "tags": "[\"secret\", \"security\", \"gitleaks\"]",
+      "properties": "{\"tags\": [\"secret\", \"security\", \"gitleaks\"], \"scanner_name\": \"gitleaks\", \"scanner_version\": \"8.30.1\", \"scanner_details\": {\"tool_name\": \"gitleaks\", \"tool_version\": \"8.30.1\", \"tool_invocation\": {\"exit_code\": 0, \"duration\": 0.5, \"start_time\": \"2026-01-15T12:00:00+00:00\", \"end_time\": \"2026-01-15T12:00:00.500000+00:00\"}}}",
+      "raw_data": "{\"ruleId\":\"github-pat\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"github-pat has detected secret for file docs/example.md.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"docs/example.md\",\"index\":-1},\"region\":{\"startLine\":5,\"startColumn\":6,\"endLine\":5,\"endColumn\":45,\"charOffset\":-1,\"byteOffset\":-1,\"snippet\":{\"text\":\"REDACTED\"}}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"secret\",\"security\",\"gitleaks\"],\"scanner_name\":\"gitleaks\",\"scanner_version\":\"8.30.1\",\"scanner_details\":{\"tool_name\":\"gitleaks\",\"tool_version\":\"8.30.1\",\"tool_invocation\":{\"exit_code\":0,\"duration\":0.5,\"start_time\":\"2026-01-15T12:00:00+00:00\",\"end_time\":\"2026-01-15T12:00:00.500000+00:00\"}}}}"
+    },
     {
       "id": "gitleaks-slack-bot-token-e7da11ac",
       "title": "slack-bot-token",

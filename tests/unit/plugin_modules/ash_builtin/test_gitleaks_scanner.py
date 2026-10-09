@@ -31,6 +31,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+    DEFAULT_RULES_CONFIG,
     LEAKS_EXIT_CODE,
     REDACTED,
     GitleaksScanner,
@@ -38,6 +39,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scan
     GitleaksScannerConfigOptions,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     get_severity_metrics_from_sarif,
@@ -48,13 +50,16 @@ PluginContext.model_rebuild()
 DATA = Path(__file__).parents[3] / "test_data" / "scanners" / "gitleaks"
 CAPTURED_SARIF = DATA / "gitleaks-8.30.1.sarif"
 
-#: What gitleaks 8.30.1 reports for the fixture repo: (rule id, uri, line).
-#: The negatives -- clean.py, inline_allowed.py, fingerprint_ignored.py and
-#: docs/example.md -- are absent by construction; the integration test proves
-#: each one is found once its allow mechanism is removed.
+#: What gitleaks 8.30.1 writes for the fixture repo with ASH's argv: (rule id, uri,
+#: line). docs/example.md is in it because ASH does not pass the tree's
+#: .gitleaks.toml, whose allowlist covers it. app/fingerprint_ignored.py is not:
+#: gitleaks itself applies the tree's root .gitleaksignore, and ASH's re-scan adds
+#: that finding back (tested here with a fake run, and against the binary in the
+#: integration test). clean.py and inline_allowed.py are absent by construction.
 EXPECTED = {
     ("aws-access-token", "app/settings.py", 5),
     ("github-pat", "app/settings.py", 4),
+    ("github-pat", "docs/example.md", 5),
     ("slack-bot-token", "app/settings.py", 6),
 }
 
@@ -75,13 +80,30 @@ def _context(tmp_path: Path, config: AshConfig | None = None) -> PluginContext:
     )
 
 
-def _scanner(tmp_path: Path, **options) -> GitleaksScanner:
+def _scanner(
+    tmp_path: Path, *, operator: bool | None = None, **options
+) -> GitleaksScanner:
+    """A scanner whose options came from the operator (True), the scanned tree
+    (False), or a config with no recorded provenance (None, which counts as the
+    tree's)."""
+    context = _context(tmp_path)
+    if operator is not None:
+        source = Path(context.source_dir)
+        record_provenance(
+            context.config,
+            in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+            trusted=AshConfig(),
+        )
     return GitleaksScanner(
-        context=_context(tmp_path),
+        context=context,
         config=GitleaksScannerConfig(
             enabled=True, options=GitleaksScannerConfigOptions(**options)
         ),
     )
+
+
+def _default_rules(tmp_path: Path) -> str:
+    return f"--config={(tmp_path / 'ash-gitleaks-default-rules.toml').resolve().as_posix()}"
 
 
 def _parse(scanner: GitleaksScanner, raw: dict) -> SarifReport:
@@ -129,6 +151,7 @@ def test_argv_for_the_source_target(tmp_path):
     results = tmp_path / "out.sarif"
     args = scanner._build_arguments(source, results)
     assert args[:2] == ["gitleaks", "dir"]
+    no_ignore = (tmp_path / "ash-no-gitleaksignore").resolve()
     for flag in (
         "--report-format=sarif",
         f"--report-path={results.as_posix()}",
@@ -136,12 +159,16 @@ def test_argv_for_the_source_target(tmp_path):
         f"--exit-code={LEAKS_EXIT_CODE}",
         "--no-banner",
         "--no-color",
-        f"--gitleaks-ignore-path={source.as_posix()}",
+        f"--gitleaks-ignore-path={no_ignore.as_posix()}",
+        _default_rules(tmp_path),
     ):
         assert flag in args
+    assert no_ignore.is_dir() and not any(no_ignore.iterdir())
+    assert (tmp_path / "ash-gitleaks-default-rules.toml").read_text() == (
+        DEFAULT_RULES_CONFIG
+    )
     # Source-relative paths: "." from the source directory, after "--".
     assert args[-2:] == ["--", "."]
-    assert not any(a.startswith("--config") for a in args)
 
 
 def test_argv_for_the_converted_target_is_absolute(tmp_path):
@@ -156,6 +183,7 @@ def test_every_option_is_one_token_so_no_value_can_become_a_flag(tmp_path):
     """A path starting with "-" stays a value, and the scan path follows "--"."""
     scanner = _scanner(
         tmp_path,
+        operator=True,
         config_file="-c-evil.toml",
         baseline_path="--baseline.json",
         max_target_megabytes=5,
@@ -175,32 +203,27 @@ def test_every_option_is_one_token_so_no_value_can_become_a_flag(tmp_path):
 
 
 @pytest.mark.parametrize("name", [".gitleaks.toml", ".ash/.gitleaks.toml"])
-def test_a_config_in_the_source_dir_is_discovered(tmp_path, monkeypatch, name):
+def test_a_gitleaks_config_in_the_scanned_tree_is_not_read(
+    tmp_path, monkeypatch, caplog, name
+):
+    """It could replace the rules or allowlist everything, unreported."""
     monkeypatch.delenv("GITLEAKS_CONFIG", raising=False)
     monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     scanner = _scanner(tmp_path)
     found = scanner.context.source_dir / name
     found.parent.mkdir(parents=True, exist_ok=True)
-    found.write_text("[extend]\nuseDefault = true\n")
-    args = scanner._build_arguments(scanner.context.work_dir, tmp_path / "o.sarif")
-    # Passed explicitly, so the converted target gets the source's rules too.
-    assert f"--config={found.resolve().as_posix()}" in args
-
-
-def test_root_config_wins_over_the_ash_dir_one(tmp_path, monkeypatch):
-    monkeypatch.delenv("GITLEAKS_CONFIG", raising=False)
-    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
-    scanner = _scanner(tmp_path)
-    source = scanner.context.source_dir
-    (source / ".ash").mkdir()
-    (source / ".ash" / ".gitleaks.toml").write_text("")
-    (source / ".gitleaks.toml").write_text("")
-    args = scanner._build_arguments(source, tmp_path / "o.sarif")
-    assert f"--config={(source / '.gitleaks.toml').resolve().as_posix()}" in args
+    found.write_text("[extend]\nuseDefault = true\n[allowlist]\npaths = ['.*']\n")
+    with caplog.at_level("INFO"):
+        args = scanner._build_arguments(
+            scanner.context.source_dir, tmp_path / "o.sarif"
+        )
+    assert [a for a in args if a.startswith("--config")] == [_default_rules(tmp_path)]
+    assert f"{name} in the scanned tree is not read" in caplog.text
 
 
 @pytest.mark.parametrize("variable", ["GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"])
 def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, variable):
+    """The operator's environment, not the tree: gitleaks resolves it."""
     monkeypatch.setenv(variable, "anything")
     scanner = _scanner(tmp_path)
     (scanner.context.source_dir / ".gitleaks.toml").write_text("")
@@ -208,9 +231,9 @@ def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, va
     assert not any(a.startswith("--config") for a in args)
 
 
-def test_config_file_option_wins_over_env_and_discovery(tmp_path, monkeypatch):
+def test_the_operators_config_file_wins_over_env_and_the_tree(tmp_path, monkeypatch):
     monkeypatch.setenv("GITLEAKS_CONFIG", "elsewhere.toml")
-    scanner = _scanner(tmp_path, config_file="rules/custom.toml")
+    scanner = _scanner(tmp_path, operator=True, config_file="rules/custom.toml")
     source = scanner.context.source_dir
     (source / ".gitleaks.toml").write_text("")
     (source / "rules").mkdir()
@@ -222,10 +245,34 @@ def test_config_file_option_wins_over_env_and_discovery(tmp_path, monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("operator", [False, None])
+def test_config_file_and_baseline_from_the_scanned_tree_are_ignored(
+    tmp_path, monkeypatch, caplog, operator
+):
+    monkeypatch.delenv("GITLEAKS_CONFIG", raising=False)
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
+    scanner = _scanner(
+        tmp_path,
+        operator=operator,
+        config_file="rules/custom.toml",
+        baseline_path="baseline.json",
+    )
+    source = scanner.context.source_dir
+    (source / "rules").mkdir()
+    (source / "rules" / "custom.toml").write_text("")
+    (source / "baseline.json").write_text("[]")
+    with caplog.at_level("WARNING"):
+        args = scanner._build_arguments(source, tmp_path / "o.sarif")
+    assert [a for a in args if a.startswith("--config")] == [_default_rules(tmp_path)]
+    assert not any(a.startswith("--baseline-path") for a in args)
+    for option in ("config_file", "baseline_path"):
+        assert f"scanners.gitleaks.options.{option}" in caplog.text
+
+
 @pytest.mark.parametrize("option", ["config_file", "baseline_path"])
-def test_a_configured_path_that_does_not_exist_fails_the_scan(tmp_path, option):
+def test_an_operator_path_that_does_not_exist_fails_the_scan(tmp_path, option):
     """Falling back to default rules would scan with rules nobody asked for."""
-    scanner = _scanner(tmp_path, **{option: "missing.file"})
+    scanner = _scanner(tmp_path, operator=True, **{option: "missing.file"})
     with pytest.raises(ScannerError, match=f"scanners.gitleaks.options.{option}"):
         scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
 
@@ -423,13 +470,17 @@ def _suppressed(tmp_path, *, suppressions=(), ignore_paths=()) -> dict:
     scanner = GitleaksScanner(context=context, config=GitleaksScannerConfig())
     report = apply_suppressions_to_sarif(_parse(scanner, _raw_report()), context)
     return {
-        result.ruleId: bool(result.suppressions) for result in report.get_all_results()
+        (
+            result.ruleId,
+            result.locations[0].physicalLocation.root.artifactLocation.uri,
+        ): bool(result.suppressions)
+        for result in report.get_all_results()
     }
 
 
 def test_no_suppressions_suppresses_nothing(tmp_path):
     state = _suppressed(tmp_path)
-    assert state == {rule: False for rule, _, _ in EXPECTED}
+    assert state == {(rule, uri): False for rule, uri, _ in EXPECTED}
 
 
 def test_a_line_pinned_rule_suppression_suppresses_only_that_finding(tmp_path):
@@ -446,9 +497,10 @@ def test_a_line_pinned_rule_suppression_suppresses_only_that_finding(tmp_path):
         ],
     )
     assert state == {
-        "github-pat": True,
-        "aws-access-token": False,
-        "slack-bot-token": False,
+        ("github-pat", "app/settings.py"): True,
+        ("github-pat", "docs/example.md"): False,
+        ("aws-access-token", "app/settings.py"): False,
+        ("slack-bot-token", "app/settings.py"): False,
     }
 
 
@@ -473,7 +525,7 @@ def test_a_path_suppression_suppresses_every_finding_in_the_file(tmp_path):
         tmp_path,
         suppressions=[AshSuppression(path="app/settings.py", reason="fixture")],
     )
-    assert state == {rule: True for rule, _, _ in EXPECTED}
+    assert state == {(rule, uri): uri == "app/settings.py" for rule, uri, _ in EXPECTED}
 
 
 def test_a_global_ignore_path_removes_the_findings(tmp_path):
@@ -481,7 +533,7 @@ def test_a_global_ignore_path_removes_the_findings(tmp_path):
         tmp_path,
         ignore_paths=[IgnorePathWithReason(path="app/**", reason="fixture")],
     )
-    assert state == {}
+    assert state == {("github-pat", "docs/example.md"): False}
 
 
 def test_findings_under_the_output_dir_are_dropped(tmp_path):
@@ -510,27 +562,150 @@ def test_gitleaks_config_variables_are_left_to_gitleaks_outside_a_sandbox(
     (scanner.context.source_dir / ".gitleaks.toml").write_text('title = "repo"\n')
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
 
-    assert scanner._resolve_config_file() is None
+    assert scanner._resolve_config_file(tmp_path) is None
 
 
-def test_under_a_sandbox_gitleaks_config_variables_do_not_hand_over_to_the_repo(
+def test_under_a_sandbox_gitleaks_config_variables_give_the_default_rules(
     tmp_path, monkeypatch, caplog
 ):
     """The sandbox drops GITLEAKS_*, so leaving resolution to gitleaks would quietly
-    pick the scanned tree's .gitleaks.toml. ASH's own discovery runs and says so."""
+    pick the scanned tree's .gitleaks.toml. ASH passes gitleaks' default rules."""
     from automated_security_helper.plugin_modules.ash_builtin.scanners import (
         gitleaks_scanner as module,
     )
 
     scanner = _scanner(tmp_path)
-    repo_config = scanner.context.source_dir / ".gitleaks.toml"
-    repo_config.write_text('title = "repo"\n')
+    (scanner.context.source_dir / ".gitleaks.toml").write_text('title = "repo"\n')
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
     monkeypatch.setattr(module, "active_scope", lambda: object())
 
     with caplog.at_level("INFO"):
-        chosen = scanner._resolve_config_file()
+        chosen = scanner._resolve_config_file(tmp_path)
 
-    assert chosen == repo_config.resolve()
+    assert chosen == (tmp_path / "ash-gitleaks-default-rules.toml").resolve()
+    assert chosen.read_text() == DEFAULT_RULES_CONFIG
     assert "not passed into the scanner sandbox" in caplog.text
-    assert "uses .gitleaks.toml from the scanned source directory" in caplog.text
+    assert ".gitleaks.toml in the scanned tree is not read" in caplog.text
+
+
+# --------------------------------------------------------------------------- #
+# The scanned tree's .gitleaksignore
+# --------------------------------------------------------------------------- #
+
+
+def _result(uri: str, rule: str, line: int) -> dict:
+    return {
+        "ruleId": rule,
+        "message": {"text": f"{rule} has detected secret"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri},
+                    "region": {"startLine": line, "snippet": {"text": "REDACTED"}},
+                }
+            }
+        ],
+    }
+
+
+def _report(*results: dict) -> dict:
+    return {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "gitleaks"}}, "results": list(results)}],
+    }
+
+
+def _rescan_harness(tmp_path, monkeypatch, per_file: dict, code: int = LEAKS_EXIT_CODE):
+    """A scanner whose re-scans write ``per_file[<scan path>]`` as their report."""
+    scanner = _scanner(tmp_path)
+    calls = []
+
+    def fake_run(command, results_dir=None, timeout=None, **kwargs):
+        calls.append(list(command))
+        report = next(
+            a.split("=", 1)[1] for a in command if a.startswith("--report-path=")
+        )
+        Path(report).write_text(json.dumps(_report(*per_file.get(command[-1], []))))
+        return {"returncode": code}
+
+    monkeypatch.setattr(scanner, "_run_subprocess", fake_run)
+    return scanner, calls
+
+
+def test_findings_the_trees_gitleaksignore_drops_are_added_back(tmp_path, monkeypatch):
+    kept = _result("app/settings.py", "aws-access-token", 5)
+    dropped = _result("app/settings.py", "github-pat", 4)
+    other = _result("docs/example.md", "github-pat", 5)
+    scanner, calls = _rescan_harness(
+        tmp_path,
+        monkeypatch,
+        {"app/settings.py": [kept, dropped], "docs/example.md": [other]},
+    )
+    source = Path(scanner.context.source_dir)
+    for name in ("app/settings.py", "docs/example.md"):
+        (source / name).parent.mkdir(parents=True, exist_ok=True)
+        (source / name).write_text("x")
+    (source / ".gitleaksignore").write_text(
+        "# a comment\n"
+        "app/settings.py:github-pat:4\n"
+        "docs/example.md:github-pat:5\n"
+        "0123abc:app/settings.py:github-pat:4\n"  # a git-scan fingerprint
+        "../outside.txt:github-pat:1\n"
+        "missing.py:github-pat:1\n"
+    )
+    (tmp_path / "outside.txt").write_text("x")
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    main_args = scanner._build_arguments(source, results_file)
+    raw = _report(kept)
+
+    scanner._add_back_gitleaksignore_drops(raw, source, main_args, results_file)
+
+    keys = {
+        (r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], r["ruleId"])
+        for r in raw["runs"][0]["results"]
+    }
+    assert keys == {
+        ("app/settings.py", "aws-access-token"),
+        ("app/settings.py", "github-pat"),
+        ("docs/example.md", "github-pat"),
+    }
+    # One run per named file inside the target, each with its own report, the same
+    # flags as the first run, and the file after "--".
+    assert [c[-2:] for c in calls] == [
+        ["--", "app/settings.py"],
+        ["--", "docs/example.md"],
+    ]
+    for call in calls:
+        assert call[:-1] != main_args[:-1]
+        assert [a for a in call if not a.startswith("--report-path=")][:-1] == [
+            a for a in main_args if not a.startswith("--report-path=")
+        ][:-1]
+
+
+def test_without_a_gitleaksignore_nothing_is_re_scanned(tmp_path, monkeypatch):
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    results_file = tmp_path / "gitleaks.sarif"
+    raw = _report()
+    scanner._add_back_gitleaksignore_drops(
+        raw, source, scanner._build_arguments(source, results_file), results_file
+    )
+    assert calls == [] and raw["runs"][0]["results"] == []
+
+
+@pytest.mark.parametrize("code", [1, 126])
+def test_a_failed_re_scan_fails_the_scan(tmp_path, monkeypatch, code):
+    """Reporting the first run alone would hide what the ignore file dropped."""
+    scanner, _ = _rescan_harness(tmp_path, monkeypatch, {}, code=code)
+    source = Path(scanner.context.source_dir)
+    (source / "a.py").write_text("x")
+    (source / ".gitleaksignore").write_text("a.py:github-pat:1\n")
+    results_file = tmp_path / "gitleaks.sarif"
+    with pytest.raises(ScannerError, match="re-scanning a.py"):
+        scanner._add_back_gitleaksignore_drops(
+            _report(),
+            source,
+            scanner._build_arguments(source, results_file),
+            results_file,
+        )

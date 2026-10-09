@@ -14,9 +14,9 @@ What is covered here and nowhere else:
 
 * the committed capture ``gitleaks-8.30.1.sarif`` still matches what the pinned
   binary writes for the fixture repo (materialized by ``tests/utils/gitleaks_fixture.py``), so the unit tests parse real output;
-* each negative in the fixture repo is a negative because of the allow mechanism
-  it claims (``.gitleaks.toml`` allowlist, ``.gitleaksignore`` fingerprint): with
-  the mechanism removed, the finding comes back;
+* the fixture repo's own ``.gitleaks.toml`` allowlist and ``.gitleaksignore``
+  fingerprint hide nothing from ASH, though gitleaks run on its own honors both
+  (the positive control), and an operator's config file still applies;
 * a full ``ash scan --scanners gitleaks`` -- CRITICAL findings, no secret value
   in any file ASH writes, ASH's output directory excluded, line-pinned and
   symbol-scoped suppressions, a broken config failing the run, and an
@@ -45,7 +45,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scan
     REDACTED,
     GitleaksScanner,
     GitleaksScannerConfig,
+    GitleaksScannerConfigOptions,
 )
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from tests.utils.gitleaks_fixture import TEMPLATE, fabricated_tokens, materialize
 
@@ -57,10 +59,25 @@ DATA = Path(__file__).parents[2] / "test_data" / "scanners" / "gitleaks"
 CAPTURED_SARIF = DATA / "gitleaks-8.30.1.sarif"
 PINNED = TOOL_VERSIONS["gitleaks"].lstrip("v")
 
+#: What gitleaks writes for the fixture with ASH's argv, which is the committed
+#: capture. The tree's .gitleaks.toml is not passed, so docs/example.md is in it;
+#: gitleaks applies the tree's root .gitleaksignore itself, so
+#: app/fingerprint_ignored.py is not.
 EXPECTED = {
     ("aws-access-token", "app/settings.py", 5),
     ("github-pat", "app/settings.py", 4),
+    ("github-pat", "docs/example.md", 5),
     ("slack-bot-token", "app/settings.py", 6),
+}
+
+#: What ASH reports: the above plus the finding ASH's re-scan adds back past the
+#: tree's .gitleaksignore. Only inline_allowed.py's gitleaks:allow still hides one.
+REPORTED = EXPECTED | {("github-pat", "app/fingerprint_ignored.py", 2)}
+
+#: The two findings the fixture repo's own gitleaks config hides from gitleaks.
+HIDDEN_BY_THE_TREE = {
+    ("github-pat", "docs/example.md", 5),
+    ("github-pat", "app/fingerprint_ignored.py", 2),
 }
 
 
@@ -127,15 +144,21 @@ def _copy_fixture(tmp_path: Path) -> Path:
     return materialize(tmp_path / "src")
 
 
-def _scan_direct(source: Path, output: Path):
+def _scan_direct(source: Path, output: Path, **options):
+    """Scan with ``options`` set by the operator (a config outside the tree)."""
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
     context = PluginContext(
         source_dir=source,
         output_dir=output,
         work_dir=output / "converted",
-        config=AshConfig(),
+        config=config,
     )
     scanner = GitleaksScanner(
-        context=context, config=GitleaksScannerConfig(enabled=True)
+        context=context,
+        config=GitleaksScannerConfig(
+            enabled=True, options=GitleaksScannerConfigOptions(**options)
+        ),
     )
     report = scanner.scan(target=source, target_type="source")
     return scanner, report
@@ -186,7 +209,7 @@ def test_the_committed_capture_matches_the_pinned_binary(tmp_path, path_with_git
     assert [r["id"] for r in written["runs"][0]["tool"]["driver"]["rules"]] == [
         r["id"] for r in captured["runs"][0]["tool"]["driver"]["rules"]
     ]
-    assert _findings(report) == EXPECTED
+    assert _findings(report) == REPORTED
 
 
 def test_a_clean_tree_exits_zero_with_no_findings(tmp_path, path_with_gitleaks):
@@ -198,22 +221,43 @@ def test_a_clean_tree_exits_zero_with_no_findings(tmp_path, path_with_gitleaks):
     assert _findings(report) == set()
 
 
-@pytest.mark.parametrize(
-    "remove, reappears",
-    [
-        (".gitleaks.toml", ("github-pat", "docs/example.md", 5)),
-        (".gitleaksignore", ("github-pat", "app/fingerprint_ignored.py", 2)),
-    ],
-)
-def test_each_negative_is_negative_because_of_its_allow_mechanism(
-    tmp_path, path_with_gitleaks, remove, reappears
+def test_the_trees_own_gitleaks_config_and_ignore_file_hide_nothing(
+    tmp_path, path_with_gitleaks
 ):
     source = _copy_fixture(tmp_path)
-    _, report = _scan_direct(source, tmp_path / "out-with")
-    assert reappears not in _findings(report)
-    (source / remove).unlink()
-    _, report = _scan_direct(source, tmp_path / "out-without")
-    assert reappears in _findings(report)
+    # The positive control: gitleaks left to its own discovery honors both files.
+    plain = tmp_path / "plain.sarif"
+    subprocess.run(
+        [
+            "gitleaks",
+            "dir",
+            "--report-format=sarif",
+            f"--report-path={plain}",
+            "--exit-code=0",
+            "--no-banner",
+            ".",
+        ],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    hidden_by_gitleaks = HIDDEN_BY_THE_TREE - _raw_findings(
+        json.loads(plain.read_text(encoding="utf-8"))
+    )
+    assert hidden_by_gitleaks == HIDDEN_BY_THE_TREE
+
+    _, report = _scan_direct(source, tmp_path / "out")
+    assert HIDDEN_BY_THE_TREE <= _findings(report)
+
+
+def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
+    source = _copy_fixture(tmp_path)
+    operator_config = tmp_path / "operator.toml"
+    shutil.copy(source / ".gitleaks.toml", operator_config)
+    _, report = _scan_direct(source, tmp_path / "out", config_file=str(operator_config))
+    assert ("github-pat", "docs/example.md", 5) not in _findings(report)
+    assert ("github-pat", "app/settings.py", 4) in _findings(report)
 
 
 def test_the_inline_allow_comment_is_what_hides_its_finding(
@@ -229,15 +273,16 @@ def test_the_inline_allow_comment_is_what_hides_its_finding(
     assert ("github-pat", "app/inline_allowed.py", 2) in _findings(report)
 
 
-def test_an_unparseable_config_fails_rather_than_reports_clean(
+def test_an_unparseable_operator_config_fails_rather_than_reports_clean(
     tmp_path, path_with_gitleaks
 ):
     from automated_security_helper.core.exceptions import ScannerError
 
     source = _copy_fixture(tmp_path)
-    (source / ".gitleaks.toml").write_text("this is [ not toml\n", encoding="utf-8")
+    broken = tmp_path / "broken.toml"
+    broken.write_text("this is [ not toml\n", encoding="utf-8")
     with pytest.raises(ScannerError, match="gitleaks exited 1"):
-        _scan_direct(source, tmp_path / "out")
+        _scan_direct(source, tmp_path / "out", config_file=str(broken))
 
 
 def test_no_network_is_needed(tmp_path, path_with_gitleaks, monkeypatch):
@@ -249,7 +294,7 @@ def test_no_network_is_needed(tmp_path, path_with_gitleaks, monkeypatch):
     source = _copy_fixture(tmp_path)
     scanner, report = _scan_direct(source, tmp_path / "out")
     assert scanner.exit_code == 2
-    assert _findings(report) == EXPECTED
+    assert _findings(report) == REPORTED
 
 
 # --------------------------------------------------------------------------- #
@@ -340,7 +385,7 @@ def test_ash_scan_reports_critical_findings_and_writes_no_secret(
             r["locations"][0]["physicalLocation"]["region"]["startLine"],
         )
         for r in results
-    } == EXPECTED, log
+    } == REPORTED, log
     assert {r["level"] for r in results} == {"error"}, log
     assert all(
         r["locations"][0]["physicalLocation"]["region"]["snippet"]["text"] == REDACTED
@@ -359,7 +404,7 @@ def test_ash_scan_reports_critical_findings_and_writes_no_secret(
 
     row = _gitleaks_row(output)
     assert row.get("status") == "FAILED", row
-    assert row.get("severity_counts", {}).get("critical") == len(EXPECTED), row
+    assert row.get("severity_counts", {}).get("critical") == len(REPORTED), row
 
     # No file ASH wrote holds a fixture secret. The stale copy planted above is
     # the one exception, so it is excluded by name -- and it is a positive
@@ -399,15 +444,20 @@ def test_ash_suppressions_apply_to_gitleaks_findings(tmp_path, gitleaks_bin_dir)
     assert proc.returncode == 0, log
     sarif = json.loads((output / "reports" / "ash.sarif").read_text(encoding="utf-8"))
     state = {
-        r["ruleId"]: bool(r.get("suppressions"))
+        (
+            r["ruleId"],
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+        ): bool(r.get("suppressions"))
         for run in sarif["runs"]
         for r in run.get("results", [])
         if "gitleaks" in (r.get("properties", {}).get("tags") or [])
     }
     assert state == {
-        "github-pat": True,
-        "aws-access-token": False,
-        "slack-bot-token": False,
+        ("github-pat", "app/settings.py"): True,
+        ("github-pat", "docs/example.md"): False,
+        ("github-pat", "app/fingerprint_ignored.py"): False,
+        ("aws-access-token", "app/settings.py"): False,
+        ("slack-bot-token", "app/settings.py"): False,
     }, log
 
 

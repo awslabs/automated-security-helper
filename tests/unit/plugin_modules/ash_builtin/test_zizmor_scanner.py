@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
@@ -38,6 +39,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanne
     version_satisfies,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.config_trust import record_provenance
 
 FIXTURE_ROOT = Path(__file__).parents[3] / "test_data" / "scanners" / "zizmor"
 CAPTURED_SARIF = FIXTURE_ROOT / "zizmor-1.30.1.sarif"
@@ -113,13 +115,24 @@ def repo(tmp_path) -> Path:
     return target
 
 
-def _scanner(source_dir: Path, **options) -> ZizmorScanner:
+def _scanner(
+    source_dir: Path, *, operator: bool | None = None, **options
+) -> ZizmorScanner:
+    """``operator``: the options came from the operator (True), the scanned tree
+    (False), or a config with no recorded provenance (None, counted as the tree's)."""
     output_dir = source_dir / ".ash" / "ash_output"
+    config = get_default_config()
+    if operator is not None:
+        record_provenance(
+            config,
+            in_tree=[] if operator else [source_dir / ".ash" / ".ash.yaml"],
+            trusted=AshConfig(),
+        )
     context = PluginContext(
         source_dir=source_dir,
         output_dir=output_dir,
         work_dir=output_dir / "converted",
-        config=get_default_config(),
+        config=config,
     )
     return ZizmorScanner(
         context=context,
@@ -373,15 +386,43 @@ def test_ash_offline_mode_overrides_online_audits(repo, monkeypatch):
     assert "GITHUB_TOKEN" not in env
 
 
-def test_config_file_is_passed_resolved_and_a_missing_one_fails(repo):
+def test_an_operator_config_file_is_passed_resolved_and_a_missing_one_fails(repo):
     (repo / "zizmor-ci.yml").write_text("rules: {}\n")
-    final_args, _, _ = _argv_and_env(_scanner(repo, config_file="zizmor-ci.yml"), repo)
-    assert f"--config={(repo / 'zizmor-ci.yml').resolve().as_posix()}" in final_args
-    assert final_args.index(
-        f"--config={(repo / 'zizmor-ci.yml').resolve().as_posix()}"
-    ) < final_args.index("--")
+    final_args, _, _ = _argv_and_env(
+        _scanner(repo, operator=True, config_file="zizmor-ci.yml"), repo
+    )
+    config = f"--config={(repo / 'zizmor-ci.yml').resolve().as_posix()}"
+    assert config in final_args
+    assert final_args.index(config) < final_args.index("--")
+    assert "--no-config" not in final_args
     with pytest.raises(FileNotFoundError, match="does-not-exist.yml"):
-        _argv_and_env(_scanner(repo, config_file="does-not-exist.yml"), repo)
+        _argv_and_env(
+            _scanner(repo, operator=True, config_file="does-not-exist.yml"), repo
+        )
+
+
+@pytest.mark.parametrize("operator", [False, None])
+def test_a_config_file_from_the_scanned_tree_is_ignored(repo, caplog, operator):
+    (repo / "zizmor-ci.yml").write_text("rules: {}\n")
+    with caplog.at_level("WARNING"):
+        final_args, _, _ = _argv_and_env(
+            _scanner(repo, operator=operator, config_file="zizmor-ci.yml"), repo
+        )
+    separator = final_args.index("--")
+    assert "--no-config" in final_args[:separator]
+    assert not any(a.startswith("--config") for a in final_args[:separator])
+    assert "scanners.zizmor.options.config_file" in caplog.text
+
+
+@pytest.mark.parametrize("name", ["zizmor.yml", ".github/zizmor.yml"])
+def test_without_an_operator_config_zizmor_reads_none(repo, caplog, name):
+    """zizmor would discover the tree's own config next to its inputs."""
+    (repo / name).parent.mkdir(parents=True, exist_ok=True)
+    (repo / name).write_text("rules:\n  template-injection:\n    disable: true\n")
+    with caplog.at_level("INFO"):
+        final_args, _, _ = _argv_and_env(_scanner(repo), repo)
+    assert "--no-config" in final_args[: final_args.index("--")]
+    assert f"{name} in the scanned tree is not read" in caplog.text
 
 
 def test_a_path_that_looks_like_a_flag_stays_an_input(repo):

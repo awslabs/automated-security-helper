@@ -38,15 +38,12 @@ scanners:
 
 ### `config_file`
 
-ASH always hands actionlint an explicit `-config-file`:
+ASH always hands actionlint an explicit `-config-file`, and it is never the scanned repository's own:
 
-1. `options.config_file`, if set. A path that does not exist fails the scan with `ERROR`.
-2. Otherwise `.github/actionlint.yaml` or `.github/actionlint.yml` directly under the scan root.
-3. Otherwise an empty config ASH writes into its own results directory.
+1. `options.config_file`, when the operator set it: from `--config-overrides`, or an ASH config file outside the scanned tree. A path that does not exist fails the scan with `ERROR`.
+2. Otherwise an empty config ASH writes into its own results directory.
 
-actionlint's own discovery walks up to the nearest `.git` directory, so whether a config applied used to depend on whether the checkout had a `.git` (often missing in container builds and archives), and a scan of a subdirectory could pick up a config from outside the scan root. The explicit file removes both.
-
-If the config has `paths.<glob>.ignore` patterns, actionlint drops matching findings before ASH sees them. ASH logs a warning naming the patterns. Prefer ASH suppressions, which are reported and tracked.
+A `.github/actionlint.yaml` or `.github/actionlint.yml` in the scanned repository is not read (ASH notes it at INFO), and `config_file` set by an ASH config inside the scanned tree is ignored with a warning. A config's `paths.<glob>.ignore` patterns make actionlint drop findings before ASH sees them, so they would be neither reported nor counted as suppressed. Tune findings with ASH suppressions, which are both. If the operator's config has `ignore` patterns, ASH logs a warning naming them.
 
 ### `shellcheck` and `pyflakes`
 

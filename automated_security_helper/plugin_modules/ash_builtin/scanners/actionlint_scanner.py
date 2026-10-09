@@ -49,17 +49,19 @@ Decisions, and why
    Whoever sets it, a program that resolves inside the scanned tree is
    refused. A refused value is logged and the integration stays off.
 
-3. The config file is always explicit. actionlint discovers
-   ``.github/actionlint.yaml`` by walking up to the nearest ``.git`` directory, so
-   whether a config applied depended on whether the checkout had a ``.git`` (it is
-   often absent in container builds and source archives), and a scan of a
-   subdirectory could read a config from outside the scan root. ASH passes
-   ``-config-file`` every time: ``options.config_file`` if set, else
-   ``.github/actionlint.yaml`` or ``.github/actionlint.yml`` directly under the scan
-   target, else an empty config ASH writes into its own results directory. An
-   explicitly configured file that does not exist is an error, not a silent
-   fallback. A config whose ``paths`` section has ``ignore`` patterns removes
-   findings before ASH sees them, so ASH logs a warning naming the patterns.
+3. The config file is always explicit, and it is never the scanned repository's.
+   actionlint discovers ``.github/actionlint.yaml`` by walking up to the nearest
+   ``.git`` directory, and a config's ``paths`` section can ``ignore`` findings,
+   which actionlint drops before ASH sees them: they are neither reported nor
+   counted as suppressed. So ASH passes ``-config-file`` every time: an empty config
+   it writes into its own results directory, unless the operator set
+   ``options.config_file`` (``--config-overrides`` or a config file outside the
+   scanned tree, ``utils/config_trust.py``). A ``config_file`` set by a config in
+   the scanned tree is ignored with a warning, and a ``.github/actionlint.yaml`` or
+   ``.github/actionlint.yml`` in the tree is ignored with a note; findings are tuned
+   with ASH suppressions, which are reported and counted. An operator's file that
+   does not exist is an error, not a silent fallback, and one whose ``paths``
+   section has ``ignore`` patterns is logged with the patterns.
 
 4. Output is JSON, converted to SARIF here. actionlint 1.7.12 has no built-in SARIF
    writer; its documentation points at a Go template in its test data. ASH asks for
@@ -211,7 +213,8 @@ _SEVERITY_TO_LEVEL: Dict[str, str] = {
     "LOW": "note",
 }
 
-#: Config files ASH looks for under the scan target, in this order.
+#: actionlint's own config names. ASH does not read them from the scanned tree
+#: (decision 3); it names them in the note it logs when one is present.
 _DEFAULT_CONFIG_CANDIDATES = (".github/actionlint.yaml", ".github/actionlint.yml")
 
 _WORKFLOW_SUFFIXES = (".yml", ".yaml")
@@ -413,9 +416,10 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "Path to an actionlint config file, relative to the source directory. "
-                "Defaults to .github/actionlint.yaml or .github/actionlint.yml under "
-                "the scan target, and to an empty config when neither exists. A path "
-                "set here that does not exist fails the scan."
+                "Honored only when set by --config-overrides or a config file outside "
+                "the scanned tree; otherwise actionlint runs with an empty config, and "
+                "a .github/actionlint.yaml in the scanned repository is not read. A "
+                "path set here that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -659,6 +663,19 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def _resolve_config_file(self, target: Path, results_dir: Path) -> Path:
         """The config file actionlint is given, always explicitly. See decision 3."""
         configured = self._options().config_file
+        context_config = self.context.config if self.context is not None else None
+        if configured and not set_by_operator(
+            context_config, "scanners.actionlint.options.config_file", configured
+        ):
+            self._plugin_log(
+                f"scanners.actionlint.options.config_file ({configured!r}) is set by "
+                "a config in the scanned tree, so it is ignored and actionlint runs "
+                "with an empty config. Set it with --config-overrides or a config "
+                "file outside the scanned tree, or tune findings with ASH "
+                "suppressions.",
+                level=logging.WARNING,
+            )
+            configured = None
         if configured:
             candidate = Path(configured)
             if not candidate.is_absolute():
@@ -669,15 +686,23 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     f"which does not exist (resolved to {candidate.as_posix()})."
                 )
             return candidate.absolute()
-        for name in _DEFAULT_CONFIG_CANDIDATES:
-            candidate = target / name
-            if candidate.is_file():
-                return candidate.absolute()
+        present = [
+            name for name in _DEFAULT_CONFIG_CANDIDATES if (target / name).is_file()
+        ]
+        if present:
+            self._plugin_log(
+                f"{', '.join(present)} in the scanned tree is not read: actionlint "
+                "runs with an empty config, so its findings are reported and tuned "
+                "with ASH suppressions. Set scanners.actionlint.options.config_file "
+                "with --config-overrides or a config file outside the scanned tree "
+                "to use an actionlint config.",
+                level=logging.INFO,
+            )
         empty = results_dir / "ash-default-actionlint.yaml"
         with open_for_write(empty) as handle:
             handle.write(
-                "# Written by ASH so actionlint does not discover a config outside "
-                "the scan root.\n"
+                "# Written by ASH so actionlint reads no config from the scanned "
+                "tree.\n"
             )
         return empty.absolute()
 

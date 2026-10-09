@@ -42,22 +42,40 @@ The table below shows findings by scanner, with status based on severity thresho
 
 | Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| gitleaks | 0 | 3 | 0 | 0 | 0 | 0 | 3 | FAILED | MEDIUM (global) |
+| gitleaks | 0 | 4 | 0 | 0 | 0 | 0 | 4 | FAILED | MEDIUM (global) |
 
-### Top 1 Hotspots
+### Top 2 Hotspots
 
 Files with the highest number of security findings:
 
 | Finding Count | File Location |
 | ---: | --- |
 | 3 | app/settings.py |
+| 1 | docs/example.md |
 
 <h2>Detailed Findings</h2>
 
 <details>
-<summary>Show 3 actionable findings</summary>
+<summary>Show 4 actionable findings</summary>
 
-### Finding 1: slack-bot-token
+### Finding 1: github-pat
+
+- **Severity**: HIGH
+- **Scanner**: gitleaks
+- **Rule ID**: github-pat
+- **Location**: docs/example.md:5
+
+**Description**:
+github-pat has detected secret for file docs/example.md.
+
+**Code Snippet**:
+```
+REDACTED
+```
+
+---
+
+### Finding 2: slack-bot-token
 
 - **Severity**: HIGH
 - **Scanner**: gitleaks
@@ -74,7 +92,7 @@ REDACTED
 
 ---
 
-### Finding 2: github-pat
+### Finding 3: github-pat
 
 - **Severity**: HIGH
 - **Scanner**: gitleaks
@@ -91,7 +109,7 @@ REDACTED
 
 ---
 
-### Finding 3: aws-access-token
+### Finding 4: aws-access-token
 
 - **Severity**: HIGH
 - **Scanner**: gitleaks

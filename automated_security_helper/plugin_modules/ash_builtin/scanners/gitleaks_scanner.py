@@ -29,22 +29,35 @@ Every invocation carries these flags, and none of them is configurable:
   apart, so 0 and 2 are success and 1 is a failure.
 * ``--no-banner``, ``--no-color``: the log goes to a file nobody reads in a
   terminal.
-* ``--gitleaks-ignore-path=<source dir>``: gitleaks reads ``.gitleaksignore``
-  from its working directory by default, which is the source directory for the
-  source scan and would be nothing useful for the converted one.
+* ``--gitleaks-ignore-path=<empty directory ASH writes>``: by default gitleaks
+  reads ``.gitleaksignore`` from its working directory, the source directory.
 
-Config resolution
------------------
-gitleaks' own order is ``--config``, then ``GITLEAKS_CONFIG``, then
-``GITLEAKS_CONFIG_TOML``, then ``<target>/.gitleaks.toml``, then its built-in
-rules. ASH keeps that order with one change: it looks for ``.gitleaks.toml`` in
-the SOURCE directory and passes it explicitly, so the converted target (which
-lives under the output directory) is scanned with the same rules as the source.
-When either environment variable is set nothing is discovered and gitleaks
-resolves it, so an operator who exported one still gets it. ``config_file`` wins
-over all of it, and a ``config_file`` that does not exist fails the scan rather
-than falling back to the default rules, which would scan with rules the operator
-did not ask for and report clean.
+The scanned repository's own gitleaks configuration is not used
+---------------------------------------------------------------
+A ``.gitleaks.toml`` can replace gitleaks' rules or allowlist any path, and a
+``.gitleaksignore`` or a baseline report drops findings by fingerprint. gitleaks
+applies all of them before ASH sees a result, so what they hide is neither
+reported nor counted as suppressed. Findings are tuned with ASH suppressions,
+which are both, so the scanned tree does not configure gitleaks:
+
+* The config is the operator's ``options.config_file`` (set by
+  ``--config-overrides`` or a config file outside the scanned tree,
+  ``utils/config_trust.py``), else ``GITLEAKS_CONFIG`` or ``GITLEAKS_CONFIG_TOML``
+  from the operator's environment (outside the scanner sandbox, which does not
+  pass them in), else a config ASH writes that extends gitleaks' default rules and
+  adds nothing. It is always passed as ``--config`` except in the environment
+  case, so gitleaks never falls through to ``<target>/.gitleaks.toml``. A
+  ``config_file`` or ``baseline_path`` set by a config in the scanned tree is
+  ignored with a warning, and a ``.gitleaks.toml`` or ``.ash/.gitleaks.toml`` in
+  the tree with a note. An operator's file that does not exist fails the scan
+  rather than falling back to the default rules.
+* ``.gitleaksignore``: gitleaks reads ``<scan path>/.gitleaksignore`` whatever
+  ``--gitleaks-ignore-path`` says, and has no flag to turn that off (measured on
+  8.30.1). When the scan root has one, ASH runs gitleaks again on each file it
+  names, one file per run (a single-file run reads no ``.gitleaksignore``, and
+  reports the same fingerprint form), and adds back every finding the first run
+  dropped. A failed re-run fails the scan rather than reporting the first run
+  alone. Inline ``gitleaks:allow`` comments still apply.
 
 Paths
 -----
@@ -77,12 +90,14 @@ credential of this kind is present", and an exposed credential is the same
 severity whichever provider issued it.
 """
 
+import json
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import (
@@ -102,7 +117,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.utils.config_trust import set_by_operator
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
 
@@ -112,13 +129,24 @@ REDACTED = "REDACTED"
 #: Exit code gitleaks is told to use when it finds leaks. See the module docstring.
 LEAKS_EXIT_CODE = 2
 
-#: Config files ASH looks for in the source directory, in order, when
-#: ``config_file`` is not set. ``.gitleaks.toml`` is gitleaks' own discovery name.
-DEFAULT_CONFIG_CANDIDATES = (".gitleaks.toml", ".ash/.gitleaks.toml")
+#: gitleaks config names a repository commits. ASH does not read them from the
+#: scanned tree; they are named only in the note logged when one is present.
+TREE_CONFIG_NAMES = (".gitleaks.toml", ".ash/.gitleaks.toml")
 
-#: Environment variables gitleaks reads a config from. When either is set ASH
-#: discovers nothing and lets gitleaks resolve it.
+#: Environment variables gitleaks reads a config from. When either is set, outside
+#: the scanner sandbox, ASH passes no ``--config`` and gitleaks resolves it.
 CONFIG_ENV_VARS = ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML")
+
+#: The ignore file gitleaks always reads at the root of its scan path.
+IGNORE_FILE_NAME = ".gitleaksignore"
+
+#: The config ASH passes when the operator chose none: gitleaks' default rules.
+DEFAULT_RULES_CONFIG = (
+    "# Written by ASH: gitleaks' default rules and nothing else, so no gitleaks\n"
+    "# config in the scanned tree is read.\n"
+    "[extend]\n"
+    "useDefault = true\n"
+)
 
 
 class GitleaksScannerConfigOptions(ScannerOptionsBase):
@@ -128,10 +156,11 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Path to a gitleaks TOML config, relative to the source directory. "
                 "Its rules and [[allowlists]] apply on top of ASH suppressions. "
-                "Defaults to `.gitleaks.toml`, then `.ash/.gitleaks.toml`, in the "
-                "source directory; when neither exists, or GITLEAKS_CONFIG or "
-                "GITLEAKS_CONFIG_TOML is set, gitleaks resolves its own config. A "
-                "path that does not exist fails the scan."
+                "Honored only when set by --config-overrides or a config file "
+                "outside the scanned tree. Unset, gitleaks uses GITLEAKS_CONFIG or "
+                "GITLEAKS_CONFIG_TOML from the environment if one is set, else its "
+                "default rules; a .gitleaks.toml in the scanned repository is not "
+                "read. A path that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -140,8 +169,9 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "Path to a gitleaks JSON report, relative to the source directory, "
-                "whose findings gitleaks ignores (gitleaks --baseline-path). A path "
-                "that does not exist fails the scan."
+                "whose findings gitleaks ignores (gitleaks --baseline-path). Honored "
+                "only when set by --config-overrides or a config file outside the "
+                "scanned tree. A path that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -176,6 +206,10 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # mounted: grants derived from the environment or options wait for the
     # sandbox's grant gates.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    # The target and argv of the run whose report _read_results_file reads next,
+    # for the .gitleaksignore re-scan. Set by _execute_scan.
+    _pending_run: Optional[Tuple[Path, List[str]]] = PrivateAttr(default=None)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -221,21 +255,43 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         return candidate.resolve()
 
-    def _resolve_config_file(self) -> Optional[Path]:
-        """The config to pass as ``--config``, or None to let gitleaks decide."""
-        options = self._options()
-        if options.config_file:
-            return self._resolve_option_path(options.config_file, "config_file")
+    def _set_by_operator(self, option: str, value: Any) -> bool:
+        config = self.context.config if self.context is not None else None
+        return set_by_operator(config, f"scanners.gitleaks.options.{option}", value)
+
+    def _operator_option_path(self, option: str) -> Optional[Path]:
+        """``option``'s path when the operator set it, else None (with a warning)."""
+        value = getattr(self._options(), option)
+        if not value:
+            return None
+        if not self._set_by_operator(option, value):
+            self._plugin_log(
+                f"scanners.gitleaks.options.{option} ({str(value)!r}) is set by a "
+                "config in the scanned tree, so it is ignored. Set it with "
+                "--config-overrides or a config file outside the scanned tree, or "
+                "tune findings with ASH suppressions.",
+                level=logging.WARNING,
+            )
+            return None
+        return self._resolve_option_path(value, option)
+
+    def _resolve_config_file(self, results_dir: Path) -> Optional[Path]:
+        """The config to pass as ``--config``; None leaves it to the environment.
+
+        See "The scanned repository's own gitleaks configuration is not used" in
+        the module docstring.
+        """
+        operator_config = self._operator_option_path("config_file")
+        if operator_config is not None:
+            return operator_config
         set_vars = [name for name in CONFIG_ENV_VARS if os.environ.get(name)]
         if set_vars and active_scope() is not None:
             # The sandbox does not pass these variables in (see
-            # sandbox_requirements), so gitleaks would not see them and would
-            # fall back to the scanned tree's .gitleaks.toml with nothing said.
-            # ASH's own discovery runs instead, and names what it picks.
+            # sandbox_requirements), so gitleaks would not see them.
             self._plugin_log(
                 f"{', '.join(set_vars)} is not passed into the scanner sandbox; "
-                "gitleaks uses the config ASH discovers instead. Set "
-                "scanners.gitleaks.options.config_file to choose one.",
+                "gitleaks uses its default rules instead. Set "
+                "scanners.gitleaks.options.config_file to choose a config.",
                 level=logging.WARNING,
             )
         elif set_vars:
@@ -243,18 +299,44 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 f"{', '.join(set_vars)} set; leaving gitleaks config resolution to gitleaks"
             )
             return None
-        for name in DEFAULT_CONFIG_CANDIDATES:
-            candidate = self._source_dir() / name
-            if candidate.is_file():
-                # Said at INFO because the file comes from the tree under scan and
-                # can narrow or replace gitleaks' rules; options.config_file is how
-                # an operator who does not trust that tree takes the choice back.
-                ASH_LOGGER.info(
-                    f"gitleaks uses {name} from the scanned source directory; set "
-                    "scanners.gitleaks.options.config_file to use a config you control"
-                )
-                return candidate.resolve()
-        return None
+        present = [n for n in TREE_CONFIG_NAMES if (self._source_dir() / n).is_file()]
+        if present:
+            self._plugin_log(
+                f"{', '.join(present)} in the scanned tree is not read: gitleaks runs "
+                "with its default rules, so its findings are reported and tuned "
+                "with ASH suppressions. Set scanners.gitleaks.options.config_file "
+                "with --config-overrides or a config file outside the scanned tree "
+                "to use a gitleaks config.",
+                level=logging.INFO,
+            )
+        default_rules = results_dir / "ash-gitleaks-default-rules.toml"
+        with open_for_write(default_rules) as handle:
+            handle.write(DEFAULT_RULES_CONFIG)
+        return default_rules.resolve()
+
+    def _empty_ignore_dir(self, results_dir: Path) -> Path:
+        """A directory with no ``.gitleaksignore``, for ``--gitleaks-ignore-path``."""
+        empty = results_dir / "ash-no-gitleaksignore"
+        if empty.is_symlink() or empty.is_file():
+            empty.unlink()
+        elif empty.is_dir():
+            for child in empty.iterdir():
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        empty.mkdir(parents=True, exist_ok=True)
+        return empty.resolve()
+
+    def _scan_path(self, target: Path) -> str:
+        """The path gitleaks is given: ``.`` for the source, absolute otherwise.
+
+        The source target as "." from the source directory (the subprocess cwd),
+        so reported paths are source-relative; see the module docstring.
+        """
+        if Path(target).absolute() == self._source_dir().absolute():
+            return "."
+        return Path(target).absolute().as_posix()
 
     def _build_arguments(self, target: Path, results_file: Path) -> List[str]:
         """The full gitleaks argv for one target.
@@ -263,7 +345,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         ``--``, so no path or config value can be read as a flag.
         """
         options = self._options()
-        source_dir = self._source_dir()
+        results_dir = results_file.parent
         args: List[str] = [
             self.command or "gitleaks",
             *self.subcommands,
@@ -273,24 +355,17 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             f"--exit-code={LEAKS_EXIT_CODE}",
             "--no-banner",
             "--no-color",
-            f"--gitleaks-ignore-path={source_dir.as_posix()}",
+            f"--gitleaks-ignore-path={self._empty_ignore_dir(results_dir).as_posix()}",
         ]
-        config_file = self._resolve_config_file()
+        config_file = self._resolve_config_file(results_dir)
         if config_file is not None:
             args.append(f"--config={config_file.as_posix()}")
-        if options.baseline_path:
-            baseline = self._resolve_option_path(options.baseline_path, "baseline_path")
+        baseline = self._operator_option_path("baseline_path")
+        if baseline is not None:
             args.append(f"--baseline-path={baseline.as_posix()}")
         if options.max_target_megabytes:
             args.append(f"--max-target-megabytes={int(options.max_target_megabytes)}")
-
-        # The source target as "." from the source directory (the subprocess
-        # cwd), so reported paths are source-relative; see the module docstring.
-        if Path(target).absolute() == source_dir.absolute():
-            scan_path = "."
-        else:
-            scan_path = Path(target).absolute().as_posix()
-        args.extend(["--", scan_path])
+        args.extend(["--", self._scan_path(target)])
         return args
 
     def _execute_scan(
@@ -313,6 +388,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         # is at this path.
         results_file.unlink(missing_ok=True)
         final_args = self._build_arguments(target, results_file)
+        self._pending_run = (Path(target), list(final_args))
         self._plugin_log(
             f"Running: {' '.join(final_args)}",
             target_type=target_type,
@@ -327,13 +403,133 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         outside 0 and 2 is not one gitleaks documents. Raised before reading so
         a partial report cannot pass as a complete one.
         """
+        pending, self._pending_run = self._pending_run, None
         if self.exit_code not in self.success_exit_codes:
             raise ScannerError(
                 f"gitleaks exited {self.exit_code}; it exits 0 when it finds "
                 f"nothing and {LEAKS_EXIT_CODE} when it finds leaks, so this run "
                 "failed"
             )
-        return super()._read_results_file(results_file)
+        raw = super()._read_results_file(results_file)
+        if raw is not None and pending is not None:
+            target, final_args = pending
+            self._add_back_gitleaksignore_drops(raw, target, final_args, results_file)
+        return raw
+
+    def _gitleaksignore_files(self, target: Path) -> List[str]:
+        """The files ``<target>/.gitleaksignore`` names, spelled as gitleaks reports them.
+
+        A dir-scan fingerprint is ``<file>:<rule id>:<line>``. Entries in another
+        form (a git-scan fingerprint starts with a commit), and files that are not
+        inside the target, are left out: gitleaks could not have matched them.
+        """
+        ignore_file = Path(target) / IGNORE_FILE_NAME
+        if not ignore_file.is_file():
+            return []
+        root = Path(target).resolve()
+        names = set()
+        text = ignore_file.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            parts = entry.rsplit(":", 2)
+            if len(parts) != 3 or not parts[0]:
+                continue
+            name = parts[0]
+            candidate = Path(name) if Path(name).is_absolute() else root / name
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if resolved.is_file() and resolved.is_relative_to(root):
+                names.add(name)
+        return sorted(names)
+
+    def _add_back_gitleaksignore_drops(
+        self,
+        raw: Dict[str, Any],
+        target: Path,
+        final_args: List[str],
+        results_file: Path,
+    ) -> None:
+        """Re-scan each file the tree's ``.gitleaksignore`` names, one per run.
+
+        gitleaks reads ``<scan path>/.gitleaksignore`` whatever ASH passes, so the
+        run whose report is ``raw`` may have dropped findings by fingerprint. A run
+        over a single file reads no ``.gitleaksignore`` and reports the same
+        fingerprint form, so its findings that ``raw`` lacks are the dropped ones,
+        and they are appended to ``raw``. See the module docstring.
+        """
+        names = self._gitleaksignore_files(target)
+        if not names:
+            return
+        runs = raw.get("runs") or []
+        if not runs:
+            return
+        results = runs[0].setdefault("results", None) or []
+        runs[0]["results"] = results
+
+        def key(result: Dict[str, Any]) -> Tuple[Any, ...]:
+            location = ((result.get("locations") or [{}])[0]).get(
+                "physicalLocation", {}
+            )
+            return (
+                (location.get("artifactLocation") or {}).get("uri"),
+                result.get("ruleId"),
+                (location.get("region") or {}).get("startLine"),
+            )
+
+        seen = {key(result) for result in results}
+        rescan_dir = results_file.parent / "gitleaksignore-rescan"
+        if rescan_dir.is_symlink() or rescan_dir.is_file():
+            rescan_dir.unlink()
+        elif rescan_dir.is_dir():
+            shutil.rmtree(rescan_dir)
+        rescan_dir.mkdir(parents=True)
+        added = 0
+        for index, name in enumerate(names):
+            report = rescan_dir / f"{index}.sarif"
+            args = [
+                f"--report-path={report.as_posix()}"
+                if arg.startswith("--report-path=")
+                else arg
+                for arg in final_args[:-1]
+            ] + [name]
+            exit_code = self.exit_code
+            response = self._run_subprocess(
+                command=args,
+                results_dir=rescan_dir,
+                timeout=self._effective_scan_timeout(),
+            )
+            self.exit_code = exit_code
+            code = response.get("returncode", 1) if isinstance(response, dict) else 1
+            if (
+                not isinstance(response, dict)
+                or response.get("timed_out")
+                or response.get("spawn_failed")
+                or code not in self.success_exit_codes
+                or not report.is_file()
+            ):
+                raise ScannerError(
+                    f"gitleaks failed re-scanning {name}, which the scanned tree's "
+                    f"{IGNORE_FILE_NAME} names (exit {code}); without that run the "
+                    "findings the file hides would go unreported"
+                )
+            data = json.loads(report.read_text(encoding="utf-8") or "{}")
+            for run in data.get("runs") or []:
+                for result in run.get("results") or []:
+                    if key(result) not in seen:
+                        seen.add(key(result))
+                        results.append(result)
+                        added += 1
+        self._plugin_log(
+            f"The scanned tree's {IGNORE_FILE_NAME} names {len(names)} file(s). "
+            "gitleaks applies it at the scan root whatever ASH passes, so ASH "
+            f"re-scanned those files and reports the {added} finding(s) it dropped. "
+            "Tune findings with ASH suppressions, which are reported and counted.",
+            level=logging.INFO,
+        )
 
     def _post_process_sarif(
         self,

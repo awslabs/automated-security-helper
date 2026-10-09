@@ -37,9 +37,20 @@ mode (``ASH_OFFLINE``) overrides ``online_audits``.
 
 ``ZIZMOR_CONFIG``, ``ZIZMOR_OFFLINE`` and ``ZIZMOR_NO_ONLINE_AUDITS`` are
 removed too, so the result of a scan depends on the repository and the ASH
-config, not on stray variables in the caller's shell. Use
-``options.config_file`` for a config outside the repository; a ``zizmor.yml``
-or ``.github/zizmor.yml`` inside it is discovered by zizmor as usual.
+config, not on stray variables in the caller's shell.
+
+Configuration
+-------------
+zizmor discovers ``zizmor.yml`` or ``.github/zizmor.yml`` next to its inputs (not
+in its working directory, measured on 1.30.1), and a config there can disable
+audits or ignore findings, which zizmor then never reports: they are neither in
+ASH's results nor counted as suppressed. ASH passes ``--no-config`` unless the
+operator set ``options.config_file`` (``--config-overrides`` or a config file
+outside the scanned tree, ``utils/config_trust.py``), in which case that file is
+passed as ``--config``. A ``config_file`` set by a config in the scanned tree is
+ignored with a warning, and a ``zizmor.yml`` in the tree with a note; findings are
+tuned with ASH suppressions, which are reported and counted. zizmor's inline
+``# zizmor: ignore[...]`` comments still apply.
 
 Severity mapping
 ----------------
@@ -106,6 +117,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     SarifReport,
 )
+from automated_security_helper.utils.config_trust import set_by_operator
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.pre_installed_tool import (
@@ -331,6 +343,11 @@ def _verbatim_path(location: Location) -> Optional[str]:
     return None
 
 
+#: The config names zizmor discovers next to its inputs. ASH does not let it read
+#: them from the scanned tree; they are named only in the note logged when present.
+_ZIZMOR_CONFIG_NAMES = ("zizmor.yml", ".github/zizmor.yml")
+
+
 class ZizmorScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
@@ -338,8 +355,10 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Path to a zizmor configuration file, passed as `--config`. "
                 "Relative paths are resolved against the source directory; "
-                "absolute paths are used as given. When unset, zizmor discovers "
-                "`zizmor.yml` or `.github/zizmor.yml` in the repository itself."
+                "absolute paths are used as given. Honored only when set by "
+                "--config-overrides or a config file outside the scanned tree; "
+                "otherwise zizmor runs with `--no-config`, so a `zizmor.yml` or "
+                "`.github/zizmor.yml` in the scanned repository is not read."
             ),
         ),
     ] = None
@@ -660,9 +679,39 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         return path.as_posix()
 
     def _config_file_argument(self) -> Optional[str]:
+        """The operator's ``--config`` file, or None for ``--no-config``.
+
+        See "Configuration" in the module docstring.
+        """
         configured = self._options.config_file
-        if configured is None or str(configured).strip() == "":
-            return None
+        if configured is not None and str(configured).strip() != "":
+            if set_by_operator(
+                self._plugin_context.config,
+                "scanners.zizmor.options.config_file",
+                configured,
+            ):
+                return self._resolve_config_file(configured)
+            self._plugin_log(
+                f"scanners.zizmor.options.config_file ({str(configured)!r}) is set "
+                "by a config in the scanned tree, so it is ignored and zizmor runs "
+                "with --no-config. Set it with --config-overrides or a config file "
+                "outside the scanned tree, or tune findings with ASH suppressions.",
+                level=logging.WARNING,
+            )
+        source = Path(self._plugin_context.source_dir)
+        present = [n for n in _ZIZMOR_CONFIG_NAMES if (source / n).is_file()]
+        if present:
+            self._plugin_log(
+                f"{', '.join(present)} in the scanned tree is not read: zizmor runs "
+                "with --no-config, so its findings are reported and tuned with ASH "
+                "suppressions. Set scanners.zizmor.options.config_file with "
+                "--config-overrides or a config file outside the scanned tree to "
+                "use a zizmor config.",
+                level=logging.INFO,
+            )
+        return None
+
+    def _resolve_config_file(self, configured: Path | str) -> str:
         candidate = Path(configured)
         if not candidate.is_absolute():
             candidate = Path(self._plugin_context.source_dir) / candidate
@@ -785,6 +834,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         config_file = self._config_file_argument()
         if config_file is not None:
             final_args.append(f"--config={config_file}")
+        else:
+            final_args.append("--no-config")
         # "--" so an input whose path starts with "-" is never read as a flag.
         final_args.append("--")
         final_args.extend(self._input_argument(path) for path in inputs)
