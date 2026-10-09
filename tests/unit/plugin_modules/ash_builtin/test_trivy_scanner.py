@@ -1206,6 +1206,23 @@ def test_a_tree_set_trivy_config_does_not_reach_the_update(tmp_path, monkeypatch
     assert Path(_value(update, "--config")).name == "empty-config.yaml"
 
 
+def test_only_the_hosts_environment_chooses_the_updates_cache(tmp_path, monkeypatch):
+    """The update runs unsandboxed: a TRIVY_CACHE_DIR a scanner layers on is ignored."""
+    fake = _FakeTrivy()
+    _update_env(tmp_path, monkeypatch, fake)  # host TRIVY_CACHE_DIR = trivy-cache
+    scanner = _scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_CACHE_DIR": str(tmp_path / "steered")}
+
+    scanner._run_subprocess(
+        command=["trivy", "fs", "/t"],
+        results_dir=tmp_path,
+        env={"TRIVY_CACHE_DIR": str(tmp_path / "steered")},
+    )
+
+    (update,) = fake.calls
+    assert Path(_value(update, "--cache-dir")) == (tmp_path / "trivy-cache").absolute()
+
+
 def test_two_concurrent_scanners_never_update_at_the_same_time(tmp_path, monkeypatch):
     fake = _FakeTrivy(hold=0.2)
     _update_env(tmp_path, monkeypatch, fake)

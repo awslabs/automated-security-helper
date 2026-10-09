@@ -140,9 +140,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
-    # Env vars layered onto the subprocess. Populated by _process_config_options
-    # when offline mode is active. Kept on the instance so concurrent scanners
-    # do not race on os.environ.
+    # Env vars ASH layers onto trivy's subprocess, kept on the instance so
+    # concurrent scanners do not race on os.environ. Nothing fills it from config;
+    # the database update reads only the host's environment (_shared_update_flags).
     extra_env: Annotated[Dict[str, str], Field(default_factory=dict)]
 
     # The in-tree trivy input files already reported as ignored.
@@ -248,15 +248,13 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         there. The scan cache only saves re-analysing an unchanged target, so
         results are the same either way.
         """
-        flags = self._shared_update_flags(command, kwargs.get("env"))
+        flags = self._shared_update_flags(command)
         if not any(a.startswith("--cache-backend") for a in command):
             flags.append("--cache-backend=memory")
         command[2:2] = flags
         return super()._run_subprocess(command, *args, **kwargs)
 
-    def _shared_update_flags(
-        self, command: List[str], env: Optional[Dict[str, str]]
-    ) -> List[str]:
+    def _shared_update_flags(self, command: List[str]) -> List[str]:
         """Update trivy's database (and checks bundle) once, then skip it in the scan.
 
         Why: trivy and trivy-repo run concurrently and share trivy's cache. Each
@@ -288,7 +286,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             return []
         options: Any = self.config.options  # type: ignore[union-attr]
         wants_checks = "misconfig" in (options.scanners or [])
-        cache = default_cache_dir("trivy", env or snapshot_environ())
+        # From the host's environment only: the update runs unsandboxed, so nothing
+        # a scanner layers on (extra_env) may choose where it writes.
+        cache = default_cache_dir("trivy", snapshot_environ())
         # The operator's trivy.yaml, under the rule the scan's --config follows,
         # so a database mirror it names applies to the update; otherwise the
         # update gets an empty config of its own.
