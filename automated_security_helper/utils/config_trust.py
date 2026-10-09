@@ -215,3 +215,54 @@ def scan_root(config: Any, source_dir: PathLike) -> Path:
     ``source_dir``, as ``path_trust.honored_path`` decides it.
     """
     return Path(getattr(config, "_scanned_root", None) or source_dir)
+
+
+#: Why ``operator_path`` refused a value the operator did not set.
+NOT_THE_OPERATORS = (
+    "it came from a config file in the scanned tree or from an MCP client; set it "
+    "with --config-overrides or a config file outside the tree"
+)
+
+#: Why ``operator_path`` refused a path inside the scanned tree.
+INSIDE_THE_TREE = "it is inside the scanned tree"
+
+
+@dataclass(frozen=True)
+class OperatorPath:
+    """The outcome of ``operator_path``: the path to use, or why there is none."""
+
+    path: Optional[Path]
+    refusal: Optional[str] = None
+
+
+def operator_path(
+    config: Any,
+    key: str,
+    value: Any,
+    source_dir: PathLike,
+    *,
+    outside_tree: bool = True,
+) -> OperatorPath:
+    """``value`` as the path a tool will read, when the operator chose it.
+
+    The one rule for a scanner option that names a file a tool reads as its own
+    configuration: used only when ``set_by_operator`` accepts ``value`` for ``key``
+    and, with ``outside_tree``, when it resolves outside the scanned tree
+    (``config/path_trust.in_scanned_tree``, from ``scan_root``). The path returned
+    is ``path_trust.resolved_path`` of ``value`` (``~`` expanded, relative to
+    ``source_dir``, symlinks and ``..`` resolved), the same path that was checked,
+    so a caller hands the tool exactly that and nothing rebuilt from ``value``.
+    Whether the file exists is left to the caller, which knows whether a missing
+    one should fail the scan.
+    """
+    from automated_security_helper.config.path_trust import (
+        in_scanned_tree,
+        resolved_path,
+    )
+
+    candidate = resolved_path(value, Path(source_dir))
+    if not set_by_operator(config, key, value):
+        return OperatorPath(None, NOT_THE_OPERATORS)
+    if outside_tree and in_scanned_tree(candidate, scan_root(config, source_dir)):
+        return OperatorPath(None, INSIDE_THE_TREE)
+    return OperatorPath(candidate)

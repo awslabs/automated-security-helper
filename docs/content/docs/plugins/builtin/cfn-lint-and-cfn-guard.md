@@ -147,6 +147,8 @@ scanners:
 
 An unknown rule-set name is reported with the list of available names.
 
+`rules_paths` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning. cfn-guard prints a rules file it cannot parse, all of it, in its error, so a path the scanned repository chose could otherwise put any file the scan can read into the report.
+
 #### Why the rules are not age-checked
 
 ASH holds downloaded content databases (grype's and trivy's vulnerability databases, the offline semgrep and opengrep rulesets) to a maximum age, because those are fetched at build or scan time and can go stale silently. The Guard rules are not declared there. They are a fixed release archive pinned by digest, like the policies inside the pinned checkov package: they change only when ASH changes the pin, and an age bound would measure how recently the same bytes were copied rather than how current the rules are. Release 1.0.2 is the newest the registry has published.

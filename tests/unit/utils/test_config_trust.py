@@ -238,3 +238,67 @@ def test_the_scanners_context_carries_the_overrides(repo):
         set_by_operator(context.config, "scanners.actionlint.options.pyflakes", "x")
         is False
     )
+
+
+# --------------------------------------------------------------------------- #
+# operator_path: the one rule for an option that names a tool's config file
+# --------------------------------------------------------------------------- #
+
+
+def _operator_path_case(tmp_path, *, operator: bool):
+    from automated_security_helper.utils.config_trust import record_provenance
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    config = AshConfig()
+    record_provenance(
+        config,
+        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+    )
+    return repo, config
+
+
+def test_operator_path_refuses_a_value_the_operator_did_not_set(tmp_path):
+    from automated_security_helper.utils.config_trust import (
+        NOT_THE_OPERATORS,
+        operator_path,
+    )
+
+    repo, config = _operator_path_case(tmp_path, operator=False)
+    outside = tmp_path / "elsewhere.yaml"
+    outside.write_text("", encoding="utf-8")
+    chosen = operator_path(config, "scanners.x.options.config_file", str(outside), repo)
+    assert chosen.path is None and chosen.refusal == NOT_THE_OPERATORS
+
+
+def test_operator_path_refuses_the_tree_unless_told_not_to(tmp_path):
+    from automated_security_helper.utils.config_trust import (
+        INSIDE_THE_TREE,
+        operator_path,
+    )
+
+    repo, config = _operator_path_case(tmp_path, operator=True)
+    inside = repo / "tool.yaml"
+    inside.write_text("", encoding="utf-8")
+    refused = operator_path(config, "scanners.x.options.config_file", "tool.yaml", repo)
+    assert refused.path is None and refused.refusal == INSIDE_THE_TREE
+    allowed = operator_path(
+        config, "scanners.x.options.config_file", "tool.yaml", repo, outside_tree=False
+    )
+    assert allowed.path == inside.resolve()
+
+
+def test_operator_path_returns_the_path_it_checked(tmp_path, monkeypatch):
+    from automated_security_helper.utils.config_trust import operator_path
+
+    repo, config = _operator_path_case(tmp_path, operator=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "tool.yaml").write_text("", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    chosen = operator_path(
+        config, "scanners.x.options.config_file", "~/tool.yaml", repo
+    )
+    assert chosen.path == (home / "tool.yaml").resolve()

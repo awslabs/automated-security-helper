@@ -30,6 +30,7 @@ import pytest
 from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
     DEFAULT_RULE_SET,
@@ -46,6 +47,7 @@ from automated_security_helper.utils.rules_bundles import (
     RULES_DIR_ENV,
     RulesBundleUnavailable,
 )
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
 FIXTURES = (
@@ -123,12 +125,19 @@ def rules_root(ash_temp_path, monkeypatch) -> Path:
     return root
 
 
-def _scanner(repo: Path, **options) -> CfnGuardScanner:
+def _scanner(repo: Path, *, operator: bool = True, **options) -> CfnGuardScanner:
+    """``operator``: the options came from the operator, or from the scanned tree."""
+    config = get_default_config()
+    record_provenance(
+        config,
+        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+    )
     context = PluginContext(
         source_dir=repo,
         output_dir=repo / ".ash" / "ash_output",
         work_dir=repo / ".ash" / "ash_output" / "converted",
-        config=get_default_config(),
+        config=config,
     )
     return CfnGuardScanner(
         context=context,
@@ -259,6 +268,38 @@ class TestRuleSelection:
         (repo / "policy" / "mine.guard").write_text("rule mine { }\n")
         scanner = _scanner(repo, rule_sets=[], rules_paths=["policy"])
         assert scanner.rule_files() == [repo / "policy"]
+
+    @pytest.mark.parametrize("where", ["outside", "inside"])
+    def test_rules_paths_from_the_scanned_tree_are_not_used(
+        self, repo, rules_root, ash_temp_path, caplog, where
+    ):
+        """cfn-guard echoes a rules file it cannot parse, so a path the scanned
+        repository chose could put any readable file into the report."""
+        if where == "outside":
+            secret = ash_temp_path / "elsewhere" / "credentials"
+            secret.parent.mkdir()
+        else:
+            secret = repo / "policy.guard"
+        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        scanner = _scanner(
+            repo, operator=False, rule_sets=[], rules_paths=[str(secret)]
+        )
+        with caplog.at_level("WARNING"):
+            # The refused list leaves nothing selected, which is an error of its own.
+            with pytest.raises(
+                RulesBundleUnavailable, match="no cfn-guard rules are selected"
+            ):
+                scanner.rule_files()
+        assert "scanners.cfn-guard.options.rules_paths" in caplog.text
+
+    def test_operator_rules_paths_outside_the_tree_are_used(
+        self, repo, rules_root, ash_temp_path
+    ):
+        mine = ash_temp_path / "operator" / "mine.guard"
+        mine.parent.mkdir()
+        mine.write_text("rule mine { }\n")
+        scanner = _scanner(repo, rule_sets=[], rules_paths=[str(mine)])
+        assert scanner.rule_files() == [mine.resolve()]
 
     def test_own_rules_paths_that_do_not_exist_are_refused(self, repo, rules_root):
         with pytest.raises(RulesBundleUnavailable, match="does not exist"):
