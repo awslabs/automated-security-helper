@@ -200,7 +200,7 @@
   `install-opengrep: false`.
 
   **The container image pins uv and no longer runs `get-pip.py`.** uv is
-  installed from its pinned release asset (0.12.23), verified against its SHA256,
+  installed from its pinned release asset (0.12.24), verified against its SHA256,
   in both build stages, replacing `curl -LsSf https://astral.sh/uv/install.sh |
   sh`. The unpinned `get-pip.py` download is gone: it installed a pip the base
   image already ships, and the image still upgrades pip with `pip install
