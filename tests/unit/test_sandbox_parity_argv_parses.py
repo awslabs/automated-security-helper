@@ -37,7 +37,7 @@ def parity():
 
 
 @pytest.mark.parametrize("offline", [True, False])
-@pytest.mark.parametrize("mode", ["off", "bwrap"])
+@pytest.mark.parametrize("mode", ["off", "bwrap", "sandbox-exec"])
 def test_the_scan_argv_parses(parity, tmp_path, monkeypatch, mode, offline):
     seen: list[list[str]] = []
 

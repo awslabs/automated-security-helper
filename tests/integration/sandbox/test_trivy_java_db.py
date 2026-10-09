@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
 from automated_security_helper.utils.subprocess_utils import find_executable
@@ -109,10 +110,11 @@ def _listing(directory: Path) -> dict:
 
 
 def _scan(repo: Path, output: Path, mode: str, env: dict) -> set:
-    ash = Path(sys.executable).with_name("ash")
+    # The canonical command, not the deprecated `ash` alias.
+    ash = Path(sys.executable).with_name(CANONICAL_CLI_NAME)
     result = subprocess.run(  # nosec B603 - fixed argv
         [
-            str(ash if ash.exists() else shutil.which("ash")),
+            str(ash if ash.exists() else shutil.which(CANONICAL_CLI_NAME)),
             "scan",
             "--source-dir",
             str(repo),
@@ -123,8 +125,7 @@ def _scan(repo: Path, output: Path, mode: str, env: dict) -> set:
             "--sandbox",
             mode,
             "--no-progress",
-            "--fail-on-findings",
-            "false",
+            "--no-fail-on-findings",
             "--config-overrides",
             "ash_plugin_modules=[automated_security_helper.plugin_modules.ash_trivy_plugins]",
         ],
