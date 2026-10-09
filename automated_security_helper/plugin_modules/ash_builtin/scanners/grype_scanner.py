@@ -151,11 +151,19 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
-        cache_paths=("~/.cache/grype", "$GRYPE_DB_CACHE_DIR"),
-        # grype's default database location on macOS, read-only like the cache
-        # above: the database is updated outside the sandbox before an online
-        # scan (utils/content_db_refresh.py), and grype only reads it.
-        read_paths=("~/Library/Caches/grype",),
+        # Every place content_db_refresh.default_cache_dir can put grype's
+        # database: ~/.cache on Linux, ~/Library/Caches on macOS, XDG_CACHE_HOME
+        # when set, and GRYPE_DB_CACHE_DIR. Caches rather than read paths: a cache
+        # is read-only on every backend but bwrap, whose overlay throws writes
+        # away, and sandbox-exec runs no program from one, where it runs programs
+        # from read paths. The database is updated outside the sandbox before an
+        # online scan (utils/content_db_refresh.py), and grype only reads it.
+        cache_paths=(
+            "~/.cache/grype",
+            "~/Library/Caches/grype",
+            "$XDG_CACHE_HOME/grype",
+            "$GRYPE_DB_CACHE_DIR",
+        ),
         env_prefixes=("GRYPE_",),
     )
 
@@ -267,6 +275,28 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             return []
         return sorted(key for key in OUTPUT_RESTRICTING_GRYPE_KEYS if document.get(key))
 
+    def _warn_if_config_moves_the_database(self, config_path: Path) -> None:
+        """Say so when the grype config sets ``db.cache-dir``, which ASH overrides.
+
+        The scan reads the database from ``default_cache_dir("grype")``, passed as
+        ``GRYPE_DB_CACHE_DIR``, so the refresh and the staleness check read the same
+        one; that variable beats the config file. Never raises, like
+        ``_output_restricting_keys``.
+        """
+        try:
+            with open(config_path, "r", encoding="utf-8") as config_file:
+                document = yaml.safe_load(config_file)
+        except (OSError, yaml.YAMLError):
+            return
+        db = document.get("db") if isinstance(document, dict) else None
+        if isinstance(db, dict) and db.get("cache-dir"):
+            self._plugin_log(
+                f"The grype config at {config_path} sets db.cache-dir, which ASH "
+                "does not use: grype reads its database from the directory ASH "
+                "refreshes and checks the age of. Set GRYPE_DB_CACHE_DIR to move it.",
+                level=logging.WARNING,
+            )
+
     def _process_config_options(self):
         # Grype config path
         possible_config_paths = [
@@ -314,6 +344,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                         "with findings withheld.",
                         level=logging.WARNING,
                     )
+                self._warn_if_config_moves_the_database(candidate)
                 resolved_config = candidate.resolve()
                 self.args.extra_args.append(
                     ToolExtraArg(
@@ -393,22 +424,30 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             target=f"dir:{target.as_posix()}",
             results_file=results_file,
         )
-        subprocess_env = (
-            {**snapshot_environ(), **self.extra_env} if self.extra_env else None
-        )
+        scan_env = {**snapshot_environ(), **self.extra_env}
+        # The database's directory, resolved once as grype resolves it on this host
+        # and named to the scan, the refresh and the staleness check alike: the
+        # sandbox drops XDG_CACHE_HOME, and GRYPE_DB_CACHE_DIR beats a db.cache-dir
+        # in any grype config, the scanned repository's included. See "Which
+        # cache" in utils/content_db_refresh.py.
+        cache = default_cache_dir("grype", scan_env)
+        scan_env["GRYPE_DB_CACHE_DIR"] = cache.as_posix()
+        self._content_db_cache_dir = cache
         if sandboxed_online(self._scanner_offline()):
             # The sandbox mounts grype's cache read-only, so its database is updated
             # first, outside the sandbox, and grype only reads it. See
             # utils/content_db_refresh.py.
-            scan_env = subprocess_env or snapshot_environ()
             prepare_content_db(
                 "grype",
-                default_cache_dir("grype", scan_env),
+                cache,
                 offline=False,
+                source_dir=self.context.source_dir,
+                results_dir=self.results_dir or results_file.parent,
+                config=getattr(self.context, "config", None),
                 scan_id=scan_id_for(self.context),
             )
-            subprocess_env = {**scan_env, **GRYPE_PREPARED_ENV}
-        return final_args, results_file, subprocess_env
+            scan_env.update(GRYPE_PREPARED_ENV)
+        return final_args, results_file, scan_env
 
     def _ensure_runs(self, sarif_report: SarifReport) -> None:
         """Synthesize a fallback Run when Grype emits a runless SARIF."""

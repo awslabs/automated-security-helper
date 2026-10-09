@@ -61,7 +61,7 @@ it needs.
   sandboxed online scan ASH updates them itself, outside the sandbox: `grype db
   update`, and `trivy image --download-db-only` plus, for a misconfiguration scan,
   trivy's checks bundle. Nothing from the scanned repository reaches these: they run
-  from an empty directory outside every checkout, with an explicit empty config file,
+  from a directory outside the scanned tree, with an empty config file ASH ships,
   against the cache directory the scan reads. A lock in that cache directory makes
   concurrent scans take turns, and each tool is updated once per scan. The scanners
   then run with their own update turned off (`--skip-db-update`,
@@ -69,6 +69,16 @@ it needs.
   staleness check still holds the database to its bound. trivy's Java database
   (about 935 MiB) is not updated and trivy-repo runs with `--skip-java-db-update`:
   `trivy repository` does not analyze JAR, WAR or EAR files and never reads it.
+  Under every backend, online or offline, trivy-repo keeps its scan cache in memory
+  (`--cache-backend=memory`), because trivy otherwise opens `fanal/fanal.db` in a
+  cache directory it may only read, and exits 1.
+- The cache directory is the one grype or trivy itself uses on the host:
+  `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR` when set, else `$XDG_CACHE_HOME` when set
+  (on macOS, grype only), else `~/.cache` on Linux and `~/Library/Caches` on macOS.
+  The sandbox does not pass `XDG_CACHE_HOME`, so ASH names the directory to the scan
+  (`--cache-dir`, `GRYPE_DB_CACHE_DIR`), to the update and to the staleness check, and
+  all three read the same database. A `cache.dir` in a `trivy.yaml` or a `db.cache-dir`
+  in a grype config does not move it; set the variable instead.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
@@ -123,9 +133,9 @@ it needs.
 | checkov | no | uv cache | uv-managed Python |
 | semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
 | opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
-| grype | yes (database update) | grype database cache; on macOS, `~/Library/Caches/grype` | single binary |
+| grype | yes (database update) | grype database cache (read-only) | single binary |
 | syft | no | syft cache | single binary |
-| trivy | yes (database update) | trivy cache; on macOS, `~/Library/Caches/trivy` | single binary |
+| trivy | yes (database update) | trivy cache (read-only) | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
@@ -492,9 +502,9 @@ macOS-specific locations are declared per scanner and granted as narrowly as the
 allows:
 
 - grype's database at `~/Library/Caches/grype`, its default location on macOS, is
-  read-only. Before an online scan ASH updates it there, outside the sandbox, as it
-  does `~/.cache/grype` on Linux. trivy-repo's database at `~/Library/Caches/trivy`
-  is handled the same way.
+  a read-only cache, from which nothing may run. Before an online scan ASH updates it
+  there, outside the sandbox, as it does `~/.cache/grype` on Linux. trivy-repo's
+  database at `~/Library/Caches/trivy` is handled the same way.
 - cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
   temporary directory instead of the shared `~/Library/Caches/com.amazonaws.jsii`,
   whose JavaScript every CDK process on the machine runs.

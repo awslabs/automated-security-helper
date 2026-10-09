@@ -694,6 +694,8 @@ scanners:
 
 If you have been using Grype separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory, the ```.ash``` directory, and the ```.grype``` directory for a file named ```.grype.yaml```. The current directory will also be searched for a ```grype.yaml``` file. If any of these files are found, ASH will use the settings found in the file. For more details on using a Grype configuration file, refer to the Grype [documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
 
+One setting is not used: `db.cache-dir`. ASH reads grype's database from the directory grype uses by default (`$XDG_CACHE_HOME/grype/db`, else `~/.cache/grype/db`, or `~/Library/Caches/grype/db` on macOS), passed to the scan as `GRYPE_DB_CACHE_DIR`, so that the scan, the database update and ASH's check of the database's age all read the same one. To keep the database somewhere else, set `GRYPE_DB_CACHE_DIR`; ASH logs a warning when a config file sets `db.cache-dir`.
+
 ### Syft
 
 ```yaml

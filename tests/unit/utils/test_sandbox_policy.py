@@ -1321,41 +1321,81 @@ class TestSystemTrustRoots:
         ] * 2
 
 
-def _builtin_requirements():
-    from automated_security_helper.plugin_modules.ash_builtin import ASH_SCANNERS
+def _scanner_requirements():
+    """Every scanner plugin ASH ships, by class name: each plugin module's
+    ASH_SCANNERS, so trivy-repo, snyk-code and ferret-scan are held to the same
+    guards as the builtin scanners, and a new plugin module is too."""
+    import importlib
+    import pkgutil
+
+    import automated_security_helper.plugin_modules as plugin_modules
 
     found = {}
-    for scanner in ASH_SCANNERS:
-        requirements = getattr(scanner, "sandbox_requirements", None)
-        if isinstance(requirements, SandboxRequirements):
-            found[scanner.__name__] = requirements
+    for module in pkgutil.iter_modules(plugin_modules.__path__):
+        package = importlib.import_module(f"{plugin_modules.__name__}.{module.name}")
+        for scanner in getattr(package, "ASH_SCANNERS", []):
+            requirements = getattr(scanner, "sandbox_requirements", None)
+            if isinstance(requirements, SandboxRequirements):
+                found[scanner.__name__] = requirements
     return found
 
 
+def test_the_guards_see_every_shipped_scanner_plugin():
+    found = set(_scanner_requirements())
+    assert {
+        "GrypeScanner",
+        "OpengrepScanner",
+        "TrivyRepoScanner",
+        "SnykCodeScanner",
+        "FerretScanScanner",
+    } <= found
+
+
+def _content_db_scanners():
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+    )
+
+    return {"grype": GrypeScanner, "trivy": TrivyRepoScanner}
+
+
 class TestMacosScannerDeclarations:
-    """What each builtin scanner is granted for macOS, and how narrowly."""
+    """What each shipped scanner is granted for macOS, and how narrowly."""
 
-    def test_grype_reads_its_macos_database_read_only(self):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-            grype_scanner,
-        )
-
-        requirements = grype_scanner.GrypeScanner.sandbox_requirements
-        assert "~/Library/Caches/grype" in requirements.read_paths
-        assert "~/Library/Caches/grype" not in requirements.cache_paths
+    @pytest.mark.parametrize("tool", ["grype", "trivy"])
+    def test_the_macos_database_is_a_cache_not_a_read_path(self, tool):
+        """sandbox-exec runs programs from read paths, and never from a cache, which
+        it mounts read-only like every backend but bwrap's throwaway overlay."""
+        requirements = _content_db_scanners()[tool].sandbox_requirements
+        assert f"~/Library/Caches/{tool}" in requirements.cache_paths
+        assert f"~/Library/Caches/{tool}" not in requirements.read_paths
         # Not updated inside the sandbox: content_db_refresh updates the database
-        # outside it before an online scan and sets GRYPE_DB_AUTO_UPDATE=false.
+        # outside it before an online scan.
         assert dict(requirements.sandbox_exec_env) == {}
 
-    def test_trivy_repo_reads_its_macos_database_read_only(self):
-        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-            trivy_repo_scanner,
-        )
-
-        requirements = trivy_repo_scanner.TrivyRepoScanner.sandbox_requirements
-        # Where content_db_refresh.default_cache_dir updates it on macOS.
-        assert "~/Library/Caches/trivy" in requirements.read_paths
-        assert "~/Library/Caches/trivy" not in requirements.cache_paths
+    @pytest.mark.parametrize("tool", ["grype", "trivy"])
+    def test_sandbox_exec_runs_nothing_from_the_database_directory(self, layout, tool):
+        database = layout.home / "Library" / "Caches" / tool
+        database.mkdir(parents=True)
+        requirements = _content_db_scanners()[tool].sandbox_requirements
+        policy = _policy(layout, requirements)
+        assert _resolved([database]) <= _resolved(policy.cache)
+        assert not _resolved([database]) & _resolved(policy.executable)
+        plan = SandboxExecBackend().plan(["/usr/bin/true"], {}, policy)
+        try:
+            profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
+            allowed = set().union(
+                *(
+                    _subpaths(rule)
+                    for _, rule in _indexed(profile, "(allow process-exec ")
+                )
+            )
+            assert _as_argv(database) not in allowed
+        finally:
+            plan.run_cleanup()
 
     def test_cdk_nag_does_not_use_the_shared_jsii_cache(self):
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
@@ -1371,13 +1411,13 @@ class TestMacosScannerDeclarations:
     def test_only_opengrep_unpacks_itself(self):
         declared = {
             name: requirements.unpack_dir_env
-            for name, requirements in _builtin_requirements().items()
+            for name, requirements in _scanner_requirements().items()
             if requirements.unpack_dir_env
         }
         assert declared == {"OpengrepScanner": "XDG_CACHE_HOME"}
 
     def test_no_grant_covers_the_whole_library_caches_directory(self):
-        for name, requirements in _builtin_requirements().items():
+        for name, requirements in _scanner_requirements().items():
             for path in requirements.read_paths + requirements.cache_paths:
                 parts = Path(path).parts
                 assert parts[-2:] != ("Library", "Caches"), (name, path)

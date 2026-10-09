@@ -155,7 +155,9 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
     assert argv[:2] == ["trivy", "repository"]
     assert argv[2].startswith("--ignorefile=")
     assert argv[3].startswith("--secret-config=")
-    assert argv[4:] == resolved[2:]
+    # The cache the scan, the refresh and the staleness check all read.
+    assert argv[4].startswith("--cache-dir=")
+    assert argv[5:] == resolved[2:]
 
 
 def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_update(
@@ -174,6 +176,7 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
     prepared = []
     with (
         patch.object(trivy_repo_scanner, "sandboxed_online", return_value=True),
+        patch.object(trivy_repo_scanner, "in_scanner_sandbox", return_value=True),
         patch.object(
             trivy_repo_scanner,
             "prepare_content_db",
@@ -195,5 +198,6 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
     subcommand_at = argv.index("repository")
     target_at = max(i for i, a in enumerate(argv) if Path(a) == source)
     ignore_at = next(i for i, a in enumerate(argv) if a.startswith("--ignorefile="))
-    for at in [*(argv.index(flag) for flag in flags), ignore_at]:
+    cache_at = next(i for i, a in enumerate(argv) if a.startswith("--cache-dir="))
+    for at in [*(argv.index(flag) for flag in flags), ignore_at, cache_at]:
         assert subcommand_at < at < target_at, argv

@@ -1047,3 +1047,200 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
 
         assert coverage_has_gap({"stale_content_databases": [{"name": "grype-db"}]})
         assert not coverage_has_gap({"stale_content_databases": []})
+
+
+# --------------------------------------------------------------------------- what the probes read
+
+#: trivy's config and cache resolution around ``trivy version``, as measured at 0.75.0:
+#: ``--config FILE`` loads FILE (an error when it is missing), and without the flag
+#: ``trivy.yaml`` in the working directory, never a parent's. The cache is
+#: ``--cache-dir``, else TRIVY_CACHE_DIR, else the config's ``cache.dir``, else the
+#: default. Config files here are JSON, which is YAML.
+FAKE_TRIVY = """\
+import json, os, sys
+args = sys.argv[1:]
+def flag(name):
+    for i, arg in enumerate(args):
+        if arg == name and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith(name + "="):
+            return arg.split("=", 1)[1]
+    return None
+path = flag("--config")
+explicit = path is not None
+path = path if explicit else "trivy.yaml"
+config = {}
+if os.path.isfile(path):
+    text = open(path, encoding="utf-8").read()
+    config = json.loads(text) if text.strip() else {}
+elif explicit:
+    sys.exit("config file not found: " + path)
+cache = (
+    flag("--cache-dir")
+    or os.environ.get("TRIVY_CACHE_DIR")
+    or (config.get("cache") or {}).get("dir")
+    or os.path.join(os.path.expanduser("~"), ".cache", "trivy")
+)
+with open(os.path.join(cache, "db", "metadata.json"), encoding="utf-8") as f:
+    print(json.dumps({"Version": "0.75.0", "VulnerabilityDB": json.load(f)}))
+"""
+
+#: grype's around ``grype db status``, as measured at 0.120.1: ``-c FILE`` loads only
+#: FILE; without it, ``.grype.yaml`` or ``.grype/config.yaml`` in the working
+#: directory. The cache is GRYPE_DB_CACHE_DIR, else the config's ``db.cache-dir``,
+#: else the default.
+FAKE_GRYPE = """\
+import json, os, sys
+args = sys.argv[1:]
+path = None
+for i, arg in enumerate(args):
+    if arg in ("-c", "--config") and i + 1 < len(args):
+        path = args[i + 1]
+if path is None:
+    for candidate in (".grype.yaml", os.path.join(".grype", "config.yaml")):
+        if os.path.isfile(candidate):
+            path = candidate
+            break
+config = {}
+if path is not None:
+    text = open(path, encoding="utf-8").read()
+    config = json.loads(text) if text.strip() else {}
+cache = (
+    os.environ.get("GRYPE_DB_CACHE_DIR")
+    or (config.get("db") or {}).get("cache-dir")
+    or os.path.join(os.path.expanduser("~"), ".cache", "grype", "db")
+)
+built = open(os.path.join(cache, "6", "built.txt"), encoding="utf-8").read().strip()
+db = os.path.join(cache, "6", "vulnerability.db")
+print(json.dumps({"built": built, "path": db, "valid": True}))
+"""
+
+
+def _plant_trivy(cache: Path, when: datetime) -> None:
+    (cache / "db").mkdir(parents=True, exist_ok=True)
+    stamp = _ts(when)
+    (cache / "db" / "metadata.json").write_text(
+        json.dumps(
+            {
+                "Version": 2,
+                "NextUpdate": stamp,
+                "UpdatedAt": stamp,
+                "DownloadedAt": stamp,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _plant_grype(cache: Path, when: datetime) -> None:
+    (cache / "6").mkdir(parents=True, exist_ok=True)
+    (cache / "6" / "built.txt").write_text(_ts(when), encoding="utf-8")
+
+
+class TestTheProbeReadsNothingTheRepositoryWrote:
+    """``cd repo && ash --offline`` with a planted config cannot age a stale database.
+
+    Measured with trivy 0.75.0 and grype 0.120.1: run from a directory holding a
+    ``trivy.yaml`` with ``cache.dir``, or a ``.grype.yaml`` or ``.grype/config.yaml``
+    with ``db.cache-dir``, naming a planted database built "2099-01-01", the probes
+    ASH ran after the scan reported that date. The fake tools below resolve config
+    and cache the way the real ones were measured to; the same case against the
+    real binaries is tests/integration/scanners/test_content_db_probe_real_tools.py.
+    """
+
+    PLANTED = datetime(2099, 1, 1, tzinfo=UTC)
+
+    @pytest.fixture
+    def repo(self, tmp_path, monkeypatch):
+        from automated_security_helper.utils import subprocess_utils
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        _executable(bin_dir, "trivy", FAKE_TRIVY)
+        _executable(bin_dir, "grype", FAKE_GRYPE)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+        monkeypatch.setattr(subprocess_utils, "_find_executable_cache", {})
+        home = tmp_path / "home"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
+        for name in ("XDG_CACHE_HOME", "TRIVY_CACHE_DIR", "GRYPE_DB_CACHE_DIR"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("ASH_OFFLINE", "YES")
+        source = tmp_path / "repo"
+        source.mkdir()
+        # ASH's own working directory is the scanned repository.
+        monkeypatch.chdir(source)
+        return source
+
+    @staticmethod
+    def _context(source: Path):
+        from automated_security_helper.base.plugin_context import PluginContext
+
+        return PluginContext(
+            source_dir=source,
+            output_dir=source.parent / "out",
+            config=get_default_config(),
+        )
+
+    def _assert_fresh(self, record, fresh: datetime) -> None:
+        assert record.built is not None, record.error
+        assert record.built != self.PLANTED, "the probe read the repository's database"
+        assert abs(record.built - fresh) < timedelta(seconds=2)
+
+    def test_trivy_yaml(self, repo, monkeypatch):
+        from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+            TrivyRepoScanner,
+            TrivyRepoScannerConfig,
+        )
+        from automated_security_helper.utils.content_db_refresh import (
+            default_cache_dir,
+        )
+
+        fresh = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+        _plant_trivy(default_cache_dir("trivy"), fresh)
+        planted = repo.parent / "planted-trivy"
+        _plant_trivy(planted, self.PLANTED)
+        (repo / "trivy.yaml").write_text(json.dumps({"cache": {"dir": str(planted)}}))
+
+        scanner = TrivyRepoScanner(
+            context=self._context(repo), config=TrivyRepoScannerConfig()
+        )
+        scanner._process_config_options()
+        monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+        monkeypatch.setattr(scanner, "_run_subprocess", lambda command, **kw: {})
+        scanner.scan(repo, "source")
+        record = staleness.measure(
+            cdb.get("trivy-db"),
+            scanner.content_database_probe_context(),
+            cdb.STALENESS_FAIL,
+        )
+        self._assert_fresh(record, fresh)
+
+    @pytest.mark.parametrize("name", [".grype.yaml", ".grype/config.yaml"])
+    def test_grype_config(self, repo, name):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+            GrypeScanner,
+            GrypeScannerConfig,
+        )
+        from automated_security_helper.utils.content_db_refresh import (
+            default_cache_dir,
+        )
+
+        fresh = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+        _plant_grype(default_cache_dir("grype"), fresh)
+        planted = repo.parent / "planted-grype"
+        _plant_grype(planted, self.PLANTED)
+        config = repo / name
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(json.dumps({"db": {"cache-dir": str(planted)}}))
+
+        scanner = GrypeScanner(context=self._context(repo), config=GrypeScannerConfig())
+        scanner._process_config_options()
+        scanner._execute_scan(repo, "source", [])
+        record = staleness.measure(
+            cdb.get("grype-db"),
+            scanner.content_database_probe_context(),
+            cdb.STALENESS_FAIL,
+        )
+        self._assert_fresh(record, fresh)

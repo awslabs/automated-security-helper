@@ -33,12 +33,26 @@ database. So a caller asks for it only for a mode that reads it.
 Isolation
 ---------
 These commands run outside the sandbox, so nothing from the scanned repository may
-reach them. They run from a fresh empty directory outside every checkout, with an
-explicit empty config file (``-c`` for grype, ``--config`` for trivy) so neither
-tool looks for one in the working directory, the home directory or anywhere else,
-and with the cache directory passed explicitly. The environment is the operator's
-own (``snapshot_environ``), not anything a scanner derived from the scanned tree.
-They scan nothing but that empty directory.
+reach them. They run from a working directory outside the scanned tree
+(``config.path_trust.cwd_outside_scanned_tree``, the same rule checkov's scans use),
+with ``EMPTY_TOOL_CONFIG`` as an explicit config file (``-c`` for grype,
+``--config`` for trivy) so neither tool looks for one in the working directory, the
+home directory or anywhere else, and with the cache directory passed explicitly.
+The environment is the operator's own (``snapshot_environ``), not anything a
+scanner derived from the scanned tree. They scan nothing but an empty directory
+ASH creates for the purpose.
+
+Which cache
+-----------
+``default_cache_dir`` resolves each tool's cache the way the tool itself does on
+the host, ``XDG_CACHE_HOME`` included. The sandbox does not pass
+``XDG_CACHE_HOME``, so the scanners hand the resolved directory to the sandboxed
+scan explicitly (``--cache-dir`` for trivy, ``GRYPE_DB_CACHE_DIR`` for grype), and
+to the staleness check through ``content_database_probe_context``. The refresh,
+the scan and the check then name one directory, whatever the tool would have
+picked inside the sandbox, and a ``cache.dir`` or ``db.cache-dir`` in a config
+file cannot move the scan elsewhere: a flag or variable beats a config file in
+both tools (measured with grype 0.120.1 and trivy 0.75.0).
 
 Concurrency and repetition
 --------------------------
@@ -47,7 +61,10 @@ directory, or in the temporary directory named for the cache when the cache is n
 writable: the scanners of one scan run in threads, and other ASH processes may
 share the cache. The second caller to take the lock finds the database current,
 and the tool returns at once. ``scan_id`` also skips every call after the first
-that succeeded for the same tool, cache and scan.
+that succeeded for the same tool, cache and scan. It is the scan's
+``PluginContext.scan_id``, a random id, rather than anything derived from the
+context object's address, which a long-running process such as the MCP server
+can hand to a later scan's context once the first is freed.
 
 Failure modes
 -------------
@@ -59,15 +76,18 @@ failed rather than run against a database that could not be brought up to date.
 from __future__ import annotations
 
 import hashlib
+import ntpath
 import os
+import posixpath
 import shutil
 import subprocess  # nosec B404 - TimeoutExpired only; spawns go through spawn_run
 import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
+from automated_security_helper.config.path_trust import cwd_outside_scanned_tree
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.file_lock import exclusive_lock
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -91,38 +111,109 @@ GRYPE_PREPARED_ENV = {
     "GRYPE_CHECK_FOR_APP_UPDATE": "false",
 }
 
+#: An empty file, shipped with ASH, passed as the config file of every grype and
+#: trivy command ASH runs on a scan's behalf (the refresh here and the staleness
+#: probes in utils/content_db_staleness.py), so the tool reads no config of its
+#: own finding: not ``trivy.yaml``, ``.grype.yaml`` or ``.grype/config.yaml`` in
+#: its working directory, nor one under the home directory. In ASH's package
+#: because every sandbox backend mounts that read-only (``sandbox.policy
+#: ._ash_paths``) and a probe runs inside the scanner's sandbox, where a file in a
+#: temporary directory would not be visible and one in the results directory
+#: would be writable by the scanner. An empty file rather than trivy's
+#: ``--config ""``, which disables loading only from trivy 0.75.0
+#: (pkg/commands/app.go initConfig; 0.74.0 and earlier fail on it).
+EMPTY_TOOL_CONFIG = Path(__file__).resolve().with_name("empty-tool-config.yaml")
+
 _prepared_lock = threading.Lock()
 _prepared: Set[Tuple[str, str, bool, bool, str]] = set()
 
 
-def default_cache_dir(tool: str, env: Optional[Mapping[str, str]] = None) -> Path:
-    """The cache directory ``tool`` uses inside a scanner sandbox.
+def default_cache_dir(
+    tool: str,
+    env: Optional[Mapping[str, str]] = None,
+    platform: Optional[str] = None,
+) -> Path:
+    """The cache directory ``tool`` uses on this host, resolved as the tool does.
 
-    The refresh has to write the directory the sandboxed scan then reads, so this
-    resolves it the way each tool does. The sandbox passes ``GRYPE_*`` and
-    ``TRIVY_*`` through, and those win, but not ``XDG_CACHE_HOME``, so inside it
-    each tool falls back to its platform default under ``$HOME``:
+    The refresh writes it, the scan is pointed at it and the staleness check reads
+    it, so all three name the directory the operator's own grype or trivy would use
+    outside ASH (see "Which cache" above):
 
-    - grype: ``xdg.CacheHome/grype/db`` (grype/db/v6/installation/curator.go), and
-      github.com/adrg/xdg puts ``CacheHome`` at ``~/Library/Caches`` on macOS and
-      ``~/.cache`` elsewhere on Unix.
-    - trivy: ``os.UserCacheDir()/trivy`` (pkg/cache/dir.go), which is the same pair
-      of directories.
+    - grype: ``GRYPE_DB_CACHE_DIR``, else ``xdg.CacheHome/grype/db``
+      (grype/db/v6/installation/curator.go, grype 0.120.1). github.com/adrg/xdg
+      v0.5.3 sets ``CacheHome`` to ``XDG_CACHE_HOME`` when that is an absolute
+      path, else to ``~/Library/Caches`` on macOS (paths_darwin.go), ``~/.cache``
+      on other Unix (paths_unix.go) and ``%LOCALAPPDATA%\\cache`` on Windows
+      (paths_windows.go).
+    - trivy: ``TRIVY_CACHE_DIR``, else ``os.UserCacheDir()/trivy``
+      (pkg/cache/dir.go, trivy 0.75.0), and ``os.TempDir()/trivy`` when Go cannot
+      name a user cache directory. Go's ``os.UserCacheDir`` is ``XDG_CACHE_HOME``
+      (an error when relative) or ``~/.cache`` on Unix other than macOS,
+      ``~/Library/Caches`` on macOS, whatever ``XDG_CACHE_HOME`` says, and
+      ``%LocalAppData%`` on Windows.
 
-    There is no sandbox on Windows, so the refresh never runs there.
+    Args:
+        tool: ``grype`` or ``trivy``.
+        env: The environment the scan runs with; the process environment when
+            None. Only the variables above are read from it; the home directory
+            is this process's (``Path.home()``), which is also the ``HOME`` every
+            sandbox backend gives the scanner.
+        platform: A ``sys.platform`` value; this one when None.
+
+    Returns:
+        An absolute path. A relative ``*_CACHE_DIR`` is taken from ASH's working
+        directory, once, so the refresh, the scan and the check, which run from
+        different directories, still name one cache.
     """
     env = os.environ if env is None else env
-    user_cache = (
-        Path.home() / "Library" / "Caches"
-        if sys.platform == "darwin"
-        else Path.home() / ".cache"
-    )
+    platform = sys.platform if platform is None else platform
+    windows = platform == "win32"
+    isabs = ntpath.isabs if windows else posixpath.isabs
+
+    def variable(name: str) -> str:
+        if windows:  # Windows variable names are case-insensitive.
+            for key, value in env.items():
+                if key.upper() == name:
+                    return value
+            return ""
+        return env.get(name, "")
+
+    def absolute(raw: str) -> Path:
+        return Path(os.path.abspath(Path(raw).expanduser()))
+
+    xdg = variable("XDG_CACHE_HOME")
+    local_app_data = variable("LOCALAPPDATA")
     if tool == "grype":
-        raw = env.get("GRYPE_DB_CACHE_DIR")
-        return Path(raw).expanduser() if raw else user_cache / "grype" / "db"
+        raw = variable("GRYPE_DB_CACHE_DIR")
+        if raw:
+            return absolute(raw)
+        if xdg and isabs(xdg):
+            cache_home = Path(xdg)
+        elif windows:
+            cache_home = Path(local_app_data or Path.home() / "AppData" / "Local")
+            cache_home = cache_home / "cache"
+        elif platform == "darwin":
+            cache_home = Path.home() / "Library" / "Caches"
+        else:
+            cache_home = Path.home() / ".cache"
+        return cache_home / "grype" / "db"
     if tool == "trivy":
-        raw = env.get("TRIVY_CACHE_DIR")
-        return Path(raw).expanduser() if raw else user_cache / "trivy"
+        raw = variable("TRIVY_CACHE_DIR")
+        if raw:
+            return absolute(raw)
+        if windows:
+            user_cache = Path(local_app_data) if local_app_data else None
+        elif platform == "darwin":
+            user_cache = Path.home() / "Library" / "Caches"
+        elif not xdg:
+            user_cache = Path.home() / ".cache"
+        else:
+            user_cache = Path(xdg) if isabs(xdg) else None
+        if user_cache is None:
+            # Go's os.TempDir: $TMPDIR on Unix, GetTempPath on Windows.
+            temp = "" if windows else variable("TMPDIR")
+            user_cache = Path(temp or tempfile.gettempdir())
+        return user_cache / "trivy"
     raise ValueError(f"no content database refresh for {tool!r}")
 
 
@@ -146,6 +237,9 @@ def prepare_content_db(
     cache_dir: Union[str, Path],
     offline: bool,
     *,
+    source_dir: Union[str, Path],
+    results_dir: Union[str, Path],
+    config: Any = None,
     checks: bool = False,
     java: bool = False,
     scan_id: Optional[str] = None,
@@ -157,12 +251,17 @@ def prepare_content_db(
         tool: ``grype`` or ``trivy``.
         cache_dir: The cache the sandboxed scan reads (see ``default_cache_dir``).
         offline: When true nothing runs; the database is used as it is.
+        source_dir: The scan's source directory, and ``results_dir`` the
+            scanner's results directory, and ``config`` the scan's AshConfig:
+            what ``cwd_outside_scanned_tree`` needs to place the tools' working
+            directory outside the scanned tree.
         checks: trivy only: also fetch the checks bundle a misconfiguration scan
             reads.
         java: trivy only: also update the Java database, for a mode that analyzes
             JAR, WAR and EAR files (``image``, ``rootfs``).
-        scan_id: Refresh at most once per tool, cache and scan id. None refreshes
-            on every call (the tool itself returns at once when current).
+        scan_id: Refresh at most once per tool, cache and scan id
+            (``scan_id_for``). None refreshes on every call (the tool itself
+            returns at once when current).
         executable: The tool to run; found on PATH when not given.
 
     Raises:
@@ -186,11 +285,13 @@ def prepare_content_db(
     with exclusive_lock(update_lock_path(tool, cache)), outside_scanner_sandbox():
         workdir = Path(tempfile.mkdtemp(prefix=f"ash-{tool}-refresh-"))
         try:
-            config = workdir / "empty-config.yaml"
-            config.write_text("")
-            cwd = workdir if not _inside_a_checkout(workdir) else Path(workdir.anchor)
+            # Placed by the same rule as checkov's scans, inside this block so that
+            # it is chosen for an unsandboxed spawn.
+            cwd = cwd_outside_scanned_tree(
+                workdir, results_dir=results_dir, source_dir=source_dir, config=config
+            )
             for argv, env, what in _commands(
-                tool, program, cache, config, workdir, checks, java
+                tool, program, cache, workdir, checks, java
             ):
                 _run(argv, env, cwd, f"{tool} {what}")
         finally:
@@ -204,16 +305,16 @@ def _commands(
     tool: str,
     program: str,
     cache: Path,
-    config: Path,
     workdir: Path,
     checks: bool,
     java: bool,
 ) -> List[Tuple[List[str], Dict[str, str], str]]:
     env = snapshot_environ()
+    config = EMPTY_TOOL_CONFIG.as_posix()
     if tool == "grype":
         env["GRYPE_DB_CACHE_DIR"] = cache.as_posix()
-        return [([program, "db", "update", "-c", config.as_posix()], env, "database")]
-    common = ["--config", config.as_posix(), "--cache-dir", cache.as_posix()]
+        return [([program, "db", "update", "-c", config], env, "database")]
+    common = ["--config", config, "--cache-dir", cache.as_posix()]
     commands = [
         (
             [program, "image", "--download-db-only", "--no-progress", *common],
@@ -236,11 +337,6 @@ def _commands(
             ([program, "config", *common, empty.as_posix()], env, "checks bundle")
         )
     return commands
-
-
-def _inside_a_checkout(path: Path) -> bool:
-    """Whether ``path`` or a directory above it holds a ``.git`` entry."""
-    return any((p / ".git").exists() for p in [path, *path.parents])
 
 
 def _run(argv: List[str], env: Dict[str, str], cwd: Path, what: str) -> None:
@@ -269,20 +365,30 @@ def _run(argv: List[str], env: Dict[str, str], cwd: Path, what: str) -> None:
         )
 
 
-def sandboxed_online(offline: bool) -> bool:
-    """Whether a spawn made now runs in a scanner sandbox, with a network to use."""
+def in_scanner_sandbox() -> bool:
+    """Whether a spawn made now runs in a scanner sandbox."""
     from automated_security_helper.utils.sandbox.scope import (
         SandboxScope,
         active_scope,
     )
 
-    return not offline and isinstance(active_scope(), SandboxScope)
+    return isinstance(active_scope(), SandboxScope)
 
 
-def scan_id_for(context: object) -> str:
-    """An id for the scan ``context`` belongs to: its output directory and the
-    context object, so a second scan into the same directory refreshes again."""
-    return f"{getattr(context, 'output_dir', '')}:{id(context)}"
+def sandboxed_online(offline: bool) -> bool:
+    """Whether a spawn made now runs in a scanner sandbox, with a network to use."""
+    return not offline and in_scanner_sandbox()
+
+
+def scan_id_for(context: object) -> Optional[str]:
+    """The id of the scan ``context`` belongs to (``PluginContext.scan_id``).
+
+    None for a context that carries no id, which refreshes on every call rather
+    than risk skipping one: a key built from anything else about the context
+    object can be shared by two scans.
+    """
+    scan_id = getattr(context, "scan_id", None)
+    return scan_id if isinstance(scan_id, str) and scan_id else None
 
 
 def forget_prepared() -> None:

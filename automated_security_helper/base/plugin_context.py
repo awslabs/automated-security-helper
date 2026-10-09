@@ -1,8 +1,16 @@
 """Module containing the PluginContext class for sharing context between plugins."""
 
+import uuid
 import warnings
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 from typing import Annotated, Any, TYPE_CHECKING
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -71,6 +79,20 @@ class PluginContext(BaseModel):
     ignore_suppressions: Annotated[
         bool, Field(description="Ignore all suppression rules")
     ] = False
+
+    # Private, so it is in no schema and no serialized context. See scan_id.
+    _scan_id: str = PrivateAttr(default_factory=lambda: uuid.uuid4().hex)
+
+    @property
+    def scan_id(self) -> str:
+        """A random id for the run this context was built for, fixed for its life.
+
+        For state kept per scan in a process that outlives the scan, such as the
+        once-per-scan content database refresh (utils/content_db_refresh.py) in the
+        MCP server. Not ``id(self)``: an address is reused once the context is
+        freed, so a later scan's context could inherit an earlier scan's state.
+        """
+        return self._scan_id
 
     @field_validator("config")
     def validate_config(cls, value):

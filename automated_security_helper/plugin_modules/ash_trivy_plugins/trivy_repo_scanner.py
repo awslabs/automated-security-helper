@@ -44,6 +44,7 @@ from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.content_db_refresh import (
     default_cache_dir,
+    in_scanner_sandbox,
     prepare_content_db,
     sandboxed_online,
     scan_id_for,
@@ -132,11 +133,19 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
 
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
-        cache_paths=("~/.cache/trivy", "$TRIVY_CACHE_DIR"),
-        # trivy's default cache on macOS (os.UserCacheDir), read-only like the
-        # cache above: the database is updated there outside the sandbox before an
-        # online scan (utils/content_db_refresh.py), and trivy only reads it.
-        read_paths=("~/Library/Caches/trivy",),
+        # Every place content_db_refresh.default_cache_dir can put trivy's cache:
+        # ~/.cache or XDG_CACHE_HOME on Linux, ~/Library/Caches on macOS, and
+        # TRIVY_CACHE_DIR. Caches rather than read paths: a cache is read-only on
+        # every backend but bwrap, whose overlay throws writes away, and
+        # sandbox-exec runs no program from one, where it runs programs from read
+        # paths. The database is updated outside the sandbox before an online scan
+        # (utils/content_db_refresh.py), and trivy only reads it.
+        cache_paths=(
+            "~/.cache/trivy",
+            "~/Library/Caches/trivy",
+            "$XDG_CACHE_HOME/trivy",
+            "$TRIVY_CACHE_DIR",
+        ),
         env_prefixes=("TRIVY_",),
     )
 
@@ -503,36 +512,56 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             insert_at = (
                 len(head) if final_args[: len(head)] == head else len(final_args)
             )
-            final_args[insert_at:insert_at] = [
-                f"--ignorefile={self._ignore_file()}",
-                f"--secret-config={self._secret_config_file()}",
-            ]
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
+            # The database's directory, resolved once as trivy resolves it on this
+            # host and named to the scan, the refresh and the staleness check alike:
+            # the sandbox drops XDG_CACHE_HOME, and the flag beats a cache.dir in a
+            # trivy.yaml, the scanned repository's included. See "Which cache" in
+            # utils/content_db_refresh.py.
+            cache = default_cache_dir("trivy", subprocess_env or snapshot_environ())
+            self._content_db_cache_dir = cache
+            final_args[insert_at:insert_at] = [
+                f"--ignorefile={self._ignore_file()}",
+                f"--secret-config={self._secret_config_file()}",
+                f"--cache-dir={cache.as_posix()}",
+            ]
+            sandbox_flags: List[str] = []
             if sandboxed_online(self._scanner_offline()):
                 # The sandbox mounts trivy's cache read-only, so its database (and
                 # the checks bundle, for misconfiguration scans) is updated first,
                 # outside the sandbox, and trivy only reads it: no update of its
-                # own, and its scan cache in memory rather than in that cache. See
-                # utils/content_db_refresh.py. Not the Java database: `trivy
-                # repository` does not analyze JAR, WAR or EAR files and never reads
-                # it (measured with trivy 0.75), so its update is skipped rather
-                # than downloading about 935 MiB the scan would not use.
+                # own. See utils/content_db_refresh.py. Not the Java database:
+                # `trivy repository` does not analyze JAR, WAR or EAR files and never
+                # reads it (measured with trivy 0.75), so its update is skipped
+                # rather than downloading about 935 MiB the scan would not use.
                 checks = "misconfig" in (self.config.options.scanners or [])
                 prepare_content_db(
                     "trivy",
-                    default_cache_dir("trivy", subprocess_env or snapshot_environ()),
+                    cache,
                     offline=False,
+                    source_dir=self.context.source_dir,
+                    results_dir=self.results_dir or target_results_dir,
+                    config=getattr(self.context, "config", None),
                     checks=checks,
                     scan_id=scan_id_for(self.context),
                 )
-                final_args[insert_at:insert_at] = [
+                sandbox_flags += [
                     "--skip-db-update",
                     "--skip-java-db-update",
                     *(["--skip-check-update"] if checks else []),
-                    "--cache-backend=memory",
                 ]
+            if in_scanner_sandbox():
+                # Online or offline: trivy keeps its scan cache (fanal/fanal.db) in
+                # the cache directory, which every sandbox backend but bwrap mounts
+                # read-only. Measured with trivy 0.75.0 against a read-only cache,
+                # offline: "unable to initialize fs cache: failed to create cache
+                # dir ... permission denied", exit 1, and with --cache-backend=memory
+                # the same scan's findings. The scan cache only saves re-analysing an
+                # unchanged target, so the results are the same either way.
+                sandbox_flags.append("--cache-backend=memory")
+            final_args[insert_at:insert_at] = sandbox_flags
 
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",

@@ -22,7 +22,7 @@ from automated_security_helper.utils.subprocess_utils import (
     find_executable,
 )
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 from typing import (
     Annotated,
     Any,
@@ -66,6 +66,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
     config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
+
+    # The content database cache this scanner's scan was pointed at, set by the
+    # scanner when it resolves one (grype, trivy-repo), and handed to the staleness
+    # check by content_database_probe_context so the check reads what the scan read.
+    _content_db_cache_dir: Optional[Path] = PrivateAttr(default=None)
 
     dependency_unavailable_reason: Annotated[
         str | None,
@@ -275,19 +280,35 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         return [entry for entry in CONTENT_DATABASES if entry.scanner == name]
 
     def content_database_probe_context(self):
-        """How to read this scanner's database: its binary, and the env its scan ran with.
+        """How to read this scanner's database, as its scan did.
 
-        The env is the scanner's own ``extra_env`` over the process environment, so the
-        probe sees the same cache directory and settings the scan did.
+        Its binary; the env its scan ran with (the scanner's own ``extra_env`` over
+        the process environment); the cache directory its scan was pointed at, when
+        it recorded one; and a working directory outside the scanned tree
+        (``path_trust.cwd_outside_scanned_tree``), so the probe reads no config file
+        the scanned repository wrote. See "What the probes read" in
+        ``utils/content_db_staleness.py``.
         """
+        from automated_security_helper.config.path_trust import (
+            cwd_outside_scanned_tree,
+        )
         from automated_security_helper.utils.content_db_staleness import (
             ProbeContext,
             probe_env,
         )
 
+        cache = self._content_db_cache_dir
+        cwd = cwd_outside_scanned_tree(
+            self.context.source_dir,
+            results_dir=self.results_dir or self.context.output_dir,
+            source_dir=self.context.source_dir,
+            config=getattr(self.context, "config", None),
+        )
         return ProbeContext(
             env=probe_env(getattr(self, "extra_env", None)),
             executable=find_executable(self.command) if self.command else None,
+            cache_dir=cache.as_posix() if cache is not None else None,
+            cwd=cwd.as_posix(),
         )
 
     def _process_config_options(self) -> None:

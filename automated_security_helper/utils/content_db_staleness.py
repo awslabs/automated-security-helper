@@ -66,12 +66,27 @@ Failure modes
   says which source it used.
 * Only scanners that return a SARIF report are measured. A scanner that failed outright is
   already reported as ERROR or MISSING, and its database contributed nothing.
+
+What the probes read
+--------------------
+grype's and trivy's probes read the cache the scan read, and nothing the scanned
+repository wrote. Measured with trivy 0.75.0 and grype 0.120.1: run from a directory
+holding a ``trivy.yaml`` with ``cache.dir`` (or a ``.grype.yaml`` or
+``.grype/config.yaml`` with ``db.cache-dir``) naming a planted database, ``trivy version``
+and ``grype db status`` reported the planted database's time (2099-01-01), so a
+repository scanned with ``cd repo && ash --offline`` could carry a stale database past
+this check. So each probe runs from ``ProbeContext.cwd``, outside the scanned tree, passes
+``content_db_refresh.EMPTY_TOOL_CONFIG`` as its config file (neither tool then looks for
+one), and names ``ProbeContext.cache_dir``, the directory the scanner pointed its scan at,
+with the flag or variable that beats any config file (``--cache-dir``,
+``GRYPE_DB_CACHE_DIR``).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -86,6 +101,7 @@ from typing import (
     Sequence,
 )
 
+from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.content_databases import (
     CONTENT_DATABASES,
     DEFAULT_STALENESS_POLICY,
@@ -336,10 +352,25 @@ class ProbeContext:
 
     env: Dict[str, str]
     executable: Optional[str] = None
+    #: The database's directory as the scan used it: grype's and trivy's cache
+    #: (``content_db_refresh.default_cache_dir``), or the offline rules directory.
+    #: For grype and trivy, None leaves the choice to the tool, with ``env``.
     cache_dir: Optional[str] = None
+    #: Where a probe runs: outside the scanned tree
+    #: (``path_trust.cwd_outside_scanned_tree``). None runs it from the filesystem
+    #: root of the temporary directory, which no repository writes.
+    cwd: Optional[str] = None
 
 
-def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
+def _probe_cwd(ctx: ProbeContext) -> str:
+    if ctx.cwd:
+        return ctx.cwd
+    import tempfile
+
+    return Path(os.path.abspath(tempfile.gettempdir())).anchor
+
+
+def _run_json(command: List[str], env: Mapping[str, str], cwd: str) -> Any:
     """Run a tool's status command and parse its stdout as JSON, whatever it exits with.
 
     ``grype db status`` exits 1 when it considers the database invalid -- including when it
@@ -350,6 +381,7 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
         capture_output=True,
         text=True,
         env=dict(env),
+        cwd=cwd,
         timeout=_PROBE_TIMEOUT_SECONDS,
         check=False,
     )
@@ -365,7 +397,22 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
 def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
     if not ctx.executable:
         raise ValueError("grype executable not found")
-    status = _run_json([ctx.executable, "db", "status", "-o", "json"], ctx.env)
+    env = dict(ctx.env)
+    if ctx.cache_dir:
+        env["GRYPE_DB_CACHE_DIR"] = ctx.cache_dir
+    status = _run_json(
+        [
+            ctx.executable,
+            "db",
+            "status",
+            "-o",
+            "json",
+            "-c",
+            EMPTY_TOOL_CONFIG.as_posix(),
+        ],
+        env,
+        _probe_cwd(ctx),
+    )
     built = status.get("built") if isinstance(status, dict) else None
     if not built:
         raise ValueError(f"`grype db status` reported no build time: {status!r}"[:300])
@@ -375,7 +422,19 @@ def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
 def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
     if not ctx.executable:
         raise ValueError("trivy executable not found")
-    version = _run_json([ctx.executable, "version", "--format", "json"], ctx.env)
+    version = _run_json(
+        [
+            ctx.executable,
+            "version",
+            "--format",
+            "json",
+            "--config",
+            EMPTY_TOOL_CONFIG.as_posix(),
+            *(["--cache-dir", ctx.cache_dir] if ctx.cache_dir else []),
+        ],
+        ctx.env,
+        _probe_cwd(ctx),
+    )
     db = version.get("VulnerabilityDB") if isinstance(version, dict) else None
     updated = db.get("UpdatedAt") if isinstance(db, dict) else None
     if not updated:
