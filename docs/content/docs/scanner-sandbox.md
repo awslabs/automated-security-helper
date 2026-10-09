@@ -89,14 +89,14 @@ it needs.
 | bandit | no | uv cache | uv-managed Python |
 | checkov | no | uv cache | uv-managed Python |
 | semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
-| opengrep | yes (registry rules) | `~/.opengrep` | single binary |
-| grype | yes (database update) | grype database cache | single binary |
+| opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
+| grype | yes (database update) | grype database cache; on macOS the database is read-only and not updated inside the sandbox | single binary |
 | syft | no | syft cache | single binary |
 | trivy | yes (database update) | trivy cache | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
-| cdk-nag | no | jsii's runtime cache | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
+| cdk-nag | no | jsii's runtime cache, not used on macOS | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
 
 ### Community and third-party plugin scanners
 
@@ -129,6 +129,12 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         env_prefixes=("MYTOOL_",),
         # Credential-shaped names it needs.
         env_names=("MYTOOL_TOKEN",),
+        # Set under sandbox-exec only, which has no overlay: keep the tool from
+        # writing a cache it gets read-only there.
+        sandbox_exec_env=(("MYTOOL_AUTO_UPDATE", "false"),),
+        # The tool unpacks itself where this variable says and runs what it
+        # unpacked; sandbox-exec points it at a private directory per spawn.
+        unpack_dir_env="XDG_CACHE_HOME",
     )
 ```
 
@@ -383,6 +389,27 @@ the spawn, outside the sandbox, with the same command (`security find-certificat
 read and not write, and sets `SSL_CERT_FILE` to it, which ca-certs reads instead. An
 `SSL_CERT_FILE` you set yourself is passed through and wins.
 
+sandbox-exec has no throwaway overlay, so a cache it lets a scanner write is written
+in place, and the next run, sandboxed or not, reads what the scanner left there. The
+macOS-specific locations are therefore declared per scanner and granted as narrowly as
+the tool allows:
+
+- grype's database at `~/Library/Caches/grype` is read-only, and grype runs with
+  `GRYPE_DB_AUTO_UPDATE=false`, so it uses the database it finds and still checks its
+  age online. Update it outside the sandbox (`grype db update`, or an unsandboxed
+  scan) when it is too old.
+- cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
+  temporary directory instead of the shared `~/Library/Caches/com.amazonaws.jsii`,
+  whose JavaScript every CDK process on the machine runs.
+- opengrep's macOS binary unpacks itself to `$XDG_CACHE_HOME/opengrep/<version>` and
+  runs `opengrep.bin` from there. `XDG_CACHE_HOME` points at a directory made for the
+  spawn, writable and executable for it alone, and removed when it exits; it is the
+  only writable directory a program may run from.
+- `uv tool run` opens uv's tools-directory lock read-write before it looks for an
+  installed tool. That one file is writable; the tools directory is not.
+- A script's interpreter, from its `#!` line, has its install prefix readable, so a
+  RubyGems wrapper finds its Ruby's library when Ruby is installed under `$HOME`.
+
 sandbox-exec does not end processes the scanner leaves running. ASH's removal of
 symlinks after each spawn and its non-following writes still apply, but a process that
 outlives the scanner could replace a subdirectory of the results directory with a
@@ -430,8 +457,9 @@ file outside the source tree (a planted `~/.ssh/id_rsa`), write outside its resu
 directory, open a network socket under `--offline`, and modify the source tree. CI runs
 it under each backend available on the runner. Each attempt must fail with the sandbox
 on, and succeed with `--sandbox off`, which is the negative control that proves the
-attempts are real. CI also runs every builtin scanner under bubblewrap against the
-snapshot fixture and asserts the findings match the unsandboxed run.
+attempts are real. CI also runs every builtin scanner under bubblewrap on Linux and
+under sandbox-exec on macOS against the snapshot fixture, offline and online, and
+asserts the findings match the unsandboxed run.
 
 On macOS, `tests/integration/sandbox/test_sandbox_exec_services.py` has the fixture
 scanner open TextEdit through LaunchServices, read a canary back from the pasteboard
