@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS = REPO_ROOT / "tests"
 STDLIB = frozenset(sys.stdlib_module_names)
@@ -185,7 +187,13 @@ def leaks(source: str, relative: str = "<planted>") -> list[str]:
 
 
 def _test_files() -> list[Path]:
-    return sorted(TESTS.rglob("*.py"))
+    # Pruned rather than TESTS.rglob(): tests/pytest-temp is under TESTS, and other
+    # xdist workers create and delete directories there while this walks.
+    return sorted(
+        path
+        for path in iter_repo_files(TESTS, skip_dirs=frozenset({"__pycache__"}))
+        if path.suffix == ".py"
+    )
 
 
 def test_the_walk_reaches_the_tests():

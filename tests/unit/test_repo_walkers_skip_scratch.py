@@ -89,6 +89,11 @@ _WALK_METHODS = frozenset({"glob", "rglob"})
 #: function rather than by file so converting one walker in a file does not
 #: silently exempt the next one added to it.
 _ALLOWED = {
+    ("test_github_yaml_files.py", "test_the_simulation_reproduces_the_race"): (
+        "The control for the scratch-race simulation: it runs the old walk on purpose "
+        "while the planted directory is made to vanish, and passes only if that walk "
+        "tried to enter it."
+    ),
     (
         "test_agent_plugin_ash_version.py",
         "test_every_version_files_path_exists",
@@ -100,9 +105,101 @@ _ALLOWED = {
 }
 
 
-def _root_walk_calls(source: str) -> list[tuple[int, str]]:
-    """``(lineno, enclosing function)`` for every root-walking call in ``source``."""
+class _Unresolvable(Exception):
+    """A binding that is not plain path arithmetic on ``__file__``."""
+
+
+def _evaluate_path(node: ast.expr, bindings: dict[str, Path], here: Path) -> Path:
+    """Evaluate ``node`` if it is path arithmetic on ``__file__``; raise otherwise.
+
+    An explicit evaluator rather than ``eval``: it accepts only ``Path(__file__)``,
+    ``Path(<str>)``, a name already bound this way, ``/`` with a string or another
+    such path, ``.parent``, ``.resolve()`` and ``.parents[<int>]``, so nothing in a
+    test module is ever executed to find out what it names.
+    """
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return here
+        if node.id in bindings:
+            return bindings[node.id]
+        raise _Unresolvable(node.id)
+    if isinstance(node, ast.Call):
+        if node.keywords:
+            raise _Unresolvable("keyword arguments")
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == "Path" and len(node.args) == 1:
+            (arg,) = node.args
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                return Path(arg.value)
+            return _evaluate_path(arg, bindings, here)
+        if isinstance(func, ast.Attribute) and func.attr == "resolve" and not node.args:
+            return _evaluate_path(func.value, bindings, here).resolve()
+        raise _Unresolvable(ast.dump(func))
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        return _evaluate_path(node.value, bindings, here).parent
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "parents"
+        and isinstance(node.slice, ast.Constant)
+        and type(node.slice.value) is int
+    ):
+        parents = _evaluate_path(node.value.value, bindings, here).parents
+        try:
+            return parents[node.slice.value]
+        except IndexError as error:
+            raise _Unresolvable("parents index out of range") from error
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left = _evaluate_path(node.left, bindings, here)
+        right = node.right
+        if isinstance(right, ast.Constant) and isinstance(right.value, str):
+            return left / right.value
+        return left / _evaluate_path(right, bindings, here)
+    raise _Unresolvable(type(node).__name__)
+
+
+def _scratch_ancestor_aliases(tree: ast.Module, path: Path) -> set[str]:
+    """Module-level names in ``path`` bound to a directory the scratch tree is under.
+
+    ``REPO = Path(__file__).resolve().parents[2]`` and ``TESTS = REPO_ROOT / "tests"``
+    both name such a directory, and walking either races the scratch tree exactly
+    like ``REPO_ROOT.rglob``. Two tests added in one train did that under the name
+    ``REPO``, which the fixed name list did not cover, and one raised
+    FileNotFoundError on windows-latest. So bindings are resolved, not matched by
+    name, with ``_evaluate_path``, in order, each able to use the ones before it.
+    """
+    scratch = ASH_TEST_TEMP_ROOT.resolve()
+    bindings: dict[str, Path] = {}
+    aliases: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            continue
+        if not isinstance(target, ast.Name):
+            continue
+        try:
+            resolved = _evaluate_path(value, bindings, path).resolve()
+        except (_Unresolvable, OSError, ValueError):
+            continue
+        bindings[target.id] = resolved
+        if scratch.is_relative_to(resolved):
+            aliases.add(target.id)
+    return aliases
+
+
+def _root_walk_calls(source: str, path: Path | None = None) -> list[tuple[int, str]]:
+    """``(lineno, enclosing function)`` for every root-walking call in ``source``.
+
+    With ``path``, names bound to any directory the scratch tree sits under count
+    too, not only the conventional root names.
+    """
     tree = ast.parse(source)
+    walked_names = set(_ROOT_NAMES)
+    if path is not None:
+        walked_names |= _scratch_ancestor_aliases(tree, path)
     enclosing: dict[int, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -117,7 +214,7 @@ def _root_walk_calls(source: str) -> list[tuple[int, str]]:
         func = node.func
         if not isinstance(func, ast.Attribute) or func.attr not in _WALK_METHODS:
             continue
-        if not isinstance(func.value, ast.Name) or func.value.id not in _ROOT_NAMES:
+        if not isinstance(func.value, ast.Name) or func.value.id not in walked_names:
             continue
         found.append((node.lineno, enclosing.get(node.lineno, "<module>")))
     return found
@@ -153,6 +250,49 @@ class TestNoTestWalksTheRepoRootWithRglob:
         assert _root_walk_calls("def h():\n    return PKG_ROOT.rglob('*.py')\n") == []
         assert _root_walk_calls("def i():\n    return root.rglob('*.py')\n") == []
 
+    def test_the_matcher_resolves_other_names_for_the_root(self):
+        """A root bound to any name is still the root; a subdirectory is not."""
+        here = TESTS_ROOT / "unit" / "test_planted_example.py"
+        source = (
+            "from pathlib import Path\n"
+            "REPO = Path(__file__).resolve().parents[2]\n"
+            "TESTS = REPO / 'tests'\n"
+            "PKG = REPO / 'automated_security_helper'\n"
+            "def a():\n    return REPO.glob('**/x.yml')\n"
+            "def b():\n    return TESTS.rglob('*.py')\n"
+            "def c():\n    return PKG.rglob('*.py')\n"
+        )
+        assert _root_walk_calls(source, here) == [(6, "a"), (8, "b")]
+        # Without the path the bindings cannot be resolved, as before.
+        assert _root_walk_calls(source) == []
+
+    def test_the_evaluator_resolves_path_arithmetic_and_nothing_else(self):
+        here = TESTS_ROOT / "unit" / "test_planted_example.py"
+
+        def evaluate(expression, bindings=None):
+            node = ast.parse(expression, mode="eval").body
+            return _evaluate_path(node, bindings or {}, here)
+
+        assert evaluate("Path(__file__).resolve().parents[2]") == REPO_ROOT
+        assert evaluate("Path(__file__).parent.parent") == TESTS_ROOT
+        assert evaluate("ROOT / 'tests' / 'unit'", {"ROOT": REPO_ROOT}) == (
+            TESTS_ROOT / "unit"
+        )
+        assert evaluate("Path('relative/dir')") == Path("relative/dir")
+        for refused in (
+            "Path.home()",
+            "os.getcwd()",
+            "Path(__file__).with_name('x')",
+            "Path(__file__).parents[UNBOUND]",
+            "Path(__file__).parents[99]",
+            "UNBOUND / 'tests'",
+            "Path(__file__, 'x')",
+            "Path(__file__) + 'x'",
+            "__import__('os').getcwd()",
+        ):
+            with pytest.raises(_Unresolvable):
+                evaluate(refused)
+
     def test_prose_about_the_hazard_is_not_counted_as_the_hazard(self):
         """``helpers.py`` quotes the traceback; an AST check must not see it.
 
@@ -170,7 +310,8 @@ class TestNoTestWalksTheRepoRootWithRglob:
     def test_no_test_walks_the_repo_root(self):
         offenders: dict[str, str] = {}
         for path in _test_sources():
-            for lineno, function in _root_walk_calls(path.read_text(encoding="utf-8")):
+            source = path.read_text(encoding="utf-8")
+            for lineno, function in _root_walk_calls(source, path):
                 if (path.name, function) in _ALLOWED:
                     continue
                 offenders[f"{path.relative_to(REPO_ROOT)}:{lineno}"] = function

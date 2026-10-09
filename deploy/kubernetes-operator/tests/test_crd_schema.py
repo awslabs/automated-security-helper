@@ -346,6 +346,102 @@ class TestTheDigestIgnoresDefaults:
 
         assert self._with(enum_with_default_key) != self._with(enum_with_other)
 
+    def test_a_definition_named_default_is_still_hashed(self):
+        def add_definition(schema):
+            schema["$defs"]["default"] = {"type": "string"}
+
+        assert self._with(add_definition) != ash_config_schema_digest(self.BASE)
+
+    def test_a_pattern_property_named_default_is_still_hashed(self):
+        def with_patterns(patterns):
+            def mutate(schema):
+                schema["patternProperties"] = patterns
+
+            return mutate
+
+        named_default = with_patterns({"default": {"type": "string"}})
+        assert self._with(named_default) != self._with(with_patterns({}))
+
+    def test_const_and_examples_values_are_data_not_keywords(self):
+        for keyword in ("const", "examples"):
+
+            def with_value(value, keyword=keyword):
+                def mutate(schema):
+                    schema["properties"]["enabled"][keyword] = (
+                        {"default": value} if keyword == "const" else [{"default": value}]
+                    )
+
+                return mutate
+
+            assert self._with(with_value(1)) != self._with(with_value(2)), keyword
+
+    def test_a_default_inside_a_list_of_subschemas_is_ignored(self):
+        def any_of(default):
+            def mutate(schema):
+                schema["properties"]["enabled"]["anyOf"] = [
+                    {"type": "boolean", "default": default},
+                    {"type": "null"},
+                ]
+
+            return mutate
+
+        assert self._with(any_of(True)) == self._with(any_of(False))
+
+
+class TestTheDigestsBlindSpotsAreAbsent:
+    """Shapes where ignoring `default` would hide something the CRD carries.
+
+    ``_without_defaults`` drops a key named ``default`` wherever it is not a field or
+    definition name, which would also drop one in a ``discriminator.mapping``, a
+    ``dependentSchemas`` map or an ``x-`` extension object. And ``_structural`` copies
+    ``patternProperties`` and a list-valued ``items`` verbatim, so a ``default`` inside
+    either reaches the CRD while the digest ignores it. None of these exist in
+    AshConfig's schema today; this fails when one appears, so the digest is revisited
+    rather than silently blind to it.
+    """
+
+    def _walk(self, node, pointer="", verbatim=False):
+        if isinstance(node, list):
+            for i, item in enumerate(node):
+                yield from self._walk(item, f"{pointer}/{i}", verbatim)
+            return
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            here = f"{pointer}/{key}"
+            if key in ("properties", "$defs", "definitions") and isinstance(value, dict):
+                for name, sub in value.items():
+                    yield from self._walk(sub, f"{here}/{name}", verbatim)
+                continue
+            if key in ("enum", "const", "examples", "example"):
+                continue
+            if key in ("discriminator", "dependentSchemas") or key.startswith("x-"):
+                yield f"{here}: a keyword whose value may hold a key named default"
+            if key == "default" and verbatim:
+                yield f"{here}: a default the CRD copies verbatim"
+            copied = verbatim or key == "patternProperties"
+            copied = copied or (key == "items" and isinstance(value, list))
+            yield from self._walk(value, here, copied)
+
+    def test_the_live_schema_has_none_of_them(self):
+        from ash_operator.crd_schema import ash_config_json_schema
+
+        schema, _origin = ash_config_json_schema()
+        assert list(self._walk(schema)) == []
+
+    def test_the_walk_finds_each_shape(self):
+        planted = {
+            "properties": {
+                "a": {"patternProperties": {".*": {"type": "string", "default": "x"}}},
+                "b": {"type": "array", "items": [{"type": "string", "default": "y"}]},
+                "c": {"discriminator": {"mapping": {"default": "#/$defs/C"}}},
+                "d": {"dependentSchemas": {"default": {"type": "object"}}},
+                "e": {"x-extension": {"default": 1}},
+            }
+        }
+        found = list(self._walk(planted))
+        assert len(found) == 5, found
+
 
 class TestFullExposure:
     def test_every_top_level_ash_config_field_is_present(self):

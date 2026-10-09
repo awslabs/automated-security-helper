@@ -133,6 +133,39 @@ def iter_repo_files(
             yield here / name
 
 
+#: The ``.github`` directories that hold this repository's workflows and composite
+#: actions, relative to the repository root. Listed rather than discovered with a
+#: ``**`` glob from the root: that walk descends into tests/pytest-temp, where other
+#: xdist workers create and delete directories, and raised FileNotFoundError on a
+#: windows-latest py3.11 leg (test_checkout_persist_credentials). The completeness
+#: test in tests/unit/test_github_yaml_files.py compares this list with
+#: ``git ls-files`` so a new one cannot be missed.
+GITHUB_YAML_ROOTS = (
+    ".github",
+    "ash-agent-plugins/.github",
+    "docs/content/tutorials/CI/GitHubActions/.github",
+)
+
+
+def github_yaml_files(repo_root: Path) -> list[Path]:
+    """Every workflow and composite-action YAML under ``GITHUB_YAML_ROOTS``.
+
+    Each glob is one or two fixed levels deep inside a ``.github`` directory, so
+    nothing outside those directories is listed, let alone descended into.
+    """
+    found: set[Path] = set()
+    for rel in GITHUB_YAML_ROOTS:
+        root = repo_root / rel
+        for pattern in (
+            "workflows/*.yml",
+            "workflows/*.yaml",
+            "actions/*/action.yml",
+            "actions/*/action.yaml",
+        ):
+            found.update(path for path in root.glob(pattern) if path.is_file())
+    return sorted(found)
+
+
 def get_ash_temp_path():
     """Create a temporary directory using the gitignored tests/pytest-temp directory.
 

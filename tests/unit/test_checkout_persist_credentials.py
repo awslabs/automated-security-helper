@@ -25,6 +25,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.utils.helpers import github_yaml_files
+
 REPO = Path(__file__).resolve().parents[2]
 
 # (file, job, n): the n-th checkout in that job; job "" is a composite action's steps.
@@ -72,14 +74,9 @@ FROZEN_SIZE = 38
 
 
 def _files() -> list[Path]:
-    found = []
-    for pattern in (
-        "**/.github/workflows/*.yml",
-        "**/.github/workflows/*.yaml",
-        "**/.github/actions/*/action.yml",
-    ):
-        found += [p for p in REPO.glob(pattern) if "node_modules" not in p.parts]
-    return sorted(set(found))
+    # The listed .github roots only. A `**` glob from the repository root descends
+    # into tests/pytest-temp, which other xdist workers create and delete under it.
+    return github_yaml_files(REPO)
 
 
 def checkouts() -> list[tuple[tuple[str, str, int], bool]]:

@@ -406,8 +406,9 @@ global_settings:
       reason: >-
         sourceSchemaSha256 is a truncated SHA-256 of ASH's own published config
         schema, written by `python -m ash_operator.generate_manifests` so a stale
-        generated file can be detected. It changes on every schema change and is
-        derived from a public file.
+        generated file can be detected. It changes whenever the schema the CRD carries
+        changes; defaults are left out of it, because the CRD drops them and two of
+        them depend on the platform. It is derived from a public file.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: deploy/kubernetes-operator/generated/crd-ashscans.yaml
       reason: >-

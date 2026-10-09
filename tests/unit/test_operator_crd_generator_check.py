@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess  # nosec B404 - runs this repository's own generator
+import subprocess
 import sys
 from pathlib import Path
 
@@ -81,7 +81,7 @@ def _env() -> dict[str, str]:
 
 
 def _python(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(  # nosec B603 - this interpreter, code from this checkout
+    return subprocess.run(
         [sys.executable, *args],
         cwd=OPERATOR,
         env=_env(),

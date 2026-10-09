@@ -27,6 +27,8 @@ from typing import Iterator
 import pytest
 import yaml
 
+from tests.utils.helpers import github_yaml_files
+
 REPO = Path(__file__).resolve().parents[2]
 
 # `ash` (or ash.exe) where a shell would run it: the start of a command line, or
@@ -38,14 +40,9 @@ ASH_OPTION = re.compile(r"--ash(?:=|\s+)ash(?:\.exe)?(?=\s|$|\\)")
 
 
 def _files() -> list[Path]:
-    found: set[Path] = set()
-    for pattern in (
-        "**/.github/workflows/*.yml",
-        "**/.github/workflows/*.yaml",
-        "**/.github/actions/*/action.yml",
-    ):
-        found |= {p for p in REPO.glob(pattern) if "node_modules" not in p.parts}
-    return sorted(found)
+    # The listed .github roots only. A `**` glob from the repository root descends
+    # into tests/pytest-temp, which other xdist workers create and delete under it.
+    return github_yaml_files(REPO)
 
 
 def _run_lines() -> Iterator[tuple[str, str, str]]:
