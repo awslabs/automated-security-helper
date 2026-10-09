@@ -127,6 +127,14 @@ def main() -> int:
         if not leaked:
             raise RuntimeError("no IPC endpoint variable in the environment")
 
+    def write_host_cache():
+        # uv's cache on the host, which a later unsandboxed `uv run` or `uv tool
+        # install` reads. Writable only where the write cannot reach the host.
+        with open(os.path.join(spec["host_cache"], "seed.txt"), "a") as f:
+            f.write("pwned\n")
+        with open(os.path.join(spec["host_cache"], "pwned.txt"), "w") as f:
+            f.write("pwned")
+
     def write_dev_shm():
         with open(spec["shm_file"], "w") as f:
             f.write("pwned")
@@ -171,6 +179,7 @@ def main() -> int:
         "ipc_environment": ipc_environment,
         "unix_socket_connect": unix_socket_connect,
         "plant_symlinks": plant_symlinks,
+        "write_host_cache": write_host_cache,
     }
     if os.path.isdir("/proc") and sys.platform.startswith("linux"):
         checks["parent_environ"] = parent_environ
@@ -196,8 +205,16 @@ def main() -> int:
                 a.close()
                 b.close()
 
+    def uv_cache_is_writable():
+        # Wherever UV_CACHE_DIR points (the host cache through bwrap's overlay, a
+        # private directory elsewhere), uv has to be able to write it.
+        with open(os.path.join(os.environ["UV_CACHE_DIR"], "probe.txt"), "w") as f:
+            f.write("ok")
+
     # What must still work, recorded apart from the attempts: "works" or why not.
     works = {}
+    result = attempt(uv_cache_is_writable)
+    works["uv_cache"] = "works" if result == "succeeded" else result
     if sys.platform.startswith("linux"):
         result = attempt(socketpair_round_trip)
         works["socketpair"] = "works" if result == "succeeded" else result

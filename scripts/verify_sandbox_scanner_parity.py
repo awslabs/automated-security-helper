@@ -154,9 +154,20 @@ def read_results(
     return statuses, findings, shapes
 
 
+def read_durations(output: Path) -> Dict[str, float]:
+    """Seconds each scanner took, as ASH recorded it. Reported, not compared: a
+    sandbox costs time, and how much is worth seeing per scanner."""
+    document = json.loads((output / "ash_aggregated_results.json").read_text())
+    return {
+        name: float(info.get("duration") or 0.0)
+        for name, info in document["scanner_results"].items()
+    }
+
+
 def compare(label: str, off: Path, boxed: Path) -> Tuple[List[dict], List[str]]:
     off_status, off_findings, off_shapes = read_results(off)
     box_status, box_findings, box_shapes = read_results(boxed)
+    off_seconds, box_seconds = read_durations(off), read_durations(boxed)
     rows, problems = [], []
     for name in sorted(set(off_status) | set(box_status)):
         a, b = off_status.get(name), box_status.get(name)
@@ -169,6 +180,8 @@ def compare(label: str, off: Path, boxed: Path) -> Tuple[List[dict], List[str]]:
             "findings_off": len(fa),
             "findings_sandboxed": len(fb),
             "identical": a == b and fa == fb,
+            "seconds_off": round(off_seconds.get(name, 0.0), 2),
+            "seconds_sandboxed": round(box_seconds.get(name, 0.0), 2),
         }
         rows.append(row)
         if a != b:
@@ -262,13 +275,15 @@ def main() -> int:
     width = max(len(r["scanner"]) for r in rows)
     print(
         f"\n{'run':8} {'scanner':{width}}  off            {args.sandbox:14} identical"
+        f"  seconds off/{args.sandbox}"
     )
     for r in rows:
         print(
             f"{r['run']:8} {r['scanner']:{width}}  "
             f"{str(r['status_off']):8}{r['findings_off']:>4}   "
             f"{str(r['status_sandboxed']):8}{r['findings_sandboxed']:>4}     "
-            f"{'yes' if r['identical'] else 'NO'}"
+            f"{'yes' if r['identical'] else 'NO ':9}"
+            f"{r['seconds_off']:>7.2f} {r['seconds_sandboxed']:>7.2f}"
         )
     if args.report:
         args.report.write_text(

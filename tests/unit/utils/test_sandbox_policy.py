@@ -170,7 +170,7 @@ class TestExecutable:
         assert etc in _resolved(policy.read_only)
         assert etc not in _resolved(policy.executable)
 
-    def test_nothing_writable_is_executable_but_the_uv_cache(
+    def test_nothing_writable_or_cached_is_executable(
         self, layout, monkeypatch, tmp_path
     ):
         uv_cache = tmp_path / "uv-cache"
@@ -180,11 +180,10 @@ class TestExecutable:
         monkeypatch.setenv("UV_CACHE_DIR", str(uv_cache))
         policy = _policy(layout, SandboxRequirements(cache_paths=(str(other_cache),)))
         executable = _resolved(policy.executable)
-        # `uv tool run` keeps the environments of tools it was not asked to install
-        # in its cache and runs their entry points from there.
-        assert Path(os.path.realpath(uv_cache)) in executable
-        assert Path(os.path.realpath(other_cache)) not in executable
-        assert Path(os.path.realpath(layout.results)) not in executable
+        # The host caches are read-only wherever exec is restricted; uv runs from
+        # the spawn's private cache, which the backend makes executable.
+        for path in (uv_cache, other_cache, layout.results):
+            assert Path(os.path.realpath(path)) not in executable, path
 
 
 class TestEnvironment:
@@ -293,6 +292,143 @@ class TestSocketFilterWrapper:
         ]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+class TestHostCachesAreNotWrittenInPlace:
+    """A host cache is writable only where the write is thrown away.
+
+    bwrap's overlay discards what a scanner writes to a cache. firejail, Landlock,
+    sandbox-exec, and bwrap without overlay support would write in place, changing
+    what later runs read: uv hard-links its cache into the tool environments a
+    later unsandboxed `uv tool install` builds. So they mount every cache
+    read-only, and point UV_CACHE_DIR, and each variable a scanner names in
+    cache_env, at a private directory under the results directory that is
+    removed after the spawn.
+    """
+
+    @pytest.fixture
+    def cache(self, layout, monkeypatch):
+        cache = layout.home.parent / "uv-cache"
+        cache.mkdir()
+        monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+        return cache
+
+    def _plan(self, name, layout, requirements=SandboxRequirements(), overlay=False):
+        backend = BACKENDS[name]()
+        if hasattr(backend, "_executable"):
+            backend._executable = f"/usr/bin/{name}"
+        if name == "bwrap":
+            backend._overlay = overlay
+        return backend.plan(
+            ["/usr/bin/true"], {"PATH": "/usr/bin"}, _policy(layout, requirements)
+        )
+
+    def _assert_private(self, plan, layout, variable):
+        private = Path(plan.env[variable])
+        assert private.is_dir()
+        assert private.parent.name.startswith(".sandbox-cache-")
+        assert _resolved([private.parent.parent]) == _resolved([layout.results])
+        plan.run_cleanup()
+        assert not private.parent.exists()
+
+    def test_bwrap_keeps_its_throwaway_overlay(self, layout, cache):
+        plan = self._plan("bwrap", layout, overlay=True)
+        real = _as_argv(cache)
+        i = plan.argv.index("--overlay-src")
+        assert plan.argv[i : i + 4] == ["--overlay-src", real, "--tmp-overlay", real]
+        # Through the overlay the host cache itself is used, read and written.
+        assert "UV_CACHE_DIR" not in plan.env
+        plan.run_cleanup()
+
+    def test_bwrap_without_an_overlay_mounts_caches_read_only(self, layout, cache):
+        plan = self._plan("bwrap", layout, overlay=False)
+        real = _as_argv(cache)
+        binds = [
+            plan.argv[i]
+            for i in range(len(plan.argv) - 1)
+            if plan.argv[i + 1] == real and plan.argv[i].startswith("--")
+        ]
+        assert binds == ["--ro-bind"], binds
+        self._assert_private(plan, layout, "UV_CACHE_DIR")
+
+    def test_firejail_mounts_caches_read_only(self, layout, cache):
+        plan = self._plan("firejail", layout)
+        real = _as_argv(cache)
+        assert f"--read-only={real}" in plan.argv
+        assert f"--read-write={real}" not in plan.argv
+        self._assert_private(plan, layout, "UV_CACHE_DIR")
+
+    def test_landlock_grants_caches_read_only(self, layout, cache):
+        import json
+
+        plan = self._plan("landlock", layout)
+        document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
+        assert _as_argv(cache) in document["read_only"]
+        assert _as_argv(cache) not in document["writable"]
+        self._assert_private(plan, layout, "UV_CACHE_DIR")
+
+    def test_sandbox_exec_grants_caches_read_only(self, layout, cache, tmp_path):
+        backend = BACKENDS["sandbox-exec"]()
+        profile = backend.profile(_policy(layout), tmp_path)
+        writable = [line for line in profile.splitlines() if "file-write*" in line]
+        assert not any(_as_argv(cache) in line for line in writable), writable
+        assert any(
+            _as_argv(cache) in line and "file-write*" not in line
+            for line in profile.splitlines()
+        )
+        plan = self._plan("sandbox-exec", layout)
+        self._assert_private(plan, layout, "UV_CACHE_DIR")
+
+    @pytest.mark.parametrize("name", ["firejail", "landlock", "sandbox-exec"])
+    def test_a_declared_cache_variable_gets_a_private_directory(
+        self, layout, cache, name, tmp_path
+    ):
+        npm_cache = tmp_path / "npm-cache"
+        npm_cache.mkdir()
+        requirements = SandboxRequirements(
+            cache_paths=(str(npm_cache),), cache_env=("npm_config_cache",)
+        )
+        plan = self._plan(name, layout, requirements)
+        assert (
+            Path(plan.env["npm_config_cache"]).parent
+            == Path(plan.env["UV_CACHE_DIR"]).parent
+        )
+        self._assert_private(plan, layout, "npm_config_cache")
+
+    def test_a_redirect_replaces_a_differently_cased_copy(self, layout, cache):
+        # npm reads npm_config_* whatever the case, so a NPM_CONFIG_CACHE from the
+        # parent would compete with the private npm_config_cache.
+        backend = BACKENDS["landlock"]()
+        requirements = SandboxRequirements(
+            env_prefixes=("NPM_CONFIG_",), cache_env=("npm_config_cache",)
+        )
+        plan = backend.plan(
+            ["/usr/bin/true"],
+            {"PATH": "/usr/bin", "NPM_CONFIG_CACHE": "/host/npm"},
+            _policy(layout, requirements),
+        )
+        assert "NPM_CONFIG_CACHE" not in plan.env
+        self._assert_private(plan, layout, "npm_config_cache")
+
+    def test_bundled_scanners_that_write_a_cache_declare_where(self):
+        """Measured under Landlock with the caches read-only: these failed or lost
+        findings until redirected (semgrep and opengrep cannot open their log under
+        ~/.semgrep or ~/.opengrep; npm-audit lost the vulnerable ranges it reads
+        from registry metadata it caches). grype's and trivy's databases are only
+        read, so they are not redirected."""
+        declared = {
+            getattr(cls, "__name__"): getattr(cls, "sandbox_requirements").cache_env
+            for cls in _bundled_scanner_classes()
+            if isinstance(
+                getattr(cls, "sandbox_requirements", None), SandboxRequirements
+            )
+        }
+        assert declared["SemgrepScanner"] == ("XDG_CONFIG_HOME",)
+        assert declared["OpengrepScanner"] == ("XDG_CONFIG_HOME",)
+        assert declared["NpmAuditScanner"] == ("npm_config_cache",)
+        assert declared["GrypeScanner"] == ()
+        assert declared["TrivyRepoScanner"] == ()
+
+
 #: Variables that name a local IPC endpoint: the SSH agent, the session bus, the
 #: Docker and Podman sockets, and the per-user runtime directory holding them.
 IPC_ENDPOINT_VARIABLES = {
@@ -304,11 +440,9 @@ IPC_ENDPOINT_VARIABLES = {
 }
 
 
-def _every_declared_requirement():
-    """The sandbox requirements every bundled scanner declares on its class."""
+def _bundled_scanner_classes():
     import importlib
 
-    found = []
     for module in (
         "ash_builtin",
         "ash_snyk_plugins",
@@ -318,12 +452,18 @@ def _every_declared_requirement():
         package = importlib.import_module(
             f"automated_security_helper.plugin_modules.{module}"
         )
-        for scanner in package.ASH_SCANNERS:
-            declared = getattr(scanner, "sandbox_requirements", None)
-            # detect-secrets computes its own per instance; it declares no
-            # environment, only a network.
-            if isinstance(declared, SandboxRequirements):
-                found.append(declared)
+        yield from package.ASH_SCANNERS
+
+
+def _every_declared_requirement():
+    """The sandbox requirements every bundled scanner declares on its class."""
+    found = []
+    for scanner in _bundled_scanner_classes():
+        declared = getattr(scanner, "sandbox_requirements", None)
+        # detect-secrets computes its own per instance; it declares no
+        # environment, only a network.
+        if isinstance(declared, SandboxRequirements):
+            found.append(declared)
     return found
 
 
@@ -906,25 +1046,41 @@ class TestSandboxExecProfile:
         for denied in (layout.results, tmp_path / "private-tmp", layout.source):
             assert _as_argv(denied) in _subpaths(deny), denied
 
-    def test_the_uv_cache_is_executable_and_other_caches_are_not(
+    def test_the_spawns_private_uv_cache_is_executable_and_nothing_else_written(
         self, layout, monkeypatch, tmp_path
     ):
         uv_cache = tmp_path / "uv-cache"
-        other_cache = tmp_path / "grype-cache"
+        other_cache = tmp_path / "npm-cache"
         uv_cache.mkdir()
         other_cache.mkdir()
         monkeypatch.setenv("UV_CACHE_DIR", str(uv_cache))
-        lines = _sbpl(
-            layout,
-            tmp_path,
-            requirements=SandboxRequirements(cache_paths=(str(other_cache),)),
+        requirements = SandboxRequirements(
+            cache_paths=(str(other_cache),), cache_env=("npm_config_cache",)
         )
-        ((_, allow),) = _indexed(lines, "(allow process-exec ")
-        ((_, deny),) = _indexed(lines, "(deny process-exec ")
-        assert _as_argv(uv_cache) in _subpaths(allow)
-        assert _as_argv(uv_cache) not in _subpaths(deny)
-        assert _as_argv(other_cache) in _subpaths(deny)
-        assert _as_argv(other_cache) not in _subpaths(allow)
+        plan = SandboxExecBackend().plan(
+            ["/usr/bin/true"], {}, _policy(layout, requirements)
+        )
+        try:
+            private_uv = _as_argv(plan.env["UV_CACHE_DIR"])
+            private_npm = _as_argv(plan.env["npm_config_cache"])
+            profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
+            allowed = set().union(
+                *(
+                    _subpaths(rule)
+                    for _, rule in _indexed(profile, "(allow process-exec ")
+                )
+            )
+            ((deny_at, deny),) = _indexed(profile, "(deny process-exec ")
+            # `uv tool run` builds an uninstalled tool's environment in its cache
+            # and runs it from there; the private cache is this spawn's alone.
+            assert private_uv in allowed
+            last_allow = max(i for i, _ in _indexed(profile, "(allow process-exec "))
+            assert last_allow > deny_at
+            for never in (private_npm, _as_argv(uv_cache), _as_argv(other_cache)):
+                assert never not in allowed, never
+            assert {_as_argv(uv_cache), _as_argv(other_cache)} <= _subpaths(deny)
+        finally:
+            plan.run_cleanup()
 
     def test_the_scan_data_is_not_executable_inside_a_tool_path(self, layout, tmp_path):
         # A tool path that holds the scanned tree, as /opt holds a repository
@@ -1138,17 +1294,14 @@ class TestUnpackDir:
             unpack = Path(plan.env["XDG_CACHE_HOME"])
             assert unpack.is_dir()
             profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
-            ((_, allow),) = [
-                (i, line)
-                for i, line in enumerate(profile)
-                if line.startswith("(allow process-exec ")
-            ]
-            ((_, deny),) = [
-                (i, line)
-                for i, line in enumerate(profile)
-                if line.startswith("(deny process-exec ")
-            ]
-            assert _as_argv(unpack) in _subpaths(allow)
+            allowed = set().union(
+                *(
+                    _subpaths(rule)
+                    for _, rule in _indexed(profile, "(allow process-exec ")
+                )
+            )
+            ((_, deny),) = _indexed(profile, "(deny process-exec ")
+            assert _as_argv(unpack) in allowed
             assert _as_argv(unpack) not in _subpaths(deny)
             writable = set().union(
                 *(

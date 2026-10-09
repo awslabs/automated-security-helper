@@ -225,6 +225,13 @@ def _scan(
         "project_name: sandbox-escape\nash_plugin_modules:\n  - escape_plugins\n"
     )
     output = tmp_path / "out"
+    # The uv cache the scan sees, standing in for the user's: every sandbox
+    # mounts it, and a write that lands in it outlives the sandbox.
+    host_cache = tmp_path / "uv-cache"
+    host_cache.mkdir()
+    seed = host_cache / "seed.txt"
+    seed.write_text("original\n")
+    seed_mtime = seed.stat().st_mtime_ns
 
     host_ip = _host_ip()
     spec = {
@@ -242,6 +249,7 @@ def _scan(
         "unix_abstract": listeners.abstract_name,
         "unix_datagram_socket": str(listeners.datagram_path or ""),
         "ipc_env": _ipc_environment(listeners),
+        "host_cache": str(host_cache),
         "victims": {
             "ASH.ScanResults.json": str(outside / "victim-results.txt"),
             "SandboxEscapeScanner.stdout.log": str(outside / "victim-log.txt"),
@@ -265,6 +273,7 @@ def _scan(
         # the spec carries the canary, which parent_environ would then find in the
         # sandbox's own init process.
         "ASH_SANDBOX_ESCAPE_SPEC": str(spec_file),
+        "UV_CACHE_DIR": str(host_cache),
         **_ipc_environment(listeners),
     }
     command = [
@@ -333,6 +342,16 @@ def _scan(
             "succeeded" if shm.exists() else "blocked: nothing left in /dev/shm"
         )
         shm.unlink(missing_ok=True)
+    # Only the host side counts here too: under bwrap the write lands in a
+    # throwaway overlay and succeeds without reaching the host.
+    outcomes.pop("write_host_cache", None)
+    outcomes["_host_cache_untouched"] = (
+        "succeeded"
+        if seed.read_text() != "original\n"
+        or seed.stat().st_mtime_ns != seed_mtime
+        or (host_cache / "pwned.txt").exists()
+        else "blocked: host cache unchanged"
+    )
     outcomes["_outside_untouched"] = (
         "succeeded"
         if (outside / "pwned.txt").exists() or (output / "pwned.txt").exists()
@@ -369,6 +388,7 @@ BLOCKED_BY = (
     "blocked: source tree unchanged",
     "blocked: nothing written outside the results directory",
     "blocked: nothing left in /dev/shm",
+    "blocked: host cache unchanged",
     "blocked: ASH did not write through the planted links",
 )
 
@@ -388,10 +408,14 @@ KNOWN_GAPS = {
     },
 }
 
-#: What has to keep working inside every sandbox. Stream and seqpacket socketpairs
-#: are how tools make pipes; only the datagram kind, which can reach a path, is
-#: refused. Probed on Linux only.
-EXPECTED_WORKS = {"socketpair": "works"} if sys.platform.startswith("linux") else {}
+#: What has to keep working inside every sandbox. uv writes its cache on every run,
+#: so wherever UV_CACHE_DIR points has to be writable: the host cache through
+#: bwrap's overlay, a private directory under the other backends. Stream and
+#: seqpacket socketpairs are how tools make pipes; only the datagram kind, which
+#: can reach a path, is refused (probed on Linux only).
+EXPECTED_WORKS = {"uv_cache": "works"}
+if sys.platform.startswith("linux"):
+    EXPECTED_WORKS["socketpair"] = "works"
 
 #: The attempts that need only a network, which a scanner granted one should have.
 NETWORK_ATTEMPTS = ("tcp_connect", "tcp_connect_host_address", "udp_send")

@@ -63,6 +63,35 @@ def _with_socket_filter(argv: Sequence[str]) -> List[str]:
     ]
 
 
+def _private_caches(
+    policy: SandboxPolicy, child_env: Dict[str, str]
+) -> List[Callable[[], None]]:
+    """Give the tools that must write a cache a private one; returns the cleanup.
+
+    Only bwrap's throwaway overlay lets a scanner write a host cache without the
+    write reaching the host. Every other backend mounts ``policy.cache`` read-only
+    and calls this, which points each variable in ``policy.cache_env``
+    (``UV_CACHE_DIR``, and what the scanner declares) at its own empty directory:
+    a fresh directory under the results directory, the one place the scanner may
+    write, removed once the process has exited. A tool redirected this way starts
+    from an empty cache, so online it fetches what it needs and offline it has
+    nothing cached. A cache that is only read, such as a vulnerability database,
+    is not redirected and stays read-only.
+    """
+    if not policy.cache_env:
+        return []
+    root = Path(tempfile.mkdtemp(prefix=".sandbox-cache-", dir=policy.results_dir))
+    for name in policy.cache_env:
+        # npm reads npm_config_* without regard to case, so a NPM_CONFIG_CACHE
+        # passed through from the parent would compete with the redirect.
+        for key in [k for k in child_env if k.lower() == name.lower() and k != name]:
+            del child_env[key]
+        private = root / name.lower()
+        private.mkdir()
+        child_env[name] = private.as_posix()
+    return [lambda: shutil.rmtree(root, ignore_errors=True)]
+
+
 @dataclass
 class SpawnPlan:
     """What to hand ``subprocess`` in place of the scanner's own argv and env."""
@@ -208,8 +237,8 @@ class BwrapBackend(SandboxBackend):
         if not self._overlay:
             ASH_LOGGER.warning(
                 "bwrap cannot mount a throwaway overlay here (needs bubblewrap 0.8+ "
-                "and Linux 5.11+): scanner caches will be mounted read-write, so a "
-                "scanner can change what a later scan reads from them."
+                "and Linux 5.11+): scanner caches will be mounted read-only, and uv "
+                "and any tool that has to write its cache get an empty private one."
             )
         return None
 
@@ -227,7 +256,7 @@ class BwrapBackend(SandboxBackend):
         for p in policy.read_only:
             add(p, _RO)
         for p in policy.cache:
-            add(p, _CACHE if self._overlay else _RW)
+            add(p, _CACHE if self._overlay else _RO)
         for p in policy.writable:
             add(p, _RW)
 
@@ -298,7 +327,11 @@ class BwrapBackend(SandboxBackend):
             cmd.extend(["--chdir", _real(policy.cwd).as_posix()])
         cmd.append("--")
         cmd.extend(_with_socket_filter(argv))
-        return SpawnPlan(argv=cmd, env=policy.filter_env(env))
+        child_env = policy.filter_env(env)
+        cleanup: List[Callable[[], None]] = []
+        if not self._overlay:
+            cleanup = _private_caches(policy, child_env)
+        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
 
 
 # ---------------------------------------------------------------------------
@@ -365,10 +398,12 @@ class FirejailBackend(SandboxBackend):
             if path and os.path.lexists(path):
                 cmd.append(f"--blacklist={path}")
 
-        readable = [_real(p) for p in policy.read_only]
-        writable = [_real(p) for p in policy.writable] + [
+        # firejail has no throwaway overlay, so a cache is read-only like the rest;
+        # _private_caches gives the tools that write one a private directory.
+        readable = [_real(p) for p in policy.read_only] + [
             _real(p) for p in policy.cache
         ]
+        writable = [_real(p) for p in policy.writable]
         # Whitelisting any path inside $HOME (or /tmp) makes everything else there
         # invisible, which is how firejail hides the home directory.
         whitelisted = [
@@ -388,15 +423,17 @@ class FirejailBackend(SandboxBackend):
         # often the source tree) opened back up. Without this, CI measured the
         # source tree and the output directory writable whenever they sat in /tmp.
         for p in readable:
-            # A readable path inside a writable one (a cache, the results dir) is
-            # left to the --read-write below rather than made read-only first.
+            # A readable path inside a writable one (the results dir) is left to
+            # the --read-write below rather than made read-only first.
             if not any(p == w or _is_within(p, w) for w in writable):
                 cmd.append(f"--read-only={p.as_posix()}")
         for p in writable:
             cmd.append(f"--read-write={p.as_posix()}")
         cmd.append("--")
         cmd.extend(_with_socket_filter(argv))
-        return SpawnPlan(argv=cmd, env=policy.filter_env(env))
+        child_env = policy.filter_env(env)
+        cleanup = _private_caches(policy, child_env)
+        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
 
 
 # ---------------------------------------------------------------------------
@@ -460,10 +497,12 @@ class LandlockBackend(SandboxBackend):
             argv[0] if os.path.isabs(argv[0]) else (shutil.which(argv[0]) or argv[0])
         )
         document = {
+            # Caches are read-only: Landlock cannot discard a write, so one in place
+            # would change what later runs read. See _private_caches.
             "read_only": [_real(p).as_posix() for p in policy.read_only]
+            + [_real(p).as_posix() for p in policy.cache]
             + ["/proc", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full"],
             "writable": [_real(p).as_posix() for p in policy.writable]
-            + [_real(p).as_posix() for p in policy.cache]
             # /dev/shm because POSIX semaphores live there and multiprocessing needs
             # them (detect-secrets scans files in a process pool). Landlock cannot
             # make it private, so this is the host's: a documented gap of this
@@ -485,10 +524,12 @@ class LandlockBackend(SandboxBackend):
         child_env = policy.filter_env(env)
         child_env["TMPDIR"] = private_tmp.as_posix()
         child_env["HOME"] = private_home.as_posix()
+        private_cleanup = _private_caches(policy, child_env)
         return SpawnPlan(
             argv=cmd,
             env=child_env,
-            cleanup=[lambda: shutil.rmtree(private_root, ignore_errors=True)],
+            cleanup=[lambda: shutil.rmtree(private_root, ignore_errors=True)]
+            + private_cleanup,
         )
 
 
@@ -654,20 +695,22 @@ def _mach_rule(names: Sequence[str]) -> str:
 
 
 def _exec_rules(
-    policy: SandboxPolicy, private_tmp: Path, unpack_dir: Optional[Path] = None
+    policy: SandboxPolicy, private_tmp: Path, spawn_executable: Sequence[Path] = ()
 ) -> List[str]:
     """Programs run from the policy's executable paths, and from nowhere else.
 
     Then exec is denied again in the scan's own data, which the scanned repository
     wrote, and everywhere else the scanner can write (the results directory, its
     caches, the private TMPDIR), even where a tool path contains one of them: a
-    checkout under /opt is not executable because /opt is. A tool path inside one of
-    those (a virtualenv in the scanned project that ASH itself runs from) is given
-    back last. In SBPL the last matching rule wins.
+    checkout under /opt is not executable because /opt is. A path inside one of
+    those that has to be executable is given back last: a tool path (a virtualenv
+    in the scanned project that ASH itself runs from), and ``spawn_executable``,
+    the directories made for this spawn alone that a tool runs programs from (its
+    private uv cache, a self-unpacking tool's unpack directory). In SBPL the last
+    matching rule wins.
     """
     executable = sorted(
-        {_real(p) for p in policy.executable}
-        | ({_real(unpack_dir)} if unpack_dir is not None else set())
+        {_real(p) for p in policy.executable} | {_real(p) for p in spawn_executable}
     )
     denied = sorted(
         {
@@ -705,16 +748,18 @@ class SandboxExecBackend(SandboxBackend):
         private_tmp: Path,
         trust_roots: Optional[Path] = None,
         unpack_dir: Optional[Path] = None,
+        private_uv_cache: Optional[Path] = None,
     ) -> str:
         home = _real(policy.home)
+        # Caches are read-only here too; see _private_caches.
         readable = " ".join(
-            f"(subpath {_sbpl_string(_real(p))})" for p in policy.read_only
+            f"(subpath {_sbpl_string(_real(p))})"
+            for p in list(policy.read_only) + list(policy.cache)
         )
         writable = " ".join(
             [
                 f"(subpath {_sbpl_string(_real(p))})"
                 for p in list(policy.writable)
-                + list(policy.cache)
                 + [private_tmp]
                 + ([unpack_dir] if unpack_dir is not None else [])
             ]
@@ -724,7 +769,11 @@ class SandboxExecBackend(SandboxBackend):
             "(version 1)",
             "(deny default)",
             "(allow process-fork)",
-            *_exec_rules(policy, private_tmp, unpack_dir),
+            *_exec_rules(
+                policy,
+                private_tmp,
+                [p for p in (unpack_dir, private_uv_cache) if p is not None],
+            ),
             "(allow signal (target same-sandbox))",
             "(allow process-info* (target same-sandbox))",
             "(allow sysctl-read)",
@@ -784,6 +833,15 @@ class SandboxExecBackend(SandboxBackend):
         ]
         child_env = policy.filter_env(env)
         child_env["TMPDIR"] = private_tmp.as_posix()
+        # Caches are read-only here; see _private_caches. uv's private cache is
+        # also where `uv tool run` builds the environment of a tool it was not asked
+        # to install and runs it from, so the profile lets that one run programs.
+        cleanup += _private_caches(policy, child_env)
+        private_uv_cache = (
+            Path(child_env["UV_CACHE_DIR"])
+            if "UV_CACHE_DIR" in policy.cache_env and child_env.get("UV_CACHE_DIR")
+            else None
+        )
         trust_roots = None
         # An SSL_CERT_FILE the operator set is passed through and wins, as it
         # would unsandboxed.
@@ -817,7 +875,9 @@ class SandboxExecBackend(SandboxBackend):
             "" if policy.cwd else private_tmp.as_posix(),
             self.executable,
             "-p",
-            self.profile(policy, private_tmp, trust_roots, unpack_dir),
+            self.profile(
+                policy, private_tmp, trust_roots, unpack_dir, private_uv_cache
+            ),
             *argv,
         ]
         return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
