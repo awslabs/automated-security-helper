@@ -297,16 +297,17 @@ def _check_value_pattern(
             )
 
 
-def apply_runtime_patch(
-    base: AshConfig,
+def check_runtime_ops(
     patch_ops: List[Dict[str, Any]],
     *,
     allowlist: RuntimeOverridesConfig,
-) -> AshConfig:
-    """Apply a JSON-Patch to a config, enforcing the runtime allowlist.
+) -> None:
+    """Enforce the runtime allowlist on JSON-Patch ops without applying them.
 
-    Returns a new `AshConfig`. The base instance is never mutated. Any rule
-    violation raises `RuntimePatchDeniedError` and aborts the entire patch.
+    The rules ``apply_runtime_patch`` applies before it patches anything, for a
+    caller that needs the verdict on each op whatever the op would change, such
+    as ``cli/mcp/workspace._gate_client_overrides``. Raises
+    ``RuntimePatchDeniedError`` on the first op a rule refuses.
     """
     if not allowlist.enabled:
         raise RuntimePatchDeniedError(
@@ -349,6 +350,20 @@ def apply_runtime_patch(
             )
         _check_op_paths(op, allowlist=allowlist)
         _check_value_pattern(op, allowlist=allowlist)
+
+
+def apply_runtime_patch(
+    base: AshConfig,
+    patch_ops: List[Dict[str, Any]],
+    *,
+    allowlist: RuntimeOverridesConfig,
+) -> AshConfig:
+    """Apply a JSON-Patch to a config, enforcing the runtime allowlist.
+
+    Returns a new `AshConfig`. The base instance is never mutated. Any rule
+    violation raises `RuntimePatchDeniedError` and aborts the entire patch.
+    """
+    check_runtime_ops(patch_ops, allowlist=allowlist)
 
     base_dict = base.model_dump(mode="python", by_alias=False)
     try:

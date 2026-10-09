@@ -151,3 +151,104 @@ def test_ash_plugin_modules_is_denied_by_default_even_when_everything_is_allowed
     allowlist = RuntimeOverridesConfig(enabled=True, allowed_paths=["/**"])
     with pytest.raises(RuntimePatchDeniedError):
         apply_runtime_patch(AshConfig(), [op], allowlist=allowlist)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "override",
+    [
+        "fail_on_findings=false",
+        "sandbox.mode=off",
+        "ash_plugin_modules=[]",
+        "global_settings.suppressions=[]",
+        "fail-on-findings=false",
+    ],
+)
+async def test_an_override_equal_to_the_profile_is_still_checked_by_its_key(
+    tmp_path, monkeypatch, override
+):
+    """It changes nothing in the profile but would still overwrite each project's value."""
+    _with_profile(
+        monkeypatch,
+        tmp_path,
+        ["/project_name"],
+        "fail_on_findings: false\n",
+    )
+    result = await _resolve(tmp_path, [override])
+    assert result["success"] is False, result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "override",
+    ["ash_plugin_modules=[]", "ash-plugin-modules=[]", "sandbox.mode=bwrap"],
+)
+async def test_a_denied_key_is_refused_when_the_value_is_unchanged(
+    tmp_path, monkeypatch, override
+):
+    _with_profile(monkeypatch, tmp_path, ["/**"], "sandbox:\n  mode: bwrap\n")
+    result = await _resolve(tmp_path, [override])
+    assert result["success"] is False, result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", ["project_name=renamed", "project-name=renamed"])
+async def test_an_override_on_an_allowed_key_is_accepted(
+    tmp_path, monkeypatch, override
+):
+    _with_profile(monkeypatch, tmp_path, ["/project_name"])
+    result = await _resolve(tmp_path, [override])
+    assert result["success"] is True, result
+
+
+_POLICY = "workspace:\n  ignore_paths:\n    - path: app\n      reason: stand-in\n"
+
+
+def _delivered_workspace(tmp_path: Path, monkeypatch, with_policy: bool) -> Path:
+    root = tmp_path / "ash-mcp"
+    tree = root / "session-a" / "source"
+    (tree / "app").mkdir(parents=True)
+    (tree / "app" / "main.py").write_text("x = 1\n")
+    definition = tree / "dev.code-workspace"
+    definition.write_text(json.dumps({"folders": [{"path": "app"}]}))
+    if with_policy:
+        (tree / ".ash-workspace.yaml").write_text(_POLICY)
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+    return definition
+
+
+@pytest.mark.asyncio
+async def test_a_policy_found_beside_a_delivered_definition_is_refused(
+    tmp_path, monkeypatch
+):
+    definition = _delivered_workspace(tmp_path, monkeypatch, with_policy=True)
+    result = await workspace_module.mcp_resolve_workspace(
+        str(definition), session_id="session-a"
+    )
+    assert result["success"] is False
+    assert "delivered by an MCP client" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_named_client_policy_is_refused_and_an_operator_policy_kept(
+    tmp_path, monkeypatch
+):
+    definition = _delivered_workspace(tmp_path, monkeypatch, with_policy=False)
+    delivered = definition.parent / "policy.yaml"
+    delivered.write_text(_POLICY)
+    refused = await workspace_module.mcp_resolve_workspace(
+        str(definition), workspace_config=str(delivered), session_id="session-a"
+    )
+    assert refused["success"] is False
+    assert "delivered by an MCP client" in refused["error"]
+
+    # A session's config inputs are confined, so the operator grants its own
+    # policy directory, as a network deployment does.
+    operator = tmp_path / "operator" / "policy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(_POLICY)
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(operator.parent))
+    kept = await workspace_module.mcp_resolve_workspace(
+        str(definition), workspace_config=str(operator), session_id="session-a"
+    )
+    assert kept["success"] is True, kept

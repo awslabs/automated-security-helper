@@ -126,7 +126,10 @@
   workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the
-  default). `/ash_plugin_modules` joins the default `denied_paths`.
+  default). Each override is checked by the key it names, so one whose value the
+  session config already holds is checked too. A workspace policy file a client
+  delivered, named or found beside the definition, is refused.
+  `/ash_plugin_modules` joins the default `denied_paths`.
 
   Each value that is not honored is logged once as a warning naming the key. See
   [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).

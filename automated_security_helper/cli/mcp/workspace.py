@@ -348,7 +348,13 @@ def _refuse_config_inputs_outside_the_permitted_roots(
     deployment that granted the tree but not its own path as a config root.
     """
 
-    from automated_security_helper.cli.mcp.sandbox import validate_config_input
+    from automated_security_helper.cli.mcp.sandbox import (
+        config_is_client_supplied,
+        validate_config_input,
+    )
+    from automated_security_helper.workspace.policy import (
+        discover_workspace_policy_file,
+    )
 
     for label, candidate in (
         ("workspace definition", workspace_file),
@@ -363,6 +369,22 @@ def _refuse_config_inputs_outside_the_permitted_roots(
             f"Workspace scan refused: the {label} file is outside the "
             f"directories this server may read config from. {refusal}",
             context=dict(refusal.context, config_input=label),
+        )
+    # A workspace policy sets suppressions and ignore paths for every project,
+    # the fields the runtime-override denylist keeps from a client. So a policy a
+    # client delivered, named or found next to the definition, is not used.
+    policy = (
+        Path(workspace_config)
+        if workspace_config is not None
+        else discover_workspace_policy_file(Path(workspace_file).parent)
+    )
+    if policy is not None and config_is_client_supplied(policy):
+        return MCPResourceError(
+            "Workspace scan refused: the workspace policy file "
+            f"{Path(policy).as_posix()} was delivered by an MCP client. A policy "
+            "sets suppressions and ignore paths for every project, so only an "
+            "operator's policy file is used.",
+            context={"config_input": "workspace policy"},
         )
     return None
 
@@ -461,6 +483,11 @@ def _gate_client_overrides(
     ``global_settings.mcp.runtime_overrides``. Runtime overrides are off by
     default, so without a profile that enables them no override is accepted.
 
+    Each override is checked twice: by the key it names (``check_runtime_ops``
+    on an ``add`` at the pointer it resolves to in the session config, with every
+    other '-'/'_' spelling checked against the denials), and by the change it
+    makes to the session config (``apply_runtime_override``).
+
     Raises:
         RuntimePatchDeniedError: An override is not allowed.
         ASHConfigValidationError: An override cannot be applied.
@@ -472,9 +499,14 @@ def _gate_client_overrides(
         RuntimeOverridesConfig,
     )
     from automated_security_helper.config.resolve_config import (
+        _parse_config_value,
         apply_config_overrides,
     )
-    from automated_security_helper.config.runtime_patch import apply_runtime_override
+    from automated_security_helper.config.runtime_patch import (
+        RuntimePatchDeniedError,
+        apply_runtime_override,
+        check_runtime_ops,
+    )
 
     base = (
         AshConfig.from_file(config_path=Path(session_config))
@@ -485,8 +517,67 @@ def _gate_client_overrides(
     allowlist = (
         mcp_cfg.runtime_overrides if mcp_cfg is not None else RuntimeOverridesConfig()
     )
+    # Each override is checked by the key it names, whatever it changes. A diff
+    # against the session config alone misses one whose value the session config
+    # already holds: it changes nothing there, but still overwrites each
+    # project's own value. --config-overrides treats '-' and '_' as one key
+    # (config_sources._resolve_dict_key), so the key is resolved against the
+    # session config the way the override will be, and that pointer gets every
+    # check. Every other spelling must also clear the denials, since a project's
+    # config can spell an extra section differently.
+    base_dump = base.model_dump()
+    any_path = allowlist.model_copy(update={"allowed_paths": ["/**"]})
+    for override in config_overrides:
+        key, separator, raw = str(override).partition("=")
+        if not separator or not key.strip():
+            raise RuntimePatchDeniedError(None, f"invalid config override {override!r}")
+        append = key.endswith("+")
+        parts = (key[:-1] if append else key).split(".")
+        value = _parse_config_value(raw)
+
+        def op_at(segments: Sequence[str]) -> Dict[str, Any]:
+            pointer = "/" + "/".join(
+                segment.replace("~", "~0").replace("/", "~1") for segment in segments
+            )
+            return {
+                "op": "add",
+                "path": pointer + ("/-" if append else ""),
+                "value": value,
+            }
+
+        resolved = _resolve_override_key(base_dump, parts)
+        check_runtime_ops([op_at(resolved)], allowlist=allowlist)
+        spellings = {
+            tuple(parts),
+            tuple(part.strip() for part in parts),
+            tuple(part.strip().replace("_", "-") for part in parts),
+            tuple(part.strip().replace("-", "_") for part in parts),
+        }
+        check_runtime_ops(
+            [op_at(spelling) for spelling in sorted(spellings)], allowlist=any_path
+        )
     after = apply_config_overrides(base, list(config_overrides))
     apply_runtime_override(base, after, allowlist=allowlist)
+
+
+def _resolve_override_key(
+    config_dict: Dict[str, Any], parts: Sequence[str]
+) -> List[str]:
+    """The keys ``apply_config_overrides`` writes ``parts`` to in ``config_dict``.
+
+    The same walk as ``resolve_config._apply_config_override``: each segment
+    takes the spelling the dict already uses, and a segment under a missing or
+    non-dict value is kept as typed.
+    """
+    from automated_security_helper.config.config_sources import _resolve_dict_key
+
+    resolved: List[str] = []
+    current: Any = config_dict
+    for part in parts:
+        key = _resolve_dict_key(current, part) if isinstance(current, dict) else part
+        resolved.append(key)
+        current = current.get(key) if isinstance(current, dict) else None
+    return resolved
 
 
 def _resolve_session_config(
