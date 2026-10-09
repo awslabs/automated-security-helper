@@ -20,7 +20,7 @@ also why the denial tests check the error names the entry, not just
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, get_args
 
 import pytest
 import yaml
@@ -34,7 +34,10 @@ from automated_security_helper.cli.mcp.profile_registry import (
     set_profile_registry,
 )
 from automated_security_helper.cli.mcp_tools import mcp_select_profile
-from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+from automated_security_helper.config.ash_config import (
+    RuntimeOverridesConfig,
+    SandboxConfig,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +138,62 @@ def test_override_yaml_cannot_change_the_sandbox(tmp_path: Path, field: str) -> 
         assert "denied_paths entry '/sandbox'" in result["error"], result["error"]
     assert overridden["error"].startswith("override denied: ")
     assert f"/sandbox/{field}" in overridden["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
+def test_every_sandbox_field_has_a_case() -> None:
+    """A sandbox field added later without a case here would go untested."""
+    assert sorted(_SANDBOX_CASES) == sorted(SandboxConfig.model_fields)
+
+
+@pytest.mark.parametrize(
+    "mode",
+    sorted(
+        m
+        for m in get_args(SandboxConfig.model_fields["mode"].annotation)
+        if m != "bwrap"
+    ),
+)
+def test_override_yaml_cannot_move_the_sandbox_to_any_other_mode(
+    tmp_path: Path, mode: str
+) -> None:
+    """'off' and every other backend: the profile's mode is the only one bound."""
+    document = _profile(allowed_paths=["/**"])
+    _install(tmp_path, document)
+
+    patched, overridden = _both_routes(
+        {"op": "replace", "path": "/sandbox/mode", "value": mode},
+        _restated(document, sandbox={"mode": mode}),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert "denied_paths entry '/sandbox'" in result["error"], result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
+def test_override_yaml_cannot_replace_the_whole_sandbox_section(
+    tmp_path: Path,
+) -> None:
+    """Every sandbox field changed at once, the way a client would rewrite it."""
+    document = _profile(allowed_paths=["/**"])
+    _install(tmp_path, document)
+    section = {
+        "mode": "off",
+        "network_scanners": ["checkov", "grype"],
+        "extra_read_paths": ["/"],
+    }
+
+    patched, overridden = _both_routes(
+        {"op": "replace", "path": "/sandbox", "value": section},
+        _restated(document, sandbox=section),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert "denied_paths entry '/sandbox'" in result["error"], result["error"]
     _assert_unbound("patch")
     _assert_unbound("override")
 
