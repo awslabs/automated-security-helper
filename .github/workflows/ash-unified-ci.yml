@@ -912,44 +912,6 @@ jobs:
         run: |
           sudo log show --last 30m --predicate 'sender == "Sandbox"' --style compact \
             | grep -E 'deny\(1\) (mach-lookup|process-exec)' | tail -n 200 || true
-      # TEMPORARY (diagnostic, removed before merge): whether the keychain is
-      # readable through /usr/bin/security under the shipped profile, and under the
-      # same profile with com.apple.SecurityServer allowed.
-      - name: Read a keychain item from inside the profile
-        if: always() && runner.os == 'macOS'
-        run: |
-          security add-generic-password -a ash-diag -s ash-diag-keychain -w diag-keychain-canary
-          uv run python - <<'EOF'
-          import subprocess
-          import tempfile
-          from pathlib import Path
-
-          from automated_security_helper.utils.sandbox.backends import SandboxExecBackend
-          from automated_security_helper.utils.sandbox.policy import (
-              SandboxRequirements,
-              build_scanner_policy,
-          )
-
-          root = Path(tempfile.mkdtemp())
-          src = root / "src"
-          out = src / "out"
-          out.mkdir(parents=True)
-          policy = build_scanner_policy(
-              "diag", SandboxRequirements(), argv0="/usr/bin/security",
-              source_dir=src, output_dir=out, results_dir=out / "r", scan_target=src,
-              cwd=src, offline=True, network_scanners=None,
-          )
-          profile = SandboxExecBackend().profile(policy, root / "tmp")
-          extra = '(allow mach-lookup (global-name "com.apple.SecurityServer"))'
-          for label, text in (("as shipped", profile), ("SecurityServer allowed", profile + "\n" + extra)):
-              r = subprocess.run(
-                  ["/usr/bin/sandbox-exec", "-p", text, "/usr/bin/security",
-                   "find-generic-password", "-s", "ash-diag-keychain", "-w"],
-                  capture_output=True, text=True, check=False,
-              )
-              print(f"{label}: exit {r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()[-200:]!r}")
-          EOF
-          security delete-generic-password -s ash-diag-keychain
       - name: Collect the suite report
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
