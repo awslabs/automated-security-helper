@@ -904,19 +904,6 @@ jobs:
             tests/unit/utils/test_sandbox_choke_point.py \
             --run-integration --no-cov -p no:randomly -n 0 -v \
             --junit-xml=test-results/sandbox.junit.xml
-      # TEMPORARY (removed before merge): the keychain file test against main's
-      # profile, to show whether it would have passed there.
-      - name: Run the keychain file test against main's profile
-        if: always() && runner.os == 'macOS'
-        continue-on-error: true
-        env:
-          ASH_REQUIRE_SANDBOX_BACKENDS: ${{ matrix.require }}
-        run: |
-          git fetch -q --depth=1 origin main
-          git show FETCH_HEAD:automated_security_helper/utils/sandbox/backends.py \
-            > automated_security_helper/utils/sandbox/backends.py
-          uv run pytest tests/integration/sandbox/test_sandbox_exec_services.py \
-            -k keychain_files --run-integration --no-cov -p no:randomly -n 0 -v
       # A Mach service or exec path the macOS profile does not allow shows up in the
       # unified log as a deny line naming it, which is the first thing to look at
       # when a macOS image update turns this job red.
@@ -935,23 +922,11 @@ jobs:
           if-no-files-found: warn
 
   sandbox-scanner-parity:
-    name: "sandbox scanner parity (${{ matrix.sandbox }}, ${{ matrix.os }}${{ matrix.files && format(', files {0}', matrix.files) || '' }})"
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    name: "sandbox scanner parity (bwrap, ubuntu-latest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            sandbox: bwrap
-          # TEMPORARY (removed before merge): the networked scanners on macOS with
-          # the file rules lifted (all but the keychain deny), and once as shipped.
-          - { os: macos-latest, sandbox: sandbox-exec, files: open }
-          - { os: macos-15, sandbox: sandbox-exec, files: open }
-          - { os: macos-14, sandbox: sandbox-exec, files: open }
-          - { os: macos-latest, sandbox: sandbox-exec, files: real }
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -967,7 +942,6 @@ jobs:
         with:
           ruby-version: "3.3"
       - name: Install bubblewrap
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q bubblewrap
@@ -990,21 +964,13 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
           PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
-          SANDBOX: ${{ matrix.sandbox }}
-          ASH_SANDBOX_EXEC_DIAG_OPEN_FILES: ${{ matrix.files == 'open' && '1' || '' }}
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
-            --sandbox "$SANDBOX" --online --ash ash \
+            --sandbox bwrap --online --ash ash \
             --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft \
             --report "$PARITY_REPORT"
-      - name: Show what sandbox-exec denied
-        if: always() && runner.os == 'macOS'
-        run: |
-          sudo log show --last 60m --predicate 'sender == "Sandbox"' --style compact \
-            | grep -E 'deny\(1\) (mach-lookup|process-exec|file-read-data /Library/Keychains|file-read-data /Users/runner/Library/Keychains)' \
-            | sed -E 's/^.*Sandbox: //; s/\([0-9]+\) / /' | sort | uniq -c | sort -rn | head -n 80 || true
       - name: Collect the parity report and scan output
-        if: failure() && runner.os == 'Linux'
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sandbox-scanner-parity

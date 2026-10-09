@@ -696,10 +696,6 @@ class SandboxExecBackend(SandboxBackend):
             lines.append(
                 f"(allow file-read* (literal {_sbpl_string(_real(trust_roots))}))"
             )
-        # TEMPORARY (diagnostic, removed before merge): lift the file rules other
-        # than the keychain deny, so CI can run every scanner to the end.
-        if os.environ.get("ASH_SANDBOX_EXEC_DIAG_OPEN_FILES"):
-            lines.append('(allow file-read* file-write* (subpath "/"))')
         # Last of the file rules, so no path the policy grants can reopen them: the
         # system and login keychains, whatever the keychain daemon would allow.
         lines.append(
