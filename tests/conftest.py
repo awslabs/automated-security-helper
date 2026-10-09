@@ -712,7 +712,7 @@ class _ProcessWideToolState:
             }
         return self
 
-    def __exit__(self, *exc_info) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         self._restore_probe_memos()
         self._restore_uv_tool_runner()
         self._restore_plugin_manager()
@@ -746,21 +746,27 @@ class _ProcessWideToolState:
                 memo.extend(contents)
 
     def _restore_uv_tool_runner(self) -> None:
-        runner_module = sys.modules.get(_UV_TOOL_RUNNER_MODULE)
-        if runner_module is None:
+        if _UV_TOOL_RUNNER_MODULE not in sys.modules:
             return
+        # Imported by name, not reached through sys.modules, so that a type checker
+        # sees the real module and checks the name assigned below. The test above
+        # keeps this from importing the module when the test did not.
+        from automated_security_helper.utils import uv_tool_runner
+
         if self._runner is None:
-            runner_module.reset_uv_tool_runner()
+            uv_tool_runner.reset_uv_tool_runner()
             return
         runner, attributes = self._runner
-        runner_module._uv_tool_runner = runner
+        uv_tool_runner._uv_tool_runner = runner
         vars(runner).clear()
         vars(runner).update(attributes)
 
     def _restore_plugin_manager(self) -> None:
-        plugins = sys.modules.get(_PLUGINS_MODULE)
-        if plugins is None:
+        if _PLUGINS_MODULE not in sys.modules:
             return
+        # By name for the same reason as in _restore_uv_tool_runner.
+        from automated_security_helper import plugins
+
         saved = self._plugins
         if saved is None:
             ash_plugin_manager = plugins.ash_plugin_manager
@@ -821,7 +827,7 @@ class _ProcessWideToolState:
 
 
 @pytest.fixture(autouse=True)
-def _restore_process_wide_tool_state():
+def _restore_process_wide_tool_state() -> Iterator[None]:
     """Stop one test's tool probes and plugin registrations from leaking into the next.
 
     Why this exists. ``get_uv_tool_runner()`` returns one ``UVToolRunner`` per

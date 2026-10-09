@@ -8,14 +8,38 @@ the way a test can, check that the poison took (the control), and check that
 leaving ``_ProcessWideToolState`` puts back what was there.
 """
 
+import importlib
 import subprocess
 import sys
 from unittest.mock import patch
 
+import automated_security_helper.plugins as plugins_module
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils import subprocess_utils, uv_tool_runner
-from tests.conftest import _ProcessWideToolState
+from tests.conftest import (
+    _PLUGINS_MODULE,
+    _PROCESS_WIDE_PROBE_MEMOS,
+    _UV_TOOL_RUNNER_MODULE,
+    _ProcessWideToolState,
+)
+
+
+def test_every_name_the_restore_looks_up_exists():
+    """The restore finds each module with ``sys.modules.get`` and skips a missing one.
+
+    That is right for a module the run never imported, and it would also make a
+    misspelled or renamed module silently stop being restored. So each name is
+    resolved here, where a mismatch fails.
+    """
+    for module_name, attribute in _PROCESS_WIDE_PROBE_MEMOS:
+        memo = getattr(importlib.import_module(module_name), attribute)
+        assert isinstance(memo, (dict, list)), (module_name, attribute)
+    runner_module = importlib.import_module(_UV_TOOL_RUNNER_MODULE)
+    assert runner_module is uv_tool_runner
+    assert runner_module._uv_tool_runner is uv_tool_runner.get_uv_tool_runner()
+    assert importlib.import_module(_PLUGINS_MODULE) is plugins_module
+    assert plugins_module.ash_plugin_manager is ash_plugin_manager
 
 
 def test_a_memoized_uv_is_not_available_is_rolled_back():
@@ -90,6 +114,13 @@ def test_the_cheap_probe_memos_are_rolled_back_in_full():
         subprocess_utils._find_executable_cache["opengrep"] = None
 
     assert subprocess_utils._find_executable_cache == executables
+
+
+def test_a_rebound_plugin_manager_is_put_back():
+    with _ProcessWideToolState():
+        plugins_module.ash_plugin_manager = object()
+
+    assert plugins_module.ash_plugin_manager is ash_plugin_manager
 
 
 def test_a_registration_and_handlers_a_test_made_are_rolled_back():
