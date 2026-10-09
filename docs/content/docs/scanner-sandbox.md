@@ -303,6 +303,17 @@ results directory read-write. Paths outside `$HOME` that your user can read rema
 caches are mounted read-write because firejail has no throwaway overlay. Use bwrap
 when you can.
 
+firejail also decides for itself whether to build a sandbox at all. When it finds no
+kernel threads among the first ten PIDs, as inside a container that has its own PID
+namespace, it concludes it is already sandboxed and runs the command with none of the
+options above. The command still exits 0, and the only sign is a warning that
+`--quiet` hides. So ASH's probe runs `readlink /proc/self/ns/mnt` under the same
+options, without `--quiet`, and requires a mount namespace other than ASH's own, since
+every sandbox firejail builds has one. When the command reports ASH's namespace, or
+firejail prints that warning, firejail is unavailable with that reason:
+`--sandbox firejail` records each scanner `MISSING`, and `--sandbox auto` moves on to
+Landlock.
+
 ### Linux: Landlock
 
 Landlock is an unprivileged kernel LSM (Linux 5.13+), so this mode needs nothing
