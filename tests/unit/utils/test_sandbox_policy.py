@@ -851,7 +851,8 @@ class TestSandboxExecProfile:
 class TestSystemTrustRoots:
     """semgrep-core reads root certificates from a file instead of the keychain."""
 
-    PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+    # Shaped enough for the export to accept it, and not a certificate.
+    PEM = "-----BEGIN CERTIFICATE-----\nplaceholder, not a certificate\n"
 
     def _plan(self, layout, monkeypatch, env=None, declared=True, pem=PEM):
         monkeypatch.setattr(backends_module, "_system_trust_roots", lambda: pem)

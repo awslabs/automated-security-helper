@@ -151,7 +151,7 @@ def pasteboard() -> Iterator[str]:
 def keychain_item() -> Iterator[tuple]:
     """A throwaway item in the default keychain, removed afterwards."""
     service = f"ash-sandbox-canary-{uuid.uuid4().hex}"
-    secret = f"ash-keychain-canary-{uuid.uuid4().hex}"
+    canary = f"ash-keychain-canary-{uuid.uuid4().hex}"
     added = subprocess.run(  # nosec B603 - fixed argv
         [
             "/usr/bin/security",
@@ -161,7 +161,7 @@ def keychain_item() -> Iterator[tuple]:
             "-s",
             service,
             "-w",
-            secret,
+            canary,
         ],
         capture_output=True,
         timeout=30,
@@ -169,7 +169,7 @@ def keychain_item() -> Iterator[tuple]:
     )
     if added.returncode != 0:
         _unavailable(f"no writable default keychain here: {added.stderr!r}")
-    yield service, secret
+    yield service, canary
     subprocess.run(  # nosec B603 - fixed argv
         ["/usr/bin/security", "delete-generic-password", "-s", service],
         capture_output=True,
@@ -297,12 +297,12 @@ def test_a_sandboxed_scanner_cannot_read_the_pasteboard(tmp_path_factory, pasteb
 
 def test_a_sandboxed_scanner_cannot_read_the_keychain(tmp_path_factory, keychain_item):
     _require_sandbox_exec()
-    service, secret = keychain_item
+    service, canary = keychain_item
     control = _attempt(
         tmp_path_factory.mktemp("control"),
         "off",
         "keychain_read",
-        secret,
+        canary,
         keychain_service=service,
     )
     if control != "succeeded":
@@ -312,7 +312,7 @@ def test_a_sandboxed_scanner_cannot_read_the_keychain(tmp_path_factory, keychain
         tmp_path_factory.mktemp("sandboxed"),
         "sandbox-exec",
         "keychain_read",
-        secret,
+        canary,
         keychain_service=service,
     )
     assert outcome != "succeeded", "sandbox-exec let the scanner read the keychain"
