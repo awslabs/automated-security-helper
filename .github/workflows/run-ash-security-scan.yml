@@ -156,6 +156,26 @@ on:
         required: false
         default: false
         type: boolean
+      install-actionlint:
+        description: "Whether to install the actionlint scanner"
+        required: false
+        default: false
+        type: boolean
+      install-cfn-guard:
+        description: "Whether to install the cfn-guard scanner and the rules it evaluates"
+        required: false
+        default: false
+        type: boolean
+      install-gitleaks:
+        description: "Whether to install the gitleaks scanner"
+        required: false
+        default: false
+        type: boolean
+      install-trivy:
+        description: "Whether to install the trivy scanner"
+        required: false
+        default: false
+        type: boolean
       changed-files-only:
         description: "Limit the scan to files changed in the PR (reduces scan time and focuses feedback)"
         required: false
@@ -172,9 +192,9 @@ env:
   # scanner's availability check -- a metadata read of cdk_nag, aws-cdk-lib and
   # constructs -- comes up short and cdk-nag reports MISSING, so a consumer with
   # CloudFormation got no IaC findings from the one scanner that produces them.
-  # Neither `ash dependencies install` step below fixes this: both are scoped to a
-  # single --tool, and cdk-nag is a Python dependency rather than a downloaded
-  # binary.
+  # None of the `ash dependencies install` steps below fixes this: each is scoped
+  # to the tools it names, and cdk-nag is a Python dependency rather than a
+  # downloaded binary.
   #
   # Extras on a PEP 508 direct reference, rather than a second install step: the
   # extra's contents are read from pyproject.toml at the pinned ref, so there is no
@@ -387,6 +407,34 @@ jobs:
           uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
             --tool syft \
             --bin-path "${ASH_TOOL_BIN}"
+          echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
+
+      # actionlint, cfn-guard, gitleaks and trivy go through the same verified
+      # installer, in one step: each input only adds its tool to the list. Run from
+      # RUNNER_TEMP and without ASH_CONFIG, as for OpenGrep below, so the scanned
+      # repository's .ash.yaml cannot change what is installed.
+      #
+      # cfn-guard's rules land next to the bin path, in
+      # ${RUNNER_TEMP}/share/cfn-guard-rules; the Run ASH step points
+      # ASH_CFN_GUARD_RULES_DIR there.
+      - name: Install actionlint, cfn-guard, gitleaks and trivy
+        if: inputs.install-actionlint || inputs.install-cfn-guard || inputs.install-gitleaks || inputs.install-trivy
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+          INSTALL_ACTIONLINT: ${{ inputs.install-actionlint && 'actionlint' || '' }}
+          INSTALL_CFN_GUARD: ${{ inputs.install-cfn-guard && 'cfn-guard' || '' }}
+          INSTALL_GITLEAKS: ${{ inputs.install-gitleaks && 'gitleaks' || '' }}
+          INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
+        run: |
+          set -euo pipefail
+          tools=()
+          for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
+            if [ -n "${tool}" ]; then tools+=(--tool "${tool}"); fi
+          done
+          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+              "${tools[@]}" \
+              --bin-path "${ASH_TOOL_BIN}")
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       # OpenGrep goes through the same verified installer as Grype and Syft above.
@@ -668,6 +716,9 @@ jobs:
           VERBOSE: ${{ inputs.verbose && '--verbose' || '' }}
           CHANGED_FILES_ONLY: ${{ inputs.changed-files-only == true && '--changed-files-only' || '' }}
           BASE_REF: ${{ inputs.base-ref }}
+          # Where the install step above put cfn-guard's rules. Empty when it did
+          # not install cfn-guard, and ASH then looks in its default place.
+          ASH_CFN_GUARD_RULES_DIR: ${{ inputs.install-cfn-guard && format('{0}/share/cfn-guard-rules', runner.temp) || '' }}
         run: |-
           # ${ASH_ARGS} is last so a flag the caller passes explicitly wins.
           # `click` resolves a boolean flag pair last-occurrence-wins, and while
