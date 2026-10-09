@@ -686,6 +686,10 @@ class RuntimeOverridesConfig(BaseModel):
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
+        # The runtime-override policy itself: a client that could rewrite it
+        # through patch_ops could then lift every other entry here.
+        "/global_settings/mcp",
+        "/global_settings/mcp/**",
         # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
         "/reporters/bedrock-summary-reporter/options/aws_*",
         "/reporters/cloudwatch-logs/**",

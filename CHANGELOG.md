@@ -95,6 +95,25 @@
 
 ### Behavior changes
 
+- **A config file an MCP client delivered may not change a field the session's
+  runtime-override policy denies.** That covers an upload named as
+  `config_path`, a delivered tree's own `.ash.yaml`, a project config in a
+  delivered workspace, and every such file in an `extends` chain. Before, only
+  `patch_ops`, `override_yaml` and workspace `config_overrides` were checked
+  against `denied_paths` and `denied_value_patterns`. A value equal to the
+  server's is accepted, so an `ash config init` file scans; `sandbox` and
+  `ash_plugin_modules` keep their existing restrict-only limits. A file that
+  changes a denied field is refused with the field named
+  (`error_type: config_field_denied`), and `validate_config` reports it. A
+  delivered tree's own suppressions and ignore paths apply, marked
+  `client_supplied` in the results, unless the profile's own `denied_paths`
+  lists them. Files under a client-supplied ignore path are still converted and
+  scanned, and each finding there is kept as a marked, suppressed result. The policy comes from the registered profile, never from the
+  session's patched copy, and `/global_settings/mcp` joins the default
+  `denied_paths`. Delivering source while a scan of the session runs is refused.
+  See
+  [Config files in delivered source](docs/content/docs/mcp/streamable-http.md#config-files-in-delivered-source).
+
 - **A config file inside the scanned tree can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`:

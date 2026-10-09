@@ -154,13 +154,16 @@ ash_config:
         - /ash_plugin_modules/**
         - /global_settings/ignore_paths
         - /global_settings/suppressions
+        - /global_settings/mcp
+        - /global_settings/mcp/**
         - /reporters/bedrock-summary-reporter/options/aws_*
         - /reporters/cloudwatch-logs/**
         denied_value_patterns: {}
         enabled: false
     severity_threshold: MEDIUM
     suppressions:
-    - expiration: null
+    - client_supplied: false
+      expiration: null
       line_end: 5
       line_start: 5
       package_name: null
@@ -170,7 +173,8 @@ ash_config:
       reason: Fixture placeholder credential, not a real secret
       rule_id: SECRET-SECRET-KEYWORD
       symbol: null
-    - expiration: '2099-12-31'
+    - client_supplied: false
+      expiration: '2099-12-31'
       line_end: null
       line_start: null
       package_name: null

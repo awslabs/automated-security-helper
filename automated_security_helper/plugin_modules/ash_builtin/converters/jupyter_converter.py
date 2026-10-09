@@ -11,6 +11,7 @@ from typing import Annotated, List, Literal, Optional
 
 from pydantic import Field
 
+from automated_security_helper.models.core import ignore_paths_that_skip_scanning
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
     ConverterPluginConfigBase,
@@ -431,7 +432,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     ASH_LOGGER.debug(f"Skipping directory: {ipynb_file}")
                     skip_item = True
                 else:
-                    for ignore_path in self.context.config.global_settings.ignore_paths:
+                    for ignore_path in ignore_paths_that_skip_scanning(
+                        self.context.config.global_settings.ignore_paths
+                    ):
                         rel_path = (
                             Path(ipynb_file)
                             .relative_to(self.context.source_dir)

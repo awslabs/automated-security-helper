@@ -20,6 +20,8 @@ global_settings:
       - /ash_plugin_modules/**
       - /global_settings/ignore_paths
       - /global_settings/suppressions
+      - /global_settings/mcp
+      - /global_settings/mcp/**
       - /reporters/bedrock-summary-reporter/options/aws_*
       - /reporters/cloudwatch-logs/**
       denied_value_patterns: {}

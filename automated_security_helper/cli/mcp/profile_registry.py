@@ -25,11 +25,16 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import yaml
 
 from automated_security_helper.config.ash_config import AshConfig
+
+if TYPE_CHECKING:
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
 
 
 class ProfileRegistryError(ValueError):
@@ -392,6 +397,65 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
     if recorded is None:
         return None
     return recorded if Path(recorded).is_file() else None
+
+
+def session_profile_entry(
+    session_id: Optional[str] = None, profile: Optional[str] = None
+) -> Optional[ProfileEntry]:
+    """The registered profile a call runs under: ``profile``, else the session's bound one.
+
+    None when neither applies. The entry is the operator's registered file as
+    loaded at startup, never the session's materialized config, which holds the
+    profile after the client's ``patch_ops`` or ``override_yaml``.
+
+    Raises:
+        ProfileRegistryError: The profile named, or the one bound, is not
+            registered. Failing closed: running under some other policy would
+            accept what the operator's denies.
+    """
+    name = profile
+    if name is None:
+        with _session_lock:
+            state = _session_state.get(session_id or DEFAULT_SESSION_ID)
+            name = state.profile_name if state is not None else None
+    if name is None:
+        return None
+    entry = get_profile_registry().get(name)
+    if entry is None:
+        raise ProfileRegistryError(
+            f"profile {name!r} is not registered, so the runtime-override policy "
+            "it sets cannot be read"
+        )
+    return entry
+
+
+def session_client_rules(
+    session_id: Optional[str] = None, profile: Optional[str] = None
+) -> "ClientConfigRules":
+    """The rules a config this session's client delivers is checked against.
+
+    The registered profile's (``session_profile_entry``), so a client allowed to
+    change ``global_settings`` cannot rewrite the policy its own uploads are
+    checked against. An unbound session gets the server's default config's. A
+    bound profile that is no longer registered, or a default config that cannot
+    be loaded, gives rules that refuse only a config with a client-delivered file,
+    which is the one they would check; any other scan reports its own config
+    error as it always has.
+    """
+    from automated_security_helper.config.client_config_policy import (
+        rules_from,
+        unreadable_rules,
+    )
+    from automated_security_helper.config.default_config import get_default_config
+
+    try:
+        entry = session_profile_entry(session_id, profile)
+        trusted = entry.config if entry is not None else get_default_config()
+    except Exception as exc:  # noqa: BLE001 -- held, and raised only where it applies
+        return unreadable_rules(
+            f"the trusted config could not be loaded: {type(exc).__name__}: {exc}"
+        )
+    return rules_from(trusted)
 
 
 def clear_session_state(session_id: Optional[str] = None) -> None:

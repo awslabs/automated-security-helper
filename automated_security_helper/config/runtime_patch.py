@@ -38,7 +38,19 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, Pattern, Set, Tuple
+from typing import (
+    AbstractSet,
+    Any,
+    Dict,
+    FrozenSet,
+    List,
+    Mapping,
+    NamedTuple,
+    Pattern,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 import jsonpatch
 from pydantic import ValidationError
@@ -492,6 +504,243 @@ def _check_value_pattern(
                 f"value at {path!r} matches denied_value_patterns regex "
                 f"{pattern!r} bound to {pattern_path!r}",
             )
+
+
+class DocumentDenial(NamedTuple):
+    """One field a config document sets that a denial refuses."""
+
+    #: The field as the document spells it: dotted for a leaf, the pointer for a
+    #: ``patch`` op.
+    key: str
+    #: The JSON pointer written.
+    pointer: str
+    #: Which rule refused it, and how.
+    reason: str
+    #: True for a ``patch`` op, which is refused whatever it writes.
+    from_patch: bool
+
+
+def _document_writes(document: Any) -> List[Tuple[str, Dict[str, Any], str]]:
+    """The writes a config document makes, as (key, JSON-Patch op, kind).
+
+    ``kind`` is "leaf" for a value the document sets, "key" for a mapping key it
+    writes (the op's value is the key itself, so a value pattern sees keys as it
+    does inside a patch op's value), and "patch" for a ``patch`` op, taken as
+    written with a ``move``'s source as a ``remove`` and a ``test`` writing
+    nothing. A mapping with nothing in it sets nothing. ``extends`` names bases,
+    which are files of their own, so it is skipped.
+    """
+    from automated_security_helper.config.config_sources import (
+        EXTENDS_KEY,
+        PATCH_KEY,
+    )
+
+    writes: List[Tuple[str, Dict[str, Any], str]] = []
+
+    def pointer_of(segments: List[str]) -> str:
+        return "/" + "/".join(_escape_pointer_segment(s) for s in segments)
+
+    def leaves(segments: List[str], value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if isinstance(key, str):
+                    op = {
+                        "op": "add",
+                        "path": pointer_of([*segments, key]),
+                        "value": key,
+                    }
+                    writes.append((".".join([*segments, key]), op, "key"))
+                leaves([*segments, str(key)], child)
+            return
+        op = {"op": "add", "path": pointer_of(segments), "value": value}
+        writes.append((".".join(segments), op, "leaf"))
+
+    if not isinstance(document, dict):
+        return writes
+    for key, value in document.items():
+        if key == EXTENDS_KEY:
+            continue
+        if key == PATCH_KEY:
+            for op in value if isinstance(value, list) else []:
+                if not isinstance(op, dict) or op.get("op") == "test":
+                    continue
+                if op.get("op") == "move" and isinstance(op.get("from"), str):
+                    remove = {"op": "remove", "path": op["from"]}
+                    writes.append((op["from"], remove, "patch"))
+                if isinstance(op.get("path"), str):
+                    writes.append((op["path"], op, "patch"))
+            continue
+        if isinstance(key, str):
+            op = {"op": "add", "path": pointer_of([key]), "value": key}
+            writes.append((key, op, "key"))
+        leaves([str(key)], value)
+    return writes
+
+
+_PLUGIN_TYPES = {
+    "scanners": "scanner",
+    "reporters": "reporter",
+    "converters": "converter",
+}
+
+
+def _walk(value: Any, segments: Sequence[str]) -> Tuple[bool, Any]:
+    """The value under ``segments`` of ``value``, matching keys with '-' and '_' folded."""
+    from automated_security_helper.config.config_sources import _resolve_dict_key
+
+    for segment in segments:
+        if not isinstance(value, dict):
+            return False, None
+        key = _resolve_dict_key(value, segment)
+        if key not in value:
+            return False, None
+        value = value[key]
+    return True, value
+
+
+def _trusted_value(
+    config: AshConfig, dump: Dict[str, Any], pointer: str, plugin_keys: PluginKeys
+) -> Tuple[bool, Any]:
+    """The value ``config`` has where ``pointer`` writes, as ASH would read it.
+
+    Under a plugin section that is the section the plugin itself reads: the key
+    names a plugin (as written, '-'/'_'-folded, or under a spelling the lookup
+    reads), and ``config.get_plugin_config`` gives that plugin's section, the same
+    function a scan uses. Where the key could name more than one plugin, every one
+    has to agree. (False, None) when nothing is there, which counts as a change.
+    """
+    segments = _path_segments(pointer)
+    if len(segments) < 2 or segments[0] not in _PLUGIN_TYPES:
+        return _walk(dump, segments)
+    section, written = segments[0], segments[1]
+    from automated_security_helper.config.config_sources import _resolve_dict_key
+
+    raw_section = dump.get(section)
+    present: Dict[str, Any] = raw_section if isinstance(raw_section, dict) else {}
+    folded = _resolve_dict_key(present, written)
+    if folded in present:
+        plugins = [folded]
+    else:
+        names = plugin_key_lookup_names(written)
+        plugins = sorted(
+            key
+            for key in plugin_keys.get(section, ())
+            if (reduced := reduced_plugin_name(key)) and reduced in names
+        )
+    found = []
+    for plugin in plugins:
+        read = config.get_plugin_config(_PLUGIN_TYPES[section], plugin)  # type: ignore[arg-type]
+        found.append(_walk(_as_json(read) if read is not None else None, segments[2:]))
+    if not found or not all(present_ for present_, _ in found):
+        return False, None
+    values = {json.dumps(value, sort_keys=True) for _, value in found}
+    return (True, found[0][1]) if len(values) == 1 else (False, None)
+
+
+def _as_json(value: Any) -> Any:
+    """``value`` as it would read back from JSON, so a parsed file and a dump compare."""
+    return json.loads(json.dumps(value, default=str))
+
+
+def _covered(patterns: Sequence[str], pointer: str, plugin_keys: PluginKeys) -> bool:
+    """Whether ``pointer`` is at or under one of ``patterns``, under every spelling."""
+    return bool(pointer) and any(
+        _path_matches(pattern, target)
+        or _match_segments(_subtree_pattern(pattern), _path_segments(target))
+        for each in patterns
+        for pattern, target in _denial_spellings(each, pointer, plugin_keys)
+    )
+
+
+def _key_pattern_reason(
+    pointer: str, key: str, allowlist: RuntimeOverridesConfig, plugin_keys: PluginKeys
+) -> str | None:
+    """Which value pattern refuses mapping key ``key`` written at ``pointer``, or None.
+
+    Only a pattern whose subtree contains ``pointer`` applies. A pattern bound
+    below it describes the values under the key, not the key itself.
+    """
+    for pattern_path, pattern in allowlist.denied_value_patterns.items():
+        if not _covered([pattern_path], pointer, plugin_keys):
+            continue
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            return f"denied_value_patterns regex for {pattern_path!r} is invalid: {exc}"
+        if compiled.search(key):
+            return (
+                f"key {key!r} at {pointer!r} matches denied_value_patterns regex "
+                f"{pattern!r} bound to {pattern_path!r}"
+            )
+    return None
+
+
+def config_document_denials(
+    document: Any,
+    *,
+    allowlist: RuntimeOverridesConfig,
+    config: AshConfig | None = None,
+    exempt: Sequence[str] = (),
+    inert: Sequence[str] = (),
+) -> List[DocumentDenial]:
+    """The fields ``document`` sets that ``allowlist``'s denials refuse.
+
+    ``denied_paths`` and ``denied_value_patterns`` only, matched exactly as for a
+    runtime patch op (every '-'/'_' mix and every spelling the plugin lookup
+    reads, including through a glob). ``enabled`` and ``allowed_paths`` do not
+    apply: a config file is not a runtime override, and those two decide which
+    overrides a client may make at all.
+
+    ``config`` is the trusted config. Its plugin sections add to the keys a glob
+    denial is matched over, and a leaf whose value equals what ``config`` has at
+    the same place (``_trusted_value``) changes nothing, so it is not refused: an
+    ``ash config init`` file writes the defaults. A ``patch`` op is refused
+    whatever it writes.
+
+    A write at or under a pattern in ``exempt`` is not checked against
+    ``denied_paths``, though value patterns still apply to it. A write at or
+    under a pattern in ``inert`` is not checked at all: it names a field with no
+    effect in this document.
+    """
+    plugin_keys = known_plugin_keys(config)
+    dump = (
+        _as_json(config.model_dump(mode="json", by_alias=True))
+        if config is not None
+        else None
+    )
+    denials: List[DocumentDenial] = []
+    for key, op, kind in _document_writes(document):
+        path = op["path"]
+        if _covered(inert, path, plugin_keys):
+            continue
+        reason: str | None = None
+        if kind == "key":
+            reason = _key_pattern_reason(path, op["value"], allowlist, plugin_keys)
+        else:
+            if not _covered(exempt, path, plugin_keys):
+                reason = next(
+                    (
+                        found
+                        for denied in allowlist.denied_paths
+                        if (found := _denied_path_reason(denied, path, plugin_keys))
+                    ),
+                    None,
+                )
+            if reason is None:
+                try:
+                    _check_value_pattern(
+                        op, allowlist=allowlist, plugin_keys=plugin_keys
+                    )
+                except RuntimePatchDeniedError as exc:
+                    reason = exc.rule
+        if reason is None:
+            continue
+        if kind == "leaf" and config is not None and dump is not None:
+            present, value = _trusted_value(config, dump, path, plugin_keys)
+            if present and value == _as_json(op["value"]):
+                continue
+        denials.append(DocumentDenial(key, path, reason, kind == "patch"))
+    return denials
 
 
 def check_runtime_ops(

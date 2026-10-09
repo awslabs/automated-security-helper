@@ -24,6 +24,12 @@
       "description": "(Optional) Expiration date (YYYY-MM-DD)",
       "title": "Expiration"
     },
+    "client_supplied": {
+      "default": false,
+      "description": "Set by the server: True when the config of a tree an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client's own config.",
+      "title": "Client Supplied",
+      "type": "boolean"
+    },
     "rule_id": {
       "anyOf": [
         {

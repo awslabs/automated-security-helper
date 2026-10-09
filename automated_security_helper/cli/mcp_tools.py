@@ -14,7 +14,7 @@ import asyncio
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -49,6 +49,11 @@ _logger = ASH_LOGGER
 #: ``error_type`` of every refusal of a config input outside the permitted roots,
 #: whichever tool refused it. The same value ``run_ash_scan`` returns.
 CONFIG_INPUT_NOT_PERMITTED = "config_input_not_permitted"
+#: ``error_type`` for a client-delivered config that sets a field the session's
+#: runtime-override policy denies; see ``config/client_config_policy.py``.
+CONFIG_FIELD_DENIED = "config_field_denied"
+#: ``error_type`` for a client-delivered config whose policy cannot be established.
+CONFIG_POLICY_UNREADABLE = "config_policy_unreadable"
 
 
 def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
@@ -65,6 +70,100 @@ def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
         "error_type": CONFIG_INPUT_NOT_PERMITTED,
         "error_category": error.context["error_category"],
     }
+
+
+def _session_client_rules(session_id: Optional[str]) -> Any:
+    """The ClientConfigRules a config this session's client delivers is checked against.
+
+    From the registered profile the session bound, never from its materialized
+    config; see ``profile_registry.session_client_rules``. Raises when the bound
+    profile is gone, so a scan is refused rather than checked against another
+    policy.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_client_rules,
+    )
+
+    return session_client_rules(session_id)
+
+
+def _denied_response(exc: Exception, operation: str) -> Dict[str, Any]:
+    """The response for a client-delivered config that was refused."""
+    from automated_security_helper.core.exceptions import (
+        ASHConfigPolicyUnreadableError,
+    )
+
+    return {
+        "success": False,
+        "operation": operation,
+        "error": str(exc),
+        "error_type": (
+            CONFIG_POLICY_UNREADABLE
+            if isinstance(exc, ASHConfigPolicyUnreadableError)
+            else CONFIG_FIELD_DENIED
+        ),
+    }
+
+
+def _client_config_denial(
+    config_path: Optional[str],
+    source_dir: Path,
+    session_id: Optional[str],
+    operation: str,
+) -> Optional[Dict[str, Any]]:
+    """Refuse up front a client-delivered config the scan would refuse while resolving.
+
+    The scan resolves the config in the background, so the same check runs here
+    first and the client is told which field to remove at once. The chain is read
+    the way the scan reads it: the named file, or the file discovered in
+    ``source_dir``. Any other chain problem is left to the scan, which reports it
+    as it always has. The scan's own check is the one that decides; this one
+    only reports early.
+    """
+    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.config.client_config_policy import (
+        apply_client_config_rules,
+    )
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        discover_config_source,
+        resolve_config_document,
+    )
+    from automated_security_helper.core.exceptions import (
+        ASHConfigFieldDeniedError,
+        ASHConfigPolicyUnreadableError,
+    )
+
+    rules = _session_client_rules(session_id)
+    permit_base = config_base_gate(session_id)
+    try:
+        if config_path is not None:
+            path = Path(config_path)
+            confine = default_confinement_root(path, source_dir)
+        else:
+            selected = discover_config_source(source_dir).selected
+            if selected is None:
+                return None
+            path, confine = selected.path, source_dir
+        documents = resolve_config_document(
+            path, confine_to=confine, permit_base=permit_base
+        ).documents
+    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
+        _logger.debug(f"Config chain not read before the scan: {exc}")
+        return None
+    try:
+        apply_client_config_rules(
+            AshConfig(),
+            documents,
+            rules=rules,
+            trusted_config_path=None,
+            source_dir=source_dir,
+            permit_base=permit_base,
+        )
+    except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as exc:
+        return _denied_response(exc, operation)
+    return None
 
 
 async def mcp_scan_directory(
@@ -193,6 +292,12 @@ async def mcp_scan_directory(
                     "Ensure the file has a valid extension (.yaml, .yml, or .json)",
                 ],
             )
+
+    denial = _client_config_denial(
+        config_path, resolved_target, session_id, "scan_directory"
+    )
+    if denial is not None:
+        return denial
 
     try:
         # Create a unique scan ID
@@ -337,6 +442,14 @@ async def _run_scan_async(
     trusted_config_path = (
         resolve_session_config_path(session_id) if untrusted_config else None
     )
+    # Every file of the chain a client delivered, the named upload or the
+    # target's own .ash.yaml, is checked against this session's policy.
+    try:
+        client_config_policy = _session_client_rules(session_id)
+    except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, str(exc))
+        _logger.error(f"Scan {scan_id} refused: {exc}")
+        return
 
     # Resolve the per-session lock if a session_id was supplied. The lock is
     # acquired inside the executor wrapper below — we MUST NOT hold it on the
@@ -383,6 +496,7 @@ async def _run_scan_async(
                     config_base_gate=base_gate,
                     untrusted_config=untrusted_config,
                     trusted_config_path=trusted_config_path,
+                    client_config_policy=client_config_policy,
                 )
         else:
             return run_ash_scan(
@@ -396,6 +510,7 @@ async def _run_scan_async(
                 config_base_gate=base_gate,
                 untrusted_config=untrusted_config,
                 trusted_config_path=trusted_config_path,
+                client_config_policy=client_config_policy,
             )
 
     try:
@@ -1179,7 +1294,9 @@ def mcp_get_config(
     )
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.core.exceptions import (
+        ASHConfigFieldDeniedError,
         ASHConfigInputNotPermittedError,
+        ASHConfigPolicyUnreadableError,
     )
 
     if config_path is not None:
@@ -1254,9 +1371,12 @@ def mcp_get_config(
             trusted_config_path=(
                 resolve_session_config_path(session_id) if untrusted_config else None
             ),
+            client_config_policy=_session_client_rules(session_id),
         )
     except ASHConfigInputNotPermittedError as exc:
         return _config_refusal(config_chain_refusal(path, exc), "get_config")
+    except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as exc:
+        return _denied_response(exc, "get_config")
     return resolved.model_dump()
 
 
@@ -1372,10 +1492,94 @@ def mcp_validate_config(
             ],
         }
 
+    errors = [_classify(e) for e in raw_errors]
+    denied = _validated_document_denials(config_content, config_path, session_id)
     return {
-        "valid": valid,
-        "errors": [_classify(e) for e in raw_errors],
+        "valid": valid and not denied,
+        "errors": errors + denied,
     }
+
+
+def _validated_document_denials(
+    config_content: Optional[str],
+    config_path: Optional[str],
+    session_id: Optional[str],
+) -> list:
+    """The fields a client's config sets that this session's policy denies, as errors.
+
+    A named file is checked with every base its ``extends`` chain reaches, under
+    the session's config-root gate, the way a scan reads it; each file of the
+    chain a client delivered is checked. Content is the caller's own text, so it
+    is checked only for a remote caller: on stdio the caller launched this
+    server, and the same text as a local file is not a client's.
+    """
+    import yaml as _yaml
+
+    from automated_security_helper.cli.mcp.sandbox import (
+        caller_is_remote,
+        config_base_gate,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        INERT_PATHS,
+        client_file_denials,
+        exempt_paths,
+    )
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        resolve_config_document,
+    )
+    from automated_security_helper.config.runtime_patch import (
+        config_document_denials,
+    )
+
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    rules = _session_client_rules(session_id)
+    checked = (
+        caller_is_remote(session_id)
+        if config_content is not None
+        else config_path is not None and config_is_client_supplied(config_path)
+    )
+    if rules.unreadable is not None and checked:
+        return [
+            {"field": "", "message": rules.unreadable, "type": CONFIG_POLICY_UNREADABLE}
+        ]
+    found: List[Tuple[str, str]] = []
+    try:
+        if config_content is not None:
+            if not caller_is_remote(session_id):
+                return []
+            denials = config_document_denials(
+                _yaml.safe_load(config_content),
+                allowlist=rules.policy,
+                config=rules.base,
+                exempt=exempt_paths(rules.policy),
+                inert=INERT_PATHS,
+            )
+            found = [(denial.key, denial.reason) for denial in denials]
+        elif config_path is not None:
+            path = Path(config_path)
+            documents = resolve_config_document(
+                path,
+                confine_to=default_confinement_root(path),
+                permit_base=config_base_gate(session_id),
+            ).documents
+            found = [
+                (denial.key, f"{denial.reason}, in {file.name}")
+                for file, denials in client_file_denials(documents, rules)
+                for denial in denials
+            ]
+    except Exception:  # noqa: BLE001 -- a read or chain error is reported already
+        return []
+    return [
+        {
+            "field": key,
+            "message": f"{key} may not be set by a config an MCP client delivers: "
+            f"{reason}",
+            "type": "denied_by_runtime_policy",
+        }
+        for key, reason in found
+    ]
 
 
 def mcp_suggest_suppression(

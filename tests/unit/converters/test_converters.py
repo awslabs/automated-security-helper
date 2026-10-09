@@ -127,6 +127,38 @@ class TestArchiveConverter:
         assert (extracted_dir / "subfolder" / "test2.py").exists()
         assert not (extracted_dir / "test.txt").exists()
 
+    def test_a_client_supplied_ignore_path_does_not_skip_extraction(
+        self, temp_dir, test_plugin_context, monkeypatch
+    ):
+        """A client's ignore path hides findings in the results; the archive is extracted."""
+        from automated_security_helper.models.core import IgnorePathWithReason
+
+        archives = []
+        for folder in ("client", "vendor"):
+            (temp_dir / folder).mkdir()
+            path = temp_dir / folder / f"{folder}.zip"
+            with zipfile.ZipFile(path, "w") as zf:
+                zf.writestr(f"{folder}.py", "x = 1\n")
+            archives.append(str(path))
+        test_plugin_context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator"),
+            IgnorePathWithReason(
+                path="client/*", reason="client", client_supplied=True
+            ),
+        ]
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.scan_set",
+            lambda *args, **kwargs: archives,
+        )
+        converter = ArchiveConverter(
+            context=test_plugin_context, config=ArchiveConverterConfig()
+        )
+
+        results = converter.convert()
+
+        assert len(results) == 1
+        assert (results[0] / "client.py").exists()
+
     def test_archive_converter_convert_tar(
         self, temp_dir, sample_tar_file, test_plugin_context, monkeypatch
     ):

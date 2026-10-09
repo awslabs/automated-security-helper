@@ -588,6 +588,30 @@ class TestConvert:
             "the ignore reason belongs in the log so the skip is explainable"
         )
 
+    def test_a_client_supplied_ignore_path_does_not_skip_conversion(
+        self, converter, monkeypatch
+    ):
+        """A client's ignore path hides findings in the results; the file is converted."""
+        client = write_notebook(converter.context.source_dir / "client", "c.ipynb")
+        vendor = write_notebook(converter.context.source_dir / "vendor", "v.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator"),
+            IgnorePathWithReason(
+                path="client/*", reason="client", client_supplied=True
+            ),
+        ]
+        monkeypatch.setattr(
+            f"{MODULE}.scan_set", lambda **kwargs: [str(client), str(vendor)]
+        )
+        converter.use_uv_tool = False
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+
+        results = converter.convert()
+
+        assert len(results) == 1
+        assert [Path(cmd[6]).name for cmd in run.calls] == [client.name]
+
     def test_uv_execution_is_preferred_and_skips_the_subprocess_fallback(
         self, converter, tmp_path, monkeypatch
     ):

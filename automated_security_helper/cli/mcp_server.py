@@ -18,6 +18,9 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer, Context
 
 from automated_security_helper.cli.mcp_tools import (
+    CONFIG_FIELD_DENIED,
+    CONFIG_INPUT_NOT_PERMITTED,
+    CONFIG_POLICY_UNREADABLE,
     mcp_scan_directory,
     mcp_get_scan_progress,
     mcp_get_scan_results,
@@ -400,6 +403,14 @@ async def run_ash_scan(
             await ctx.error(
                 f"Failed to start scan: {result.get('error', 'Unknown error')}"
             )
+            # A refusal is a contract the client branches on, so its own
+            # error_type reaches the client rather than a generic start failure.
+            if result.get("error_type") in (
+                CONFIG_FIELD_DENIED,
+                CONFIG_INPUT_NOT_PERMITTED,
+                CONFIG_POLICY_UNREADABLE,
+            ):
+                return result
             return {
                 "success": False,
                 "error": f"Failed to start scan: {result.get('error', 'Unknown error')}",

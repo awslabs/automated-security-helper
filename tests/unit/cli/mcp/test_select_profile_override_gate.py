@@ -320,6 +320,28 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         },
         {"suppressions": [_SUPPRESS_ALL]},
     ),
+    "/global_settings/mcp": (
+        {
+            "op": "replace",
+            "path": "/global_settings/mcp/runtime_overrides/denied_paths",
+            "value": [],
+        },
+        {"global_settings": {"mcp": {"runtime_overrides": {"denied_paths": []}}}},
+    ),
+    "/global_settings/mcp/**": (
+        {
+            "op": "add",
+            "path": "/global_settings/mcp/runtime_overrides/allowed_paths/-",
+            "value": "/fail_on_findings",
+        },
+        {
+            "global_settings": {
+                "mcp": {
+                    "runtime_overrides": {"allowed_paths": ["/**", "/fail_on_findings"]}
+                }
+            }
+        },
+    ),
     "/reporters/bedrock-summary-reporter/options/aws_*": (
         {
             "op": "add",
@@ -369,9 +391,19 @@ def _override_for(document: Dict[str, Any], changes: Dict[str, Any]) -> str:
     block the restatement has to keep.
     """
     restated = yaml.safe_load(yaml.safe_dump(document))
+
+    def merge(into: Dict[str, Any], change: Dict[str, Any]) -> None:
+        for key, value in change.items():
+            if isinstance(value, dict) and isinstance(into.get(key), dict):
+                merge(into[key], value)
+            else:
+                into[key] = value
+
     for key, value in changes.items():
         if key in ("ignore_paths", "suppressions"):
             restated["global_settings"][key] = value
+        elif key == "global_settings":
+            merge(restated["global_settings"], value)
         else:
             restated[key] = value
     return yaml.safe_dump(restated)
@@ -398,7 +430,7 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     covering = next(
         (
             prefix
-            for prefix in ("/sandbox", "/ash_plugin_modules")
+            for prefix in ("/sandbox", "/ash_plugin_modules", "/global_settings/mcp")
             if entry.startswith(prefix)
         ),
         entry,
