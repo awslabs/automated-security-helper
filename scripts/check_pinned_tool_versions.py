@@ -76,7 +76,8 @@ Known limitations
   has not been shown to be current, and reporting it as current would be the
   failure this script exists to prevent. Unauthenticated GitHub API calls are
   limited to 60 an hour per address; set ``GITHUB_TOKEN`` (or ``GH_TOKEN``) to
-  lift that.
+  lift that. A GitHub lookup that gets 403 with the token is retried once without
+  it, and logs GitHub's error message to stderr; see ``_get_github_json``.
 * Pre-release suffixes compare as text after the numeric part, so ``1.2.0rc10``
   sorts before ``1.2.0rc9``. The upstream APIs above return final releases, so
   the case does not arise in practice.
@@ -104,6 +105,7 @@ import lzma
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -374,16 +376,70 @@ def _get_json(url: str, headers: dict[str, str] | None = None) -> Any:
     return json.loads(_get_bytes(url, headers))
 
 
-def latest_github_release(project: str) -> str:
+# How much of GitHub's error message a refused request logs. Enough for any message
+# GitHub sends; a bound so that an unexpected body cannot flood the job log.
+_GITHUB_MESSAGE_LIMIT = 300
+
+
+def _github_error_message(error: urllib.error.HTTPError, token: str) -> str:
+    """The ``message`` of GitHub's JSON error body, quoted and safe to print.
+
+    Quoted with ``repr``, so a newline in it cannot start a line of its own, which in
+    a GitHub Actions log is where a workflow command would begin. The token is cut out
+    before anything else, in case a body ever echoes it, and the result is truncated.
+    """
+    # Diagnostic only, so any failure to read the body is reported in its place
+    # rather than raised: it must not decide whether the retry happens.
+    try:
+        body = json.loads(error.read(64 * 1024) or b"null")
+    except Exception as exc:
+        return f"(error body unreadable: {type(exc).__name__})"
+    message = body.get("message") if isinstance(body, dict) else None
+    if not isinstance(message, str):
+        return "(error body has no message)"
+    message = message.replace(token, "<token>")
+    if len(message) > _GITHUB_MESSAGE_LIMIT:
+        return repr(message[:_GITHUB_MESSAGE_LIMIT]) + " (truncated)"
+    return repr(message)
+
+
+def _get_github_json(path: str) -> Any:
+    """``https://api.github.com/<path>``, with the token when one is set.
+
+    Every endpoint this script reads is public: the token is sent only to lift the
+    anonymous rate limit. So a 403 to the request that carries it is retried once
+    without it, and the lookup fails only if that fails too. In the weekly job GitHub
+    has repeatedly answered 403 to the token-carrying request for one repository
+    while the same token worked for every other. Why is not established; the retry
+    logs GitHub's own message so the next run shows it. Any other status, any network
+    error, and a 403 with no token configured fail on the first try, as before.
+    """
+    url = f"https://api.github.com/{path}"
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    data = _get_json(f"https://api.github.com/repos/{project}/releases/latest", headers)
-    return str(data["tag_name"])
+    if not token:
+        return _get_json(url, headers)
+    try:
+        return _get_json(url, {**headers, "Authorization": f"Bearer {token}"})
+    except urllib.error.HTTPError as exc:
+        if exc.code != 403:
+            raise
+        message = _github_error_message(exc, token)
+    # Outside the except block, so a failed retry is reported as itself rather than
+    # chained to the 403 before it. Never the headers: one of them is the token.
+    print(
+        f"warning: GitHub answered 403 to the authenticated request for {path}; "
+        f"GitHub's message: {message}. Retrying once without the token.",
+        file=sys.stderr,
+    )
+    return _get_json(url, headers)
+
+
+def latest_github_release(project: str) -> str:
+    return str(_get_github_json(f"repos/{project}/releases/latest")["tag_name"])
 
 
 def latest_pypi_release(distribution: str) -> str:
