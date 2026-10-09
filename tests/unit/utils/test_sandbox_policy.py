@@ -1179,6 +1179,24 @@ class TestSandboxExecProfile:
         finally:
             plan.run_cleanup()
 
+    def test_a_root_cwd_is_not_scan_data_and_the_tree_stays_exec_denied(
+        self, layout, tmp_path
+    ):
+        # checkov and ferret-scan run from the filesystem root so that they read no
+        # config file from the scanned tree. The root is not the scan's data: the
+        # read list already leaves it out, and the exec deny must too, or it holds
+        # every tool path only because each one is given back after it.
+        root = Path(os.path.abspath(os.sep))
+        lines = _sbpl(layout, tmp_path, cwd=root)
+        ((_, deny),) = _indexed(lines, "(deny process-exec ")
+        assert _as_argv(root) not in _subpaths(deny), deny
+        for still_denied in (layout.source, layout.output, layout.results):
+            assert _as_argv(still_denied) in _subpaths(deny), still_denied
+        policy = _policy(layout, cwd=root)
+        assert Path(os.path.realpath(root)) not in _resolved(policy.scan_data)
+        for data in (layout.source, layout.output):
+            assert Path(os.path.realpath(data)) in _resolved(policy.scan_data)
+
     def test_the_scan_data_is_not_executable_inside_a_tool_path(self, layout, tmp_path):
         # A tool path that holds the scanned tree, as /opt holds a repository
         # checked out under it.
