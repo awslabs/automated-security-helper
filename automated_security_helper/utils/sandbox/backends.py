@@ -3,7 +3,8 @@
 Each backend answers two questions. ``probe()`` says whether it can actually start a
 sandbox on this machine, by starting one, because "the binary is on PATH" is not the
 same thing: Ubuntu 24.04 ships a bwrap that AppArmor stops from creating a user
-namespace unless it is the packaged one, and a kernel can be built without Landlock.
+namespace unless it is the packaged one, a kernel can be built without Landlock, and
+inside a container firejail can exit 0 having run its command with no sandbox at all.
 ``plan()`` returns the argv to run, the environment to pass, and anything to clean up
 when the process has exited.
 
@@ -134,11 +135,11 @@ class SandboxBackend:
         raise NotImplementedError
 
 
-def _probe_run(
+def _probe_process(
     argv: Sequence[str], env: Optional[Mapping[str, str]] = None
-) -> Optional[str]:
-    """Run ``argv``; None if it exited 0, otherwise its stderr as the reason."""
-    result = subprocess.run(  # nosec B603 - fixed argv built in this module
+) -> "subprocess.CompletedProcess[str]":
+    """Run ``argv`` with its output captured, as a probe."""
+    return subprocess.run(  # nosec B603 - fixed argv built in this module
         list(argv),
         capture_output=True,
         text=True,
@@ -146,10 +147,21 @@ def _probe_run(
         env=dict(env) if env is not None else {"PATH": os.environ.get("PATH", "")},
         check=False,
     )
+
+
+def _exit_failure(result: "subprocess.CompletedProcess[str]") -> Optional[str]:
+    """None if ``result`` exited 0, otherwise its last line of output as the reason."""
     if result.returncode == 0:
         return None
     detail = (result.stderr or result.stdout or "").strip().splitlines()
     return f"exit {result.returncode}: {detail[-1] if detail else 'no output'}"
+
+
+def _probe_run(
+    argv: Sequence[str], env: Optional[Mapping[str, str]] = None
+) -> Optional[str]:
+    """Run ``argv``; None if it exited 0, otherwise its stderr as the reason."""
+    return _exit_failure(_probe_process(argv, env))
 
 
 def _true() -> str:
@@ -339,6 +351,30 @@ class BwrapBackend(SandboxBackend):
 # ---------------------------------------------------------------------------
 
 
+#: The confinement options every firejail spawn gets, ahead of the policy's paths.
+#: The probe runs its command under them too, so a firejail that rejects one (an old
+#: release, a feature turned off in firejail.config) is unavailable before any scan.
+_FIREJAIL_CONFINEMENT: Tuple[str, ...] = (
+    "--noprofile",
+    "--private-dev",
+    "--nonewprivs",
+    "--caps.drop=all",
+    "--seccomp",
+    "--nogroups",
+    "--dbus-user=none",
+    "--dbus-system=none",
+    "--read-only=/",
+)
+
+#: Tried before PATH for the probe's command, because --private hides $HOME: a
+#: readlink found first in ~/bin or a Nix profile would fail to start inside the
+#: sandbox, and firejail would be refused for that.
+_SYSTEM_READLINK: Tuple[str, ...] = ("/usr/bin/readlink", "/bin/readlink")
+
+#: Printed by firejail, unless --quiet, when it runs a command without a sandbox.
+_FIREJAIL_NO_SANDBOX = "existing sandbox"
+
+
 class FirejailBackend(SandboxBackend):
     name = "firejail"
     platforms = ("linux",)
@@ -350,13 +386,79 @@ class FirejailBackend(SandboxBackend):
         found = shutil.which("firejail")
         if not found:
             return "firejail is not installed"
-        self._executable = found
+        readlink = next(
+            (path for path in _SYSTEM_READLINK if os.access(path, os.X_OK)), None
+        ) or shutil.which("readlink")
+        if not readlink:
+            return (
+                "readlink is not installed, so ASH cannot check that firejail "
+                "confines what it runs"
+            )
+        # Exiting 0 proves nothing: when firejail finds no kernel threads among PIDs
+        # 1-10, as in a container with its own PID namespace (unless a container=
+        # variable names LXC, Docker or nspawn), it decides it is already inside a
+        # sandbox and runs the command with none of its options.
+        # Every sandbox it does build has its own mount namespace, which is where
+        # the read-only root, the private home and the whitelists are, so a command
+        # that reports ASH's mount namespace ran unconfined. Without --quiet here,
+        # firejail's own warning, when it prints one, goes into the reason.
+        own_namespace = os.readlink("/proc/self/ns/mnt")
+        result = _probe_process(
+            [
+                found,
+                *_FIREJAIL_CONFINEMENT,
+                "--net=none",
+                "--private",
+                "--private-tmp",
+                "--",
+                readlink,
+                "/proc/self/ns/mnt",
+            ]
+        )
+        failure = _exit_failure(result)
+        if failure:
+            return f"firejail cannot create a sandbox here ({failure})"
+        namespaces = [
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip().startswith("mnt:[")
+        ]
+        warnings = [
+            line.strip()
+            for line in f"{result.stderr}\n{result.stdout}".splitlines()
+            if _FIREJAIL_NO_SANDBOX in line
+        ]
+        evidence: List[str] = []
+        if namespaces and namespaces[-1] == own_namespace:
+            evidence.append("the command ran in ASH's own mount namespace")
+        if warnings:
+            evidence.append(f"firejail said: {warnings[0]}")
+        if evidence:
+            return (
+                "firejail ran a test command without a sandbox ("
+                + "; ".join(evidence)
+                + "), so it would run scanners unconfined. firejail does this when "
+                "it decides it is already inside a sandbox, as in a container that "
+                "does not share the host's PID namespace. Use --sandbox bwrap or "
+                "--sandbox landlock here"
+            )
+        if not namespaces:
+            output = result.stdout.strip().splitlines()
+            return (
+                "ASH could not confirm that firejail confines what it runs: its test "
+                "command printed no mount namespace ("
+                + (repr(output[-1]) if output else "no output")
+                + ")"
+            )
+        # A separate run, without --private: the filter runs ASH's own interpreter,
+        # which may live under $HOME, and every real spawn whitelists it.
         failure = _probe_run(
             [found, "--quiet", "--noprofile", "--net=none", "--"]
             + _with_socket_filter([_true()])
         )
         if failure:
             return f"firejail cannot start a sandbox with the Unix-socket filter ({failure})"
+        self._executable = found
         return None
 
     def plan(
@@ -366,19 +468,7 @@ class FirejailBackend(SandboxBackend):
             raise RuntimeError(f"{self.name}: probe() must succeed before plan()")
         home = _real(policy.home)
         tmp_root = _real(Path("/tmp"))  # nosec B108 - compared against, never written
-        cmd = [
-            self._executable,
-            "--quiet",
-            "--noprofile",
-            "--private-dev",
-            "--nonewprivs",
-            "--caps.drop=all",
-            "--seccomp",
-            "--nogroups",
-            "--dbus-user=none",
-            "--dbus-system=none",
-            "--read-only=/",
-        ]
+        cmd = [self._executable, "--quiet", *_FIREJAIL_CONFINEMENT]
         if not policy.network:
             cmd.append("--net=none")
         # firejail leaves everything outside $HOME visible, including the local IPC
