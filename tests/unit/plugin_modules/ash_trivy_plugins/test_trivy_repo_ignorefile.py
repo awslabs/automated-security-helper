@@ -132,3 +132,27 @@ def test_a_refused_option_does_not_hide_the_operators_environment_file(
     monkeypatch.setenv("TRIVY_IGNOREFILE", str(operator))
     argv = _argv(tmp_path, source, {"ignore_file": ".trivyignore"})
     assert _ignorefile(argv) == operator.resolve()
+
+
+def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path):
+    """On Windows the argv can carry the target with backslashes."""
+    source = _tree(tmp_path)
+    output = tmp_path / "out"
+    output.mkdir()
+    scanner = TrivyRepoScanner(
+        context=PluginContext(source_dir=source, output_dir=output, config=AshConfig()),
+        config=TrivyRepoScannerConfig(),
+    )
+    scanner.dependencies_satisfied = True
+    resolved = ["trivy", "repository", "--format", "sarif", r"C:\work\repo"]
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_resolve_arguments", return_value=list(resolved)),
+        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+    ):
+        scanner.scan(target=source, target_type="source")
+    argv = run.call_args.kwargs["command"]
+    assert argv[:2] == ["trivy", "repository"]
+    assert argv[2].startswith("--ignorefile=")
+    assert argv[3].startswith("--secret-config=")
+    assert argv[4:] == resolved[2:]

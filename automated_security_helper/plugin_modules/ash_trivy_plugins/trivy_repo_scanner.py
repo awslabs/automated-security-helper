@@ -487,9 +487,13 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 target=target,
                 results_file=results_file,
             )
-            # Before the target, which _resolve_arguments places after the options.
-            target_index = final_args.index(Path(target).as_posix())
-            final_args[target_index:target_index] = [
+            # Right after `trivy repository`, which needs no knowledge of how the
+            # target is spelled further on; trivy takes flags in any position.
+            head = [self.command, *self.subcommands]
+            insert_at = (
+                len(head) if final_args[: len(head)] == head else len(final_args)
+            )
+            final_args[insert_at:insert_at] = [
                 f"--ignorefile={self._ignore_file()}",
                 f"--secret-config={self._secret_config_file()}",
             ]
