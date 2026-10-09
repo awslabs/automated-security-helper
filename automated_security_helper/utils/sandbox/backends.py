@@ -605,7 +605,9 @@ def _mach_rule(names: Sequence[str]) -> str:
     return f"(allow mach-lookup {filters})"
 
 
-def _exec_rules(policy: SandboxPolicy, private_tmp: Path) -> List[str]:
+def _exec_rules(
+    policy: SandboxPolicy, private_tmp: Path, unpack_dir: Optional[Path] = None
+) -> List[str]:
     """Programs run from the policy's executable paths, and from nowhere else.
 
     Then exec is denied again in the scan's own data, which the scanned repository
@@ -615,7 +617,10 @@ def _exec_rules(policy: SandboxPolicy, private_tmp: Path) -> List[str]:
     those (a virtualenv in the scanned project that ASH itself runs from) is given
     back last. In SBPL the last matching rule wins.
     """
-    executable = sorted({_real(p) for p in policy.executable})
+    executable = sorted(
+        {_real(p) for p in policy.executable}
+        | ({_real(unpack_dir)} if unpack_dir is not None else set())
+    )
     denied = sorted(
         {
             _real(p)
@@ -651,20 +656,27 @@ class SandboxExecBackend(SandboxBackend):
         policy: SandboxPolicy,
         private_tmp: Path,
         trust_roots: Optional[Path] = None,
+        unpack_dir: Optional[Path] = None,
     ) -> str:
         home = _real(policy.home)
         readable = " ".join(
             f"(subpath {_sbpl_string(_real(p))})" for p in policy.read_only
         )
         writable = " ".join(
-            f"(subpath {_sbpl_string(_real(p))})"
-            for p in list(policy.writable) + list(policy.cache) + [private_tmp]
+            [
+                f"(subpath {_sbpl_string(_real(p))})"
+                for p in list(policy.writable)
+                + list(policy.cache)
+                + [private_tmp]
+                + ([unpack_dir] if unpack_dir is not None else [])
+            ]
+            + [f"(literal {_sbpl_string(_real(p))})" for p in policy.uv_tool_locks]
         )
         lines = [
             "(version 1)",
             "(deny default)",
             "(allow process-fork)",
-            *_exec_rules(policy, private_tmp),
+            *_exec_rules(policy, private_tmp, unpack_dir),
             "(allow signal (target same-sandbox))",
             "(allow process-info* (target same-sandbox))",
             "(allow sysctl-read)",
@@ -737,6 +749,14 @@ class SandboxExecBackend(SandboxBackend):
                 trust_roots = roots_dir / "roots.pem"
                 trust_roots.write_text(pem, encoding="ascii", errors="replace")
                 child_env["SSL_CERT_FILE"] = trust_roots.as_posix()
+        unpack_dir = None
+        if policy.unpack_dir_env:
+            unpack_dir = Path(tempfile.mkdtemp(prefix="ash-sandbox-unpack-"))
+            cleanup.append(lambda: shutil.rmtree(unpack_dir, ignore_errors=True))
+            child_env[policy.unpack_dir_env] = unpack_dir.as_posix()
+        # Last, so the scanner's own setting cannot ask for the write the profile
+        # will refuse (a grype database update into its read-only cache).
+        child_env.update(policy.sandbox_exec_env)
         cmd = [
             sys.executable,
             "-I",
@@ -744,7 +764,7 @@ class SandboxExecBackend(SandboxBackend):
             _SETSID_EXEC,
             self.executable,
             "-p",
-            self.profile(policy, private_tmp, trust_roots),
+            self.profile(policy, private_tmp, trust_roots, unpack_dir),
             *argv,
         ]
         return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)

@@ -937,3 +937,210 @@ class TestSystemTrustRoots:
         assert [argv[:4] for argv in calls] == [
             ["/usr/bin/security", "find-certificate", "-a", "-p"]
         ] * 2
+
+
+def _builtin_requirements():
+    from automated_security_helper.plugin_modules.ash_builtin import ASH_SCANNERS
+
+    found = {}
+    for scanner in ASH_SCANNERS:
+        requirements = getattr(scanner, "sandbox_requirements", None)
+        if isinstance(requirements, SandboxRequirements):
+            found[scanner.__name__] = requirements
+    return found
+
+
+class TestMacosScannerDeclarations:
+    """What each builtin scanner is granted for macOS, and how narrowly."""
+
+    def test_grype_reads_its_macos_database_and_never_updates_it_there(self):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            grype_scanner,
+        )
+
+        requirements = grype_scanner.GrypeScanner.sandbox_requirements
+        assert "~/Library/Caches/grype" in requirements.read_paths
+        assert "~/Library/Caches/grype" not in requirements.cache_paths
+        assert dict(requirements.sandbox_exec_env) == {"GRYPE_DB_AUTO_UPDATE": "false"}
+
+    def test_cdk_nag_does_not_use_the_shared_jsii_cache(self):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            cdk_nag_scanner,
+        )
+
+        requirements = cdk_nag_scanner.CdkNagScanner.sandbox_requirements
+        assert dict(requirements.sandbox_exec_env) == {
+            "JSII_RUNTIME_PACKAGE_CACHE": "disabled"
+        }
+        assert not any("jsii" in p for p in requirements.cache_paths)
+
+    def test_only_opengrep_unpacks_itself(self):
+        declared = {
+            name: requirements.unpack_dir_env
+            for name, requirements in _builtin_requirements().items()
+            if requirements.unpack_dir_env
+        }
+        assert declared == {"OpengrepScanner": "XDG_CACHE_HOME"}
+
+    def test_no_grant_covers_the_whole_library_caches_directory(self):
+        for name, requirements in _builtin_requirements().items():
+            for path in requirements.read_paths + requirements.cache_paths:
+                parts = Path(path).parts
+                assert parts[-2:] != ("Library", "Caches"), (name, path)
+                assert parts[-1:] != ("Library",), (name, path)
+
+
+class TestSandboxExecEnv:
+    def test_the_declared_values_win_over_the_scanner_environment(self, layout):
+        requirements = SandboxRequirements(
+            env_prefixes=("GRYPE_",),
+            sandbox_exec_env=(("GRYPE_DB_AUTO_UPDATE", "false"),),
+        )
+        plan = SandboxExecBackend().plan(
+            ["/usr/bin/true"],
+            {"GRYPE_DB_AUTO_UPDATE": "true"},
+            _policy(layout, requirements),
+        )
+        try:
+            assert plan.env["GRYPE_DB_AUTO_UPDATE"] == "false"
+        finally:
+            plan.run_cleanup()
+
+    def test_other_backends_ignore_them(self, layout):
+        backend = BwrapBackend()
+        backend._executable = "/usr/bin/bwrap"
+        requirements = SandboxRequirements(sandbox_exec_env=(("JSII_X", "1"),))
+        plan = backend.plan(["/usr/bin/true"], {}, _policy(layout, requirements))
+        assert "JSII_X" not in plan.env
+
+
+class TestUnpackDir:
+    """A self-unpacking tool gets a private directory it may write and run from."""
+
+    REQUIREMENTS = SandboxRequirements(unpack_dir_env="XDG_CACHE_HOME")
+
+    def test_the_variable_names_a_private_writable_executable_directory(self, layout):
+        plan = SandboxExecBackend().plan(
+            ["/usr/bin/true"], {}, _policy(layout, self.REQUIREMENTS)
+        )
+        try:
+            unpack = Path(plan.env["XDG_CACHE_HOME"])
+            assert unpack.is_dir()
+            profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
+            ((_, allow),) = [
+                (i, line)
+                for i, line in enumerate(profile)
+                if line.startswith("(allow process-exec ")
+            ]
+            ((_, deny),) = [
+                (i, line)
+                for i, line in enumerate(profile)
+                if line.startswith("(deny process-exec ")
+            ]
+            assert _as_argv(unpack) in _subpaths(allow)
+            assert _as_argv(unpack) not in _subpaths(deny)
+            writable = set().union(
+                *(
+                    _subpaths(line)
+                    for line in profile
+                    if line.startswith("(allow file-read* file-write* ")
+                )
+            )
+            assert _as_argv(unpack) in writable
+        finally:
+            plan.run_cleanup()
+        assert not unpack.exists(), "the unpack directory outlived its spawn"
+
+    def test_each_spawn_gets_its_own(self, layout):
+        policy = _policy(layout, self.REQUIREMENTS)
+        first = SandboxExecBackend().plan(["/usr/bin/true"], {}, policy)
+        second = SandboxExecBackend().plan(["/usr/bin/true"], {}, policy)
+        try:
+            assert first.env["XDG_CACHE_HOME"] != second.env["XDG_CACHE_HOME"]
+        finally:
+            first.run_cleanup()
+            second.run_cleanup()
+
+    def test_without_the_field_nothing_is_set_or_executable(self, layout):
+        plan = SandboxExecBackend().plan(["/usr/bin/true"], {}, _policy(layout))
+        try:
+            assert "XDG_CACHE_HOME" not in plan.env
+            assert "ash-sandbox-unpack-" not in plan.argv[plan.argv.index("-p") + 1]
+        finally:
+            plan.run_cleanup()
+
+
+class TestUvToolLock:
+    """uv tool run opens its tools-directory lock read-write; nothing else there."""
+
+    def test_the_lock_file_is_writable_and_the_tools_directory_is_not(
+        self, layout, monkeypatch, tmp_path
+    ):
+        tools = tmp_path / "uv-tools"
+        tools.mkdir()
+        (tools / ".lock").write_text("")
+        monkeypatch.setenv("UV_TOOL_DIR", str(tools))
+        policy = _policy(layout)
+        assert [Path(p) for p in policy.uv_tool_locks] == [(tools / ".lock").absolute()]
+        lines = _sbpl(layout, tmp_path)
+        writable = [
+            line for line in lines if line.startswith("(allow file-read* file-write* ")
+        ]
+        assert any(
+            f'(literal "{_as_argv(tools / ".lock")}")' in line for line in writable
+        )
+        assert not any(_as_argv(tools) in _subpaths(line) for line in writable)
+
+    def test_no_lock_file_no_grant(self, layout, monkeypatch, tmp_path):
+        tools = tmp_path / "uv-tools"
+        tools.mkdir()
+        monkeypatch.setenv("UV_TOOL_DIR", str(tools))
+        assert _policy(layout).uv_tool_locks == ()
+
+    def test_a_lock_that_is_a_symlink_is_not_granted(
+        self, layout, monkeypatch, tmp_path
+    ):
+        tools = tmp_path / "uv-tools"
+        tools.mkdir()
+        victim = tmp_path / "victim"
+        victim.write_text("")
+        (tools / ".lock").symlink_to(victim)
+        monkeypatch.setenv("UV_TOOL_DIR", str(tools))
+        assert _policy(layout).uv_tool_locks == ()
+
+
+class TestScriptInterpreter:
+    """A script's interpreter prefix is readable, as cfn_nag_scan's Ruby must be."""
+
+    def _install(self, tmp_path, shebang):
+        prefix = tmp_path / "toolcache" / "Ruby" / "3.3.12"
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "lib").mkdir()
+        ruby = prefix / "bin" / "ruby"
+        ruby.write_text("")
+        ruby.chmod(0o755)
+        script_dir = tmp_path / "ash-bin"
+        script_dir.mkdir()
+        script = script_dir / "cfn_nag_scan"
+        script.write_text(shebang.format(ruby=ruby) + "\nputs 1\n")
+        script.chmod(0o755)
+        return prefix, script
+
+    def test_an_absolute_shebang(self, layout, tmp_path):
+        prefix, script = self._install(tmp_path, "#!{ruby}")
+        policy = _policy(layout, argv0=str(script))
+        assert Path(os.path.realpath(prefix)) in _resolved(policy.read_only)
+
+    def test_an_env_shebang_is_resolved_through_path(
+        self, layout, monkeypatch, tmp_path
+    ):
+        prefix, script = self._install(tmp_path, "#!/usr/bin/env ruby")
+        monkeypatch.setenv("PATH", str(prefix / "bin"))
+        policy = _policy(layout, argv0=str(script))
+        assert Path(os.path.realpath(prefix)) in _resolved(policy.read_only)
+
+    def test_a_binary_is_not_read_as_a_script(self, layout, tmp_path):
+        binary = tmp_path / "tool"
+        binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/evil/bin/x")
+        policy = _policy(layout, argv0=str(binary))
+        assert not any("evil" in p.as_posix() for p in _resolved(policy.read_only))

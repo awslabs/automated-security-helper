@@ -60,6 +60,21 @@ class SandboxRequirements:
             out of reach, so for such a tool ASH exports the same certificates to
             a read-only file before the spawn and sets ``SSL_CERT_FILE`` to it,
             which ca-certs reads instead. Other backends leave the tool alone.
+        sandbox_exec_env: ``(name, value)`` pairs set in the scanner's environment
+            under sandbox-exec only, after the allowlist. That backend has no
+            throwaway overlay, so a cache it could write would be written in place
+            and read by every later run. These keep the tool from writing what it
+            is given read-only there: grype's database (no update inside the
+            sandbox), jsii's package cache (not used at all).
+        unpack_dir_env: The tool unpacks itself and runs what it unpacked, at a
+            location this environment variable decides (opengrep's macOS binary,
+            built with Nuitka's onefile mode, unpacks to
+            ``$XDG_CACHE_HOME/opengrep/<version>`` and runs ``opengrep.bin`` from
+            there). Under sandbox-exec, which runs programs only from tool paths,
+            the variable points at a directory created for the spawn, writable and
+            executable for it alone and removed afterwards, so nothing it unpacks
+            reaches another run. Other backends give the tool a private home
+            directory and do not restrict exec, and leave the variable alone.
     """
 
     network: bool = False
@@ -69,6 +84,8 @@ class SandboxRequirements:
     env_names: Tuple[str, ...] = ()
     network_requires_grant: bool = False
     system_trust_roots: bool = False
+    sandbox_exec_env: Tuple[Tuple[str, str], ...] = ()
+    unpack_dir_env: Optional[str] = None
 
 
 #: The baseline environment allowlist. Exact names, then prefixes. Anything else in
@@ -185,6 +202,12 @@ class SandboxPolicy:
     executable: Tuple[Path, ...] = ()
     scan_data: Tuple[Path, ...] = ()
     system_trust_roots: bool = False
+    sandbox_exec_env: Dict[str, str] = field(default_factory=dict)
+    unpack_dir_env: Optional[str] = None
+    #: uv's tools-directory lock file, which ``uv tool run`` opens read-write before
+    #: it looks for an installed tool. The file, not the directory: writing the
+    #: lock changes nothing a later run reads.
+    uv_tool_locks: Tuple[Path, ...] = ()
 
     def filter_env(self, env: Mapping[str, str]) -> Dict[str, str]:
         """Reduce ``env`` to the allowlist, then point HOME inside."""
@@ -276,6 +299,21 @@ def _uv_directories() -> List[Path]:
             ):
                 found.append(prefix)
     return _existing(found)
+
+
+def _uv_tool_locks() -> List[Path]:
+    """The ``.lock`` file of uv's tools directory, where one exists."""
+    home = Path.home()
+    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
+    tool_dir = (
+        _expand(os.environ["UV_TOOL_DIR"])
+        if os.environ.get("UV_TOOL_DIR")
+        else data / "uv" / "tools"
+    )
+    if tool_dir is None:
+        return []
+    lock = tool_dir / ".lock"
+    return [lock.absolute()] if lock.is_file() and not lock.is_symlink() else []
 
 
 def uv_cache_directory() -> Optional[Path]:
@@ -377,7 +415,16 @@ def _executable_prefix(argv0: str) -> List[Path]:
         return real in (Path("/"), real_home) or real.parent == real_home
 
     paths: List[Path] = []
-    for candidate in set(_symlink_hops(Path(found))) | {Path(os.path.realpath(found))}:
+    candidates = set(_symlink_hops(Path(found))) | {Path(os.path.realpath(found))}
+    # A script runs on the interpreter its first line names, whose libraries sit in
+    # that interpreter's own prefix: cfn_nag_scan is a RubyGems wrapper whose Ruby,
+    # on the hosted macOS runners, is installed under $HOME.
+    interpreter = _shebang_interpreter(Path(found))
+    if interpreter is not None:
+        candidates |= set(_symlink_hops(interpreter)) | {
+            Path(os.path.realpath(interpreter))
+        }
+    for candidate in candidates:
         parent = candidate.parent
         if parent.name in _BIN_DIR_NAMES or not too_broad(parent):
             if Path(os.path.realpath(parent)) != real_home:
@@ -385,6 +432,27 @@ def _executable_prefix(argv0: str) -> List[Path]:
         if parent.name in _BIN_DIR_NAMES and not too_broad(parent.parent):
             paths.append(parent.parent)
     return _existing(paths)
+
+
+def _shebang_interpreter(script: Path) -> Optional[Path]:
+    """The interpreter a ``#!`` script names, resolved through ``env`` and PATH."""
+    try:
+        with open(script, "rb") as f:
+            first = f.readline(256)
+    except OSError:
+        return None
+    if not first.startswith(b"#!"):
+        return None
+    words = first[2:].decode("utf-8", errors="replace").split()
+    if not words:
+        return None
+    program = words[0]
+    if os.path.basename(program) == "env":
+        names = [w for w in words[1:] if not w.startswith("-")]
+        if not names:
+            return None
+        program = shutil.which(names[0]) or ""
+    return Path(program) if os.path.isabs(program) else None
 
 
 def _ash_paths() -> List[Path]:
@@ -568,4 +636,7 @@ def build_scanner_policy(
         executable=tuple(executable),
         scan_data=tuple(scan_data),
         system_trust_roots=requirements.system_trust_roots,
+        sandbox_exec_env=dict(requirements.sandbox_exec_env),
+        unpack_dir_env=requirements.unpack_dir_env,
+        uv_tool_locks=tuple(_uv_tool_locks()),
     )

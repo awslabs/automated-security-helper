@@ -145,7 +145,14 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.cache/grype", "$GRYPE_DB_CACHE_DIR"),
+        # grype's default database location on macOS. Read-only: under
+        # sandbox-exec a writable cache is written in place, and the database is
+        # what every later scan, sandboxed or not, takes its matches from.
+        read_paths=("~/Library/Caches/grype",),
         env_prefixes=("GRYPE_",),
+        # So grype does not try to update the read-only database. It keeps
+        # validating the database's age online, so a stale one is still an error.
+        sandbox_exec_env=(("GRYPE_DB_AUTO_UPDATE", "false"),),
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS

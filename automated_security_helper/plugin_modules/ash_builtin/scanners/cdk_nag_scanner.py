@@ -883,7 +883,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     # NODE_OPTIONS is deliberately not passed: a --require preload pointing into the
     # home directory, which the sandbox hides, would stop node from starting.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
-        env_prefixes=("JSII_",)
+        env_prefixes=("JSII_",),
+        # jsii's package cache (~/Library/Caches/com.amazonaws.jsii on macOS) holds
+        # the JavaScript every later CDK process on the machine runs. Disabled, jsii
+        # unpacks into its own temporary directory instead.
+        sandbox_exec_env=(("JSII_RUNTIME_PACKAGE_CACHE", "disabled"),),
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
