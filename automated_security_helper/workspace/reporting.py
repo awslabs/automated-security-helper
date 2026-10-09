@@ -101,6 +101,7 @@ from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
+    confined_report_path,
     reporter_matches_requested_formats,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -598,7 +599,12 @@ def emit_workspace_reports(
             ASH_LOGGER.verbose(f"Reporter {name} returned no content")
             continue
 
-        target = reports_dir / filename
+        target = confined_report_path(reports_dir, filename)
+        if target is None:
+            failures[name] = f"report file {filename!r} is not a file in {reports_dir}"
+            entry["error"] = failures[name]
+            ASH_LOGGER.error(f"Reporter {name}: {failures[name]}; nothing was written")
+            continue
         target.write_text(content, encoding="utf-8")
         artifacts[name] = target
         entry["workspace_artifact"] = target.relative_to(output_dir).as_posix()

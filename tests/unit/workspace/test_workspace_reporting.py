@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ConfigDict
 
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -1140,3 +1141,47 @@ class TestSarifStaysOneRunPerProject:
                     artifact = location["physicalLocation"]["artifactLocation"]
                     assert not artifact["uri"].startswith("/")
                     assert artifact["uriBaseId"] == PROJECT_ROOT_URI_BASE_ID
+
+
+class _EscapingConfig(ReporterPluginConfigBase):
+    """A default is not validated, so this reaches the writer unchanged."""
+
+    model_config = ConfigDict(validate_default=False)
+
+    name: str = "fake-escaping"
+    extension: str = "x/../../escaped-probe.txt"
+    enabled: bool = True
+
+
+class FakeEscapingReporter(FakeMergedReporter):
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _EscapingConfig()
+        return super().model_post_init(context)
+
+
+class FakeSymlinkedReporter(FakeMergedReporter):
+    """Writes ash.merged.txt, which the test makes a symlink to a file outside."""
+
+
+class TestTheWorkspaceWriterStaysInTheReportsDirectory:
+    def test_an_extension_with_a_path_writes_nothing_outside(self, workspace):
+        _, output_dir, _ = workspace
+        (output_dir / REPORTS_DIR_NAME / "ash.x").mkdir(parents=True)
+
+        outcome = _emit(workspace, FakeEscapingReporter)
+
+        assert not (output_dir / "escaped-probe.txt").exists()
+        assert "fake-escaping" not in outcome.workspace_artifacts
+
+    def test_a_symlinked_report_file_is_not_followed(self, workspace, tmp_path):
+        _, output_dir, _ = workspace
+        outside = tmp_path / "outside.txt"
+        outside.write_text("unchanged", encoding="utf-8")
+        reports = output_dir / REPORTS_DIR_NAME
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "ash.merged.txt").symlink_to(outside)
+
+        _emit(workspace, FakeSymlinkedReporter)
+
+        assert outside.read_text(encoding="utf-8") == "unchanged"

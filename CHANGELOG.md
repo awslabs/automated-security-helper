@@ -130,6 +130,15 @@
     `log_group_name` and `log_stream_name`. This covers the section under any
     spelling ASH reads as that reporter's, such as `BedrockSummary`. The reporters'
     other options still apply from the tree.
+  - Such a file can no longer add `automated_security_helper.plugin_modules.ash_aws_plugins`
+    (or a module inside it) to `ash_plugin_modules`. Its reporters are enabled by
+    default and send findings to AWS with the operator's credentials, so only
+    `--ash-plugin-modules`, `--config-overrides` or a config file outside the tree
+    can add it.
+  - A reporter's `extension` has to be a filename suffix, from any source: a value
+    with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
+    warning naming the key. Reports are written only when the resolved file is
+    directly inside the reports directory.
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's

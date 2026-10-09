@@ -38,12 +38,20 @@ rejected because it would fail an entire workspace run for any external plugin.
 from abc import abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, ClassVar, Generic, Iterable, TypeVar
+from pathlib import Path
+from typing import Annotated, Any, ClassVar, Generic, Iterable, Optional, TypeVar
 from typing_extensions import Self
 
-from pydantic import Field, model_validator
+from pydantic import (
+    Field,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticUseDefault
 
-from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.options import ReporterOptionsBase, _warn_once
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
@@ -101,6 +109,54 @@ class ReporterPluginConfigBase(PluginConfigBase):
         ReporterOptionsBase()
     )
     extension: str | None = None
+
+    @field_validator("extension", mode="wrap")
+    @classmethod
+    def _extension_is_a_filename_suffix(
+        cls, value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> Any:
+        """The report is written to ``ash.<extension>`` in the reports directory.
+
+        So the value is a filename suffix, from every source: one with a path
+        separator, ``..`` or NUL is replaced by the reporter's default, with one
+        warning naming the key. Declared here so it covers every reporter's
+        ``extension``, including those that redeclare the field.
+        """
+        value = handler(value)
+        if value is None or is_filename_suffix(value):
+            return value
+        name = (info.data or {}).get("name") or cls.__name__
+        key = f"reporters.{name}.extension"
+        _warn_once(
+            key,
+            str(value),
+            f"Ignoring {key}: {value!r} is not a filename suffix such as 'json'. "
+            "The report is written to ash.<extension> in the reports directory, so "
+            "it cannot contain '/', '\\', '..' or NUL. Using the default instead.",
+        )
+        raise PydanticUseDefault from None
+
+
+def is_filename_suffix(value: object) -> bool:
+    """Whether ``value`` can follow ``ash.`` in a file name without leaving its directory."""
+    return isinstance(value, str) and not any(
+        part in value for part in ("/", "\\", "..", "\x00")
+    )
+
+
+def confined_report_path(report_dir: Path, filename: str) -> Optional[Path]:
+    """``report_dir / filename``, or None when that is not a file in ``report_dir``.
+
+    Checked on the resolved path, so a ``..`` or a symlink that leads out of the
+    directory is refused, whatever produced the name.
+    """
+    target = Path(report_dir) / filename
+    try:
+        if target.resolve().parent != Path(report_dir).resolve():
+            return None
+    except (OSError, RuntimeError):
+        return None
+    return target
 
 
 T = TypeVar("T", bound=ReporterPluginConfigBase)
