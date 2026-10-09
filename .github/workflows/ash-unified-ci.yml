@@ -894,11 +894,6 @@ jobs:
           fi
       - name: Install dependencies
         run: uv sync
-      # TEMPORARY (diagnostic): which SBPL forms parse here, and whether this runner
-      # has a pasteboard and a LaunchServices session to reach.
-      - name: Probe SBPL syntax and the session services
-        if: runner.os == 'macOS'
-        run: bash .github/scripts/sandbox-exec-diag.sh probe
       - name: Run the sandbox escape and unit suites
         env:
           ASH_REQUIRE_SANDBOX_BACKENDS: ${{ matrix.require }}
@@ -909,11 +904,52 @@ jobs:
             tests/unit/utils/test_sandbox_choke_point.py \
             --run-integration --no-cov -p no:randomly -n 0 -v \
             --junit-xml=test-results/sandbox.junit.xml
-      - name: Summarize what sandboxed processes looked up and executed
+      # A Mach service or exec path the macOS profile does not allow shows up in the
+      # unified log as a deny line naming it, which is the first thing to look at
+      # when a macOS image update turns this job red.
+      - name: Show what sandbox-exec denied
+        if: failure() && runner.os == 'macOS'
+        run: |
+          sudo log show --last 30m --predicate 'sender == "Sandbox"' --style compact \
+            | grep -E 'deny\(1\) (mach-lookup|process-exec)' | tail -n 200 || true
+      # TEMPORARY (diagnostic, removed before merge): whether the keychain is
+      # readable through /usr/bin/security under the shipped profile, and under the
+      # same profile with com.apple.SecurityServer allowed.
+      - name: Read a keychain item from inside the profile
         if: always() && runner.os == 'macOS'
-        env:
-          DIAG_DIR: ${{ runner.temp }}/sandbox-exec-diag
-        run: bash .github/scripts/sandbox-exec-diag.sh summarize
+        run: |
+          security add-generic-password -a ash-diag -s ash-diag-keychain -w diag-keychain-canary
+          uv run python - <<'EOF'
+          import subprocess
+          import tempfile
+          from pathlib import Path
+
+          from automated_security_helper.utils.sandbox.backends import SandboxExecBackend
+          from automated_security_helper.utils.sandbox.policy import (
+              SandboxRequirements,
+              build_scanner_policy,
+          )
+
+          root = Path(tempfile.mkdtemp())
+          src = root / "src"
+          out = src / "out"
+          out.mkdir(parents=True)
+          policy = build_scanner_policy(
+              "diag", SandboxRequirements(), argv0="/usr/bin/security",
+              source_dir=src, output_dir=out, results_dir=out / "r", scan_target=src,
+              cwd=src, offline=True, network_scanners=None,
+          )
+          profile = SandboxExecBackend().profile(policy, root / "tmp")
+          extra = '(allow mach-lookup (global-name "com.apple.SecurityServer"))'
+          for label, text in (("as shipped", profile), ("SecurityServer allowed", profile + "\n" + extra)):
+              r = subprocess.run(
+                  ["/usr/bin/sandbox-exec", "-p", text, "/usr/bin/security",
+                   "find-generic-password", "-s", "ash-diag-keychain", "-w"],
+                  capture_output=True, text=True, check=False,
+              )
+              print(f"{label}: exit {r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()[-200:]!r}")
+          EOF
+          security delete-generic-password -s ash-diag-keychain
       - name: Collect the suite report
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -924,28 +960,11 @@ jobs:
           if-no-files-found: warn
 
   sandbox-scanner-parity:
-    name: "sandbox scanner parity (${{ matrix.sandbox }}, ${{ matrix.os }}${{ matrix.files && format(', files {0}', matrix.files) || '' }}${{ matrix.extra && format(', {0}', matrix.extra) || '' }})"
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    name: "sandbox scanner parity (bwrap, ubuntu-latest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            sandbox: bwrap
-          # TEMPORARY (diagnostic): the file rules as they are, to compare with the
-          # first measurement, and lifted, to check the Mach and exec rules against
-          # complete scanner runs. "fallback" adds configd always and SecurityServer
-          # with a network, in case the narrower lists break a scanner.
-          - { os: macos-latest, sandbox: sandbox-exec, files: real }
-          - { os: macos-15, sandbox: sandbox-exec, files: real }
-          - { os: macos-14, sandbox: sandbox-exec, files: real }
-          - { os: macos-latest, sandbox: sandbox-exec, files: open }
-          - { os: macos-15, sandbox: sandbox-exec, files: open }
-          - { os: macos-14, sandbox: sandbox-exec, files: open }
-          - { os: macos-14, sandbox: sandbox-exec, files: open, extra: fallback }
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -956,16 +975,11 @@ jobs:
         with:
           python-version: "3.12"
           install-ash: "false"
-      # TEMPORARY (diagnostic): which SBPL forms parse here; exports the report form.
-      - name: Probe SBPL syntax
-        if: runner.os == 'macOS'
-        run: bash .github/scripts/sandbox-exec-diag.sh probe
       - name: Set up Ruby for cfn-nag
         uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: "3.3"
       - name: Install bubblewrap
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q bubblewrap
@@ -978,8 +992,8 @@ jobs:
         run: |
           pip install ".[cdk]"
           ash dependencies install
-      # Every scanner runs twice over one fixture, with --sandbox off and under the
-      # backend, offline and online, and status plus findings must match per scanner.
+      # Every scanner runs twice over one fixture, with --sandbox off and --sandbox
+      # bwrap, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that
       # is MISSING in both runs cannot pass parity by being absent.
       - name: Compare every scanner with and without the sandbox
@@ -988,32 +1002,16 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
           PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
-          SANDBOX: ${{ matrix.sandbox }}
-          DIAG_DIR: ${{ runner.temp }}/sandbox-exec-diag
-          # TEMPORARY (diagnostic): lift the file rules so every scanner runs to the
-          # end and its whole Mach and exec use is reported.
-          ASH_SANDBOX_EXEC_REPORT: ${{ matrix.files == 'open' && 'open-files' || (runner.os == 'macOS' && '1' || '') }}
-          ASH_SANDBOX_EXEC_DIAG_ALWAYS: ${{ matrix.extra == 'fallback' && 'com.apple.SystemConfiguration.configd' || '' }}
-          ASH_SANDBOX_EXEC_DIAG_NETWORK: ${{ matrix.extra == 'fallback' && 'com.apple.SecurityServer' || '' }}
         run: |
-          set -o pipefail
-          mkdir -p "$DIAG_DIR"
-          python -u scripts/verify_sandbox_scanner_parity.py \
-            --sandbox "$SANDBOX" --online --ash ash \
+          python scripts/verify_sandbox_scanner_parity.py \
+            --sandbox bwrap --online --ash ash \
             --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft \
-            --report "$PARITY_REPORT" 2>&1 \
-            | while IFS= read -r line; do printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line"; done \
-            | tee "$DIAG_DIR/parity-stdout.log"
-      - name: Summarize what sandboxed processes looked up and executed
-        if: always() && runner.os == 'macOS'
-        env:
-          DIAG_DIR: ${{ runner.temp }}/sandbox-exec-diag
-        run: bash .github/scripts/sandbox-exec-diag.sh summarize
+            --report "$PARITY_REPORT"
       - name: Collect the parity report and scan output
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sandbox-scanner-parity-${{ matrix.os }}${{ matrix.files && format('-{0}', matrix.files) || '' }}${{ matrix.extra && format('-{0}', matrix.extra) || '' }}
+          name: sandbox-scanner-parity
           path: |
             ${{ runner.temp }}/sandbox-parity.json
             ${{ runner.temp }}/ash-sandbox-parity-*
