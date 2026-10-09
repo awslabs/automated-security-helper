@@ -33,9 +33,19 @@ import shutil
 import subprocess  # nosec B404 - spawn_run below is the sandbox choke point
 import tempfile
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, Generic, List, Optional, TypeVar
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Set,
+    TypeVar,
+)
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -51,14 +61,20 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.config.path_trust import (
+    honored_path,
+    in_scanned_tree,
+    resolved_path,
+)
 from automated_security_helper.utils.config_trust import (
-    inside_scanned_tree,
+    scan_root,
     set_by_operator,
 )
 from automated_security_helper.utils.file_lock import exclusive_lock
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.scope import outside_scanner_sandbox
 from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -119,6 +135,94 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # when offline mode is active. Kept on the instance so concurrent scanners
     # do not race on os.environ.
     extra_env: Annotated[Dict[str, str], Field(default_factory=dict)]
+
+    # The in-tree trivy input files already reported as ignored.
+    _warned_inputs: Set[str] = PrivateAttr(default_factory=set)
+
+    def _ignore_file(self) -> str:
+        """The file trivy reads finding IDs to ignore from (``--ignorefile``)."""
+        return self._trivy_input_file(
+            option="ignore_file",
+            env="TRIVY_IGNOREFILE",
+            default_name=".trivyignore",
+            ash_name="trivyignore-empty",
+            ash_content="",
+        )
+
+    def _secret_config_file(self) -> str:
+        """The file trivy reads secret rules from (``--secret-config``)."""
+        return self._trivy_input_file(
+            option="secret_config_file",
+            env="TRIVY_SECRET_CONFIG",
+            default_name="trivy-secret.yaml",
+            ash_name="trivy-secret-empty.yaml",
+            # An empty file is a decode error in trivy; an empty mapping is not.
+            ash_content="{}\n",
+        )
+
+    def _trivy_input_file(
+        self,
+        *,
+        option: str,
+        env: str,
+        default_name: str,
+        ash_name: str,
+        ash_content: str,
+    ) -> str:
+        """A file to pass trivy for an input it would otherwise read from its cwd.
+
+        Shared by ``trivy`` and ``trivy-repo``; both pass ``--ignorefile`` and
+        ``--secret-config`` from here.
+
+        Without the flag, trivy reads ``default_name`` (``.trivyignore``,
+        ``trivy-secret.yaml``) from its working directory, the source directory,
+        so the scanned repository could remove findings from its own report
+        (measured with trivy 0.75.0). The operator's file, from the option or the
+        environment variable, is used when it is outside the scanned tree
+        (config/path_trust.py); a refused option falls through to the variable.
+        Otherwise trivy gets a file ASH writes into the results directory, which
+        sets nothing.
+        """
+        if self.context is None:
+            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
+        context_config = getattr(self.context, "config", None)
+        source_dir = Path(self.context.source_dir)
+        name = self.config.name if self.config is not None else "trivy"
+        options: Any = self.config.options  # type: ignore[union-attr]
+        for key, value in (
+            (f"scanners.{name}.options.{option}", getattr(options, option)),
+            (env, os.environ.get(env)),
+        ):
+            if not value:
+                continue
+            path = honored_path(
+                value, source_dir=source_dir, key=key, config=context_config
+            )
+            if path is None:
+                continue
+            if not path.is_file():
+                raise ScannerError(
+                    f"{key} is {value!r}, which is not a file (resolved to "
+                    f"{path.as_posix()}). Fix the path or unset it; trivy is not run "
+                    "without it."
+                )
+            return path.as_posix()
+        in_tree = source_dir / default_name
+        if in_tree.is_file() and in_tree.as_posix() not in self._warned_inputs:
+            self._warned_inputs.add(in_tree.as_posix())
+            self._plugin_log(
+                f"Ignoring {in_tree.as_posix()}: it is inside the scanned tree. Set "
+                f"scanners.{name}.options.{option} to a file outside the tree "
+                "to use one.",
+                level=logging.WARNING,
+            )
+        if self.results_dir is None:
+            raise ScannerError(f"{self.__class__.__name__} has no results directory")
+        written = Path(os.path.abspath(self.results_dir)) / ash_name
+        written.parent.mkdir(parents=True, exist_ok=True)
+        with open_for_write(written) as handle:
+            handle.write(ash_content)
+        return written.as_posix()
 
     def _trivy_cache_dir(self) -> Path:
         """trivy's cache directory, as trivy resolves it on Linux.
@@ -280,9 +384,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         source_dir = Path(self.context.source_dir)
-        candidate = Path(value)
-        if not candidate.is_absolute():
-            candidate = source_dir / candidate
+        candidate = resolved_path(value, source_dir)
         name = self.config.name if self.config is not None else "trivy"
         key = f"scanners.{name}.options.{option}"
         if not set_by_operator(self.context.config, key, value):
@@ -290,7 +392,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 "it came from a config file in the scanned tree; set it with "
                 "--config-overrides or a config file outside the tree"
             )
-        elif inside_scanned_tree(candidate, source_dir):
+        elif in_scanned_tree(candidate, scan_root(self.context.config, source_dir)):
             reason = "it is inside the scanned tree"
         else:
             return candidate

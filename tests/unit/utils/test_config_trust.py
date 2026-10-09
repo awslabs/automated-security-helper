@@ -23,7 +23,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.utils.config_trust import (
-    inside_scanned_tree,
+    scan_root,
     set_by_operator,
 )
 
@@ -180,21 +180,14 @@ def test_scanner_names_match_with_either_separator(repo, spelling):
         assert set_by_operator(config, key, Path("/x/rc")) is True
 
 
-def test_inside_scanned_tree_is_the_checkout_and_follows_symlinks(repo, tmp_path):
-    scan_root = repo / "sub"
-    scan_root.mkdir()
-    outside = tmp_path / "outside"
-    outside.write_text("")
-    assert inside_scanned_tree(scan_root / "a" / "b", scan_root) is True
-    # Above the scan root, inside the checkout: still the repository's.
-    assert inside_scanned_tree(repo / "tools" / "x", scan_root) is True
-    assert inside_scanned_tree(outside, scan_root) is False
-    link = scan_root / "link"
-    try:
-        link.symlink_to(outside)
-    except OSError:
-        pytest.skip("symlinks need privileges here")
-    assert inside_scanned_tree(link, scan_root) is False
+def test_scan_root_is_the_recorded_workspace_root_else_the_source_dir(repo, tmp_path):
+    """The root path_trust.in_scanned_tree is given, as honored_path chooses it."""
+    config = AshConfig()
+    assert scan_root(config, repo) == repo
+    workspace = tmp_path / "workspace"
+    config._scanned_root = workspace
+    assert scan_root(config, repo) == workspace
+    assert scan_root(None, repo) == repo
 
 
 def _context_after_initialize(source: Path, config_path=None, overrides=None):

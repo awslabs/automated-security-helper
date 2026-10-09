@@ -146,8 +146,9 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.utils.config_trust import (
-    inside_scanned_tree,
+    scan_root,
     set_by_operator,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
@@ -552,6 +553,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         """
         source_dir = self._source_dir()
         context_config = self.context.config if self.context is not None else None
+        root = scan_root(context_config, source_dir)
         if configured != flag and not set_by_operator(
             context_config, f"scanners.actionlint.options.{flag}", configured
         ):
@@ -562,7 +564,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             )
         if not any(sep and sep in configured for sep in ("/", os.sep, os.altsep)):
             found = find_executable(configured)
-            if found is not None and inside_scanned_tree(found, source_dir):
+            if found is not None and in_scanned_tree(found, root):
                 raise _RefusedIntegration(
                     f"it resolves to {found}, inside the scanned tree"
                 )
@@ -573,7 +575,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 "a relative path resolves inside the scanned tree; use a "
                 "command name or an absolute path outside it"
             )
-        if inside_scanned_tree(candidate, source_dir):
+        if in_scanned_tree(candidate, root):
             raise _RefusedIntegration("it is inside the scanned tree")
         # A file that is not executable counts as absent: actionlint would
         # otherwise drop the integration silently.

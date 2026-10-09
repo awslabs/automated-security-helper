@@ -66,7 +66,10 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tupl
 
 from pydantic import AnyUrl, Field, field_validator
 
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -91,15 +94,13 @@ from automated_security_helper.utils.cfn_template_discovery import (
     discover_templates,
     display_path,
 )
+from automated_security_helper.config.path_trust import in_scanned_tree, resolved_path
 from automated_security_helper.utils.config_trust import (
-    inside_scanned_tree,
+    scan_root,
     set_by_operator,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.output_excerpt import head_and_tail
-from automated_security_helper.utils.pre_installed_tool import (
-    validate_version_constraint,
-)
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
@@ -215,6 +216,7 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
     # and output may change.
     tool_version: Annotated[
         str | None,
+        tool_version_constraint("scanners.cfn-lint.options.tool_version"),
         Field(
             description=(
                 "Version constraint for the cfn-lint installation, in pip requirement "
@@ -245,12 +247,6 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                     f"{item!r} is not a cfn-lint rule id or prefix (letters and digits)"
                 )
         return value
-
-    @field_validator("tool_version")
-    @classmethod
-    def _valid_tool_version(cls, value: Optional[str]) -> Optional[str]:
-        # Appended to the package name for uv; see validate_version_constraint.
-        return validate_version_constraint(value)
 
 
 class CfnLintScannerConfig(ScannerPluginConfigBase):
@@ -388,9 +384,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             ScannerError: the operator named a file that does not exist.
         """
         source_dir = self._source_dir()
-        candidate = Path(configured)
-        if not candidate.is_absolute():
-            candidate = source_dir / candidate
+        candidate = resolved_path(configured, source_dir)
         context_config = self.context.config if self.context is not None else None
         if not set_by_operator(
             context_config, "scanners.cfn-lint.options.config_file", configured
@@ -399,7 +393,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 "it came from a config file in the scanned tree; set it with "
                 "--config-overrides or a config file outside the tree"
             )
-        elif inside_scanned_tree(candidate, source_dir):
+        elif in_scanned_tree(candidate, scan_root(context_config, source_dir)):
             reason = "it is inside the scanned tree"
         else:
             if not candidate.is_file():

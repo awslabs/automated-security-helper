@@ -37,9 +37,9 @@ scanners:
       # Look for licenses in source headers too. Only used with `license`.
       license_full: false
       disable_telemetry: true
-      # A trivy.yaml, a .trivyignore and a trivy-secret.yaml outside the scanned
-      # tree, set by the operator. Unset, the ones in the scanned repository are
-      # NOT read; see below.
+      # A trivy.yaml (from the operator), a .trivyignore and a trivy-secret.yaml,
+      # each outside the scanned tree. Unset, the ones in the scanned repository
+      # are NOT read; see below.
       config_file: null
       ignore_file: null
       secret_config_file: null
@@ -56,15 +56,18 @@ scanners:
 
 trivy reads `trivy.yaml`, `.trivyignore` and, for the `secret` scanner, `trivy-secret.yaml` from its working directory, which is the repository being scanned. Any of them can remove findings without the report saying so: a `severity: [CRITICAL]` or `scan.skip-files` entry in `trivy.yaml` removes every lower-rated or skipped finding, an `ignore-policy` it names (a Rego file) drops whatever the policy matches, each `.trivyignore` line removes an advisory, and `trivy-secret.yaml` can disable secret rules. A `trivy.yaml` can also point trivy at a directory of WASM modules (`module.dir`) and enable them, which runs them during the scan. So the builtin scanner passes `--config`, `--ignorefile` and `--secret-config` pointing at files of its own that set nothing, and a repository's own files are not read. trivy reads no other file from a default location: `--ignore-policy` has no default.
 
-To use your own, name them as the operator, through `--config-overrides` or an ASH config file outside the scanned tree, for files outside the scanned tree:
+To use your own:
+
+- `config_file`: set it as the operator, through `--config-overrides` or an ASH config file outside the scanned tree, for a file outside the scanned tree. Set by an ASH config inside the tree, or naming a file inside it, it is ignored with a warning and trivy gets ASH's empty config.
+- `ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`: a file outside the scanned tree, from any of them. One inside the tree is ignored with a warning, and trivy gets ASH's empty one. trivy-repo takes these two the same way.
 
 ```bash
 ash scan --config-overrides 'scanners.trivy.options.ignore_file=/etc/ash/trivyignore'
 ```
 
-Each of `config_file`, `ignore_file` and `secret_config_file` set by an ASH config inside the scanned tree, or naming a file inside it, is ignored with a warning, and trivy gets ASH's empty one. A configured file that does not exist fails the scan rather than running without it.
+A configured file that does not exist fails the scan rather than running without it.
 
-To accept a finding, prefer an ASH suppression, which is recorded in the reports and counted. The community `trivy-repo` plugin passes its own config file, modules directory and secret config the same way; see its `config_file`, `module_dir` and `secret_config_file` options.
+To accept a finding, prefer an ASH suppression, which is recorded in the reports and counted. The community `trivy-repo` plugin passes its own config file, modules directory, ignore file and secret config the same way; see its `config_file`, `module_dir`, `ignore_file` and `secret_config_file` options.
 
 ## Severity
 

@@ -233,8 +233,8 @@ def test_default_argv(tmp_path):
         "--timeout=1800s",
         "--skip-dirs=.ash/ash_output",
         f"--config={(scanner.results_dir / 'trivy-config.yaml').resolve().as_posix()}",
-        f"--ignorefile={(scanner.results_dir / 'trivyignore.txt').resolve().as_posix()}",
-        f"--secret-config={(scanner.results_dir / 'trivy-secret.yaml').resolve().as_posix()}",
+        f"--ignorefile={(scanner.results_dir / 'trivyignore-empty').resolve().as_posix()}",
+        f"--secret-config={(scanner.results_dir / 'trivy-secret-empty.yaml').resolve().as_posix()}",
         source.as_posix(),
         "--output",
         results.as_posix(),
@@ -290,27 +290,57 @@ def test_an_operator_chosen_trivy_file_is_passed(tmp_path, option, flag, name):
     assert f"{flag}={chosen.resolve().as_posix()}" in argv
 
 
-@pytest.mark.parametrize(
-    "option, flag, name",
-    [
-        ("ignore_file", "--ignorefile", ".trivyignore"),
-        ("secret_config_file", "--secret-config", "trivy-secret.yaml"),
-    ],
-)
-@pytest.mark.parametrize("who", ["tree", "operator-inside-the-tree"])
-def test_ignore_and_secret_files_need_the_operator_and_a_path_outside_the_tree(
-    tmp_path, caplog, option, flag, name, who
+_INPUT_FILES = [
+    ("ignore_file", "--ignorefile", ".trivyignore", "TRIVY_IGNOREFILE"),
+    (
+        "secret_config_file",
+        "--secret-config",
+        "trivy-secret.yaml",
+        "TRIVY_SECRET_CONFIG",
+    ),
+]
+
+
+@pytest.mark.parametrize("option, flag, name, env", _INPUT_FILES)
+@pytest.mark.parametrize("operator", [False, True])
+def test_an_ignore_or_secret_file_inside_the_tree_is_never_passed(
+    tmp_path, caplog, monkeypatch, option, flag, name, env, operator
 ):
-    """Either can drop findings that then appear neither in the results nor as
-    suppressed, so the tree cannot choose one, and nobody can point at one in it."""
+    """Either can drop findings, so one inside the scanned tree is refused whoever
+    names it, as trivy-repo refuses it (TrivyScannerBase._trivy_input_file)."""
+    from automated_security_helper.config.path_trust import (
+        reset_path_refusal_warnings,
+    )
+
+    reset_path_refusal_warnings()
+    monkeypatch.delenv(env, raising=False)
     probe = _scanner(tmp_path)
     (probe.context.source_dir / name).write_text("", encoding="utf-8")
-    scanner = _scanner(tmp_path, operator=who != "tree", **{option: name})
+    scanner = _scanner(tmp_path, operator=operator, **{option: name})
     with caplog.at_level("WARNING"):
         argv = _argv(scanner, scanner.context.source_dir)
     (value,) = [a[len(flag) + 1 :] for a in argv if a.startswith(f"{flag}=")]
     assert Path(value).is_relative_to(scanner.results_dir.resolve())
     assert f"scanners.trivy.options.{option}" in caplog.text
+
+
+@pytest.mark.parametrize("option, flag, name, env", _INPUT_FILES)
+def test_an_ignore_or_secret_file_outside_the_tree_is_passed_from_option_or_env(
+    tmp_path, monkeypatch, option, flag, name, env
+):
+    chosen = tmp_path / "outside" / name
+    chosen.parent.mkdir()
+    chosen.write_text("", encoding="utf-8")
+    monkeypatch.delenv(env, raising=False)
+    from_option = _scanner(tmp_path, **{option: str(chosen)})
+    assert f"{flag}={chosen.resolve().as_posix()}" in _argv(
+        from_option, from_option.context.source_dir
+    )
+    monkeypatch.setenv(env, str(chosen))
+    from_env = _scanner(tmp_path)
+    assert f"{flag}={chosen.resolve().as_posix()}" in _argv(
+        from_env, from_env.context.source_dir
+    )
 
 
 _MODULE_CONFIG = "module:\n  dir: ./trivy-modules\n  enable-modules: [planted]\n"

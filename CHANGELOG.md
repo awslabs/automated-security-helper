@@ -182,10 +182,11 @@
   - trivy runs with empty config, ignore and secret-config files, not
     `trivy.yaml`, `.trivyignore` or `trivy-secret.yaml`.
 
-  Each of those scanners' `config_file` options, gitleaks' `baseline_path`, and
-  trivy's `ignore_file` and `secret_config_file`, set by an ASH config inside the
-  scanned tree, are ignored with a warning; trivy's also need a path outside the
-  tree. Inline comments (`gitleaks:allow`, `# zizmor: ignore[...]`) still apply.
+  Each of those scanners' `config_file` options and gitleaks' `baseline_path`, set
+  by an ASH config inside the scanned tree, are ignored with a warning. trivy's
+  `ignore_file` and `secret_config_file` (or `TRIVY_IGNOREFILE` and
+  `TRIVY_SECRET_CONFIG`) are honored for a file outside the scanned tree, as for
+  trivy-repo. Inline comments (`gitleaks:allow`, `# zizmor: ignore[...]`) still apply.
 - **trivy-repo names its own config file and modules directory.** It always passes
   `--config` and `--module-dir`: by default an empty config file and an empty
   directory in its results directory, so trivy does not load a `trivy.yaml` from the
