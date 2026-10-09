@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""No test may walk the repository root with ``rglob``.
+"""No walk the test run performs may enter a per-run directory.
 
 Why this file exists
 --------------------
@@ -51,27 +51,37 @@ failure ``test_prose_about_the_hazard_is_not_counted_as_the_hazard`` documents i
 ``test_project_isolation.py``. Matching ``ast.Call`` nodes makes prose invisible
 by construction, so the explanation can stay.
 
-What this proves, and what it does not
---------------------------------------
-It finds ``REPO_ROOT.glob(...)`` and ``REPO_ROOT.rglob(...)`` by AST, under the
-names this repository actually uses for its root. A walker that binds the root to
-some other name and calls ``rglob`` on it would pass this and still race; the
-mitigation is that ``iter_repo_files`` is now the obvious thing to reach for, not
-that this sweep is exhaustive.
+Two walks this guard could not see
+----------------------------------
+The first version matched ``REPO_ROOT.glob`` and ``REPO_ROOT.rglob`` by name, in
+tests/ only. Two walks raced past it: one bound the root to ``REPO``, and two lived
+in scripts the tests run on the real checkout (``collect_md_files`` in
+scripts/verify_docs_freshness.py walked ``REPO_ROOT.rglob("*.md")``, and
+``find_orphans`` in .github/scripts/check-snapshot-trailers.py walked
+``(root / "tests").rglob`` with the root arriving as a parameter). So the sweep now
+lives in ``tests.utils.walk_guard``, which evaluates what each walk's receiver is,
+follows the scripts the tests load or run, and fails closed on a receiver it cannot
+resolve. Its module docstring says exactly what it follows.
 
-It deliberately does not forbid ``rglob`` on a subdirectory. Walking
-``automated_security_helper/`` is safe -- the scratch tree is not under it, so
-there is nothing to race.
+A receiver that only exists at run time (a path a call returns, an awaited result)
+cannot be resolved, so the walk is flagged. Each such walk that is in fact safe is
+named in ``_EXEMPT`` below by file, function and receiver, with the reason, and
+``test_every_exemption_still_names_a_flagged_walk`` fails when an entry no longer
+matches anything, so the list cannot rot into blanket permission.
+
+It deliberately does not flag a walk of a subtree no per-run directory is under.
+Walking ``automated_security_helper/`` or ``.github/`` is safe; there is nothing to
+race.
 """
 
 from __future__ import annotations
 
-import ast
 import importlib.util
+import textwrap
 import json
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import ModuleType
 
 import pytest
@@ -82,81 +92,354 @@ from tests.utils.helpers import (
     is_under_test_scratch,
     iter_repo_files,
 )
+from tests.utils.walk_guard import (
+    PER_RUN_DIRS,
+    Evaluator,
+    InRepo,
+    Private,
+    Source,
+    Sweep,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_ROOT = REPO_ROOT / "tests"
 
-#: Names this repository binds the repository root to.
-_ROOT_NAMES = frozenset({"REPO_ROOT", "repo_root"})
-_WALK_METHODS = frozenset({"glob", "rglob"})
-
-#: (file name, enclosing function) pairs exempted, each with a reason. Keyed by
-#: function rather than by file so converting one walker in a file does not
-#: silently exempt the next one added to it.
-_ALLOWED = {
+#: Walks the guard cannot resolve that are safe, by (file, function, receiver), with
+#: the reason. Every entry must still name a flagged walk; see
+#: test_every_exemption_still_names_a_flagged_walk.
+_EXEMPT = {
+    ("tests/utils/helpers.py", "iter_repo_files", "root"): (
+        "The sanctioned walker: it removes the scratch tree from dirnames before "
+        "os.walk descends. TestIterRepoFilesPrunesTheScratchTree covers it."
+    ),
+    (".github/scripts/check-snapshot-trailers.py", "_snapshot_dirs", "root / entry"): (
+        "Walks only directories git reports as untracked and not ignored, pruning "
+        "every directory git reports as ignored. "
+        "TestScriptWalkersStayOutOfTheScratchTree removes a scratch directory at the "
+        "moment the walk lists it and shows it is never entered."
+    ),
+    (".github/scripts/check-snapshot-trailers.py", "find_orphans", "entry"): (
+        "One per-module directory inside a __snapshots__ directory that "
+        "_snapshot_dirs returned, so never an ignored one."
+    ),
     (
-        "test_agent_plugin_ash_version.py",
+        "scripts/verify_multi_project_attribution.py",
+        "find_scanner_error_logs",
+        "scanner_dir",
+    ): (
+        "A fixed-depth pattern with no ** of its own; its one substitution is a "
+        "scanner name taken from the scan's results, and it is applied to the "
+        "scan's own output directory."
+    ),
+    ("tests/snapshot/mcp/test_snapshot_mcp_session_tools.py", "_files_under", "root"): (
+        "The source an MCP session extracted, under the workspace root that the "
+        "isolated_mcp_state fixture points at tmp_path."
+    ),
+    (
+        "tests/unit/converters/test_converter_scanned_tree.py",
+        "test_a_regular_archive_beside_a_symlinked_one_still_extracts",
+        "extracted",
+    ): (
+        "What the converter extracted, under the work directory of "
+        "test_plugin_context, which is inside this test's ash_temp_path."
+    ),
+    (
+        "tests/unit/test_agent_plugin_ash_version.py",
         "test_every_version_files_path_exists",
+        "REPO_ROOT",
     ): (
         "Globs commitizen's version_files entries, which are literal paths with "
         "no wildcard, so the glob resolves one path and never descends. "
         "test_the_version_files_exemption_is_still_sound asserts that."
     ),
+    (
+        "tests/unit/utils/test_cdk_nag_unevaluated_rule.py",
+        "test_the_prefix_appears_verbatim_in_the_installed_distribution",
+        "root",
+    ): (
+        "The installed cdk-nag distribution, found through importlib.util.find_spec; "
+        "no test creates or removes anything in it."
+    ),
 }
 
 
-def _root_walk_calls(source: str) -> list[tuple[int, str]]:
-    """``(lineno, enclosing function)`` for every root-walking call in ``source``."""
-    tree = ast.parse(source)
-    enclosing: dict[int, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for child in ast.walk(node):
-                if hasattr(child, "lineno"):
-                    enclosing.setdefault(child.lineno, node.name)
-
-    found: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if not isinstance(func, ast.Attribute) or func.attr not in _WALK_METHODS:
-            continue
-        if not isinstance(func.value, ast.Name) or func.value.id not in _ROOT_NAMES:
-            continue
-        found.append((node.lineno, enclosing.get(node.lineno, "<module>")))
-    return found
+@pytest.fixture(scope="module")
+def sweep() -> Sweep:
+    return Sweep.of_checkout()
 
 
-def _test_sources():
-    for path in iter_repo_files(TESTS_ROOT, skip_dirs=frozenset({"__pycache__"})):
-        if path.suffix == ".py":
-            yield path
+@pytest.fixture(scope="module")
+def offenders(sweep) -> dict:
+    return sweep.offenders()
 
 
-class TestNoTestWalksTheRepoRootWithRglob:
-    def test_the_sweep_finds_test_files_at_all(self):
-        """Anti-vacuity: an empty walk would make the assertion below pass."""
-        sources = list(_test_sources())
-        assert len(sources) > 100, (
-            f"the sweep found only {len(sources)} test files, so it is not "
-            "walking the tests tree and a clean result means nothing"
+class TestNoWalkTheTestsRunEntersAPerRunDirectory:
+    def test_the_sweep_reads_the_tests_and_the_scripts_they_reach(self, sweep):
+        """Anti-vacuity: an empty sweep would make every assertion below pass."""
+        names = {source.rel.name for source in sweep.tests}
+        assert len(sweep.tests) > 500, f"only {len(sweep.tests)} test modules read"
+        assert {"test_project_isolation.py", "helpers.py", "conftest.py"} <= names
+        reached = {rel.as_posix(): reach.called for rel, reach in sweep.reached.items()}
+        assert "collect_md_files" in reached["scripts/verify_docs_freshness.py"]
+        assert "find_orphans" in reached[".github/scripts/check-snapshot-trailers.py"]
+        assert sum(1 for _ in sweep.walks()) > 50, "the sweep found almost no walks"
+
+    def test_no_walk_the_tests_run_can_enter_a_per_run_directory(self, offenders):
+        unexempted = {
+            key: lines for key, lines in offenders.items() if key not in _EXEMPT
+        }
+        assert unexempted == {}, (
+            "these walks can enter a per-run directory (tests/pytest-temp, which "
+            "other xdist workers create and remove, .ash/ash_output, .venv, "
+            "node_modules), or walk something the guard cannot resolve. List files "
+            "with git ls-files, or walk with tests.utils.helpers.iter_repo_files, "
+            "which never enters the scratch tree. A receiver that only exists at run "
+            "time and is safe goes in _EXEMPT with the reason:\n"
+            + "\n".join(line for lines in unexempted.values() for line in lines)
         )
-        names = {path.name for path in sources}
-        assert "test_project_isolation.py" in names
-        assert "test_agent_plugin_ash_version.py" in names
 
-    def test_the_matcher_recognizes_the_pattern_it_forbids(self):
-        """Anti-vacuity: prove the detector fires before trusting that it found none."""
-        assert _root_walk_calls("def f():\n    return REPO_ROOT.rglob('*')\n") == [
-            (2, "f")
-        ]
-        assert _root_walk_calls("def g():\n    return list(repo_root.glob(n))\n") == [
-            (2, "g")
-        ]
-        # A subdirectory walk is safe and must not be flagged.
-        assert _root_walk_calls("def h():\n    return PKG_ROOT.rglob('*.py')\n") == []
-        assert _root_walk_calls("def i():\n    return root.rglob('*.py')\n") == []
+    def test_every_exemption_still_names_a_flagged_walk(self, offenders):
+        """An exemption that matches nothing is either stale or misspelled."""
+        stale = sorted(set(_EXEMPT) - set(offenders))
+        assert stale == [], f"remove these from _EXEMPT: {stale}"
+
+    def test_the_version_files_exemption_is_still_sound(self):
+        """The one exemption holds only while no entry carries a wildcard.
+
+        ``REPO_ROOT.glob("a/b.md")`` resolves one path. ``REPO_ROOT.glob("**/b.md")``
+        walks the whole tree and would race exactly like the rest. So the exemption
+        is conditional, and this is the condition.
+
+        Read through the package's own ``_load_toml`` rather than ``tomllib``.
+        ``tomllib`` is standard library only from 3.11 while ``requires-python``
+        floors at 3.10, and a module-level ``import tomllib`` took out this whole
+        file -- and therefore the guard itself -- on all three 3.10 legs.
+        """
+        settings = _load_toml(REPO_ROOT / "pyproject.toml")["tool"]["commitizen"]
+
+        entries = settings["version_files"]
+        assert entries, "version_files is empty, so the exemption guards nothing"
+        wildcarded = [entry for entry in entries if "*" in entry or "?" in entry]
+        assert wildcarded == [], (
+            "a version_files entry now carries a wildcard, so "
+            "test_every_version_files_path_exists globs recursively and races the "
+            "scratch tree. Either drop the wildcard or convert that test to "
+            "iter_repo_files and remove its exemption here: " + repr(wildcarded)
+        )
+
+
+def _source(rel: str, text: str) -> Source:
+    return Source(PurePosixPath(rel), textwrap.dedent(text))
+
+
+def _values(expression: str, bindings: str = "", rel: str = "tests/unit/test_x.py"):
+    """What ``expression`` evaluates to after ``bindings``, in a synthetic module."""
+    source = _source(rel, textwrap.dedent(bindings) + f"\n_PROBE = {expression}\n")
+    return Evaluator([source]).lookup("_PROBE", source, None)
+
+
+_PER_RUN = tuple(PurePosixPath(d) for d in PER_RUN_DIRS)
+
+
+def _flagged(*sources: Source, scripts: tuple = ()) -> dict:
+    """``(function, receiver)`` -> reasons, for a synthetic tree."""
+    found = Sweep(sources, scripts).offenders(_PER_RUN)
+    return {(fn, receiver): lines for (_, fn, receiver), lines in found.items()}
+
+
+class TestTheEvaluator:
+    """What a receiver can be, read from the AST; nothing is imported or run."""
+
+    def test_path_arithmetic_on_the_file_resolves_to_the_checkout(self):
+        assert _values("Path(__file__).resolve().parents[2]") == {
+            InRepo(PurePosixPath("."))
+        }
+        assert _values("Path(__file__).parent.parent") == {
+            InRepo(PurePosixPath("tests"))
+        }
+        assert _values(
+            "ROOT / 'tests' / 'unit'", "ROOT = Path(__file__).parents[2]"
+        ) == {InRepo(PurePosixPath("tests/unit"))}
+        assert _values("Path(f'{ROOT}/docs')", "ROOT = Path(__file__).parents[2]") == {
+            InRepo(PurePosixPath("docs"))
+        }
+
+    def test_private_directories_are_recognized(self):
+        source = """
+            def f(tmp_path, tmp_path_factory, ash_temp_path):
+                a = tmp_path / "x"
+                b = tmp_path_factory.mktemp("y")
+                c = Path(f"{ash_temp_path}/z")
+                d = Path.home() / ".cache"
+                return a, b, c, d
+        """
+        module = _source("tests/unit/test_x.py", source)
+        evaluator = Evaluator([module])
+        func = module.functions["f"][0]
+        for name in "abcd":
+            values = evaluator.lookup(name, module, func)
+            assert values and all(isinstance(v, Private) for v in values), (
+                name,
+                values,
+            )
+
+    def test_loops_tuples_dicts_and_constructor_keywords_are_followed(self):
+        bindings = """
+            ROOT = Path(__file__).parents[2]
+            DIRS = (ROOT / ".github", ROOT / "scripts")
+            BY_NAME = {"a": ROOT / "docs"}
+            context = PluginContext(output_dir=ROOT / "out")
+        """
+        assert _values(
+            "LAST", textwrap.dedent(bindings) + "for d in DIRS:\n    LAST = d\n"
+        ) == {
+            InRepo(PurePosixPath(".github")),
+            InRepo(PurePosixPath("scripts")),
+        }
+        assert _values("BY_NAME['a']", bindings) == {InRepo(PurePosixPath("docs"))}
+        assert _values("context.output_dir", bindings) == {InRepo(PurePosixPath("out"))}
+
+    def test_the_working_directory_is_the_checkout(self):
+        """pytest runs from the repository root, so a walk of the cwd walks it."""
+        root = {InRepo(PurePosixPath("."))}
+        assert _values("Path.cwd()") == root
+        assert _values("os.getcwd()", "import os") == root
+        assert _values("Path('tests')") == {InRepo(PurePosixPath("tests"))}
+
+    def test_anything_else_is_unknown_and_nothing_is_executed(self):
+        for expression in (
+            "__import__('subprocess').run(['false'])",
+            "open('/etc/passwd').read()",
+            "Path(__file__).with_name('x')",
+            "UNBOUND / 'tests'",
+            "Path(__file__).parents[UNBOUND]",
+        ):
+            values = _values(expression)
+            assert values and not any(
+                isinstance(v, (InRepo, Private)) for v in values
+            ), (
+                expression,
+                values,
+            )
+
+
+class TestTheDetector:
+    """Synthetic trees: what is flagged, and what is not."""
+
+    def test_walks_of_a_tree_holding_the_scratch_directory_are_flagged(self):
+        test = _source(
+            "tests/unit/test_x.py",
+            """
+            import ast, os, shutil
+            from pathlib import Path
+            REPO = Path(__file__).resolve().parents[2]
+            TESTS = REPO / "tests"
+            PKG = REPO / "automated_security_helper"
+
+            def a(): return REPO.rglob("*.yml")
+            def b(): return TESTS.rglob("*.py")
+            def c(): return list(os.walk(REPO))
+            def d(dst): shutil.copytree(REPO, dst)
+            def e(): return REPO.glob("**/x.yml")
+            def f(): return PKG.rglob("*.py")
+            def g(): return REPO.glob("*.yml")
+            def h(): return REPO.glob(".github/**/*.yml")
+            def i(tmp_path): return tmp_path.rglob("*")
+            def j(ash_temp_path): return ash_temp_path.rglob("*")
+            def k(tree): return ast.walk(tree)
+            def m(where): return where.rglob("*")
+            def n(): return _helper(REPO)
+            def o(tmp_path): return _helper(tmp_path)
+            def _helper(root): return list(root.rglob("*"))
+            """,
+        )
+        flagged = _flagged(test)
+        assert set(flagged) == {
+            ("a", "REPO"),
+            ("b", "TESTS"),
+            ("c", "REPO"),
+            ("d", "REPO"),
+            ("e", "REPO"),
+            ("m", "where"),
+            ("_helper", "root"),
+        }, flagged
+        assert "holds tests/pytest-temp/" in flagged[("b", "TESTS")][0]
+        assert "cannot be resolved" in flagged[("m", "where")][0]
+
+    def test_a_script_walk_is_flagged_only_when_a_test_runs_it_on_the_checkout(self):
+        """The two shapes the first guard missed, in scripts the tests load."""
+        docs = _source(
+            "scripts/docs_gate.py",
+            """
+            from pathlib import Path
+            REPO_ROOT = Path(__file__).resolve().parent.parent
+            def collect_md_files():
+                return sorted(REPO_ROOT.rglob("*.md"))
+            def never_called():
+                return sorted(REPO_ROOT.rglob("*.txt"))
+            """,
+        )
+        orphans = _source(
+            ".github/scripts/orphans.py",
+            """
+            def find_orphans(root):
+                return sorted((root / "tests").rglob("__snapshots__"))
+            """,
+        )
+        on_checkout = _source(
+            "tests/unit/test_on_checkout.py",
+            """
+            import importlib.util
+            from pathlib import Path
+            REPO_ROOT = Path(__file__).resolve().parents[2]
+
+            def gate():
+                spec = importlib.util.spec_from_file_location(
+                    "g", REPO_ROOT / "scripts" / "docs_gate.py"
+                )
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module
+
+            def trailers():
+                spec = importlib.util.spec_from_file_location(
+                    "t", REPO_ROOT / ".github/scripts/orphans.py"
+                )
+                return importlib.util.module_from_spec(spec)
+
+            def test_docs(gate):
+                assert gate.collect_md_files()
+
+            def test_orphans(trailers):
+                assert trailers.find_orphans(REPO_ROOT) == []
+            """,
+        )
+        flagged = _flagged(on_checkout, scripts=(docs, orphans))
+        assert set(flagged) == {
+            ("collect_md_files", "REPO_ROOT"),
+            ("find_orphans", "root / 'tests'"),
+        }, flagged
+
+        on_tmp_only = _source(
+            "tests/unit/test_on_tmp.py",
+            textwrap.dedent(
+                """
+                import importlib.util
+                from pathlib import Path
+                REPO_ROOT = Path(__file__).resolve().parents[2]
+
+                def trailers():
+                    spec = importlib.util.spec_from_file_location(
+                        "t", REPO_ROOT / ".github/scripts/orphans.py"
+                    )
+                    return importlib.util.module_from_spec(spec)
+
+                def test_orphans(trailers, tmp_path):
+                    assert trailers.find_orphans(tmp_path) == []
+                """
+            ),
+        )
+        assert _flagged(on_tmp_only, scripts=(docs, orphans)) == {}
 
     def test_prose_about_the_hazard_is_not_counted_as_the_hazard(self):
         """``helpers.py`` quotes the traceback; an AST check must not see it.
@@ -170,54 +453,8 @@ class TestNoTestWalksTheRepoRootWithRglob:
             "helpers.py no longer quotes the traceback, so this test is checking "
             "nothing about how the detector treats prose"
         )
-        assert _root_walk_calls(helpers) == []
-
-    def test_no_test_walks_the_repo_root(self):
-        offenders: dict[str, str] = {}
-        for path in _test_sources():
-            for lineno, function in _root_walk_calls(path.read_text(encoding="utf-8")):
-                if (path.name, function) in _ALLOWED:
-                    continue
-                offenders[f"{path.relative_to(REPO_ROOT)}:{lineno}"] = function
-
-        assert offenders == {}, (
-            "these walk the repository root with glob/rglob, which raises "
-            "FileNotFoundError from inside its own descent when another xdist "
-            "worker's ash_temp_path teardown removes a directory mid-walk. Use "
-            "tests.utils.helpers.iter_repo_files, which prunes the scratch tree "
-            "during traversal so the descent never happens: " + repr(offenders)
-        )
-
-    def test_the_version_files_exemption_is_still_sound(self):
-        """The one exemption holds only while no entry carries a wildcard.
-
-        ``REPO_ROOT.glob("a/b.md")`` resolves one path. ``REPO_ROOT.glob("**/b.md")``
-        walks the whole tree and would race exactly like the rest. So the exemption
-        is conditional, and this is the condition.
-
-        Read through the package's own ``_load_toml`` rather than ``tomllib``.
-        ``tomllib`` is standard library only from 3.11 while ``requires-python``
-        floors at 3.10, and a module-level ``import tomllib`` took out this whole
-        file -- and therefore the guard itself -- on all three 3.10 legs.
-
-        Skipping below 3.11 was the first fix and it was wrong. This file *is* the
-        guard: a guard that skips on 3.10 does not protect 3.10, and a skipped
-        guard exits 0, which is the failure mode this entire change exists to
-        close. ``_load_toml`` already solves it properly -- ``tomllib`` on 3.11+,
-        falling back to the ``toml`` package, which is a declared runtime
-        dependency -- so nothing needs to be skipped or added.
-        """
-        settings = _load_toml(REPO_ROOT / "pyproject.toml")["tool"]["commitizen"]
-
-        entries = settings["version_files"]
-        assert entries, "version_files is empty, so the exemption guards nothing"
-        wildcarded = [entry for entry in entries if "*" in entry or "?" in entry]
-        assert wildcarded == [], (
-            "a version_files entry now carries a wildcard, so "
-            "test_every_version_files_path_exists globs recursively and races the "
-            "scratch tree. Either drop the wildcard or convert that test to "
-            "iter_repo_files and remove its exemption here: " + repr(wildcarded)
-        )
+        flagged = _flagged(_source("tests/utils/helpers.py", helpers))
+        assert set(flagged) == {("iter_repo_files", "root")}, flagged
 
 
 class TestIterRepoFilesPrunesTheScratchTree:
@@ -270,27 +507,6 @@ class TestIterRepoFilesPrunesTheScratchTree:
     def test_the_scratch_root_is_inside_the_repository(self):
         """If it were not, pruning it would be a no-op and this is all theatre."""
         assert ASH_TEST_TEMP_ROOT.resolve().is_relative_to(REPO_ROOT.resolve())
-
-
-class TestTheGuardWouldCatchANewOffender:
-    """Prove the exemption list is narrow rather than the detector broken.
-
-    ``test_no_test_walks_the_repo_root`` passes partly because one function is
-    exempted. If the detector were broken it would pass for the wrong reason and
-    look identical, so assert that the same detector does find the exempted call.
-    """
-
-    def test_the_detector_finds_the_exempted_call(self):
-        source = (TESTS_ROOT / "unit" / "test_agent_plugin_ash_version.py").read_text(
-            encoding="utf-8"
-        )
-        functions = {function for _, function in _root_walk_calls(source)}
-
-        assert "test_every_version_files_path_exists" in functions, (
-            "the detector no longer finds the one call it is supposed to be "
-            "exempting, so either that test was converted -- in which case drop "
-            "the entry from _ALLOWED -- or the detector is blind"
-        )
 
 
 #: Walkers outside tests/ that tests run against the real checkout. The AST sweep
