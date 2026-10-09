@@ -994,6 +994,11 @@ jobs:
           sudo log show --last 60m --predicate 'sender == "Sandbox"' --style compact \
             | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
             | sed -E 's/^.*Sandbox: //; s/\([0-9]+\) / /' | sort | uniq -c | sort -rn | head -n 150 || true
+          for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/ash.log; do
+            echo "::group::$log (errors and warnings)"
+            grep -E "ERROR|WARNING|MISSING" "$log" | cut -c1-400 | head -n 80
+            echo "::endgroup::"
+          done
           for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/scanners/*/*/*stderr*; do
             [ -s "$log" ] || continue
             echo "::group::$log"
