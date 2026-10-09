@@ -221,6 +221,26 @@ def test_a_clean_tree_exits_zero_with_no_findings(tmp_path, path_with_gitleaks):
     assert _findings(report) == set()
 
 
+def test_a_symlink_out_of_the_tree_is_not_followed(tmp_path, path_with_gitleaks):
+    """gitleaks walks the target itself and, without --follow-symlinks (which ASH
+    never passes), reads no file a symlink names; measured with 8.30.1."""
+    source = tmp_path / "src"
+    source.mkdir()
+    shutil.copy(TEMPLATE / "app" / "clean.py", source / "clean.py")
+    secrets = _copy_fixture(tmp_path / "secrets")
+    try:
+        (source / "linked-settings.py").symlink_to(secrets / "app" / "settings.py")
+        (source / "linked-dir").symlink_to(secrets, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+    # The control: the same files scanned in place are found.
+    _, direct = _scan_direct(secrets, tmp_path / "out-direct")
+    assert _findings(direct)
+    scanner, report = _scan_direct(source, tmp_path / "out")
+    assert "--follow-symlinks" not in scanner._build_arguments(source, tmp_path / "x")
+    assert _findings(report) == set()
+
+
 def test_the_trees_own_gitleaks_config_and_ignore_file_hide_nothing(
     tmp_path, path_with_gitleaks
 ):

@@ -169,6 +169,8 @@ def test_argv_for_the_source_target(tmp_path):
     )
     # Source-relative paths: "." from the source directory, after "--".
     assert args[-2:] == ["--", "."]
+    # gitleaks then reads no file a symlink in the tree names.
+    assert "--follow-symlinks" not in args
 
 
 def test_argv_for_the_converted_target_is_absolute(tmp_path):

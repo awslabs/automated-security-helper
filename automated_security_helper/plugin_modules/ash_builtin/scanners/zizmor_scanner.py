@@ -17,7 +17,8 @@ file, and only those:
 The files come from ASH's scan set, so ``.gitignore``, ``.ashignore`` and the
 global ``ignore_paths`` exclusions apply, and are passed to zizmor explicitly. A
 directory input would make zizmor walk the tree itself and skip ASH's ignore
-rules. A target holding neither kind of file completes with zero findings and
+rules. zizmor reads a symlinked input where it points, so a file whose real path
+is outside the real scan root is skipped with a warning, as actionlint's are. A target holding neither kind of file completes with zero findings and
 never starts zizmor.
 
 Builtin, enabled by default
@@ -26,7 +27,10 @@ Builtin, enabled by default
 
 Network and credentials
 -----------------------
-Always ``--offline`` unless ``options.online_audits`` is true. zizmor reads a
+Always ``--offline`` unless the operator set ``options.online_audits`` to true
+(``--config-overrides`` or a config file outside the scanned tree,
+``utils/config_trust.py``); set by a config in the scanned tree, or by an MCP
+client, it is ignored with a warning. zizmor reads a
 GitHub token from ``GH_TOKEN``, ``GITHUB_TOKEN`` or ``ZIZMOR_GITHUB_TOKEN`` on
 its own, so those variables are removed from the child environment while
 offline: a token in the environment of a CI job that runs ASH is not consent to
@@ -381,7 +385,9 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "is removed from its environment. When true, `--offline` is not "
                 "passed, those variables reach zizmor unchanged, and zizmor may "
                 "call the GitHub API with the token. ASH never reads or logs the "
-                "token. Ignored, with a warning, when ASH runs in offline mode."
+                "token. Honored only when set by --config-overrides or a config "
+                "file outside the scanned tree, and ignored, with a warning, when "
+                "ASH runs in offline mode."
             ),
         ),
     ] = False
@@ -425,6 +431,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # The inputs of the most recent invocation, which _post_process_sarif maps
     # zizmor's URIs back onto.
     _last_inputs: List[Path] = PrivateAttr(default_factory=list)
+    # Whether the tree-set online_audits refusal was already logged.
+    _online_refusal_logged: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -582,6 +590,24 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def _online(self) -> bool:
         if not self._options.online_audits:
             return False
+        # Online audits send the GitHub token in the environment to the GitHub
+        # API, so only the operator can turn them on, as for config_file.
+        if not set_by_operator(
+            self._plugin_context.config,
+            "scanners.zizmor.options.online_audits",
+            True,
+        ):
+            if not self._online_refusal_logged:
+                self._online_refusal_logged = True
+                self._plugin_log(
+                    "scanners.zizmor.options.online_audits is true in a config in "
+                    "the scanned tree or from an MCP client, so it is ignored: zizmor "
+                    "runs with --offline and without the GitHub token variables. Set "
+                    "it with --config-overrides or a config file outside the scanned "
+                    "tree.",
+                    level=logging.WARNING,
+                )
+            return False
         if self._is_offline_mode():
             self._plugin_log(
                 "scanners.zizmor.options.online_audits is true but ASH is in "
@@ -619,6 +645,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         ``ignore_paths``. Sorted so the command line is deterministic.
         """
         target_abs = Path(target).absolute()
+        target_real = Path(target).resolve()
         if target_type == "converted":
             candidates = [p for p in target_abs.rglob("*") if p.is_file()]
         else:
@@ -641,6 +668,15 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 continue
             relative = candidate.relative_to(target_abs)
             if not is_zizmor_input(relative):
+                continue
+            # zizmor reads a symlinked input where it points. Only pass files whose
+            # real path is inside the real scan root.
+            if not candidate.resolve().is_relative_to(target_real):
+                self._plugin_log(
+                    f"Not auditing {relative.as_posix()}: it resolves outside the "
+                    "scan root.",
+                    level=logging.WARNING,
+                )
                 continue
             if known_ignored.intersection(relative.parts[:-1]):
                 continue

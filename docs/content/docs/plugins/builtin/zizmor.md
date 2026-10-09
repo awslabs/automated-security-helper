@@ -23,7 +23,9 @@ ASH passes zizmor two kinds of file, taken from its scan set so `.gitignore`,
   (the only place GitHub runs a workflow from; subdirectories are not scanned);
 - composite actions: every `action.yml` and `action.yaml`.
 
-Files under `node_modules/` and virtual environments are skipped. A repository
+Files under `node_modules/` and virtual environments are skipped, and so is a
+file that is a symlink resolving outside the scan root, with a warning: zizmor
+would read it where it points. A repository
 with neither kind of file does not start zizmor; the scanner reports `SKIPPED`
 with zero findings, the same as cfn-nag on a repository with no templates.
 
@@ -76,9 +78,13 @@ variables from zizmor's environment.
 
 `online_audits: true` disables `--offline` and lets those variables reach zizmor
 unchanged, which enables the audits that query the GitHub API (for example
-known-vulnerable actions and impostor commits). ASH never reads, copies or logs
-the token and never puts it on zizmor's command line. ASH's own offline mode
-(`ASH_OFFLINE=true` or `ash scan --offline`) overrides `online_audits`.
+known-vulnerable actions and impostor commits). It is honored only when the
+operator sets it, with `--config-overrides` or an ASH config file outside the
+scanned tree; set by a config in the scanned tree, or by an MCP client, it is
+ignored with a warning and zizmor runs offline without the tokens. ASH never
+reads, copies or logs the token and never puts it on zizmor's command line.
+ASH's own offline mode (`ASH_OFFLINE=true` or `ash scan --offline`) overrides
+`online_audits`.
 
 `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and `ZIZMOR_NO_ONLINE_AUDITS` are always
 removed from zizmor's environment, so a scan's result depends on the repository
