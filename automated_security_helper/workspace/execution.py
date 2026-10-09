@@ -897,6 +897,10 @@ def _project_config_with_policy(
         trusted_config_path=settings.default_config_path,
     )
 
+    # The scanners' own checks on tool config file paths (config/path_trust.py)
+    # use the same tree as the checks above: the whole workspace.
+    config._scanned_root = _workspace_root(project)
+
     # Preserves the diagnostic the orchestrator used to emit from config_path,
     # which is the only thing dropping that argument costs.
     ASH_LOGGER.verbose(

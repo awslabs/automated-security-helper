@@ -162,25 +162,34 @@ def test_checkov_scanner_configure(test_plugin_context):
     ],
 )
 def test_process_config_options_with_config_files(
-    config_file, test_source_dir, test_plugin_context
+    config_file, test_source_dir, test_plugin_context, tmp_path
 ):
-    """Test processing of different config file types."""
-    config_path = test_source_dir.joinpath(config_file)
-    config_path.touch()
+    """A config file of each name is passed when it is outside the scanned tree.
 
-    scanner = CheckovScanner(
-        context=test_plugin_context,
-        config=CheckovScannerConfig(
-            options=CheckovScannerConfigOptions(
-                config_file=config_path.as_posix(),
-            )
-        ),
-    )
-    scanner._process_config_options()
+    One inside the source directory is not passed at all (config/path_trust.py).
+    """
+    inside = test_source_dir.joinpath(config_file)
+    inside.touch()
+    outside = tmp_path / "operator" / config_file
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.touch()
 
-    # Check that the config file argument was added
-    config_args = [arg.key for arg in scanner.args.extra_args]
-    assert "--config-file" in config_args
+    def config_args(path):
+        scanner = CheckovScanner(
+            context=test_plugin_context,
+            config=CheckovScannerConfig(
+                options=CheckovScannerConfigOptions(config_file=path.as_posix())
+            ),
+        )
+        scanner._process_config_options()
+        return [
+            arg.value for arg in scanner.args.extra_args if arg.key == "--config-file"
+        ]
+
+    # _process_config_options also runs while the scanner is built, so the
+    # argument can appear twice; only which file is passed matters here.
+    assert config_args(inside) == []
+    assert set(config_args(outside)) == {outside.resolve().as_posix()}
 
 
 def test_process_config_options_frameworks(test_plugin_context):

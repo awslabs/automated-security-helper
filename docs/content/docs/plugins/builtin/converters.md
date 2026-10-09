@@ -58,6 +58,12 @@ converters:
       install_timeout: 300    # Seconds allowed for tool installation
 ```
 
+**How conversion runs**: nbconvert is given a copy of the notebook in a directory
+that holds nothing else, and runs there rather than in the scanned tree. ASH picks the
+exporter: `python` for a Python notebook or one that names no language, `script`
+otherwise. The copy has `metadata.language_info.nbconvert_exporter` removed, so the
+notebook does not choose the exporter class.
+
 **Key Features**:
 - Code cell extraction
 - Cell number preservation for accurate line mapping
@@ -115,6 +121,32 @@ converters:
   jupyter:
     enabled: true                # Cell-to-line mapping is always preserved
 ```
+
+## Inputs a converter does not read
+
+A converter reads a file only if it is a regular file inside the scanned tree. It
+skips, with one warning naming the file:
+
+- a symlink, wherever it points, and any file under a symlinked directory;
+- a path outside the scanned tree;
+- a directory, FIFO, socket or device;
+- a file with more than one hard link.
+
+Inside an archive, the archive converter also skips members that are symlinks, hard
+links or special files, and members whose names are absolute or contain `..`.
+
+Each skipped input is recorded in `ash_aggregated_results.json` under
+`converter_results.<converter>.refused_inputs`, with its path relative to the scanned
+tree, the archive member's name where there is one, and the reason:
+
+```json
+"refused_inputs": [
+  {"path": "notebooks/report.ipynb", "member": null, "reason": "it is a symbolic link"},
+  {"path": "dist/app.tar", "member": "../setup.py", "reason": "its path contains a '..' component"}
+]
+```
+
+To have a skipped file converted, replace the link with the file itself.
 
 ## Integration with Scanners
 

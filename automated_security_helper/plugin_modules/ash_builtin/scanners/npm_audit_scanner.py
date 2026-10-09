@@ -107,6 +107,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.npm",),
+        # npm cannot audit without writing its cache (the registry metadata the
+        # vulnerable ranges come from) and logs, both under npm_config_cache.
+        cache_env=("npm_config_cache",),
         env_prefixes=("npm_config_", "NPM_CONFIG_"),
     )
 

@@ -150,6 +150,8 @@ ash_config:
         - /content_db_staleness_overrides
         - /sandbox
         - /sandbox/**
+        - /ash_plugin_modules
+        - /ash_plugin_modules/**
         - /global_settings/ignore_paths
         - /global_settings/suppressions
         - /reporters/bedrock-summary-reporter/options/aws_*

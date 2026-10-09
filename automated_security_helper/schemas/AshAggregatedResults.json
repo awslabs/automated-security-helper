@@ -1384,6 +1384,8 @@
                   "/content_db_staleness_overrides",
                   "/sandbox",
                   "/sandbox/**",
+                  "/ash_plugin_modules",
+                  "/ash_plugin_modules/**",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1770,6 +1772,8 @@
                 "/content_db_staleness_overrides",
                 "/sandbox",
                 "/sandbox/**",
+                "/ash_plugin_modules",
+                "/ash_plugin_modules/**",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1822,6 +1826,8 @@
               "/content_db_staleness_overrides",
               "/sandbox",
               "/sandbox/**",
+              "/ash_plugin_modules",
+              "/ash_plugin_modules/**",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
               "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -4811,6 +4817,14 @@
           "default": null,
           "description": "Why this converter produced nothing, when the reason was that something went wrong. For an exception out of convert() this is '<type>: <message>'. None when nothing went wrong, which includes a converter that ran and found nothing to convert. Distinct from excluded, which means the run never intended to use it, and from dependencies_satisfied, which reports an absent external tool.",
           "title": "Failure"
+        },
+        "refused_inputs": {
+          "description": "Inputs this converter did not read because they failed the scanned-tree check: a symlink, a path outside the scanned tree, a file that is not a regular file or has more than one hard link, or an archive member that is a link or would be extracted outside its destination.",
+          "items": {
+            "$ref": "#/$defs/RefusedInputInfo"
+          },
+          "title": "Refused Inputs",
+          "type": "array"
         }
       },
       "title": "ConverterStatusInfo",
@@ -13160,6 +13174,41 @@
       "title": "Reference",
       "type": "object"
     },
+    "RefusedInputInfo": {
+      "additionalProperties": true,
+      "description": "One input a converter declined to read, and why.",
+      "properties": {
+        "member": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The archive member's name, when the refusal was of a member.",
+          "title": "Member"
+        },
+        "path": {
+          "description": "The input's path relative to the scanned tree, with '/' separators. For an archive member, the archive's path.",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why the input was not read.",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "RefusedInputInfo",
+      "type": "object"
+    },
     "Region": {
       "additionalProperties": false,
       "properties": {
@@ -15985,6 +16034,8 @@
             "/content_db_staleness_overrides",
             "/sandbox",
             "/sandbox/**",
+            "/ash_plugin_modules",
+            "/ash_plugin_modules/**",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/reporters/bedrock-summary-reporter/options/aws_*",

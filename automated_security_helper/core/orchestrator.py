@@ -90,6 +90,27 @@ class ASHScanOrchestrator(BaseModel):
             ),
         ),
     ] = None
+    untrusted_config: Annotated[
+        bool,
+        Field(
+            description=(
+                "The config at config_path was written by the caller, not the "
+                "operator, so its sandbox settings are restrict-only. Passed to "
+                "resolve_config; see its docstring."
+            ),
+        ),
+    ] = False
+    trusted_config_path: Annotated[
+        Optional[Path | str],
+        Field(
+            None,
+            description=(
+                "The operator's config the sandbox grants come from when "
+                "untrusted_config is set, in place of ASH_CONFIG or the defaults. "
+                "Passed to resolve_config."
+            ),
+        ),
+    ] = None
     color_system: Annotated[
         Optional[str], Field(None, description="Color system to use for console output")
     ] = None
@@ -225,6 +246,8 @@ class ASHScanOrchestrator(BaseModel):
             for name, value in (
                 ("config_path", self.config_path),
                 ("config_overrides", self.config_overrides),
+                ("untrusted_config", self.untrusted_config),
+                ("trusted_config_path", self.trusted_config_path),
             )
             if value
         ]
@@ -275,12 +298,16 @@ class ASHScanOrchestrator(BaseModel):
                 source_dir=self.source_dir,
                 config_overrides=self.config_overrides or [],
                 permit_base=self.config_base_gate,
+                trusted_config_path=self.trusted_config_path,
+                untrusted_config=self.untrusted_config,
             )
 
         # Surface config resolution warnings prominently
         if self.config._resolution_warnings:
             for warning in self.config._resolution_warnings:
                 ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
+
+        self._refuse_symlinked_output_dir()
 
         ASH_LOGGER.verbose("Setting up working directories")
 
@@ -406,6 +433,32 @@ class ASHScanOrchestrator(BaseModel):
         instance = cls(**kwargs)
         instance.initialize()
         return instance
+
+    def _refuse_symlinked_output_dir(self) -> None:
+        """Stop a sandboxed scan whose output directory runs through a symlink.
+
+        Before ensure_directories, which clears subdirectories of the output
+        directory, and before anything else ASH writes there unsandboxed. See
+        utils/sandbox/policy.py:refuse_symlinked_output_dir for what is refused.
+        With the sandbox off, where the output goes is the operator's choice.
+        """
+        from automated_security_helper.core.enums import SandboxMode
+        from automated_security_helper.utils.sandbox.policy import (
+            SandboxUnavailable,
+            refuse_symlinked_output_dir,
+        )
+
+        settings = getattr(self.config, "sandbox", None)
+        mode = getattr(settings, "mode", SandboxMode.off)
+        if SandboxMode(mode) == SandboxMode.off:
+            return
+        try:
+            refuse_symlinked_output_dir(Path(self.source_dir), Path(self.output_dir))
+        except SandboxUnavailable as refusal:
+            raise ASHValidationError(
+                f"The scanner sandbox is on, and {refusal}. Choose an output "
+                "directory that is not reached through a symlink."
+            ) from refusal
 
     def ensure_directories(self):
         """Ensure required directories exist in a thread-safe manner.

@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+import io
 
 from cfn_tools import load_yaml
 from pathlib import Path
@@ -8,6 +9,27 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Annotated, Dict
 
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanned_tree import open_in_scanned_tree
+
+
+def describe_parse_error(exc: BaseException) -> str:
+    """Name a parse or validation error without quoting the document.
+
+    The text of these exceptions carries part of the file: PyYAML prints the offending
+    line under a caret, and pydantic prints the rejected ``input_value``. That text
+    goes to ``ash.log``, so only the exception type and, where the parser knows it, the
+    1-based line number are kept.
+    """
+    line = None
+    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+    if mark is not None and isinstance(getattr(mark, "line", None), int):
+        line = mark.line + 1
+    elif isinstance(getattr(exc, "lineno", None), int):
+        # json.JSONDecodeError
+        line = exc.lineno  # type: ignore[attr-defined]
+    if line is None:
+        return type(exc).__name__
+    return f"{type(exc).__name__} at line {line}"
 
 
 class CloudFormationTemplateModelError(Exception):
@@ -34,7 +56,9 @@ class CloudFormationTemplateModelError(Exception):
     def __init__(self, template_path: Path | str, error: Exception):
         self.template_path = template_path
         self.error = error
-        super().__init__(f"{template_path}: {type(error).__name__}: {error}")
+        # The error's own text is left out: a pydantic ValidationError quotes the
+        # rejected value, and this message is logged. ``error`` keeps the detail.
+        super().__init__(f"{template_path}: {describe_parse_error(error)}")
 
 
 class CloudFormationResource(BaseModel):
@@ -68,6 +92,8 @@ class CloudFormationTemplateModel(BaseModel):
 
 def get_model_from_template(
     template_path: Path | None = None,
+    *,
+    scan_root: Path | str | None = None,
 ) -> CloudFormationTemplateModel | None:
     """Model *template_path* as CloudFormation, or say which kind of no it is.
 
@@ -78,12 +104,46 @@ def get_model_from_template(
     skip. Exceptions from ``load_yaml`` propagate unchanged -- a file that is not
     parseable YAML or JSON never reached this model in the first place, and the two
     callers already classify that case for themselves.
+
+    With ``scan_root``, the template is read under the scanned-tree rule
+    (``utils/scanned_tree.py``) and a file that breaks it raises
+    :class:`~automated_security_helper.utils.scanned_tree.TreeInputRefused` before
+    anything is read. Both scanners that call this pass the root they scan.
     """
     if template_path is None:
         return None
 
-    with open(template_path, mode="r", encoding="utf-8") as f:
-        template = load_yaml(f.read())
+    if scan_root is not None:
+        text = read_template_text(template_path, scan_root)
+    else:
+        with open(template_path, mode="r", encoding="utf-8") as f:
+            text = f.read()
+    return get_model_from_template_text(text, template_path)
+
+
+def read_template_text(template_path: Path | str, scan_root: Path | str) -> str:
+    """The template's text, read under the scanned-tree rule.
+
+    For callers that need the text more than once (cdk-nag models it, maps findings to
+    its lines and synthesizes it): reading once and reusing the text means every use
+    sees the file that was checked.
+
+    Raises:
+        TreeInputRefused: The template breaks the rule; nothing was read.
+    """
+    # TextIOWrapper rather than bytes.decode, so newlines are translated exactly as a
+    # text-mode open() translates them.
+    with io.TextIOWrapper(
+        open_in_scanned_tree(template_path, scan_root), encoding="utf-8"
+    ) as f:
+        return f.read()
+
+
+def get_model_from_template_text(
+    text: str, template_path: Path | str
+) -> CloudFormationTemplateModel | None:
+    """:func:`get_model_from_template` for text already read; ``template_path`` names it."""
+    template = load_yaml(text)
 
     # The one question that separates "not CloudFormation" from "CloudFormation this
     # model cannot represent". `cfn_tools.load_yaml` returns an ODict, which is a dict
@@ -102,9 +162,12 @@ def get_model_from_template(
         # the default level -- with the lines commented out this function emitted nothing
         # at any verbosity, so the only record of an unscanned template was a consumer's
         # TRACE line claiming the file was not CloudFormation.
+        #
+        # Named by file and error type only. The error's text quotes the rejected value
+        # out of the template, and this line is written to ash.log.
         ASH_LOGGER.warning(
             f"Template {template_path} carries a Resources mapping but could not be "
             f"modeled as CloudFormation, so no rule will be evaluated against it: "
-            f"{type(e).__name__}: {e}"
+            f"{describe_parse_error(e)}"
         )
         raise CloudFormationTemplateModelError(template_path, e) from e

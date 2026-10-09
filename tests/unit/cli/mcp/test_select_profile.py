@@ -178,12 +178,20 @@ class TestInheritAndPatch:
 
 class TestFullOverride:
     def test_override_replaces_resolved_config(self, tmp_path: Path) -> None:
+        import yaml
+
         cfg = _profile_with_runtime_overrides(
             project_name="profile-name",
             allowed_paths=["/project_name"],
         )
         _install_profile("default", cfg, tmp_path)
-        override = "project_name: override-name\n"
+        # The override restates the profile and changes only the allowed field.
+        # It is held to the same allowlist as patch_ops, so a bare
+        # `project_name: override-name` would also reset the profile's mcp
+        # block to defaults, a change outside allowed_paths, and be refused.
+        document = cfg.model_dump(mode="json", by_alias=True)
+        document["project_name"] = "override-name"
+        override = yaml.safe_dump(document)
         result = mcp_select_profile("default", override_yaml=override)
         assert result["success"] is True
         assert result["mode"] == "override"
@@ -192,6 +200,22 @@ class TestFullOverride:
         assert state.bound_config is not None
         assert state.bound_config.project_name == "override-name"
         assert state.override_yaml == override
+
+    def test_override_that_resets_unallowed_fields_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = _profile_with_runtime_overrides(
+            project_name="profile-name",
+            allowed_paths=["/project_name"],
+        )
+        _install_profile("default", cfg, tmp_path)
+        result = mcp_select_profile(
+            "default", override_yaml="project_name: override-name\n"
+        )
+        assert result["success"] is False
+        assert result["error"].startswith("override denied: ")
+        assert "/global_settings/mcp" in result["error"]
+        assert get_session_state().bound_config is None
 
     def test_override_validated_against_ashconfig(self, tmp_path: Path) -> None:
         cfg = AshConfig(project_name="profile-name")

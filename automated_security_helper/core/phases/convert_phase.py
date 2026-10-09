@@ -1,7 +1,7 @@
 """Implementation of the Convert phase."""
 
 from pathlib import Path
-from typing import Any, List, cast
+from typing import Any, Dict, List, cast
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
@@ -24,6 +24,18 @@ def _converter_display_name(plugin_instance: Any) -> str:
     config = getattr(plugin_instance, "config", None)
     name = getattr(config, "name", None)
     return name or plugin_instance.__class__.__name__
+
+
+def _refused_inputs_field(plugin_instance: Any) -> Dict[str, Any]:
+    """The ``refused_inputs`` keyword for a converter's row, or nothing.
+
+    Omitted when the converter refused nothing, so ``to_simple_dict``, which dumps
+    with ``exclude_unset``, renders a clean tree's row as it did before the field
+    existed. Read with ``getattr`` because a third-party converter need not derive
+    from ``ConverterPluginBase``.
+    """
+    refused = list(getattr(plugin_instance, "refused_inputs", None) or [])
+    return {"refused_inputs": refused} if refused else {}
 
 
 class ConvertPhase(EnginePhase):
@@ -415,6 +427,7 @@ class ConvertPhase(EnginePhase):
                         dependencies_satisfied=plugin_instance.dependencies_satisfied,
                         excluded=not plugin_instance.config.enabled or False,
                         converted_paths=plugin_converted_paths,
+                        **_refused_inputs_field(plugin_instance),
                     )
                 )
 
@@ -455,6 +468,7 @@ class ConvertPhase(EnginePhase):
                         excluded=False,
                         failure=f"{type(e).__name__}: {e}",
                         converted_paths=plugin_converted_paths,
+                        **_refused_inputs_field(plugin_instance),
                     )
                 )
 

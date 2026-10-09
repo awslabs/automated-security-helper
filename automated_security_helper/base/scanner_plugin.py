@@ -667,6 +667,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return None
         return output_abs.relative_to(target_abs)
 
+    def _subprocess_cwd(self, results_dir: Path) -> Path | None:
+        """The working directory for the tool's scan subprocess.
+
+        None runs it in the source directory (``PluginBase._run_subprocess``).
+        A scanner whose tool reads its own config file from its working directory
+        returns a directory outside the scanned tree instead.
+        """
+        return None
+
     def _effective_scan_timeout(self) -> float | None:
         """Seconds to allow this scanner's tool, or None to leave it unbounded.
 
@@ -746,6 +755,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=results_file.parent,
+                cwd=self._subprocess_cwd(results_file.parent),
                 env=subprocess_env,
                 timeout=effective_timeout,
             )

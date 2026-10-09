@@ -26,6 +26,11 @@ Defense-in-depth checks (in order):
 7. The result, after applying the patch, must validate as a full `AshConfig`.
 
 A single failing op aborts the entire patch. The base config is never mutated.
+
+A whole-document override (`select_profile(override_yaml=...)`) is gated by
+`apply_runtime_override`, which expresses the override as the patch that turns
+the base into it and sends that patch through `apply_runtime_patch`. There is no
+second copy of these rules: an override is permitted exactly when that patch is.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-from typing import Any, Dict, List, Pattern
+from typing import Any, Dict, List, Pattern, Tuple
 
 import jsonpatch
 from pydantic import ValidationError
@@ -41,6 +46,8 @@ from pydantic import ValidationError
 from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
+    plugin_key_lookup_names,
+    reduced_plugin_name,
 )
 
 
@@ -196,6 +203,67 @@ def _policy_covers_op_path(pattern: str, path: str) -> bool:
     return _pattern_reaches_into(_subtree_pattern(pattern), _path_segments(path))
 
 
+def _fold_separators(pointer: str) -> str:
+    """``pointer`` with every '-' read as '_'.
+
+    Config merging treats a key spelled with '-' and the same key spelled with
+    '_' as one key, one segment at a time (``config_sources._resolve_dict_key``),
+    so a denial has to hold for every mix of the two. Replacing over the whole
+    pointer is the same as replacing per segment: '/' separates segments, and
+    the RFC 6901 escapes contain neither character.
+    """
+    return pointer.replace("-", "_")
+
+
+_PLUGIN_SECTIONS = frozenset({"scanners", "reporters", "converters"})
+
+
+def _path_with_patterns_plugin_name(pattern: str, path: str) -> str | None:
+    """``path`` with its plugin segment spelled as ``pattern``'s, if both name one plugin.
+
+    ``AshConfig.get_plugin_config`` finds a plugin's section under any key in
+    ``plugin_key_lookup_names``, so ``/reporters/BedrockSummary`` is read as
+    ``bedrock-summary-reporter``'s config when no section uses that exact name.
+    Respelling the path's segment as the pattern's lets the usual matching run
+    on it. None when the pattern's plugin segment contains a glob character
+    (matched as written), when the two sit under different sections, or when the
+    path's segment reaches a different plugin.
+    """
+    pattern_segs = _path_segments(pattern)
+    path_segs = _path_segments(path)
+    if len(pattern_segs) < 2 or len(path_segs) < 2:
+        return None
+    section, plugin = pattern_segs[0], pattern_segs[1]
+    if section not in _PLUGIN_SECTIONS or path_segs[0] != section:
+        return None
+    if any(char in plugin for char in "*?[") or path_segs[1] == plugin:
+        return None
+    reduced = reduced_plugin_name(plugin)
+    if not reduced or reduced not in plugin_key_lookup_names(path_segs[1]):
+        return None
+    return "/" + "/".join(
+        _escape_pointer_segment(segment)
+        for segment in [section, plugin, *path_segs[2:]]
+    )
+
+
+def _denial_spellings(pattern: str, path: str) -> Tuple[Tuple[str, str], ...]:
+    """The (pattern, path) pairs a denial is matched over.
+
+    As written, then folded, then, when the path's plugin segment names the
+    pattern's plugin under another spelling, the respelled path as written and
+    folded. As written comes first so a glob whose character class contains '-'
+    keeps its meaning; every other pair only adds matches, so it can only refuse
+    more.
+    """
+    pairs = [(pattern, path), (_fold_separators(pattern), _fold_separators(path))]
+    respelled = _path_with_patterns_plugin_name(pattern, path)
+    if respelled is not None:
+        pairs.append((pattern, respelled))
+        pairs.append((_fold_separators(pattern), _fold_separators(respelled)))
+    return tuple(pairs)
+
+
 def _denied_path_reason(denied: str, path: str) -> str | None:
     """Explain how a `denied_paths` entry blocks a write at `path`, or None.
 
@@ -204,13 +272,18 @@ def _denied_path_reason(denied: str, path: str) -> str | None:
     wholesale cannot act on a message that does not say which descendant of it
     is off limits.
     """
-    if not _policy_covers_op_path(denied, path):
-        return None
-    if _path_matches(denied, path):
-        return f"path {path!r} matches denied_paths entry {denied!r}"
-    if _match_segments(_subtree_pattern(denied), _path_segments(path)):
-        return f"path {path!r} is inside denied_paths entry {denied!r}"
-    return f"path {path!r} writes a subtree that contains denied_paths entry {denied!r}"
+    for pattern, target in _denial_spellings(denied, path):
+        if not _policy_covers_op_path(pattern, target):
+            continue
+        if _path_matches(pattern, target):
+            return f"path {path!r} matches denied_paths entry {denied!r}"
+        if _match_segments(_subtree_pattern(pattern), _path_segments(target)):
+            return f"path {path!r} is inside denied_paths entry {denied!r}"
+        return (
+            f"path {path!r} writes a subtree that contains denied_paths entry "
+            f"{denied!r}"
+        )
+    return None
 
 
 def _check_op_paths(
@@ -275,7 +348,10 @@ def _check_value_pattern(
     # value written at a child, and a value written at a parent carries every
     # child the regex was registered for.
     for pattern_path, pattern in allowlist.denied_value_patterns.items():
-        if not _policy_covers_op_path(pattern_path, path):
+        if not any(
+            _policy_covers_op_path(bound, target)
+            for bound, target in _denial_spellings(pattern_path, path)
+        ):
             continue
         try:
             compiled = re.compile(pattern)
@@ -292,16 +368,17 @@ def _check_value_pattern(
             )
 
 
-def apply_runtime_patch(
-    base: AshConfig,
+def check_runtime_ops(
     patch_ops: List[Dict[str, Any]],
     *,
     allowlist: RuntimeOverridesConfig,
-) -> AshConfig:
-    """Apply a JSON-Patch to a config, enforcing the runtime allowlist.
+) -> None:
+    """Enforce the runtime allowlist on JSON-Patch ops without applying them.
 
-    Returns a new `AshConfig`. The base instance is never mutated. Any rule
-    violation raises `RuntimePatchDeniedError` and aborts the entire patch.
+    The rules ``apply_runtime_patch`` applies before it patches anything, for a
+    caller that needs the verdict on each op whatever the op would change, such
+    as ``cli/mcp/workspace._gate_client_overrides``. Raises
+    ``RuntimePatchDeniedError`` on the first op a rule refuses.
     """
     if not allowlist.enabled:
         raise RuntimePatchDeniedError(
@@ -345,6 +422,20 @@ def apply_runtime_patch(
         _check_op_paths(op, allowlist=allowlist)
         _check_value_pattern(op, allowlist=allowlist)
 
+
+def apply_runtime_patch(
+    base: AshConfig,
+    patch_ops: List[Dict[str, Any]],
+    *,
+    allowlist: RuntimeOverridesConfig,
+) -> AshConfig:
+    """Apply a JSON-Patch to a config, enforcing the runtime allowlist.
+
+    Returns a new `AshConfig`. The base instance is never mutated. Any rule
+    violation raises `RuntimePatchDeniedError` and aborts the entire patch.
+    """
+    check_runtime_ops(patch_ops, allowlist=allowlist)
+
     base_dict = base.model_dump(mode="python", by_alias=False)
     try:
         patched = jsonpatch.apply_patch(base_dict, patch_ops, in_place=False)
@@ -359,3 +450,84 @@ def apply_runtime_patch(
         raise RuntimePatchDeniedError(
             None, f"patched config failed validation: {exc.errors()}"
         ) from exc
+
+
+def _escape_pointer_segment(key: str) -> str:
+    """Escape a mapping key as an RFC 6901 JSON-Pointer segment (`~` first)."""
+    return key.replace("~", "~0").replace("/", "~1")
+
+
+def _same_json_value(before: Any, after: Any) -> bool:
+    """Compare two JSON values as JSON, not as Python.
+
+    Python's `==` says `True == 1` and `1 == 1.0`, so a change between them
+    would produce no op and never reach the gate. Serializing both sides keeps
+    them apart.
+    """
+    return json.dumps(before, sort_keys=True) == json.dumps(after, sort_keys=True)
+
+
+def json_patch_between(before: Any, after: Any, path: str = "") -> List[Dict[str, Any]]:
+    """Return add/remove/replace ops that turn the JSON value `before` into `after`.
+
+    Mappings are walked key by key, so a change deep in the document becomes an
+    op at the deepest pointer that differs; that is the pointer an operator's
+    `allowed_paths` names. Lists and scalars are compared whole and replaced
+    whole. An element-wise list diff would emit index pointers (`/x/0`) that an
+    allowlist written for the list itself or for appends (`/x/-`) does not name,
+    and the denylist covers a list's elements either way.
+
+    No `move` or `copy` ops are produced, because `apply_runtime_patch` refuses
+    them.
+    """
+    if isinstance(before, dict) and isinstance(after, dict):
+        ops: List[Dict[str, Any]] = []
+        for key in before:
+            if key not in after:
+                ops.append(
+                    {"op": "remove", "path": f"{path}/{_escape_pointer_segment(key)}"}
+                )
+        for key, value in after.items():
+            child = f"{path}/{_escape_pointer_segment(key)}"
+            if key not in before:
+                ops.append({"op": "add", "path": child, "value": value})
+            else:
+                ops.extend(json_patch_between(before[key], value, child))
+        return ops
+    if _same_json_value(before, after):
+        return []
+    return [{"op": "replace", "path": path, "value": after}]
+
+
+def apply_runtime_override(
+    base: AshConfig,
+    override: AshConfig,
+    *,
+    allowlist: RuntimeOverridesConfig,
+) -> AshConfig:
+    """Gate a whole-document override with the rules `apply_runtime_patch` enforces.
+
+    The override replaces `base` wholesale, so a field it leaves out reverts to
+    its default. Diffing the two documents, rather than reading only the fields
+    the override names, is what catches that: an override that omits `sandbox`
+    from a profile that sets `sandbox.mode: bwrap` is a `replace` at
+    `/sandbox/mode`, and is refused like one.
+
+    Returns the config the gated patch produces, not `override` itself, so what
+    the caller binds is exactly what the gate checked. If that config differs
+    from the override, part of the override was not expressed as an op and so
+    was never checked; that is refused rather than bound either way.
+    """
+    base_doc = base.model_dump(mode="json", by_alias=False)
+    override_doc = override.model_dump(mode="json", by_alias=False)
+    patch_ops = json_patch_between(base_doc, override_doc)
+    patched = apply_runtime_patch(base, patch_ops, allowlist=allowlist)
+    if not _same_json_value(
+        patched.model_dump(mode="json", by_alias=False), override_doc
+    ):
+        raise RuntimePatchDeniedError(
+            None,
+            "the patch computed from the override does not reproduce the "
+            "override, so part of it could not be checked",
+        )
+    return patched
