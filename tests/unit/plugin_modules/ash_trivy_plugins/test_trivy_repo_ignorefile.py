@@ -189,8 +189,11 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
     flags = ["--skip-db-update", "--skip-java-db-update", "--cache-backend=memory"]
     for flag in flags:
         assert flag in argv, argv
-    # Every inserted flag sits between the subcommand and the target.
+    # Every inserted flag sits between the subcommand and the target. The ignore
+    # file is found by its prefix: trivy-repo spells its value with as_posix(), so
+    # rebuilding the argument from a Path would use backslashes on Windows.
     subcommand_at = argv.index("repository")
     target_at = max(i for i, a in enumerate(argv) if Path(a) == source)
-    for flag in [*flags, f"--ignorefile={passed}"]:
-        assert subcommand_at < argv.index(flag) < target_at, argv
+    ignore_at = next(i for i, a in enumerate(argv) if a.startswith("--ignorefile="))
+    for at in [*(argv.index(flag) for flag in flags), ignore_at]:
+        assert subcommand_at < at < target_at, argv
