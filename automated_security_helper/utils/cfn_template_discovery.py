@@ -25,6 +25,13 @@ The three outcomes per file
 * CloudFormation the model rejects (``CloudFormationTemplateModelError``): returned in
   ``unmodelable`` with the reason, so the caller counts a failed target rather than
   letting the file vanish. That is the distinction ``cfn_template_model`` documents.
+
+A file is read under the scanned-tree rule (``utils/scanned_tree.py``), against the
+tree cfn-nag reads it against: a symlink, a file under a symlinked directory, one
+outside the tree or with more than one hard link is not read, and is returned in
+``refused`` so the caller can name it, as cfn-nag skips and names it. cfn-lint and
+cfn-guard then open the templates themselves, by path; under ``--sandbox`` they can
+read nothing outside the tree.
 """
 
 from __future__ import annotations
@@ -39,6 +46,7 @@ from automated_security_helper.utils.cfn_template_model import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanned_tree import TreeInputRefused
 
 if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
@@ -52,6 +60,7 @@ class TemplateDiscovery:
 
     templates: List[Path] = field(default_factory=list)
     unmodelable: List[Tuple[Path, str]] = field(default_factory=list)
+    refused: List[Tuple[str, str]] = field(default_factory=list)
 
 
 def candidate_files(
@@ -76,13 +85,18 @@ def candidate_files(
 def discover_templates(
     context: "PluginContext", target_type: Literal["source", "converted"]
 ) -> TemplateDiscovery:
-    """Classify every candidate file as a template, not-a-template, or unmodelable."""
+    """Classify every candidate file as a template, not-a-template, unmodelable, or refused."""
     result = TemplateDiscovery()
+    # The tree CfnNagScanner.scan reads each candidate against.
+    scan_root = context.work_dir if target_type == "converted" else context.source_dir
     for path in candidate_files(context, target_type):
         if not path.is_file():
             continue
         try:
-            model = get_model_from_template(template_path=path)
+            model = get_model_from_template(template_path=path, scan_root=scan_root)
+        except TreeInputRefused as refused:
+            result.refused.append((refused.path, refused.reason))
+            continue
         except CloudFormationTemplateModelError as exc:
             result.unmodelable.append(
                 (

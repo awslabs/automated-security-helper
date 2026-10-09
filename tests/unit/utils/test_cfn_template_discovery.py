@@ -19,6 +19,9 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    cfn_nag_scanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
     CfnNagScanner,
 )
@@ -72,10 +75,15 @@ def test_discovery_classifies_the_tree(context):
 def test_cfn_nag_selects_the_same_templates(context):
     """The agreement test the discovery module's docstring promises."""
     handed_to_cfn_nag = []
+    stage = cfn_nag_scanner._stage_cfn_nag_input
+
+    # cfn_nag_scan reads a staged copy of each template's checked text, so the
+    # template it was given is the one staged, not the --input-path it opens.
+    def record_stage(results_file_dir, cfn_file, text):
+        handed_to_cfn_nag.append(Path(cfn_file))
+        return stage(results_file_dir, cfn_file, text)
 
     def fake_run(self, command, **kwargs):
-        target = command[command.index("--input-path") + 1]
-        handed_to_cfn_nag.append(Path(target))
         return {
             "stdout": '{"version": "2.1.0", "runs": [{"tool": {"driver": '
             '{"name": "cfn_nag"}}, "results": []}]}',
@@ -87,6 +95,7 @@ def test_cfn_nag_selects_the_same_templates(context):
     with (
         patch.object(CfnNagScanner, "validate_plugin_dependencies", return_value=True),
         patch.object(CfnNagScanner, "_run_subprocess", fake_run),
+        patch.object(cfn_nag_scanner, "_stage_cfn_nag_input", record_stage),
     ):
         scanner.scan(target=Path(context.source_dir), target_type="source")
 
@@ -96,6 +105,24 @@ def test_cfn_nag_selects_the_same_templates(context):
     )
     # And they count the unmodelable template the same way.
     assert scanner.targets_failed == len(discovered.unmodelable) == 1
+
+
+def test_a_symlinked_template_is_refused_by_both(context, ash_temp_path):
+    """A template reached through a symlink is read by neither, and named by both."""
+    outside = ash_temp_path / "elsewhere" / "outside.yaml"
+    outside.parent.mkdir()
+    outside.write_text(TREE["stack.yaml"], encoding="utf-8")
+    link = Path(context.source_dir) / "linked.yaml"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+    discovered = discover_templates(context, "source")
+
+    assert link not in discovered.templates
+    assert [shown for shown, _ in discovered.refused] == ["linked.yaml"]
+    test_cfn_nag_selects_the_same_templates(context)
 
 
 def test_display_path_is_relative_inside_and_absolute_outside(tmp_path):

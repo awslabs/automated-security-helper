@@ -544,6 +544,15 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             if self.context is None:
                 raise ScannerError("cfn-lint has no plugin context")
             discovery = discover_templates(self.context, target_type)
+            for shown, reason in discovery.refused:
+                # Not read, so not known to be CloudFormation: skipped and named, as
+                # cfn-nag skips it.
+                self._plugin_log(
+                    f"Skipped {shown}: {reason}",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
                 self.targets_failed += 1
