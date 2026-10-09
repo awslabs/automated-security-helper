@@ -231,10 +231,20 @@ def _spelled(tmp_path: Path, source: Path, chosen: Path, spelling: str) -> str:
         link.parent.mkdir(exist_ok=True)
         _symlink_or_skip(link, chosen)
         return str(link)
+    if spelling == "relative-dotdot-through-link":
+        # source/jump -> <outside>/deep, so "jump/../<name>" is <outside>/<name> to
+        # the filesystem but <source>/<name> to a lexical normalization.
+        deep = chosen.parent / "deep"
+        deep.mkdir(exist_ok=True)
+        _symlink_or_skip(source / "jump", deep)
+        return f"jump/../{chosen.name}"
     raise AssertionError(spelling)
 
 
-@pytest.mark.parametrize("spelling", ["relative", "dotdot", "symlink", "home"])
+@pytest.mark.parametrize(
+    "spelling",
+    ["relative", "dotdot", "symlink", "home", "relative-dotdot-through-link"],
+)
 @pytest.mark.parametrize("option, flag, name, content", OPTIONS)
 @pytest.mark.parametrize("scanner", SCANNERS)
 def test_trivy_is_handed_the_path_that_was_checked(
@@ -252,6 +262,9 @@ def test_trivy_is_handed_the_path_that_was_checked(
     planted = source / "~" / name
     planted.parent.mkdir()
     planted.write_text("module:\n  dir: ./planted\n", encoding="utf-8")
+    # What a lexical normalization of "jump/../<name>" would name.
+    lexical = source / name
+    lexical.write_text("module:\n  dir: ./planted\n", encoding="utf-8")
     if spelling == "home":
         _set_home(monkeypatch, chosen.parent)
         value = f"~/{name}"
@@ -264,6 +277,7 @@ def test_trivy_is_handed_the_path_that_was_checked(
 
     assert _passed(argv, flag) == _real(chosen)
     assert _real(planted) not in " ".join(argv)
+    assert _passed(argv, flag) != _real(lexical)
 
 
 @pytest.mark.parametrize("option, flag, name, content", OPTIONS)
