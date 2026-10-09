@@ -181,16 +181,69 @@ def test_the_lock_lives_in_the_cache_or_beside_it(tmp_path):
             cache.chmod(0o700)
 
 
-def test_the_cache_is_where_the_sandboxed_tool_looks(tmp_path):
-    home = Path.home()
-    assert refresh.default_cache_dir("grype", {}) == home / ".cache" / "grype" / "db"
-    assert refresh.default_cache_dir("trivy", {}) == home / ".cache" / "trivy"
+def _tools_own_default(tool: str, platform: str) -> Path:
+    """Where each tool puts its cache inside the sandbox, as its source decides.
+
+    grype 0.120.1 uses filepath.Join(xdg.CacheHome, "grype", "db")
+    (grype/db/v6/installation/curator.go). Its github.com/adrg/xdg v0.5.3 sets
+    CacheHome to $XDG_CACHE_HOME when that is set, else ~/Library/Caches on darwin
+    (paths_darwin.go) and ~/.cache on other Unix (paths_unix.go). trivy 0.75.0 uses
+    filepath.Join(os.UserCacheDir(), "trivy") (pkg/cache/dir.go), and Go's
+    os.UserCacheDir is ~/Library/Caches on darwin and $XDG_CACHE_HOME or ~/.cache on
+    other Unix. The sandbox does not pass XDG_CACHE_HOME (see the next test), so
+    inside it only the fallback applies.
+    """
+    base = (
+        Path.home() / "Library" / "Caches"
+        if platform == "darwin"
+        else Path.home() / ".cache"
+    )
+    return base / "grype" / "db" if tool == "grype" else base / "trivy"
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_the_cache_is_where_the_sandboxed_tool_looks(monkeypatch, tmp_path, platform):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    # Set on the host, and still not where the sandboxed tool looks.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(refresh.sys, "platform", platform)
+    for tool in ("grype", "trivy"):
+        assert refresh.default_cache_dir(tool, {}) == _tools_own_default(tool, platform)
     env = {
         "GRYPE_DB_CACHE_DIR": str(tmp_path / "g"),
         "TRIVY_CACHE_DIR": str(tmp_path / "t"),
     }
     assert refresh.default_cache_dir("grype", env) == tmp_path / "g"
     assert refresh.default_cache_dir("trivy", env) == tmp_path / "t"
+
+
+def test_the_sandbox_does_not_pass_xdg_cache_home(tmp_path):
+    """What the derivation above relies on: the tools' own variables reach the
+    sandboxed scan, XDG_CACHE_HOME does not."""
+    from automated_security_helper.utils.sandbox.policy import SandboxPolicy
+
+    policy = SandboxPolicy(
+        scanner_name="grype",
+        read_only=(),
+        writable=(tmp_path,),
+        cache=(),
+        network=True,
+        home=tmp_path,
+        cwd=None,
+        env_prefixes=("GRYPE_", "TRIVY_"),
+    )
+    env = policy.filter_env(
+        {
+            "XDG_CACHE_HOME": str(tmp_path / "xdg"),
+            "GRYPE_DB_CACHE_DIR": str(tmp_path / "g"),
+            "TRIVY_CACHE_DIR": str(tmp_path / "t"),
+        }
+    )
+    assert "XDG_CACHE_HOME" not in env
+    assert env["GRYPE_DB_CACHE_DIR"] == str(tmp_path / "g")
+    assert env["TRIVY_CACHE_DIR"] == str(tmp_path / "t")
 
 
 def test_threads_of_one_scan_take_turns(monkeypatch, tmp_path):
@@ -359,24 +412,3 @@ class TestScannersUseThePreparedDatabase:
         assert not getattr(call, "java", False)
         assert "--skip-java-db-update" in command
         assert "--cache-backend=memory" in command
-
-
-def test_grypes_macos_default_is_under_library_caches(monkeypatch, tmp_path):
-    """The refresh writes where grype reads on macOS, not under ~/.cache."""
-    from automated_security_helper.utils import content_db_refresh
-
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(content_db_refresh.sys, "platform", "darwin")
-    assert content_db_refresh.default_cache_dir("grype", {}) == (
-        Path.home() / "Library" / "Caches" / "grype" / "db"
-    )
-    monkeypatch.setattr(content_db_refresh.sys, "platform", "linux")
-    assert content_db_refresh.default_cache_dir("grype", {}) == (
-        Path.home() / ".cache" / "grype" / "db"
-    )
-    assert (
-        content_db_refresh.default_cache_dir(
-            "grype", {"GRYPE_DB_CACHE_DIR": str(tmp_path / "db")}
-        )
-        == tmp_path / "db"
-    )

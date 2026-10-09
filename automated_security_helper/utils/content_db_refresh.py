@@ -98,23 +98,31 @@ _prepared: Set[Tuple[str, str, bool, bool, str]] = set()
 def default_cache_dir(tool: str, env: Optional[Mapping[str, str]] = None) -> Path:
     """The cache directory ``tool`` uses inside a scanner sandbox.
 
-    The sandbox passes ``GRYPE_*`` and ``TRIVY_*`` through but not ``XDG_CACHE_HOME``,
-    so inside it each tool falls back to its default. The refresh has to write the
-    directory the sandboxed scan then reads, so this resolves the same way. grype's
-    default follows the XDG base directory spec as its library reads it on each
-    platform, which on macOS puts the cache in ``~/Library/Caches``.
+    The refresh has to write the directory the sandboxed scan then reads, so this
+    resolves it the way each tool does. The sandbox passes ``GRYPE_*`` and
+    ``TRIVY_*`` through, and those win, but not ``XDG_CACHE_HOME``, so inside it
+    each tool falls back to its platform default under ``$HOME``:
+
+    - grype: ``xdg.CacheHome/grype/db`` (grype/db/v6/installation/curator.go), and
+      github.com/adrg/xdg puts ``CacheHome`` at ``~/Library/Caches`` on macOS and
+      ``~/.cache`` elsewhere on Unix.
+    - trivy: ``os.UserCacheDir()/trivy`` (pkg/cache/dir.go), which is the same pair
+      of directories.
+
+    There is no sandbox on Windows, so the refresh never runs there.
     """
     env = os.environ if env is None else env
+    user_cache = (
+        Path.home() / "Library" / "Caches"
+        if sys.platform == "darwin"
+        else Path.home() / ".cache"
+    )
     if tool == "grype":
         raw = env.get("GRYPE_DB_CACHE_DIR")
-        if raw:
-            return Path(raw).expanduser()
-        if sys.platform == "darwin":
-            return Path.home() / "Library" / "Caches" / "grype" / "db"
-        return Path.home() / ".cache" / "grype" / "db"
+        return Path(raw).expanduser() if raw else user_cache / "grype" / "db"
     if tool == "trivy":
         raw = env.get("TRIVY_CACHE_DIR")
-        return Path(raw).expanduser() if raw else Path.home() / ".cache" / "trivy"
+        return Path(raw).expanduser() if raw else user_cache / "trivy"
     raise ValueError(f"no content database refresh for {tool!r}")
 
 

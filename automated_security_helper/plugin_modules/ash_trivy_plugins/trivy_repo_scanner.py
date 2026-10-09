@@ -133,6 +133,10 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.cache/trivy", "$TRIVY_CACHE_DIR"),
+        # trivy's default cache on macOS (os.UserCacheDir), read-only like the
+        # cache above: the database is updated there outside the sandbox before an
+        # online scan (utils/content_db_refresh.py), and trivy only reads it.
+        read_paths=("~/Library/Caches/trivy",),
         env_prefixes=("TRIVY_",),
     )
 
