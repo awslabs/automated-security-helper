@@ -282,6 +282,23 @@ def active_scope() -> "SandboxScope | RefusingScope | None":
     return _ACTIVE.get()
 
 
+@contextmanager
+def outside_scanner_sandbox() -> Iterator[None]:
+    """Run the block's spawns unsandboxed, for ASH's own work on a scanner's behalf.
+
+    For preparing content a sandboxed scanner then reads, such as trivy's database:
+    a sandbox may mount the cache read-only or through a throwaway overlay, so an
+    update made inside it would not reach the host, or would let one scanner change
+    what the next one reads. The block runs no scanner code and reads nothing from
+    the scanned tree.
+    """
+    previous = _ACTIVE.set(None)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(previous)
+
+
 def prepare_spawn(
     argv: Sequence[str],
     env: Optional[Mapping[str, str]],

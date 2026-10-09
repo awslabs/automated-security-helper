@@ -1317,7 +1317,7 @@ def _builtin_requirements():
 class TestMacosScannerDeclarations:
     """What each builtin scanner is granted for macOS, and how narrowly."""
 
-    def test_grype_reads_its_macos_database_and_never_updates_it_there(self):
+    def test_grype_reads_its_macos_database_read_only(self):
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             grype_scanner,
         )
@@ -1325,7 +1325,9 @@ class TestMacosScannerDeclarations:
         requirements = grype_scanner.GrypeScanner.sandbox_requirements
         assert "~/Library/Caches/grype" in requirements.read_paths
         assert "~/Library/Caches/grype" not in requirements.cache_paths
-        assert dict(requirements.sandbox_exec_env) == {"GRYPE_DB_AUTO_UPDATE": "false"}
+        # Not updated inside the sandbox: content_db_refresh updates the database
+        # outside it before an online scan and sets GRYPE_DB_AUTO_UPDATE=false.
+        assert dict(requirements.sandbox_exec_env) == {}
 
     def test_cdk_nag_does_not_use_the_shared_jsii_cache(self):
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (

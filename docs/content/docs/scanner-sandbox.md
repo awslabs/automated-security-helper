@@ -57,10 +57,16 @@ it needs.
   npm-audit) get a private, empty one under the results directory, removed after the
   spawn, so uv starts from an empty cache: online it downloads what it runs, offline
   it has nothing cached.
-- Content databases are read, not refreshed, outside bwrap: grype and trivy cannot
-  update theirs during the scan there. Once one is due (trivy's 24 hours after it was
-  built, grype's past its 5-day bound), the online scan fails until the database is
-  refreshed outside ASH (`grype db update`, `trivy image --download-db-only`).
+- grype and trivy cannot update their databases from inside a sandbox, so before a
+  sandboxed online scan ASH updates them itself, outside the sandbox: `grype db
+  update`, and `trivy image --download-db-only` plus, for a misconfiguration scan,
+  trivy's checks bundle. Nothing from the scanned repository reaches these: they run
+  from an empty directory outside every checkout, with an explicit empty config file,
+  against the cache directory the scan reads. A lock in that cache directory makes
+  concurrent scans take turns, and each tool is updated once per scan. The scanners
+  then run with their own update turned off (`--skip-db-update`,
+  `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
+  staleness check still holds the database to its bound.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
@@ -111,7 +117,7 @@ it needs.
 | checkov | no | uv cache | uv-managed Python |
 | semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
 | opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
-| grype | yes (database update) | grype database cache; on macOS the database is read-only and not updated inside the sandbox | single binary |
+| grype | yes (database update) | grype database cache; on macOS, `~/Library/Caches/grype` | single binary |
 | syft | no | syft cache | single binary |
 | trivy | yes (database update) | trivy cache | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
@@ -153,9 +159,8 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         env_prefixes=("MYTOOL_",),
         # Credential-shaped names it needs.
         env_names=("MYTOOL_TOKEN",),
-        # Set under sandbox-exec only, which has no overlay: keep the tool from
-        # writing a cache it gets read-only there.
-        sandbox_exec_env=(("MYTOOL_AUTO_UPDATE", "false"),),
+        # Set under sandbox-exec only, after the allowlist.
+        sandbox_exec_env=(("MYTOOL_PACKAGE_CACHE", "disabled"),),
         # The tool unpacks itself where this variable says and runs what it
         # unpacked; sandbox-exec points it at a private directory per spawn.
         unpack_dir_env="XDG_CACHE_HOME",
@@ -443,10 +448,9 @@ sandbox-exec has no throwaway overlay, so caches are read-only there, as above. 
 macOS-specific locations are declared per scanner and granted as narrowly as the tool
 allows:
 
-- grype's database at `~/Library/Caches/grype` is read-only, and grype runs with
-  `GRYPE_DB_AUTO_UPDATE=false`, so it uses the database it finds and still checks its
-  age online. Update it outside the sandbox (`grype db update`, or an unsandboxed
-  scan) when it is too old.
+- grype's database at `~/Library/Caches/grype`, its default location on macOS, is
+  read-only. Before an online scan ASH updates it there, outside the sandbox, as it
+  does `~/.cache/grype` on Linux.
 - cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
   temporary directory instead of the shared `~/Library/Caches/com.amazonaws.jsii`,
   whose JavaScript every CDK process on the machine runs.

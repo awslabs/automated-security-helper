@@ -70,9 +70,9 @@ class SandboxRequirements:
         sandbox_exec_env: ``(name, value)`` pairs set in the scanner's environment
             under sandbox-exec only, after the allowlist. That backend has no
             throwaway overlay, so a cache it could write would be written in place
-            and read by every later run. These keep the tool from writing what it
-            is given read-only there: grype's database (no update inside the
-            sandbox), jsii's package cache (not used at all).
+            and read by every later run. For a tool that would otherwise reach for
+            a shared cache that backend keeps out of reach: cdk-nag turns jsii's
+            package cache (``~/Library/Caches/com.amazonaws.jsii``) off.
         unpack_dir_env: The tool unpacks itself and runs what it unpacked, at a
             location this environment variable decides (opengrep's macOS binary,
             built with Nuitka's onefile mode, unpacks to
