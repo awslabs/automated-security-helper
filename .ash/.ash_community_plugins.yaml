@@ -25,14 +25,17 @@ ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins
+  - automated_security_helper.plugin_modules.ash_guarddog_plugins
+  - automated_security_helper.plugin_modules.ash_hadolint_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
-    # === GuardDog false positive in this repository's own tests (line-pinned) ===
+    # === GuardDog false positives in this repository's own tests (line-pinned) ===
     # GuardDog's heuristics read source text, so test code that writes a fake
-    # credentials file matches them. Pinned to the one line, so a real finding
-    # elsewhere in the file is still reported.
+    # credentials file, or a fixture that quotes a malicious payload as data, matches
+    # them. Pinned to the one line each, so a real finding elsewhere in the file is
+    # still reported.
     - rule_id: "threat-filesystem-read"
       path: "tests/integration/scanners/test_trivy_real_binary.py"
       line_start: 508
@@ -42,6 +45,14 @@ global_settings:
         secret, generated per run with secrets.choice, into the test's temporary
         fixture tree so trivy's secret scanner has something to find. Nothing reads
         a real credentials file.
+    - rule_id: "threat-runtime-obfuscation-base64exec"
+      path: "tests/unit/plugin_modules/ash_guarddog_plugins/test_guarddog_scanner.py"
+      line_start: 317
+      line_end: 317
+      reason: >-
+        False positive. The line is a string in a captured GuardDog result the test
+        parses ("threat_code": "exec(base64.b64decode(x))"); it is data describing
+        a finding, never executed.
     - path: automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — generated CycloneDX schema definitions contain field names that match secret patterns"
@@ -101,8 +112,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 317
-      line_end: 416
+      line_start: 337
+      line_end: 442
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of the executable inside one of those verified
@@ -123,8 +134,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 824
-      line_end: 850
+      line_start: 897
+      line_end: 941
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -1036,8 +1047,8 @@ global_settings:
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 448
-      line_end: 448
+      line_start: 472
+      line_end: 472
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py

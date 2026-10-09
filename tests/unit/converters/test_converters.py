@@ -301,9 +301,10 @@ class TestArchiveConverterPathTraversal:
             safe_file.write_text('print("safe")')
             tf.add(safe_file, arcname="safe.py")
 
-            # This should be blocked by path traversal protection
+            # This should be blocked by path traversal protection. The content does
+            # not matter to the test; only the member's name does.
             malicious_file = temp_dir / "evil.py"
-            malicious_file.write_text('import os; os.system("whoami")')
+            malicious_file.write_text('print("evil")')
             tf.add(malicious_file, arcname="../../../../../../tmp/evil.py")
 
         def mock_scan_set(*args, **kwargs):
@@ -327,6 +328,11 @@ class TestArchiveConverterPathTraversal:
 
         # The malicious file should NOT exist at the traversal path
         assert not Path("/tmp/evil.py").exists()  # nosec B108 — validates traversal protection
+        # Nor anywhere else: the member was refused for its name, not extracted.
+        assert not list(extracted_dir.rglob("evil.py"))
+        assert [(r.member, r.reason) for r in converter.refused_inputs] == [
+            ("../../../../../../tmp/evil.py", "its path contains a '..' component")
+        ]
 
     def test_convert_zip_with_traversal_does_not_write_outside(
         self, temp_dir, test_plugin_context, monkeypatch
@@ -336,9 +342,8 @@ class TestArchiveConverterPathTraversal:
         zip_path = temp_dir / "source-code.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("safe.py", 'print("safe")')
-            zf.writestr(
-                "../../../../../../tmp/evil.py", 'import os; os.system("whoami")'
-            )
+            # The content does not matter to the test; only the member's name does.
+            zf.writestr("../../../../../../tmp/evil.py", 'print("evil")')
 
         def mock_scan_set(*args, **kwargs):
             return [str(zip_path)]
@@ -361,6 +366,12 @@ class TestArchiveConverterPathTraversal:
 
         # The malicious file should NOT exist at the traversal path
         assert not Path("/tmp/evil.py").exists()  # nosec B108 — validates traversal protection
+        # Nor anywhere else: zipfile itself drops '..' and would write the member
+        # inside the destination, so only the refusal shows ASH refused it.
+        assert not list(extracted_dir.rglob("evil.py"))
+        assert [(r.member, r.reason) for r in converter.refused_inputs] == [
+            ("../../../../../../tmp/evil.py", "its path contains a '..' component")
+        ]
 
     def test_inspect_members_without_target_path_backward_compat(
         self, temp_dir, converter

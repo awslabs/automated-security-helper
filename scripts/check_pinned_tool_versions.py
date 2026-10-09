@@ -128,6 +128,11 @@ CFN_NAG_GEM = "cfn-nag"
 GITHUB = "github-release"
 PYPI = "pypi"
 RUBYGEMS = "rubygems"
+# A library another pinned distribution bundles (a shared library auditwheel grafted
+# into a wheel). Its version is whatever that wheel carries and cannot be bumped on its
+# own, so it is listed but never looked up: comparing it with its project's latest
+# release would report a bump nobody can make.
+BUNDLED = "bundled"
 
 _GITHUB_PREFIX = "https://github.com/"
 _TIMEOUT_SECONDS = 30
@@ -179,7 +184,7 @@ class Pin:
 class Result:
     pin: Pin
     latest: str | None
-    status: str  # "current" | "outdated" | "ahead" | "error"
+    status: str  # "current" | "outdated" | "ahead" | "held" | "error"
     detail: str = ""
 
 
@@ -269,6 +274,17 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                         f"{tool} is {version} in TOOL_VERSIONS and {entry.version} in "
                         f"THIRD_PARTY_LICENSES; a version bump is half-applied."
                     )
+        elif getattr(entry, "bundled_in", None):
+            result.append(
+                Pin(
+                    tool=tool,
+                    version=entry.version,
+                    ecosystem=BUNDLED,
+                    project=entry.bundled_in,
+                    pinned_in=("THIRD_PARTY_LICENSES (bundled)",),
+                )
+            )
+            continue
         else:
             # A license-only entry: bundled, but not downloaded through this module.
             version = entry.version
@@ -306,7 +322,9 @@ def enumerate_pins(pins: Any) -> list[Pin]:
 # Version comparison
 # ---------------------------------------------------------------------------
 
-_VERSION_RE = re.compile(r"^v?(\d+(?:\.\d+)*)(.*)$")
+# An optional "<project>-" prefix: libssh2 and OpenSSL tag their releases
+# "libssh2-1.11.1" and "openssl-3.3.3", and their license entries record the tag.
+_VERSION_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9]*-)?v?(\d+(?:\.\d+)*)(.*)$")
 
 
 def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
@@ -412,6 +430,9 @@ def check(pins: Iterable[Pin], fetchers: Fetchers | None = None) -> list[Result]
     fetchers = fetchers or DEFAULT_FETCHERS
     results = []
     for pin in pins:
+        if pin.ecosystem == BUNDLED:
+            results.append(Result(pin, None, "held", f"version set by {pin.project}"))
+            continue
         try:
             latest = fetchers[pin.ecosystem](pin.project)
             status = compare(pin.version, latest)

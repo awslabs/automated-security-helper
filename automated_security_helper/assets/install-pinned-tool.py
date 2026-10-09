@@ -405,7 +405,7 @@ def install(
                     raise SystemExit(_EXIT_INTEGRITY)
                 print(f"Verified executable SHA256 {extracted}", flush=True)
         else:
-            # The asset is the executable itself (opengrep), so the digest just
+            # The asset is the executable itself (opengrep, hadolint), so the digest just
             # verified covers the exact bytes being installed, and it is also the
             # executable digest (ToolAsset.executable_digest falls back to it).
             archive.rename(staged)
@@ -925,6 +925,33 @@ def _copies_on_path(executable: str, search_path: "str | None") -> "list[str]":
     return copies
 
 
+def _uv_tool_dir() -> "str | None":
+    """What ``uv tool dir`` prints, or None if uv is not there to ask."""
+    uv = shutil.which("uv")
+    if uv is None:
+        return None
+    try:
+        result = subprocess.run(  # nosec B603 - fixed argv, uv resolved on PATH
+            [uv, "tool", "dir"],
+            capture_output=True,
+            text=True,
+            timeout=_VERSION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _probe_argv(
+    probe: "tuple[str, ...]", uv_tool_dir: "str | None"
+) -> "list[str] | None":
+    """``probe`` with ``{uv_tool_dir}`` filled in; None if it is needed and unknown."""
+    if any("{uv_tool_dir}" in part for part in probe) and not uv_tool_dir:
+        return None
+    return [part.replace("{uv_tool_dir}", uv_tool_dir or "") for part in probe]
+
+
 def verify_third_party(
     package_root: Path,
     third_party_dir: Path,
@@ -953,6 +980,9 @@ def verify_third_party(
     problems: "list[str]" = []
     entries = pins.THIRD_PARTY_LICENSES
     package_files = python_package_files(site_dirs)
+    uv_tool_dir: "str | None" = None
+    if any(getattr(entries[t], "version_probe", ()) for t in entries):
+        uv_tool_dir = _uv_tool_dir()
 
     if not third_party_dir.is_dir():
         return [f"{third_party_dir} does not exist; no license files were installed"]
@@ -987,9 +1017,15 @@ def verify_third_party(
         # getattr: a table from before version_probe existed has executables only.
         probe = getattr(entry, "version_probe", ())
         if probe:
-            # Not an executable on PATH (a rules bundle): the probe reports the
-            # version that is installed.
-            argv = list(probe)
+            # Not an executable on PATH (a rules bundle, a library inside a uv tool
+            # environment): the probe reports the version that is installed.
+            argv = _probe_argv(probe, uv_tool_dir)
+            if argv is None:
+                problems.append(
+                    f"{tool}: its version probe needs `uv tool dir`, and uv did not "
+                    "answer"
+                )
+                continue
             try:
                 output = version_output(argv[0], argv)
             except (OSError, subprocess.TimeoutExpired) as exc:
@@ -1095,7 +1131,10 @@ def main(argv: "list[str] | None" = None) -> int:
     )
     parser.add_argument(
         "tool",
-        help=("actionlint, cfn-guard, gitleaks, grype, opengrep, syft, trivy or uv"),
+        help=(
+            "actionlint, cfn-guard, gitleaks, grype, hadolint, opengrep, syft, "
+            "trivy or uv"
+        ),
     )
     parser.add_argument(
         "-b",

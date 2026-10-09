@@ -7,6 +7,8 @@ This section is dedicated to community-developed plugins for ASH. Community plug
 ### Security Scanners
 
 - **[Ferret Scan Plugin](ferret-scan-plugin.md)** - Integrates Ferret Scan for comprehensive sensitive data detection (credit cards, passports, SSNs, API keys, secrets, and more)
+- **[GuardDog Plugin](guarddog-plugin.md)** - Malicious-package heuristics for PyPI, npm, Go, GitHub Actions, RubyGems and crates packages
+- **[hadolint Plugin](hadolint-plugin.md)** - Lints Dockerfiles and Containerfiles with hadolint and its ShellCheck integration
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 

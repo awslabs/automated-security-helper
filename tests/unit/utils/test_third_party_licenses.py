@@ -28,6 +28,8 @@ member or a digest mismatch), and the container legs re-check the finished image
 
 import importlib.util
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,6 +46,8 @@ from automated_security_helper.utils.tool_downloads import (
     get_third_party_license,
 )
 from automated_security_helper.core.exceptions import ToolNotProvisionableError
+from automated_security_helper.utils.process_env import snapshot_environ
+from tests.unit.utils.pygit2_bundle_fixture import fake_pygit2_site
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
@@ -191,7 +195,10 @@ class TestEntryShape:
     @pytest.mark.parametrize("tool", ENTRIES)
     def test_there_is_a_license_text(self, tool):
         names = [f.name for f in THIRD_PARTY_LICENSES[tool].files]
-        assert any(n.upper().startswith(("LICENSE", "COPYING")) for n in names), names
+        # LICENCE: PCRE's own spelling.
+        assert any(
+            n.upper().startswith(("LICENSE", "LICENCE", "COPYING")) for n in names
+        ), names
 
     @pytest.mark.parametrize("tool", ENTRIES)
     def test_every_license_identifier_is_classified(self, tool):
@@ -204,6 +211,24 @@ class TestEntryShape:
             assert identifier in COPYLEFT_SPDX | PERMISSIVE_SPDX, (
                 f"{tool}: classify {identifier} in COPYLEFT_SPDX or PERMISSIVE_SPDX"
             )
+
+    @pytest.mark.parametrize("tool", ENTRIES)
+    def test_every_license_exception_is_known(self, tool):
+        """The token after WITH is an exception, never a license to classify.
+
+        Known exceptions only, so a typo or a license placed after WITH fails here
+        instead of silently dropping out of the copyleft check.
+        """
+        for exception in THIRD_PARTY_LICENSES[tool].spdx_exceptions:
+            assert exception in tool_downloads.SPDX_EXCEPTIONS, (
+                f"{tool}: {exception} is not a known SPDX exception"
+            )
+
+    def test_an_exception_does_not_hide_the_license_it_modifies(self):
+        entry = THIRD_PARTY_LICENSES["pygit2"]
+        assert entry.spdx_identifiers == ["GPL-2.0-only"]
+        assert entry.spdx_exceptions == ["GCC-exception-2.0"]
+        assert entry.copyleft
 
     def test_the_two_classifications_do_not_overlap(self):
         assert not COPYLEFT_SPDX & PERMISSIVE_SPDX
@@ -328,6 +353,16 @@ class TestTheDockerfileInstallsEveryEntry:
             if f"install-pinned-tool {tool} " in core
         )
         assert declared < first_install
+
+    def test_the_pygit2_constraint_matches_its_entry(self):
+        """The image holds pygit2 to the release whose files it ships."""
+        core = _core_stage(DOCKERFILE.read_text())
+        version = THIRD_PARTY_LICENSES["pygit2"].version.lstrip("v")
+        assert f'ARG PYGIT2_VERSION="{version}"' in core
+        assert 'ENV UV_CONSTRAINT="/etc/ash/uv-constraints.txt"' in core
+        assert core.index("ENV UV_CONSTRAINT=") < core.index(
+            'ash dependencies install --bin-path "${ASH_BIN_PATH}"'
+        ), "the constraint must be in place before GuardDog is installed"
 
     def test_every_uv_install_leaves_no_cache_in_its_layer(self):
         """uv's cache is only useful to a later install on the same machine.
@@ -460,6 +495,9 @@ class TestThePythonTools:
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             cfn_lint_scanner,
         )
+        from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
+            guarddog_scanner,
+        )
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             zizmor_scanner,
         )
@@ -482,6 +520,7 @@ class TestThePythonTools:
             "cfn-lint": lambda: (
                 cfn_lint_scanner.CfnLintScannerConfigOptions().tool_version
             ),
+            "guarddog": lambda: guarddog_scanner.GUARDDOG_DEFAULT_VERSION_CONSTRAINT,
             "zizmor": lambda: zizmor_scanner.ZizmorScannerConfigOptions().tool_version,
         }[tool]()
         assert default, f"{tool} has no default constraint to check the pin against"
@@ -503,16 +542,41 @@ class TestThePythonTools:
         text = DOCKERFILE.read_text()
         for line in lines:
             assert line.strip() == (
-                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \\'
+                'ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \\'
             ), line
         assert (
             text.count('RUN pins="$(install-pinned-tool --uv-tool-pins)" && \\\n') == 2
         )
+        # Both load the community modules that bring tools of their own, so those
+        # tools are installed and pinned too.
+        assert (
+            text.count(
+                '    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \\\n'
+            )
+            == 2
+        )
+        declared = re.findall(
+            r'^ARG ASH_COMMUNITY_PLUGIN_MODULES="([^"]+)"$', text, re.MULTILINE
+        )
+        assert len(declared) == 2 and declared[0] == declared[1], declared
+        from automated_security_helper.core.community_scanners import (
+            community_scanner_modules,
+        )
+
+        expected = sorted(
+            set(community_scanner_modules().values())
+            - {
+                "automated_security_helper.plugin_modules.ash_ferret_plugins",
+                "automated_security_helper.plugin_modules.ash_snyk_plugins",
+                "automated_security_helper.plugin_modules.ash_trivy_plugins",
+            }
+        )
+        assert sorted(declared[0].split(",")) == expected
 
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())
         staged = core.index(
-            "install-pinned-tool --licenses-only bandit cfn-lint checkov semgrep zizmor"
+            "install-pinned-tool --licenses-only bandit cfn-lint checkov guarddog semgrep zizmor"
         )
         assert core.index('ash dependencies install --bin-path "${ASH_BIN_PATH}"') < (
             staged
@@ -574,3 +638,166 @@ class TestTheHashBlock:
             used.add(entry.commit)
             used.update(f.sha256 for f in entry.files if f.sha256)
         assert sorted(set(tool_downloads._THIRD_PARTY_HASHES.values()) - used) == []
+
+
+def _run_probe(tool: str, site: Path) -> "subprocess.CompletedProcess[str]":
+    """Run ``tool``'s version probe with this interpreter over a fake site."""
+    _, flag, code = THIRD_PARTY_LICENSES[tool].version_probe
+    return subprocess.run(  # nosec B603 - this interpreter, the table's own probe
+        [sys.executable, flag, code],
+        capture_output=True,
+        text=True,
+        env={**snapshot_environ(), "PYTHONPATH": str(site)},
+        timeout=60,
+        check=False,
+    )
+
+
+class TestPygit2BundledLibraries:
+    """pygit2's manylinux wheel bundles libssh2, OpenSSL and PCRE beside libgit2.
+
+    Each ships in the image inside GuardDog's environment, so each needs its own
+    license entry; libgit2's COPYING covers libgit2's own vendored code, not the
+    libraries the wheel grafted in.
+    """
+
+    BUNDLED = ("libssh2", "openssl", "pcre")
+
+    @pytest.mark.parametrize("tool", BUNDLED)
+    def test_each_bundled_library_has_a_probed_entry(self, tool):
+        entry = THIRD_PARTY_LICENSES[tool]
+        assert entry.files, tool
+        assert entry.version_probe[0] == "{uv_tool_dir}/guarddog/bin/python", tool
+
+    @pytest.mark.parametrize("tool", BUNDLED)
+    def test_the_probe_reads_the_version_the_entry_records(self, tool, tmp_path):
+        site = fake_pygit2_site(tmp_path)
+        proc = _run_probe(tool, site)
+        assert proc.returncode == 0, proc.stderr
+        assert installer.reports_version(
+            proc.stdout, THIRD_PARTY_LICENSES[tool].version.lstrip("v")
+        ), proc.stdout
+
+    @pytest.mark.parametrize(
+        "tool,name",
+        [
+            ("libssh2", "libssh2-7af77739.so.1.0.1"),
+            ("openssl", "libcrypto-909d00cf.so.3"),
+            ("pcre", "libpcre-0dd207b5.so.1.2.10"),
+        ],
+    )
+    def test_a_missing_library_fails_the_probe(self, tool, name, tmp_path):
+        """Fail closed: no file to read is not a version."""
+        site = fake_pygit2_site(tmp_path, {name: None})
+        proc = _run_probe(tool, site)
+        assert proc.returncode != 0, proc.stdout
+
+    @pytest.mark.parametrize(
+        "tool,name,data",
+        [
+            ("libssh2", "libssh2-7af77739.so.1.0.1", b"SSH-2.0-libssh2_1.11.0\x00"),
+            ("openssl", "libcrypto-909d00cf.so.3", b"OpenSSL 3.3.2 3 Sep 2024\x00"),
+            ("pcre", "libpcre-0dd207b5.so.1.2.10", b"8.45 2021-06-15\x00"),
+        ],
+    )
+    def test_a_different_bundled_version_is_not_reported_as_the_pinned_one(
+        self, tool, name, data, tmp_path
+    ):
+        """A pygit2 that bundles another release must fail the image build."""
+        site = fake_pygit2_site(tmp_path, {name: data})
+        proc = _run_probe(tool, site)
+        assert proc.returncode == 0, proc.stderr
+        assert not installer.reports_version(
+            proc.stdout, THIRD_PARTY_LICENSES[tool].version.lstrip("v")
+        ), proc.stdout
+
+    def test_the_image_fetches_their_license_files(self):
+        line = next(
+            line
+            for line in DOCKERFILE.read_text().splitlines()
+            if "install-pinned-tool --licenses-only" in line
+        )
+        for tool in self.BUNDLED:
+            assert f" {tool} " in f" {line.rstrip(chr(39))} ", (tool, line)
+
+
+class TestYaraBundledOpenSSL:
+    """yara-python's manylinux wheel grafts its own OpenSSL, 1.1.1, into
+    ``yara_python.libs``. It ships in GuardDog's environment beside pygit2's
+    OpenSSL 3, under a different license, so it needs an entry of its own."""
+
+    TOOL = "openssl-1.1"
+    LIB = "libcrypto-0ec7d250.so.1.1"
+
+    def test_it_is_a_probed_entry_under_the_openssl_license(self):
+        entry = THIRD_PARTY_LICENSES[self.TOOL]
+        assert entry.license == "OpenSSL"
+        assert not entry.copyleft
+        assert entry.version_probe[0] == "{uv_tool_dir}/guarddog/bin/python"
+
+    def test_the_probe_reads_the_version_the_entry_records(self, tmp_path):
+        proc = _run_probe(self.TOOL, fake_pygit2_site(tmp_path))
+        assert proc.returncode == 0, proc.stderr
+        assert installer.reports_version(
+            proc.stdout, THIRD_PARTY_LICENSES[self.TOOL].version
+        ), proc.stdout
+
+    def test_a_missing_library_fails_the_probe(self, tmp_path):
+        site = fake_pygit2_site(tmp_path, yara_overrides={self.LIB: None})
+        assert _run_probe(self.TOOL, site).returncode != 0
+
+    def test_another_release_is_not_reported_as_the_pinned_one(self, tmp_path):
+        site = fake_pygit2_site(
+            tmp_path,
+            yara_overrides={self.LIB: b"\x7fELF\x00OpenSSL 1.1.1v  1 Aug 2023\x00"},
+        )
+        proc = _run_probe(self.TOOL, site)
+        assert proc.returncode == 0, proc.stderr
+        assert not installer.reports_version(
+            proc.stdout, THIRD_PARTY_LICENSES[self.TOOL].version
+        ), proc.stdout
+
+    def test_pygit2s_openssl_3_probe_does_not_read_this_copy(self, tmp_path):
+        """The two OpenSSL entries must each read their own library."""
+        site = fake_pygit2_site(tmp_path)
+        proc = _run_probe("openssl", site)
+        assert proc.returncode == 0, proc.stderr
+        assert "1.1.1" not in proc.stdout
+
+    def test_the_image_fetches_its_license_file(self):
+        line = next(
+            line
+            for line in DOCKERFILE.read_text().splitlines()
+            if "install-pinned-tool --licenses-only" in line and "pygit2" in line
+        )
+        assert f" {self.TOOL} " in f" {line.rstrip(chr(39))} ", line
+
+
+def test_hadolints_source_notice_points_at_its_linked_libraries():
+    """hadolint is one statically linked binary: its corresponding source is its
+    repository plus the Hackage packages ThirdPartyNotices.txt lists."""
+    notice = THIRD_PARTY_LICENSES["hadolint"].source_notice()
+    assert "Corresponding source" in notice
+    assert "ThirdPartyNotices.txt" in notice.split("Corresponding source")[1]
+    assert "hackage.haskell.org" in notice
+
+
+def test_an_entry_without_a_source_note_is_unchanged():
+    notice = THIRD_PARTY_LICENSES["opengrep"].source_notice()
+    assert "Hackage" not in notice
+
+
+def test_a_bundled_librarys_source_notice_says_what_built_it():
+    notice = THIRD_PARTY_LICENSES["libgit2"].source_notice()
+    assert "the pygit2 1.18.2 manylinux wheel" in notice
+    assert "as published by its upstream project" not in notice
+
+
+def test_a_release_tag_spelled_unlike_the_version_is_named_as_upstream_spells_it():
+    assert "Release tag:         OpenSSL_1_1_1w" in (
+        THIRD_PARTY_LICENSES["openssl-1.1"].source_notice()
+    )
+    assert "Release tag:         none" in THIRD_PARTY_LICENSES["pcre"].source_notice()
+    assert "Release tag:         v1.30.2" in (
+        THIRD_PARTY_LICENSES["opengrep"].source_notice()
+    )

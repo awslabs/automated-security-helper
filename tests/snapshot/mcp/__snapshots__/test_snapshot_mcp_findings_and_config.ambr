@@ -1977,6 +1977,20 @@
         'offline_strategy': 'cache_flags',
         'version': None,
       }),
+      'guarddog': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'guarddog',
+        'offline_strategy': 'bundled',
+        'version': '<GUARDDOG_VERSION>',
+      }),
+      'hadolint': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'name': 'hadolint',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
       'npm_audit': dict({
         'dependencies_satisfied': True,
         'enabled': True,

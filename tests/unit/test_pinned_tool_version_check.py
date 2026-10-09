@@ -87,7 +87,12 @@ def _expected_pins(pins: Any) -> dict[str, tuple[str, str]]:
     for tool, version in pins.TOOL_VERSIONS.items():
         expected[tool] = (version, checker.GITHUB)
     for tool, entry in pins.THIRD_PARTY_LICENSES.items():
-        ecosystem = checker.PYPI if entry.distribution else checker.GITHUB
+        if entry.distribution:
+            ecosystem = checker.PYPI
+        elif getattr(entry, "bundled_in", None):
+            ecosystem = checker.BUNDLED
+        else:
+            ecosystem = checker.GITHUB
         expected[tool] = (entry.version, ecosystem)
     expected[checker.CFN_NAG_GEM] = (pins.CFN_NAG_GEM_VERSION, checker.RUBYGEMS)
     return expected
@@ -243,6 +248,8 @@ class TestVersionComparison:
             ("1.2.0rc1", "1.2.0", "outdated"),
             ("3.3.26", "3.3.25", "ahead"),
             ("v0.69.10", "v0.69.9", "ahead"),
+            ("libssh2-1.11.1", "libssh2-1.11.1", "current"),  # project-prefixed tag
+            ("openssl-3.3.3", "openssl-3.6.0", "outdated"),
         ],
     )
     def test_compare(self, pinned, latest, status):
@@ -508,3 +515,38 @@ class TestOnlyAllowlistedHttpsUrlsAreFetched:
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         assert checker._get_json(url) == {"ok": True}
         assert opened == [url]
+
+
+class TestBundledLibrariesAreListedButNotLookedUp:
+    """A library a wheel bundles cannot be bumped on its own (its version is the
+    wheel's), so comparing it with its project's latest release would make the
+    scheduled check red with a bump nobody can make. It is listed as held instead."""
+
+    def test_each_bundled_entry_enumerates_as_bundled(self, pins):
+        bundled = {
+            tool
+            for tool, entry in pins.THIRD_PARTY_LICENSES.items()
+            if getattr(entry, "bundled_in", None)
+        }
+        assert {"libgit2", "libssh2", "openssl", "openssl-1.1", "pcre"} <= bundled
+        by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
+        for tool in bundled:
+            assert by_tool[tool].ecosystem == checker.BUNDLED, tool
+
+    def test_a_bundled_pin_is_held_and_never_fetched(self, pins):
+        bundled = [
+            p for p in checker.enumerate_pins(pins) if p.ecosystem == checker.BUNDLED
+        ]
+        assert bundled
+
+        def refuse(project):
+            raise AssertionError(f"looked up {project}")
+
+        results = checker.check(bundled, {checker.GITHUB: refuse, checker.PYPI: refuse})
+        assert {r.status for r in results} == {"held"}
+        assert checker.exit_code(results, fail_on_outdated=True) == checker.EXIT_OK
+
+    def test_pygit2_itself_is_still_checked(self, pins):
+        """The wheel that sets the bundled versions is an ordinary pin."""
+        by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
+        assert by_tool["pygit2"].ecosystem == checker.GITHUB

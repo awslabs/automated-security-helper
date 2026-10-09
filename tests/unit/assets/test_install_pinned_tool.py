@@ -399,6 +399,52 @@ class TestTheDigestCheckCanFail:
         )
 
 
+class TestABareBinaryAsset:
+    """hadolint's release asset is the executable, with no archive around it."""
+
+    # The published release checksum of hadolint-linux-x86_64 v2.15.1, as pinned in
+    # tool_downloads.py; public by construction, not a credential.
+    HADOLINT_LINUX_AMD64 = "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"  # pragma: allowlist secret
+
+    @staticmethod
+    def _fake_download(payload: bytes):
+        import hashlib
+
+        def download(url: str, target: Path) -> str:
+            target.write_bytes(payload)
+            return hashlib.sha256(payload).hexdigest()
+
+        return download, hashlib.sha256(payload).hexdigest()
+
+    def _linux(self, monkeypatch, download):
+        monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
+        monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(installer, "download", download)
+
+    def test_the_verified_bytes_are_installed_verbatim(self, tmp_path, monkeypatch):
+        payload = b"\x7fELF fake hadolint"
+        download, digest = self._fake_download(payload)
+        pins = _pins_dir(tmp_path, {self.HADOLINT_LINUX_AMD64: digest})
+        self._linux(monkeypatch, download)
+
+        installed = installer.install("hadolint", tmp_path / "bin", pins)
+
+        assert installed == tmp_path / "bin" / "hadolint"
+        assert installed.read_bytes() == payload
+        assert os.access(installed, os.X_OK)
+
+    def test_a_mismatch_exits_three_and_installs_nothing(self, tmp_path, monkeypatch):
+        download, _ = self._fake_download(b"\x7fELF fake hadolint")
+        pins = _pins_dir(tmp_path, {self.HADOLINT_LINUX_AMD64: "0" * 64})
+        self._linux(monkeypatch, download)
+
+        bin_dir = tmp_path / "bin"
+        with pytest.raises(SystemExit) as raised:
+            installer.install("hadolint", bin_dir, pins)
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not bin_dir.exists() or list(bin_dir.iterdir()) == []
+
+
 class TestABareExecutableAsset:
     """opengrep publishes the executable itself; there is no archive to open."""
 
@@ -700,6 +746,7 @@ import io  # noqa: E402
 import json  # noqa: E402
 import shutil  # noqa: E402
 
+from tests.unit.utils.pygit2_bundle_fixture import fake_pygit2_site  # noqa: E402
 from automated_security_helper.utils.tool_downloads import (  # noqa: E402
     THIRD_PARTY_LICENSES,
 )
@@ -1029,8 +1076,12 @@ class TestVerifyThirdParty:
 
     @pytest.fixture(autouse=True)
     def _bundled_components(self, tmp_path, monkeypatch):
-        """What the version probe of the rules bundle reads in the image: its
-        manifest under ASH_CFN_GUARD_RULES_DIR."""
+        """What the version probes of non-executable entries read in the image.
+
+        The rules bundle's manifest under ASH_CFN_GUARD_RULES_DIR, and a uv tool
+        directory whose guarddog/bin/python runs the real interpreter over a fake
+        pygit2 and pygit2.libs that report the versions the table records.
+        """
         rules = tmp_path / "cfn-guard-rules"
         registry = THIRD_PARTY_LICENSES["aws-guard-rules-registry"].version
         manifest_dir = rules / f"aws-guard-rules-registry-{registry}"
@@ -1040,6 +1091,17 @@ class TestVerifyThirdParty:
         )
         monkeypatch.setenv("ASH_CFN_GUARD_RULES_DIR", str(rules))
 
+        tools = tmp_path / "uv-tools"
+        python = tools / "guarddog" / "bin" / "python"
+        python.parent.mkdir(parents=True)
+        site = fake_pygit2_site(tmp_path / "guarddog-site")
+        # The real interpreter on a fake site-packages, so the probes' own code runs.
+        python.write_text(
+            f'#!/bin/sh\nPYTHONPATH="{site}" exec "{sys.executable}" "$@"\n'
+        )
+        python.chmod(0o755)
+        monkeypatch.setattr(installer, "_uv_tool_dir", lambda: str(tools))
+        self.uv_tools = tools
         self.rules = rules
 
     @staticmethod
@@ -1122,6 +1184,15 @@ class TestVerifyThirdParty:
         (Path(path) / "uv").unlink()
         self._fails(pins, third_party, path, "uv: uv is not on PATH")
 
+    def test_a_bundled_library_reporting_another_version(self, tmp_path):
+        """pygit2 resolved past its constraint: its files would describe another release."""
+        pins, third_party, path = self._tree(tmp_path)
+        python = self.uv_tools / "guarddog" / "bin" / "python"
+        python.write_text("#!/bin/sh\necho 1.17.0\n")
+        self._fails(
+            pins, third_party, path, "pygit2: its version probe does not report"
+        )
+
     def test_a_rules_bundle_at_another_version(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
         for manifest in self.rules.glob("*/.ash-rules-manifest.json"):
@@ -1130,10 +1201,18 @@ class TestVerifyThirdParty:
             pins, third_party, path, "aws-guard-rules-registry: its version probe"
         )
 
-    def test_a_probed_entry_needs_no_executable_on_path(self, tmp_path):
-        """The rules bundle is not on PATH, and need not be."""
+    def test_a_probe_needing_uv_fails_when_uv_cannot_answer(
+        self, tmp_path, monkeypatch
+    ):
         pins, third_party, path = self._tree(tmp_path)
-        assert not (Path(path) / "aws-guard-rules-registry").exists()
+        monkeypatch.setattr(installer, "_uv_tool_dir", lambda: None)
+        self._fails(pins, third_party, path, "libgit2: its version probe needs")
+
+    def test_a_probed_entry_needs_no_executable_on_path(self, tmp_path):
+        """The rules bundle and the libraries are not on PATH, and need not be."""
+        pins, third_party, path = self._tree(tmp_path)
+        for tool in ("aws-guard-rules-registry", "libgit2", "pygit2"):
+            assert not (Path(path) / tool).exists()
         assert installer.verify_third_party(pins, third_party, path, []) == []
 
     def test_a_secondary_executable_may_be_absent(self, tmp_path):
