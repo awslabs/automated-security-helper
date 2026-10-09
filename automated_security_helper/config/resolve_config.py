@@ -314,7 +314,7 @@ def _load_operator_config(
     except ValidationError as e:
         raise ASHConfigValidationError(
             f"Configuration validation failed for '{describe_config_path(path)}': "
-            f"{str(e)}. Run 'ash config lint' to identify and fix issues."
+            f"{str(e)}. Run 'ashx config lint' to identify and fix issues."
         ) from e
     return config, list(document.chain)
 
