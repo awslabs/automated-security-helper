@@ -36,16 +36,15 @@ scanners:
 
 ### Which gitleaks config is used
 
-1. `options.config_file`, when set. A path that does not exist fails the scan rather than falling back to gitleaks' default rules.
-2. Otherwise, if `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML` is set in the environment, gitleaks resolves the config from it.
-3. Otherwise `.gitleaks.toml`, then `.ash/.gitleaks.toml`, in the source directory.
-4. Otherwise gitleaks' built-in rules.
+The scanned repository's own gitleaks configuration is not used. A `.gitleaks.toml` can replace gitleaks' rules or allowlist every path, and a `.gitleaksignore` drops findings by fingerprint, before ASH sees the report: what they hide is neither reported nor counted as suppressed. Tune findings with ASH suppressions, which are both.
 
-ASH passes the file it finds in step 3 explicitly, so archives and notebooks that ASH extracts into its work directory are scanned with the same rules as the source tree. Path-based allowlists and `.gitleaksignore` fingerprints are matched against relative paths, so they do not match findings in that extracted content, which gitleaks reports by absolute path.
+1. `options.config_file`, when the operator set it: from `--config-overrides`, or an ASH config file outside the scanned tree. A path that does not exist fails the scan rather than falling back to gitleaks' default rules.
+2. Otherwise, if `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML` is set in the environment, gitleaks resolves the config from it. Under `--sandbox` those variables are not passed in, and step 3 applies.
+3. Otherwise gitleaks' default rules, through a config ASH writes that extends them and adds nothing. It is passed as `--config`, so gitleaks does not fall back to a `.gitleaks.toml` in the scanned tree.
 
-`config_file` and `baseline_path` may also be absolute paths or point outside the source directory. They are read from your ASH config, which ASH treats as trusted input.
+`config_file` or `baseline_path` set by an ASH config inside the scanned tree (`.ash/.ash.yaml`) is ignored with a warning, and a `.gitleaks.toml` or `.ash/.gitleaks.toml` in the tree is noted at INFO. The operator's files may be absolute paths or point outside the source directory.
 
-A `.gitleaks.toml` or `.gitleaksignore` in the scanned repository is therefore trusted the way gitleaks itself trusts it: a change that adds one can narrow or replace the rules (a config without `[extend] useDefault = true` drops the built-in rules, and an allowlist can match everything). That is deliberate, because these files are how a project records its own gitleaks decisions, and it differs from the `trivy` scanner, which reads no config from the scanned repository unless configured. When the repository under scan is not trusted to set its own rules, as when scanning a pull request from a fork, set `options.config_file` to a config you control: step 1 then wins, and the repository's `.gitleaks.toml` is not read. Its `.gitleaksignore` is still read, so review changes to that file the way you would a suppression. ASH logs, at INFO, when it uses a config file from the scanned repository.
+gitleaks always reads `.gitleaksignore` at the root of the path it scans, whatever `--gitleaks-ignore-path` says, and has no flag to turn that off. When the scan root has one, ASH runs gitleaks again on each file it names, one file per run (such a run reads no `.gitleaksignore`), and reports the findings the first run dropped. A failed re-run fails the scan.
 
 gitleaks's options are described by the JSON schema (`automated_security_helper/schemas/AshConfig.json`) and listed below.
 
@@ -59,14 +58,13 @@ ASH always runs gitleaks with `--redact=100`, so gitleaks writes `REDACTED` in p
 
 ## Suppressing findings
 
-gitleaks' own mechanisms and ASH's suppressions both apply. gitleaks drops what its mechanisms allow before ASH sees the report; ASH then applies its suppressions to what is left.
+Use ASH suppressions: they are recorded in the reports and counted. gitleaks' own mechanisms drop findings before ASH sees the report, so only these still apply:
 
-gitleaks mechanisms:
-
-- `[[allowlists]]` in the gitleaks config (paths, regexes, stopwords, per-rule).
 - A `gitleaks:allow` comment on the line with the secret.
-- `.gitleaksignore` in the source directory, one fingerprint per line in the form `<file>:<rule-id>:<line>`, for example `src/settings.py:github-pat:12`. ASH runs gitleaks from the source directory with the source as `.`, so file paths in fingerprints are relative to the source directory, the same as a plain `gitleaks dir .` run.
-- `baseline_path`: a previous gitleaks JSON report whose findings are ignored.
+- `[[allowlists]]` in an operator's `config_file` (paths, regexes, stopwords, per-rule).
+- An operator's `baseline_path`: a previous gitleaks JSON report whose findings are ignored.
+
+The scanned repository's `.gitleaks.toml` and `.gitleaksignore` do not apply (see above).
 
 ASH suppressions use the gitleaks rule id (for example `github-pat`, `aws-access-token`) and the path relative to the source directory:
 

@@ -37,9 +37,9 @@ scanners:
       # Look for licenses in source headers too. Only used with `license`.
       license_full: false
       disable_telemetry: true
-      # A trivy.yaml, a .trivyignore and a trivy-secret.yaml, relative to the
-      # source directory. Unset, the ones in the scanned repository are NOT read;
-      # see below.
+      # A trivy.yaml, a .trivyignore and a trivy-secret.yaml outside the scanned
+      # tree, set by the operator. Unset, the ones in the scanned repository are
+      # NOT read; see below.
       config_file: null
       ignore_file: null
       secret_config_file: null
@@ -54,22 +54,17 @@ scanners:
 
 ## trivy configuration in the scanned repository
 
-trivy reads `trivy.yaml`, `.trivyignore` and, for the `secret` scanner, `trivy-secret.yaml` from its working directory, which is the repository being scanned. Any of them can remove findings without the report saying so: a `severity: [CRITICAL]` or `scan.skip-files` entry in `trivy.yaml` removes every lower-rated or skipped finding, each `.trivyignore` line removes an advisory, and `trivy-secret.yaml` can disable secret rules. So the builtin scanner passes `--config`, `--ignorefile` and `--secret-config` pointing at files of its own that set nothing, and a repository's own files are not read. To use them, name them:
+trivy reads `trivy.yaml`, `.trivyignore` and, for the `secret` scanner, `trivy-secret.yaml` from its working directory, which is the repository being scanned. Any of them can remove findings without the report saying so: a `severity: [CRITICAL]` or `scan.skip-files` entry in `trivy.yaml` removes every lower-rated or skipped finding, an `ignore-policy` it names (a Rego file) drops whatever the policy matches, each `.trivyignore` line removes an advisory, and `trivy-secret.yaml` can disable secret rules. A `trivy.yaml` can also point trivy at a directory of WASM modules (`module.dir`) and enable them, which runs them during the scan. So the builtin scanner passes `--config`, `--ignorefile` and `--secret-config` pointing at files of its own that set nothing, and a repository's own files are not read. trivy reads no other file from a default location: `--ignore-policy` has no default.
 
-```yaml
-scanners:
-  trivy:
-    options:
-      config_file: trivy.yaml
-      ignore_file: .trivyignore
-      secret_config_file: trivy-secret.yaml
+To use your own, name them as the operator, through `--config-overrides` or an ASH config file outside the scanned tree, for files outside the scanned tree:
+
+```bash
+ash scan --config-overrides 'scanners.trivy.options.ignore_file=/etc/ash/trivyignore'
 ```
 
-A relative path is anchored on the source directory. A configured file that does not exist fails the scan rather than running without it.
+Each of `config_file`, `ignore_file` and `secret_config_file` set by an ASH config inside the scanned tree, or naming a file inside it, is ignored with a warning, and trivy gets ASH's empty one. A configured file that does not exist fails the scan rather than running without it.
 
-`config_file` is held to more than that, because a `trivy.yaml` can point trivy at a directory of WASM modules (`module.dir`) and enable them, which runs them during the scan. It is honored only when the operator sets it, through `--config-overrides` or a config file outside the scanned tree, and only for a file outside the scanned tree. Otherwise it is ignored with a warning and trivy gets ASH's empty config. `ignore_file` and `secret_config_file` hold patterns, not code, and are honored from the repository's config as shown above.
-
-To accept a finding, prefer an ASH suppression, which is recorded in the reports. The community `trivy-repo` plugin passes its own config file and modules directory the same way; see its `config_file` and `module_dir` options.
+To accept a finding, prefer an ASH suppression, which is recorded in the reports and counted. The community `trivy-repo` plugin passes its own config file, modules directory and secret config the same way; see its `config_file`, `module_dir` and `secret_config_file` options.
 
 ## Severity
 

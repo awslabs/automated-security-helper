@@ -297,16 +297,20 @@ def test_an_operator_chosen_trivy_file_is_passed(tmp_path, option, flag, name):
         ("secret_config_file", "--secret-config", "trivy-secret.yaml"),
     ],
 )
-def test_pattern_files_from_the_scanned_tree_are_still_passed(
-    tmp_path, option, flag, name
+@pytest.mark.parametrize("who", ["tree", "operator-inside-the-tree"])
+def test_ignore_and_secret_files_need_the_operator_and_a_path_outside_the_tree(
+    tmp_path, caplog, option, flag, name, who
 ):
-    # They hold patterns, not code; only config_file can load modules.
+    """Either can drop findings that then appear neither in the results nor as
+    suppressed, so the tree cannot choose one, and nobody can point at one in it."""
     probe = _scanner(tmp_path)
     (probe.context.source_dir / name).write_text("", encoding="utf-8")
-    scanner = _scanner(tmp_path, **{option: name})
-    argv = _argv(scanner, scanner.context.source_dir)
-    expected = (scanner.context.source_dir / name).resolve().as_posix()
-    assert f"{flag}={expected}" in argv
+    scanner = _scanner(tmp_path, operator=who != "tree", **{option: name})
+    with caplog.at_level("WARNING"):
+        argv = _argv(scanner, scanner.context.source_dir)
+    (value,) = [a[len(flag) + 1 :] for a in argv if a.startswith(f"{flag}=")]
+    assert Path(value).is_relative_to(scanner.results_dir.resolve())
+    assert f"scanners.trivy.options.{option}" in caplog.text
 
 
 _MODULE_CONFIG = "module:\n  dir: ./trivy-modules\n  enable-modules: [planted]\n"

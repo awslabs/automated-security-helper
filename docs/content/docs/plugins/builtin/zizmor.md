@@ -51,10 +51,15 @@ scanners:
 - `persona`: zizmor's [persona](https://docs.zizmor.sh/usage/#using-personas).
   `regular` has the fewest false positives, `pedantic` adds code-smell findings,
   and `auditor` reports everything.
-- `config_file`: passed as `--config`. A relative path is resolved against the
-  source directory; an absolute path may point outside it (a config shared across
-  repositories). Without it, zizmor reads a `zizmor.yml` or `.github/zizmor.yml` it
-  finds in the repository, as it does when run by hand. A configured file that
+- `config_file`: passed as `--config`, when the operator set it: from
+  `--config-overrides`, or an ASH config file outside the scanned tree. A relative
+  path is resolved against the source directory; an absolute path may point outside
+  it (a config shared across repositories). Without it, ASH runs zizmor with
+  `--no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned
+  repository is not read: a config there can disable audits or ignore findings,
+  which zizmor then never reports, so they would be neither in ASH's results nor
+  counted as suppressed. `config_file` set by an ASH config inside the scanned tree
+  is ignored with a warning. A configured file that
   does not exist fails the scan rather than being ignored. zizmor quotes the
   offending text of a config it cannot parse in its error, and that error reaches
   ASH's log and the scanner's stderr log, so do not point this at a file holding
@@ -116,8 +121,9 @@ global_settings:
 ```
 
 zizmor's own [ignore comments](https://docs.zizmor.sh/usage/#ignoring-results)
-(`# zizmor: ignore[template-injection]`) and `zizmor.yml` rules are honored as
-well. Package-scoped and symbol-scoped suppressions do not apply: zizmor reports
+(`# zizmor: ignore[template-injection]`) are honored as well, and so are the rules
+of an operator's `config_file`; a `zizmor.yml` in the scanned repository is not
+read. Package-scoped and symbol-scoped suppressions do not apply: zizmor reports
 no packages, and a workflow has no functions or classes.
 
 ## Installation

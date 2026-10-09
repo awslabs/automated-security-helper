@@ -585,21 +585,52 @@ def test_without_a_config_an_empty_one_is_passed_from_the_results_dir(
 
 
 @pytest.mark.parametrize("name", ["actionlint.yaml", "actionlint.yml"])
-def test_a_config_in_the_scan_root_is_passed(repo, monkeypatch, on_path, name):
-    (repo / ".github" / name).write_text("self-hosted-runner:\n  labels: [x]\n")
+def test_the_scanned_trees_actionlint_config_is_not_read(
+    repo, monkeypatch, on_path, caplog, name
+):
+    """Its ``paths.ignore`` would drop findings neither reported nor suppressed."""
+    (repo / ".github" / name).write_text(
+        "paths:\n  .github/workflows/**/*.yml:\n    ignore:\n      - '.*'\n"
+    )
     scanner = _scanner(repo)
     fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
 
-    scanner.scan(target=repo, target_type="source")
+    with caplog.at_level(logging.INFO):
+        scanner.scan(target=repo, target_type="source")
 
     ((argv, _),) = fake.calls
-    assert argv[argv.index("-config-file") + 1] == (repo / ".github" / name).as_posix()
+    config = Path(argv[argv.index("-config-file") + 1])
+    assert config.is_relative_to(Path(scanner.results_dir))
+    assert config.read_text().startswith("#")
+    assert f".github/{name} in the scanned tree is not read" in caplog.text
 
 
-def test_a_configured_config_file_that_does_not_exist_is_an_error(
+@pytest.mark.parametrize("operator", [True, False])
+def test_config_file_is_passed_only_when_the_operator_set_it(
+    repo, monkeypatch, on_path, caplog, operator
+):
+    (repo / "ci").mkdir()
+    (repo / "ci" / "actionlint.yaml").write_text("self-hosted-runner:\n  labels: [x]\n")
+    scanner = _scanner(repo, operator=operator, config_file="ci/actionlint.yaml")
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    config = Path(argv[argv.index("-config-file") + 1])
+    if operator:
+        assert config == (repo / "ci" / "actionlint.yaml").absolute()
+        assert "is set by a config in the scanned tree" not in caplog.text
+    else:
+        assert config.is_relative_to(Path(scanner.results_dir))
+        assert "is set by a config in the scanned tree" in caplog.text
+
+
+def test_an_operator_config_file_that_does_not_exist_is_an_error(
     repo, monkeypatch, on_path
 ):
-    scanner = _scanner(repo, config_file="ci/actionlint.yaml")
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
     fake = _run(scanner, monkeypatch, "", 0)
 
     with pytest.raises(ScannerError, match="does not exist"):
@@ -608,14 +639,15 @@ def test_a_configured_config_file_that_does_not_exist_is_an_error(
     assert scanner.targets_failed == scanner.targets_attempted == 2
 
 
-def test_a_config_that_ignores_findings_is_warned_about(
+def test_an_operator_config_that_ignores_findings_is_warned_about(
     repo, monkeypatch, on_path, caplog
 ):
-    (repo / ".github" / "actionlint.yaml").write_text(
+    (repo / "ci").mkdir()
+    (repo / "ci" / "actionlint.yaml").write_text(
         "paths:\n  .github/workflows/**/*.yml:\n    ignore:\n"
         "      - 'potentially untrusted'\n"
     )
-    scanner = _scanner(repo)
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
     _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
 
     with caplog.at_level(logging.WARNING):

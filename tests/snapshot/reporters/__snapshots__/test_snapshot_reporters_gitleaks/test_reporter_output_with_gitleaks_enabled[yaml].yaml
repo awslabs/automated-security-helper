@@ -3,13 +3,13 @@ additional_reports:
     source:
       duration: 0.5
       end_time: '2026-01-15T12:00:00.500000Z'
-      finding_count: 3
+      finding_count: 4
       metadata:
         scanner_version: 8.30.1
       report_type: sarif
       scanner_name: gitleaks
       severity_counts:
-        critical: 3
+        critical: 4
       start_time: '2026-01-15T12:00:00Z'
       status: PASSED
       target: <TMP>/src
@@ -398,7 +398,7 @@ metadata:
   report_id: ASH-20260115
   shard: null
   summary_stats:
-    actionable: 3
+    actionable: 4
     duration: 0.0
     end: null
     error: 0
@@ -406,7 +406,7 @@ metadata:
     missing: 0
     passed: 0
     severity_counts:
-      critical: 3
+      critical: 4
       high: 0
       info: 0
       low: 0
@@ -414,7 +414,7 @@ metadata:
       suppressed: 0
     skipped: 0
     start: null
-    total: 3
+    total: 4
   tool_version: <ASH_VERSION>
   validation_summary: {}
 name: ASH Scan 2026-01-15T12:00:00
@@ -448,6 +448,88 @@ sarif:
       tags: []
     redactionTokens: []
     results:
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: docs/example.md
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 45
+            endLine: 5
+            message: null
+            properties: null
+            snippet:
+              binary: null
+              properties: null
+              rendered: null
+              text: REDACTED
+            sourceLanguage: null
+            startColumn: 6
+            startLine: 5
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: github-pat has detected secret for file docs/example.md.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: gitleaks
+          tool_version: 8.30.1
+        scanner_name: gitleaks
+        scanner_version: 8.30.1
+        tags:
+        - secret
+        - security
+        - gitleaks
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: github-pat
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
     - analysisTarget: null
       attachments: []
       baselineState: null
@@ -4765,14 +4847,14 @@ sarif:
   version: 2.1.0
 scanner_results:
   gitleaks:
-    actionable_finding_count: 3
+    actionable_finding_count: 4
     dependencies_satisfied: true
     duration: 0.5
     excluded: false
     exit_code: 0
-    finding_count: 3
+    finding_count: 4
     severity_counts:
-      critical: 3
+      critical: 4
       high: 0
       info: 0
       low: 0

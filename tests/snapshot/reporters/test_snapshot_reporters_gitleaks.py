@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the built-in reporters write for a scan with the opt-in gitleaks scanner on.
+"""What the built-in reporters write for a scan with the gitleaks scanner on.
 
 The default fixture scan never enables gitleaks, so nothing else in this suite shows
 a gitleaks finding in a report. The input here is the real report gitleaks 8.30.1
@@ -95,7 +95,7 @@ def gitleaks_scan(pinned_clock, tmp_path: Path):
     return _build_model(manifest, context), context
 
 
-def test_the_model_carries_the_three_findings_as_critical(gitleaks_scan):
+def test_the_model_carries_the_four_findings_as_critical(gitleaks_scan):
     model, _ = gitleaks_scan
     row = model.scanner_results["gitleaks"]
     assert (
@@ -105,6 +105,7 @@ def test_the_model_carries_the_three_findings_as_critical(gitleaks_scan):
     results = model.sarif.runs[0].results
     assert sorted(r.ruleId for r in results) == [
         "aws-access-token",
+        "github-pat",
         "github-pat",
         "slack-bot-token",
     ]

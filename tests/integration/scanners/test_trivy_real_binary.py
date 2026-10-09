@@ -454,14 +454,22 @@ def test_the_scanned_repos_own_trivy_config_cannot_shrink_the_report(
     (source / ".trivyignore").write_text("CVE-2018-18074\n", encoding="utf-8")
     _, report = _scan_direct(source, tmp_path / "out1")
     assert _pairs(report) == _pairs(baseline)
-    # Opted in, each file does what trivy says it does.
-    _, ignored = _scan_direct(source, tmp_path / "out2", ignore_file=".trivyignore")
+    # Named by the tree's ASH config, neither file is passed either.
+    _, in_tree = _scan_direct(
+        source, tmp_path / "out2", ignore_file=".trivyignore", config_file="trivy.yaml"
+    )
+    assert _pairs(in_tree) == _pairs(baseline)
+    # Each is honored only from the operator, for a file outside the tree, and then
+    # does what trivy says it does.
+    operator_ignore = tmp_path / "operator-ignore" / ".trivyignore"
+    operator_ignore.parent.mkdir()
+    operator_ignore.write_text("CVE-2018-18074\n", encoding="utf-8")
+    _, ignored = _scan_direct(
+        source, tmp_path / "out3", operator=True, ignore_file=str(operator_ignore)
+    )
     assert _pairs(ignored) == _pairs(baseline) - {
         ("CVE-2018-18074", "requirements.txt")
     }
-    # config_file is honored only from the operator, for a file outside the tree.
-    _, in_tree = _scan_direct(source, tmp_path / "out3", config_file="trivy.yaml")
-    assert _pairs(in_tree) == _pairs(baseline)
     operator_config = tmp_path / "operator" / "trivy.yaml"
     operator_config.parent.mkdir()
     operator_config.write_text("severity:\n  - CRITICAL\n", encoding="utf-8")
@@ -510,13 +518,102 @@ def test_the_scanned_repos_secret_config_cannot_disable_rules(tmp_path, trivy_en
     )
     _, report = _scan_direct(source, tmp_path / "out1", scanners=["secret"])
     assert _pairs(report) == _pairs(baseline)
-    _, opted = _scan_direct(
+    # Named by the tree's ASH config, it is still not passed.
+    _, named = _scan_direct(
         source,
         tmp_path / "out2",
         scanners=["secret"],
         secret_config_file=repo_rules_file,
     )
+    assert _pairs(named) == _pairs(baseline)
+    # The operator's, outside the tree, applies.
+    operator_rules = tmp_path / "operator" / repo_rules_file
+    operator_rules.parent.mkdir()
+    shutil.copy(source / repo_rules_file, operator_rules)
+    _, opted = _scan_direct(
+        source,
+        tmp_path / "out3",
+        operator=True,
+        scanners=["secret"],
+        secret_config_file=str(operator_rules),
+    )
     assert _pairs(opted) < _pairs(baseline)
+
+
+#: A Rego ignore policy (trivy's --ignore-policy) that drops one fixture CVE. trivy
+#: evaluates it with Rego v0 syntax.
+_IGNORE_POLICY = (
+    "package trivy\n\ndefault ignore = false\n\n"
+    'ignore {\n\tinput.VulnerabilityID == "CVE-2023-32681"\n}\n'
+)
+_DROPPED_BY_THE_POLICY = ("CVE-2023-32681", "requirements.txt")
+
+
+def _plant_ignore_policy(root: Path) -> None:
+    """A trivy.yaml in ``root`` that names an ignore policy beside it."""
+    (root / "policy.rego").write_text(_IGNORE_POLICY, encoding="utf-8")
+    (root / "trivy.yaml").write_text("ignore-policy: policy.rego\n", encoding="utf-8")
+
+
+def _trivy_on_its_own(source: Path, out: Path, subcommand: str) -> set:
+    """``trivy <subcommand>`` in ``source`` with trivy's own config discovery."""
+    proc = subprocess.run(
+        [
+            "trivy",
+            subcommand,
+            "--scanners",
+            "vuln",
+            "--skip-db-update",
+            "--format",
+            "json",
+            "--output",
+            str(out),
+            ".",
+        ],
+        cwd=source,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    data = json.loads(out.read_text(encoding="utf-8"))
+    return {
+        (v["VulnerabilityID"], r["Target"])
+        for r in data.get("Results") or []
+        for v in r.get("Vulnerabilities") or []
+    }
+
+
+def test_an_ignore_policy_named_by_the_trees_trivy_yaml_does_not_apply(
+    tmp_path, trivy_env
+):
+    source = _copy_fixture(tmp_path)
+    _, baseline = _scan_direct(source, tmp_path / "out0", scanners=["vuln"])
+    assert _DROPPED_BY_THE_POLICY in _pairs(baseline)
+    _plant_ignore_policy(source)
+    # The positive control: trivy left to read that trivy.yaml drops the CVE.
+    assert _DROPPED_BY_THE_POLICY not in _trivy_on_its_own(
+        source, tmp_path / "plain.json", "fs"
+    )
+
+    _, report = _scan_direct(source, tmp_path / "out1", scanners=["vuln"])
+
+    assert _pairs(report) == _pairs(baseline)
+    # The operator's config, outside the tree, naming a policy outside it: applies.
+    operator = tmp_path / "operator"
+    operator.mkdir()
+    (operator / "policy.rego").write_text(_IGNORE_POLICY, encoding="utf-8")
+    (operator / "trivy.yaml").write_text(
+        f"ignore-policy: {(operator / 'policy.rego').as_posix()}\n", encoding="utf-8"
+    )
+    _, opted = _scan_direct(
+        source,
+        tmp_path / "out2",
+        operator=True,
+        scanners=["vuln"],
+        config_file=str(operator / "trivy.yaml"),
+    )
+    assert _pairs(opted) == _pairs(baseline) - {_DROPPED_BY_THE_POLICY}
 
 
 def _repo_pairs(output: Path) -> set:
@@ -567,6 +664,88 @@ def test_trivy_repo_does_not_load_the_scanned_repos_trivy_yaml(tmp_path, trivy_e
         "trivy-repo",
         "--config-overrides",
         f"scanners.trivy-repo.options.config_file={operator_config.as_posix()}",
+    )
+    assert _repo_pairs(tmp_path / "out2") < baseline, log
+
+
+def _trivy_repo_config(scanners: list) -> dict:
+    return {
+        "project_name": "trivy-repo-e2e",
+        "ash_plugin_modules": [
+            "automated_security_helper.plugin_modules.ash_trivy_plugins"
+        ],
+        "scanners": {"trivy-repo": {"options": {"scanners": scanners}}},
+    }
+
+
+def test_trivy_repo_does_not_apply_an_ignore_policy_from_the_trees_trivy_yaml(
+    tmp_path, trivy_env
+):
+    source = _copy_fixture(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    config = _trivy_repo_config(["vuln"])
+    proc, log = _run_ash(
+        source, tmp_path / "out0", config, trivy_env, "--scanners", "trivy-repo"
+    )
+    baseline = _repo_pairs(tmp_path / "out0")
+    assert _DROPPED_BY_THE_POLICY in baseline, log
+    _plant_ignore_policy(source)
+    # The positive control: trivy repository left to read it drops the CVE.
+    assert _DROPPED_BY_THE_POLICY not in _trivy_on_its_own(
+        source, tmp_path / "plain.json", "repository"
+    )
+
+    proc, log = _run_ash(
+        source, tmp_path / "out1", config, trivy_env, "--scanners", "trivy-repo"
+    )
+
+    assert _repo_pairs(tmp_path / "out1") == baseline, log
+
+
+def test_trivy_repo_does_not_read_the_trees_trivy_secret_yaml(tmp_path, trivy_env):
+    """trivy reads trivy-secret.yaml from its working directory unless told not to."""
+    import secrets
+    import string
+
+    source = tmp_path / "src"
+    source.mkdir()
+    key_id = "AKIA" + "".join(
+        secrets.choice(string.ascii_uppercase + "234567") for _ in range(16)
+    )
+    secret = "".join(
+        secrets.choice(string.ascii_letters + string.digits) for _ in range(40)
+    )
+    (source / "creds.env").write_text(
+        f"AWS_ACCESS_KEY_ID={key_id}\nAWS_SECRET_ACCESS_KEY={secret}\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    config = _trivy_repo_config(["secret"])
+    proc, log = _run_ash(
+        source, tmp_path / "out0", config, trivy_env, "--scanners", "trivy-repo"
+    )
+    baseline = _repo_pairs(tmp_path / "out0")
+    assert baseline, log
+    rules = "disable-rules:\n  - aws-access-key-id\n  - aws-secret-access-key\n"
+    (source / "trivy-secret.yaml").write_text(rules, encoding="utf-8")
+
+    proc, log = _run_ash(
+        source, tmp_path / "out1", config, trivy_env, "--scanners", "trivy-repo"
+    )
+
+    assert _repo_pairs(tmp_path / "out1") == baseline, log
+    # The control: the same rules, named by the operator from outside the tree.
+    operator_rules = tmp_path / "operator-trivy-secret.yaml"
+    operator_rules.write_text(rules, encoding="utf-8")
+    proc, log = _run_ash(
+        source,
+        tmp_path / "out2",
+        config,
+        trivy_env,
+        "--scanners",
+        "trivy-repo",
+        "--config-overrides",
+        f"scanners.trivy-repo.options.secret_config_file={operator_rules.as_posix()}",
     )
     assert _repo_pairs(tmp_path / "out2") < baseline, log
 

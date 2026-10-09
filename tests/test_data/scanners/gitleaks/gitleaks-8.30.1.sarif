@@ -1347,6 +1347,40 @@
    "results": [
     {
      "message": {
+      "text": "github-pat has detected secret for file docs/example.md."
+     },
+     "ruleId": "github-pat",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "docs/example.md"
+        },
+        "region": {
+         "startLine": 5,
+         "startColumn": 6,
+         "endLine": 5,
+         "endColumn": 45,
+         "snippet": {
+          "text": "REDACTED"
+         }
+        }
+       }
+      }
+     ],
+     "partialFingerprints": {
+      "commitSha": "",
+      "email": "",
+      "author": "",
+      "date": "",
+      "commitMessage": ""
+     },
+     "properties": {
+      "tags": []
+     }
+    },
+    {
+     "message": {
       "text": "slack-bot-token has detected secret for file app/settings.py."
      },
      "ruleId": "slack-bot-token",
