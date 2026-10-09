@@ -89,11 +89,6 @@ _WALK_METHODS = frozenset({"glob", "rglob"})
 #: function rather than by file so converting one walker in a file does not
 #: silently exempt the next one added to it.
 _ALLOWED = {
-    ("test_github_yaml_files.py", "test_the_simulation_reproduces_the_race"): (
-        "The control for the scratch-race simulation: it runs the old walk on purpose "
-        "while the planted directory is made to vanish, and passes only if that walk "
-        "tried to enter it."
-    ),
     (
         "test_agent_plugin_ash_version.py",
         "test_every_version_files_path_exists",
@@ -416,17 +411,22 @@ class TestTheGuardWouldCatchANewOffender:
     look identical, so assert that the same detector does find the exempted call.
     """
 
-    def test_the_detector_finds_the_exempted_call(self):
-        source = (TESTS_ROOT / "unit" / "test_agent_plugin_ash_version.py").read_text(
-            encoding="utf-8"
-        )
-        functions = {function for _, function in _root_walk_calls(source)}
-
-        assert "test_every_version_files_path_exists" in functions, (
-            "the detector no longer finds the one call it is supposed to be "
-            "exempting, so either that test was converted -- in which case drop "
-            "the entry from _ALLOWED -- or the detector is blind"
-        )
+    def test_the_detector_finds_every_exempted_call(self):
+        """Each exemption still names a call the detector flags, or it is stale."""
+        sources = {path.name: path for path in _test_sources()}
+        assert _ALLOWED, "no exemptions, so this checks nothing; delete it with them"
+        for file_name, function in _ALLOWED:
+            assert file_name in sources, f"{file_name} is exempted but does not exist"
+            path = sources[file_name]
+            found = {
+                name
+                for _, name in _root_walk_calls(path.read_text(encoding="utf-8"), path)
+            }
+            assert function in found, (
+                f"the detector no longer finds {function} in {file_name}, so either "
+                "that call was converted -- in which case drop the entry from "
+                "_ALLOWED -- or the detector is blind"
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover
