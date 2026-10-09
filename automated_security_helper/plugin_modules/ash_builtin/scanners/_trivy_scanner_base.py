@@ -57,15 +57,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
-from automated_security_helper.config.path_trust import (
-    honored_path,
-    in_scanned_tree,
-    resolved_path,
-)
-from automated_security_helper.utils.config_trust import (
-    scan_root,
-    set_by_operator,
-)
+from automated_security_helper.config.path_trust import honored_path
+from automated_security_helper.utils.config_trust import operator_path
 from automated_security_helper.utils.content_db_refresh import (
     default_cache_dir,
     prepare_content_db,
@@ -102,13 +95,6 @@ OFFLINE_FLAGS = (
     "--skip-java-db-update",
     "--offline-scan",
     "--skip-check-update",
-)
-
-#: Why an option naming a trivy input file was not used, when the operator did
-#: not set it (utils/config_trust.set_by_operator).
-_NOT_THE_OPERATORS = (
-    "it came from a config file in the scanned tree or from an MCP client; set it "
-    "with --config-overrides or a config file outside the tree"
 )
 
 
@@ -351,16 +337,12 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
-        source_dir = Path(self.context.source_dir)
-        candidate = resolved_path(value, source_dir)
         name = self.config.name if self.config is not None else "trivy"
         key = f"scanners.{name}.options.{option}"
-        if not set_by_operator(self.context.config, key, value):
-            reason = _NOT_THE_OPERATORS
-        elif in_scanned_tree(candidate, scan_root(self.context.config, source_dir)):
-            reason = "it is inside the scanned tree"
-        else:
-            return candidate
+        chosen = operator_path(self.context.config, key, value, self.context.source_dir)
+        if chosen.path is not None:
+            return chosen.path
+        reason = chosen.refusal
         # Once per value: the scanners ask for each target and the update asks again.
         refusal = f"{key}={value}"
         if refusal not in self._warned_inputs:

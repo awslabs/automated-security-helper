@@ -190,9 +190,12 @@
   Each of those scanners' `config_file` options and gitleaks' `baseline_path`, set
   by an ASH config inside the scanned tree or by an MCP client, are ignored with a
   warning, and so are trivy's and trivy-repo's `ignore_file` and
-  `secret_config_file`; `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` still apply,
-  for a file outside the scanned tree. Inline comments (`gitleaks:allow`,
-  `# zizmor: ignore[...]`) still apply.
+  `secret_config_file` and cfn-guard's `rules_paths` (cfn-guard prints a rules
+  file it cannot parse, so a path the repository chose could put any readable file
+  into the report); `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` still apply, for a
+  file outside the scanned tree. Inline comments (`gitleaks:allow`,
+  `# zizmor: ignore[...]`) still apply. Tool output quoted in a scanner's error
+  has terminal escape sequences removed and other control characters escaped.
 - **trivy-repo names its own config file and modules directory.** It always passes
   `--config` and `--module-dir`: by default an empty config file and an empty
   directory in its results directory, so trivy does not load a `trivy.yaml` from the

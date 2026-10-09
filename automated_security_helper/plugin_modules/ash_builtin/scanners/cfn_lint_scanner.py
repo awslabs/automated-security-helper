@@ -94,13 +94,9 @@ from automated_security_helper.utils.cfn_template_discovery import (
     discover_templates,
     display_path,
 )
-from automated_security_helper.config.path_trust import in_scanned_tree, resolved_path
-from automated_security_helper.utils.config_trust import (
-    scan_root,
-    set_by_operator,
-)
+from automated_security_helper.utils.config_trust import operator_path
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.output_excerpt import head_and_tail
+from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
@@ -383,25 +379,20 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         Raises:
             ScannerError: the operator named a file that does not exist.
         """
-        source_dir = self._source_dir()
-        candidate = resolved_path(configured, source_dir)
-        context_config = self.context.config if self.context is not None else None
-        if not set_by_operator(
-            context_config, "scanners.cfn-lint.options.config_file", configured
-        ):
-            reason = (
-                "it came from a config file in the scanned tree; set it with "
-                "--config-overrides or a config file outside the tree"
-            )
-        elif in_scanned_tree(candidate, scan_root(context_config, source_dir)):
-            reason = "it is inside the scanned tree"
-        else:
-            if not candidate.is_file():
+        chosen = operator_path(
+            self.context.config if self.context is not None else None,
+            "scanners.cfn-lint.options.config_file",
+            configured,
+            self._source_dir(),
+        )
+        if chosen.path is not None:
+            if not chosen.path.is_file():
                 raise ScannerError(
-                    f"scanners.cfn-lint.options.config_file names {candidate}, which "
-                    "does not exist"
+                    f"scanners.cfn-lint.options.config_file names {chosen.path}, "
+                    "which does not exist"
                 )
-            return candidate.resolve()
+            return chosen.path
+        reason = chosen.refusal
         # A .cfnlintrc can make cfn-lint import Python files (append_rules), so one
         # the scanned repository chose is never handed to it.
         self._plugin_log(
@@ -686,7 +677,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             return f"cfn-lint could not be started: {response['error']}"
         code = response.get("returncode")
         if not _successful_exit(code):
-            stderr = head_and_tail((response.get("stderr") or "").strip(), 500)
+            stderr = tool_output_excerpt((response.get("stderr") or "").strip(), 500)
             return f"cfn-lint exited {code}" + (f": {stderr}" if stderr else "")
         if not batch_file.is_file() or batch_file.stat().st_size == 0:
             return f"cfn-lint exited {code} without writing {batch_file.name}"

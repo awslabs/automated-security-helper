@@ -90,7 +90,11 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.output_excerpt import head_and_tail
+from automated_security_helper.utils.config_trust import (
+    NOT_THE_OPERATORS,
+    set_by_operator,
+)
+from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
     create_rules_bundle_install_command,
@@ -147,7 +151,10 @@ class CfnGuardScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Your own cfn-guard rules: .guard files or directories of them, "
                 "relative to the source directory. Evaluated in addition to "
-                "rule_sets."
+                "rule_sets. Honored only when set by --config-overrides or a config "
+                "file outside the scanned tree: cfn-guard prints a rules file it "
+                "cannot parse, so a path the scanned repository chose could put any "
+                "file the scan can read into the report."
             ),
         ),
     ] = []
@@ -189,8 +196,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         every ``--rules`` path would be missing inside the sandbox. A property
         because the location is read from the environment at scan time, as
         ``rule_files`` reads it. ``rules_paths`` entries outside the source tree are
-        not granted here: the scanned repository can set them, so reading them
-        takes ``sandbox.extra_read_paths`` from a config outside the tree.
+        not granted here, as an option-derived grant waits for the sandbox's grant
+        gates: reading them takes ``sandbox.extra_read_paths`` from a config outside
+        the tree.
         """
         return SandboxRequirements(read_paths=(rules_root().as_posix(),))
 
@@ -230,6 +238,33 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             raise ScannerError("cfn-guard has no plugin context")
         return Path(self.context.source_dir)
 
+    def _operator_rules_paths(self, source_dir: Path) -> List[Path]:
+        """``rules_paths`` as cfn-guard will read them, when the operator set them.
+
+        cfn-guard echoes a rules file it cannot parse, all of it, in its error
+        (measured with 3.2.1: a credentials file given as ``--rules`` came back
+        whole on stderr), and that error reaches the scan's results. So the list is
+        used only when ``set_by_operator`` accepts it; set by a config in the
+        scanned tree, or by an MCP client, it is ignored with a warning. Each entry
+        is resolved as ``config/path_trust.resolved_path`` resolves it.
+        """
+        options = self._options()
+        if not options.rules_paths:
+            return []
+        config = self.context.config if self.context is not None else None
+        if not set_by_operator(
+            config, "scanners.cfn-guard.options.rules_paths", options.rules_paths
+        ):
+            self._plugin_log(
+                "Ignoring scanners.cfn-guard.options.rules_paths "
+                f"({options.rules_paths!r}): {NOT_THE_OPERATORS}.",
+                level=logging.WARNING,
+            )
+            return []
+        from automated_security_helper.config.path_trust import resolved_path
+
+        return [resolved_path(raw, source_dir) for raw in options.rules_paths]
+
     def rule_files(self) -> List[Path]:
         """The rules files and directories cfn-guard will be given, in order.
 
@@ -246,10 +281,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             installed = verify_installed_bundle(bundle, files=names)
             selected.extend(installed.directory.joinpath(name) for name in names)
         source_dir = self._source_dir()
-        for raw in options.rules_paths:
-            path = Path(raw)
-            if not path.is_absolute():
-                path = source_dir / path
+        for path in self._operator_rules_paths(source_dir):
             if not path.exists():
                 raise RulesBundleUnavailable(
                     f"scanners.cfn-guard.options.rules_paths names {path}, which does "
@@ -500,7 +532,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         if "error" in response:
             return f"cfn-guard could not be started: {response['error']}", None
         code = response.get("returncode")
-        stderr = head_and_tail((response.get("stderr") or "").strip(), 500)
+        stderr = tool_output_excerpt((response.get("stderr") or "").strip(), 500)
         if code not in _SUCCESS_EXIT_CODES:
             return (
                 f"cfn-guard exited {code}" + (f": {stderr}" if stderr else ""),

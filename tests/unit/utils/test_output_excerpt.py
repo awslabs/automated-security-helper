@@ -5,7 +5,10 @@
 
 import pytest
 
-from automated_security_helper.utils.output_excerpt import head_and_tail
+from automated_security_helper.utils.output_excerpt import (
+    head_and_tail,
+    tool_output_excerpt,
+)
 
 
 def test_text_within_the_limit_is_unchanged():
@@ -33,3 +36,18 @@ def test_the_kept_text_is_exactly_the_limit(limit):
 
 def test_a_non_positive_limit_keeps_nothing():
     assert head_and_tail("anything", 0) == ""
+
+
+def test_a_tool_excerpt_drops_escape_sequences_and_names_control_characters():
+    text = "\x1b[31merror\x1b[0m: \x1b]0;title\x07bad\x00 byte\x07\rline\nnext\ttab"
+    assert tool_output_excerpt(text, 500) == (
+        "error: bad\\x00 byte\\x07\\x0dline\nnext\ttab"
+    )
+
+
+def test_a_tool_excerpt_is_cut_after_cleaning():
+    text = "x" * 300 + "\x1b[2J" + "y" * 300
+    excerpt = tool_output_excerpt(text, 100)
+    assert "\x1b" not in excerpt
+    assert excerpt.startswith("x" * 25) and excerpt.endswith("y" * 75)
+    assert "characters omitted" in excerpt
