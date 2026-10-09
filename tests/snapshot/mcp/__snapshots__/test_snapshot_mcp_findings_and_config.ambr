@@ -692,10 +692,14 @@
         }),
       }),
       'sandbox': dict({
+        'env_scanners': list([
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
         'network_scanners': None,
+        'read_path_scanners': list([
+        ]),
       }),
       'scanners': dict({
         'bandit': dict({
@@ -1081,10 +1085,14 @@
         }),
       }),
       'sandbox': dict({
+        'env_scanners': list([
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
         'network_scanners': None,
+        'read_path_scanners': list([
+        ]),
       }),
       'scanners': dict({
         'bandit': dict({
@@ -1470,10 +1478,14 @@
         }),
       }),
       'sandbox': dict({
+        'env_scanners': list([
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
         'network_scanners': None,
+        'read_path_scanners': list([
+        ]),
       }),
       'scanners': dict({
         'bandit': dict({
