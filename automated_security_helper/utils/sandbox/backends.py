@@ -502,8 +502,12 @@ def _sbpl_literal(text: str) -> str:
 
 
 #: Starts a new session, so there is no controlling terminal to inject keystrokes
-#: into through TIOCSTI, then execs the rest of argv. macOS ships no setsid(1).
-_SETSID_EXEC = "import os,sys;os.setsid();os.execv(sys.argv[1],sys.argv[1:])"
+#: into through TIOCSTI, changes to the directory in argv[1] when it is not empty,
+#: then execs the rest of argv. macOS ships no setsid(1).
+_SETSID_EXEC = (
+    "import os,sys;os.setsid();sys.argv[1] and os.chdir(sys.argv[1]);"
+    "os.execv(sys.argv[2],sys.argv[2:])"
+)
 
 #: The Mach services every sandboxed scanner may look up. Measured: the ten builtin
 #: scanners were run through the scanner parity fixture on the macOS 14.8, 15.7 and
@@ -762,6 +766,11 @@ class SandboxExecBackend(SandboxBackend):
             "-I",
             "-c",
             _SETSID_EXEC,
+            # A spawn with no working directory of its own (a version probe) would
+            # otherwise start in ASH's, which is often under $HOME and unreadable
+            # here, and uv fails on its config lookup there. bwrap moves such a
+            # process to its private home for the same reason.
+            "" if policy.cwd else private_tmp.as_posix(),
             self.executable,
             "-p",
             self.profile(policy, private_tmp, trust_roots, unpack_dir),

@@ -1144,3 +1144,26 @@ class TestScriptInterpreter:
         binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/evil/bin/x")
         policy = _policy(layout, argv0=str(binary))
         assert not any("evil" in p.as_posix() for p in _resolved(policy.read_only))
+
+
+class TestSandboxExecWorkingDirectory:
+    """A spawn without a cwd of its own starts in the private TMPDIR, not in ASH's."""
+
+    def _chdir_arg(self, plan):
+        return plan.argv[plan.argv.index(backends_module._SETSID_EXEC) + 1]
+
+    def test_a_probe_without_a_cwd_starts_in_its_private_tmpdir(self, layout):
+        plan = SandboxExecBackend().plan(
+            ["/usr/bin/true"], {}, _policy(layout, cwd=None)
+        )
+        try:
+            assert self._chdir_arg(plan) == plan.env["TMPDIR"]
+        finally:
+            plan.run_cleanup()
+
+    def test_a_spawn_with_a_cwd_keeps_it(self, layout):
+        plan = SandboxExecBackend().plan(["/usr/bin/true"], {}, _policy(layout))
+        try:
+            assert self._chdir_arg(plan) == ""
+        finally:
+            plan.run_cleanup()
