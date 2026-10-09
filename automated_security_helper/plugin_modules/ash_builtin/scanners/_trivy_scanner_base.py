@@ -26,12 +26,8 @@ so both config classes satisfy it without sharing a base.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
-import shutil
-import subprocess  # nosec B404 - spawn_run below is the sandbox choke point
-import tempfile
 from pathlib import Path
 from typing import (
     Annotated,
@@ -70,13 +66,15 @@ from automated_security_helper.utils.config_trust import (
     scan_root,
     set_by_operator,
 )
-from automated_security_helper.utils.file_lock import exclusive_lock
+from automated_security_helper.utils.content_db_refresh import (
+    default_cache_dir,
+    prepare_content_db,
+    scan_id_for,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
-from automated_security_helper.utils.sandbox.scope import outside_scanner_sandbox
-from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
+from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.package_identity import (
     NpmLockIndex,
@@ -106,19 +104,23 @@ OFFLINE_FLAGS = (
     "--skip-check-update",
 )
 
-
-#: The lock file in trivy's cache directory that serializes its database update.
-UPDATE_LOCK_NAME = ".ash-trivy-update.lock"
-
-#: How long one update command (database or checks bundle) may take.
-UPDATE_TIMEOUT_SECONDS = 900
-
 #: Why an option naming a trivy input file was not used, when the operator did
 #: not set it (utils/config_trust.set_by_operator).
 _NOT_THE_OPERATORS = (
     "it came from a config file in the scanned tree or from an MCP client; set it "
     "with --config-overrides or a config file outside the tree"
 )
+
+
+def _existing_file(key: str, value: Any, path: Path) -> str:
+    """``path`` as trivy is given it; a configured file that is missing fails."""
+    if not path.is_file():
+        raise ScannerError(
+            f"{key} is {str(value)!r}, which is not a file (resolved to "
+            f"{path.as_posix()}). Fix the path or unset it; trivy is not run "
+            "without it."
+        )
+    return path.as_posix()
 
 
 class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
@@ -184,46 +186,37 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         Without the flag, trivy reads ``default_name`` (``.trivyignore``,
         ``trivy-secret.yaml``) from its working directory, the source directory,
         so the scanned repository could remove findings from its own report
-        (measured with trivy 0.75.0). The operator's file is used when it is
-        outside the scanned tree (config/path_trust.py): the option when the
-        operator set it (``set_by_operator``), else the environment variable. A
-        refused option falls through to the variable. Otherwise trivy gets a file
-        ASH writes into the results directory, which sets nothing.
+        (measured with trivy 0.75.0). The option is used under the rule every
+        trivy path option follows (``_operator_path``: set by the operator, for a
+        file outside the scanned tree). A refused or unset option falls through to
+        the environment variable, which is the operator's, used for a file outside
+        the tree (config/path_trust.py). Otherwise trivy gets a file ASH writes
+        into the results directory, which sets nothing.
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
-        context_config = getattr(self.context, "config", None)
         source_dir = Path(self.context.source_dir)
         name = self.config.name if self.config is not None else "trivy"
         options: Any = self.config.options  # type: ignore[union-attr]
-        option_key = f"scanners.{name}.options.{option}"
-        for key, value in (
-            (option_key, getattr(options, option)),
-            (env, os.environ.get(env)),
-        ):
-            if not value:
-                continue
-            if key == option_key and not set_by_operator(context_config, key, value):
-                refusal = f"{key}={value}"
-                if refusal not in self._warned_inputs:
-                    self._warned_inputs.add(refusal)
-                    self._plugin_log(
-                        f"Ignoring {key} ({str(value)!r}): {_NOT_THE_OPERATORS}.",
-                        level=logging.WARNING,
-                    )
-                continue
-            path = honored_path(
-                value, source_dir=source_dir, key=key, config=context_config
+        value = getattr(options, option)
+        if value:
+            path = self._operator_path(
+                option,
+                value,
+                f"trivy gets {env}, if set, or ASH's empty file instead.",
             )
-            if path is None:
-                continue
-            if not path.is_file():
-                raise ScannerError(
-                    f"{key} is {value!r}, which is not a file (resolved to "
-                    f"{path.as_posix()}). Fix the path or unset it; trivy is not run "
-                    "without it."
-                )
-            return path.as_posix()
+            if path is not None:
+                return _existing_file(f"scanners.{name}.options.{option}", value, path)
+        from_env = os.environ.get(env)
+        if from_env:
+            path = honored_path(
+                from_env,
+                source_dir=source_dir,
+                key=env,
+                config=getattr(self.context, "config", None),
+            )
+            if path is not None:
+                return _existing_file(env, from_env, path)
         in_tree = source_dir / default_name
         if in_tree.is_file() and in_tree.as_posix() not in self._warned_inputs:
             self._warned_inputs.add(in_tree.as_posix())
@@ -241,77 +234,53 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             handle.write(ash_content)
         return written.as_posix()
 
-    def _trivy_cache_dir(self) -> Path:
-        """trivy's cache directory, as trivy resolves it on Linux.
-
-        Used only to place the update lock; trivy itself is never given a
-        ``--cache-dir``, so where it reads and writes stays its own choice.
-        """
-        raw = self.extra_env.get("TRIVY_CACHE_DIR") or os.environ.get("TRIVY_CACHE_DIR")
-        if raw:
-            return Path(raw).expanduser()
-        base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
-        return Path(base) / "trivy"
-
-    def _update_lock_path(self) -> Path:
-        """Where the update lock lives: in trivy's cache, or beside it when read-only.
-
-        A cache the operator provides read-only (a pre-seeded mount) still gets a
-        lock, in the system temporary directory and named for the cache, so the
-        scanners of this host still take turns; trivy then finds the database
-        current and writes nothing, or fails to update it and says why.
-        """
-        cache = self._trivy_cache_dir()
-        probe = cache if cache.exists() else cache.parent
-        if os.access(probe, os.W_OK):
-            return cache / UPDATE_LOCK_NAME
-        digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
-        return Path(tempfile.gettempdir()) / f"ash-trivy-update-{digest}.lock"
-
     def _run_subprocess(
         self, command: List[str], *args: Any, **kwargs: Any
     ) -> Dict[str, str]:
         """Bring trivy's shared caches up to date first, then run ``command``.
 
         ``command`` gains, in place so the invocation ASH records is the one that
-        ran, the flags that skip the update and ``--cache-backend=memory``. trivy
-        keeps its scan cache (``fanal/fanal.db``) in the cache directory unless told
-        otherwise, ``trivy repository`` included, and a sandbox may mount that
-        directory read-only: with the scan cache in memory the scan only reads the
-        database and checks there. The scan cache only saves re-analysing an
-        unchanged target, so results are the same either way.
+        ran, the flags that skip the update, the cache directory the update wrote
+        and ``--cache-backend=memory``. trivy keeps its scan cache
+        (``fanal/fanal.db``) in the cache directory unless told otherwise, ``trivy
+        repository`` included, and a sandbox may mount that directory read-only:
+        with the scan cache in memory the scan only reads the database and checks
+        there. The scan cache only saves re-analysing an unchanged target, so
+        results are the same either way.
         """
-        flags = self._shared_update_flags(command, kwargs.get("results_dir"))
+        flags = self._shared_update_flags(command, kwargs.get("env"))
         if not any(a.startswith("--cache-backend") for a in command):
             flags.append("--cache-backend=memory")
         command[2:2] = flags
         return super()._run_subprocess(command, *args, **kwargs)
 
     def _shared_update_flags(
-        self, command: List[str], results_dir: Path | str | None
+        self, command: List[str], env: Optional[Dict[str, str]]
     ) -> List[str]:
-        """Update trivy's database (and checks bundle) once, under a lock.
+        """Update trivy's database (and checks bundle) once, then skip it in the scan.
 
         Why: trivy and trivy-repo run concurrently and share trivy's cache. Each
         downloads the vulnerability database when it is out of date, and one can
         read ``metadata.json``, or the memory-mapped ``trivy.db``, while the other
         rewrites it. Seen in CI as ``failed to update downloaded_at: unable to get
         metadata: json decode error: unexpected EOF``, and reproduced locally as a
-        SIGBUS inside bbolt, in 1 run of 5 against an empty shared cache. So the
-        update runs here, serialized across threads and processes by a lock in
-        the cache directory, and the scan is told to skip it: ``--skip-db-update``,
-        and ``--skip-check-update`` when ``misconfig`` needs the checks bundle.
-        The second scanner to take the lock finds the database current, and
-        trivy's update command returns at once. The scan-time staleness check
-        (``utils/content_db_staleness.py``) still measures the database after.
-
-        The update runs outside the scanner sandbox (``outside_scanner_sandbox``):
-        a sandbox may mount trivy's cache read-only, or through a throwaway
+        SIGBUS inside bbolt, in 1 run of 5 against an empty shared cache. A
+        sandbox may also mount the cache read-only, or through a throwaway
         overlay, so an update made inside it would not reach the cache the scan
-        reads, or would let one sandboxed scanner change what the next one runs
-        on. The sandboxed scan then only reads the cache, which trivy (0.75, whose
-        default scan cache is in memory) does with the cache read-only. The update
-        commands run no scanner code and read nothing from the scanned tree.
+        reads.
+
+        So the update runs first, in ``utils/content_db_refresh.prepare_content_db``,
+        sandboxed or not: outside the scanner sandbox, under a lock in the cache
+        directory, once per scan, from an empty directory ASH makes outside every
+        checkout and with an empty ``--config`` of ASH's own, so nothing in the
+        scanned tree (a ``trivy.yaml`` whose ``db.repository`` names another
+        database, measured with trivy 0.75.0) reaches it. The scan is then told to
+        skip it: ``--skip-db-update``, ``--skip-check-update`` when ``misconfig``
+        needs the checks bundle, and ``--skip-java-db-update``, since fs and
+        repository scans never open the Java database (trivy 0.75). It is pointed
+        at the cache the update wrote (``--cache-dir``), which is also the one the
+        sandbox mounts. The scan-time staleness check
+        (``utils/content_db_staleness.py``) still measures the database after.
 
         Not done offline, where ``OFFLINE_FLAGS`` already skip every update.
         """
@@ -319,72 +288,34 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             return []
         options: Any = self.config.options  # type: ignore[union-attr]
         wants_checks = "misconfig" in (options.scanners or [])
-        executable = find_executable(command[0]) or command[0]
-        config_args = [a for a in command if a.startswith("--config=")]
-        env = {**snapshot_environ(), **self.extra_env}
-        with exclusive_lock(self._update_lock_path()), outside_scanner_sandbox():
-            self._run_update(
-                [
-                    executable,
-                    "image",
-                    "--download-db-only",
-                    "--no-progress",
-                    *config_args,
-                ],
-                env,
-                "its vulnerability database",
+        cache = default_cache_dir("trivy", env or snapshot_environ())
+        # The operator's trivy.yaml, under the rule the scan's --config follows,
+        # so a database mirror it names applies to the update; otherwise the
+        # update gets an empty config of its own.
+        operator_config = (
+            self._operator_path(
+                "config_file",
+                options.config_file,
+                "The database update runs with an empty config instead.",
             )
-            if wants_checks:
-                # trivy has no command that only fetches the checks bundle; a
-                # misconfiguration scan of an empty directory fetches it. ``trivy
-                # config`` takes no --no-progress; its output is captured anyway.
-                empty = (
-                    Path(results_dir or self.results_dir or ".") / "trivy-checks-update"
-                )
-                if empty.is_symlink() or empty.is_file():
-                    empty.unlink()
-                elif empty.is_dir():
-                    shutil.rmtree(empty)
-                empty.mkdir(parents=True)
-                self._run_update(
-                    [
-                        executable,
-                        "config",
-                        *config_args,
-                        empty.as_posix(),
-                    ],
-                    env,
-                    "its checks bundle",
-                )
-        # The Java database too, as OFFLINE_FLAGS skip it: fs and repository scans
-        # never open it (trivy 0.75), so it is not fetched, and the flag keeps a
-        # read-only cache from ever being asked for it.
+            if options.config_file
+            else None
+        )
+        prepare_content_db(
+            "trivy",
+            cache,
+            offline=False,
+            checks=wants_checks,
+            scan_id=scan_id_for(self.context),
+            executable=find_executable(command[0]),
+            config_file=operator_config,
+        )
         return [
             "--skip-db-update",
             "--skip-java-db-update",
             *(["--skip-check-update"] if wants_checks else []),
+            f"--cache-dir={Path(os.path.abspath(cache)).as_posix()}",
         ]
-
-    def _run_update(self, argv: List[str], env: Dict[str, str], what: str) -> None:
-        """Run one trivy update command; raise ScannerError naming its stderr."""
-        try:
-            proc = spawn_run(  # nosec B603 - resolved trivy binary, list arguments
-                argv,
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=UPDATE_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise ScannerError(
-                f"trivy did not finish updating {what} within {UPDATE_TIMEOUT_SECONDS}s"
-            ) from exc
-        if proc.returncode != 0:
-            detail = head_and_tail((proc.stderr or proc.stdout or "").strip(), 2000)
-            raise ScannerError(
-                f"trivy could not update {what} (exit {proc.returncode}): {detail}"
-            )
 
     def _operator_path(
         self, option: str, value: Path | str, why: str
@@ -410,9 +341,14 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             reason = "it is inside the scanned tree"
         else:
             return candidate
-        self._plugin_log(
-            f"Ignoring {key} ({str(value)!r}): {reason}. {why}", level=logging.WARNING
-        )
+        # Once per value: the scanners ask for each target and the update asks again.
+        refusal = f"{key}={value}"
+        if refusal not in self._warned_inputs:
+            self._warned_inputs.add(refusal)
+            self._plugin_log(
+                f"Ignoring {key} ({str(value)!r}): {reason}. {why}",
+                level=logging.WARNING,
+            )
         return None
 
     @model_validator(mode="after")

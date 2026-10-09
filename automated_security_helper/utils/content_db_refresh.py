@@ -34,9 +34,12 @@ Isolation
 ---------
 These commands run outside the sandbox, so nothing from the scanned repository may
 reach them. They run from a fresh empty directory outside every checkout, with an
-explicit empty config file (``-c`` for grype, ``--config`` for trivy) so neither
-tool looks for one in the working directory, the home directory or anywhere else,
-and with the cache directory passed explicitly. The environment is the operator's
+explicit config file (``-c`` for grype, ``--config`` for trivy) so neither tool
+looks for one in the working directory, the home directory or anywhere else: an
+empty one, or for trivy the operator's ``trivy.yaml`` once the caller has checked it
+is the operator's and outside the scanned tree (``config_file``), so a database
+mirror it names applies to the update too. The cache directory is passed
+explicitly. The environment is the operator's
 own (``snapshot_environ``), not anything a scanner derived from the scanned tree.
 They scan nothing but that empty directory.
 
@@ -92,7 +95,7 @@ GRYPE_PREPARED_ENV = {
 }
 
 _prepared_lock = threading.Lock()
-_prepared: Set[Tuple[str, str, bool, bool, str]] = set()
+_prepared: Set[Tuple[str, str, bool, bool, str, str]] = set()
 
 
 def default_cache_dir(tool: str, env: Optional[Mapping[str, str]] = None) -> Path:
@@ -150,6 +153,7 @@ def prepare_content_db(
     java: bool = False,
     scan_id: Optional[str] = None,
     executable: Optional[str] = None,
+    config_file: Optional[Union[str, Path]] = None,
 ) -> None:
     """Bring ``tool``'s database in ``cache_dir`` up to date, outside any sandbox.
 
@@ -164,16 +168,32 @@ def prepare_content_db(
         scan_id: Refresh at most once per tool, cache and scan id. None refreshes
             on every call (the tool itself returns at once when current).
         executable: The tool to run; found on PATH when not given.
+        config_file: trivy only: the config file to pass instead of an empty one.
+            Only a file the caller has established is the operator's and outside
+            the scanned tree (``TrivyScannerBase._operator_path``); never one the
+            scanned repository could have written.
 
     Raises:
         ScannerError: The tool is missing, failed, or timed out.
     """
     if tool not in TOOLS:
         raise ValueError(f"no content database refresh for {tool!r}")
+    if config_file is not None and tool != "trivy":
+        raise ValueError(f"no config file for the {tool} refresh")
     if offline:
         return
     cache = Path(os.path.abspath(Path(cache_dir).expanduser()))
-    key = (tool, cache.as_posix(), checks, java, scan_id or "")
+    operator_config = (
+        Path(os.path.abspath(config_file)) if config_file is not None else None
+    )
+    key = (
+        tool,
+        cache.as_posix(),
+        checks,
+        java,
+        scan_id or "",
+        operator_config.as_posix() if operator_config else "",
+    )
     if scan_id is not None:
         with _prepared_lock:
             if key in _prepared:
@@ -186,8 +206,11 @@ def prepare_content_db(
     with exclusive_lock(update_lock_path(tool, cache)), outside_scanner_sandbox():
         workdir = Path(tempfile.mkdtemp(prefix=f"ash-{tool}-refresh-"))
         try:
-            config = workdir / "empty-config.yaml"
-            config.write_text("")
+            if operator_config is not None:
+                config = operator_config
+            else:
+                config = workdir / "empty-config.yaml"
+                config.write_text("")
             cwd = workdir if not _inside_a_checkout(workdir) else Path(workdir.anchor)
             for argv, env, what in _commands(
                 tool, program, cache, config, workdir, checks, java
