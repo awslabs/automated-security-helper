@@ -252,3 +252,64 @@ async def test_a_named_client_policy_is_refused_and_an_operator_policy_kept(
         str(definition), workspace_config=str(operator), session_id="session-a"
     )
     assert kept["success"] is True, kept
+
+
+@pytest.mark.asyncio
+async def test_a_default_denial_holds_for_the_other_separator(tmp_path, monkeypatch):
+    _with_profile(monkeypatch, tmp_path, ["/**"])
+    result = await _resolve(
+        tmp_path, ["reporters.bedrock_summary_reporter.options.aws_region=us-east-1"]
+    )
+    assert result["success"] is False, result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "override",
+    [
+        "scanners.trivy_repo.options.ignore_file=standin.txt",
+        "scanners.trivy-repo.options.ignore-file=standin.txt",
+    ],
+)
+async def test_an_operator_denial_holds_for_every_mix_of_separators(
+    tmp_path, monkeypatch, override
+):
+    profile = tmp_path / "profile.yaml"
+    profile.write_text(
+        "project_name: operator\n"
+        "global_settings:\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        '      allowed_paths: ["/**"]\n'
+        '      denied_paths: ["/scanners/trivy-repo/options/ignore_file"]\n'
+    )
+    monkeypatch.setattr(
+        workspace_module,
+        "_resolve_session_config",
+        lambda session_id, profile_name: str(profile),
+    )
+    result = await _resolve(tmp_path, [override])
+    assert result["success"] is False, result
+
+
+@pytest.mark.asyncio
+async def test_a_policy_beside_a_symlinked_definitions_target_is_refused(
+    tmp_path, monkeypatch
+):
+    """The resolver looks for a policy beside the file a symlink points to."""
+    definition = _delivered_workspace(tmp_path, monkeypatch, with_policy=False)
+    target_dir = definition.parent / "sub"
+    (target_dir / "app").mkdir(parents=True)
+    (target_dir / "app" / "main.py").write_text("x = 1\n")
+    target = target_dir / "real.code-workspace"
+    target.write_text(json.dumps({"folders": [{"path": "app"}]}))
+    (target_dir / ".ash-workspace.yaml").write_text(_POLICY)
+    link = definition.parent / "link.code-workspace"
+    link.symlink_to(Path("sub") / "real.code-workspace")
+
+    result = await workspace_module.mcp_resolve_workspace(
+        str(link), session_id="session-a"
+    )
+    assert result["success"] is False, result
+    assert "delivered by an MCP client" in result["error"]

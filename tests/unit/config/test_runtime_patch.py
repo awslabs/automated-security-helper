@@ -1018,3 +1018,84 @@ class TestOverrideAsPatch:
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
             apply_runtime_override(base, override, allowlist=allowlist)
         assert "does not reproduce the override" in excinfo.value.rule
+
+
+class TestDenialsMatchEitherSeparator:
+    """Config merging treats '-' and '_' in a key as one key, per segment, so a
+    denial written with one has to refuse a write spelled with the other, in any
+    mix across segments.
+    """
+
+    def test_default_denial_refuses_the_underscore_spelling(self) -> None:
+        allowlist = RuntimeOverridesConfig(enabled=True, allowed_paths=["/**"])
+        ops = [
+            {
+                "op": "add",
+                "path": "/reporters/bedrock_summary_reporter/options/aws_region",
+                "value": "us-east-1",
+            }
+        ]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(_base_config(), ops, allowlist=allowlist)
+        assert "denied_paths" in excinfo.value.rule
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/scanners/trivy_repo/options/ignore_file",
+            "/scanners/trivy-repo/options/ignore-file",
+            "/scanners/trivy_repo/options/ignore-file",
+        ],
+    )
+    def test_operator_denial_mixing_separators_refuses_every_mix(
+        self, path: str
+    ) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=["/scanners/trivy-repo/options/ignore_file"],
+        )
+        ops = [{"op": "add", "path": path, "value": "x"}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(_base_config(), ops, allowlist=allowlist)
+        assert "denied_paths" in excinfo.value.rule
+
+    def test_value_pattern_binds_to_either_spelling(self) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[],
+            denied_value_patterns={
+                "/reporters/bedrock-summary-reporter/options/aws_region": r"^us-east-1$"
+            },
+        )
+        ops = [
+            {
+                "op": "add",
+                "path": "/reporters/bedrock_summary_reporter/options/aws_region",
+                "value": "us-east-1",
+            }
+        ]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(_base_config(), ops, allowlist=allowlist)
+        assert "denied_value_patterns" in excinfo.value.rule
+
+    def test_a_character_class_keeps_its_meaning(self) -> None:
+        # Folding '-' would turn [a-z] into [a_z]; the pattern as written still
+        # applies, so the folded form only adds refusals.
+        allowlist = RuntimeOverridesConfig(
+            enabled=True, allowed_paths=["/**"], denied_paths=["/project_[a-z]ame"]
+        )
+        ops = [{"op": "replace", "path": "/project_name", "value": "renamed"}]
+        with pytest.raises(RuntimePatchDeniedError):
+            apply_runtime_patch(_base_config(), ops, allowlist=allowlist)
+
+    def test_an_unrelated_path_is_still_allowed(self) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=["/scanners/trivy-repo/options/ignore_file"],
+        )
+        ops = [{"op": "replace", "path": "/project_name", "value": "renamed"}]
+        patched = apply_runtime_patch(_base_config(), ops, allowlist=allowlist)
+        assert patched.project_name == "renamed"

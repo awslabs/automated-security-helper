@@ -348,13 +348,7 @@ def _refuse_config_inputs_outside_the_permitted_roots(
     deployment that granted the tree but not its own path as a config root.
     """
 
-    from automated_security_helper.cli.mcp.sandbox import (
-        config_is_client_supplied,
-        validate_config_input,
-    )
-    from automated_security_helper.workspace.policy import (
-        discover_workspace_policy_file,
-    )
+    from automated_security_helper.cli.mcp.sandbox import validate_config_input
 
     for label, candidate in (
         ("workspace definition", workspace_file),
@@ -370,23 +364,33 @@ def _refuse_config_inputs_outside_the_permitted_roots(
             f"directories this server may read config from. {refusal}",
             context=dict(refusal.context, config_input=label),
         )
-    # A workspace policy sets suppressions and ignore paths for every project,
-    # the fields the runtime-override denylist keeps from a client. So a policy a
-    # client delivered, named or found next to the definition, is not used.
-    policy = (
-        Path(workspace_config)
-        if workspace_config is not None
-        else discover_workspace_policy_file(Path(workspace_file).parent)
-    )
-    if policy is not None and config_is_client_supplied(policy):
-        return MCPResourceError(
-            "Workspace scan refused: the workspace policy file "
-            f"{Path(policy).as_posix()} was delivered by an MCP client. A policy "
-            "sets suppressions and ignore paths for every project, so only an "
-            "operator's policy file is used.",
-            context={"config_input": "workspace policy"},
-        )
     return None
+
+
+def _refuse_a_client_delivered_policy(
+    plan: WorkspacePlan,
+) -> Optional[MCPResourceError]:
+    """Refuse a plan whose workspace policy an MCP client delivered.
+
+    A policy sets suppressions and ignore paths for every project, the fields
+    the runtime-override denylist keeps from a client. Checked on the file the
+    resolver applied (``workspace_config_source``, already resolved) rather than
+    on a path worked out beforehand: discovery runs beside the resolved
+    definition, so a symlinked definition, or a file added between a check and
+    the resolution, would make a separate lookup check a different file.
+    """
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    source = plan.workspace_config_source
+    if source is None or not config_is_client_supplied(Path(source)):
+        return None
+    return MCPResourceError(
+        "Workspace scan refused: the workspace policy file "
+        f"{Path(source).as_posix()} was delivered by an MCP client. A policy sets "
+        "suppressions and ignore paths for every project, so only an operator's "
+        "policy file is used.",
+        context={"config_input": "workspace policy"},
+    )
 
 
 def _refuse_projects_outside_the_permitted_roots(
@@ -484,9 +488,8 @@ def _gate_client_overrides(
     default, so without a profile that enables them no override is accepted.
 
     Each override is checked twice: by the key it names (``check_runtime_ops``
-    on an ``add`` at the pointer it resolves to in the session config, with every
-    other '-'/'_' spelling checked against the denials), and by the change it
-    makes to the session config (``apply_runtime_override``).
+    on an ``add`` at the pointer it resolves to in the session config), and by
+    the change it makes to the session config (``apply_runtime_override``).
 
     Raises:
         RuntimePatchDeniedError: An override is not allowed.
@@ -520,41 +523,31 @@ def _gate_client_overrides(
     # Each override is checked by the key it names, whatever it changes. A diff
     # against the session config alone misses one whose value the session config
     # already holds: it changes nothing there, but still overwrites each
-    # project's own value. --config-overrides treats '-' and '_' as one key
-    # (config_sources._resolve_dict_key), so the key is resolved against the
-    # session config the way the override will be, and that pointer gets every
-    # check. Every other spelling must also clear the denials, since a project's
-    # config can spell an extra section differently.
+    # project's own value. The key is resolved against the session config the
+    # way --config-overrides resolves it ('-' and '_' match per segment, see
+    # config_sources._resolve_dict_key); the denials match either spelling on
+    # their own (runtime_patch._denial_spellings).
     base_dump = base.model_dump()
-    any_path = allowlist.model_copy(update={"allowed_paths": ["/**"]})
     for override in config_overrides:
         key, separator, raw = str(override).partition("=")
         if not separator or not key.strip():
             raise RuntimePatchDeniedError(None, f"invalid config override {override!r}")
         append = key.endswith("+")
-        parts = (key[:-1] if append else key).split(".")
-        value = _parse_config_value(raw)
-
-        def op_at(segments: Sequence[str]) -> Dict[str, Any]:
-            pointer = "/" + "/".join(
-                segment.replace("~", "~0").replace("/", "~1") for segment in segments
-            )
-            return {
-                "op": "add",
-                "path": pointer + ("/-" if append else ""),
-                "value": value,
-            }
-
-        resolved = _resolve_override_key(base_dump, parts)
-        check_runtime_ops([op_at(resolved)], allowlist=allowlist)
-        spellings = {
-            tuple(parts),
-            tuple(part.strip() for part in parts),
-            tuple(part.strip().replace("_", "-") for part in parts),
-            tuple(part.strip().replace("-", "_") for part in parts),
-        }
+        resolved = _resolve_override_key(
+            base_dump, (key[:-1] if append else key).split(".")
+        )
+        pointer = "/" + "/".join(
+            segment.replace("~", "~0").replace("/", "~1") for segment in resolved
+        )
         check_runtime_ops(
-            [op_at(spelling) for spelling in sorted(spellings)], allowlist=any_path
+            [
+                {
+                    "op": "add",
+                    "path": pointer + ("/-" if append else ""),
+                    "value": _parse_config_value(raw),
+                }
+            ],
+            allowlist=allowlist,
         )
     after = apply_config_overrides(base, list(config_overrides))
     apply_runtime_override(base, after, allowlist=allowlist)
@@ -1070,6 +1063,14 @@ async def mcp_resolve_workspace(
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
 
+    policy_refusal = _refuse_a_client_delivered_policy(plan)
+    if policy_refusal is not None:
+        return _error_response(
+            policy_refusal,
+            "resolve_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
+
     return {
         "success": True,
         "exit_code": int(WorkspaceExitCode.SUCCESS),
@@ -1214,6 +1215,14 @@ async def mcp_scan_workspace(
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")
+
+    policy_refusal = _refuse_a_client_delivered_policy(plan)
+    if policy_refusal is not None:
+        return _error_response(
+            policy_refusal,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
 
     refusal = _refuse_projects_outside_the_permitted_roots(plan, session_id)
     if refusal is not None:

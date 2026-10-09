@@ -38,7 +38,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-from typing import Any, Dict, List, Pattern
+from typing import Any, Dict, List, Pattern, Tuple
 
 import jsonpatch
 from pydantic import ValidationError
@@ -201,6 +201,27 @@ def _policy_covers_op_path(pattern: str, path: str) -> bool:
     return _pattern_reaches_into(_subtree_pattern(pattern), _path_segments(path))
 
 
+def _fold_separators(pointer: str) -> str:
+    """``pointer`` with every '-' read as '_'.
+
+    Config merging treats a key spelled with '-' and the same key spelled with
+    '_' as one key, one segment at a time (``config_sources._resolve_dict_key``),
+    so a denial has to hold for every mix of the two. Replacing over the whole
+    pointer is the same as replacing per segment: '/' separates segments, and
+    the RFC 6901 escapes contain neither character.
+    """
+    return pointer.replace("-", "_")
+
+
+def _denial_spellings(pattern: str, path: str) -> Tuple[Tuple[str, str], ...]:
+    """The (pattern, path) pairs a denial is matched over: as written, then folded.
+
+    As written comes first so a glob whose character class contains '-' keeps
+    its meaning; the folded pair only adds matches, so it can only refuse more.
+    """
+    return ((pattern, path), (_fold_separators(pattern), _fold_separators(path)))
+
+
 def _denied_path_reason(denied: str, path: str) -> str | None:
     """Explain how a `denied_paths` entry blocks a write at `path`, or None.
 
@@ -209,13 +230,18 @@ def _denied_path_reason(denied: str, path: str) -> str | None:
     wholesale cannot act on a message that does not say which descendant of it
     is off limits.
     """
-    if not _policy_covers_op_path(denied, path):
-        return None
-    if _path_matches(denied, path):
-        return f"path {path!r} matches denied_paths entry {denied!r}"
-    if _match_segments(_subtree_pattern(denied), _path_segments(path)):
-        return f"path {path!r} is inside denied_paths entry {denied!r}"
-    return f"path {path!r} writes a subtree that contains denied_paths entry {denied!r}"
+    for pattern, target in _denial_spellings(denied, path):
+        if not _policy_covers_op_path(pattern, target):
+            continue
+        if _path_matches(pattern, target):
+            return f"path {path!r} matches denied_paths entry {denied!r}"
+        if _match_segments(_subtree_pattern(pattern), _path_segments(target)):
+            return f"path {path!r} is inside denied_paths entry {denied!r}"
+        return (
+            f"path {path!r} writes a subtree that contains denied_paths entry "
+            f"{denied!r}"
+        )
+    return None
 
 
 def _check_op_paths(
@@ -280,7 +306,10 @@ def _check_value_pattern(
     # value written at a child, and a value written at a parent carries every
     # child the regex was registered for.
     for pattern_path, pattern in allowlist.denied_value_patterns.items():
-        if not _policy_covers_op_path(pattern_path, path):
+        if not any(
+            _policy_covers_op_path(bound, target)
+            for bound, target in _denial_spellings(pattern_path, path)
+        ):
             continue
         try:
             compiled = re.compile(pattern)

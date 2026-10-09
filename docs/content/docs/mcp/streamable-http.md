@@ -214,7 +214,7 @@ The allowlist defines:
 
 - `enabled: bool = False` — the master switch. Defaults to off; runtime patches are denied unless the operator flips this on per profile.
 - `allowed_paths: list[str]` — JSON-Pointer prefixes the client may target. A trailing `/*` means "this whole subtree". Example: `/scanners/*/options/severity_threshold`.
-- `denied_paths: list[str]` — explicit blocks; always wins over `allowed_paths`. The defaults are `/fail_on_findings`, `/fail_on_incomplete_scanners`, `/content_db_staleness`, `/content_db_staleness_overrides`, `/sandbox` and `/sandbox/**`, `/ash_plugin_modules` and `/ash_plugin_modules/**`, `/global_settings/ignore_paths`, `/global_settings/suppressions`, `/reporters/bedrock-summary-reporter/options/aws_*`, and `/reporters/cloudwatch-logs/**`.
+- `denied_paths: list[str]` — explicit blocks; always wins over `allowed_paths`. The defaults are `/fail_on_findings`, `/fail_on_incomplete_scanners`, `/content_db_staleness`, `/content_db_staleness_overrides`, `/sandbox` and `/sandbox/**`, `/ash_plugin_modules` and `/ash_plugin_modules/**`, `/global_settings/ignore_paths`, `/global_settings/suppressions`, `/reporters/bedrock-summary-reporter/options/aws_*`, and `/reporters/cloudwatch-logs/**`. A `denied_paths` entry, and a `denied_value_patterns` key, matches a path whatever mix of `-` and `_` either one is spelled with, because ASH reads `bedrock-summary-reporter` and `bedrock_summary_reporter` as the same key.
 - `denied_value_patterns: dict[str, str]` — per-path regex denylist for dangerous values (e.g., scanner `extra_args` containing `--no-verify` or shell metacharacters).
 
 Additional invariants enforced by `apply_runtime_patch`:
