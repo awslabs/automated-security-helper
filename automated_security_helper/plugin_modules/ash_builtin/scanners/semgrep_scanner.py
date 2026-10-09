@@ -16,7 +16,10 @@ from typing import Annotated, List, Literal, ClassVar
 from pydantic import Field
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -71,6 +74,7 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
 
     tool_version: Annotated[
         str | None,
+        tool_version_constraint("scanners.semgrep.options.tool_version"),
         Field(
             description=(
                 "Version constraint for semgrep installation, in pip requirement "

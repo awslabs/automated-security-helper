@@ -17,6 +17,9 @@ from automated_security_helper.config.default_config import (
     default_config_chain,
     get_default_config,
 )
+from automated_security_helper.config.plugin_module_trust import (
+    confine_plugin_modules,
+)
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     files_inside,
@@ -196,6 +199,7 @@ def resolve_config(
     permit_base: Optional[Callable[[Path], bool]] = None,
     scanned_root: Path | str | None = None,
     trusted_config_path: Path | str | None = None,
+    untrusted_config: bool = False,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -219,6 +223,14 @@ def resolve_config(
             which a project's own config file replaces). Used in place of the
             defaults as the trusted base the grants come from, unless it is
             inside the scanned tree as well.
+        untrusted_config: The selected config file was written by the caller,
+            not the operator: an MCP client's upload named as ``config_path``.
+            Every file of its chain is then treated as a file inside the scanned
+            tree is, wherever it is: its sandbox grants come from the trusted
+            base instead, its ``network_scanners`` list only removes network,
+            and its ``sandbox.mode`` cannot turn off or replace a mode the
+            trusted base sets. Its ``ash_plugin_modules`` are limited the same way
+            as an in-tree file's (``config/plugin_module_trust.py``).
 
     Returns:
         The resolved AshConfig object
@@ -238,7 +250,7 @@ def resolve_config(
         scanned_root = source_dir if source_dir is not None else Path.cwd()
     trees = scanned_trees(Path(scanned_root))
     if chain:
-        in_tree = files_inside(chain, trees)
+        in_tree = list(chain) if untrusted_config else files_inside(chain, trees)
         if not in_tree:
             return config
         default_in_tree = files_inside(default_config_chain(), trees)
@@ -273,6 +285,9 @@ def resolve_config(
     if sandbox_overrides:
         trusted = apply_config_overrides(trusted, sandbox_overrides)
     confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
+    confine_plugin_modules(
+        config, trusted, config_overrides, Path(scanned_root), in_tree
+    )
     return config
 
 

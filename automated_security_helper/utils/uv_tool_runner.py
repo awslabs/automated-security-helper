@@ -84,6 +84,34 @@ def _install_retry_delay(config: UVToolRetryConfig, attempt: int) -> float:
     return max(0.0, min(delay, config.max_delay))
 
 
+def checked_requirement(spec: str) -> str:
+    """``spec`` if it names a package from an index; UVToolRunnerError otherwise.
+
+    Every requirement uv installs or runs here is assembled from a package name, the
+    plugin's extras and the plugin's ``tool_version``. The options validate
+    ``tool_version`` already (``base/options.tool_version_constraint``); this is
+    the check at the point of use, so a plugin that builds its constraint some
+    other way still cannot hand uv a path, a URL or an environment marker.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    from automated_security_helper.utils.pre_installed_tool import (
+        validate_version_constraint,
+    )
+
+    try:
+        requirement = Requirement(spec)
+        if requirement.url or requirement.marker:
+            raise ValueError("a direct reference or marker")
+        validate_version_constraint(str(requirement.specifier))
+    except (InvalidRequirement, ValueError):
+        raise UVToolRunnerError(
+            f"Refusing to pass {spec!r} to uv: a tool requirement must be a package "
+            "name with optional extras and a PEP 440 version specifier"
+        ) from None
+    return spec
+
+
 class UVToolRunner:
     """UV tool runner for managing UV-based tool execution and installation."""
 
@@ -192,6 +220,14 @@ class UVToolRunner:
         """
         if not self.is_uv_available():
             return None
+        if package_name:
+            try:
+                checked_requirement(package_name)
+            except UVToolRunnerError as error:
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.warning(str(error))
+                return None
 
         cache_key = f"{tool_name}::{package_name or ''}"
 
@@ -377,6 +413,13 @@ class UVToolRunner:
         tool_spec = (
             f"{base_spec}{version_constraint}" if version_constraint else base_spec
         )
+        try:
+            checked_requirement(tool_spec)
+            for dep in with_dependencies or []:
+                checked_requirement(dep)
+        except UVToolRunnerError as error:
+            ASH_LOGGER.warning(str(error))
+            return False
 
         # Build command with offline support
         cmd = [self.uv_executable, "tool", "install"]
@@ -634,7 +677,7 @@ class UVToolRunner:
             else:
                 base_spec = tool_name
 
-            from_spec = (
+            from_spec = checked_requirement(
                 f"{base_spec}{version_constraint}" if version_constraint else base_spec
             )
 
@@ -649,7 +692,7 @@ class UVToolRunner:
             command.extend(
                 [
                     "--from",
-                    package_name,
+                    checked_requirement(package_name),
                 ]
             )
 

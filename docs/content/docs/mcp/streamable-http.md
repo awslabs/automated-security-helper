@@ -59,7 +59,7 @@ Path hashes let clients detect that the operator rotated a profile file undernea
 
 1. **Static.** `select_profile(profile_name="default")` — bind the profile as-is.
 2. **Inherit-and-patch.** `select_profile(profile_name="default", patch_ops=[...])` — apply a JSON-Patch document, each op checked against the runtime-override allowlist first; a rejected op fails the whole call without mutating the session config. See [Runtime config overrides](#runtime-config-overrides).
-3. **Full override.** `select_profile(profile_name="default", override_yaml="...")` — replace the resolved config with a client-supplied YAML string, still validated through `AshConfig`.
+3. **Full override.** `select_profile(profile_name="default", override_yaml="...")` — replace the resolved config with a client-supplied YAML string, validated through `AshConfig` and held to the same runtime-override allowlist as `patch_ops`. See [Overrides are patches](#overrides-are-patches).
 
 `patch_ops` and `override_yaml` are mutually exclusive, and the parameter is `profile_name` — a profile must be named in every mode, including override.
 
@@ -160,6 +160,18 @@ Any of these triggers an immediate failure. Out-of-order sequences, checksum mis
 
 `mcp__ash__clear_source` wipes the session workspace and resets `source_dir` if you need to reload.
 
+### Config files in delivered source
+
+A delivered tree can carry its own `.ash.yaml`, and a client can name any file in its session workspace as `run_ash_scan`'s `config_path`. Such a file was written by the client, not the operator, so its sandbox settings are restrict-only, the same as a config file inside the scanned repository, wherever the scan target is:
+
+- `sandbox.network_scanners` and `sandbox.extra_read_paths` come from the server instead: the profile this session bound with `select_profile`, or else `ASH_CONFIG` and the defaults.
+- The file's `network_scanners` list still applies as a limit, so it can take network away from a scanner but never give it one.
+- `sandbox.mode` can turn the sandbox on, but cannot turn it off or move it to another backend when the server's config sets a mode.
+
+Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`.
+
+`get_config` shows the sandbox section the same way, as a scan of the session's delivered source (or, with none delivered, the working directory) would apply it.
+
 ### Restricting scan targets
 
 `run_ash_scan` also accepts a server-side path directly, and ASH writes its
@@ -202,7 +214,7 @@ The allowlist defines:
 
 - `enabled: bool = False` — the master switch. Defaults to off; runtime patches are denied unless the operator flips this on per profile.
 - `allowed_paths: list[str]` — JSON-Pointer prefixes the client may target. A trailing `/*` means "this whole subtree". Example: `/scanners/*/options/severity_threshold`.
-- `denied_paths: list[str]` — explicit blocks; always wins over `allowed_paths`. Defaults seed `/global_settings/fail_fast`, `/global_settings/ignore_paths`, `/scanners/bedrock_summary/options/aws_*`, and `/reporters/bedrock_summary/**`.
+- `denied_paths: list[str]` — explicit blocks; always wins over `allowed_paths`. The defaults are `/fail_on_findings`, `/fail_on_incomplete_scanners`, `/content_db_staleness`, `/content_db_staleness_overrides`, `/sandbox` and `/sandbox/**`, `/ash_plugin_modules` and `/ash_plugin_modules/**`, `/global_settings/ignore_paths`, `/global_settings/suppressions`, `/reporters/bedrock-summary-reporter/options/aws_*`, and `/reporters/cloudwatch-logs/**`. A `denied_paths` entry, and a `denied_value_patterns` key, matches a path whatever mix of `-` and `_` either one is spelled with, because ASH reads `bedrock-summary-reporter` and `bedrock_summary_reporter` as the same key. Under `/scanners`, `/reporters` and `/converters`, an entry naming a plugin's section also matches every other spelling ASH reads as that plugin's config: case, punctuation and the words Scanner, Reporter and Converter are ignored, so `/reporters/BedrockSummary` is refused by the `bedrock-summary-reporter` entry. A plugin segment containing a glob character (`*`, `?`, `[`) is matched as written.
 - `denied_value_patterns: dict[str, str]` — per-path regex denylist for dangerous values (e.g., scanner `extra_args` containing `--no-verify` or shell metacharacters).
 
 Additional invariants enforced by `apply_runtime_patch`:
@@ -212,6 +224,12 @@ Additional invariants enforced by `apply_runtime_patch`:
 - Any rejection raises `RuntimePatchDeniedError` with the offending op and the rule that fired; nothing is applied.
 
 The full allowlist is exposed at runtime via the `ash://schema/runtime-overrides` resource so clients can introspect what is patchable before composing a patch.
+
+### Overrides are patches
+
+`override_yaml` is checked by the same rules, not by a second copy of them. The server validates the YAML as an `AshConfig`, diffs it against the profile, and sends the resulting add/remove/replace ops through `apply_runtime_patch`. An override is accepted exactly when that patch would be: never while `enabled` is false, and only if every field it changes is in `allowed_paths`, outside `denied_paths`, and clear of `denied_value_patterns`. A refusal returns `success: false` with an `override denied:` error naming the op and the rule.
+
+Because an override replaces the profile wholesale, a field the YAML leaves out reverts to its default, and that counts as a change. Omitting `sandbox` from an override of a profile that sets `sandbox.mode: bwrap` is a `replace` at `/sandbox/mode`, refused by the `/sandbox` entry. To change one field with `override_yaml`, restate the profile and edit that field; `patch_ops` is usually the shorter way to say the same thing.
 
 ### Safe example
 
@@ -359,7 +377,7 @@ The streamable-HTTP transport puts the MCP server on the network. A few invarian
 - **The auth header is the only built-in gate.** There is no per-tool RBAC, no per-tenant rate limiting, no audit log beyond standard logging. Anything more sophisticated belongs in a fronting proxy.
 - **Set `ASH_MCP_ALLOWED_ROOTS`.** Scan targets are confined to the roots it names, plus the per-session workspace. The fallback when it is unset refuses only a short list of system directories and leaves the rest of the server's filesystem available as a scan target, so on a network-reachable deployment it is not a substitute for naming the roots yourself. See [Restricting scan targets](#restricting-scan-targets).
 - **Always run behind TLS in production.** ASH does not terminate TLS itself. Use nginx, traefik, an API gateway, or a service mesh sidecar.
-- **The runtime-override allowlist defaults to disabled.** A profile must explicitly set `mcp.runtime_overrides.enabled: true` and enumerate `allowed_paths` for any client patching to succeed. Leaving it off is the safe default — clients can still pick profiles, just not modify them.
+- **The runtime-override allowlist defaults to disabled.** A profile must explicitly set `mcp.runtime_overrides.enabled: true` and enumerate `allowed_paths` for any client patching to succeed, through `patch_ops` or `override_yaml`. Leaving it off is the safe default — clients can still pick profiles, just not modify them.
 - **Source-upload limits are per-session, not per-tenant.** A misbehaving tenant can still consume their session quota. Pair the transport with upstream rate limits if untrusted clients can connect.
 - **Workspaces are wiped on disconnect.** Don't rely on session-resident state to survive reconnects; persisted state across server restarts is explicitly out of scope (Track 10.8).
 

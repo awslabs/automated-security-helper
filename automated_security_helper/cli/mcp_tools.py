@@ -308,7 +308,13 @@ async def _run_scan_async(
         run_ash_scan,
     )
 
-    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.cli.mcp.profile_registry import (
+        resolve_session_config_path,
+    )
+    from automated_security_helper.cli.mcp.sandbox import (
+        config_base_gate,
+        config_is_client_supplied,
+    )
 
     registry = get_scan_registry()
     entry = registry.get_scan(scan_id)
@@ -320,6 +326,17 @@ async def _run_scan_async(
     # session's grant. mcp_scan_directory checked the chain before starting; this
     # is what holds if a base changes between that check and the scan.
     base_gate = config_base_gate(session_id)
+
+    # A config the client delivered into a session sandbox (an upload or a clone)
+    # is the client's, not the operator's, wherever the scan target is. It is
+    # resolved restrict-only for sandbox settings, with the profile this session
+    # bound, if any, as the trusted base the grants come from.
+    untrusted_config = config_path is not None and config_is_client_supplied(
+        config_path
+    )
+    trusted_config_path = (
+        resolve_session_config_path(session_id) if untrusted_config else None
+    )
 
     # Resolve the per-session lock if a session_id was supplied. The lock is
     # acquired inside the executor wrapper below — we MUST NOT hold it on the
@@ -364,6 +381,8 @@ async def _run_scan_async(
                     fail_on_findings=False,
                     show_summary=False,
                     config_base_gate=base_gate,
+                    untrusted_config=untrusted_config,
+                    trusted_config_path=trusted_config_path,
                 )
         else:
             return run_ash_scan(
@@ -375,6 +394,8 @@ async def _run_scan_async(
                 fail_on_findings=False,
                 show_summary=False,
                 config_base_gate=base_gate,
+                untrusted_config=untrusted_config,
+                trusted_config_path=trusted_config_path,
             )
 
     try:
@@ -1128,15 +1149,25 @@ def mcp_get_config(
 
     Returns:
         Dict representation of the resolved AshConfig, or raw YAML dict if raw=True.
-        A refused path returns ``success`` False with ``error_type``
+        Its ``sandbox`` section is the one a scan of this session's default
+        target would apply, so a file the client delivered shows no grants of
+        its own. A refused path returns ``success`` False with ``error_type``
         ``config_input_not_permitted``.
     """
     import yaml as _yaml
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+        resolve_session_config_path,
+    )
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
         config_base_gate,
         config_chain_refusal,
+        config_is_client_supplied,
         validate_config_input,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        get_session_source_dir,
     )
     from automated_security_helper.config.resolve_config import (
         resolve_config,
@@ -1193,15 +1224,36 @@ def mcp_get_config(
     # `extends` bases must stay, so it is the searched directory when the file
     # was discovered, and otherwise the file's own project directory (the
     # parent of .ash/ for a file in .ash/), never .ash/ itself.
+    #
+    # The sandbox section is shown as a scan would apply it. A discovered file is
+    # resolved for the directory searched, which is what a scan of it would find.
+    # A named file is resolved for the target run_ash_scan() takes when none is
+    # named, this session's delivered source or else the working directory, not
+    # for the file's own directory: no scan targets the directory of a bound
+    # profile or a config root, so treating the file as inside its own scanned
+    # tree would hide grants a scan applies. A file the client delivered is
+    # restrict-only wherever it is, with the bound profile as the trusted base,
+    # as the scan runner resolves it.
     if config_path is None:
         source_dir = Path(search_dir) if search_dir else Path.cwd()
+        scanned_root = source_dir
     else:
         source_dir = default_confinement_root(path)
+        delivered = get_session_source_dir(session_id or DEFAULT_SESSION_ID)
+        scanned_root = (
+            delivered if delivered is not None and delivered.is_dir() else Path.cwd()
+        )
+    untrusted_config = config_is_client_supplied(path)
     try:
         resolved = resolve_config(
             config_path=path,
             source_dir=source_dir,
             permit_base=config_base_gate(session_id),
+            scanned_root=scanned_root,
+            untrusted_config=untrusted_config,
+            trusted_config_path=(
+                resolve_session_config_path(session_id) if untrusted_config else None
+            ),
         )
     except ASHConfigInputNotPermittedError as exc:
         return _config_refusal(config_chain_refusal(path, exc), "get_config")
@@ -1457,7 +1509,11 @@ def mcp_select_profile(
           config is patched through `apply_runtime_patch` (which enforces the
           MCP allowlist).
         * **override** — `override_yaml` is provided; the profile is
-          replaced wholesale by the YAML, validated through `AshConfig`.
+          replaced wholesale by the YAML, validated through `AshConfig`, and
+          held to the same allowlist as `patch_ops`: the difference between
+          the profile and the YAML is checked as the JSON-Patch that produces
+          it (`apply_runtime_override`), so both modes are held to one set of
+          rules.
 
     `patch_ops` and `override_yaml` are mutually exclusive.
 
@@ -1474,6 +1530,7 @@ def mcp_select_profile(
     )
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
+        apply_runtime_override,
         apply_runtime_patch,
     )
     from automated_security_helper.config.ash_config import (
@@ -1483,6 +1540,19 @@ def mcp_select_profile(
     )
     import yaml as _yaml
     from pydantic import ValidationError as _ValidationError
+
+    def _runtime_overrides_policy(profile_cfg: AshConfig) -> RuntimeOverridesConfig:
+        # One reading of the profile's allowlist for both mutating modes, so
+        # override_yaml cannot be checked against a different policy than
+        # patch_ops.
+        mcp_cfg: Optional[AshMcpConfig] = getattr(
+            profile_cfg.global_settings, "mcp", None
+        )
+        return (
+            mcp_cfg.runtime_overrides
+            if mcp_cfg is not None
+            else RuntimeOverridesConfig()
+        )
 
     if patch_ops is not None and override_yaml is not None:
         return {
@@ -1528,12 +1598,20 @@ def mcp_select_profile(
                 ),
             }
         try:
-            new_cfg = AshConfig.model_validate(raw or {}, strict=True)
+            override_cfg = AshConfig.model_validate(raw or {}, strict=True)
         except _ValidationError as exc:
             return {
                 "success": False,
                 "error": f"override_yaml validation error: {exc.errors()}",
             }
+        try:
+            new_cfg = apply_runtime_override(
+                base_cfg,
+                override_cfg,
+                allowlist=_runtime_overrides_policy(base_cfg),
+            )
+        except RuntimePatchDeniedError as exc:
+            return {"success": False, "error": f"override denied: {exc}"}
         materialized = _materialize_or_error(
             materialize_session_config, session_id, new_cfg
         )
@@ -1555,14 +1633,10 @@ def mcp_select_profile(
         }
 
     if patch_ops is not None:
-        mcp_cfg: Optional[AshMcpConfig] = getattr(base_cfg.global_settings, "mcp", None)
-        allowlist = (
-            mcp_cfg.runtime_overrides
-            if mcp_cfg is not None
-            else RuntimeOverridesConfig()
-        )
         try:
-            patched = apply_runtime_patch(base_cfg, patch_ops, allowlist=allowlist)
+            patched = apply_runtime_patch(
+                base_cfg, patch_ops, allowlist=_runtime_overrides_policy(base_cfg)
+            )
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"patch denied: {exc}"}
         materialized = _materialize_or_error(

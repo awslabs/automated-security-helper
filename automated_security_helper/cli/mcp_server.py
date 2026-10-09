@@ -1672,6 +1672,9 @@ async def select_profile(
       against the server's runtime-override allowlist, and one rejected op fails
       the whole call without changing the session's config.
     * override_yaml: replace it wholesale with your own YAML, still validated.
+      The difference from the profile is checked against the same allowlist as
+      patch_ops, so a field the YAML leaves out reverts to its default and is
+      refused like any other change the allowlist does not permit.
 
     patch_ops and override_yaml are mutually exclusive.
 
@@ -1687,8 +1690,8 @@ async def select_profile(
         Dict with success, mode ('static', 'inherit_and_patch' or 'override'),
         profile_name, session_id, and config_path -- the file inside this
         session's workspace that later scans will be handed. On failure,
-        success=False and error, for an unknown profile, a denied patch op, or
-        YAML that does not validate.
+        success=False and error, for an unknown profile, a denied patch op or
+        override, or YAML that does not validate.
     """
     try:
         session_id = resolve_session_id(ctx.headers)

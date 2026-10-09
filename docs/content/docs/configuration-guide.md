@@ -437,7 +437,45 @@ ash_plugin_modules:
 The top-level package must be inside ASH's plugin namespace: either under
 `automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`.
 A module outside that namespace is skipped with a warning rather than imported, so a
-name like `another_plugin_module` silently registers nothing.
+name like `another_plugin_module` silently registers nothing. When the list comes from
+a config file inside the scanned tree, only installed modules are imported; see
+[Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
+
+## Settings a repository's config cannot choose
+
+ASH reads its configuration from the repository it scans unless `--config` names a
+file elsewhere. When any file the configuration was built from is inside the scanned
+tree (a discovered `.ash/.ash.yaml`, a `--config` path inside the tree, an `extends`
+base, or the file `ASH_CONFIG` names), a few settings are limited, because they decide
+what ASH installs, imports or hands a scanner as its own configuration. The scanned
+tree is the outermost git checkout around the source directory, or the source
+directory itself outside a checkout.
+
+Under the MCP server, a config file a client delivered (an upload or a file in a
+delivered tree, named as `config_path`) is limited the same way, wherever it is. A
+file any MCP client delivered also counts as inside the scanned tree for the path
+and module checks below: everything under the MCP workspace root
+(`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except each session's
+`config/` directory, which only the server writes.
+
+| Setting | From a config file inside the scanned tree |
+|---|---|
+| `scanners.<name>.options.tool_version`, `converters.jupyter.options.tool_version` | Must be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`. This applies from every source, including `--config-overrides`. Any other value is replaced by the scanner's default constraint. |
+| `scanners.opengrep.options.version` | Must be a release tag such as `v1.15.1`, from every source. Any other value is replaced by the pinned version. |
+| `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. |
+| `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool only when the file is outside the scanned tree. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
+| `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept only when the file is outside the scanned tree. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
+| trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and a file that sets nothing is passed otherwise. |
+| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.mode` | See [Scanner sandbox](scanner-sandbox.md). |
+
+Each setting that is not honored is logged once, as a warning that names it.
+
+To set any of these for a repository you trust, use `--config-overrides`,
+`--ash-plugin-modules`, or a config file outside the scanned tree. A file path set
+that way still has to point outside the tree. Under `--sandbox`, a file outside the
+system paths the sandbox already reads also has to be listed in
+`sandbox.extra_read_paths`, or the tool cannot open it and the scanner reports an
+error.
 
 ## Validating Configuration
 

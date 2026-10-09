@@ -92,6 +92,50 @@
 
 ### Behavior changes
 
+- **A config file inside the scanned tree can no longer choose what ASH installs,
+  imports or hands a scanner as its own configuration.** It applies to a discovered
+  `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`:
+  - `tool_version` (bandit, checkov, semgrep, ferret-scan, the jupyter converter)
+    must be a PEP 440 version specifier set such as `>=1.2,<2`, from any source.
+    Any other value is replaced by the default, with a warning naming the key.
+    `scanners.opengrep.options.version` likewise has to be a release tag.
+  - `ash_plugin_modules` entries such a file adds are imported only when they name
+    an installed module outside the tree. `--ash-plugin-modules`,
+    `--config-overrides` and a config file outside the tree are unaffected.
+  - checkov's and ferret-scan's `config_file`, the `.checkov.yaml` and `ferret.yaml`
+    files they find by name, and detect-secrets plugins and filters that name a
+    file are passed to the tool only when the file is outside the scanned tree.
+    checkov and ferret-scan now run from the filesystem root, because each reads
+    its config file from its working directory itself, and ferret-scan always
+    gets a `--config`; the paths in their findings are unchanged.
+  - trivy-repo no longer reads a `.trivyignore` or `trivy-secret.yaml` from the
+    scanned repository, either of which could remove findings from the report. It
+    gets an explicit `--ignorefile` and `--secret-config`: the
+    `scanners.trivy-repo.options.ignore_file` / `secret_config_file` options, or
+    `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`, when that file is outside the scanned
+    tree, otherwise one that sets nothing. A repository that relied on either file
+    now sees those findings, with a warning naming the file. Under `--sandbox`, an
+    operator file outside the system paths also has to be listed in
+    `sandbox.extra_read_paths`.
+  - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
+    write `==1.2.3`, or leave it unset for the supported range.
+
+  Under the MCP server, a config a client delivered is limited the same way, and a
+  file any MCP client delivered (under the MCP workspace root, except each session's
+  `config/` directory) counts as inside the scanned tree for these checks. The
+  workspace tools' `config_overrides` are checked against the session config's
+  `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
+  `override_yaml` are, and are refused while runtime overrides are off (the
+  default). Each override is checked by the key it names, so one whose value the
+  session config already holds is checked too. A workspace policy file a client
+  delivered, named or found beside the definition, is refused.
+  `/ash_plugin_modules` joins the default `denied_paths`, and `denied_paths` and
+  `denied_value_patterns` now match a key spelled with either `-` or `_`, and a
+  plugin's section under every spelling ASH reads as that plugin's config.
+
+  Each value that is not honored is logged once as a warning naming the key. See
+  [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+
 - **`ash dependencies install --tool` selects the archive converter as `archive`.**
   Every plugin is now listed and selected by its config key. The archive converter
   was the one bundled plugin listed under its class name, so its canonical `--tool`

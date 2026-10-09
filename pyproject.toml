@@ -47,6 +47,10 @@ dependencies = [
  "pyjwt>=2.14,<3",
  "uvicorn>=0.54.0,<1",
  "jsonpatch>=1.33,<2",
+ # Parses scanners' tool_version as a PEP 440 specifier set before it reaches uv or
+ # pip (utils/pre_installed_tool.py validate_version_constraint). Already in every
+ # install as a transitive dependency; declared because ASH now imports it.
+ "packaging>=24.0,<27",
 ]
 [project.optional-dependencies]
 cdk = [

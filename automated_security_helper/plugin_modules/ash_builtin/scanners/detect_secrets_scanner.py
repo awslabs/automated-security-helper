@@ -12,6 +12,7 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
@@ -326,6 +327,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     f"Falling back to default settings."
                 )
 
+        self._drop_in_tree_settings_paths()
+
         # Skipped when the library is absent: the plugin list has to be read out of
         # detect-secrets itself, and there is no scan to configure for a scanner that
         # has already been recorded unable to run. Returning here rather than
@@ -379,6 +382,78 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ASH_LOGGER.debug(f"Default settings identified: {settings}")
 
         return super()._process_config_options()
+
+    def _drop_in_tree_settings_paths(self) -> None:
+        """Keep plugins_used and filters_used file entries only from outside the tree.
+
+        detect-secrets names a plugin or filter defined in a file as
+        ``file://<path>`` (a filter adds ``::<function>``), and reads a relative
+        path from its worker's working directory, which is not the source
+        directory. So a relative ``file://`` entry is dropped, and an absolute one
+        is kept only when the file is outside the scanned tree (see
+        config/path_trust.py), rewritten to the resolved path that was checked.
+        A path that is not ``file://`` is a module the worker imports, and is kept
+        only when it is one of detect-secrets' own (``detect_secrets.``). This
+        covers entries from the config and from the baseline file.
+        """
+        settings = self.config.options.scan_settings
+        source_dir = Path(self.context.source_dir)
+
+        def _checked(value: Any, key: str) -> tuple[bool, Any]:
+            """(keep, value to use) for one entry's path."""
+            if value is None:
+                return True, value
+            if not isinstance(value, str) or not value.startswith("file://"):
+                # A dotted path is imported by the worker. Only detect-secrets'
+                # own modules are named that way; anything else needs file://.
+                if isinstance(value, str) and value.startswith("detect_secrets."):
+                    return True, value
+                ASH_LOGGER.warning(
+                    f"Ignoring {key} {value!r}: only detect-secrets' own plugins "
+                    "and filters may be named by module path. Name another one "
+                    "with an absolute file:// path outside the scanned tree."
+                )
+                return False, value
+            file_part, separator, function = value[len("file://") :].partition("::")
+            if not Path(file_part).is_absolute():
+                ASH_LOGGER.warning(
+                    f"Ignoring {key} {value!r}: a file:// path must be absolute, "
+                    "because detect-secrets resolves a relative one from its own "
+                    "working directory."
+                )
+                return False, value
+            honored = honored_path(
+                file_part,
+                source_dir=source_dir,
+                key=key,
+                config=getattr(self.context, "config", None),
+            )
+            if honored is None:
+                return False, value
+            return True, f"file://{honored.as_posix()}{separator}{function}"
+
+        plugins_key = (
+            "scanners.detect-secrets.options.scan_settings.plugins_used[].path"
+        )
+        plugins = []
+        for plugin in settings.plugins_used:
+            keep, value = _checked(getattr(plugin, "path", None), plugins_key)
+            if keep:
+                if value is not None:
+                    setattr(plugin, "path", value)
+                plugins.append(plugin)
+        settings.plugins_used = plugins
+
+        filters_key = (
+            "scanners.detect-secrets.options.scan_settings.filters_used[].path"
+        )
+        filters = []
+        for item in settings.filters_used:
+            keep, value = _checked(item.path, filters_key)
+            if keep:
+                item.path = value
+                filters.append(item)
+        settings.filters_used = filters
 
     @staticmethod
     def _get_baseline_exclude_patterns(
