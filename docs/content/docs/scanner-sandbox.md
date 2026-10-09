@@ -185,8 +185,9 @@ The community scanners declare theirs:
   the `TRIVY_` variables.
 - ferret-scan asks only for its `FERRET_` variables.
 
-A file outside the source tree that a scanner option names is not mounted: a
-cfn-guard `rules_paths` entry, a `config_file` of actionlint, gitleaks, cfn-lint,
+A file outside the source tree that a scanner option names is not mounted (cfn-guard's
+`rules_paths` needs no mount: ASH copies those rules into the results directory): a
+`config_file` of actionlint, gitleaks, cfn-lint,
 zizmor, trivy or trivy-repo, gitleaks' `baseline_path`, trivy's `ignore_file`, a
 `secret_config_file` of trivy or trivy-repo, trivy-repo's `module_dir`, or an
 absolute actionlint `shellcheck` or `pyflakes`. Nor do gitleaks' `GITLEAKS_*` variables or

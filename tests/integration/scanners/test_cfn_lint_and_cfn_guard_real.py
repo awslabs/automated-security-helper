@@ -303,7 +303,9 @@ def _cfnlintrc(path: Path, rules: Path) -> Path:
     return path
 
 
-def _scan_with_tree_config(tmp_path: Path, tree_config: dict, *extra: str):
+def _scan_with_tree_config(
+    tmp_path: Path, tree_config: dict, *extra: str, scanners: str = "cfn-lint"
+):
     """``ash scan`` with no --config, so the tree's .ash/.ash.yaml is the config."""
     source = tmp_path / "repo"
     if not source.exists():
@@ -330,7 +332,7 @@ def _scan_with_tree_config(tmp_path: Path, tree_config: dict, *extra: str):
             "--output-dir",
             str(output),
             "--scanners",
-            "cfn-lint",
+            scanners,
             "--no-progress",
             "--no-fail-on-findings",
             *extra,
@@ -378,3 +380,98 @@ def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
     )
 
     assert marker.exists(), "cfn-lint never imported the operator's rules"
+
+
+# --------------------------------------------------------------------------- #
+# cfn-guard prints a rules file it cannot parse, whole, and follows a symlinked
+# .guard in a rules directory (both measured with 3.2.1). A credentials file outside
+# every rules directory carries a marker that must appear nowhere ASH writes.
+# --------------------------------------------------------------------------- #
+
+_LEAK_MARKER = "ash-cfn-guard-leak-marker-5c1e"
+
+
+def _secret(tmp_path: Path) -> Path:
+    secret = tmp_path / "elsewhere" / "credentials"
+    secret.parent.mkdir(parents=True)
+    secret.write_text(f"aws_secret_access_key = {_LEAK_MARKER}\n", encoding="utf-8")
+    return secret
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+
+def _files_mentioning(output: Path, text: str) -> list:
+    return [
+        path
+        for path in output.rglob("*")
+        if path.is_file() and text.encode() in path.read_bytes()
+    ]
+
+
+def test_rules_paths_named_by_the_scanned_tree_are_not_read(tmp_path):
+    """The tree empties rule_sets and names its own rules: a link to a file outside
+    the tree, and the file itself. Neither is read; the default set runs instead."""
+    _require_tools()
+    secret = _secret(tmp_path)
+    source = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, source)
+    (source / "policy").mkdir()
+    _symlink_or_skip(source / "policy" / "leak.guard", secret)
+
+    proc, output = _scan_with_tree_config(
+        tmp_path,
+        {
+            "scanners": {
+                "cfn-guard": {
+                    "options": {
+                        "rule_sets": [],
+                        "rules_paths": ["policy", secret.as_posix()],
+                    }
+                }
+            }
+        },
+        scanners="cfn-guard",
+    )
+
+    log = proc.stdout[-3000:] + proc.stderr[-3000:]
+    assert _files_mentioning(output, _LEAK_MARKER) == [], log
+    ash_log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    assert "Ignoring scanners.cfn-guard.options.rules_paths entry" in ash_log, log
+    guard = _results(output, "cfn-guard")
+    assert {r["ruleId"] for r in guard} == CFN_GUARD_EXPECTED_RULES, log
+
+
+def test_an_operator_rules_directory_is_read_but_not_a_link_out_of_it(tmp_path):
+    """The control: the operator's directory is honored, so its rule reports, and
+    the link in it that leaves the directory is refused."""
+    _require_tools()
+    secret = _secret(tmp_path)
+    rules = tmp_path / "operator-rules"
+    (rules / "nested").mkdir(parents=True)
+    (rules / "nested" / "mine.guard").write_text(
+        'rule ash_operator_rule { Resources.*.Type == "AWS::SQS::Queue" }\n',
+        encoding="utf-8",
+    )
+    _symlink_or_skip(rules / "leak.guard", secret)
+
+    proc, output = _scan_with_tree_config(
+        tmp_path,
+        {},
+        "--config-overrides",
+        "scanners.cfn-guard.options.rule_sets=[]",
+        "--config-overrides",
+        f'scanners.cfn-guard.options.rules_paths=["{rules.as_posix()}"]',
+        scanners="cfn-guard",
+    )
+
+    log = proc.stdout[-3000:] + proc.stderr[-3000:]
+    assert _files_mentioning(output, _LEAK_MARKER) == [], log
+    ash_log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    assert "resolves outside the rules directory" in ash_log, log
+    guard = _results(output, "cfn-guard")
+    assert {r["ruleId"] for r in guard} == {"ASH_OPERATOR_RULE"}, log

@@ -302,3 +302,32 @@ def test_operator_path_returns_the_path_it_checked(tmp_path, monkeypatch):
         config, "scanners.x.options.config_file", "~/tool.yaml", repo
     )
     assert chosen.path == (home / "tool.yaml").resolve()
+
+
+def test_operator_paths_decides_provenance_for_the_list_and_checks_each_entry(
+    tmp_path,
+):
+    from automated_security_helper.utils.config_trust import (
+        INSIDE_THE_TREE,
+        NOT_THE_OPERATORS,
+        operator_paths,
+    )
+
+    key = "scanners.x.options.rules_paths"
+    outside = tmp_path / "rules"
+    outside.mkdir()
+    values = [str(outside), "policy"]
+
+    repo, config = _operator_path_case(tmp_path, operator=False)
+    refused = operator_paths(config, key, values, repo)
+    assert [(c.path, c.refusal) for c in refused] == [(None, NOT_THE_OPERATORS)] * 2
+
+    repo, config = _operator_path_case(tmp_path / "op", operator=True)
+    (repo / "policy").mkdir()
+    strict = operator_paths(config, key, values, repo)
+    assert [(c.path, c.refusal) for c in strict] == [
+        (outside.resolve(), None),
+        (None, INSIDE_THE_TREE),
+    ]
+    relaxed = operator_paths(config, key, values, repo, outside_tree=False)
+    assert [c.path for c in relaxed] == [outside.resolve(), (repo / "policy").resolve()]

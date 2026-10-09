@@ -118,6 +118,13 @@ def repo(ash_temp_path) -> Path:
     return target
 
 
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+
 @pytest.fixture
 def rules_root(ash_temp_path, monkeypatch) -> Path:
     root = ash_temp_path / "rules"
@@ -267,30 +274,92 @@ class TestRuleSelection:
         (repo / "policy").mkdir()
         (repo / "policy" / "mine.guard").write_text("rule mine { }\n")
         scanner = _scanner(repo, rule_sets=[], rules_paths=["policy"])
-        assert scanner.rule_files() == [repo / "policy"]
+        assert scanner.rule_files() == [repo / "policy" / "mine.guard"]
 
-    @pytest.mark.parametrize("where", ["outside", "inside"])
+    @pytest.mark.parametrize("where", ["outside", "inside", "directory"])
     def test_rules_paths_from_the_scanned_tree_are_not_used(
         self, repo, rules_root, ash_temp_path, caplog, where
     ):
         """cfn-guard echoes a rules file it cannot parse, so a path the scanned
-        repository chose could put any readable file into the report."""
+        repository chose could put any readable file into the report. With
+        rule_sets emptied as well, the scan falls back to the default set instead
+        of evaluating nothing."""
+        directory = _fake_bundle(rules_root)
         if where == "outside":
             secret = ash_temp_path / "elsewhere" / "credentials"
             secret.parent.mkdir()
-        else:
+        elif where == "inside":
             secret = repo / "policy.guard"
+        else:
+            secret = repo / "policy" / "leak.guard"
+            secret.parent.mkdir()
         secret.write_text("aws_secret_access_key = not-a-rule\n")
+        named = secret.parent if where == "directory" else secret
+        scanner = _scanner(repo, operator=False, rule_sets=[], rules_paths=[str(named)])
+        with caplog.at_level("WARNING"):
+            assert scanner.rule_files() == [directory / "wa-Security-Pillar.guard"]
+        assert "Ignoring scanners.cfn-guard.options.rules_paths entry" in caplog.text
+        assert f"ASH's default rule set, {DEFAULT_RULE_SET}" in caplog.text
+
+    def test_rules_paths_from_the_tree_leave_the_chosen_rule_sets_alone(
+        self, repo, rules_root, caplog
+    ):
+        directory = _fake_bundle(rules_root)
+        (repo / "policy.guard").write_text("rule mine { }\n")
         scanner = _scanner(
-            repo, operator=False, rule_sets=[], rules_paths=[str(secret)]
+            repo,
+            operator=False,
+            rule_sets=["custom-set"],
+            rules_paths=["policy.guard"],
         )
         with caplog.at_level("WARNING"):
-            # The refused list leaves nothing selected, which is an error of its own.
-            with pytest.raises(
-                RulesBundleUnavailable, match="no cfn-guard rules are selected"
-            ):
-                scanner.rule_files()
-        assert "scanners.cfn-guard.options.rules_paths" in caplog.text
+            assert scanner.rule_files() == [directory / "custom-set.guard"]
+        assert "default rule set" not in caplog.text
+
+    def test_an_operator_rules_directory_is_read_as_cfn_guard_reads_one(
+        self, repo, rules_root, ash_temp_path
+    ):
+        """.guard and .ruleset files at any depth, case-sensitively, and a link
+        that stays inside the directory; measured against cfn-guard 3.2.1."""
+        mine = ash_temp_path / "operator-rules"
+        (mine / "sub").mkdir(parents=True)
+        (mine / "a.guard").write_text("rule a { }\n")
+        (mine / "sub" / "b.ruleset").write_text("rule b { }\n")
+        (mine / "notes.txt").write_text("not a rule\n")
+        (mine / "UPPER.GUARD").write_text("rule upper { }\n")
+        _symlink_or_skip(mine / "same.guard", Path("a.guard"))
+        scanner = _scanner(repo, rule_sets=[], rules_paths=[str(mine)])
+        assert scanner.rule_files() == [
+            mine.resolve() / "a.guard",
+            mine.resolve() / "same.guard",
+            mine.resolve() / "sub" / "b.ruleset",
+        ]
+
+    @pytest.mark.parametrize("link_to", ["file", "directory-file"])
+    def test_a_rules_file_that_leaves_the_operator_directory_is_refused(
+        self, repo, rules_root, ash_temp_path, caplog, link_to
+    ):
+        """cfn-guard follows a symlinked .guard in a rules directory and prints a
+        target it cannot parse, so the link would put that file in the report."""
+        secret = ash_temp_path / "elsewhere" / "credentials"
+        secret.parent.mkdir()
+        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        mine = ash_temp_path / "operator-rules"
+        mine.mkdir()
+        (mine / "mine.guard").write_text("rule mine { }\n")
+        if link_to == "file":
+            _symlink_or_skip(mine / "leak.guard", secret)
+        else:
+            (mine / "nested").mkdir()
+            _symlink_or_skip(
+                mine / "nested" / "leak.guard",
+                Path("..") / ".." / "elsewhere" / "credentials",
+            )
+        scanner = _scanner(repo, rule_sets=[], rules_paths=[str(mine)])
+        with caplog.at_level("WARNING"):
+            assert scanner.rule_files() == [mine.resolve() / "mine.guard"]
+        assert "leak.guard" in caplog.text
+        assert "resolves outside the rules directory" in caplog.text
 
     def test_operator_rules_paths_outside_the_tree_are_used(
         self, repo, rules_root, ash_temp_path
@@ -310,6 +379,19 @@ class TestRuleSelection:
             RulesBundleUnavailable, match="no cfn-guard rules are selected"
         ):
             _scanner(repo, rule_sets=[]).rule_files()
+
+    def test_an_operator_directory_with_no_rules_selects_nothing(
+        self, repo, rules_root, ash_temp_path
+    ):
+        """cfn-guard given such a directory exits 0 with no results (measured),
+        which would read as a clean scan."""
+        empty = ash_temp_path / "operator-rules"
+        empty.mkdir()
+        (empty / "README.md").write_text("no rules here\n")
+        with pytest.raises(
+            RulesBundleUnavailable, match="no cfn-guard rules are selected"
+        ):
+            _scanner(repo, rule_sets=[], rules_paths=[str(empty)]).rule_files()
 
     @pytest.mark.parametrize("name", ["wa-Security-Pillar.guard", "../x", "a/b", "-r"])
     def test_rule_set_names_must_be_bare_names(self, name):
@@ -426,8 +508,43 @@ class TestScan:
             "--rules=aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard"
             in recorded
         )
-        assert "--rules=policy" in recorded
+        assert "--rules=policy/mine.guard" in recorded
         assert not any(str(rules_root) in a or str(repo) in a for a in recorded)
+
+    def test_cfn_guard_is_given_a_copy_of_what_was_checked(
+        self, repo, rules_root, ash_temp_path
+    ):
+        """The operator's rules reach cfn-guard as copies in the results
+        directory, so a link swapped in after the check is never followed, and
+        a link that left the directory is not passed at all."""
+        _fake_bundle(rules_root)
+        secret = ash_temp_path / "elsewhere" / "credentials"
+        secret.parent.mkdir()
+        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        mine = ash_temp_path / "operator-rules"
+        mine.mkdir()
+        (mine / "mine.guard").write_text("rule mine { }\n")
+        _symlink_or_skip(mine / "leak.guard", secret)
+        given = []
+
+        def fake(command, **kwargs):
+            given.extend(
+                Path(a.split("=", 1)[1]) for a in command if a.startswith("--rules=")
+            )
+            return {
+                "returncode": 0,
+                "stdout": CAPTURED_COMPLIANT.read_text(),
+                "stderr": "",
+            }
+
+        scanner = _scanner(repo, rules_paths=[str(mine)])
+        self._run(scanner, fake)
+        operator_given = {p for p in given if "aws-guard-rules-registry" not in str(p)}
+        assert operator_given, given
+        for path in operator_given:
+            assert path.is_relative_to(Path(scanner.results_dir)), path
+            assert not path.is_symlink()
+            assert path.read_text() == "rule mine { }\n"
 
     def test_one_failing_template_does_not_cost_the_others(self, repo, rules_root):
         _fake_bundle(rules_root)
