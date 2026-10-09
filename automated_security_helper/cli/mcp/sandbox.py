@@ -300,6 +300,32 @@ def shared_workspace_root() -> Optional[Path]:
         return None
 
 
+def config_is_client_supplied(config_path: str | Path) -> bool:
+    """True when ``config_path`` is a file an MCP client delivered.
+
+    Everything under the shared workspace root got there through a client: a
+    delivered source tree, a zip upload and its staging. The exception is each
+    session's ``config/`` directory, which only the server writes, with the
+    operator's profile that ``select_profile`` materializes. Any session's
+    sandbox counts, not only the caller's, because a sibling session's upload is
+    no more the operator's than the caller's own.
+
+    A scan whose selected config is client-supplied resolves it with
+    ``resolve_config(untrusted_config=True)``, which keeps its sandbox settings
+    restrict-only. The path is resolved first, so a symlink is judged by the
+    file it reaches.
+    """
+
+    shared = shared_workspace_root()
+    if shared is None:
+        return False
+    try:
+        parts = Path(config_path).resolve().relative_to(shared).parts
+    except ValueError:
+        return False
+    return not (len(parts) >= 2 and parts[1] == CONFIG_DIR_NAME)
+
+
 def _validated_session_component(session_id: str) -> str:
     """Return ``session_id`` when it names one directory, else raise.
 
@@ -817,6 +843,7 @@ __all__ = [
     "SessionSandbox",
     "config_base_gate",
     "config_chain_refusal",
+    "config_is_client_supplied",
     "get_server_transport",
     "operator_config_roots",
     "operator_scan_roots",

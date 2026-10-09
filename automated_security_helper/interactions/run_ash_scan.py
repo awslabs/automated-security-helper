@@ -126,6 +126,11 @@ class ScanOptions(BaseModel):
     config_base_gate: Optional[Callable[[Path], bool]] = Field(
         default=None, exclude=True
     )
+    # The config was written by the caller (an MCP client's upload), so its sandbox
+    # settings are restrict-only; trusted_config_path is the operator's config the
+    # grants come from instead. Both go to resolve_config, in local mode only.
+    untrusted_config: bool = False
+    trusted_config_path: Optional[str] = None
     offline: bool = False
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
@@ -1877,6 +1882,8 @@ def _run_local_mode(
             config_path=config,
             config_overrides=opts.config_overrides or [],
             config_base_gate=opts.config_base_gate,
+            untrusted_config=opts.untrusted_config,
+            trusted_config_path=opts.trusted_config_path,
             verbose=opts.verbose or opts.debug,
             debug=opts.debug,
             strategy=(
@@ -2860,6 +2867,8 @@ def run_ash_scan(
     workspace_plan: "WorkspacePlan | None" = None,
     allow_missing_projects: bool = False,
     config_base_gate: Optional[Callable[[Path], bool]] = None,
+    untrusted_config: bool = False,
+    trusted_config_path: Optional[str] = None,
     *args,
     **kwargs,
 ):
@@ -2929,7 +2938,22 @@ def run_ash_scan(
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
         config_base_gate=config_base_gate,
+        untrusted_config=untrusted_config,
+        trusted_config_path=trusted_config_path,
     )
+
+    # Only the local orchestrator resolves with these. Container and nix mode run
+    # a separate ASH that is handed the config path alone, and workspace mode
+    # resolves each project's own config, so in any of them the restriction would
+    # be dropped without a word.
+    if opts.untrusted_config and (
+        opts.mode in (RunMode.container, RunMode.nix) or opts.workspace_plan is not None
+    ):
+        raise ValueError(
+            "untrusted_config is applied only to a single-directory scan in local "
+            f"mode, not to mode={opts.mode.value!r}"
+            + (" with a workspace plan" if opts.workspace_plan is not None else "")
+        )
 
     _apply_log_level_env(opts)
     logger = _setup_logger(opts)

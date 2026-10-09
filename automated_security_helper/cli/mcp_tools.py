@@ -308,7 +308,13 @@ async def _run_scan_async(
         run_ash_scan,
     )
 
-    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.cli.mcp.profile_registry import (
+        resolve_session_config_path,
+    )
+    from automated_security_helper.cli.mcp.sandbox import (
+        config_base_gate,
+        config_is_client_supplied,
+    )
 
     registry = get_scan_registry()
     entry = registry.get_scan(scan_id)
@@ -320,6 +326,17 @@ async def _run_scan_async(
     # session's grant. mcp_scan_directory checked the chain before starting; this
     # is what holds if a base changes between that check and the scan.
     base_gate = config_base_gate(session_id)
+
+    # A config the client delivered into a session sandbox (an upload or a clone)
+    # is the client's, not the operator's, wherever the scan target is. It is
+    # resolved restrict-only for sandbox settings, with the profile this session
+    # bound, if any, as the trusted base the grants come from.
+    untrusted_config = config_path is not None and config_is_client_supplied(
+        config_path
+    )
+    trusted_config_path = (
+        resolve_session_config_path(session_id) if untrusted_config else None
+    )
 
     # Resolve the per-session lock if a session_id was supplied. The lock is
     # acquired inside the executor wrapper below — we MUST NOT hold it on the
@@ -364,6 +381,8 @@ async def _run_scan_async(
                     fail_on_findings=False,
                     show_summary=False,
                     config_base_gate=base_gate,
+                    untrusted_config=untrusted_config,
+                    trusted_config_path=trusted_config_path,
                 )
         else:
             return run_ash_scan(
@@ -375,6 +394,8 @@ async def _run_scan_async(
                 fail_on_findings=False,
                 show_summary=False,
                 config_base_gate=base_gate,
+                untrusted_config=untrusted_config,
+                trusted_config_path=trusted_config_path,
             )
 
     try:

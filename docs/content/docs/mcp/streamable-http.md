@@ -160,6 +160,16 @@ Any of these triggers an immediate failure. Out-of-order sequences, checksum mis
 
 `mcp__ash__clear_source` wipes the session workspace and resets `source_dir` if you need to reload.
 
+### Config files in delivered source
+
+A delivered tree can carry its own `.ash.yaml`, and a client can name any file in its session workspace as `run_ash_scan`'s `config_path`. Such a file was written by the client, not the operator, so its sandbox settings are restrict-only, the same as a config file inside the scanned repository, wherever the scan target is:
+
+- `sandbox.network_scanners` and `sandbox.extra_read_paths` come from the server instead: the profile this session bound with `select_profile`, or else `ASH_CONFIG` and the defaults.
+- The file's `network_scanners` list still applies as a limit, so it can take network away from a scanner but never give it one.
+- `sandbox.mode` can turn the sandbox on, but cannot turn it off or move it to another backend when the server's config sets a mode.
+
+Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`.
+
 ### Restricting scan targets
 
 `run_ash_scan` also accepts a server-side path directly, and ASH writes its

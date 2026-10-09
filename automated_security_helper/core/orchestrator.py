@@ -90,6 +90,27 @@ class ASHScanOrchestrator(BaseModel):
             ),
         ),
     ] = None
+    untrusted_config: Annotated[
+        bool,
+        Field(
+            description=(
+                "The config at config_path was written by the caller, not the "
+                "operator, so its sandbox settings are restrict-only. Passed to "
+                "resolve_config; see its docstring."
+            ),
+        ),
+    ] = False
+    trusted_config_path: Annotated[
+        Optional[Path | str],
+        Field(
+            None,
+            description=(
+                "The operator's config the sandbox grants come from when "
+                "untrusted_config is set, in place of ASH_CONFIG or the defaults. "
+                "Passed to resolve_config."
+            ),
+        ),
+    ] = None
     color_system: Annotated[
         Optional[str], Field(None, description="Color system to use for console output")
     ] = None
@@ -225,6 +246,8 @@ class ASHScanOrchestrator(BaseModel):
             for name, value in (
                 ("config_path", self.config_path),
                 ("config_overrides", self.config_overrides),
+                ("untrusted_config", self.untrusted_config),
+                ("trusted_config_path", self.trusted_config_path),
             )
             if value
         ]
@@ -275,6 +298,8 @@ class ASHScanOrchestrator(BaseModel):
                 source_dir=self.source_dir,
                 config_overrides=self.config_overrides or [],
                 permit_base=self.config_base_gate,
+                trusted_config_path=self.trusted_config_path,
+                untrusted_config=self.untrusted_config,
             )
 
         # Surface config resolution warnings prominently
