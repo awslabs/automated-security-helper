@@ -345,13 +345,32 @@ than escaping.
 ### macOS: sandbox-exec
 
 `sandbox-exec` applies a Seatbelt (SBPL) profile. ASH generates one per scanner:
-deny by default, allow process creation and Mach service lookup, read everywhere
-except the home directory and the shared temporary directories, read the policy's
-tool paths inside home, write only to the results directory and a private `TMPDIR`.
-With no network, no socket of any kind is allowed. With a network, IP sockets are
-allowed and Unix sockets are not, except the resolver's (`mDNSResponder`), so Docker
-Desktop's socket and the launchd SSH agent stay out of reach. The scanner starts in a
-new session, with no controlling terminal.
+deny by default, read everywhere except the home directory and the shared temporary
+directories, read the policy's tool paths inside home, write only to the results
+directory and a private `TMPDIR`. With no network, no socket of any kind is allowed.
+With a network, IP sockets are allowed and Unix sockets are not, except the
+resolver's (`mDNSResponder`), so Docker Desktop's socket and the launchd SSH agent
+stay out of reach. The scanner starts in a new session, with no controlling terminal.
+
+Programs run only from the system and tool paths the policy makes readable, and from
+uv's cache, where `uv tool run` keeps the environments of tools it was not asked to
+install. Nothing runs from the source tree, the output and results directories, the
+other caches or the private `TMPDIR`, even where a tool path contains one of them (a
+repository checked out under `/opt`), so a program the scanner writes, or one the
+scanned repository ships, cannot be started. A tool path inside the scanned tree, such
+as a virtualenv ASH itself runs from, stays executable.
+
+Mach service lookups are limited to a list measured on the macOS 14, 15 and 26 CI
+runners: everything the ten builtin scanners looked up there, which was the same on
+all three. Every scanner may reach preferences (`cfprefsd`), logging (`logd`),
+notifications (`notifyd`) and user and group lookups (`opendirectoryd`). A scanner
+with a network may also reach the DNS and network configuration (`configd`) and
+certificate trust (`trustd`). LaunchServices (`launchservicesd`, `coreservicesd`,
+`com.apple.lsd.*`) and the pasteboard (`com.apple.pasteboard.*`) are denied after
+every allow, so no allow can reach them: LaunchServices asks launchd to start an app,
+and launchd starts it outside the sandbox. The keychain (`com.apple.SecurityServer`)
+is not on the list either, which keeps a scanner from reading keychain items through
+`/usr/bin/security`.
 
 sandbox-exec does not end processes the scanner leaves running. ASH's removal of
 symlinks after each spawn and its non-following writes still apply, but a process that
@@ -359,10 +378,16 @@ outlives the scanner could replace a subdirectory of the results directory with 
 link between the sweep and ASH's next write there. That is a known gap of this
 backend.
 
-Mach service lookup is allowed without a filter, because system libraries look up a
-long and version-dependent list of services and a missing one fails in ways that are
-hard to diagnose. A scanner can therefore talk to launchd services the user's session
-exposes (the pasteboard, for example). That is a known gap of this backend.
+A macOS release or a scanner update can make a tool look up a service that is not on
+the list. The profile denies it, the tool usually fails or reports less, and the
+unified log says which service it was:
+
+```bash
+log show --last 10m --predicate 'sender == "Sandbox"' | grep -E 'deny\(1\) (mach-lookup|process-exec)'
+```
+
+The list is `MACH_SERVICES` and `MACH_SERVICES_WITH_NETWORK` in
+`automated_security_helper/utils/sandbox/backends.py`.
 
 Risk to record: Apple has marked `sandbox-exec` deprecated since macOS 10.13 and
 documents SBPL as private. It still works on current macOS and is what Apple's own
@@ -396,3 +421,8 @@ it under each backend available on the runner. Each attempt must fail with the s
 on, and succeed with `--sandbox off`, which is the negative control that proves the
 attempts are real. CI also runs every builtin scanner under bubblewrap against the
 snapshot fixture and asserts the findings match the unsandboxed run.
+
+On macOS, `tests/integration/sandbox/test_sandbox_exec_services.py` has the fixture
+scanner open TextEdit through LaunchServices, read a canary back from the pasteboard,
+and look up the LaunchServices and pasteboard Mach services directly. Each must
+succeed unsandboxed and fail under `sandbox-exec`.
