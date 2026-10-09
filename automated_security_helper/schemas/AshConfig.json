@@ -1321,7 +1321,7 @@
         },
         "rules_paths": {
           "default": [],
-          "description": "Your own cfn-guard rules: .guard files or directories of them, relative to the source directory. Evaluated in addition to rule_sets. Honored only when set by --config-overrides or a config file outside the scanned tree: cfn-guard prints a rules file it cannot parse, so a path the scanned repository chose could put any file the scan can read into the report.",
+          "description": "Your own cfn-guard rules: .guard files or directories of them, relative to the source directory. Evaluated in addition to rule_sets. Honored only when set by --config-overrides or a config file outside the scanned tree: cfn-guard prints a rules file it cannot parse, so a path the scanned repository chose could put any file the scan can read into the report. Set elsewhere, it is ignored with a warning, and an empty rule_sets falls back to wa-Security-Pillar. In a directory, the .guard and .ruleset files are read, recursively; one that resolves outside the directory, through a symlink, is refused.",
           "items": {
             "type": "string"
           },

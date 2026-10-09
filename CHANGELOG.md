@@ -193,7 +193,10 @@
   `secret_config_file` and cfn-guard's `rules_paths` (cfn-guard prints a rules
   file it cannot parse, so a path the repository chose could put any readable file
   into the report); `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` still apply, for a
-  file outside the scanned tree. Inline comments (`gitleaks:allow`,
+  file outside the scanned tree. With `rules_paths` ignored and `rule_sets` empty,
+  cfn-guard falls back to `wa-Security-Pillar`. In an operator's rules directory, a
+  rules file that resolves outside it through a symlink is refused, and cfn-guard
+  is given copies of the files ASH read. Inline comments (`gitleaks:allow`,
   `# zizmor: ignore[...]`) still apply. Tool output quoted in a scanner's error
   has terminal escape sequences removed and other control characters escaped.
 - **trivy-repo names its own config file and modules directory.** It always passes

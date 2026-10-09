@@ -147,7 +147,9 @@ scanners:
 
 An unknown rule-set name is reported with the list of available names.
 
-`rules_paths` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning. cfn-guard prints a rules file it cannot parse, all of it, in its error, so a path the scanned repository chose could otherwise put any file the scan can read into the report.
+`rules_paths` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning, and if that config also empties `rule_sets`, cfn-guard evaluates the default `wa-Security-Pillar` set instead of nothing. cfn-guard prints a rules file it cannot parse, all of it, in its error, so a path the scanned repository chose could otherwise put any file the scan can read into the report.
+
+For a directory, ASH collects the files cfn-guard would read from it: `.guard` and `.ruleset` files at any depth, case-sensitively, not entering symlinked subdirectories. cfn-guard follows a symlinked rules file, so one that resolves outside the directory you named is refused with a warning; a link that stays inside it is read. ASH reads each file itself and gives cfn-guard a copy under the scanner's results directory, which is also why `rules_paths` needs no sandbox grant. A directory with no rules files selects nothing, which fails the scan when nothing else is selected: cfn-guard given such a directory reports a clean run.
 
 #### Why the rules are not age-checked
 

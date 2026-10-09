@@ -23,6 +23,13 @@ refuses a path inside the scanned tree whoever named it, with
 ``config/path_trust.py``'s ``in_scanned_tree`` (from ``scan_root``), the test every
 other scanner's tool config and plugin paths go through.
 
+Options that name a file or directory a tool reads as its own configuration, even
+one that only tunes findings (a gitleaks baseline, a zizmor or actionlint config,
+cfn-guard rules), go through ``operator_path`` or its list form ``operator_paths``:
+the value is used only when the operator set it, as the resolved path that was
+checked. A repository could otherwise hide its own findings, or, for a tool that
+prints a file it cannot parse, put any file the scan can read into the report.
+
 This module and ``config/sandbox_grants.py`` share their idea of the tree and of the
 trusted base. ``set_by_operator`` is the only provenance call the scanners make, so a
 shared implementation can replace this one behind it.
@@ -55,7 +62,7 @@ import copy
 import os
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 PathLike = Union[str, "os.PathLike[str]"]
 
@@ -245,24 +252,67 @@ def operator_path(
 ) -> OperatorPath:
     """``value`` as the path a tool will read, when the operator chose it.
 
-    The one rule for a scanner option that names a file a tool reads as its own
-    configuration: used only when ``set_by_operator`` accepts ``value`` for ``key``
-    and, with ``outside_tree``, when it resolves outside the scanned tree
+    The one rule for a scanner option that names a file or directory a tool reads:
+    used only when ``set_by_operator`` accepts ``value`` for ``key`` and, with
+    ``outside_tree``, when it resolves outside the scanned tree
     (``config/path_trust.in_scanned_tree``, from ``scan_root``). The path returned
     is ``path_trust.resolved_path`` of ``value`` (``~`` expanded, relative to
     ``source_dir``, symlinks and ``..`` resolved), the same path that was checked,
     so a caller hands the tool exactly that and nothing rebuilt from ``value``.
     Whether the file exists is left to the caller, which knows whether a missing
     one should fail the scan.
+
+    ``outside_tree`` is for a file whose content can make the tool run code, or
+    that ``path_trust`` already keeps out of the tree for every scanner; such a
+    file is refused inside the tree even when the operator named it. Without it,
+    the operator may name a file of their own in the tree (a findings config, a
+    baseline, a rules directory), which is a choice about that tree's content
+    they are entitled to make.
     """
+    return _operator_candidate(
+        config, value, source_dir, set_by_operator(config, key, value), outside_tree
+    )
+
+
+def operator_paths(
+    config: Any,
+    key: str,
+    values: Sequence[Any],
+    source_dir: PathLike,
+    *,
+    outside_tree: bool = True,
+) -> List[OperatorPath]:
+    """``operator_path`` for an option that holds a list of paths, entry by entry.
+
+    ``set_by_operator`` compares a whole value, so provenance is decided once, for
+    the list as set; each entry is then resolved and, with ``outside_tree``,
+    checked on its own. A list the operator did not set gives one refusal per
+    entry, so a caller can name each one it ignores.
+    """
+    entries = list(values)
+    trusted = set_by_operator(config, key, entries)
+    return [
+        _operator_candidate(config, entry, source_dir, trusted, outside_tree)
+        for entry in entries
+    ]
+
+
+def _operator_candidate(
+    config: Any,
+    value: Any,
+    source_dir: PathLike,
+    trusted: bool,
+    outside_tree: bool,
+) -> OperatorPath:
+    """The body of ``operator_path``, given its provenance verdict."""
     from automated_security_helper.config.path_trust import (
         in_scanned_tree,
         resolved_path,
     )
 
-    candidate = resolved_path(value, Path(source_dir))
-    if not set_by_operator(config, key, value):
+    if not trusted:
         return OperatorPath(None, NOT_THE_OPERATORS)
+    candidate = resolved_path(value, Path(source_dir))
     if outside_tree and in_scanned_tree(candidate, scan_root(config, source_dir)):
         return OperatorPath(None, INSIDE_THE_TREE)
     return OperatorPath(candidate)
