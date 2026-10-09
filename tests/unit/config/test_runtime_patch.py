@@ -14,6 +14,7 @@ from automated_security_helper.config.runtime_patch import (
     RuntimePatchDeniedError,
     apply_runtime_override,
     apply_runtime_patch,
+    check_runtime_ops,
     json_patch_between,
 )
 
@@ -1099,3 +1100,95 @@ class TestDenialsMatchEitherSeparator:
         ops = [{"op": "replace", "path": "/project_name", "value": "renamed"}]
         patched = apply_runtime_patch(_base_config(), ops, allowlist=allowlist)
         assert patched.project_name == "renamed"
+
+
+# Spellings of the bedrock-summary-reporter section that AshConfig.get_plugin_config
+# resolves for that plugin when no section uses its exact name.
+_BEDROCK_SPELLINGS = [
+    "BedrockSummary",
+    "BedrockSummaryReporter",
+    "bedrocksummaryreporter",
+    "bedrocksummary",
+    "Bedrock.Summary",
+]
+
+
+class TestDenialsMatchEveryPluginSpelling:
+    """A plugin's config section is looked up ignoring case, punctuation and the
+    Scanner/Reporter/Converter word (AshConfig.get_plugin_config), so a denial on
+    that section has to refuse every spelling the lookup would read as it.
+    """
+
+    @pytest.mark.parametrize("spelling", _BEDROCK_SPELLINGS)
+    def test_the_lookup_reads_each_spelling_as_the_plugin(self, spelling: str) -> None:
+        # Without this the denial tests below could be refusing names nothing reads.
+        config = AshConfig.model_validate(
+            {"reporters": {spelling: {"options": {"aws_region": "us-east-1"}}}}
+        )
+        found = config.get_plugin_config("reporter", "bedrock-summary-reporter")
+        assert found is not None
+        assert found["options"]["aws_region"] == "us-east-1"
+
+    @pytest.mark.parametrize("spelling", _BEDROCK_SPELLINGS)
+    @pytest.mark.parametrize("suffix", ["/options/aws_region", ""])
+    def test_default_denial_refuses_every_spelling(
+        self, spelling: str, suffix: str
+    ) -> None:
+        allowlist = RuntimeOverridesConfig(enabled=True, allowed_paths=["/**"])
+        value = "us-east-1" if suffix else {"options": {"aws_region": "us-east-1"}}
+        ops = [{"op": "add", "path": f"/reporters/{spelling}{suffix}", "value": value}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(ops, allowlist=allowlist)
+        assert "denied_paths" in excinfo.value.rule
+
+    @pytest.mark.parametrize("spelling", ["TrivyRepo", "trivyrepo", "TrivyRepoScanner"])
+    def test_operator_denial_refuses_every_spelling(self, spelling: str) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=["/scanners/trivy-repo/options/ignore_file"],
+        )
+        ops = [
+            {
+                "op": "add",
+                "path": f"/scanners/{spelling}/options/ignore_file",
+                "value": "x",
+            }
+        ]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(ops, allowlist=allowlist)
+        assert "denied_paths" in excinfo.value.rule
+
+    def test_value_pattern_binds_to_every_spelling(self) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[],
+            denied_value_patterns={
+                "/reporters/bedrock-summary-reporter/options/aws_region": r"^us-east-1$"
+            },
+        )
+        ops = [
+            {
+                "op": "add",
+                "path": "/reporters/BedrockSummary",
+                "value": {"options": {"aws_region": "us-east-1"}},
+            }
+        ]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(ops, allowlist=allowlist)
+        assert "denied_value_patterns" in excinfo.value.rule
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/scanners/TrivyImage/options/ignore_file", "/reporters/TrivyRepo/options/x"],
+    )
+    def test_another_plugin_or_section_is_not_refused(self, path: str) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=["/scanners/trivy-repo/options/ignore_file"],
+        )
+        check_runtime_ops(
+            [{"op": "add", "path": path, "value": "x"}], allowlist=allowlist
+        )

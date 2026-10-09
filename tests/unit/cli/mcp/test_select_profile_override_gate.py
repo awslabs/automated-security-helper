@@ -528,3 +528,29 @@ def test_override_yaml_identical_to_the_profile_changes_nothing(
     assert state.bound_config is not None
     assert state.bound_config.project_name == "operator"
     assert state.bound_config.sandbox.mode == "bwrap"
+
+
+@pytest.mark.parametrize(
+    "spelling", ["BedrockSummary", "bedrocksummaryreporter", "Bedrock_Summary_Reporter"]
+)
+def test_a_denied_plugin_section_is_refused_in_every_spelling(
+    tmp_path: Path, spelling: str
+) -> None:
+    """get_plugin_config reads each of these as bedrock-summary-reporter's config."""
+    document = _profile(allowed_paths=["/**"])
+    _install(tmp_path, document)
+    section = {"enabled": True, "options": {"aws_region": "other-region-1"}}
+
+    patched, overridden = _both_routes(
+        {"op": "add", "path": f"/reporters/{spelling}", "value": section},
+        _override_for(document, {"reporters": {spelling: section}}),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert (
+            "denied_paths entry '/reporters/bedrock-summary-reporter/options/aws_*'"
+            in result["error"]
+        ), result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")

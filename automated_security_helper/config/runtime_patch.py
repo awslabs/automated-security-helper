@@ -46,6 +46,8 @@ from pydantic import ValidationError
 from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
+    plugin_key_lookup_names,
+    reduced_plugin_name,
 )
 
 
@@ -213,13 +215,53 @@ def _fold_separators(pointer: str) -> str:
     return pointer.replace("-", "_")
 
 
-def _denial_spellings(pattern: str, path: str) -> Tuple[Tuple[str, str], ...]:
-    """The (pattern, path) pairs a denial is matched over: as written, then folded.
+_PLUGIN_SECTIONS = frozenset({"scanners", "reporters", "converters"})
 
-    As written comes first so a glob whose character class contains '-' keeps
-    its meaning; the folded pair only adds matches, so it can only refuse more.
+
+def _path_with_patterns_plugin_name(pattern: str, path: str) -> str | None:
+    """``path`` with its plugin segment spelled as ``pattern``'s, if both name one plugin.
+
+    ``AshConfig.get_plugin_config`` finds a plugin's section under any key in
+    ``plugin_key_lookup_names``, so ``/reporters/BedrockSummary`` is read as
+    ``bedrock-summary-reporter``'s config when no section uses that exact name.
+    Respelling the path's segment as the pattern's lets the usual matching run
+    on it. None when the pattern's plugin segment contains a glob character
+    (matched as written), when the two sit under different sections, or when the
+    path's segment reaches a different plugin.
     """
-    return ((pattern, path), (_fold_separators(pattern), _fold_separators(path)))
+    pattern_segs = _path_segments(pattern)
+    path_segs = _path_segments(path)
+    if len(pattern_segs) < 2 or len(path_segs) < 2:
+        return None
+    section, plugin = pattern_segs[0], pattern_segs[1]
+    if section not in _PLUGIN_SECTIONS or path_segs[0] != section:
+        return None
+    if any(char in plugin for char in "*?[") or path_segs[1] == plugin:
+        return None
+    reduced = reduced_plugin_name(plugin)
+    if not reduced or reduced not in plugin_key_lookup_names(path_segs[1]):
+        return None
+    return "/" + "/".join(
+        _escape_pointer_segment(segment)
+        for segment in [section, plugin, *path_segs[2:]]
+    )
+
+
+def _denial_spellings(pattern: str, path: str) -> Tuple[Tuple[str, str], ...]:
+    """The (pattern, path) pairs a denial is matched over.
+
+    As written, then folded, then, when the path's plugin segment names the
+    pattern's plugin under another spelling, the respelled path as written and
+    folded. As written comes first so a glob whose character class contains '-'
+    keeps its meaning; every other pair only adds matches, so it can only refuse
+    more.
+    """
+    pairs = [(pattern, path), (_fold_separators(pattern), _fold_separators(path))]
+    respelled = _path_with_patterns_plugin_name(pattern, path)
+    if respelled is not None:
+        pairs.append((pattern, respelled))
+        pairs.append((_fold_separators(pattern), _fold_separators(respelled)))
+    return tuple(pairs)
 
 
 def _denied_path_reason(denied: str, path: str) -> str | None:

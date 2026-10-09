@@ -255,11 +255,19 @@ async def test_a_named_client_policy_is_refused_and_an_operator_policy_kept(
 
 
 @pytest.mark.asyncio
-async def test_a_default_denial_holds_for_the_other_separator(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "override",
+    [
+        "reporters.bedrock_summary_reporter.options.aws_region=us-east-1",
+        "reporters.BedrockSummary.options.aws_region=us-east-1",
+        "reporters.bedrocksummaryreporter.options.aws_region=us-east-1",
+    ],
+)
+async def test_a_default_denial_holds_for_every_spelling_of_the_plugin(
+    tmp_path, monkeypatch, override
+):
     _with_profile(monkeypatch, tmp_path, ["/**"])
-    result = await _resolve(
-        tmp_path, ["reporters.bedrock_summary_reporter.options.aws_region=us-east-1"]
-    )
+    result = await _resolve(tmp_path, [override])
     assert result["success"] is False, result
 
 
@@ -269,6 +277,7 @@ async def test_a_default_denial_holds_for_the_other_separator(tmp_path, monkeypa
     [
         "scanners.trivy_repo.options.ignore_file=standin.txt",
         "scanners.trivy-repo.options.ignore-file=standin.txt",
+        "scanners.TrivyRepo.options.ignore_file=standin.txt",
     ],
 )
 async def test_an_operator_denial_holds_for_every_mix_of_separators(
