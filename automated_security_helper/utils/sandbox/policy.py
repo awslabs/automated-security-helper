@@ -690,7 +690,10 @@ def build_scanner_policy(
     read_only = [p for p in read_only if not _inside_writable(p)]
     cache = [p for p in cache if not _inside_writable(p)]
 
-    scan_data = _existing([source_dir, output_dir, scan_target, cwd])
+    # The working directory the same way the read list takes it: a filesystem root
+    # (checkov and ferret-scan run from one so that they read no config file from
+    # the scanned tree) is not the scan's data.
+    scan_data = _existing([source_dir, output_dir, scan_target, _readable_cwd(cwd)])
     not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
 
