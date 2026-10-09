@@ -8,12 +8,13 @@ runs with defaults.
 
 from __future__ import annotations
 
+import copy
 import json
 
 import pytest
 import yaml
 
-from ash_operator.crd_schema import build_config_schema
+from ash_operator.crd_schema import ash_config_schema_digest, build_config_schema
 from ash_operator.generate_manifests import build_mcp_crd, build_scan_crd, render
 
 # A miniature schema in pydantic's dialect, so the translation rules can be tested
@@ -239,7 +240,11 @@ class TestSchemaSource:
             ),
         )
         import ash_operator.crd_schema as crd_schema
-        from ash_operator.crd_schema import _COMMITTED_SCHEMA, ash_config_schema_digest
+        from ash_operator.crd_schema import (
+            _COMMITTED_SCHEMA,
+            _without_defaults,
+            ash_config_schema_digest,
+        )
 
         if not _COMMITTED_SCHEMA.is_file():
             # A second, non-obvious way this arm can go missing, found while building a
@@ -261,6 +266,14 @@ class TestSchemaSource:
         with open(_COMMITTED_SCHEMA) as handle:
             committed = json.load(handle)
         live = ash_config.AshConfig.model_json_schema()
+        # Compared without `default` keywords, as the digest is: the CRD drops every
+        # default, and two of ASH's depend on the platform the schema was generated
+        # on (see ash_config_schema_digest). Everything the CRD carries must agree.
+        assert _without_defaults(committed) == _without_defaults(live), (
+            f"{_COMMITTED_SCHEMA} no longer matches AshConfig.model_json_schema() "
+            f"outside its defaults. Regenerate it with "
+            f"automated_security_helper/schemas/generate_schemas.py."
+        )
         assert ash_config_schema_digest(committed) == ash_config_schema_digest(live), (
             f"{_COMMITTED_SCHEMA} no longer matches AshConfig.model_json_schema(). "
             f"Regenerate it with automated_security_helper/schemas/generate_schemas.py "
@@ -280,6 +293,58 @@ class TestSchemaSource:
         assert report.source in {"model", "committed"}
         assert len(report.source_digest) == 16
         assert report.as_report()["sourceSchemaSha256"] == report.source_digest
+
+
+class TestTheDigestIgnoresDefaults:
+    """The CRD annotation's digest is the same on every platform.
+
+    opengrep's and semgrep's `enabled` default is computed from platform.system()
+    when ASH is imported, so the source schema differs between Windows and every other
+    platform in exactly those defaults. The CRD drops every default, and the digest
+    leaves them out too.
+    """
+
+    BASE = {
+        "type": "object",
+        "properties": {
+            "enabled": {"type": "boolean", "default": True},
+            "default": {"type": "string", "description": "a field named default"},
+        },
+        "$defs": {"X": {"type": "integer", "default": 3}},
+    }
+
+    def _with(self, mutate):
+        schema = copy.deepcopy(self.BASE)
+        mutate(schema)
+        return ash_config_schema_digest(schema)
+
+    def test_a_different_default_gives_the_same_digest(self):
+        def flip(schema):
+            schema["properties"]["enabled"]["default"] = False
+            schema["$defs"]["X"]["default"] = 4
+
+        assert self._with(flip) == ash_config_schema_digest(self.BASE)
+
+    def test_a_different_type_still_changes_the_digest(self):
+        def retype(schema):
+            schema["properties"]["enabled"]["type"] = "string"
+
+        assert self._with(retype) != ash_config_schema_digest(self.BASE)
+
+    def test_a_field_named_default_is_still_hashed(self):
+        def drop_field(schema):
+            del schema["properties"]["default"]
+
+        assert self._with(drop_field) != ash_config_schema_digest(self.BASE)
+
+    def test_enum_values_are_data_not_keywords(self):
+        def enum_with_default_key(schema):
+            schema["properties"]["enabled"]["enum"] = [{"default": 1}]
+
+        def enum_with_other(schema):
+            schema["properties"]["enabled"]["enum"] = [{"default": 2}]
+
+        assert self._with(enum_with_default_key) != self._with(enum_with_other)
 
 
 class TestFullExposure:

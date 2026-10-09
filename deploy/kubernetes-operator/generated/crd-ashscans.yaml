@@ -10,7 +10,7 @@ metadata:
   name: ashscans.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: a738e42e263daa48
+    ash.awslabs.github.io/ash-config-schema-sha256: 045e54daa3d94ae8
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced

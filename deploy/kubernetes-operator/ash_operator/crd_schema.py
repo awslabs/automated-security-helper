@@ -460,9 +460,43 @@ def ash_config_schema_digest(schema: dict[str, Any]) -> str:
     byte-identical schemas. A digest of the schema itself is the same either way --
     which the agreement test makes true rather than assumed -- and it answers the
     question the annotation exists for: which ASH config surface is this CRD from.
+
+    Every ``default`` keyword is left out of the hash. The CRD drops all of them
+    (``_DELIBERATE_DROPS``), so they are not part of the surface it carries, and two
+    of them are not even the same on every machine: opengrep's and semgrep's
+    ``enabled`` default is ``platform.system().lower() != "windows"``, evaluated when
+    ASH is imported. Hashing them made the generator emit different annotations on
+    Windows, so a ``--check`` there failed against the committed files, and a
+    regeneration there would have broken every other platform's check.
     """
-    canonical = json.dumps(schema, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(_without_defaults(schema), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+# Keywords whose value maps names to subschemas, so a key inside one is a field or
+# definition name (a field may be called "default") rather than a keyword.
+_NAME_MAPS = frozenset({"properties", "patternProperties", "$defs", "definitions"})
+# Keywords whose value is data, not a subschema; nothing inside them is a keyword.
+_DATA_VALUES = frozenset({"enum", "const", "examples", "example"})
+
+
+def _without_defaults(node: Any) -> Any:
+    """``node`` with every ``default`` keyword removed, wherever a subschema can sit."""
+    if isinstance(node, list):
+        return [_without_defaults(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key == "default":
+            continue
+        if key in _NAME_MAPS and isinstance(value, dict):
+            out[key] = {name: _without_defaults(sub) for name, sub in value.items()}
+        elif key in _DATA_VALUES:
+            out[key] = value
+        else:
+            out[key] = _without_defaults(value)
+    return out
 
 
 def build_config_schema(
