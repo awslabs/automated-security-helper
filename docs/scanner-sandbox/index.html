@@ -1,0 +1,4443 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Your one-stop shop for code security scanning">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/docs/scanner-sandbox/">
+      
+      
+        <link rel="prev" href="../config-overrides/">
+      
+      
+        <link rel="next" href="../../user-guide/scanner-statistics/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/aws-logo-light.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Scanner Sandboxing - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="dracula" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#scanner-sandboxing" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-header__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 19.0.1, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 304 182" style="enable-background:new 0 0 304 182;" xml:space="preserve">
+<style type="text/css">
+	.st0{fill:#FFFFFF;}
+	.st1{fill-rule:evenodd;clip-rule:evenodd;fill:#FFFFFF;}
+</style>
+<g>
+	<path class="st0" d="M86.4,66.4c0,3.7,0.4,6.7,1.1,8.9c0.8,2.2,1.8,4.6,3.2,7.2c0.5,0.8,0.7,1.6,0.7,2.3c0,1-0.6,2-1.9,3l-6.3,4.2
+		c-0.9,0.6-1.8,0.9-2.6,0.9c-1,0-2-0.5-3-1.4C76.2,90,75,88.4,74,86.8c-1-1.7-2-3.6-3.1-5.9c-7.8,9.2-17.6,13.8-29.4,13.8
+		c-8.4,0-15.1-2.4-20-7.2c-4.9-4.8-7.4-11.2-7.4-19.2c0-8.5,3-15.4,9.1-20.6c6.1-5.2,14.2-7.8,24.5-7.8c3.4,0,6.9,0.3,10.6,0.8
+		c3.7,0.5,7.5,1.3,11.5,2.2v-7.3c0-7.6-1.6-12.9-4.7-16c-3.2-3.1-8.6-4.6-16.3-4.6c-3.5,0-7.1,0.4-10.8,1.3c-3.7,0.9-7.3,2-10.8,3.4
+		c-1.6,0.7-2.8,1.1-3.5,1.3c-0.7,0.2-1.2,0.3-1.6,0.3c-1.4,0-2.1-1-2.1-3.1v-4.9c0-1.6,0.2-2.8,0.7-3.5c0.5-0.7,1.4-1.4,2.8-2.1
+		c3.5-1.8,7.7-3.3,12.6-4.5c4.9-1.3,10.1-1.9,15.6-1.9c11.9,0,20.6,2.7,26.2,8.1c5.5,5.4,8.3,13.6,8.3,24.6V66.4z M45.8,81.6
+		c3.3,0,6.7-0.6,10.3-1.8c3.6-1.2,6.8-3.4,9.5-6.4c1.6-1.9,2.8-4,3.4-6.4c0.6-2.4,1-5.3,1-8.7v-4.2c-2.9-0.7-6-1.3-9.2-1.7
+		c-3.2-0.4-6.3-0.6-9.4-0.6c-6.7,0-11.6,1.3-14.9,4c-3.3,2.7-4.9,6.5-4.9,11.5c0,4.7,1.2,8.2,3.7,10.6
+		C37.7,80.4,41.2,81.6,45.8,81.6z M126.1,92.4c-1.8,0-3-0.3-3.8-1c-0.8-0.6-1.5-2-2.1-3.9L96.7,10.2c-0.6-2-0.9-3.3-0.9-4
+		c0-1.6,0.8-2.5,2.4-2.5h9.8c1.9,0,3.2,0.3,3.9,1c0.8,0.6,1.4,2,2,3.9l16.8,66.2l15.6-66.2c0.5-2,1.1-3.3,1.9-3.9c0.8-0.6,2.2-1,4-1
+		h8c1.9,0,3.2,0.3,4,1c0.8,0.6,1.5,2,1.9,3.9l15.8,67l17.3-67c0.6-2,1.3-3.3,2-3.9c0.8-0.6,2.1-1,3.9-1h9.3c1.6,0,2.5,0.8,2.5,2.5
+		c0,0.5-0.1,1-0.2,1.6c-0.1,0.6-0.3,1.4-0.7,2.5l-24.1,77.3c-0.6,2-1.3,3.3-2.1,3.9c-0.8,0.6-2.1,1-3.8,1h-8.6c-1.9,0-3.2-0.3-4-1
+		c-0.8-0.7-1.5-2-1.9-4L156,23l-15.4,64.4c-0.5,2-1.1,3.3-1.9,4c-0.8,0.7-2.2,1-4,1H126.1z M254.6,95.1c-5.2,0-10.4-0.6-15.4-1.8
+		c-5-1.2-8.9-2.5-11.5-4c-1.6-0.9-2.7-1.9-3.1-2.8c-0.4-0.9-0.6-1.9-0.6-2.8v-5.1c0-2.1,0.8-3.1,2.3-3.1c0.6,0,1.2,0.1,1.8,0.3
+		c0.6,0.2,1.5,0.6,2.5,1c3.4,1.5,7.1,2.7,11,3.5c4,0.8,7.9,1.2,11.9,1.2c6.3,0,11.2-1.1,14.6-3.3c3.4-2.2,5.2-5.4,5.2-9.5
+		c0-2.8-0.9-5.1-2.7-7c-1.8-1.9-5.2-3.6-10.1-5.2L246,52c-7.3-2.3-12.7-5.7-16-10.2c-3.3-4.4-5-9.3-5-14.5c0-4.2,0.9-7.9,2.7-11.1
+		c1.8-3.2,4.2-6,7.2-8.2c3-2.3,6.4-4,10.4-5.2c4-1.2,8.2-1.7,12.6-1.7c2.2,0,4.5,0.1,6.7,0.4c2.3,0.3,4.4,0.7,6.5,1.1
+		c2,0.5,3.9,1,5.7,1.6c1.8,0.6,3.2,1.2,4.2,1.8c1.4,0.8,2.4,1.6,3,2.5c0.6,0.8,0.9,1.9,0.9,3.3v4.7c0,2.1-0.8,3.2-2.3,3.2
+		c-0.8,0-2.1-0.4-3.8-1.2c-5.7-2.6-12.1-3.9-19.2-3.9c-5.7,0-10.2,0.9-13.3,2.8c-3.1,1.9-4.7,4.8-4.7,8.9c0,2.8,1,5.2,3,7.1
+		c2,1.9,5.7,3.8,11,5.5l14.2,4.5c7.2,2.3,12.4,5.5,15.5,9.6c3.1,4.1,4.6,8.8,4.6,14c0,4.3-0.9,8.2-2.6,11.6
+		c-1.8,3.4-4.2,6.4-7.3,8.8c-3.1,2.5-6.8,4.3-11.1,5.6C264.4,94.4,259.7,95.1,254.6,95.1z"/>
+	<g>
+		<path class="st1" d="M273.5,143.7c-32.9,24.3-80.7,37.2-121.8,37.2c-57.6,0-109.5-21.3-148.7-56.7c-3.1-2.8-0.3-6.6,3.4-4.4
+			c42.4,24.6,94.7,39.5,148.8,39.5c36.5,0,76.6-7.6,113.5-23.2C274.2,133.6,278.9,139.7,273.5,143.7z"/>
+		<path class="st1" d="M287.2,128.1c-4.2-5.4-27.8-2.6-38.5-1.3c-3.2,0.4-3.7-2.4-0.8-4.5c18.8-13.2,49.7-9.4,53.3-5
+			c3.6,4.5-1,35.4-18.6,50.2c-2.7,2.3-5.3,1.1-4.1-1.9C282.5,155.7,291.4,133.4,287.2,128.1z"/>
+	</g>
+</g>
+</svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ASH - Automated Security Helper
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Scanner Sandboxing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="dracula" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/awslabs/automated-security-helper" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    awslabs/automated-security-helper
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 19.0.1, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 304 182" style="enable-background:new 0 0 304 182;" xml:space="preserve">
+<style type="text/css">
+	.st0{fill:#FFFFFF;}
+	.st1{fill-rule:evenodd;clip-rule:evenodd;fill:#FFFFFF;}
+</style>
+<g>
+	<path class="st0" d="M86.4,66.4c0,3.7,0.4,6.7,1.1,8.9c0.8,2.2,1.8,4.6,3.2,7.2c0.5,0.8,0.7,1.6,0.7,2.3c0,1-0.6,2-1.9,3l-6.3,4.2
+		c-0.9,0.6-1.8,0.9-2.6,0.9c-1,0-2-0.5-3-1.4C76.2,90,75,88.4,74,86.8c-1-1.7-2-3.6-3.1-5.9c-7.8,9.2-17.6,13.8-29.4,13.8
+		c-8.4,0-15.1-2.4-20-7.2c-4.9-4.8-7.4-11.2-7.4-19.2c0-8.5,3-15.4,9.1-20.6c6.1-5.2,14.2-7.8,24.5-7.8c3.4,0,6.9,0.3,10.6,0.8
+		c3.7,0.5,7.5,1.3,11.5,2.2v-7.3c0-7.6-1.6-12.9-4.7-16c-3.2-3.1-8.6-4.6-16.3-4.6c-3.5,0-7.1,0.4-10.8,1.3c-3.7,0.9-7.3,2-10.8,3.4
+		c-1.6,0.7-2.8,1.1-3.5,1.3c-0.7,0.2-1.2,0.3-1.6,0.3c-1.4,0-2.1-1-2.1-3.1v-4.9c0-1.6,0.2-2.8,0.7-3.5c0.5-0.7,1.4-1.4,2.8-2.1
+		c3.5-1.8,7.7-3.3,12.6-4.5c4.9-1.3,10.1-1.9,15.6-1.9c11.9,0,20.6,2.7,26.2,8.1c5.5,5.4,8.3,13.6,8.3,24.6V66.4z M45.8,81.6
+		c3.3,0,6.7-0.6,10.3-1.8c3.6-1.2,6.8-3.4,9.5-6.4c1.6-1.9,2.8-4,3.4-6.4c0.6-2.4,1-5.3,1-8.7v-4.2c-2.9-0.7-6-1.3-9.2-1.7
+		c-3.2-0.4-6.3-0.6-9.4-0.6c-6.7,0-11.6,1.3-14.9,4c-3.3,2.7-4.9,6.5-4.9,11.5c0,4.7,1.2,8.2,3.7,10.6
+		C37.7,80.4,41.2,81.6,45.8,81.6z M126.1,92.4c-1.8,0-3-0.3-3.8-1c-0.8-0.6-1.5-2-2.1-3.9L96.7,10.2c-0.6-2-0.9-3.3-0.9-4
+		c0-1.6,0.8-2.5,2.4-2.5h9.8c1.9,0,3.2,0.3,3.9,1c0.8,0.6,1.4,2,2,3.9l16.8,66.2l15.6-66.2c0.5-2,1.1-3.3,1.9-3.9c0.8-0.6,2.2-1,4-1
+		h8c1.9,0,3.2,0.3,4,1c0.8,0.6,1.5,2,1.9,3.9l15.8,67l17.3-67c0.6-2,1.3-3.3,2-3.9c0.8-0.6,2.1-1,3.9-1h9.3c1.6,0,2.5,0.8,2.5,2.5
+		c0,0.5-0.1,1-0.2,1.6c-0.1,0.6-0.3,1.4-0.7,2.5l-24.1,77.3c-0.6,2-1.3,3.3-2.1,3.9c-0.8,0.6-2.1,1-3.8,1h-8.6c-1.9,0-3.2-0.3-4-1
+		c-0.8-0.7-1.5-2-1.9-4L156,23l-15.4,64.4c-0.5,2-1.1,3.3-1.9,4c-0.8,0.7-2.2,1-4,1H126.1z M254.6,95.1c-5.2,0-10.4-0.6-15.4-1.8
+		c-5-1.2-8.9-2.5-11.5-4c-1.6-0.9-2.7-1.9-3.1-2.8c-0.4-0.9-0.6-1.9-0.6-2.8v-5.1c0-2.1,0.8-3.1,2.3-3.1c0.6,0,1.2,0.1,1.8,0.3
+		c0.6,0.2,1.5,0.6,2.5,1c3.4,1.5,7.1,2.7,11,3.5c4,0.8,7.9,1.2,11.9,1.2c6.3,0,11.2-1.1,14.6-3.3c3.4-2.2,5.2-5.4,5.2-9.5
+		c0-2.8-0.9-5.1-2.7-7c-1.8-1.9-5.2-3.6-10.1-5.2L246,52c-7.3-2.3-12.7-5.7-16-10.2c-3.3-4.4-5-9.3-5-14.5c0-4.2,0.9-7.9,2.7-11.1
+		c1.8-3.2,4.2-6,7.2-8.2c3-2.3,6.4-4,10.4-5.2c4-1.2,8.2-1.7,12.6-1.7c2.2,0,4.5,0.1,6.7,0.4c2.3,0.3,4.4,0.7,6.5,1.1
+		c2,0.5,3.9,1,5.7,1.6c1.8,0.6,3.2,1.2,4.2,1.8c1.4,0.8,2.4,1.6,3,2.5c0.6,0.8,0.9,1.9,0.9,3.3v4.7c0,2.1-0.8,3.2-2.3,3.2
+		c-0.8,0-2.1-0.4-3.8-1.2c-5.7-2.6-12.1-3.9-19.2-3.9c-5.7,0-10.2,0.9-13.3,2.8c-3.1,1.9-4.7,4.8-4.7,8.9c0,2.8,1,5.2,3,7.1
+		c2,1.9,5.7,3.8,11,5.5l14.2,4.5c7.2,2.3,12.4,5.5,15.5,9.6c3.1,4.1,4.6,8.8,4.6,14c0,4.3-0.9,8.2-2.6,11.6
+		c-1.8,3.4-4.2,6.4-7.3,8.8c-3.1,2.5-6.8,4.3-11.1,5.6C264.4,94.4,259.7,95.1,254.6,95.1z"/>
+	<g>
+		<path class="st1" d="M273.5,143.7c-32.9,24.3-80.7,37.2-121.8,37.2c-57.6,0-109.5-21.3-148.7-56.7c-3.1-2.8-0.3-6.6,3.4-4.4
+			c42.4,24.6,94.7,39.5,148.8,39.5c36.5,0,76.6-7.6,113.5-23.2C274.2,133.6,278.9,139.7,273.5,143.7z"/>
+		<path class="st1" d="M287.2,128.1c-4.2-5.4-27.8-2.6-38.5-1.3c-3.2,0.4-3.7-2.4-0.8-4.5c18.8-13.2,49.7-9.4,53.3-5
+			c3.6,4.5-1,35.4-18.6,50.2c-2.7,2.3-5.3,1.1-4.1-1.9C282.5,155.7,291.4,133.4,287.2,128.1z"/>
+	</g>
+</g>
+</svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/awslabs/automated-security-helper" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    awslabs/automated-security-helper
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quick-start-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building-your-own-image/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building Your Own Container Image
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrating from ASH v2 to v3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting-uv-installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting UV Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../uv-tool-installation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UV Tool Installation Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-languages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Languages & Frameworks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference-generated/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference (generated)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config-overrides/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Overrides
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-sandboxed-scanner-can-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a sandboxed scanner can do
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What a sandboxed scanner can do">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-scanner-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-scanner needs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#community-and-third-party-plugin-scanners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Community and third-party plugin scanners
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threat-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-choke-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One choke point
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-bubblewrap-preferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux: bubblewrap (preferred)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-firejail-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux: firejail (fallback)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-landlock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux: Landlock
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#macos-sandbox-exec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS: sandbox-exec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-not-gvisor-or-nsjail-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why not gVisor or nsjail by default
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verifying-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying it
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/scanner-statistics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner Statistics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../plugins/builtin/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/scanners-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/reporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/reporters-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporter Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/converters-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converter Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/event-handlers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Handlers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/event-handlers-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Handler Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../plugins/aws/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    AWS Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/aws/security-hub-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security Hub Reporter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/aws/security-hub-reporter-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security Hub Reporter Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/aws/bedrock-summary-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bedrock Summary Reporter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/aws/bedrock-summary-reporter-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bedrock Summary Reporter Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/aws/cloudwatch-logs-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CloudWatch Logs Reporter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/aws/cloudwatch-logs-reporter-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CloudWatch Logs Reporter Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/aws/s3-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    S3 Reporter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/aws/s3-reporter-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    S3 Reporter Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_4" id="__nav_7_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Snyk Plugin
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CICD Setup guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/running-ash-locally/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running ASH Locally
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/running-ash-in-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running ASH in CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/using-ash-with-pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using ASH with Pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/using-ash-with-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using ASH with MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/mcp-streaming-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Streaming Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced Usage
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced Usage
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GenAI Integration Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-server-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Server Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/workspace-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspace Mode over MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-performance-scalability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Performance and Scalability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_9_6" id="__nav_9_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_9_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugin Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/development-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9_6_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_9_6_4" id="__nav_9_6_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Creating Plugins
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_9_6_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9_6_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Creating Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/scanner-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/scanner-plugins-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner Plugin Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/reporter-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporter Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/reporter-plugins-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporter Plugin Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/converter-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converter Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/converter-plugins-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converter Plugin Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Subscribers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/event-subscribers-diagrams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Subscriber Diagrams
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/plugin-best-practices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Best Practices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/unified-metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unified Metrics System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/scanner-validation-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner Validation System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/uv-tool-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UV Tool Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How to Contribute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../testing/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_11_2" id="__nav_11_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_11_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Testing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/test_organization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test Organization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/writing_effective_tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Effective Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/test_selection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test Selection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/parallel_testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parallel Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/test_utilities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test Utilities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_12" id="__nav_12_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-sandboxed-scanner-can-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a sandboxed scanner can do
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What a sandboxed scanner can do">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-scanner-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-scanner needs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#community-and-third-party-plugin-scanners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Community and third-party plugin scanners
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threat-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-choke-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One choke point
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-bubblewrap-preferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux: bubblewrap (preferred)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-firejail-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux: firejail (fallback)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-landlock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux: Landlock
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#macos-sandbox-exec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS: sandbox-exec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-not-gvisor-or-nsjail-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why not gVisor or nsjail by default
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verifying-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying it
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="scanner-sandboxing">Scanner sandboxing</h1>
+<p>ASH runs third-party scanners against code you may not trust. In local mode those
+scanners run as ordinary child processes with your user's full access: they can read
+<code>~/.ssh</code>, write anywhere you can, and open network connections. <code>--sandbox</code> runs every
+scanner subprocess inside an OS-level sandbox instead. It is off by default.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--sandbox<span class="w"> </span>auto<span class="w">            </span><span class="c1"># best sandbox this machine has</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--sandbox<span class="w"> </span>bwrap<span class="w"> </span>--offline<span class="w"> </span><span class="c1"># bubblewrap, no scanner gets a network</span>
+</span></code></pre></div>
+<p>or in <code>.ash/.ash.yaml</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">sandbox</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+</span></code></pre></div>
+<p>If you ask for a sandbox and ASH cannot provide one, the affected scanners are recorded
+<code>MISSING</code> with the reason, and the scan exits 1 like any other incomplete scan. ASH
+never falls back to running a scanner unsandboxed after you asked for a sandbox.</p>
+<h2 id="modes">Modes</h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Platform</th>
+<th>Needs</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>off</code></td>
+<td>any</td>
+<td>nothing</td>
+<td>Default. Scanners run as plain subprocesses.</td>
+</tr>
+<tr>
+<td><code>auto</code></td>
+<td>any</td>
+<td>one of the below</td>
+<td>Linux: <code>bwrap</code>, then <code>firejail</code>, then <code>landlock</code>. macOS: <code>sandbox-exec</code>. Windows: none.</td>
+</tr>
+<tr>
+<td><code>bwrap</code></td>
+<td>Linux</td>
+<td><code>bubblewrap</code>, unprivileged user namespaces</td>
+<td>Recommended.</td>
+</tr>
+<tr>
+<td><code>firejail</code></td>
+<td>Linux</td>
+<td><code>firejail</code></td>
+<td>Fallback. Weaker filesystem hiding, see below.</td>
+</tr>
+<tr>
+<td><code>landlock</code></td>
+<td>Linux 5.13+</td>
+<td>nothing (kernel LSM)</td>
+<td>No package to install. Needs Landlock enabled in the kernel's LSM list.</td>
+</tr>
+<tr>
+<td><code>sandbox-exec</code></td>
+<td>macOS</td>
+<td>ships with macOS</td>
+<td>Apple marks <code>sandbox-exec</code> deprecated. See risks.</td>
+</tr>
+</tbody>
+</table>
+<p>Container mode (<code>--mode container</code>) ignores the setting: the container is the boundary,
+and the image does not need bubblewrap. Nix mode composes with it: the inner scan that
+runs inside <code>nix develop</code> applies the sandbox to each scanner.</p>
+<h2 id="what-a-sandboxed-scanner-can-do">What a sandboxed scanner can do</h2>
+<p>Every scanner subprocess gets the same baseline policy, plus what that scanner declares
+it needs.</p>
+<ul>
+<li>The source directory, and the converted-files directory, are read-only.</li>
+<li>The scanner's own results directory (<code>&lt;output&gt;/scanners/&lt;name&gt;/</code>) is the only
+  persistent location it can write. The rest of the output directory is read-only.</li>
+<li><code>/tmp</code> and <code>$HOME</code> are private and empty. Your real home directory is not visible.
+  The tool locations a scanner needs (ASH's bin directory, uv's tool and Python
+  directories, the scanner's declared caches) are mounted at their usual paths.</li>
+<li>Tool caches (uv's cache, grype's and trivy's databases, semgrep's settings) are
+  writable only where the writes are thrown away: under bwrap (bubblewrap 0.8+ and
+  Linux 5.11+) through an overlay, so writes succeed but are discarded when the
+  scanner exits. firejail, Landlock, sandbox-exec, and bwrap without overlay support
+  mount them read-only, because a write in place would change what later runs,
+  sandboxed or not, read; uv hard-links its cache into the tool environments it
+  builds. There, uv and the scanners that have to write a cache (semgrep, opengrep,
+  npm-audit) get a private, empty one under the results directory, removed after the
+  spawn, so uv starts from an empty cache: online it downloads what it runs, offline
+  it has nothing cached.</li>
+<li>grype and trivy cannot update their databases from inside a sandbox, so before a
+  sandboxed online scan ASH updates them itself, outside the sandbox: <code>grype db
+  update</code>, and <code>trivy image --download-db-only</code> plus, for a misconfiguration scan,
+  trivy's checks bundle. Nothing from the scanned repository reaches these: they run
+  from an empty directory outside every checkout, with an explicit empty config file,
+  against the cache directory the scan reads. A lock in that cache directory makes
+  concurrent scans take turns, and each tool is updated once per scan. The scanners
+  then run with their own update turned off (<code>--skip-db-update</code>,
+  <code>GRYPE_DB_AUTO_UPDATE=false</code>). Offline nothing is updated, and in both cases ASH's
+  staleness check still holds the database to its bound. trivy's Java database
+  (about 935 MiB) is not updated and trivy-repo runs with <code>--skip-java-db-update</code>:
+  <code>trivy repository</code> does not analyze JAR, WAR or EAR files and never reads it.</li>
+<li>System directories (<code>/usr</code>, <code>/etc</code>, <code>/opt</code>, <code>/nix</code>) and the directories on <code>PATH</code>
+  are read-only. Inside <code>$HOME</code> only <code>PATH</code> entries named <code>bin</code>, <code>sbin</code> or <code>Scripts</code>
+  are mounted, and a tool's install prefix only when it is deeper than a directory
+  directly under <code>$HOME</code> (<code>~/.nvm/versions/node/v22</code> yes, <code>~/.cargo</code> no).</li>
+<li>The environment is filtered to an allowlist: locale, <code>PATH</code>, TLS and proxy settings,
+  ASH's and uv's own variables, and the prefixes the scanner declares (<code>GRYPE_</code>,
+  <code>SEMGREP_</code>, ...). Within those, a name containing <code>TOKEN</code>, <code>PASSWORD</code>, <code>SECRET</code>,
+  <code>AUTH</code>, <code>CREDENTIAL</code>, <code>API_KEY</code> or <code>SESSION</code>, and any value carrying
+  <code>user:password@</code> in a URL, is dropped unless the scanner names that exact variable
+  (snyk-code names <code>SNYK_TOKEN</code>). Cloud credentials and tokens are not passed in.</li>
+<li>No local IPC endpoint is reachable, with or without a network: not the Docker or
+  Podman socket, the session bus, <code>$SSH_AUTH_SOCK</code>, the journal, nor a socket in a
+  directory the sandbox mounts, such as the Nix daemon's under <code>/nix</code>. On Linux every
+  backend refuses <code>socket(AF_UNIX)</code> and datagram <code>socketpair()</code> with a seccomp filter
+  (see Landlock below), so neither a socket path nor an abstract socket can be
+  reached. The variables that name these endpoints (<code>SSH_AUTH_SOCK</code>,
+  <code>DBUS_SESSION_BUS_ADDRESS</code>, <code>DOCKER_HOST</code>, <code>CONTAINER_HOST</code>, <code>XDG_RUNTIME_DIR</code>)
+  are not passed in. firejail sets <code>DBUS_SESSION_BUS_ADDRESS</code> itself, to a path of
+  its own that <code>--dbus-user=none</code> leaves unserved.</li>
+<li>A results directory that is, or is reached through, a symlink is refused (the
+  scanner is recorded <code>MISSING</code>). The default output directory is inside the source
+  tree, so the scanned repository could otherwise plant one pointing anywhere.</li>
+<li>So is an output directory that is a symlink, or that is reached through one below
+  the source directory (a committed <code>build -&gt; /some/host/dir</code> scanned with
+  <code>--output-dir build/ash</code>), or whose real path differs from where its path inside
+  the source directory reads. A sandboxed scan stops with an error before ASH writes
+  anything there. Links at or above the source directory are your own and are not
+  examined, and with the sandbox off the output goes where you send it, as before.</li>
+<li>ASH writes into the results directory after the scanner exits, and ASH is not
+  sandboxed. So after every sandboxed spawn, and again after the scan, ASH removes
+  every symlink and special file the scanner left there, and ASH's own writes there
+  (stream logs, <code>ASH.ScanResults.json</code>, the files a scanner override writes) open
+  without following a symlink. A process the scanner leaves running cannot keep
+  planting links afterwards: bwrap and firejail end the whole process tree with the
+  scanner, and the Landlock wrapper is a child subreaper that kills any process its
+  scanner left behind before it exits. On a timeout ASH sends a sandboxed process
+  SIGTERM first (SIGKILL after 10 seconds), so the Landlock wrapper gets to end its
+  whole tree rather than being killed outright.</li>
+<li>Network: under <code>--offline</code> no scanner gets a network. Online, only scanners that
+  declare a network need get one (to fetch a vulnerability database, a rule pack, or
+  audit data from a package registry); everything else runs with no network.</li>
+</ul>
+<h3 id="per-scanner-needs">Per-scanner needs</h3>
+<table>
+<thead>
+<tr>
+<th>Scanner</th>
+<th>Network when online</th>
+<th>Caches</th>
+<th>Runtime</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bandit</td>
+<td>no</td>
+<td>uv cache</td>
+<td>uv-managed Python</td>
+</tr>
+<tr>
+<td>checkov</td>
+<td>no</td>
+<td>uv cache</td>
+<td>uv-managed Python</td>
+</tr>
+<tr>
+<td>semgrep</td>
+<td>yes (registry rules, <code>p/ci</code>)</td>
+<td>uv cache, <code>~/.semgrep</code></td>
+<td>uv-managed Python</td>
+</tr>
+<tr>
+<td>opengrep</td>
+<td>yes (registry rules)</td>
+<td><code>~/.opengrep</code></td>
+<td>single binary; on macOS it unpacks itself into a private directory per spawn</td>
+</tr>
+<tr>
+<td>grype</td>
+<td>yes (database update)</td>
+<td>grype database cache; on macOS, <code>~/Library/Caches/grype</code></td>
+<td>single binary</td>
+</tr>
+<tr>
+<td>syft</td>
+<td>no</td>
+<td>syft cache</td>
+<td>single binary</td>
+</tr>
+<tr>
+<td>trivy</td>
+<td>yes (database update)</td>
+<td>trivy cache; on macOS, <code>~/Library/Caches/trivy</code></td>
+<td>single binary</td>
+</tr>
+<tr>
+<td>npm-audit</td>
+<td>yes (registry audit API)</td>
+<td><code>~/.npm</code></td>
+<td>Node.js</td>
+</tr>
+<tr>
+<td>cfn-nag</td>
+<td>no</td>
+<td>none</td>
+<td>Ruby and its gem paths</td>
+</tr>
+<tr>
+<td>detect-secrets</td>
+<td>only when <code>sandbox.network_scanners</code> names it</td>
+<td>none</td>
+<td>ASH's Python, in a worker subprocess</td>
+</tr>
+<tr>
+<td>cdk-nag</td>
+<td>no</td>
+<td>jsii's runtime cache, not used on macOS</td>
+<td>ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess</td>
+</tr>
+</tbody>
+</table>
+<h3 id="community-and-third-party-plugin-scanners">Community and third-party plugin scanners</h3>
+<p>The sandbox applies to every scanner, whatever module it comes from. A scanner from a
+community module (snyk-code, ferret-scan, trivy-repo) or your own plugin package gets
+its policy from its <code>sandbox_requirements</code> class attribute. A scanner that declares
+none gets the strictest default: no network, the source tree read-only, its own
+results directory as the only writable place, a private empty <code>$HOME</code> and <code>/tmp</code>, and
+the baseline environment allowlist with nothing added. It still runs; it is never
+skipped for lacking a declaration, and never run unsandboxed.</p>
+<p>A plugin that needs more declares it:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.base.scanner_plugin</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScannerPluginBase</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.sandbox.policy</span><span class="w"> </span><span class="kn">import</span> <span class="n">SandboxRequirements</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyScanner</span><span class="p">(</span><span class="n">ScannerPluginBase</span><span class="p">[</span><span class="n">MyScannerConfig</span><span class="p">]):</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">sandbox_requirements</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="n">SandboxRequirements</span><span class="p">]</span> <span class="o">=</span> <span class="n">SandboxRequirements</span><span class="p">(</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>        <span class="c1"># A network when the scan is online; never under --offline.</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>        <span class="n">network</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>        <span class="c1"># Extra read-only paths.</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>        <span class="n">read_paths</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;~/.my-tool/rules&quot;</span><span class="p">,),</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>        <span class="c1"># Read-only, or writable through bwrap&#39;s throwaway overlay.</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>        <span class="n">cache_paths</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;~/.cache/my-tool&quot;</span><span class="p">,),</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>        <span class="c1"># Where the cache is read-only, these point at a private, empty</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>        <span class="c1"># directory, for a tool that has to write its cache.</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        <span class="n">cache_env</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;MYTOOL_CACHE_DIR&quot;</span><span class="p">,),</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        <span class="c1"># Variables passed through.</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>        <span class="n">env_prefixes</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;MYTOOL_&quot;</span><span class="p">,),</span>
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>        <span class="c1"># Credential-shaped names it needs.</span>
+</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>        <span class="n">env_names</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;MYTOOL_TOKEN&quot;</span><span class="p">,),</span>
+</span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>        <span class="c1"># Set under sandbox-exec only, after the allowlist.</span>
+</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>        <span class="n">sandbox_exec_env</span><span class="o">=</span><span class="p">((</span><span class="s2">&quot;MYTOOL_PACKAGE_CACHE&quot;</span><span class="p">,</span> <span class="s2">&quot;disabled&quot;</span><span class="p">),),</span>
+</span><span id="__span-2-24"><a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>        <span class="c1"># The tool unpacks itself where this variable says and runs what it</span>
+</span><span id="__span-2-25"><a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>        <span class="c1"># unpacked; sandbox-exec points it at a private directory per spawn.</span>
+</span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>        <span class="n">unpack_dir_env</span><span class="o">=</span><span class="s2">&quot;XDG_CACHE_HOME&quot;</span><span class="p">,</span>
+</span><span id="__span-2-27"><a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>    <span class="p">)</span>
+</span></code></pre></div>
+<p>The community scanners declare theirs: snyk-code asks for a network, its <code>SNYK_</code>
+variables and <code>SNYK_TOKEN</code>, and read access to its token file; trivy-repo asks for a
+network and its database cache; ferret-scan asks only for its <code>FERRET_</code> variables.</p>
+<p>detect-secrets needs a network only to verify candidate secrets with their issuers,
+which it does when its settings list the verification filter. Those settings come
+from a <code>.secrets.baseline</code> or an ASH config file, and the scanned repository can
+commit either one. The same baseline can also load a detect-secrets plugin from the
+repository. So the sandbox doesn't take detect-secrets' own word for it: detect-secrets
+gets a network only when <code>sandbox.network_scanners</code> names it, and a repository can't
+set that (see below). Without a network every candidate counts as unverified, so a
+sandboxed scan whose settings verify reports the candidates that verification would
+have dropped, and ASH logs a warning naming the setting.</p>
+<p>detect-secrets and cdk-nag are Python libraries. They used to run inside the ASH
+process, where no OS sandbox can reach them; they now run in worker subprocesses that
+use the same interpreter and the same library calls, so their findings are unchanged
+and the sandbox wraps them like any other scanner. To let detect-secrets verify
+secrets under the sandbox, pass <code>--config-overrides 'sandbox.network_scanners=[detect-secrets]'</code>
+(plus any other scanners that need a network). Under <code>--offline</code> it gets none.</p>
+<p>To give an extra scanner network access, or take it away:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">sandbox</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bwrap</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">network_scanners</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">grype</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">trivy</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># replaces the per-scanner defaults</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">extra_read_paths</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">/opt/company-ca</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+<p><code>network_scanners</code> and <code>extra_read_paths</code> grant access, so they are honored only from
+<code>--config-overrides</code> or a config file outside the scanned tree. When any file the
+config was built from is inside the tree, both settings are taken from the defaults
+plus <code>--config-overrides</code>, and ASH logs a warning naming the file. That covers the
+discovered <code>.ash/.ash.yaml</code>, a <code>--config</code> path, an <code>extends</code> base, and the file
+<code>ASH_CONFIG</code> names. The tree is the whole checkout: the outermost directory at or
+above the scanned directory (in workspace mode, the workspace root) that holds a
+<code>.git</code> entry, or the scanned directory itself outside a repository. Outermost, so a
+submodule's <code>.git</code> file can't make the superproject's config look outside. The
+checkout is looked up from the scanned directory as given and from its resolved
+path, so a scanned directory that is a symlink still counts the checkout it sits in. A symlink, a <code>..</code>
+segment, or a case-only difference on a case-insensitive filesystem doesn't change
+the answer, because ASH compares the files themselves, not their path strings. An
+in-tree <code>network_scanners</code> list still takes network away: a scanner it doesn't name
+gets none, so a repository can keep its own scan offline with <code>network_scanners: []</code>.</p>
+<p><code>mode</code> follows the same rule. When <code>--sandbox</code>, <code>ASH_CONFIG</code>, or the operator's
+config file turns the sandbox on, an in-tree config can't turn it off or switch it
+to another backend. A mode set by a file outside the tree comes first. When no file
+outside the tree sets one, the operator's mode still holds even if the operator's
+file is itself inside the tree, for example under a home directory that is a git
+checkout: its grants are dropped, but its mode stays, because a mode other than
+<code>off</code> grants nothing. Only <code>--sandbox off</code> or a <code>sandbox.mode</code> override turns it off.</p>
+<p>The checkout is also looked up from the shell's working directory (<code>$PWD</code>), so
+<code>cd vendor &amp;&amp; ash scan</code>, where <code>vendor</code> is a symlink out of the checkout, still
+counts the checkout. A bind mount of a directory inside a checkout can't be traced
+back to it; scan the checkout itself, or keep its config out of the grants with
+<code>--config-overrides</code>. When none of them does, an in-tree <code>mode</code> applies, because a
+sandbox the repository asks for only takes access away. In workspace mode, the
+operator's <code>--config</code> decides for a project that has its own config file, the same
+as for one that doesn't.</p>
+<p>A trusted config outside the tree that <code>extends</code> a base inside the tree loses its own
+grants too, because the merged settings no longer record which file set them. Pass
+the grants with <code>--config-overrides</code> in that layout.</p>
+<p>A sandboxed scan does not install tools: installing runs a package's build code and
+writes uv's tool directory, which a sandboxed scanner may only read. Run
+<code>ash dependencies install</code> first; a scanner whose tool is missing is recorded
+<code>MISSING</code>.</p>
+<h2 id="threat-model">Threat model</h2>
+<p>The sandbox is for three cases.</p>
+<ol>
+<li>A malicious or compromised scanner, plugin, or rule pack. A typosquatted or
+   hijacked package on PyPI or npm, a scanner binary replaced on disk, a community
+   rule pack that runs code.</li>
+<li>Scanned content that exploits a scanner. Scanners parse untrusted input and some
+   execute it on purpose: tool configuration files committed to the repository
+   (<code>trivy.yaml</code>, <code>.semgrep.yml</code>, <code>.checkov.yaml</code>, <code>.npmrc</code>, <code>.bandit</code>) change what a
+   scanner does, plugin systems <code>eval</code> code found in the tree, and parser bugs give
+   code execution or path traversal on write.</li>
+<li>Exfiltration. Code running in any of the above reading credentials (<code>~/.ssh</code>,
+   <code>~/.aws</code>, tokens in the environment) and sending them out over the network.</li>
+</ol>
+<p>Inside the sandbox such code can read the source tree (it is scanning it), write its
+own results, and, if the scanner is allowed a network, talk to the network. It cannot
+read the rest of your home directory, write outside its results directory, modify the
+source tree, or see environment variables outside the allowlist.</p>
+<p>Out of scope:</p>
+<ul>
+<li>ASH itself, its converters, and <code>git</code>, which run unsandboxed. ASH is the trusted
+  base. Converters unpack archives and notebooks into the work directory; they are
+  ASH code, not third-party tools. <code>git</code> runs only for <code>--changed-files-only</code> and
+  workspace planning, never inside a scanner.</li>
+<li>Plugin modules. A config file can list <code>ash_plugin_modules</code>, which ASH imports into
+  its own process, so they run unsandboxed. From a config file inside the scanned
+  tree, only installed modules outside the tree are imported (see
+  <a href="../configuration-guide/#settings-a-repositorys-config-cannot-choose">Settings a repository's config cannot choose</a>),
+  but an installed package still runs with ASH's access. The sandbox doesn't change
+  this; review the plugin modules a repository's config names before you scan it.</li>
+<li>Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
+  fork until a limit stops it; the existing per-scanner <code>scan_timeout</code> bounds how long.</li>
+<li>A scanner allowed a network shares the host's network, so TCP and UDP services
+  listening on the host, loopback included, are reachable from it under every
+  backend. Abstract Unix sockets bound by host processes are not: the socket filter
+  refuses Unix sockets.</li>
+<li>A scanner allowed a network can still send what it can read (the source tree)
+  wherever it likes. The online allowlist is per scanner, not per host. Host-level
+  filtering would need a proxy inside the sandbox, which tools can bypass unless the
+  network namespace forces all traffic through it; that is future work.</li>
+<li>Results integrity. A compromised scanner can still lie in its own results file.</li>
+<li>Kernel exploits. All backends share the host kernel.</li>
+</ul>
+<h2 id="design">Design</h2>
+<h3 id="one-choke-point">One choke point</h3>
+<p>Every scanner subprocess is started through one function,
+<code>utils/subprocess_utils.py:_prepare_spawn</code>, whether the scanner is run directly, through
+<code>uv tool run</code>, or as a version or availability probe. A sandbox scope (a context
+variable holding the policy for that scanner) is active around each scanner's
+construction and dependency check, which is when scanners probe their tools, around
+its scan, and around the content-database check that runs <code>grype db status</code>.
+<code>_prepare_spawn</code> rewrites the command line for the active backend when a scope is
+active. Probes get a throwaway results directory. A scanner that cannot be sandboxed
+as requested gets a refusing scope, so its probes fail instead of running unsandboxed.
+Spawns made outside any scanner scope (ASH's own <code>git</code> calls, converters, the
+container runtime) are unaffected. A sandboxed scan never installs a tool.</p>
+<p><code>tests/unit/utils/test_sandbox_choke_point.py</code> fails the build if any module in the
+package outside a short, reasoned exemption list calls <code>subprocess.run</code>,
+<code>subprocess.Popen</code>, <code>os.system</code>, <code>os.exec*</code> or the like directly, so a new spawn site
+cannot bypass the choke point. The scope is per thread: a scanner that started a
+process from a thread it created itself would not inherit it. No builtin scanner does.</p>
+<h3 id="linux-bubblewrap-preferred">Linux: bubblewrap (preferred)</h3>
+<p>bubblewrap builds an empty root from a tmpfs and mounts into it only what the policy
+lists, in new user, mount, PID, IPC, UTS, cgroup and (when the scanner gets no network)
+network namespaces. It needs no setuid binary on distributions that allow unprivileged
+user namespaces. ASH passes <code>--die-with-parent</code> and <code>--new-session</code>, so a scanner
+cannot outlive ASH or inject keystrokes into the terminal through <code>TIOCSTI</code>.</p>
+<p>bwrap's mounts hide <code>/run</code> and <code>$HOME</code>, but not a Unix socket inside a directory it
+does mount (the Nix daemon's socket is under <code>/nix</code>), and a scanner with a network
+shares the host's network namespace and every abstract Unix socket bound there. So
+the scanner is started through the Landlock wrapper in <code>--socket-filter</code> mode, which
+installs only its seccomp socket filter (described under Landlock) and then execs the
+scanner. IP sockets are left to the network namespace, so a tool can still use its own
+loopback when it has no network. ASH's probe runs the filter inside bwrap once, so an
+architecture the filter does not cover makes bwrap unavailable rather than unfiltered.</p>
+<p>Ubuntu 23.10 and later restrict unprivileged user namespaces through AppArmor
+(<code>kernel.apparmor_restrict_unprivileged_userns=1</code>). Install bubblewrap from the
+distribution (<code>apt install bubblewrap</code>); if <code>bwrap --unshare-all --ro-bind / / true</code>
+still fails with "setting up uid map: Permission denied", the restriction applies to
+it, and either an AppArmor profile that grants <code>userns</code> to <code>/usr/bin/bwrap</code> or
+<code>sysctl kernel.apparmor_restrict_unprivileged_userns=0</code> lifts it. ASH probes by
+running <code>bwrap ... true</code> once per process, so a <code>bwrap</code> that is installed but cannot
+start is reported as unavailable with the error it printed, not used and found broken
+mid-scan.</p>
+<p>The throwaway cache overlay uses <code>--overlay-src</code>/<code>--tmp-overlay</code>, which needs
+bubblewrap 0.8 and Linux 5.11. On older systems those caches are mounted read-only
+instead, as under the other backends, and the log says so.</p>
+<h3 id="linux-firejail-fallback">Linux: firejail (fallback)</h3>
+<p>firejail is a setuid-root binary, which is attack surface of its own (it has had
+privilege-escalation CVEs), and its filesystem model is "everything visible, then
+restrict" rather than "nothing visible, then allow". ASH uses
+<code>--noprofile --private-dev --nonewprivs --caps.drop=all --seccomp --nogroups</code>,
+<code>--dbus-user=none --dbus-system=none</code>, <code>--net=none</code> when the scanner gets no network,
+makes <code>/</code> read-only, blacklists the container runtime sockets, <code>/run/user/&lt;uid&gt;</code> and
+<code>$SSH_AUTH_SOCK</code>, whitelists inside <code>$HOME</code> (and <code>/tmp</code>) only the paths the policy
+lists, uses <code>--private-tmp</code> when the policy lists nothing under <code>/tmp</code>, and makes the
+results directory read-write. Paths outside <code>$HOME</code> that your user can read remain readable, and scanner
+caches are read-only because firejail has no throwaway overlay. Because
+everything outside <code>$HOME</code> stays visible, <code>/run</code> and its sockets included, the
+scanner is started through the same seccomp socket filter as under bwrap. Use bwrap
+when you can.</p>
+<p>firejail also decides for itself whether to build a sandbox at all. When it finds no
+kernel threads among the first ten PIDs, as inside a container that has its own PID
+namespace, it concludes it is already sandboxed and runs the command with none of the
+options above. The command still exits 0, and the only sign is a warning that
+<code>--quiet</code> hides. So ASH's probe runs <code>readlink /proc/self/ns/mnt</code> under the same
+options, without <code>--quiet</code>, and requires a mount namespace other than ASH's own, since
+every sandbox firejail builds has one. When the command reports ASH's namespace, or
+firejail prints that warning, firejail is unavailable with that reason:
+<code>--sandbox firejail</code> records each scanner <code>MISSING</code>, and <code>--sandbox auto</code> moves on to
+Landlock.</p>
+<h3 id="linux-landlock">Linux: Landlock</h3>
+<p>Landlock is an unprivileged kernel LSM (Linux 5.13+), so this mode needs nothing
+installed. ASH starts a small wrapper (<code>utils/sandbox/landlock_exec.py</code>, standard
+library only) that restricts itself and then <code>exec</code>s the scanner:</p>
+<ul>
+<li>Landlock filesystem rules: read and execute beneath the read-only paths, full access
+  beneath the results directory and a fresh private temporary directory (<code>TMPDIR</code>).
+  Nothing else, including <code>$HOME</code> and <code>/tmp</code>, is reachable.</li>
+<li>Sockets: Landlock does not mediate <code>connect()</code> on a Unix socket path, so a scanner
+  that could create a Unix socket could talk to the Docker socket or the session bus
+  whatever the filesystem rules say. A seccomp filter therefore refuses
+  <code>socket(AF_UNIX)</code> always. <code>socketpair()</code> of the stream and seqpacket kinds, which
+  tools use for pipes, still works; a datagram pair is refused, because a datagram
+  socket can <code>sendto()</code> or <code>connect()</code> any datagram socket by path, such as the
+  journal's <code>/dev/log</code>, however it was created. The filter also refuses
+  <code>socket()</code> for every family when the scanner has no network, which blocks UDP and
+  DNS too, and refuses <code>io_uring_setup</code>, because io_uring can create sockets without
+  the <code>socket</code> syscall. Landlock's own network rules (ABI 4, Linux 6.7) cover only TCP
+  and are added as a second layer.</li>
+<li>A tool that creates a Unix socket of its own fails too, under this backend and, since
+  bwrap and firejail run the same filter, under every Linux backend. Python 3.14's
+  default multiprocessing start method, <code>forkserver</code>, is one: it listens on a Unix
+  socket, so a Python tool on 3.14 that relies on the default fails with
+  <code>PermissionError</code>, while the <code>fork</code> and <code>spawn</code> methods work. ASH's own workers
+  select <code>fork</code>, and the builtin scanners do not rely on the default.</li>
+<li>The wrapper starts a new session before it execs the scanner, so the scanner has no
+  controlling terminal to inject keystrokes into.</li>
+<li><code>/dev/shm</code> is the host's and is writable, because POSIX semaphores live there and
+  multiprocessing needs them (detect-secrets scans in a process pool). Landlock cannot
+  make it private. A scanner can therefore leave files in, or read other processes'
+  shared memory objects of your user from, <code>/dev/shm</code>. bwrap gives each scanner its
+  own.</li>
+<li><code>io_uring_setup</code> fails with ENOSYS rather than EACCES, so runtimes that use io_uring
+  when it exists (semgrep-core) fall back to ordinary syscalls instead of aborting.</li>
+<li>ABI 6 (Linux 6.12) scoping blocks abstract Unix sockets and signals to processes
+  outside the sandbox. Below ABI 6 those are not restricted, and the log says so.</li>
+<li><code>/proc</code> is readable, but Landlock denies <code>ptrace</code>-mode access from a sandboxed
+  process to processes outside its domain, so <code>/proc/&lt;ASH's pid&gt;/environ</code> cannot be
+  read.</li>
+</ul>
+<p>Landlock cannot mount an empty <code>/tmp</code> or <code>$HOME</code> over the real ones; it denies them
+instead. <code>TMPDIR</code> and <code>HOME</code> point at a fresh private directory, and each path the
+policy grants under the real home appears in the private one as a symlink to the real
+path, so tools that write settings under <code>~</code> keep working. Granted caches are read-only,
+as Landlock has no overlay. A tool that hard-codes <code>/tmp</code> fails rather
+than escaping.</p>
+<h3 id="macos-sandbox-exec">macOS: sandbox-exec</h3>
+<p><code>sandbox-exec</code> applies a Seatbelt (SBPL) profile. ASH generates one per scanner:
+deny by default, read everywhere except the home directory and the shared temporary
+directories, read the policy's tool paths inside home, write only to the results
+directory and a private <code>TMPDIR</code>. With no network, no socket of any kind is allowed.
+With a network, IP sockets are allowed and Unix sockets are not, except the
+resolver's (<code>mDNSResponder</code>), so Docker Desktop's socket and the launchd SSH agent
+stay out of reach. The scanner starts in a new session, with no controlling terminal.</p>
+<p>Programs run only from the system and tool paths the policy makes readable, and from
+two directories made for the spawn alone: its private uv cache, where <code>uv tool run</code>
+keeps the environments of tools it was not asked to install, and a self-unpacking
+tool's unpack directory (below). Nothing runs from the source tree, the output and
+results directories, the host caches, the other private caches or the private
+<code>TMPDIR</code>, even where a tool path contains one of them (a repository checked out under
+<code>/opt</code>), so a program the scanner writes, or one the scanned repository ships, cannot
+be started. A tool path inside the scanned tree, such as a virtualenv ASH itself runs
+from, stays executable.</p>
+<p>Mach service lookups are limited to a list measured on the macOS 14, 15 and 26 CI
+runners, where the ten builtin scanners looked up the same thirteen services on all
+three. Nine of them are allowed. Every scanner may reach preferences (<code>cfprefsd</code>),
+logging (<code>logd</code>), notifications (<code>notifyd</code>) and user and group lookups
+(<code>opendirectoryd</code>). A scanner with a network may also reach the DNS and network
+configuration (<code>configd</code>) and certificate trust (<code>trustd</code>). The other four are not
+allowed: LaunchServices, which node looks up on start and does without, and the
+keychain daemon (<code>SecurityServer</code>) and a telemetry service, both looked up by
+<code>/usr/bin/security</code>. LaunchServices (<code>launchservicesd</code>, <code>coreservicesd</code>,
+<code>com.apple.lsd.*</code>), the pasteboard (<code>com.apple.pasteboard.*</code>) and the keychain daemon
+are denied after every allow, so no allow can reach them: LaunchServices asks launchd
+to start an app, and launchd starts it outside the sandbox. The keychain files
+themselves (<code>/Library/Keychains</code> and <code>~/Library/Keychains</code>) are denied after every
+file rule.</p>
+<p>semgrep's core runs <code>/usr/bin/security</code> only to read the system root certificates,
+through OCaml's ca-certs. For a scanner that declares this need
+(<code>SandboxRequirements.system_trust_roots</code>), ASH exports the same certificates before
+the spawn, outside the sandbox, with the same command (<code>security find-certificate -a
+-p</code> on the system root and system keychains), writes them to a file the scanner can
+read and not write, and sets <code>SSL_CERT_FILE</code> to it, which ca-certs reads instead. An
+<code>SSL_CERT_FILE</code> you set yourself is passed through and wins.</p>
+<p>sandbox-exec has no throwaway overlay, so caches are read-only there, as above. The
+macOS-specific locations are declared per scanner and granted as narrowly as the tool
+allows:</p>
+<ul>
+<li>grype's database at <code>~/Library/Caches/grype</code>, its default location on macOS, is
+  read-only. Before an online scan ASH updates it there, outside the sandbox, as it
+  does <code>~/.cache/grype</code> on Linux. trivy-repo's database at <code>~/Library/Caches/trivy</code>
+  is handled the same way.</li>
+<li>cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
+  temporary directory instead of the shared <code>~/Library/Caches/com.amazonaws.jsii</code>,
+  whose JavaScript every CDK process on the machine runs.</li>
+<li>opengrep's macOS binary unpacks itself to <code>$XDG_CACHE_HOME/opengrep/&lt;version&gt;</code> and
+  runs <code>opengrep.bin</code> from there. <code>XDG_CACHE_HOME</code> points at a directory made for the
+  spawn, writable and executable for it alone, and removed when it exits; it is the
+  only writable directory a program may run from.</li>
+<li><code>uv tool run</code> opens uv's tools-directory lock read-write before it looks for an
+  installed tool. That one file is writable; the tools directory is not.</li>
+<li>A script's interpreter, from its <code>#!</code> line, has its install prefix readable, so a
+  RubyGems wrapper finds its Ruby's library when Ruby is installed under <code>$HOME</code>.</li>
+</ul>
+<p>sandbox-exec does not end processes the scanner leaves running. ASH's removal of
+symlinks after each spawn and its non-following writes still apply, but a process that
+outlives the scanner could replace a subdirectory of the results directory with a
+link between the sweep and ASH's next write there. That is a known gap of this
+backend.</p>
+<p>A macOS release or a scanner update can make a tool look up a service that is not on
+the list. The profile denies it, the tool usually fails or reports less, and the
+unified log says which service it was:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>log<span class="w"> </span>show<span class="w"> </span>--last<span class="w"> </span>10m<span class="w"> </span>--predicate<span class="w"> </span><span class="s1">&#39;sender == &quot;Sandbox&quot;&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">&#39;deny\(1\) (mach-lookup|process-exec)&#39;</span>
+</span></code></pre></div>
+<p>The list is <code>MACH_SERVICES</code> and <code>MACH_SERVICES_WITH_NETWORK</code> in
+<code>automated_security_helper/utils/sandbox/backends.py</code>.</p>
+<p>Risk to record: Apple has marked <code>sandbox-exec</code> deprecated since macOS 10.13 and
+documents SBPL as private. It still works on current macOS and is what Apple's own
+tools and several other developer tools use, but a future macOS could remove or change
+it without notice. ASH probes it at startup like every other backend, so removal would
+show up as "sandbox-exec unavailable" and <code>MISSING</code> scanners, not as an unsandboxed
+scan.</p>
+<h3 id="windows">Windows</h3>
+<p>There is no Windows backend. <code>--sandbox auto</code> on Windows finds nothing and the
+scanners are recorded <code>MISSING</code>. Run ASH under WSL2 and use <code>bwrap</code> there, or use
+container mode. A native backend would use an AppContainer or a restricted token plus
+a job object; that is a larger piece of work and is not in this release.</p>
+<h3 id="why-not-gvisor-or-nsjail-by-default">Why not gVisor or nsjail by default</h3>
+<p>gVisor (<code>runsc</code>) gives the strongest isolation here because scanner syscalls go to a
+user-space kernel, but it is a container runtime: it wants an OCI bundle and root or a
+rootless setup, which is what container mode already provides. nsjail is close to
+bubblewrap in capability but is not packaged on most distributions and is configured
+through protobuf files; bubblewrap is packaged everywhere (Flatpak depends on it) and
+its command line maps one to one onto the policy above.</p>
+<h2 id="verifying-it">Verifying it</h2>
+<p><code>tests/integration/sandbox/</code> holds a malicious fixture scanner that tries to read a
+file outside the source tree (a planted <code>~/.ssh/id_rsa</code>), write outside its results
+directory, open a network socket under <code>--offline</code>, and modify the source tree. CI runs
+it under each backend available on the runner. Each attempt must fail with the sandbox
+on, and succeed with <code>--sandbox off</code>, which is the negative control that proves the
+attempts are real. CI also runs every builtin scanner under bubblewrap on Linux and
+under sandbox-exec on macOS against the snapshot fixture, offline and online, and
+asserts the findings match the unsandboxed run.</p>
+<p>On macOS, <code>tests/integration/sandbox/test_sandbox_exec_services.py</code> has the fixture
+scanner open TextEdit through LaunchServices, read a canary back from the pasteboard
+and from the keychain, read the keychain files, and look up the LaunchServices,
+pasteboard and keychain Mach services directly. Each must succeed unsandboxed and fail
+under <code>sandbox-exec</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      &copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.indexes", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
