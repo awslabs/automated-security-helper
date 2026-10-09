@@ -447,9 +447,13 @@ ASH reads its configuration from the repository it scans unless `--config` names
 file elsewhere. When any file the configuration was built from is inside the scanned
 tree (a discovered `.ash/.ash.yaml`, a `--config` path inside the tree, an `extends`
 base, or the file `ASH_CONFIG` names), a few settings are limited, because they decide
-what ASH installs, imports or hands a scanner as its own configuration. The scanned
-tree is the outermost git checkout around the source directory, or the source
-directory itself outside a checkout.
+what ASH installs, imports or hands a scanner as its own configuration. "Inside the
+scanned tree" here means inside any git checkout, found from the file's own path and
+its resolved path, or inside the source directory when the source directory is
+outside a checkout. A checkout is something other people can push to, so this
+includes a config file, tool config or plugin kept in a checkout of your own, such
+as an ops or dotfiles repository; pass those settings with `--config-overrides`, or
+keep the files outside every checkout.
 
 Under the MCP server, a config file a client delivered (an upload or a file in a
 delivered tree, named as `config_path`) is limited the same way, wherever it is. A

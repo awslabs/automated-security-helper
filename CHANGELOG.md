@@ -62,16 +62,26 @@
     when `sandbox.network_scanners` names it, because the settings that enable it
     can come from the scanned repository.
 
-  `sandbox.network_scanners` and `sandbox.extra_read_paths` grant access, so a config
-  file inside the scanned tree (discovered, `--config`, an `extends` base, or
-  `ASH_CONFIG`) cannot set them; they come from `--config-overrides` or a config
-  file outside the tree. Such a file's `network_scanners` can still remove network,
-  and its `sandbox.mode` applies only when nothing trusted turned the sandbox on.
-  The tree is the outermost enclosing checkout, not only the scanned directory, and
-  when nothing outside the tree sets a sandbox mode, the operator's mode holds even
-  when the operator's own file is in the tree. In workspace mode, an operator
-  `--config` that does not validate is now refused (exit 3) even for projects that
-  have their own config file, because the sandbox mode is read from it.
+  `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`
+  and `sandbox.env_scanners` grant access, so they come only from `--config-overrides`
+  or a config file outside every git checkout. **A config file inside any git
+  checkout cannot set them**, whether ASH discovered it, it was passed with
+  `--config`, it is an `extends` base, or `ASH_CONFIG` names it. That includes a
+  trusted config kept in an ops or dotfiles repository: its grants are dropped with a
+  warning naming the file and the setting, and have to be passed with
+  `--config-overrides`. For a scanned directory outside any checkout, a config file
+  inside that directory cannot set them either. Such a file's `network_scanners` can
+  still remove network. `sandbox.mode` is a floor: when `--sandbox`, `ASH_CONFIG` or
+  the operator's config turns the sandbox on, no repository config can turn it off or
+  switch backends. A scanner whose options ask for extra read paths or environment
+  variables declares them with `read_paths_require_grant` or `env_requires_grant` and
+  gets them only when `sandbox.read_path_scanners` or `sandbox.env_scanners` names it.
+  In workspace mode, an operator `--config` that does not validate is now refused
+  (exit 3) even for projects that have their own config file, because the sandbox
+  mode is read from it. Under a sandbox, a detect-secrets `baseline_file` outside the
+  source tree is read only when `sandbox.read_path_scanners` names detect-secrets,
+  and a scanner whose config section is renamed to another scanner's name is not run
+  sandboxed.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
@@ -125,7 +135,11 @@
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's
-  `config/` directory) counts as inside the scanned tree for these checks. The
+  `config/` directory) counts as inside the scanned tree for these checks. For
+  these checks and the sandbox grants alike, a file counts as inside the scanned
+  tree when it is inside any git checkout, by its own path or its resolved path, or
+  inside the source directory when that is outside a checkout. A tool config file
+  or plugin module kept in a checkout of your own is therefore not used either. The
   workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the

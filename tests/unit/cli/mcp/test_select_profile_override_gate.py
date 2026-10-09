@@ -105,7 +105,7 @@ def _both_routes(
 
 
 # ---------------------------------------------------------------------------
-# The three sandbox fields
+# Every sandbox field
 # ---------------------------------------------------------------------------
 
 _SANDBOX_CASES = {
@@ -120,6 +120,14 @@ _SANDBOX_CASES = {
     "network_scanners": (
         {"op": "replace", "path": "/sandbox/network_scanners", "value": ["checkov"]},
         {"mode": "bwrap", "network_scanners": ["checkov"]},
+    ),
+    "read_path_scanners": (
+        {"op": "add", "path": "/sandbox/read_path_scanners/-", "value": "zizmor"},
+        {"mode": "bwrap", "read_path_scanners": ["zizmor"]},
+    ),
+    "env_scanners": (
+        {"op": "add", "path": "/sandbox/env_scanners/-", "value": "zizmor"},
+        {"mode": "bwrap", "env_scanners": ["zizmor"]},
     ),
 }
 

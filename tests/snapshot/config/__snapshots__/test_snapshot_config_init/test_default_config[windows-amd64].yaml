@@ -27,6 +27,8 @@ sandbox:
   mode: 'off'
   network_scanners: null
   extra_read_paths: []
+  read_path_scanners: []
+  env_scanners: []
 content_db_staleness: fail
 content_db_staleness_overrides: []
 ash_plugin_modules: []

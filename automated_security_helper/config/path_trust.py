@@ -7,11 +7,10 @@ Some scanner options name a file the scanner's tool reads as its own configurati
 or a file it loads as a plugin. A path that resolves inside the scanned tree names
 a file the repository being scanned wrote, so it is not passed to the tool, whether
 an option set it or ASH found it by name in the source directory. A path outside
-the tree is passed as before. "The scanned tree" is
-any tree ``config.sandbox_grants.scanned_trees`` returns for the scan root: the
-outermost checkout above the source directory, under each name it has.
-Containment uses ``sandbox_grants.is_within``, so symlinks and ``..`` are resolved
-first.
+the tree is passed as before. "The scanned tree" is what
+``config.sandbox_grants.untrusted_path`` decides: any git checkout, found from the
+file's own path and its resolved path, and the scan root itself under each name it
+has. Symlinks and ``..`` are resolved first.
 
 Each refusal logs one warning naming the option, however many times the scanner
 asks.
@@ -39,26 +38,40 @@ def reset_path_refusal_warnings() -> None:
 def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool:
     """Whether ``path`` was written by the party whose code is being scanned.
 
-    True for a path in a tree the scanned repository controls
-    (``sandbox_grants.scanned_trees`` of the scan root, the same trees
-    ``resolve_config`` checks config files against), and, under the MCP server,
+    True for a path the scanned repository could have written
+    (``sandbox_grants.untrusted_path``, the same rule ``resolve_config`` applies to
+    config files: inside any git checkout, or inside the scan root), and, under the
+    MCP server,
     for any file an MCP client delivered (``cli.mcp.sandbox
     .config_is_client_supplied``: a delivered tree, an upload or its staging, in
     this session or another), which a client-written config could otherwise name
     from outside the tree it scans. The one membership test this module and
     ``plugin_module_trust`` use, so the rule changes in one place.
     """
+    return scanned_tree_reason(path, scan_root) is not None
+
+
+def scanned_tree_reason(
+    path: Union[str, Path], scan_root: Union[str, Path]
+) -> Optional[str]:
+    """Why ``in_scanned_tree`` holds for ``path``, for a warning, or None.
+
+    Pass ``path`` as it was named. Both it and its resolved path are checked, so a
+    symlink is judged by where it sits and by where it points.
+    """
     # Imported here: sandbox_grants imports ash_config, which imports the scanners
     # that import this module.
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
-    from automated_security_helper.config.sandbox_grants import (
-        is_within,
-        scanned_trees,
-    )
+    from automated_security_helper.config.sandbox_grants import untrusted_reason
 
-    if any(is_within(Path(path), tree) for tree in scanned_trees(Path(scan_root))):
-        return True
-    return config_is_client_supplied(path)
+    reason = untrusted_reason(Path(path), Path(scan_root))
+    if reason is not None:
+        return reason
+    if config_is_client_supplied(path) or config_is_client_supplied(
+        os.path.realpath(path)
+    ):
+        return "it is a file an MCP client delivered"
+    return None
 
 
 #: Fallback working directories already made, by filesystem root, so a process
@@ -192,17 +205,21 @@ def honored_path(
         return None
     path = resolved_path(value, source_dir)
     root = getattr(config, "_scanned_root", None) or source_dir
-    if not in_scanned_tree(path, root):
+    # Checked as named, not as resolved: scanned_tree_reason checks both, so a link
+    # the repository planted is judged by where it sits as well as where it points.
+    named = Path(os.path.expanduser(str(value)))
+    if not named.is_absolute():
+        named = Path(source_dir) / named
+    reason = scanned_tree_reason(named.absolute(), root)
+    if reason is None:
         return path
     with _WARNED_LOCK:
         first = (key, path.as_posix()) not in _WARNED
         _WARNED.add((key, path.as_posix()))
     if first:
         ASH_LOGGER.warning(
-            f"Ignoring {key} ({path.as_posix()}): it is inside the scanned tree "
-            "(the outermost git checkout around the source directory, or the source "
-            "directory outside a checkout) or is a file an MCP client delivered. "
-            "Such a file is not passed to the tool whoever names it; name one "
-            "outside them."
+            f"Ignoring {key} ({named.as_posix()}): {reason}. A file inside a git "
+            "checkout or the scanned directory, or one an MCP client delivered, is "
+            "not passed to the tool whoever names it; name one outside them."
         )
     return None

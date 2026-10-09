@@ -1575,9 +1575,11 @@
         "sandbox": {
           "$ref": "#/$defs/SandboxConfig",
           "default": {
+            "env_scanners": [],
             "extra_read_paths": [],
             "mode": "off",
-            "network_scanners": null
+            "network_scanners": null,
+            "read_path_scanners": []
           },
           "description": "OS-level sandboxing of scanner subprocesses."
         },
@@ -16137,9 +16139,18 @@
       "additionalProperties": false,
       "description": "OS-level sandboxing of scanner subprocesses. Off by default.\n\nSee docs/content/docs/scanner-sandbox.md for the policy each scanner gets.",
       "properties": {
+        "env_scanners": {
+          "default": [],
+          "description": "Scanners allowed the environment variables their own options ask for (a token for an online check, for example). Without this, such variables are not passed. Honored only from --config-overrides or a config file outside every git checkout.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Env Scanners",
+          "type": "array"
+        },
         "extra_read_paths": {
           "default": [],
-          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Ignored when set by a config file inside the scanned tree.",
+          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Ignored when set by a config file inside a git checkout.",
           "items": {
             "type": "string"
           },
@@ -16173,8 +16184,17 @@
             }
           ],
           "default": null,
-          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside the scanned tree; set inside the tree, a list can only remove network.",
+          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside every git checkout; set by any other config file, a list can only remove network.",
           "title": "Network Scanners"
+        },
+        "read_path_scanners": {
+          "default": [],
+          "description": "Scanners allowed the extra host paths their own options ask for (a rules file or baseline outside the source tree, for example). Without this, a scanner whose read paths come from its options gets only the default policy. Honored only from --config-overrides or a config file outside every git checkout.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Read Path Scanners",
+          "type": "array"
         }
       },
       "title": "SandboxConfig",

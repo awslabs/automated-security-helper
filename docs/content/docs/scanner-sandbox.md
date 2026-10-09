@@ -199,42 +199,65 @@ sandbox:
   extra_read_paths: [/opt/company-ca]
 ```
 
-`network_scanners` and `extra_read_paths` grant access, so they are honored only from
-`--config-overrides` or a config file outside the scanned tree. When any file the
-config was built from is inside the tree, both settings are taken from the defaults
-plus `--config-overrides`, and ASH logs a warning naming the file. That covers the
-discovered `.ash/.ash.yaml`, a `--config` path, an `extends` base, and the file
-`ASH_CONFIG` names. The tree is the whole checkout: the outermost directory at or
-above the scanned directory (in workspace mode, the workspace root) that holds a
-`.git` entry, or the scanned directory itself outside a repository. Outermost, so a
-submodule's `.git` file can't make the superproject's config look outside. The
-checkout is looked up from the scanned directory as given and from its resolved
-path, so a scanned directory that is a symlink still counts the checkout it sits in. A symlink, a `..`
-segment, or a case-only difference on a case-insensitive filesystem doesn't change
-the answer, because ASH compares the files themselves, not their path strings. An
-in-tree `network_scanners` list still takes network away: a scanner it doesn't name
-gets none, so a repository can keep its own scan offline with `network_scanners: []`.
+Four settings grant access: `network_scanners`, `extra_read_paths`, and the two
+below that let a scanner have what its own options ask for. A config file the
+scanned repository could have written can't grant any of them. That means a config
+file inside any git checkout, where a directory at or above the file, by its own path
+or its resolved path, holds a `.git` entry (a directory, or the file a submodule or
+linked worktree has). Only `--config-overrides`, the `--sandbox` flag, and config
+files outside every git checkout can grant. For a scanned directory outside any
+checkout, such as an extracted archive, a config file inside that directory can't
+grant either, whether it is reached by the directory's own name, its resolved path,
+or the shell's working directory (`$PWD`).
 
-`mode` follows the same rule. When `--sandbox`, `ASH_CONFIG`, or the operator's
-config file turns the sandbox on, an in-tree config can't turn it off or switch it
-to another backend. A mode set by a file outside the tree comes first. When no file
-outside the tree sets one, the operator's mode still holds even if the operator's
-file is itself inside the tree, for example under a home directory that is a git
-checkout: its grants are dropped, but its mode stays, because a mode other than
-`off` grants nothing. Only `--sandbox off` or a `sandbox.mode` override turns it off.
+When any file the config was built from can't grant (the discovered `.ash/.ash.yaml`,
+a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the four
+settings are taken from the operator's config file if it is outside every checkout,
+else `ASH_CONFIG`'s if that is, else the defaults, plus `--config-overrides`. ASH
+logs a warning that names the file and the setting. A `network_scanners` list in such
+a file still takes network away: a scanner it doesn't name gets none, so a repository
+can keep its own scan offline with `network_scanners: []`.
 
-The checkout is also looked up from the shell's working directory (`$PWD`), so
-`cd vendor && ash scan`, where `vendor` is a symlink out of the checkout, still
-counts the checkout. A bind mount of a directory inside a checkout can't be traced
-back to it; scan the checkout itself, or keep its config out of the grants with
-`--config-overrides`. When none of them does, an in-tree `mode` applies, because a
-sandbox the repository asks for only takes access away. In workspace mode, the
-operator's `--config` decides for a project that has its own config file, the same
-as for one that doesn't.
+This applies to a trusted config kept in a checkout of its own as well, such as an
+ops or dotfiles repository: its grants are dropped with the same warning. Pass them
+with `--config-overrides` instead, for example
+`--config-overrides 'sandbox.network_scanners=[grype,trivy]'`.
 
-A trusted config outside the tree that `extends` a base inside the tree loses its own
-grants too, because the merged settings no longer record which file set them. Pass
-the grants with `--config-overrides` in that layout.
+Some scanners ask for access through their options, such as a rules file or
+baseline outside the source tree, or a token for an online check. The repository
+can write those options, so the scanner declares them with `read_paths_require_grant`
+or `env_requires_grant`, and the sandbox grants them only to the scanners named in
+`sandbox.read_path_scanners` or `sandbox.env_scanners`. Those two follow the same rule
+as `network_scanners`, and ASH logs a warning when it withholds such a need. Even
+when granted, a path a scanner's options name is mounted only if it resolves inside
+the source tree or one of the operator's `extra_read_paths` entries, and only if it
+is a regular file or directory, never a socket or device. To let a scanner read a
+rules file elsewhere on the host, put its directory in `sandbox.extra_read_paths`. A
+cache path a scanner's options name is never mounted writable.
+
+ASH itself reads some files that scanner options name, outside the sandbox, and
+passes their contents on. detect-secrets' `baseline_file` is one. Under a sandbox,
+ASH reads such a file only when it is inside the source tree, or when
+`sandbox.read_path_scanners` names the scanner. Otherwise it skips the file with a
+warning, and the candidates the baseline would have marked are reported.
+
+A config file is judged by the name it was found under as well as by the file it
+resolves to, so a `.ash/.ash.yaml` that is a symlink out of the scanned directory
+still counts as inside it.
+
+Sandbox grants follow a scanner's own name, the one its code gives it. If a config
+file renames a scanner's section, for example by setting `name: grype` on a plugin's
+section, that scanner is not run sandboxed: it is recorded `MISSING` with the reason.
+
+`mode` is a restriction, so it is honored from any source, as a floor. When
+`--sandbox`, `ASH_CONFIG`, or the operator's config file turns the sandbox on, a
+config file the repository could have written can't turn it off or switch it to
+another backend. The operator's mode holds even if the operator's file is itself in
+a checkout, because a mode other than `off` grants nothing. Only `--sandbox off` or a
+`sandbox.mode` override turns it off. When nothing the operator set turns the
+sandbox on, the repository's `mode` applies, because a sandbox the repository asks
+for only takes access away. In workspace mode, the operator's `--config` decides for
+a project that has its own config file, the same as for one that doesn't.
 
 A sandboxed scan does not install tools: installing runs a package's build code and
 writes uv's tool directory, which a sandboxed scanner may only read. Run
@@ -273,6 +296,9 @@ Out of scope:
   [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)),
   but an installed package still runs with ASH's access. The sandbox doesn't change
   this; review the plugin modules a repository's config names before you scan it.
+  A virtualenv kept inside any git checkout counts as inside it, so a repository's
+  config can't import plugins installed there; the warning names the checkout.
+  Name such plugins with `--ash-plugin-modules` instead.
 - Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
   fork until a limit stops it; the existing per-scanner `scan_timeout` bounds how long.
 - A scanner allowed a network shares the host's network, so TCP and UDP services

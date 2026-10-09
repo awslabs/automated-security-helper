@@ -801,7 +801,11 @@ def resolve_workspace(
                 # Settled below by _assign_display_labels, which needs the whole
                 # sibling set to know whether this label is ambiguous.
                 display_label=label,
-                config_source=config_path.resolve().as_posix() if config_path else None,
+                # absolute(), not resolve(): the sandbox check needs the config's
+                # own name, and a symlinked .ash.yaml resolves out of the project.
+                config_source=config_path.absolute().as_posix()
+                if config_path
+                else None,
                 scanners=scanners,
                 severity_threshold=config.global_settings.severity_threshold,
                 scanner_pins=pins,

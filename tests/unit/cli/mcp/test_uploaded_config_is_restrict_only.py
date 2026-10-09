@@ -319,7 +319,13 @@ def test_get_config_does_not_show_an_uploaded_configs_grants(_server) -> None:
 
     shown = _shown(uploaded)
 
-    assert shown == {"mode": "bwrap", "network_scanners": None, "extra_read_paths": []}
+    assert shown == {
+        "mode": "bwrap",
+        "network_scanners": None,
+        "extra_read_paths": [],
+        "read_path_scanners": [],
+        "env_scanners": [],
+    }
     assert shown == _resolved_by_scan(_server["target"], uploaded).sandbox.model_dump()
 
 
@@ -336,6 +342,8 @@ def test_get_config_shows_the_bound_profile_as_the_base_for_an_upload(
         "mode": "firejail",
         "network_scanners": ["grype"],
         "extra_read_paths": ["/opt/ca"],
+        "read_path_scanners": [],
+        "env_scanners": [],
     }
     assert shown == _resolved_by_scan(_server["target"], uploaded).sandbox.model_dump()
 
@@ -350,6 +358,8 @@ def test_get_config_still_shows_the_operator_profiles_grants(_server) -> None:
         "mode": "firejail",
         "network_scanners": ["grype"],
         "extra_read_paths": ["/opt/ca"],
+        "read_path_scanners": [],
+        "env_scanners": [],
     }
     assert shown == _resolved_by_scan(_server["target"], bound).sandbox.model_dump()
 
@@ -368,4 +378,6 @@ def test_get_config_discovering_an_uploaded_config_does_not_show_its_grants(
         "mode": "firejail",
         "network_scanners": ["grype"],
         "extra_read_paths": ["/opt/ca"],
+        "read_path_scanners": [],
+        "env_scanners": [],
     }

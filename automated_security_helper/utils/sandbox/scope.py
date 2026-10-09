@@ -59,6 +59,8 @@ class SandboxScope:
     network_scanners: Optional[List[str]] = None
     extra_read_paths: List[str] = field(default_factory=list)
     network_limit: Optional[List[str]] = None
+    read_path_scanners: List[str] = field(default_factory=list)
+    env_scanners: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -173,6 +175,17 @@ def scanner_sandbox_scope(
         return None
 
     name = _plugin_name(scanner_plugin)
+    declared, declared_config = _declared_identity(scanner_plugin)
+    config = getattr(scanner_plugin, "config", None)
+    if declared is not None and (
+        declared != name
+        or (declared_config is not None and not isinstance(config, declared_config))
+    ):
+        raise SandboxUnavailable(
+            f"{name}: the config names this scanner {name!r}, but its own name is "
+            f"{declared!r}. Sandbox grants follow a scanner's own name, so a "
+            "scanner renamed by a config file is not run sandboxed."
+        )
     requirements = getattr(scanner_plugin, "sandbox_requirements", None)
     if not isinstance(requirements, SandboxRequirements):
         requirements = SandboxRequirements()
@@ -199,8 +212,33 @@ def scanner_sandbox_scope(
             f"{name}'s settings ask for a network, and those settings can come from "
             "the scanned repository, so the sandbox does not grant it. To allow it, "
             f"add {name} to sandbox.network_scanners with --config-overrides or a "
-            "config file outside the scanned tree."
+            "config file outside every git checkout."
         )
+    read_path_scanners = list(getattr(settings, "read_path_scanners", []) or [])
+    env_scanners = list(getattr(settings, "env_scanners", []) or [])
+    for withheld, key in (
+        (
+            (requirements.read_paths or requirements.cache_paths)
+            and requirements.read_paths_require_grant
+            and name not in read_path_scanners,
+            "read_path_scanners",
+        ),
+        (
+            (requirements.env_prefixes or requirements.env_names)
+            and requirements.env_requires_grant
+            and name not in env_scanners,
+            "env_scanners",
+        ),
+    ):
+        if withheld:
+            ASH_LOGGER.warning(
+                f"{name}'s settings ask for "
+                f"{'host paths' if key == 'read_path_scanners' else 'environment variables'}"
+                " the default policy does not allow, and those settings can come "
+                "from the scanned repository, so the sandbox does not grant them. "
+                f"To allow them, add {name} to sandbox.{key} with "
+                "--config-overrides or a config file outside every git checkout."
+            )
     return SandboxScope(
         backend=backend,
         scanner_name=name,
@@ -217,6 +255,8 @@ def scanner_sandbox_scope(
         network_limit=list(settings.network_limit)
         if settings.network_limit is not None
         else None,
+        read_path_scanners=read_path_scanners,
+        env_scanners=env_scanners,
     )
 
 
@@ -266,6 +306,37 @@ def _plugin_name(plugin: Any) -> str:
     if isinstance(plugin, type):
         return plugin.__name__
     return plugin.__class__.__name__
+
+
+def _declared_identity(plugin: Any) -> "tuple[Optional[str], Optional[type]]":
+    """The name and config class a scanner's own code declares, or (None, None).
+
+    A config file can set ``name`` on a plugin's section, and a plugin whose section
+    AshConfig does not type falls back to the generic config class when its own
+    class rejects that name. Grants are looked up by name, so both are read from
+    the plugin class, never from the config instance.
+    """
+    import typing
+
+    from automated_security_helper.base.plugin_config import declared_plugin_name
+
+    plugin_class = plugin if isinstance(plugin, type) else type(plugin)
+    name = declared_plugin_name(plugin_class)
+    if name is not None:
+        field = getattr(plugin_class, "model_fields")["config"]
+        for candidate in typing.get_args(field.annotation) or (field.annotation,):
+            name_field = (getattr(candidate, "model_fields", None) or {}).get("name")
+            if getattr(name_field, "default", None) == name:
+                return name, candidate
+        return name, None
+    # Not a pydantic plugin class: read the config class's own default.
+    config = getattr(plugin, "config", None)
+    fields = getattr(type(config), "model_fields", None)
+    if isinstance(fields, dict) and "name" in fields:
+        default = fields["name"].default
+        if isinstance(default, str) and default:
+            return default, type(config)
+    return None, None
 
 
 @contextmanager
@@ -328,6 +399,8 @@ def prepare_spawn(
         network_scanners=scope.network_scanners,
         extra_read_paths=scope.extra_read_paths,
         network_limit=scope.network_limit,
+        read_path_scanners=scope.read_path_scanners,
+        env_scanners=scope.env_scanners,
     )
     plan = scope.backend.plan(list(argv), base_env, policy)
     # First in line once the process has exited: nothing ASH writes into the

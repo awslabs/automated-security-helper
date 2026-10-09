@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -21,10 +22,13 @@ from automated_security_helper.config.plugin_module_trust import (
     confine_plugin_modules,
 )
 from automated_security_helper.config.sandbox_grants import (
+    REPOSITORY_WRITTEN,
     confine_sandbox_grants,
-    files_inside,
-    scanned_trees,
+    repository_written,
 )
+
+#: Why a config an MCP client supplied may not grant, for the confinement warning.
+CLIENT_SUPPLIED = "an MCP client supplied the file, not the operator"
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -236,6 +240,7 @@ def resolve_config(
         The resolved AshConfig object
     """
     chain: List[Path] = []
+    named: List[Path] = []
     config = _resolve_config(
         config_path,
         source_dir,
@@ -243,25 +248,34 @@ def resolve_config(
         config_overrides,
         permit_base,
         chain,
+        named,
     )
     if config is None:
         return config
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
-    trees = scanned_trees(Path(scanned_root))
+    root = Path(scanned_root)
+    ash_config = os.environ.get("ASH_CONFIG")
+    ash_config_named = [Path(ash_config)] if ash_config else []
     if chain:
-        in_tree = list(chain) if untrusted_config else files_inside(chain, trees)
+        in_tree = repository_written(chain, root, named, all_untrusted=untrusted_config)
         if not in_tree:
             return config
-        default_in_tree = files_inside(default_config_chain(), trees)
+        default_in_tree = repository_written(
+            default_config_chain(), root, ash_config_named
+        )
     else:
         # With no config file, the config is get_default_config(): ASH_CONFIG's
-        # file when that variable names one, which can be inside the tree too.
-        in_tree = default_in_tree = files_inside(default_config_chain(), trees)
+        # file when that variable names one, which can be untrusted too.
+        in_tree = default_in_tree = repository_written(
+            default_config_chain(), root, ash_config_named
+        )
         if not in_tree:
             return config
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
-    if operator is not None and not files_inside(operator[1], trees):
+    if operator is not None and not repository_written(
+        operator[1], root, [Path(trusted_config_path)]
+    ):
         trusted = operator[0]
     else:
         trusted = AshConfig() if default_in_tree else get_default_config()
@@ -284,7 +298,12 @@ def resolve_config(
     ]
     if sandbox_overrides:
         trusted = apply_config_overrides(trusted, sandbox_overrides)
-    confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
+    confine_sandbox_grants(
+        config.sandbox,
+        trusted.sandbox,
+        in_tree,
+        reason=CLIENT_SUPPLIED if untrusted_config else REPOSITORY_WRITTEN,
+    )
     confine_plugin_modules(
         config, trusted, config_overrides, Path(scanned_root), in_tree
     )
@@ -326,8 +345,13 @@ def _resolve_config(
     config_overrides: Optional[List[str]],
     permit_base: Optional[Callable[[Path], bool]],
     chain: List[Path],
+    named: List[Path],
 ) -> AshConfig:
-    """resolve_config without the sandbox confinement. Appends every file read to ``chain``."""
+    """resolve_config without the sandbox confinement.
+
+    Appends every file read to ``chain``, resolved, and the root config file's path
+    as it was named (passed or discovered) to ``named``.
+    """
     try:
         # Start with default config
         config = get_default_config() if fallback_to_default else None
@@ -417,6 +441,7 @@ def _resolve_config(
             )
             config = AshConfig.model_validate(document.data, strict=True)
             chain.extend(document.chain)
+            named.append(Path(config_path))
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 
             # Apply config overrides if provided

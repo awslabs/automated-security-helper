@@ -735,8 +735,9 @@ class SandboxConfig(BaseModel):
                 "uses each scanner's declared need: semgrep, opengrep, grype, trivy, "
                 "npm-audit and snyk-code fetch rules, databases or audit data. A list "
                 "replaces those defaults. Under --offline no scanner gets a network. "
-                "Honored only from --config-overrides or a config file outside the "
-                "scanned tree; set inside the tree, a list can only remove network."
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout; set by any other config file, a list can only remove "
+                "network."
             )
         ),
     ] = None
@@ -747,13 +748,39 @@ class SandboxConfig(BaseModel):
             description=(
                 "Additional host paths every sandboxed scanner may read, for example a "
                 "corporate CA bundle or a shared rule directory. '~' and $VARS expand. "
-                "Ignored when set by a config file inside the scanned tree."
+                "Ignored when set by a config file inside a git checkout."
+            )
+        ),
+    ] = []
+
+    read_path_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanners allowed the extra host paths their own options ask for "
+                "(a rules file or baseline outside the source tree, for example). "
+                "Without this, a scanner whose read paths come from its options gets "
+                "only the default policy. Honored only from --config-overrides or a "
+                "config file outside every git checkout."
+            )
+        ),
+    ] = []
+
+    env_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanners allowed the environment variables their own options ask "
+                "for (a token for an online check, for example). Without this, such "
+                "variables are not passed. Honored only from --config-overrides or a "
+                "config file outside every git checkout."
             )
         ),
     ] = []
 
     # Set by config/sandbox_grants.py from a network_scanners list that a config
-    # file inside the scanned tree wrote. Private, so no config file can set it.
+    # file the scanned repository could have written. Private, so no config file
+    # can set it.
     _network_limit: Optional[List[str]] = PrivateAttr(default=None)
 
     @property
