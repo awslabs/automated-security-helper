@@ -12,7 +12,10 @@ Exit code 0 if all checks pass, exit code 1 with a detailed report if any fail.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -145,15 +148,58 @@ def collect_md_files() -> list[Path]:
     is also what caught the omission that this docstring is the record of: the
     first version of this change edited docs/content/faq.md and not
     docs/content/faq.md.template, and the round-trip test is what noticed.
+
+    The list comes from git, not a walk of the filesystem: every tracked file,
+    plus every untracked one that is not ignored, so a new doc is checked before
+    it is added. git does not enter an ignored directory. A walk did, and that
+    matters because the unit tests call this on the real checkout under xdist:
+    ``REPO_ROOT.rglob`` descended into tests/pytest-temp, which is ignored, while
+    other workers created and removed directories there. It raised
+    FileNotFoundError when one went away mid-walk, and it returned the markdown
+    those workers had written. tests/unit/test_repo_walkers_skip_scratch.py shows
+    both. A checkout git cannot read raises here rather than yielding no docs, so
+    every check built on this list cannot pass by checking nothing.
     """
-    patterns = ("*.md", "*.md.template")
-    files = [
-        path
-        for pattern in patterns
-        for path in REPO_ROOT.rglob(pattern)
-        if not _EXCLUDED_MD_DIRS.intersection(path.parts)
-    ]
-    return sorted(set(files))
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError("git is not on PATH, so the docs to check are unknown")
+    listing = subprocess.run(
+        [
+            git,
+            "-C",
+            str(REPO_ROOT),
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "*.md",
+            "*.md.template",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise RuntimeError(
+            f"git ls-files failed in {REPO_ROOT}, so the docs to check are unknown: "
+            f"{listing.stderr.decode(errors='replace').strip()}"
+        )
+    files = set()
+    for entry in listing.stdout.split(b"\0"):
+        if not entry:
+            continue
+        relative = Path(os.fsdecode(entry))
+        path = REPO_ROOT / relative
+        # --cached still lists a tracked file deleted from the working tree.
+        if not _EXCLUDED_MD_DIRS.intersection(relative.parts) and path.is_file():
+            files.add(path)
+    if not files:
+        raise RuntimeError(
+            f"git ls-files found no markdown in {REPO_ROOT}; every check that reads "
+            f"these docs would pass by checking nothing"
+        )
+    return sorted(files)
 
 
 # ---------------------------------------------------------------------------

@@ -597,3 +597,62 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
         assert template[: -len(".template")] in files, (
             f"{template} is collected but its rendered doc is not"
         )
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    return path
+
+
+def test_the_md_corpus_is_what_git_counts_as_the_tree(gate, tmp_path, monkeypatch):
+    """Tracked and untracked docs are in; ignored, excluded and deleted ones are not.
+
+    The list comes from git so that it never enters an ignored directory: the unit
+    tests run this on the real checkout while other workers create and remove
+    directories under the ignored tests/pytest-temp.
+    """
+    repo = _git_repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text("tests/pytest-temp/\n", encoding="utf-8")
+    (repo / "docs").mkdir()
+    for name in ("README.md", "docs/guide.md.template", "docs/gone.md"):
+        (repo / name).write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    (repo / "docs/gone.md").unlink()
+    (repo / "docs/new.md").write_text("not added yet\n", encoding="utf-8")
+    (repo / "tests/pytest-temp/worker").mkdir(parents=True)
+    (repo / "tests/pytest-temp/worker/scratch.md").write_text("x\n", encoding="utf-8")
+    (repo / "node_modules/pkg").mkdir(parents=True)
+    (repo / "node_modules/pkg/README.md").write_text("x\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", repo)
+
+    files = {path.relative_to(repo).as_posix() for path in gate.collect_md_files()}
+
+    assert files == {"README.md", "docs/guide.md.template", "docs/new.md"}
+
+
+def test_the_md_corpus_refuses_a_tree_git_cannot_read(gate, tmp_path, monkeypatch):
+    """No listing is an error, not an empty corpus every check would pass on."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "README.md").write_text("x\n", encoding="utf-8")
+    # Stop git searching above tmp_path, so an enclosing repository cannot answer.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.setattr(gate, "REPO_ROOT", plain)
+
+    with pytest.raises(RuntimeError, match="git ls-files failed"):
+        gate.collect_md_files()
+
+
+def test_the_md_corpus_refuses_to_run_without_git(gate, monkeypatch):
+    monkeypatch.setattr(gate.shutil, "which", lambda name: None)
+
+    with pytest.raises(RuntimeError, match="git is not on PATH"):
+        gate.collect_md_files()
+
+
+def test_an_empty_md_corpus_is_refused(gate, tmp_path, monkeypatch):
+    monkeypatch.setattr(gate, "REPO_ROOT", _git_repo(tmp_path / "repo"))
+
+    with pytest.raises(RuntimeError, match="found no markdown"):
+        gate.collect_md_files()
