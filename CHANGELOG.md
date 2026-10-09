@@ -124,8 +124,9 @@
     the trivy database's 24h bound; offline with no database it is MISSING with the
     reason. trivy and trivy-repo share trivy's cache and run at the same time, so
     online ASH updates the database once per scan, under a lock in that cache, and
-    both scanners then run with `--skip-db-update` (and `--skip-check-update` when
-    `misconfig` is on). An image built with `OFFLINE=YES` ships the database, and the
+    both scanners then run with `--skip-db-update` and `--skip-java-db-update` (and
+    `--skip-check-update` when `misconfig` is on). An image built with `OFFLINE=YES`
+    ships the database, and the
     nix shell updates it on every entry.
 
   Options that name something a tool executes or loads are not taken from a config
