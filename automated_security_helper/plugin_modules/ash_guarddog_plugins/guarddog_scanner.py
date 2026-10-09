@@ -95,6 +95,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.package_identity import identity_properties
 from automated_security_helper.utils.pre_installed_tool import (
     validate_version_constraint,
@@ -1103,7 +1104,11 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             return f"could not be run: {response.get('error')}"
         returncode = response.get("returncode", 1)
         if returncode != 0:
-            excerpt = stderr.strip().splitlines()[-1] if stderr.strip() else "no stderr"
+            excerpt = (
+                tool_output_excerpt(stderr.strip().splitlines()[-1], 500)
+                if stderr.strip()
+                else "no stderr"
+            )
             return f"exited {returncode}: {excerpt}"
         if not stdout.strip():
             return "exited 0 but printed no result"
@@ -1196,7 +1201,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         if not isinstance(entries, list):
             return None, "printed JSON that is not a list of dependency results"
         problems = [
-            line.strip()
+            tool_output_excerpt(line.strip(), 500)
             for line in stderr.splitlines()
             if _GUARDDOG_ERROR_LINE.match(line.strip())
         ]
