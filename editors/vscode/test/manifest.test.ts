@@ -28,8 +28,24 @@ describe('package.json', () => {
     expect(untrusted?.supported).toBe(false);
     expect(typeof untrusted?.description).toBe('string');
     expect(untrusted?.description).toContain('.ash');
-    // Every config source can set ash_plugin_modules, so the reason names them all.
+    // Every config source is read the same way, so the reason names them all.
     expect(untrusted?.description).toContain('.ashrc');
     expect(untrusted?.description).toContain('[tool.ash]');
   });
+
+  // ASH takes command-line options as the operator's: `--sandbox off`,
+  // `--config-overrides sandbox.extra_read_paths=[...]` and `--ash-plugin-modules`
+  // do what a config file in the scanned tree is refused. A setting the workspace
+  // can set would hand them to the repository through its .vscode/settings.json,
+  // so the two settings that reach the command line are machine-scoped.
+  it.each(['ash.executablePath', 'ash.extraArguments'])(
+    'makes %s machine-scoped, so a repository cannot set it',
+    (setting) => {
+      const contributes = manifest.contributes as Record<string, unknown>;
+      const configuration = contributes.configuration as Record<string, unknown>;
+      const properties = configuration.properties as Record<string, Record<string, unknown>>;
+
+      expect(properties[setting]?.scope).toBe('machine');
+    },
+  );
 });

@@ -16,6 +16,11 @@ one release behind `package.json` from the first bump onward and read as drift.
   tree, including a scanner that ignores SIGTERM after ASH has exited.
 - A failed, stale, cancelled or otherwise unusable scan clears the previous
   findings instead of leaving them on screen. `incomplete` still publishes.
+- `ash.extraArguments` is machine-scoped, like `ash.executablePath`. ASH takes
+  command-line options as the operator's (`--sandbox off`, `--config-overrides`,
+  `--ash-plugin-modules`), so a repository's `.vscode/settings.json` could pass it
+  what ASH refuses from the repository's own config. A value set there is now
+  ignored; set it in user settings, or choose scanners in `.ash/.ash.yaml`.
 
 ## Exit codes, coverage and the ashx entry point
 

@@ -152,9 +152,9 @@ async function arrange(outcome: Outcome): Promise<Expected> {
     return STUB_EXPECTED[outcome];
   }
   const e2e = loadCase(outcome);
-  // The workspace becomes exactly the case's fixture. .vscode holds the workspace
-  // settings this suite writes, so it stays; the previous output goes, so nothing
-  // judged below can be left over from an earlier scan.
+  // The workspace becomes exactly the case's fixture, apart from .vscode, which is
+  // left alone; the previous output goes, so nothing judged below can be left over
+  // from an earlier scan.
   for (const entry of fs.readdirSync(WORKSPACE)) {
     if (entry !== '.vscode') {
       fs.rmSync(path.join(WORKSPACE, entry), { recursive: true, force: true });
@@ -170,10 +170,12 @@ async function arrange(outcome: Outcome): Promise<Expected> {
   for (const [key, value] of Object.entries(e2e.env ?? {})) {
     process.env[key] = value;
   }
+  // User settings: ash.extraArguments is machine-scoped, so VS Code refuses to
+  // write it to the workspace's .vscode/settings.json.
   await setSetting(
     'extraArguments',
     ['--scanners', e2e.scanners.join(','), ...(e2e.args ?? [])],
-    vscode.ConfigurationTarget.Workspace,
+    vscode.ConfigurationTarget.Global,
   );
   return realExpected(e2e);
 }
