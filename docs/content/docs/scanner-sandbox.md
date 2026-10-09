@@ -362,19 +362,26 @@ as a virtualenv ASH itself runs from, stays executable.
 
 Mach service lookups are limited to a list measured on the macOS 14, 15 and 26 CI
 runners, where the ten builtin scanners looked up the same thirteen services on all
-three. Ten of them are allowed. Every scanner may reach preferences (`cfprefsd`),
+three. Nine of them are allowed. Every scanner may reach preferences (`cfprefsd`),
 logging (`logd`), notifications (`notifyd`) and user and group lookups
 (`opendirectoryd`). A scanner with a network may also reach the DNS and network
-configuration (`configd`), certificate trust (`trustd`) and the keychain daemon
-(`SecurityServer`), which semgrep needs because its core runs `/usr/bin/security` for
-the system root certificates. With that service allowed, `security` under the profile
-still could not find an item it had itself added to the login keychain; the keychain
-files are under the home directory, which the scanner cannot read. The other three
-are not allowed: LaunchServices, which node looks up on start and does without, and a
-telemetry service of `/usr/bin/security`. LaunchServices (`launchservicesd`,
-`coreservicesd`, `com.apple.lsd.*`) and the pasteboard (`com.apple.pasteboard.*`) are
-denied after every allow, so no allow can reach them: LaunchServices asks launchd to
-start an app, and launchd starts it outside the sandbox.
+configuration (`configd`) and certificate trust (`trustd`). The other four are not
+allowed: LaunchServices, which node looks up on start and does without, and the
+keychain daemon (`SecurityServer`) and a telemetry service, both looked up by
+`/usr/bin/security`. LaunchServices (`launchservicesd`, `coreservicesd`,
+`com.apple.lsd.*`), the pasteboard (`com.apple.pasteboard.*`) and the keychain daemon
+are denied after every allow, so no allow can reach them: LaunchServices asks launchd
+to start an app, and launchd starts it outside the sandbox. The keychain files
+themselves (`/Library/Keychains` and `~/Library/Keychains`) are denied after every
+file rule.
+
+semgrep's core runs `/usr/bin/security` only to read the system root certificates,
+through OCaml's ca-certs. For a scanner that declares this need
+(`SandboxRequirements.system_trust_roots`), ASH exports the same certificates before
+the spawn, outside the sandbox, with the same command (`security find-certificate -a
+-p` on the system root and system keychains), writes them to a file the scanner can
+read and not write, and sets `SSL_CERT_FILE` to it, which ca-certs reads instead. An
+`SSL_CERT_FILE` you set yourself is passed through and wins.
 
 sandbox-exec does not end processes the scanner leaves running. ASH's removal of
 symlinks after each spawn and its non-following writes still apply, but a process that
@@ -428,5 +435,6 @@ snapshot fixture and asserts the findings match the unsandboxed run.
 
 On macOS, `tests/integration/sandbox/test_sandbox_exec_services.py` has the fixture
 scanner open TextEdit through LaunchServices, read a canary back from the pasteboard
-and from the keychain, and look up the LaunchServices, pasteboard and keychain Mach
-services directly. Each must succeed unsandboxed and fail under `sandbox-exec`.
+and from the keychain, read the keychain files, and look up the LaunchServices,
+pasteboard and keychain Mach services directly. Each must succeed unsandboxed and fail
+under `sandbox-exec`.
