@@ -83,6 +83,12 @@ it needs.
 - A results directory that is, or is reached through, a symlink is refused (the
   scanner is recorded `MISSING`). The default output directory is inside the source
   tree, so the scanned repository could otherwise plant one pointing anywhere.
+- So is an output directory that is a symlink, or that is reached through one below
+  the source directory (a committed `build -> /some/host/dir` scanned with
+  `--output-dir build/ash`), or whose real path differs from where its path inside
+  the source directory reads. A sandboxed scan stops with an error before ASH writes
+  anything there. Links at or above the source directory are your own and are not
+  examined, and with the sandbox off the output goes where you send it, as before.
 - ASH writes into the results directory after the scanner exits, and ASH is not
   sandboxed. So after every sandboxed spawn, and again after the scan, ASH removes
   every symlink and special file the scanner left there, and ASH's own writes there

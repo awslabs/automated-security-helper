@@ -30,7 +30,10 @@ from automated_security_helper.utils.sandbox.backends import (
     SandboxExecBackend,
     SpawnPlan,
 )
-from automated_security_helper.utils.sandbox.policy import build_scanner_policy
+from automated_security_helper.utils.sandbox.policy import (
+    build_scanner_policy,
+    refuse_symlinked_output_dir,
+)
 
 
 @pytest.fixture
@@ -708,6 +711,100 @@ class TestReviewFindings:
                 spawn_run(["/usr/bin/true"])
         finally:
             _ACTIVE.reset(scope_reset)
+
+
+class TestSymlinkedOutputDirectory:
+    """The scanned repository cannot choose where the output directory really is.
+
+    The output directory is mounted into every sandbox and written by ASH, so a
+    link the repository commits on the way to it (``build -> /host/dir`` with
+    ``--output-dir build/ash``) would hand the repository a host directory.
+    """
+
+    @pytest.fixture
+    def tree(self, tmp_path):
+        source = tmp_path / "src"
+        source.mkdir()
+        target = tmp_path / "elsewhere"
+        (target / "deep").mkdir(parents=True)
+        return SimpleNamespace(source=source, target=target, root=tmp_path)
+
+    def test_a_link_on_the_way_down_is_refused(self, tree):
+        (tree.source / "build").symlink_to(tree.target, target_is_directory=True)
+        with pytest.raises(SandboxUnavailable, match="build is a symlink"):
+            refuse_symlinked_output_dir(tree.source, tree.source / "build" / "ash")
+
+    def test_the_default_location_as_a_link_is_refused(self, tree):
+        (tree.source / ".ash").mkdir()
+        (tree.source / ".ash" / "ash_output").symlink_to(
+            tree.target, target_is_directory=True
+        )
+        with pytest.raises(SandboxUnavailable, match="ash_output is a symlink"):
+            refuse_symlinked_output_dir(
+                tree.source, tree.source / ".ash" / "ash_output"
+            )
+
+    def test_a_dotdot_after_a_link_is_refused(self, tree):
+        # Reads as <source>/out; the kernel resolves it under the link's target.
+        (tree.source / "build").symlink_to(
+            tree.target / "deep", target_is_directory=True
+        )
+        with pytest.raises(SandboxUnavailable, match="build is a symlink"):
+            refuse_symlinked_output_dir(
+                tree.source, tree.source / "build" / ".." / "out"
+            )
+
+    def test_an_output_directory_that_is_a_link_is_refused_outside_the_tree(self, tree):
+        link = tree.root / "out-link"
+        link.symlink_to(tree.target, target_is_directory=True)
+        with pytest.raises(SandboxUnavailable, match="out-link is a symlink"):
+            refuse_symlinked_output_dir(tree.source, link)
+
+    def test_ordinary_output_directories_are_accepted(self, tree):
+        refuse_symlinked_output_dir(tree.source, tree.root / "out")
+        refuse_symlinked_output_dir(tree.source, tree.source / ".ash" / "ash_output")
+        (tree.source / ".ash" / "ash_output").mkdir(parents=True)
+        refuse_symlinked_output_dir(tree.source, tree.source / ".ash" / "ash_output")
+
+    def test_a_link_at_or_above_the_source_directory_is_the_operators(self, tree):
+        # A home directory that links elsewhere, or macOS's /var -> /private/var.
+        real = tree.root / "real"
+        (real / "src").mkdir(parents=True)
+        link = tree.root / "home-link"
+        link.symlink_to(real, target_is_directory=True)
+        source = link / "src"
+        refuse_symlinked_output_dir(source, source / ".ash" / "ash_output")
+        refuse_symlinked_output_dir(source, link / "out")
+
+    @pytest.mark.parametrize("mode", ["off", "landlock"])
+    def test_a_sandboxed_scan_stops_before_writing_through_it(self, tree, mode):
+        # The orchestrator checks before ensure_directories, which would create
+        # and clear subdirectories under the link's target.
+        from automated_security_helper.core.exceptions import ASHValidationError
+        from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+        (tree.source / "build").symlink_to(tree.target, target_is_directory=True)
+        orchestrator = ASHScanOrchestrator(
+            source_dir=tree.source, output_dir=tree.source / "build" / "ash"
+        )
+        orchestrator.config = AshConfig(sandbox=SandboxConfig(mode=mode))
+        if mode == "off":
+            orchestrator._refuse_symlinked_output_dir()
+        else:
+            with pytest.raises(ASHValidationError, match="build is a symlink"):
+                orchestrator._refuse_symlinked_output_dir()
+        assert sorted(p.name for p in tree.target.iterdir()) == ["deep"]
+
+    def test_every_spawn_policy_refuses_it(self, layout, tmp_path):
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        (layout.source / "build").symlink_to(target, target_is_directory=True)
+        with pytest.raises(SandboxUnavailable, match="build is a symlink"):
+            _policy(
+                layout,
+                output_dir=layout.source / "build" / "ash",
+                results_dir=layout.source / "build" / "ash" / "scanners" / "grype",
+            )
 
 
 class TestProbeScope:

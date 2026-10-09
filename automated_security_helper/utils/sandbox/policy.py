@@ -568,6 +568,61 @@ def _readable_cwd(cwd: Optional[Path]) -> Optional[Path]:
     return None if absolute == Path(absolute.anchor) else cwd
 
 
+def refuse_symlinked_output_dir(source_dir: Path, output_dir: Path) -> None:
+    """Refuse an output directory reached through a symlink in the scanned tree.
+
+    Every sandbox mounts the output directory read-only and the results directory
+    below it writable, and ASH writes there unsandboxed. The default
+    ``.ash/ash_output``, or an ``--output-dir`` inside the source tree, is spelled
+    through directories the scanned repository controls: committing
+    ``build -> /some/host/dir`` and being scanned with ``--output-dir build/ash``
+    would let the repository pick a host directory for the sandbox to show and
+    for ASH to write.
+
+    Refused, with the path in the message: any component from below the source
+    directory down to the output directory that is a symlink; the output
+    directory itself if it is one, wherever it is; and an output directory inside
+    the source tree whose real path is not the source directory's real path plus
+    the rest of its spelling (a ``..`` after a symlink resolves elsewhere than it
+    reads). Components at and above the source directory are the operator's own
+    spelling (a home directory that links elsewhere, macOS's ``/var``) and are not
+    examined, so an ordinary output directory outside the tree is unaffected.
+    """
+    source = Path(os.path.abspath(source_dir))
+    spelled = Path(output_dir).absolute()
+
+    def refuse_link(path: Path) -> None:
+        if path.is_symlink():
+            raise SandboxUnavailable(
+                f"the output directory path {path.as_posix()} is a symlink, so "
+                "mounting the output directory would expose wherever it points"
+            )
+
+    # Walked as spelled, `..` included, so a link that a later `..` would step
+    # back out of is still seen.
+    current = Path(spelled.anchor)
+    for part in spelled.parts[1:]:
+        if part == "..":
+            current = current.parent
+            continue
+        if part in ("", "."):
+            continue
+        current = current / part
+        if source in current.parents:
+            refuse_link(current)
+    refuse_link(current)
+    lexical = Path(os.path.abspath(spelled))
+    if source in lexical.parents:
+        expected = Path(os.path.realpath(source)) / lexical.relative_to(source)
+        actual = Path(os.path.realpath(lexical))
+        if actual != expected:
+            raise SandboxUnavailable(
+                f"the output directory {lexical.as_posix()} resolves to "
+                f"{actual.as_posix()}, not where its path inside the source "
+                "directory reads, so mounting it would expose another directory"
+            )
+
+
 def build_scanner_policy(
     scanner_name: str,
     requirements: SandboxRequirements,
@@ -617,6 +672,7 @@ def build_scanner_policy(
         [uv_cache_directory()] + [_expand(p) for p in requirements.cache_paths]
     )
 
+    refuse_symlinked_output_dir(source_dir, output_dir)
     _refuse_symlinked_results_dir(output_dir, results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
     writable = [results_dir.absolute()]

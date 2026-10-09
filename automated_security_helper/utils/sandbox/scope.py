@@ -39,6 +39,7 @@ from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     SandboxUnavailable as SandboxUnavailable,
     _refuse_symlinked_results_dir,
+    refuse_symlinked_output_dir,
     build_scanner_policy,
 )
 
@@ -182,6 +183,7 @@ def scanner_sandbox_scope(
         results_dir = Path(context.output_dir).joinpath("scanners", name)
     # Checked here as well as when each spawn's policy is built, so a planted
     # symlink makes the scanner MISSING with the reason rather than ERROR.
+    refuse_symlinked_output_dir(Path(context.source_dir), Path(context.output_dir))
     _refuse_symlinked_results_dir(Path(context.output_dir), Path(results_dir))
     # Registered before the scanner runs anything, so even ASH's first write
     # there (a worker's request file) is guarded.

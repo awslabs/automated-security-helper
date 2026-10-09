@@ -31,7 +31,7 @@ import tempfile
 import threading
 import uuid
 from pathlib import Path
-from typing import Dict, Iterator
+from typing import Callable, Dict, Iterator
 
 import pytest
 
@@ -180,10 +180,17 @@ def _ash_executable() -> str:
 
 
 def _run_escape(
-    tmp_path: Path, listeners: _Listeners, mode: str, *, online: bool = False
+    tmp_path: Path,
+    listeners: _Listeners,
+    mode: str,
+    *,
+    online: bool = False,
+    output_in_source: "str | None" = None,
 ) -> "tuple[Dict[str, str], Dict[str, str]]":
     """The probe's attempts, and what it found still working (``works``)."""
-    outcomes, works, result = _scan(tmp_path, listeners, mode, online=online)
+    outcomes, works, result = _scan(
+        tmp_path, listeners, mode, online=online, output_in_source=output_in_source
+    )
     assert outcomes is not None and works is not None, (
         f"the probe wrote no outcome (exit {result.returncode}). The scanner may have "
         f"been MISSING or failed to start.\nstdout:\n{result.stdout[-4000:]}\n"
@@ -205,8 +212,20 @@ def _ipc_environment(listeners: _Listeners) -> Dict[str, str]:
 
 
 def _scan(
-    tmp_path: Path, listeners: _Listeners, mode: str, *, online: bool = False
+    tmp_path: Path,
+    listeners: _Listeners,
+    mode: str,
+    *,
+    online: bool = False,
+    output_in_source: "str | None" = None,
+    plant: "Callable[[Path], None] | None" = None,
 ) -> "tuple[Dict[str, str] | None, Dict[str, str] | None, subprocess.CompletedProcess]":
+    """Run the probe through a real scan.
+
+    ``output_in_source`` puts the output directory at that path inside the source
+    tree instead of beside it; ``plant`` is called with the source directory once
+    it is built, to commit something into the tree before the scan.
+    """
     home = tmp_path / "home"
     (home / ".ssh").mkdir(parents=True)
     (home / ".ssh" / "id_rsa").write_text(f"-----BEGIN KEY-----\n{CANARY}\n")
@@ -224,7 +243,9 @@ def _scan(
     (source / ".ash" / ".ash.yaml").write_text(
         "project_name: sandbox-escape\nash_plugin_modules:\n  - escape_plugins\n"
     )
-    output = tmp_path / "out"
+    output = source / output_in_source if output_in_source else tmp_path / "out"
+    if plant is not None:
+        plant(source)
     # The uv cache the scan sees, standing in for the user's: every sandbox
     # mounts it, and a write that lands in it outlives the sandbox.
     host_cache = tmp_path / "uv-cache"
@@ -501,6 +522,85 @@ def test_no_local_ipc_endpoint_is_reachable_with_a_network(
     assert works == EXPECTED_WORKS, f"{backend} broke what tools need: {works}"
     reached = listeners.reached() & UNIX_LISTENERS
     assert not reached, f"{backend} let data reach a local IPC listener: {reached}"
+
+
+def _snapshot(root: Path) -> dict:
+    """Everything under ``root`` and its own listing time, to show nothing changed."""
+    found = {".": root.stat().st_mtime_ns}
+    for path in sorted(root.rglob("*")):
+        stat = path.lstat()
+        content = path.read_bytes() if path.is_file() and not path.is_symlink() else b""
+        found[path.relative_to(root).as_posix()] = (stat.st_mtime_ns, content)
+    return found
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_an_output_directory_reached_through_a_link_in_the_tree_is_refused(
+    tmp_path, listeners, backend
+):
+    """The scanned repository commits ``build`` as a link to a host directory.
+
+    Scanned with ``--output-dir build/ash``, every sandbox would mount that host
+    directory, read-only as the output directory and writable below it as the
+    results directory, and ASH itself would write and clear subdirectories there.
+    The scan has to stop before any of it, leaving the directory as it was.
+    """
+    _require_backend(backend)
+    target = tmp_path / "host-dir"
+    target.mkdir()
+    (target / "keep.txt").write_text("original\n")
+    before = _snapshot(target)
+    outcomes, _, result = _scan(
+        tmp_path,
+        listeners,
+        backend,
+        output_in_source="build/ash",
+        plant=lambda source: (source / "build").symlink_to(
+            target, target_is_directory=True
+        ),
+    )
+    # Whitespace collapsed: the console wraps long lines at the terminal width.
+    output = " ".join((result.stdout + result.stderr).split())
+    assert outcomes is None, (
+        f"the scanner ran with a linked output directory: {outcomes}"
+    )
+    assert result.returncode == 1, output[-4000:]
+    assert "is a symlink" in output, output[-4000:]
+    assert _snapshot(target) == before, "the scan wrote into the linked directory"
+    assert not listeners.received
+
+
+def test_with_the_sandbox_off_a_linked_output_directory_is_still_used(
+    tmp_path, listeners
+):
+    """Only a sandboxed scan is refused; unsandboxed, the operator chose the path."""
+    target = tmp_path / "host-dir"
+    target.mkdir()
+    outcomes, _, result = _scan(
+        tmp_path,
+        listeners,
+        "off",
+        output_in_source="build/ash",
+        plant=lambda source: (source / "build").symlink_to(
+            target, target_is_directory=True
+        ),
+    )
+    assert outcomes is not None, (result.stdout + result.stderr)[-4000:]
+    assert (target / "ash" / "ash_aggregated_results.json").is_file()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_the_default_output_directory_inside_the_tree_is_unaffected(
+    tmp_path, listeners, backend
+):
+    """``.ash/ash_output`` under the source directory, the default, still scans."""
+    _require_backend(backend)
+    outcomes, works = _run_escape(
+        tmp_path, listeners, backend, output_in_source=".ash/ash_output"
+    )
+    _assert_blocked(backend, outcomes)
+    assert works == EXPECTED_WORKS, f"{backend} broke what tools need: {works}"
+    assert not listeners.received, f"{backend} let data reach a listener"
 
 
 def test_an_unavailable_sandbox_reports_missing_and_never_runs_the_scanner(

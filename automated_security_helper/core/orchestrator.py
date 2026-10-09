@@ -307,6 +307,8 @@ class ASHScanOrchestrator(BaseModel):
             for warning in self.config._resolution_warnings:
                 ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
 
+        self._refuse_symlinked_output_dir()
+
         ASH_LOGGER.verbose("Setting up working directories")
 
         self.ensure_directories()
@@ -431,6 +433,32 @@ class ASHScanOrchestrator(BaseModel):
         instance = cls(**kwargs)
         instance.initialize()
         return instance
+
+    def _refuse_symlinked_output_dir(self) -> None:
+        """Stop a sandboxed scan whose output directory runs through a symlink.
+
+        Before ensure_directories, which clears subdirectories of the output
+        directory, and before anything else ASH writes there unsandboxed. See
+        utils/sandbox/policy.py:refuse_symlinked_output_dir for what is refused.
+        With the sandbox off, where the output goes is the operator's choice.
+        """
+        from automated_security_helper.core.enums import SandboxMode
+        from automated_security_helper.utils.sandbox.policy import (
+            SandboxUnavailable,
+            refuse_symlinked_output_dir,
+        )
+
+        settings = getattr(self.config, "sandbox", None)
+        mode = getattr(settings, "mode", SandboxMode.off)
+        if SandboxMode(mode) == SandboxMode.off:
+            return
+        try:
+            refuse_symlinked_output_dir(Path(self.source_dir), Path(self.output_dir))
+        except SandboxUnavailable as refusal:
+            raise ASHValidationError(
+                f"The scanner sandbox is on, and {refusal}. Choose an output "
+                "directory that is not reached through a symlink."
+            ) from refusal
 
     def ensure_directories(self):
         """Ensure required directories exist in a thread-safe manner.
