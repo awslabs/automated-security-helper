@@ -44,6 +44,7 @@ from automated_security_helper.core.enums import (
     ExecutionStrategy,
     ExportFormat,
     RunMode,
+    SandboxMode,
     ScannerStatus,
 )
 from automated_security_helper.core.exceptions import (
@@ -1345,6 +1346,48 @@ def _live_progress_enabled(opts: ScanOptions) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _scan_config_path(opts: ScanOptions, log_selection: bool = False) -> Optional[str]:
+    """The config file a single-directory scan resolves: ``--config``, else the
+    one discovery finds in the source directory, else None (the defaults)."""
+    if opts.config is not None:
+        return opts.config
+    return _discovered_config_path(opts.source_dir, log_selection=log_selection)
+
+
+def _scan_sandbox_modes(opts: ScanOptions) -> List[SandboxMode]:
+    """The sandbox mode of each scan this run starts, resolved as that scan will be.
+
+    A single-directory scan resolves through ``orchestrator.resolve_scan_config``
+    with the arguments ``_run_local_mode`` gives the orchestrator, trust
+    parameters included, so a config file the scanned repository or an MCP
+    client wrote cannot turn off a mode the operator set. In workspace mode each
+    active project's scan resolves its own config
+    (``workspace.execution._project_config_with_policy``), so each one counts.
+    Raises whatever those resolutions raise.
+    """
+    if opts.workspace_plan is not None:
+        from automated_security_helper.workspace.execution import (
+            _project_config_with_policy,
+        )
+
+        settings = build_project_scan_settings(opts)
+        return [
+            SandboxMode(_project_config_with_policy(project, settings).sandbox.mode)
+            for project in opts.workspace_plan.active_projects
+        ]
+    from automated_security_helper.core.orchestrator import resolve_scan_config
+
+    config = resolve_scan_config(
+        config_path=_scan_config_path(opts),
+        source_dir=opts.source_dir,
+        config_overrides=opts.config_overrides,
+        config_base_gate=opts.config_base_gate,
+        trusted_config_path=opts.trusted_config_path,
+        untrusted_config=opts.untrusted_config,
+    )
+    return [SandboxMode(config.sandbox.mode)]
+
+
 def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     """Exit before a sandboxed scan writes through a symlinked output directory.
 
@@ -1353,15 +1396,15 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     per-scanner check in utils/sandbox/policy.py would only mark each scanner
     MISSING after ASH had already written through the link. The check is cheap
     and runs first; the config is resolved only for an output directory it
-    refuses, to learn whether the sandbox is on. With the sandbox off the output
-    goes where the operator sent it, as before. A config that does not resolve
-    counts as on, since that scan fails anyway. Container mode is left alone: the
-    container is the boundary there and runs its inner scan unsandboxed.
+    refuses, to learn whether the sandbox is on, and the same way the scan
+    resolves it (``_scan_sandbox_modes``): a mode only an operator source can
+    turn off is on here too. With every scan's sandbox off the output goes where
+    the operator sent it, as before. A config that does not resolve counts as
+    on, since that scan fails anyway. Container mode is left alone: the container
+    is the boundary there and runs its inner scan unsandboxed.
     """
     if opts.mode == RunMode.container:
         return
-    from automated_security_helper.config.resolve_config import resolve_config
-    from automated_security_helper.core.enums import SandboxMode
     from automated_security_helper.utils.sandbox.policy import (
         SandboxUnavailable,
         refuse_symlinked_output_dir,
@@ -1373,13 +1416,7 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     except SandboxUnavailable as refusal:
         reason = str(refusal)
     try:
-        config = resolve_config(
-            config_path=opts.config or _discovered_config_path(opts.source_dir),
-            source_dir=opts.source_dir,
-            config_overrides=list(opts.config_overrides or []),
-            permit_base=opts.config_base_gate,
-        )
-        if SandboxMode(config.sandbox.mode) == SandboxMode.off:
+        if all(mode == SandboxMode.off for mode in _scan_sandbox_modes(opts)):
             return
     except Exception:  # noqa: BLE001 - an unresolvable config is reported by the scan
         pass
@@ -1897,9 +1934,8 @@ def _run_local_mode(
             logger.verbose(f"Scanners specified: {opts.scanners}")
             logger.verbose(f"Scanners excluded: {opts.excluded_scanners}")
 
-        config = opts.config
-        if config is None:
-            config = _discovered_config_path(opts.source_dir, log_selection=True)
+        config = _scan_config_path(opts, log_selection=True)
+        if opts.config is None:
             if config is not None:
                 logger.info(f"Using config file found at: {config}")
         else:

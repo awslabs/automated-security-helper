@@ -33,6 +33,35 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+def resolve_scan_config(
+    *,
+    config_path: Optional[str | Path],
+    source_dir: str | Path,
+    config_overrides: Optional[List[str]] = None,
+    config_base_gate: Optional[Callable[[Path], bool]] = None,
+    trusted_config_path: Optional[str | Path] = None,
+    untrusted_config: bool = False,
+) -> AshConfig:
+    """The config a single-directory scan of ``source_dir`` runs with.
+
+    The orchestrator resolves through here, and so does any check that has to
+    reach the same answer before the orchestrator exists, such as
+    ``run_ash_scan._refuse_symlinked_output_dir``. ``trusted_config_path`` and
+    ``untrusted_config`` decide whose sandbox settings stand, and with them
+    ``resolve_config`` keeps the operator's sandbox mode as a floor. A resolution
+    without them reads ``sandbox.mode`` from a file the scanned repository or an
+    MCP client wrote, which the scan itself does not honor.
+    """
+    return resolve_config(
+        config_path=config_path,
+        source_dir=source_dir,
+        config_overrides=list(config_overrides or []),
+        permit_base=config_base_gate,
+        trusted_config_path=trusted_config_path,
+        untrusted_config=untrusted_config,
+    )
+
+
 class ASHScanOrchestrator(BaseModel):
     """Orchestrator class for ASH security scanning operations."""
 
@@ -293,11 +322,11 @@ class ASHScanOrchestrator(BaseModel):
             )
             self.config = self.resolved_config
         else:
-            self.config = resolve_config(
+            self.config = resolve_scan_config(
                 config_path=self.config_path,
                 source_dir=self.source_dir,
-                config_overrides=self.config_overrides or [],
-                permit_base=self.config_base_gate,
+                config_overrides=self.config_overrides,
+                config_base_gate=self.config_base_gate,
                 trusted_config_path=self.trusted_config_path,
                 untrusted_config=self.untrusted_config,
             )
