@@ -214,7 +214,7 @@ The allowlist defines:
 
 - `enabled: bool = False` — the master switch. Defaults to off; runtime patches are denied unless the operator flips this on per profile.
 - `allowed_paths: list[str]` — JSON-Pointer prefixes the client may target. A trailing `/*` means "this whole subtree". Example: `/scanners/*/options/severity_threshold`.
-- `denied_paths: list[str]` — explicit blocks; always wins over `allowed_paths`. Defaults seed `/global_settings/fail_fast`, `/global_settings/ignore_paths`, `/scanners/bedrock_summary/options/aws_*`, and `/reporters/bedrock_summary/**`.
+- `denied_paths: list[str]` — explicit blocks; always wins over `allowed_paths`. The defaults are `/fail_on_findings`, `/fail_on_incomplete_scanners`, `/content_db_staleness`, `/content_db_staleness_overrides`, `/sandbox` and `/sandbox/**`, `/ash_plugin_modules` and `/ash_plugin_modules/**`, `/global_settings/ignore_paths`, `/global_settings/suppressions`, `/reporters/bedrock-summary-reporter/options/aws_*`, and `/reporters/cloudwatch-logs/**`.
 - `denied_value_patterns: dict[str, str]` — per-path regex denylist for dangerous values (e.g., scanner `extra_args` containing `--no-verify` or shell metacharacters).
 
 Additional invariants enforced by `apply_runtime_patch`:

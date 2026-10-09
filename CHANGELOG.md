@@ -122,7 +122,11 @@
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's
-  `config/` directory) counts as inside the scanned tree for these checks.
+  `config/` directory) counts as inside the scanned tree for these checks. The
+  workspace tools' `config_overrides` are checked against the session config's
+  `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
+  `override_yaml` are, and are refused while runtime overrides are off (the
+  default). `/ash_plugin_modules` joins the default `denied_paths`.
 
   Each value that is not honored is logged once as a warning naming the key. See
   [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).

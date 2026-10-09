@@ -680,6 +680,9 @@ class RuntimeOverridesConfig(BaseModel):
         # scanner a network, or widen what it can read.
         "/sandbox",
         "/sandbox/**",
+        # Plugin modules are imported into ASH's own process, unsandboxed.
+        "/ash_plugin_modules",
+        "/ash_plugin_modules/**",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",

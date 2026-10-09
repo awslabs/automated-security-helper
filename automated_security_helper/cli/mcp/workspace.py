@@ -445,6 +445,50 @@ class ProfileNotRegisteredError(ValueError):
     """
 
 
+def _gate_client_overrides(
+    config_overrides: Optional[Sequence[str]], session_config: Optional[str]
+) -> None:
+    """Refuse ``config_overrides`` the session's runtime-override allowlist does not allow.
+
+    A workspace scan hands its ``config_overrides`` to ``resolve_config`` as
+    ``--config-overrides``, which the trust checks count as the operator's: they
+    are replayed onto the trusted base for the sandbox settings and add to the
+    trusted ``ash_plugin_modules``. Over MCP the caller is a client, so the same
+    gate ``select_profile``'s ``patch_ops`` and ``override_yaml`` go through
+    applies: the overrides are applied to the session's config (its bound or
+    per-call profile, else the defaults), and the change is checked with
+    ``apply_runtime_override`` against that config's
+    ``global_settings.mcp.runtime_overrides``. Runtime overrides are off by
+    default, so without a profile that enables them no override is accepted.
+
+    Raises:
+        RuntimePatchDeniedError: An override is not allowed.
+        ASHConfigValidationError: An override cannot be applied.
+    """
+    if not config_overrides:
+        return
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.resolve_config import (
+        apply_config_overrides,
+    )
+    from automated_security_helper.config.runtime_patch import apply_runtime_override
+
+    base = (
+        AshConfig.from_file(config_path=Path(session_config))
+        if session_config
+        else AshConfig()
+    )
+    mcp_cfg = getattr(base.global_settings, "mcp", None)
+    allowlist = (
+        mcp_cfg.runtime_overrides if mcp_cfg is not None else RuntimeOverridesConfig()
+    )
+    after = apply_config_overrides(base, list(config_overrides))
+    apply_runtime_override(base, after, allowlist=allowlist)
+
+
 def _resolve_session_config(
     session_id: Optional[str],
     profile: Optional[str],
@@ -916,6 +960,15 @@ async def mcp_resolve_workspace(
         )
 
     try:
+        _gate_client_overrides(config_overrides, session_config)
+    except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
+        return _error_response(
+            exc,
+            "resolve_workspace",
+            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        )
+
+    try:
         plan = _resolve(
             workspace_file,
             workspace_config,
@@ -1043,6 +1096,15 @@ async def mcp_scan_workspace(
     try:
         session_config = _resolve_session_config(session_id, profile)
     except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
+        return _error_response(
+            exc,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        )
+
+    try:
+        _gate_client_overrides(config_overrides, session_config)
+    except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
         return _error_response(
             exc,
             "scan_workspace",

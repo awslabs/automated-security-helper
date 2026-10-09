@@ -296,6 +296,14 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         {"op": "add", "path": "/sandbox/extra_read_paths/-", "value": "/"},
         {"sandbox": {"mode": "bwrap", "extra_read_paths": ["/"]}},
     ),
+    "/ash_plugin_modules": (
+        {"op": "replace", "path": "/ash_plugin_modules", "value": ["standin_module"]},
+        {"ash_plugin_modules": ["standin_module"]},
+    ),
+    "/ash_plugin_modules/**": (
+        {"op": "add", "path": "/ash_plugin_modules/-", "value": "standin_module"},
+        {"ash_plugin_modules": ["standin_module"]},
+    ),
     "/global_settings/ignore_paths": (
         {
             "op": "add",
@@ -384,9 +392,17 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     for result in (patched, overridden):
         assert "denied_paths entry" in result["error"], result["error"]
     # Both routes are refused by an entry that covers the field the case
-    # changes. `/sandbox` and `/sandbox/**` both cover every sandbox write, and
-    # the first entry in the list is the one named.
-    covering = "/sandbox" if entry.startswith("/sandbox") else entry
+    # changes. `/sandbox` and `/sandbox/**` both cover every sandbox write, as
+    # `/ash_plugin_modules` and `/ash_plugin_modules/**` cover every module list
+    # write, and the first entry in the list is the one named.
+    covering = next(
+        (
+            prefix
+            for prefix in ("/sandbox", "/ash_plugin_modules")
+            if entry.startswith(prefix)
+        ),
+        entry,
+    )
     for result in (patched, overridden):
         assert f"entry {covering!r}" in result["error"], result["error"]
     _assert_unbound("patch")

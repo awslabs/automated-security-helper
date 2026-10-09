@@ -31,7 +31,7 @@ resolve_ash_workspace(
 | `workspace_file` | Absolute path to the `.code-workspace` definition. |
 | `workspace_config` | Path to a workspace policy file. Must exist when given; ASH does not fall back to searching for one, because that would apply different policy than the one you named. Omit it and the workspace root is searched, and having no policy is not an error. |
 | `allow_missing_projects` | Mark project directories that are absent or unreadable as skipped instead of refusing the workspace. They stay in the plan, so the response still accounts for every folder the definition listed. |
-| `config_overrides` | `key=value` overrides, applied to each project's config during resolution. Applied here and not only at scan time, so the threshold the plan reports is the threshold a scan will enforce. |
+| `config_overrides` | `key=value` overrides, applied to each project's config during resolution. Applied here and not only at scan time, so the threshold the plan reports is the threshold a scan will enforce. They come from the client, so they are checked against the session config's `runtime_overrides` allowlist first, as `select_profile`'s `patch_ops` are; with runtime overrides off (the default), any override is refused. |
 
 The response carries:
 
