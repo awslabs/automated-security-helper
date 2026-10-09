@@ -1,0 +1,482 @@
+[
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverity: HIGH\nFixed Version: 4.17.21\nLink: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)",
+      "title": "CVE-2021-23337 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverity: ...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 17,
+            "file": {
+              "name": "package-lock.json",
+              "path": "package-lock.json",
+              "type_id": 1
+            },
+            "start_line": 13
+          }
+        ],
+        "cve": {
+          "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverity: HIGH\nFixed Version: 4.17.21\nLink: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)",
+          "uid": "CVE-2021-23337"
+        },
+        "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverity: HIGH\nFixed Version: 4.17.21\nLink: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)",
+        "severity": "ERROR",
+        "title": "CVE-2021-23337"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity: HIGH\nFixed Version: 4.18.0\nLink: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)",
+      "title": "CVE-2026-4800 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity: HI...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 17,
+            "file": {
+              "name": "package-lock.json",
+              "path": "package-lock.json",
+              "type_id": 1
+            },
+            "start_line": 13
+          }
+        ],
+        "cve": {
+          "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity: HIGH\nFixed Version: 4.18.0\nLink: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)",
+          "uid": "CVE-2026-4800"
+        },
+        "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity: HIGH\nFixed Version: 4.18.0\nLink: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)",
+        "severity": "ERROR",
+        "title": "CVE-2026-4800"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverity: MEDIUM\nFixed Version: 4.17.21\nLink: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)",
+      "title": "CVE-2020-28500 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverity: ...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 17,
+            "file": {
+              "name": "package-lock.json",
+              "path": "package-lock.json",
+              "type_id": 1
+            },
+            "start_line": 13
+          }
+        ],
+        "cve": {
+          "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverity: MEDIUM\nFixed Version: 4.17.21\nLink: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)",
+          "uid": "CVE-2020-28500"
+        },
+        "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverity: MEDIUM\nFixed Version: 4.17.21\nLink: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)",
+        "severity": "WARNING",
+        "title": "CVE-2020-28500"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverity: MEDIUM\nFixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)",
+      "title": "CVE-2025-13465 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverity: ...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 17,
+            "file": {
+              "name": "package-lock.json",
+              "path": "package-lock.json",
+              "type_id": 1
+            },
+            "start_line": 13
+          }
+        ],
+        "cve": {
+          "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverity: MEDIUM\nFixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)",
+          "uid": "CVE-2025-13465"
+        },
+        "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverity: MEDIUM\nFixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)",
+        "severity": "WARNING",
+        "title": "CVE-2025-13465"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: MEDIUM\nFixed Version: 4.18.0\nLink: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)",
+      "title": "CVE-2026-2950 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: ME...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 17,
+            "file": {
+              "name": "package-lock.json",
+              "path": "package-lock.json",
+              "type_id": 1
+            },
+            "start_line": 13
+          }
+        ],
+        "cve": {
+          "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: MEDIUM\nFixed Version: 4.18.0\nLink: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)",
+          "uid": "CVE-2026-2950"
+        },
+        "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: MEDIUM\nFixed Version: 4.18.0\nLink: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)",
+        "severity": "WARNING",
+        "title": "CVE-2026-2950"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: HIGH\nFixed Version: 2.20.0\nLink: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)",
+      "title": "CVE-2018-18074 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: ...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 2,
+            "file": {
+              "name": "requirements.txt",
+              "path": "requirements.txt",
+              "type_id": 1
+            },
+            "start_line": 2
+          }
+        ],
+        "cve": {
+          "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: HIGH\nFixed Version: 2.20.0\nLink: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)",
+          "uid": "CVE-2018-18074"
+        },
+        "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: HIGH\nFixed Version: 2.20.0\nLink: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)",
+        "severity": "ERROR",
+        "title": "CVE-2018-18074"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: MEDIUM\nFixed Version: 2.31.0\nLink: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)",
+      "title": "CVE-2023-32681 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: ...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 2,
+            "file": {
+              "name": "requirements.txt",
+              "path": "requirements.txt",
+              "type_id": 1
+            },
+            "start_line": 2
+          }
+        ],
+        "cve": {
+          "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: MEDIUM\nFixed Version: 2.31.0\nLink: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)",
+          "uid": "CVE-2023-32681"
+        },
+        "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: MEDIUM\nFixed Version: 2.31.0\nLink: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)",
+        "severity": "WARNING",
+        "title": "CVE-2023-32681"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: MEDIUM\nFixed Version: 2.32.0\nLink: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)",
+      "title": "CVE-2024-35195 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: ...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 2,
+            "file": {
+              "name": "requirements.txt",
+              "path": "requirements.txt",
+              "type_id": 1
+            },
+            "start_line": 2
+          }
+        ],
+        "cve": {
+          "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: MEDIUM\nFixed Version: 2.32.0\nLink: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)",
+          "uid": "CVE-2024-35195"
+        },
+        "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: MEDIUM\nFixed Version: 2.32.0\nLink: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)",
+        "severity": "WARNING",
+        "title": "CVE-2024-35195"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: MEDIUM\nFixed Version: 2.32.4\nLink: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)",
+      "title": "CVE-2024-47081 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: ...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 2,
+            "file": {
+              "name": "requirements.txt",
+              "path": "requirements.txt",
+              "type_id": 1
+            },
+            "start_line": 2
+          }
+        ],
+        "cve": {
+          "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: MEDIUM\nFixed Version: 2.32.4\nLink: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)",
+          "uid": "CVE-2024-47081"
+        },
+        "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: MEDIUM\nFixed Version: 2.32.4\nLink: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)",
+        "severity": "WARNING",
+        "title": "CVE-2024-47081"
+      }
+    ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverity: MEDIUM\nFixed Version: 2.33.0\nLink: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)",
+      "title": "CVE-2026-25645 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverity: ...",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 3,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 2,
+            "file": {
+              "name": "requirements.txt",
+              "path": "requirements.txt",
+              "type_id": 1
+            },
+            "start_line": 2
+          }
+        ],
+        "cve": {
+          "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverity: MEDIUM\nFixed Version: 2.33.0\nLink: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)",
+          "uid": "CVE-2026-25645"
+        },
+        "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverity: MEDIUM\nFixed Version: 2.33.0\nLink: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)",
+        "severity": "WARNING",
+        "title": "CVE-2026-25645"
+      }
+    ]
+  }
+]

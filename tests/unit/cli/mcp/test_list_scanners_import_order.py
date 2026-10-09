@@ -156,17 +156,19 @@ class TestLoadedScannerClasses:
         """Guards the subtlety that makes this work.
 
         ``ASH_SCANNERS`` is declared in each package's ``__init__``, so the
-        loaders return the three vendored scanners only when handed the package
+        loaders return the vendored scanners only when handed the package
         path. Pointing at ``ash_ferret_plugins.ferret_scanner`` imports the
         scanner but reports nothing, and the resulting list would be silently
-        short again. Measured both ways: leaf paths yield 0, package paths yield 3.
+        short again. Measured both ways: leaf paths yield 0, package paths yield all.
         """
+        leaves = {
+            "ash_ferret_plugins": "ferret_scanner",
+            "ash_snyk_plugins": "snyk_code_scanner",
+            "ash_trivy_plugins": "trivy_repo_scanner",
+        }
         leaf_paths = [
-            f"{package}.{leaf}"
-            for package, leaf in zip(
-                _VENDORED_SCANNER_PLUGIN_PACKAGES,
-                ("ferret_scanner", "snyk_code_scanner", "trivy_repo_scanner"),
-            )
+            f"{package}.{leaves[package.rsplit('.', 1)[1]]}"
+            for package in _VENDORED_SCANNER_PLUGIN_PACKAGES
         ]
 
         via_leaves = load_additional_plugin_modules(leaf_paths)
@@ -179,4 +181,15 @@ class TestLoadedScannerClasses:
             "the leaf modules this guard is stale, but check the package paths "
             "still work before deleting it"
         )
-        assert len(via_packages["scanners"]) == 3
+        assert len(via_packages["scanners"]) == len(VENDORED_SCANNER_CLASSES)
+
+
+def test_the_vendored_list_is_every_in_tree_community_module():
+    """A new community module that is not listed here is missing from list_scanners."""
+    from automated_security_helper.core.community_scanners import (
+        community_scanner_modules,
+    )
+
+    assert set(_VENDORED_SCANNER_PLUGIN_PACKAGES) == set(
+        community_scanner_modules().values()
+    )

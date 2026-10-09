@@ -1,0 +1,11 @@
+name: greet
+description: composite action with an injection
+inputs:
+  who:
+    description: who
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo "hello ${{ github.event.issue.title }} ${{ inputs.who }}"

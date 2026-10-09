@@ -1,0 +1,510 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "cfn-guard",
+          "semanticVersion": "3.2.1",
+          "fullName": "cfn-guard 3.2.1",
+          "organization": "Amazon Web Services",
+          "downloadUri": "https://github.com/aws-cloudformation/cloudformation-guard",
+          "informationUri": "https://github.com/aws-cloudformation/cloudformation-guard",
+          "shortDescription": {
+            "text": "AWS CloudFormation Guard is an open-source general-purpose policy-as-code evaluation tool. It provides developers with a simple-to-use, yet powerful and expressive domain-specific language (DSL) to define policies and enables developers to validate JSON- or YAML- formatted structured data with those policies."
+          }
+        }
+      },
+      "artifacts": [
+        {
+          "location": {
+            "uri": "srv/templates/insecure.yaml"
+          }
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "LAMBDA_INSIDE_VPC",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [VpcConfig.SecurityGroupIds] is missing. Value traversed to [Path=/Resources/LegacyFunction/Properties[L:13,C:6] Value={\"Runtime\":\"python2.7\",\"Handler\":\"index.handler\",\"Role\":\"arn:aws:iam::123456789012:role/example\",\"Code\":{\"ZipFile\":\"def handler(event, context): return None\"}}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 13,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "LAMBDA_INSIDE_VPC",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [VpcConfig.SubnetIds] is missing. Value traversed to [Path=/Resources/LegacyFunction/Properties[L:13,C:6] Value={\"Runtime\":\"python2.7\",\"Handler\":\"index.handler\",\"Role\":\"arn:aws:iam::123456789012:role/example\",\"Code\":{\"ZipFile\":\"def handler(event, context): return None\"}}]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-3.7,SEC-5.2,SEC-5.3    \n    Violation:  All AWS Lambda Functions must be configured with access to a VPC\n    Fix: set the VpcConfig.SecurityGroupIds and VpcConfig.SubnetIds parameters with a list of security groups and subnets.\n    Lambda creates an elastic network interface for each combination of security group and subnet in the function's VPC configuration.\n  "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 13,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration] is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.BlockPublicAcls] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.BlockPublicPolicy] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.IgnorePublicAcls] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.RestrictPublicBuckets] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-3.7,SEC-5.3,SEC-8.4    \n    Violation: S3 Bucket Public Access controls need to be restricted.\n    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.\n  "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_READ_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration] is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_READ_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.BlockPublicAcls] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_READ_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.BlockPublicPolicy] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_READ_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.IgnorePublicAcls] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_READ_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.RestrictPublicBuckets] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-3.7,SEC-5.3,SEC-8.4    \n    Violation: S3 Bucket Public Write Access controls need to be restricted.\n    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.\n  "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration] is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.BlockPublicAcls] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.BlockPublicPolicy] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.IgnorePublicAcls] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [PublicAccessBlockConfiguration.RestrictPublicBuckets] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-3.7,SEC-5.3,SEC-8.4    \n    Violation: S3 Bucket Public Write Access controls need to be restricted.\n    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.\n  "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_LOGGING_ENABLED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [LoggingConfiguration] is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-4.2    \n    Violation: S3 Bucket Logging needs to be configured to enable logging.\n    Fix: Set the S3 Bucket property LoggingConfiguration to start logging into S3 bucket.\n  "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [BucketEncryption] is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-8.3    \n    Violation: S3 Bucket must enable server-side encryption.\n    Fix: Set the S3 Bucket property BucketEncryption.ServerSideEncryptionConfiguration.ServerSideEncryptionByDefault.SSEAlgorithm to either \"aws:kms\" or \"AES256\"\n  "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_DEFAULT_ENCRYPTION_KMS",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [BucketEncryption] is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_DEFAULT_ENCRYPTION_KMS",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-8.3    \n    Violation: S3 Bucket default encryption must be set.\n    Fix: Set the S3 Bucket property BucketEncryption.ServerSideEncryptionConfiguration.ServerSideEncryptionByDefault.SSEAlgorithm to either \"aws:kms\" or \"AES256\"\n  "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_VERSIONING_ENABLED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [VersioningConfiguration] is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "S3_BUCKET_VERSIONING_ENABLED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property [VersioningConfiguration.Status] to compare from is missing. Value traversed to [Path=/Resources/OpenBucket/Properties[L:9,C:6] Value={\"BucketNam\":\"misspelled-on-purpose\"}]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-8.4    \n    Violation: S3 Bucket Versioning must be enabled.\n    Fix: Set the S3 Bucket property VersioningConfiguration.Status to 'Enabled' .\n  "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/insecure.yaml"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 6
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

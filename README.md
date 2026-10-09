@@ -78,6 +78,12 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 | [npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit) | SCA       | JavaScript/Node.js                                                                           | Install Node.js/npm                                                     |
 | [Grype](https://github.com/anchore/grype)                     | SCA       | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Grype Installation](https://github.com/anchore/grype#installation) |
 | [Syft](https://github.com/anchore/syft)                       | SBOM      | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Syft Installation](https://github.com/anchore/syft#installation)   |
+| [gitleaks](https://github.com/gitleaks/gitleaks)              | Secrets   | All text files                                                                               | `ash dependencies install` (pinned release binary)                      |
+| [cfn-lint](https://github.com/aws-cloudformation/cfn-lint)    | IaC       | CloudFormation                                                                               | Managed via UV tool isolation (auto-installed: `cfn-lint[sarif]>=1.43.3,<2.0.0`) |
+| [cfn-guard](https://github.com/aws-cloudformation/cloudformation-guard) | IaC | CloudFormation (AWS Guard Rules Registry rules)                                        | `ash dependencies install` (pinned binary and rules)                    |
+| [Trivy](https://github.com/aquasecurity/trivy) (`trivy fs`)   | SCA       | Python, JavaScript/Node.js, Java, Go, Ruby, Rust, PHP, .NET, and more                        | `ash dependencies install` (pinned release binary)                      |
+| [actionlint](https://github.com/rhysd/actionlint)             | IaC       | GitHub Actions workflows                                                                     | `ash dependencies install` (pinned release binary)                      |
+| [zizmor](https://github.com/zizmorcore/zizmor)                | SAST      | GitHub Actions workflows and composite actions                                               | Managed via UV tool isolation (auto-installed: `zizmor>=1.29.0,<2.0.0`) |
 
 ## Prerequisites
 

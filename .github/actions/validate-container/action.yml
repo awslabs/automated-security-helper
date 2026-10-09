@@ -504,6 +504,15 @@ runs:
             1) echo "::error::1 is ASH's 'error during execution', which --fail-on-incomplete-scanners also uses for a scan where a selected scanner reported ERROR or MISSING. Read the per-scanner table below." ;;
             2) echo "::error::2 means either actionable findings on a fixture that is one print statement, or a click UsageError -- a flag above was renamed or removed and the scan never ran." ;;
           esac
+          # The end of each scanner's stderr log, where a tool says why it failed. This
+          # job uploads no artifacts, so without it the reason is only in the runner.
+          find /tmp/ash-selftest/output/scanners -name '*.stderr.log' -size +0 2>/dev/null |
+            sort | while read -r log; do
+              echo "::group::last 4000 bytes of ${log}"
+              tail -c 4000 "$log"
+              echo
+              echo "::endgroup::"
+            done
           exit "$rc"
         fi
         echo "scan exited $rc"
@@ -585,17 +594,27 @@ runs:
         # the flake, so its status says nothing about the flake. In container mode
         # ASH's own environment IS the image, so its status is exactly as much a
         # statement about the image as any other scanner's.
+        #
+        # actionlint, cfn-lint, cfn-guard, gitleaks, trivy and zizmor are builtin and on
+        # by default, so the scan above runs the image's copy of each, and each is listed
+        # here so a missing binary fails this check.
         image_supplied = [
+            "actionlint",
             "bandit",
             "cdk-nag",
+            "cfn-guard",
+            "cfn-lint",
             "cfn-nag",
             "checkov",
             "detect-secrets",
+            "gitleaks",
             "grype",
             "npm-audit",
             "opengrep",
             "semgrep",
             "syft",
+            "trivy",
+            "zizmor",
         ]
 
         for name in sorted(statuses):
@@ -637,3 +656,121 @@ runs:
 
         print(f"PASS: all {len(image_supplied)} image-supplied scanners participated")
         PY
+
+    # === zizmor, on its own ===
+    #
+    # zizmor also runs in the scan above, whose participation check says only that
+    # it was not MISSING. This runs it alone with --scanners against a workflow that
+    # has a known template injection, and requires a FAILED status with that finding: MISSING or ERROR would mean the
+    # image does not supply a working zizmor, and PASSED would mean it ran
+    # but its output was lost.
+    - name: "container: zizmor runs and reports"
+      shell: bash
+      env:
+        # `ash scan --mode container` rebuilds the image, so it gets the build's
+        # base-image hand-off, as "Scan with the built image" does.
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        mkdir -p /tmp/ash-zizmor-selftest/.github/workflows
+        # The expression is assembled from two halves so this action file never
+        # contains a literal one: GitHub would expand it here, in this step.
+        open='$''{{'
+        printf '%s\n' \
+          'on: issues' \
+          'permissions: {}' \
+          'jobs:' \
+          '  greet:' \
+          '    runs-on: ubuntu-latest' \
+          '    steps:' \
+          "      - run: echo \"${open} github.event.issue.title }}\"" \
+          > /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
+        cat /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --source-dir /tmp/ash-zizmor-selftest \
+          --output-dir /tmp/ash-zizmor-selftest/output \
+          --scanners zizmor \
+          --no-fail-on-findings \
+          --fail-on-incomplete-scanners \
+          --simple
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::ash scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
+          exit "$rc"
+        fi
+        python3 <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        data = json.loads(pathlib.Path("/tmp/ash-zizmor-selftest/output/ash_aggregated_results.json").read_text())
+        status = str((data.get("scanner_results") or {}).get("zizmor", {}).get("status", "absent"))
+        rules = [
+            result.get("ruleId")
+            for run in (data.get("sarif") or {}).get("runs", [])
+            for result in run.get("results", [])
+        ]
+        print(f"zizmor status: {status}; rules: {sorted(set(r for r in rules if r))}")
+        if status.upper() != "FAILED" or "zizmor/template-injection" not in rules:
+            sys.exit("FAIL: zizmor did not report the fixture's template injection")
+        print("PASS: zizmor ran and reported the fixture's template injection")
+        PY
+
+    # cfn-lint and cfn-guard also run in the scan above, whose participation check
+    # says only that each was not MISSING. This scans one compliant template with
+    # both named and requires both PASSED, which shows that the image ships cfn-lint,
+    # the cfn-guard binary and the Guard Rules Registry bundle cfn-guard needs: a tool or
+    # the rules missing from the image is MISSING here, and
+    # --fail-on-incomplete-scanners turns that into exit 1. The template is the
+    # compliant fixture from tests/test_data/scanners/cfn_lint_guard, so both scanners
+    # must report PASSED and the scan must exit 0.
+    - name: "Scan with the image's CloudFormation scanners"
+      shell: bash
+      env:
+        # `ash scan --mode container` rebuilds the image, so it gets the build's
+        # base-image hand-off, as "Scan with the built image" does.
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        rm -rf /tmp/ash-cfn-selftest
+        mkdir -p /tmp/ash-cfn-selftest
+        cp tests/test_data/scanners/cfn_lint_guard/repo/templates/compliant.yaml /tmp/ash-cfn-selftest/
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --source-dir /tmp/ash-cfn-selftest \
+          --output-dir /tmp/ash-cfn-selftest/output \
+          --scanners cfn-lint,cfn-guard \
+          --simple \
+          --fail-on-incomplete-scanners \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        python3 - <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        results = pathlib.Path("/tmp/ash-cfn-selftest/output/ash_aggregated_results.json")
+        if not results.exists():
+            sys.exit(f"FAIL: no results at {results}")
+        rows = json.loads(results.read_text()).get("scanner_results") or {}
+        statuses = {name: str(row.get("status")) for name, row in rows.items()}
+        print(statuses)
+        bad = {n: statuses.get(n, "ABSENT") for n in ("cfn-guard", "cfn-lint") if statuses.get(n) != "PASSED"}
+        if bad:
+            sys.exit(f"FAIL: CloudFormation scanners did not pass on a compliant template: {bad}")
+        print("PASS: cfn-lint and cfn-guard ran from the image")
+        PY
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::the CloudFormation scan exited $rc on a compliant template"
+          exit "$rc"
+        fi

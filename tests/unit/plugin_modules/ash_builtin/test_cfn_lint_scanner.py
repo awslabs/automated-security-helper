@@ -1,0 +1,595 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""cfn-lint scanner: severity mapping, argv, exit-code handling and defaults.
+
+The SARIF these tests parse is real cfn-lint 1.57.1 output, captured from the fixture
+repository under ``tests/test_data/scanners/cfn_lint_guard/repo`` with::
+
+    cd tests/test_data/scanners/cfn_lint_guard/repo
+    cfn-lint --format sarif -- templates/insecure.yaml \
+        > ../captured/cfn-lint-1.57.1-insecure.sarif      # exit 6 (E|W)
+    cfn-lint --format sarif -- templates/compliant.yaml \
+        > ../captured/cfn-lint-1.57.1-compliant.sarif     # exit 0
+
+cfn-lint 1.57.2, the release the image pins (its THIRD_PARTY_LICENSES entry), gives
+the same results for both templates (rule ids, levels, messages and locations), and
+the same exit codes; checked when the pin moved to 1.57.2.
+
+Only the subprocess is faked, by writing those captured files to the ``--output-file``
+cfn-lint was asked for; discovery, argv construction, parsing and the severity mapping
+all run for real.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from pydantic import ValidationError
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+    SEVERITY_BY_RULE_LETTER,
+    CfnLintScanner,
+    CfnLintScannerConfig,
+    CfnLintScannerConfigOptions,
+    _successful_exit,
+    severity_for_rule,
+)
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.config_trust import record_provenance
+
+FIXTURES = (
+    Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "cfn_lint_guard"
+)
+CAPTURED_INSECURE = FIXTURES / "captured" / "cfn-lint-1.57.1-insecure.sarif"
+CAPTURED_COMPLIANT = FIXTURES / "captured" / "cfn-lint-1.57.1-compliant.sarif"
+
+#: What the captured insecure-template run must parse to: rule id, file, line,
+#: ASH severity and SARIF level. Read off the template by hand, not off the parser.
+EXPECTED_INSECURE = {
+    ("W2001", "templates/insecure.yaml", 4, "LOW", "note"),
+    ("E3002", "templates/insecure.yaml", 10, "MEDIUM", "warning"),
+    ("E2533", "templates/insecure.yaml", 14, "MEDIUM", "warning"),
+}
+
+
+def _observed(report: SarifReport) -> set:
+    out = set()
+    for run in report.runs:
+        for result in run.results or []:
+            physical = result.locations[0].physicalLocation.root
+            level = getattr(result.level, "value", result.level)
+            out.add(
+                (
+                    result.ruleId,
+                    physical.artifactLocation.uri,
+                    physical.region.startLine,
+                    result.properties.issue_severity,
+                    level,
+                )
+            )
+    return out
+
+
+def _assert_parses_to(report: SarifReport, expected: set) -> None:
+    observed = _observed(report)
+    assert observed == expected, (
+        f"missing {sorted(expected - observed)}, unexpected {sorted(observed - expected)}"
+    )
+
+
+def _load(path: Path) -> SarifReport:
+    return SarifReport.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+@pytest.fixture
+def repo(ash_temp_path) -> Path:
+    target = ash_temp_path / "repo"
+    shutil.copytree(FIXTURES / "repo", target)
+    return target
+
+
+def _scanner(
+    repo: Path, *, operator: bool = False, overrides: tuple = (), **options
+) -> CfnLintScanner:
+    """A scanner whose config came from the scanned tree unless ``operator`` is set.
+
+    ``operator=True`` records a config file outside the tree; ``overrides`` records
+    --config-overrides keys.
+    """
+    config = get_default_config()
+    # operator=True: built from no file in the scanned tree. Otherwise from the
+    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    record_provenance(
+        config,
+        in_tree=[] if operator else [repo / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+        config_overrides=list(overrides),
+    )
+    context = PluginContext(
+        source_dir=repo,
+        output_dir=repo / ".ash" / "ash_output",
+        work_dir=repo / ".ash" / "ash_output" / "converted",
+        config=config,
+    )
+    scanner = CfnLintScanner(
+        context=context,
+        config=CfnLintScannerConfig(
+            enabled=True, options=CfnLintScannerConfigOptions(**options)
+        ),
+    )
+    return scanner
+
+
+class FakeCfnLint:
+    """Stands in for _run_subprocess: records argv and writes captured SARIF."""
+
+    def __init__(self, captured_by_template: dict, returncode=6, extra=None):
+        self.captured_by_template = captured_by_template
+        self.returncode = returncode
+        self.extra = extra or {}
+        self.calls: list = []
+
+    def __call__(self, command, **kwargs):
+        self.calls.append(list(command))
+        output = next(
+            a.split("=", 1)[1] for a in command if a.startswith("--output-file=")
+        )
+        files = command[command.index("--") + 1 :]
+        runs = []
+        for name in files:
+            source = self.captured_by_template.get(name)
+            if source is not None:
+                runs.extend(json.loads(Path(source).read_text())["runs"])
+        # cfn-lint writes the file whenever it completes, findings or not (measured:
+        # exit 0 on compliant.yaml still writes a 732-byte SARIF with no results).
+        if self.returncode in (0, 2, 4, 6, 8, 10, 12, 14):
+            merged = json.loads(CAPTURED_INSECURE.read_text())
+            merged["runs"][0]["results"] = [
+                r for run in runs for r in run.get("results", [])
+            ]
+            Path(output).write_text(json.dumps(merged), encoding="utf-8")
+        response = {"stdout": "", "stderr": "", "returncode": self.returncode}
+        response.update(self.extra)
+        return response
+
+
+class TestSeverityMapping:
+    @pytest.mark.parametrize(
+        "rule_id, expected",
+        [
+            ("E3002", ("MEDIUM", "warning")),
+            ("W2001", ("LOW", "note")),
+            ("I3011", ("INFO", "none")),
+            ("e3002", ("MEDIUM", "warning")),
+            # An unknown class fails a default scan rather than hiding under it.
+            ("X9999", ("MEDIUM", "warning")),
+            (None, ("MEDIUM", "warning")),
+        ],
+    )
+    def test_rule_letter_mapping(self, rule_id, expected):
+        assert severity_for_rule(rule_id) == expected
+
+    def test_the_table_covers_exactly_the_three_cfn_lint_classes(self):
+        assert set(SEVERITY_BY_RULE_LETTER) == {"E", "W", "I"}
+
+    def test_captured_output_parses_to_the_expected_findings(self, repo):
+        report = _scanner(repo).normalize_report(_load(CAPTURED_INSECURE))
+        _assert_parses_to(report, EXPECTED_INSECURE)
+
+    def test_compliant_template_has_no_findings(self, repo):
+        report = _scanner(repo).normalize_report(_load(CAPTURED_COMPLIANT))
+        assert _observed(report) == set()
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("ruleId", "E3003"),
+            ("ruleId", "W3002"),  # same number, different class: severity must move
+            ("startLine", 11),
+            ("uri", "templates/compliant.yaml"),
+        ],
+    )
+    def test_negative_control_a_mutated_finding_fails_the_assertion(
+        self, repo, field, value
+    ):
+        """The assertion above bites: one changed field in one finding fails it."""
+        raw = json.loads(CAPTURED_INSECURE.read_text())
+        result = next(r for r in raw["runs"][0]["results"] if r["ruleId"] == "E3002")
+        physical = result["locations"][0]["physicalLocation"]
+        if field == "ruleId":
+            result["ruleId"] = value
+        elif field == "startLine":
+            physical["region"]["startLine"] = value
+        else:
+            physical["artifactLocation"]["uri"] = value
+        report = _scanner(repo).normalize_report(SarifReport.model_validate(raw))
+        with pytest.raises(AssertionError):
+            _assert_parses_to(report, EXPECTED_INSECURE)
+
+    def test_driver_rules_are_sorted_for_reproducible_reports(self, repo):
+        raw = json.loads(CAPTURED_INSECURE.read_text())
+        rules = {r["id"]: r for r in raw["runs"][0]["tool"]["driver"]["rules"]}
+        # Neither sorted nor reverse-sorted, so no accident of input order passes.
+        raw["runs"][0]["tool"]["driver"]["rules"] = [
+            rules["E3002"],
+            rules["W2001"],
+            rules["E2533"],
+        ]
+        report = _scanner(repo).normalize_report(SarifReport.model_validate(raw))
+        ids = [r.id for r in report.runs[0].tool.driver.rules]
+        assert ids == ["E2533", "E3002", "W2001"]
+
+
+class TestExitCodes:
+    @pytest.mark.parametrize("code", [0, 2, 4, 6, 8, 10, 12, 14])
+    def test_level_bitmask_combinations_are_completed_runs(self, code):
+        assert _successful_exit(code)
+
+    @pytest.mark.parametrize("code", [1, 3, 16, 32, -9, None, "x"])
+    def test_fatal_and_unknown_codes_are_failures(self, code):
+        assert not _successful_exit(code)
+
+
+class TestOptions:
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("regions", ["--update-specs"]),
+            ("regions", ["us-east-1; rm -rf /"]),
+            ("ignore_checks", ["--format=json"]),
+            ("include_checks", ["E30 02"]),
+        ],
+    )
+    def test_values_that_could_be_read_as_options_are_refused(self, field, value):
+        with pytest.raises(ValidationError):
+            CfnLintScannerConfigOptions(**{field: value})
+
+    def test_valid_values_are_accepted(self):
+        options = CfnLintScannerConfigOptions(
+            regions=["us-east-1", "eu-west-2", "ALL_REGIONS"],
+            ignore_checks=["W2001", "W3"],
+            include_checks=["I"],
+        )
+        assert options.regions[-1] == "ALL_REGIONS"
+
+    def test_default_version_constraint_has_a_floor_and_a_ceiling(self):
+        constraint = CfnLintScannerConfigOptions().tool_version
+        assert constraint == ">=1.43.3,<2.0.0"
+
+    def test_missing_config_file_is_an_error_not_a_silent_default(self, repo, tmp_path):
+        # Outside the checkout: the repo fixture lives inside it.
+        missing = tmp_path / "operator" / ".cfnlintrc"
+        scanner = _scanner(repo, operator=True, config_file=str(missing))
+        with pytest.raises(Exception, match="does not exist"):
+            scanner._option_args(repo)
+
+    def test_without_config_file_the_repository_cfnlintrc_is_not_read(self, repo):
+        """A scanned repo's .cfnlintrc can load Python rules and disable checks."""
+        (repo / ".cfnlintrc").write_text("ignore_checks: [E, W]\n")
+        results = repo / "out"
+        results.mkdir()
+        args = _scanner(repo)._option_args(results)
+        config_args = [a for a in args if a.startswith("--config-file=")]
+        assert len(config_args) == 1
+        named = Path(config_args[0].split("=", 1)[1])
+        assert named == (results / "ash-empty.cfnlintrc").resolve()
+        assert named.read_text() == "{}\n"
+
+    @pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="symlink creation needs privileges",
+    )
+    def test_the_empty_config_replaces_a_planted_symlink(self, repo):
+        victim = repo / "victim.txt"
+        victim.write_text("keep me\n")
+        results = repo / "out"
+        results.mkdir()
+        (results / "ash-empty.cfnlintrc").symlink_to(victim)
+        _scanner(repo)._option_args(results)
+        assert victim.read_text() == "keep me\n"
+        assert not (results / "ash-empty.cfnlintrc").is_symlink()
+
+
+class TestBuiltin:
+    def test_scanner_is_on_by_default(self):
+        assert CfnLintScannerConfig().enabled is True
+
+    def test_sarif_extra_is_requested(self, repo):
+        assert _scanner(repo)._get_tool_package_extras() == ["sarif"]
+
+
+class TestBatching:
+    def test_batches_respect_the_budget_and_keep_order(self):
+        paths = [f"t/{i:03d}.yaml" for i in range(100)]
+        batches = CfnLintScanner.batches(paths, budget=120)
+        assert [p for b in batches for p in b] == paths
+        assert all(sum(len(p) + 1 for p in b) <= 120 for b in batches)
+        assert len(batches) > 1
+
+    def test_an_oversized_path_gets_its_own_batch(self):
+        long = "x" * 500
+        assert CfnLintScanner.batches(["a", long, "b"], budget=100) == [
+            ["a"],
+            [long],
+            ["b"],
+        ]
+
+
+class TestScan:
+    def _run(self, scanner, fake):
+        with (
+            patch.object(
+                CfnLintScanner, "validate_plugin_dependencies", return_value=True
+            ),
+            patch.object(CfnLintScanner, "_run_subprocess", side_effect=fake),
+        ):
+            return scanner.scan(
+                target=Path(scanner.context.source_dir), target_type="source"
+            )
+
+    def test_scan_lints_exactly_the_cloudformation_templates(self, repo):
+        fake = FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE})
+        scanner = _scanner(repo)
+        report = self._run(scanner, fake)
+        assert len(fake.calls) == 1
+        argv = fake.calls[0]
+        files = argv[argv.index("--") + 1 :]
+        # settings.yaml has no Resources and unparseable.yaml is not YAML; both are
+        # skipped exactly as cfn-nag skips them.
+        assert files == ["templates/compliant.yaml", "templates/insecure.yaml"]
+        assert argv[:3] == ["cfn-lint", "--format", "sarif"]
+        assert scanner.targets_attempted == 2 and scanner.targets_failed == 0
+        _assert_parses_to(report, EXPECTED_INSECURE)
+
+    def test_the_recorded_invocation_carries_no_host_path(self, repo):
+        fake = FakeCfnLint({}, returncode=0)
+        report = self._run(_scanner(repo), fake)
+        recorded = report.runs[0].invocations[0].arguments
+        assert "--config-file=ash-empty.cfnlintrc" in recorded
+        assert not any(str(repo) in a for a in recorded), recorded
+        # The tool itself still gets the absolute path.
+        assert any(a.startswith("--config-file=/") or ":/" in a for a in fake.calls[0])
+
+    def test_template_names_are_glob_escaped_and_cannot_be_options(self, repo):
+        templates = repo / "templates"
+        shutil.copy(templates / "compliant.yaml", templates / "g[1].yaml")
+        shutil.copy(templates / "compliant.yaml", templates / "-dash.yaml")
+        fake = FakeCfnLint({}, returncode=0)
+        self._run(_scanner(repo), fake)
+        argv = fake.calls[0]
+        files = argv[argv.index("--") + 1 :]
+        assert "templates/g[[]1].yaml" in files
+        assert "templates/-dash.yaml" in files
+        assert argv.index("--") < argv.index("templates/-dash.yaml")
+
+    def test_config_options_reach_argv_as_single_tokens(self, repo, tmp_path):
+        operator_rc = tmp_path / "operator" / ".cfnlintrc"
+        operator_rc.parent.mkdir()
+        operator_rc.write_text("ignore_checks: []\n")
+        fake = FakeCfnLint({}, returncode=0)
+        self._run(
+            _scanner(
+                repo,
+                operator=True,
+                config_file=str(operator_rc),
+                regions=["eu-west-1"],
+                ignore_checks=["W2001"],
+            ),
+            fake,
+        )
+        argv = fake.calls[0]
+        assert any(
+            a.startswith("--config-file=") and a.endswith("/.cfnlintrc") for a in argv
+        )
+        assert argv[argv.index("--regions") + 1] == "eu-west-1"
+        assert argv[argv.index("--ignore-checks") + 1] == "W2001"
+
+    def test_a_fatal_exit_counts_every_template_in_the_batch_as_failed(self, repo):
+        fake = FakeCfnLint({}, returncode=1)
+        scanner = _scanner(repo)
+        report = self._run(scanner, fake)
+        assert scanner.targets_attempted == 2
+        assert scanner.targets_failed == 2
+        assert report.runs[0].results == []
+        assert any("cfn-lint exited 1" in e for e in scanner.errors)
+
+    def test_a_timeout_is_a_failed_batch(self, repo):
+        fake = FakeCfnLint({}, returncode=-9, extra={"timed_out": True})
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert scanner.targets_failed == scanner.targets_attempted == 2
+        assert any("timed out" in e for e in scanner.errors)
+
+    def test_a_configuration_error_result_is_a_failure_not_a_finding(self, repo):
+        raw = json.loads(CAPTURED_INSECURE.read_text())
+        raw["runs"][0]["results"] = [
+            {
+                "ruleId": "E0003",
+                "level": "error",
+                "message": {
+                    "text": "templates/x.yaml could not be processed by glob.glob"
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uriBaseId": "EXECUTIONROOT"},
+                            "region": {"startLine": 1, "startColumn": 1},
+                        }
+                    }
+                ],
+            }
+        ]
+        fake = FakeCfnLint({}, returncode=2)
+
+        def writer(command, **kwargs):
+            response = fake(command, **kwargs)
+            output = next(
+                a.split("=", 1)[1] for a in command if a.startswith("--output-file=")
+            )
+            Path(output).write_text(json.dumps(raw), encoding="utf-8")
+            return response
+
+        scanner = _scanner(repo)
+        report = self._run(scanner, writer)
+        assert report.runs[0].results == []
+        assert scanner.targets_failed == 2
+        assert any("configuration error" in e for e in scanner.errors)
+
+    def test_a_cloudformation_file_the_model_rejects_is_a_failed_target(self, repo):
+        (repo / "templates" / "custom.yaml").write_text(
+            "Resources:\n  X:\n    Type: 'Not A Valid Type!'\n"
+        )
+        fake = FakeCfnLint({}, returncode=0)
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert scanner.targets_attempted == 3
+        assert scanner.targets_failed == 1
+        assert any("custom.yaml" in e for e in scanner.errors)
+
+    def test_no_templates_attempts_nothing(self, ash_temp_path):
+        empty = ash_temp_path / "empty"
+        empty.mkdir()
+        (empty / "readme.yaml").write_text("a: 1\n")
+        fake = FakeCfnLint({})
+        scanner = _scanner(empty)
+        self._run(scanner, fake)
+        assert fake.calls == []
+        assert scanner.targets_attempted == 0
+
+    def test_missing_dependencies_return_false_without_running(self, repo):
+        scanner = _scanner(repo)
+        with (
+            patch.object(
+                CfnLintScanner, "validate_plugin_dependencies", return_value=False
+            ),
+            patch.object(CfnLintScanner, "_run_subprocess") as run,
+        ):
+            assert scanner.scan(target=repo, target_type="source") is False
+        run.assert_not_called()
+
+
+class TestTheScannedTreeCannotLoadRules:
+    """A .cfnlintrc's append_rules makes cfn-lint import Python files as rules.
+
+    ``config_file`` is honored only when the operator set it and it lies outside the
+    scanned tree; anything else is ignored and ASH's empty configuration is passed.
+    """
+
+    @staticmethod
+    def _plant(repo: Path) -> Path:
+        rules = repo / "rules"
+        rules.mkdir()
+        (rules / "evil.py").write_text(
+            "from pathlib import Path\n"
+            f"Path({str(repo / 'rules' / 'imported')!r}).touch()\n"
+        )
+        rc = repo / ".cfnlintrc"
+        rc.write_text("append_rules:\n  - rules\n")
+        return rc
+
+    @staticmethod
+    def _config_arg(scanner, results: Path) -> str:
+        results.mkdir(exist_ok=True)
+        (arg,) = [
+            a for a in scanner._option_args(results) if a.startswith("--config-file=")
+        ]
+        return arg
+
+    @pytest.mark.parametrize("spelling", ["relative", "absolute"])
+    def test_a_config_file_set_by_the_scanned_tree_is_ignored(
+        self, repo, caplog, spelling
+    ):
+        rc = self._plant(repo)
+        value = ".cfnlintrc" if spelling == "relative" else rc.as_posix()
+        scanner = _scanner(repo, config_file=value)
+
+        with caplog.at_level("WARNING"):
+            arg = self._config_arg(scanner, repo / "out")
+
+        assert arg.endswith("/ash-empty.cfnlintrc")
+        assert "scanners.cfn-lint.options.config_file" in caplog.text
+
+    def test_the_operator_cannot_name_a_config_file_inside_the_tree(self, repo):
+        rc = self._plant(repo)
+        scanner = _scanner(repo, operator=True, config_file=rc.as_posix())
+
+        assert self._config_arg(scanner, repo / "out").endswith("/ash-empty.cfnlintrc")
+
+    def test_an_override_of_another_option_does_not_vouch_for_config_file(self, repo):
+        rc = self._plant(repo)
+        scanner = _scanner(
+            repo,
+            overrides=("scanners.cfn-lint.options.regions=[us-east-1]",),
+            config_file=rc.as_posix(),
+        )
+
+        assert self._config_arg(scanner, repo / "out").endswith("/ash-empty.cfnlintrc")
+
+    @pytest.mark.parametrize("key_spelling", ["cfn-lint", "cfn_lint"])
+    def test_an_operator_override_outside_the_tree_is_used(
+        self, repo, tmp_path, key_spelling
+    ):
+        operator_rc = tmp_path / "operator" / ".cfnlintrc"
+        operator_rc.parent.mkdir()
+        operator_rc.write_text("{}\n")
+        scanner = _scanner(
+            repo,
+            overrides=(f"scanners.{key_spelling}.options.config_file={operator_rc}",),
+            config_file=str(operator_rc),
+        )
+
+        arg = self._config_arg(scanner, repo / "out")
+
+        assert arg == f"--config-file={operator_rc.resolve().as_posix()}"
+
+
+class TestToolVersionIsOnlyAVersionConstraint:
+    """tool_version is appended to the package name for uv; it must stay a constraint."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            " @ file:///tmp/evil",
+            "@ git+https://example.invalid/evil.git",
+            "[evil]>=1",
+            ">=1; sys_platform != 'x'",
+            ">=1 --index-url https://example.invalid",
+            "1.57.2",
+        ],
+    )
+    def test_a_value_that_is_not_a_specifier_set_is_replaced_by_the_default(
+        self, value
+    ):
+        """As for every uv-installed tool (tests/unit/config/test_tool_version_is_a_version_specifier.py)."""
+        default = CfnLintScannerConfigOptions().tool_version
+        assert CfnLintScannerConfigOptions(tool_version=value).tool_version == default
+
+    @pytest.mark.parametrize(
+        "value", [">=1.43.3,<2.0.0", "==1.57.2", "~=1.57", "==1.*", None, ""]
+    )
+    def test_specifier_sets_are_accepted(self, value):
+        assert CfnLintScannerConfigOptions(tool_version=value).tool_version == value
+
+
+def test_an_outside_cfnlintrc_set_by_the_scanned_tree_is_ignored(repo, tmp_path):
+    """The operator rule on its own: outside the tree, but the tree's config chose it."""
+    outside = tmp_path / "elsewhere" / ".cfnlintrc"
+    outside.parent.mkdir()
+    outside.write_text("{}\n")
+    scanner = _scanner(repo, config_file=str(outside))
+    results = repo / "out"
+    results.mkdir()
+
+    (arg,) = [
+        a for a in scanner._option_args(results) if a.startswith("--config-file=")
+    ]
+
+    assert arg.endswith("/ash-empty.cfnlintrc")

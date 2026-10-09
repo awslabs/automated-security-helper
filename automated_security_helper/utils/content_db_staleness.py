@@ -99,6 +99,7 @@ from automated_security_helper.utils.content_databases import (
     parse_timestamp,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.subprocess_utils import spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -357,7 +358,7 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
     if not text:
         raise ValueError(
             f"`{' '.join(command)}` printed nothing (exit {proc.returncode}): "
-            f"{(proc.stderr or '').strip()[:300]}"
+            f"{head_and_tail((proc.stderr or '').strip(), 300)}"
         )
     return json.loads(text)
 
@@ -429,8 +430,15 @@ def measure(
     ctx: ProbeContext,
     policy: str,
     now: Optional[datetime] = None,
+    scanner: Optional[str] = None,
 ) -> ContentDbAgeRecord:
-    """Read one database's build time. Never raises: a failure is a record of unknown age."""
+    """Read one database's build time. Never raises: a failure is a record of unknown age.
+
+    ``scanner`` is the scanner that read the database. It is recorded in place of the
+    entry's own ``scanner`` when it is one of the entry's ``readers``, so a database two
+    scanners read is reported under the one that used it.
+    """
+    reader = scanner if scanner in entry.readers else entry.scanner
     now = now or datetime.now(timezone.utc)
     built: Optional[datetime] = None
     measured_by = entry.age_source
@@ -442,7 +450,7 @@ def measure(
         error = f"{type(exc).__name__}: {exc}"
     return ContentDbAgeRecord(
         name=entry.name,
-        scanner=entry.scanner,
+        scanner=reader,
         built=built,
         measured_by=measured_by,
         max_age=entry.max_age,
@@ -549,7 +557,7 @@ def assess_scanner(
         entries = list(scanner_plugin.content_databases_in_use())
         ctx = scanner_plugin.content_database_probe_context()
     except Exception as exc:  # noqa: BLE001
-        entries = [e for e in CONTENT_DATABASES if e.scanner == scanner_name]
+        entries = [e for e in CONTENT_DATABASES if scanner_name in e.readers]
         ctx = None
         failure = f"{type(exc).__name__}: {exc}"
     if not entries:
@@ -567,11 +575,13 @@ def assess_scanner(
             )
             entry_policy, policy_source = policy, None
         if ctx is None:
-            record = measure(entry, ProbeContext(env={}), entry_policy, now)
+            record = measure(
+                entry, ProbeContext(env={}), entry_policy, now, scanner_name
+            )
             record.error = f"the scanner could not describe its database: {failure}"
             record.built = None
         else:
-            record = measure(entry, ctx, entry_policy, now)
+            record = measure(entry, ctx, entry_policy, now, scanner_name)
         record.policy_source = policy_source
         records.append(record)
         if record.stale:

@@ -123,6 +123,39 @@ def test_trivy_gets_its_database_and_when_asked_its_checks_bundle(recorder, tmp_
     assert checks.argv[1] == "config" and checks.last_is_empty_dir
 
 
+def test_trivy_takes_the_operators_config_when_given_one(recorder, tmp_path):
+    """A database mirror in the operator's trivy.yaml applies to the update too."""
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text("db:\n  repository: mirror.example/trivy-db\n")
+    refresh.prepare_content_db(
+        "trivy",
+        tmp_path / "trivy",
+        offline=False,
+        checks=True,
+        executable="trivy",
+        config_file=operator,
+    )
+    for call in recorder.calls:
+        assert Path(call.argv[call.argv.index("--config") + 1]) == operator.absolute()
+        assert "mirror.example" in call.config_text
+        assert call.cwd != operator.parent
+    # The operator's file is left where it is.
+    assert operator.is_file()
+
+
+def test_grype_takes_no_config_file(recorder, tmp_path):
+    with pytest.raises(ValueError):
+        refresh.prepare_content_db(
+            "grype",
+            tmp_path,
+            offline=False,
+            executable="grype",
+            config_file=tmp_path / "x.yaml",
+        )
+    assert recorder.calls == []
+
+
 def test_without_checks_trivy_only_updates_its_database(recorder, tmp_path):
     refresh.prepare_content_db("trivy", tmp_path, offline=False, executable="trivy")
     assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
@@ -329,12 +362,13 @@ class TestScannersUseThePreparedDatabase:
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             grype_scanner,
         )
-        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-            trivy_repo_scanner,
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            _trivy_scanner_base,
         )
 
         monkeypatch.setattr(grype_scanner, "prepare_content_db", record)
-        monkeypatch.setattr(trivy_repo_scanner, "prepare_content_db", record)
+        # trivy and trivy-repo prepare through their shared base.
+        monkeypatch.setattr(_trivy_scanner_base, "prepare_content_db", record)
         monkeypatch.delenv("ASH_OFFLINE", raising=False)
         return calls
 
@@ -391,10 +425,14 @@ class TestScannersUseThePreparedDatabase:
         # the scanner builds, and the run itself is replaced below.
         monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
         commands = []
+        # The spawn under TrivyScannerBase._run_subprocess, which adds the update
+        # and its skip flags for trivy and trivy-repo alike.
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
         monkeypatch.setattr(
-            scanner,
+            ScannerPluginBase,
             "_run_subprocess",
-            lambda command, **kwargs: commands.append(list(command)) or {},
+            lambda self, command, **kwargs: commands.append(list(command)) or {},
         )
         target = tmp_path / "repo"
         target.mkdir()

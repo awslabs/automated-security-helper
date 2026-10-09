@@ -9,6 +9,19 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    # === GuardDog false positive in this repository's own tests (line-pinned) ===
+    # GuardDog's heuristics read source text, so test code that writes a fake
+    # credentials file matches them. Pinned to the one line, so a real finding
+    # elsewhere in the file is still reported.
+    - rule_id: "threat-filesystem-read"
+      path: "tests/integration/scanners/test_trivy_real_binary.py"
+      line_start: 508
+      line_end: 508
+      reason: >-
+        False positive. The line writes a creds.env holding a fake AWS key id and
+        secret, generated per run with secrets.choice, into the test's temporary
+        fixture tree so trivy's secret scanner has something to find. Nothing reads
+        a real credentials file.
     # === Time-boxed: braces GHSA-vfj7-8cjw-p6xm, no patched version (expires 2026-11-04) ===
     # braces <= 3.0.3 is affected and no fixed release exists, so neither an upgrade
     # nor an npm `overrides` pin can remove it. deploy/cdk-constructs reaches it only
@@ -2348,13 +2361,13 @@ global_settings:
       reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 469
-      line_end: 469
+      line_start: 604
+      line_end: 604
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 738
-      line_end: 738
+      line_start: 875
+      line_end: 875
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts

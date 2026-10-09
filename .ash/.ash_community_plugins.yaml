@@ -29,6 +29,19 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    # === GuardDog false positive in this repository's own tests (line-pinned) ===
+    # GuardDog's heuristics read source text, so test code that writes a fake
+    # credentials file matches them. Pinned to the one line, so a real finding
+    # elsewhere in the file is still reported.
+    - rule_id: "threat-filesystem-read"
+      path: "tests/integration/scanners/test_trivy_real_binary.py"
+      line_start: 508
+      line_end: 508
+      reason: >-
+        False positive. The line writes a creds.env holding a fake AWS key id and
+        secret, generated per run with secrets.choice, into the test's temporary
+        fixture tree so trivy's secret scanner has something to find. Nothing reads
+        a real credentials file.
     - path: automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — generated CycloneDX schema definitions contain field names that match secret patterns"
@@ -88,19 +101,19 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 261
-      line_end: 316
+      line_start: 317
+      line_end: 416
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of the executable inside one of those verified
         archives. The archive digests in _DIGESTS were transcribed from the vendor's
-        own *_checksums.txt for grype, syft and trivy, and for opengrep and uv taken
-        from the digest GitHub reports for each release asset and confirmed by
-        hashing the asset. _EXECUTABLE_DIGESTS, the second table in the range, holds
-        the SHA256 of the executable extracted from each verified archive. A
-        64-character hex string is what an entropy detector is built to find, so
-        the 23 archive digests were reported at 95% confidence and the 18
-        executable digests have the same shape, but a release checksum is public by construction
+        own *_checksums.txt or `<asset>.sha256` file, or, for the projects that
+        publish neither (cfn-guard, opengrep, the Guard Rules Registry), from the
+        digest GitHub reports for each release asset and confirmed by hashing the
+        asset. _EXECUTABLE_DIGESTS, the second table in the range, holds the SHA256
+        of the executable extracted from each verified archive. A 64-character hex
+        string is what an entropy detector is built to find, so every one is
+        reported at 95% confidence, but a release checksum is public by construction
         and is the opposite of a credential: it exists so anyone can compare against
         it. detect-secrets is handled by an inline `# pragma: allowlist secret` on
         each line; ferret-scan does not honour that marker, hence this entry.
@@ -110,8 +123,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 638
-      line_end: 654
+      line_start: 824
+      line_end: 850
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -978,13 +991,13 @@ global_settings:
       reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 469
-      line_end: 469
+      line_start: 604
+      line_end: 604
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 738
-      line_end: 738
+      line_start: 875
+      line_end: 875
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts

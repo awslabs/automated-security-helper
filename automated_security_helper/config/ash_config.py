@@ -78,6 +78,24 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+    ActionlintScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
+    CfnGuardScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+    CfnLintScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+    GitleaksScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+    ZizmorScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -108,6 +126,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScannerConfig,
 )
+from automated_security_helper.utils.config_trust import ConfigProvenance
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -350,6 +369,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
 
+    actionlint: Annotated[
+        ActionlintScannerConfig,
+        Field(description="Configure the options for actionlint"),
+    ] = ActionlintScannerConfig()
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
     ] = BanditScannerConfig()
@@ -357,6 +380,14 @@ class ScannerConfigSegment(_PluginConfigSegment):
         CdkNagScannerConfig,
         Field(description="Configure the options for CdkNag", alias="cdk-nag"),
     ] = CdkNagScannerConfig()
+    cfn_guard: Annotated[
+        CfnGuardScannerConfig,
+        Field(description="Configure the options for cfn-guard", alias="cfn-guard"),
+    ] = CfnGuardScannerConfig()
+    cfn_lint: Annotated[
+        CfnLintScannerConfig,
+        Field(description="Configure the options for cfn-lint", alias="cfn-lint"),
+    ] = CfnLintScannerConfig()
     cfn_nag: Annotated[
         CfnNagScannerConfig,
         Field(description="Configure the options for CfnNag", alias="cfn-nag"),
@@ -371,6 +402,9 @@ class ScannerConfigSegment(_PluginConfigSegment):
             alias="detect-secrets",
         ),
     ] = DetectSecretsScannerConfig()
+    gitleaks: Annotated[
+        GitleaksScannerConfig, Field(description="Configure the options for Gitleaks")
+    ] = GitleaksScannerConfig()
     grype: Annotated[
         GrypeScannerConfig, Field(description="Configure the options for Grype")
     ] = GrypeScannerConfig()
@@ -387,6 +421,13 @@ class ScannerConfigSegment(_PluginConfigSegment):
     syft: Annotated[
         SyftScannerConfig, Field(description="Configure the options for Syft")
     ] = SyftScannerConfig()
+    trivy: Annotated[
+        TrivyScannerConfig,
+        Field(description="Configure the options for Trivy (trivy fs)"),
+    ] = TrivyScannerConfig()
+    zizmor: Annotated[
+        ZizmorScannerConfig, Field(description="Configure the options for zizmor")
+    ] = ZizmorScannerConfig()
 
 
 class ReporterConfigSegment(_PluginConfigSegment):
@@ -1065,6 +1106,10 @@ class AshConfig(BaseModel):
 
     # Internal field to track config resolution warnings (not serialized)
     _resolution_warnings: List[str] = PrivateAttr(default_factory=list)
+    # Whether the operator or the scanned tree supplied this config, recorded by the
+    # orchestrator (utils/config_trust.py). None means unknown, which counts as the
+    # scanned tree.
+    _provenance: Optional[ConfigProvenance] = PrivateAttr(default=None)
 
     # The tree a scan with this config covers, when it is wider than the source
     # directory: workspace mode sets the workspace root. config/path_trust.py

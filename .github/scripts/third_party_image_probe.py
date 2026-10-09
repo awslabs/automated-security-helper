@@ -81,6 +81,26 @@ def _python_owned(site_dirs: list) -> set:
     return owned
 
 
+def _venv_owned(real: str) -> bool:
+    """Whether ``real`` is a file a distribution in its own virtualenv installed.
+
+    uv tool environments (``uv tool dir``) are virtualenvs whose ``bin/`` holds
+    their distributions' executables, and ``uv tool install`` links those onto
+    PATH. A compiled one (zizmor) is an ELF, and the RECORD that lists it is in
+    that environment's site-packages, not the system interpreter's. Only the
+    environment the file itself lives in is consulted, so a RECORD elsewhere
+    cannot vouch for it.
+    """
+    bin_dir = os.path.dirname(real)
+    venv = os.path.dirname(bin_dir)
+    if os.path.basename(bin_dir) != "bin" or not os.path.isfile(
+        os.path.join(venv, "pyvenv.cfg")
+    ):
+        return False
+    site_dirs = glob.glob(os.path.join(venv, "lib", "python*", "site-packages"))
+    return real in _python_owned(site_dirs)
+
+
 def _world_traversable(path: str) -> bool:
     mode = os.stat(path).st_mode
     return bool(mode & stat.S_IROTH and mode & stat.S_IXOTH)
@@ -145,6 +165,8 @@ def probe(spec: dict) -> dict:
         # Only the first is required: the others may come from elsewhere (uvx is
         # in uv's release archive on one install path and only in its PyPI wheel
         # on another).
+        if not tool["executables"]:
+            continue
         primary = tool["executables"][0]
         if not any(
             os.access(os.path.join(d, primary), os.X_OK) for d in search_dirs if d
@@ -170,7 +192,7 @@ def probe(spec: dict) -> dict:
             seen.add(real)
             if _aliases(path) & owned:
                 continue
-            if real in python_owned:
+            if real in python_owned or _venv_owned(real):
                 accounted.append(f"{path}: installed by a Python distribution")
                 continue
             base = os.path.basename(real)

@@ -60,15 +60,18 @@ it needs.
 - grype and trivy cannot update their databases from inside a sandbox, so before a
   sandboxed online scan ASH updates them itself, outside the sandbox: `grype db
   update`, and `trivy image --download-db-only` plus, for a misconfiguration scan,
-  trivy's checks bundle. Nothing from the scanned repository reaches these: they run
-  from an empty directory outside every checkout, with an explicit empty config file,
-  against the cache directory the scan reads. A lock in that cache directory makes
+  trivy's checks bundle. trivy and trivy-repo do this on every online scan, sandboxed
+  or not, since they share the cache. Nothing from the scanned repository reaches
+  these: they run from an empty directory outside every checkout, with an explicit
+  config file (an empty one, or for trivy the operator's `config_file` once it passes
+  the rule for that option), against the cache directory the scan reads. A lock in that cache directory makes
   concurrent scans take turns, and each tool is updated once per scan. The scanners
   then run with their own update turned off (`--skip-db-update`,
   `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
   staleness check still holds the database to its bound. trivy's Java database
-  (about 935 MiB) is not updated and trivy-repo runs with `--skip-java-db-update`:
-  `trivy repository` does not analyze JAR, WAR or EAR files and never reads it.
+  (about 935 MiB) is not updated and trivy and trivy-repo run with
+  `--skip-java-db-update`: `trivy fs` and `trivy repository` do not analyze JAR, WAR
+  or EAR files and never read it.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
@@ -126,6 +129,11 @@ it needs.
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
 | cdk-nag | no | jsii's runtime cache, not used on macOS | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
+| actionlint | no | none | single binary |
+| cfn-lint | no | uv cache | uv-managed Python |
+| cfn-guard | no; reads its rules bundle (`$ASH_CFN_GUARD_RULES_DIR`, or `share/cfn-guard-rules` beside ASH's bin directory) | none | single binary |
+| gitleaks | no | none | single binary |
+| zizmor | no; `online_audits` gets neither a network nor a GitHub token yet | uv cache | uv-managed binary |
 
 ### Community and third-party plugin scanners
 
@@ -169,9 +177,23 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
     )
 ```
 
-The community scanners declare theirs: snyk-code asks for a network, its `SNYK_`
-variables and `SNYK_TOKEN`, and read access to its token file; trivy-repo asks for a
-network and its database cache; ferret-scan asks only for its `FERRET_` variables.
+The community scanners declare theirs:
+
+- snyk-code asks for a network, its `SNYK_` variables and `SNYK_TOKEN`, and read
+  access to its token file.
+- trivy-repo shares the builtin trivy's declaration: a network, the database cache and
+  the `TRIVY_` variables.
+- ferret-scan asks only for its `FERRET_` variables.
+
+A file outside the source tree that a scanner option names is not mounted (cfn-guard's
+`rules_paths` needs no mount: ASH copies those rules into the results directory): a
+`config_file` of actionlint, gitleaks, cfn-lint,
+zizmor, trivy or trivy-repo, gitleaks' `baseline_path`, trivy's `ignore_file`, a
+`secret_config_file` of trivy or trivy-repo, trivy-repo's `module_dir`, or an
+absolute actionlint `shellcheck` or `pyflakes`. Nor do gitleaks' `GITLEAKS_*` variables or
+zizmor's GitHub token reach a sandbox. Grants derived from options or the environment
+wait for the sandbox's grant gates; until then list such a path in
+`sandbox.extra_read_paths`, from a config outside the tree.
 
 detect-secrets needs a network only to verify candidate secrets with their issuers,
 which it does when its settings list the verification filter. Those settings come

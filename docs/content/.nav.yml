@@ -23,6 +23,11 @@ nav:
   - Built-in Plugins:
       - Overview: docs/plugins/builtin/index.md
       - Scanners: docs/plugins/builtin/scanners.md
+      - actionlint: docs/plugins/builtin/actionlint.md
+      - cfn-lint and cfn-guard: docs/plugins/builtin/cfn-lint-and-cfn-guard.md
+      - Gitleaks: docs/plugins/builtin/gitleaks.md
+      - Trivy (trivy fs): docs/plugins/builtin/trivy.md
+      - zizmor: docs/plugins/builtin/zizmor.md
       - Scanner Diagrams: docs/plugins/builtin/scanners-diagrams.md
       - Reporters: docs/plugins/builtin/reporters.md
       - Reporter Diagrams: docs/plugins/builtin/reporters-diagrams.md

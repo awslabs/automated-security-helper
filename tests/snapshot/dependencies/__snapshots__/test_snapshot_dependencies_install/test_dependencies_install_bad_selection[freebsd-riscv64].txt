@@ -6,11 +6,12 @@ $ ash dependencies install --bin-path bin --tool grype --tool gryp
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: unknown, architecture: unknown
-[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 16 scanners, and 15 reporters
 ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
 │ Unknown tool(s): gryp                                                                            │
-│ Available: archive, bandit, cdk-nag, cfn-nag, checkov, csv, cyclonedx, detect-secrets,           │
-│ flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, grype, html, junitxml, jupyter, markdown, │
-│ npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, text, unused-suppressions, yaml           │
+│ Available: actionlint, archive, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, csv,     │
+│ cyclonedx, detect-secrets, flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, gitleaks,      │
+│ grype, html, junitxml, jupyter, markdown, npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, │
+│ text, trivy, unused-suppressions, yaml, zizmor                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 2]

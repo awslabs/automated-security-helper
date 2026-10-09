@@ -429,12 +429,31 @@ def install_dependencies(
                     + escape(", ".join(sorted(o.name for o in construction_failures)))
                 )
             )
+            # A community scanner that ships with ASH is not a typo when its module
+            # is simply not loaded: say which module to add.
+            from automated_security_helper.core.community_scanners import (
+                community_module_for,
+            )
+
+            community = {
+                name: module
+                for name in unknown
+                if (module := community_module_for(name))
+            }
+            community_note = "".join(
+                f"\n[yellow]{escape(name)}[/yellow] is a community plugin scanner: "
+                + escape(
+                    f"load {module} with --config (ash_plugin_modules) or "
+                    f'--config-overrides "ash_plugin_modules+=[{module}]".'
+                )
+                for name, module in sorted(community.items())
+            )
             console.print(
                 Panel(
                     f"[bold red]Unknown tool(s): "
                     f"{escape(', '.join(sorted(unknown)))}[/bold red]\n"
                     f"[cyan]Available:[/cyan] {escape(', '.join(available))}"
-                    f"{broken_note}",
+                    f"{community_note}{broken_note}",
                     title="Nothing installed",
                     expand=False,
                 )

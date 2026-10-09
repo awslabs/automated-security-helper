@@ -95,6 +95,11 @@ scanners:
       secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as --secret-config; same rule
 ```
 
+trivy-repo always passes `--config` and `--module-dir`: an empty config file and an
+empty modules directory of ASH's, unless `config_file` and `module_dir` are set
+through `--config-overrides` or a config file outside the scanned tree, for paths
+outside that tree.
+
 trivy-repo always passes `--ignorefile` and `--secret-config`, so a `.trivyignore` or
 `trivy-secret.yaml` committed to the scanned repository is not read. Without the
 options (or `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`), trivy gets files that set

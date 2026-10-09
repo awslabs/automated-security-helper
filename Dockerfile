@@ -338,6 +338,17 @@ ARG GRYPE_VERSION="v0.120.1"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
+# actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and
+# grype.
+ARG ACTIONLINT_VERSION="v1.7.12"
+RUN with-retry 'install-pinned-tool actionlint -b /usr/local/bin'
+RUN actionlint --version
+
+# gitleaks backs the builtin gitleaks scanner, which runs beside detect-secrets.
+ARG GITLEAKS_VERSION="v8.30.1"
+RUN with-retry 'install-pinned-tool gitleaks -b /usr/local/bin'
+RUN gitleaks --version
+
 # POSIX `[ ... = ... ]`, not `[[ ... == ... ]]`. This block did not run at all under
 # podman or finch, in either direction of the condition, and nothing said so.
 #
@@ -418,6 +429,38 @@ ARG TRIVY_VERSION="v0.75.0"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
+# trivy's cache, shared by the trivy and trivy-repo scanners and writable by the
+# non-root user, as GRYPE_DB_CACHE_DIR is for grype. An offline image downloads the
+# vulnerability database into it here; trivy is a default scanner, and offline with no
+# database it is MISSING, which fails the scan. ASH holds that database to trivy's own
+# 24-hour bound (utils/content_databases.py), so an offline image's trivy scans need a
+# rebuild, or `content_db_staleness: warn`, once the database is a day old. The
+# artifact is checked rather than OFFLINE re-tested, for the reason given above.
+ENV TRIVY_CACHE_DIR="/deps/.trivy"
+RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}" && chmod 777 "${TRIVY_CACHE_DIR}"; \
+    if [ "${OFFLINE}" = "YES" ]; then \
+        with-retry "trivy image --download-db-only --no-progress --cache-dir ${TRIVY_CACHE_DIR}" && \
+        chmod -R 777 "${TRIVY_CACHE_DIR}" && \
+        if [ -z "$(ls -A "${TRIVY_CACHE_DIR}/db" 2>/dev/null)" ]; then \
+            echo "OFFLINE=YES but ${TRIVY_CACHE_DIR}/db is empty: the trivy database was not downloaded." >&2; \
+            exit 1; \
+        fi; \
+        echo "offline provisioning verified: trivy database present"; \
+    fi
+
+# cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
+# templates against. The binary comes from its pinned release asset like the three
+# above. The rules archive is pinned the same way (RULES_BUNDLES in
+# utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan
+# user cannot rewrite the rules a later scan trusts. `ash dependencies install`
+# below finds the bundle already in place, by its manifest, and leaves it alone.
+ARG CFN_GUARD_VERSION="3.2.1"
+ENV ASH_CFN_GUARD_RULES_DIR="/deps/cfn-guard-rules"
+RUN with-retry 'install-pinned-tool cfn-guard -b /usr/local/bin' && \
+    with-retry "install-pinned-tool aws-guard-rules-registry --rules-bundle -d ${ASH_CFN_GUARD_RULES_DIR}"
+RUN cfn-guard --version && \
+    test -s "${ASH_CFN_GUARD_RULES_DIR}/aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard"
+
 # opengrep has no release archive for install-pinned-tool to read license files from:
 # it is a bare executable that `ash dependencies install` puts in place below. So its
 # license files are fetched on their own, each pinned by SHA256 and by the upstream
@@ -448,7 +491,16 @@ ENV NODE_OPTIONS=--max_old_space_size=512
 COPY --from=uv-reqs /src/dist/*.whl .
 # [symbols] is tree-sitter and its grammars, for suppressions scoped by `symbol`.
 # Without it every such suppression matches nothing, so the image ships it.
-RUN uv pip install --system "$(ls *.whl)[cdk,symbols]" && rm -rf *.whl
+# UV_NO_CACHE on every uv install in this file: uv's download and wheel cache is
+# only useful to a later install on the same machine, and in an image layer it is
+# dead weight -- measured, it was most of the growth the new scanners' uv tool
+# environments added. Set per RUN rather than as an ENV so a scan inside the
+# container that installs a tool still gets uv's normal caching. The
+# `ash dependencies install` RUNs below also give that install a TMPDIR of its own
+# and remove it in the same RUN: uv keeps its no-cache cache in a temporary
+# directory, and measured, `ash dependencies install` left about 437 MB of it in
+# /tmp in each stage's layer.
+RUN UV_NO_CACHE=1 uv pip install --system "$(ls *.whl)[cdk,symbols]" && rm -rf *.whl
 
 #
 # Make sure the ash script is executable
@@ -463,20 +515,28 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-# bandit, checkov and semgrep are installed with `uv tool install`, and each scanner's
+# bandit, checkov, semgrep, cfn-lint and zizmor are installed with `uv tool install`, and each scanner's
 # own default is a version range, so on its own this would install whatever release
 # PyPI had on the day. `--uv-tool-pins` prints the --config-overrides that pin each to
 # the version of its THIRD_PARTY_LICENSES entry, so the license files and the source
 # commit below describe the release in the image. Assigned first so a failure stops
-# the build rather than leaving the install unpinned.
+# the build rather than leaving the install unpinned. UV_NO_CACHE=1 keeps uv's cache
+# out of the layer.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
-    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
+    uv_tmp="$(mktemp -d)" && \
+    { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
+    status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 # The Python tools' license files, read from each installed wheel's dist-info and,
 # for semgrep, whose wheel carries none, fetched from its repository at the pinned
 # commit and checked against their SHA256.
-RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
+RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov semgrep zizmor'
+
+# zizmor (builtin scanner) is installed by the line above through `uv tool install`
+# within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.
+RUN zizmor --version
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and
@@ -561,7 +621,10 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Pinned as in the core stage: this user's uv tool directory starts empty, so the
 # Python tools are installed again here and would otherwise float.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
-    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
+    uv_tmp="$(mktemp -d)" && \
+    { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
+    status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD ["/bin/sh", "-c", "command -v ash || exit 1"]
