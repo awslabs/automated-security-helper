@@ -121,7 +121,7 @@ it needs.
 | opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
 | grype | yes (database update) | grype database cache; on macOS, `~/Library/Caches/grype` | single binary |
 | syft | no | syft cache | single binary |
-| trivy | yes (database update) | trivy cache | single binary |
+| trivy | yes (database update) | trivy cache; on macOS, `~/Library/Caches/trivy` | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
@@ -463,7 +463,8 @@ allows:
 
 - grype's database at `~/Library/Caches/grype`, its default location on macOS, is
   read-only. Before an online scan ASH updates it there, outside the sandbox, as it
-  does `~/.cache/grype` on Linux.
+  does `~/.cache/grype` on Linux. trivy-repo's database at `~/Library/Caches/trivy`
+  is handled the same way.
 - cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
   temporary directory instead of the shared `~/Library/Caches/com.amazonaws.jsii`,
   whose JavaScript every CDK process on the machine runs.
