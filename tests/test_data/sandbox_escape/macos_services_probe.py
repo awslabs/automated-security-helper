@@ -21,6 +21,8 @@ running" apart from "the tool ran and the service refused it".
   comes back without a prompt, which is how a command line tool's stored token would.
   The keychain daemon is not reachable without a network, and the keychain files
   are under the home directory, which the scanner cannot read.
+- ``read_files``: open each file the spec lists and read a byte. The test lists the
+  keychain files it could read itself, so a refusal is the sandbox's.
 - ``mach_lookup``: ``bootstrap_look_up`` of the Mach service the spec names, through
   ctypes, which is the lookup itself with no client library around it. ``open`` is
   also refused by the profile's default deny of the ``lsopen`` operation; this check
@@ -94,6 +96,18 @@ def main() -> int:
                 f"(exit {result.returncode}: {_last_line(result.stderr)})"
             )
 
+    def read_files():
+        errors = set()
+        for path in spec["files"]:
+            try:
+                with open(path, "rb") as f:
+                    f.read(1)
+            except OSError as e:
+                errors.add(type(e).__name__)
+                continue
+            return
+        raise RuntimeError(f"no file was readable ({', '.join(sorted(errors))})")
+
     def mach_lookup():
         libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
         lookup = libsystem.bootstrap_look_up
@@ -113,6 +127,7 @@ def main() -> int:
         "launch_services": launch_services,
         "pasteboard_read": pasteboard_read,
         "keychain_read": keychain_read,
+        "read_files": read_files,
         "mach_lookup": mach_lookup,
     }
     outcomes = {

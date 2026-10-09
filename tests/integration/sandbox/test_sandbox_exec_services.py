@@ -7,10 +7,10 @@ macOS only. The scanner is the sandbox-escape fixture plugin running
 tests/test_data/sandbox_escape/macos_services_probe.py as its tool, through a real
 ``ash scan``, so the spawn goes through the same choke point as a builtin scanner.
 
-Two levels: the tools a user would reach for (``open -a TextEdit``, ``pbpaste``,
-``security find-generic-password``), and the Mach lookup of each service itself,
-which is what the profile's Mach rules decide and which a process could use without
-going through those tools.
+Three levels: the tools a user would reach for (``open -a TextEdit``, ``pbpaste``,
+``security find-generic-password``); the Mach lookup of each service itself, which
+is what the profile's Mach rules decide and which a process could use without going
+through those tools; and the keychain files, which the profile denies outright.
 
 Each attempt is made twice. ``--sandbox off`` is the control and has to succeed: that
 proves the session has the service to reach, which a login over SSH without a GUI
@@ -53,13 +53,20 @@ REFUSED = {
     "pasteboard_read": "blocked: RuntimeError: pbpaste did not return the pasteboard",
     "mach_lookup": "blocked: RuntimeError: bootstrap_look_up returned",
     "keychain_read": "blocked: RuntimeError: security did not return the keychain item",
+    "read_files": "blocked: RuntimeError: no file was readable (PermissionError)",
 }
 
-#: Services a scanner with no network has no use for, looked up directly; the probe
-#: scanner has none. LaunchServices (launchservicesd, coreservicesd and the lsd
-#: database) can start apps outside the sandbox, and the pasteboard holds whatever
-#: the user last copied: both are denied to every scanner. SecurityServer, the
-#: keychain daemon, is allowed only with a network.
+#: The keychain directories the profile denies outright: the system keychain and
+#: the login keychain, which keychain items live in whatever the daemon allows.
+KEYCHAIN_DIRECTORIES = {
+    "system": Path("/Library/Keychains"),
+    "login": Path.home() / "Library" / "Keychains",
+}
+
+#: Services no scanner has a use for, looked up directly; all of them are denied
+#: after every allow. LaunchServices (launchservicesd, coreservicesd and the lsd
+#: database) can start apps outside the sandbox, the pasteboard holds whatever the
+#: user last copied, and SecurityServer is the keychain daemon.
 UNNEEDED_SERVICES = (
     "com.apple.coreservices.launchservicesd",
     "com.apple.CoreServices.coreservicesd",
@@ -187,6 +194,7 @@ def _attempt(
     secret: str,
     service: str = "",
     keychain_service: str = "",
+    files: "list[str] | None" = None,
 ) -> str:
     source = tmp_path / "src"
     source.mkdir()
@@ -207,6 +215,7 @@ def _attempt(
                 "secret": secret,
                 "service": service,
                 "keychain_service": keychain_service,
+                "files": files or [],
                 "checks": [check],
             }
         )
@@ -308,6 +317,45 @@ def test_a_sandboxed_scanner_cannot_read_the_keychain(tmp_path_factory, keychain
     )
     assert outcome != "succeeded", "sandbox-exec let the scanner read the keychain"
     assert outcome.startswith(REFUSED["keychain_read"]), outcome
+
+
+def _readable_files(directory: Path) -> "list[str]":
+    """Files under ``directory`` this process can read, which is the control."""
+    readable = []
+    for path in sorted(directory.rglob("*")) if directory.is_dir() else []:
+        try:
+            if path.is_file():
+                with open(path, "rb") as f:
+                    f.read(1)
+                readable.append(str(path))
+        except OSError:
+            continue
+    return readable
+
+
+@pytest.mark.parametrize("which", sorted(KEYCHAIN_DIRECTORIES))
+def test_a_sandboxed_scanner_cannot_read_the_keychain_files(tmp_path_factory, which):
+    _require_sandbox_exec()
+    files = _readable_files(KEYCHAIN_DIRECTORIES[which])
+    if not files:
+        _unavailable(f"nothing under {KEYCHAIN_DIRECTORIES[which]} is readable here")
+    control = _attempt(
+        tmp_path_factory.mktemp("control"), "off", "read_files", "", files=files
+    )
+    if control != "succeeded":
+        _unavailable(f"the probe cannot read {files} even unsandboxed: {control}")
+
+    outcome = _attempt(
+        tmp_path_factory.mktemp("sandboxed"),
+        "sandbox-exec",
+        "read_files",
+        "",
+        files=files,
+    )
+    assert outcome != "succeeded", (
+        f"sandbox-exec let the scanner read a file under {KEYCHAIN_DIRECTORIES[which]}"
+    )
+    assert outcome == REFUSED["read_files"], outcome
 
 
 @pytest.mark.parametrize("service", UNNEEDED_SERVICES)
