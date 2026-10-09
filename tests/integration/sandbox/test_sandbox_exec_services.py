@@ -1,15 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Under sandbox-exec, a scanner cannot reach LaunchServices or the pasteboard.
+"""sandbox-exec keeps a scanner from LaunchServices, the pasteboard and the keychain.
 
 macOS only. The scanner is the sandbox-escape fixture plugin running
 tests/test_data/sandbox_escape/macos_services_probe.py as its tool, through a real
 ``ash scan``, so the spawn goes through the same choke point as a builtin scanner.
 
-Two levels: the tools a user would reach for (``open -a TextEdit``, ``pbpaste``), and
-the Mach lookup of each service itself, which is what the profile's Mach rules
-decide and which a process could use without going through those tools.
+Two levels: the tools a user would reach for (``open -a TextEdit``, ``pbpaste``,
+``security find-generic-password``), and the Mach lookup of each service itself,
+which is what the profile's Mach rules decide and which a process could use without
+going through those tools.
 
 Each attempt is made twice. ``--sandbox off`` is the control and has to succeed: that
 proves the session has a pasteboard and a LaunchServices to reach, which a login over
@@ -50,16 +51,19 @@ REFUSED = {
     "launch_services": "blocked: RuntimeError: open exited",
     "pasteboard_read": "blocked: RuntimeError: pbpaste did not return the pasteboard",
     "mach_lookup": "blocked: RuntimeError: bootstrap_look_up returned",
+    "keychain_read": "blocked: RuntimeError: security did not return the keychain item",
 }
 
-#: Session services a scanner has no use for, looked up directly. LaunchServices
+#: Services a scanner has no use for, looked up directly. LaunchServices
 #: (launchservicesd, coreservicesd and the lsd database) can start apps outside the
-#: sandbox; the pasteboard holds whatever the user last copied.
-SESSION_SERVICES = (
+#: sandbox; the pasteboard holds whatever the user last copied; SecurityServer is the
+#: keychain.
+UNNEEDED_SERVICES = (
     "com.apple.coreservices.launchservicesd",
     "com.apple.CoreServices.coreservicesd",
     "com.apple.lsd.mapdb",
     "com.apple.pasteboard.1",
+    "com.apple.SecurityServer",
 )
 
 
@@ -135,6 +139,37 @@ def pasteboard() -> Iterator[str]:
 
 
 @pytest.fixture
+def keychain_item() -> Iterator[tuple]:
+    """A throwaway item in the default keychain, removed afterwards."""
+    service = f"ash-sandbox-canary-{uuid.uuid4().hex}"
+    secret = f"ash-keychain-canary-{uuid.uuid4().hex}"
+    added = subprocess.run(  # nosec B603 - fixed argv
+        [
+            "/usr/bin/security",
+            "add-generic-password",
+            "-a",
+            "ash-sandbox-test",
+            "-s",
+            service,
+            "-w",
+            secret,
+        ],
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    if added.returncode != 0:
+        _unavailable(f"no writable default keychain here: {added.stderr!r}")
+    yield service, secret
+    subprocess.run(  # nosec B603 - fixed argv
+        ["/usr/bin/security", "delete-generic-password", "-s", service],
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+
+@pytest.fixture
 def textedit() -> Iterator[bool]:
     """Whether this test may quit TextEdit: only when it was not already running."""
     ours = not _textedit_running()
@@ -144,7 +179,12 @@ def textedit() -> Iterator[bool]:
 
 
 def _attempt(
-    tmp_path: Path, mode: str, check: str, secret: str, service: str = ""
+    tmp_path: Path,
+    mode: str,
+    check: str,
+    secret: str,
+    service: str = "",
+    keychain_service: str = "",
 ) -> str:
     source = tmp_path / "src"
     source.mkdir()
@@ -164,6 +204,7 @@ def _attempt(
                 "probe": str(source / PROBE.name),
                 "secret": secret,
                 "service": service,
+                "keychain_service": keychain_service,
                 "checks": [check],
             }
         )
@@ -243,8 +284,32 @@ def test_a_sandboxed_scanner_cannot_read_the_pasteboard(tmp_path_factory, pasteb
     assert outcome.startswith(REFUSED["pasteboard_read"]), outcome
 
 
-@pytest.mark.parametrize("service", SESSION_SERVICES)
-def test_a_sandboxed_scanner_cannot_look_up_a_session_service(
+def test_a_sandboxed_scanner_cannot_read_the_keychain(tmp_path_factory, keychain_item):
+    _require_sandbox_exec()
+    service, secret = keychain_item
+    control = _attempt(
+        tmp_path_factory.mktemp("control"),
+        "off",
+        "keychain_read",
+        secret,
+        keychain_service=service,
+    )
+    if control != "succeeded":
+        _unavailable(f"security cannot read its own item even unsandboxed: {control}")
+
+    outcome = _attempt(
+        tmp_path_factory.mktemp("sandboxed"),
+        "sandbox-exec",
+        "keychain_read",
+        secret,
+        keychain_service=service,
+    )
+    assert outcome != "succeeded", "sandbox-exec let the scanner read the keychain"
+    assert outcome.startswith(REFUSED["keychain_read"]), outcome
+
+
+@pytest.mark.parametrize("service", UNNEEDED_SERVICES)
+def test_a_sandboxed_scanner_cannot_look_up_an_unneeded_service(
     tmp_path_factory, service
 ):
     _require_sandbox_exec()

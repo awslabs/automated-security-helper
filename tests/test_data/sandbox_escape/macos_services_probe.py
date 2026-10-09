@@ -16,6 +16,9 @@ running" apart from "the tool ran and the service refused it".
   run code that is not sandboxed (a ``.command`` file opened in Terminal).
 - ``pasteboard_read``: ``pbpaste``. The test puts a canary on the pasteboard first, so
   the attempt succeeds only if the canary comes back, not merely if pbpaste exits 0.
+- ``keychain_read``: ``security find-generic-password -w`` for an item the test added
+  to the default keychain. An item added by ``security`` trusts ``security``, so it
+  comes back without a prompt, which is how a command line tool's stored token would.
 - ``mach_lookup``: ``bootstrap_look_up`` of the Mach service the spec names, through
   ctypes, which is the lookup itself with no client library around it. ``open`` is
   also refused by the profile's default deny of the ``lsopen`` operation; this check
@@ -70,6 +73,25 @@ def main() -> int:
                 f"(exit {result.returncode}: {_last_line(result.stderr)})"
             )
 
+    def keychain_read():
+        result = subprocess.run(  # nosec B603 - fixed argv
+            [
+                "/usr/bin/security",
+                "find-generic-password",
+                "-s",
+                spec["keychain_service"],
+                "-w",
+            ],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        if spec["secret"].encode() not in result.stdout:
+            raise RuntimeError(
+                "security did not return the keychain item "
+                f"(exit {result.returncode}: {_last_line(result.stderr)})"
+            )
+
     def mach_lookup():
         libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
         lookup = libsystem.bootstrap_look_up
@@ -88,6 +110,7 @@ def main() -> int:
     checks = {
         "launch_services": launch_services,
         "pasteboard_read": pasteboard_read,
+        "keychain_read": keychain_read,
         "mach_lookup": mach_lookup,
     }
     outcomes = {
