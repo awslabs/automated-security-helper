@@ -14,6 +14,10 @@ from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.utils.path_matching import _recursive_glob_match
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanned_tree import (
+    TreeInputRefused,
+    open_in_scanned_tree,
+)
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 # Regex patterns for inline suppression comments.
@@ -237,7 +241,9 @@ def check_for_expiring_suppressions(
     return expiring_suppressions
 
 
-def find_inline_suppressions(file_path: Path) -> List[InlineSuppression]:
+def find_inline_suppressions(
+    file_path: Path, scan_root: Optional[Path] = None
+) -> List[InlineSuppression]:
     """Scan a source file for inline suppression comments.
 
     Recognised directives (both ``#`` and ``//`` comment styles):
@@ -249,13 +255,31 @@ def find_inline_suppressions(file_path: Path) -> List[InlineSuppression]:
 
     Args:
         file_path: Path to the source file to scan.
+        scan_root: The scanned tree. When given, the file is read under the
+            scanned-tree rule (``utils/scanned_tree.py``): a reason found here is
+            copied into the SARIF justification, so a link must not make it read a
+            file outside the tree. A link whose target is inside the tree is
+            followed, because the finding was reported under the link's path and
+            the file behind it is tree content. A refused file has no inline
+            suppressions.
 
     Returns:
         List of ``InlineSuppression`` instances, one per directive found.
     """
     suppressions: List[InlineSuppression] = []
     try:
-        text = file_path.read_text(encoding="utf-8", errors="replace")
+        if scan_root is None:
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+        else:
+            with open_in_scanned_tree(
+                file_path, scan_root, follow_links_inside=True
+            ) as handle:
+                text = handle.read().decode("utf-8", errors="replace")
+    except TreeInputRefused as refused:
+        ASH_LOGGER.warning(
+            f"Inline suppressions in '{refused.path}' were not read: {refused.reason}"
+        )
+        return suppressions
     except (OSError, UnicodeDecodeError) as exc:
         ASH_LOGGER.debug(f"Could not read {file_path} for inline suppressions: {exc}")
         return suppressions

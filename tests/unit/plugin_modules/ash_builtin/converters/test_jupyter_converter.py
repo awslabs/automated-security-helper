@@ -131,9 +131,13 @@ def nbconvert_double(returncode=0, stdout="", stderr="", create_output=True):
     cannot pass by touching an attribute the real object does not have.
     """
     calls = []
+    inputs = []
 
     def _run(cmd, *args, **kwargs):
         calls.append(list(cmd))
+        # What nbconvert was given to read, captured while it still exists: the
+        # converter hands it a staged copy that is removed afterwards.
+        inputs.append(Path(cmd[6]).read_bytes() if len(cmd) > 6 else None)
         if create_output and "--output" in cmd:
             out = Path(cmd[cmd.index("--output") + 1] + ".py")
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -141,6 +145,7 @@ def nbconvert_double(returncode=0, stdout="", stderr="", create_output=True):
         return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
 
     _run.calls = calls
+    _run.inputs = inputs
     return _run
 
 
@@ -369,7 +374,10 @@ class TestExecuteNbconvertViaUv:
         )
         assert kwargs["tool_name"] == "jupyter-nbconvert"
         assert kwargs["package_name"] == "nbconvert"
-        assert kwargs["cwd"] == converter.context.source_dir
+        # Never the scanned tree: nbconvert puts its working directory first on
+        # sys.path. With no cwd given, it runs in an empty temporary directory.
+        assert kwargs["cwd"] != converter.context.source_dir
+        assert not Path(kwargs["cwd"]).is_relative_to(converter.context.source_dir)
         assert kwargs["timeout"] == 17
         assert kwargs["version_constraint"] is None, (
             "passing a constraint here makes uv error; it was validated earlier"
@@ -517,15 +525,22 @@ class TestConvert:
         assert out.parent == converter.results_dir
         # The command handed to nbconvert must ask for a script export.
         (cmd,) = run.calls
+        # A Python notebook is exported with nbconvert's Python exporter, chosen by
+        # ASH rather than by the notebook's metadata.
         assert cmd[:6] == [
             "jupyter",
             "nbconvert",
             "--log-level",
             "WARN",
             "--to",
-            "script",
+            "python",
         ]
-        assert cmd[6] == str(notebook)
+        # nbconvert reads a copy made through the checked handle, never the tree
+        # path itself, so a link swapped in after the check cannot be followed.
+        assert Path(cmd[6]).name == notebook.name
+        assert cmd[6] != str(notebook)
+        assert run.inputs == [notebook.read_bytes()]
+        assert not Path(cmd[6]).exists(), "the staged copy is removed afterwards"
         assert cmd[7] == "--output"
         assert not cmd[8].endswith(".py"), "nbconvert appends .py itself"
 
@@ -567,7 +582,7 @@ class TestConvert:
 
         assert len(results) == 1, "only the non-ignored notebook should convert"
         assert len(run.calls) == 1
-        assert run.calls[0][6] == str(kept)
+        assert Path(run.calls[0][6]).name == kept.name
         debug = messages_at(ash_log_records, logging.DEBUG)
         assert any("third-party code" in m for m in debug), (
             "the ignore reason belongs in the log so the skip is explainable"
@@ -581,7 +596,7 @@ class TestConvert:
         run = nbconvert_double()
         monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
 
-        def fake_uv(cmd, timeout=60):
+        def fake_uv(cmd, timeout=60, cwd=None):
             # Stand in for nbconvert succeeding under uv: write the output file.
             out = Path(cmd[cmd.index("--output") + 1] + ".py")
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -654,7 +669,7 @@ class TestConvert:
         )
 
         def _run(cmd, *args, **kwargs):
-            if cmd[6] == str(broken):
+            if Path(cmd[6]).name == broken.name:
                 return subprocess.CompletedProcess(cmd, 1, "", stderr_text)
             out = Path(cmd[cmd.index("--output") + 1] + ".py")
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -723,7 +738,7 @@ class TestConvert:
         real = nbconvert_double()
 
         def _run(cmd, *args, **kwargs):
-            if cmd[6] == str(first):
+            if Path(cmd[6]).name == first.name:
                 raise ValueError("something unexpected")
             return real(cmd, *args, **kwargs)
 

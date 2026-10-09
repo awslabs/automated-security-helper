@@ -2,7 +2,7 @@
 
 from abc import abstractmethod
 from pathlib import Path
-from typing import Annotated, Generic, List, TypeVar
+from typing import Annotated, BinaryIO, Generic, List, TypeVar
 from typing_extensions import Self
 
 from pydantic import Field, model_validator
@@ -11,7 +11,12 @@ from automated_security_helper.base.options import ConverterOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.asharp_model import RefusedInputInfo
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanned_tree import (
+    TreeInputRefused,
+    open_in_scanned_tree,
+)
 
 
 class ConverterPluginConfigBase(PluginConfigBase):
@@ -30,6 +35,10 @@ class ConverterPluginBase(PluginBase, Generic[T]):
 
     config: T | ConverterPluginConfigBase | None = None
     dependencies_satisfied: bool = True
+    # Inputs this converter declined to read during convert(). ConvertPhase copies them
+    # into the converter's results row, which is what keeps a refused input visible in
+    # the scan result rather than only in the log.
+    refused_inputs: List[RefusedInputInfo] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
@@ -65,6 +74,45 @@ class ConverterPluginBase(PluginBase, Generic[T]):
 
         Defaults to returning True as most converter plugins are entirely Python based."""
         return True
+
+    def open_source_file(self, path: Path | str) -> BinaryIO:
+        """Open a file from the scan set for reading, under the scanned-tree rule.
+
+        Converters read their inputs through this rather than ``open()``, so a symlink
+        or a path outside ``context.source_dir`` is refused before anything is read.
+        See ``utils/scanned_tree.py`` for the rule. Read from the returned object; do
+        not reopen ``path`` by name.
+
+        Raises:
+            TreeInputRefused: The input breaks the rule. Pass it to
+                :meth:`record_refused_input`.
+        """
+        if self.context is None:
+            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
+        return open_in_scanned_tree(path, self.context.source_dir)
+
+    def record_refused_input(
+        self, refusal: TreeInputRefused, member: str | None = None
+    ) -> None:
+        """Warn once about a refused input and keep it for the results row.
+
+        Args:
+            refusal: What :meth:`open_source_file` raised, or an equivalent built for
+                an archive member.
+            member: The archive member's name, when the refusal is of a member.
+        """
+        if member is None:
+            ASH_LOGGER.warning(
+                f"Skipped converter input '{refusal.path}': {refusal.reason}"
+            )
+        else:
+            ASH_LOGGER.warning(
+                f"Skipped member '{member}' of archive '{refusal.path}': "
+                f"{refusal.reason}"
+            )
+        self.refused_inputs.append(
+            RefusedInputInfo(path=refusal.path, member=member, reason=refusal.reason)
+        )
 
     def candidate_input_count(self) -> int | None:
         """How many files this converter WOULD convert, or None if it cannot say.

@@ -448,17 +448,34 @@ def test_every_template_is_scanned_and_all_findings_survive(
 def test_each_template_is_passed_to_the_subprocess_as_the_input_path(
     scanner, deps_available, subprocess_double
 ):
-    """The resolved argv names the template, not the containing directory."""
+    """The resolved argv names one template, not the containing directory.
+
+    The path is a copy of the text ASH read and checked, kept under the template's
+    results directory with the template's file name, and removed afterwards; see
+    ``_stage_cfn_nag_input``.
+    """
     template = scanner.context.work_dir / "role.yaml"
     template.write_text(CFN_TEMPLATE)
-    subprocess_double.side_effect = stdout_sequence(cfn_nag_sarif())
+    given = []
+
+    def run(self, **kwargs):
+        command = kwargs["command"]
+        staged = Path(command[command.index("--input-path") + 1])
+        given.append((staged, staged.read_text()))
+        return {"stdout": cfn_nag_sarif(), "stderr": "", "returncode": 0}
+
+    subprocess_double.side_effect = run
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     command = subprocess_double.call_args.kwargs["command"]
     assert command[0] == "cfn_nag_scan"
     assert "--input-path" in command
-    assert command[command.index("--input-path") + 1] == template.as_posix()
+    ((staged, text),) = given
+    assert staged.name == template.name
+    assert staged != template
+    assert text == CFN_TEMPLATE
+    assert not staged.exists(), "the copy is removed once cfn_nag_scan has run"
     assert "--output-format" in command
     assert command[command.index("--output-format") + 1] == "sarif"
 

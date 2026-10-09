@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import io
 import base64
 import os
 import inspect
@@ -30,6 +31,8 @@ from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModel,
     CloudFormationTemplateModelError,
     get_model_from_template,
+    get_model_from_template_text,
+    read_template_text,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.schemas.sarif_schema_model import Location
@@ -686,7 +689,16 @@ def run_cdk_nag_against_cfn_template(
     include_compliant_checks: bool = False,
     stack_name: str = "ASHCDKNagScanner",
     honor_template_suppressions: bool = True,
+    scan_root: Path | None = None,
 ) -> CdkNagWrapperResponse | None:
+    """Evaluate one template with cdk-nag.
+
+    With ``scan_root``, the template is read once, under the scanned-tree rule
+    (``utils/scanned_tree.py``), and every use of it -- the model, the line map findings
+    are placed with, and the copy ``CfnInclude`` synthesizes -- takes that one read. A
+    template that breaks the rule raises ``TreeInputRefused`` before anything is read.
+    Without it, the template is read by path as before.
+    """
     if nag_packs is None:
         nag_packs = ["AwsSolutionsChecks"]
     results: Dict[str, List[dict]] = {}
@@ -775,6 +787,7 @@ def run_cdk_nag_against_cfn_template(
                     scope: Construct | None = None,
                     construct_id: str | None = None,
                     template_path: Path | None = None,
+                    include_file: Path | None = None,
                 ):
                     if template_path is None:
                         raise ValueError("template_path must be provided")
@@ -829,10 +842,12 @@ def run_cdk_nag_against_cfn_template(
                         logical_id = get_shortest_name(input=template_path)
                     except ValueError:
                         logical_id = Path(template_path).as_posix()
+                    # include_file is the copy of the checked text when there is one;
+                    # the logical id above is still named after the real template.
                     CfnInclude(
                         self,
                         id=logical_id,
-                        template_file=Path(template_path).as_posix(),
+                        template_file=Path(include_file or template_path).as_posix(),
                     )
 
             # Enumerate all classes in `cdk_nag`, identify any that extend `NagPack`
@@ -847,8 +862,13 @@ def run_cdk_nag_against_cfn_template(
                         }
                 return nag_packs
 
+            template_text: str | None = None
             try:
-                model = get_model_from_template(template_path)
+                if scan_root is not None:
+                    template_text = read_template_text(template_path, scan_root)
+                    model = get_model_from_template_text(template_text, template_path)
+                else:
+                    model = get_model_from_template(template_path)
             except CloudFormationTemplateModelError as exc:
                 # The fourth state that reaches ``failure``, and it is here rather than
                 # in the None branch below because the two answers are different facts.
@@ -877,7 +897,12 @@ def run_cdk_nag_against_cfn_template(
                 )
                 return None
 
-            ASH_LOGGER.debug(f"Validated model from template: {model}")
+            # A count rather than the model: the model is the template's content, and
+            # this line reaches ash.log at debug.
+            ASH_LOGGER.debug(
+                f"Validated model from template {template_path}: "
+                f"{len(model.Resources)} resource(s)"
+            )
             ASH_LOGGER.debug(f"outdir: {outdir.as_posix() if outdir else 'None'}")
             clean_template_filename = Path(template_path).as_posix()
             try:
@@ -906,14 +931,48 @@ def run_cdk_nag_against_cfn_template(
             )
 
             nag_pack_lookup = get_nag_packs()
-            stack = WrapperStack(
-                app,
-                stack_name,
-                template_path=template_path,
-            )
-
-            with open(template_path, mode="r", encoding="utf-8") as f:
-                template_lines = f.readlines()
+            if template_text is None:
+                stack = WrapperStack(
+                    app,
+                    stack_name,
+                    template_path=template_path,
+                )
+                with open(template_path, mode="r", encoding="utf-8") as f:
+                    template_lines = f.readlines()
+            else:
+                # CfnInclude reads its file by name, from node. Handing it a copy of
+                # the text read above, in this scanner's own output directory, keeps it
+                # from reading anything other than the file that was checked. The copy
+                # is removed once the construct has read it, which CfnInclude does in
+                # its constructor, so the synthesized output is what it was.
+                include_file = outdir.joinpath(
+                    f".ash-cfn-include{Path(template_path).suffix}"
+                )
+                # Created fresh and never through a link: anything already at the
+                # name is removed, and O_EXCL|O_NOFOLLOW refuses whatever appears in
+                # its place before the open.
+                include_file.unlink(missing_ok=True)
+                include_fd = os.open(
+                    include_file,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_BINARY", 0),
+                    0o600,
+                )
+                with os.fdopen(include_fd, "w", encoding="utf-8") as include:
+                    include.write(template_text)
+                try:
+                    stack = WrapperStack(
+                        app,
+                        stack_name,
+                        template_path=template_path,
+                        include_file=include_file,
+                    )
+                finally:
+                    include_file.unlink(missing_ok=True)
+                template_lines = io.StringIO(template_text).readlines()
 
             # Registered as policy validation plugins on the APP, not as aspects on the stack.
             #

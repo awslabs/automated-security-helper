@@ -1,5 +1,6 @@
 """Module containing the Checkov security scanner implementation."""
 
+import contextlib
 import logging
 import os
 import platform
@@ -34,7 +35,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
-    get_model_from_template,
+    describe_parse_error,
+    get_model_from_template_text,
+    read_template_text,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -42,8 +45,67 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.download_utils import current_bin_path
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.scanned_tree import TreeInputRefused
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
+
+
+#: The directory, inside each template's results directory, that holds the copy of
+#: the template cfn_nag_scan reads. Removed once cfn_nag_scan has run.
+_CFN_NAG_INPUT_DIR = ".ash-cfn-nag-input"
+
+
+def _stage_cfn_nag_input(results_file_dir: Path, cfn_file: str, text: str) -> Path:
+    """Write the template text ASH checked where cfn_nag_scan will read it.
+
+    cfn_nag_scan opens its ``--input-path`` by name. Giving it the scanned-tree path
+    would let a file replaced after ASH's check be read in its place; a copy of the
+    checked text cannot be. The copy keeps the template's file name, and is written
+    without following a link (``open_for_write``) because the results directory is
+    one a sandboxed scanner can write.
+    """
+    staged = results_file_dir.joinpath(_CFN_NAG_INPUT_DIR, Path(cfn_file).name)
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    with open_for_write(staged) as handle:
+        handle.write(text)
+    return staged
+
+
+def _as_cfn_nag_renders(path: str | Path, run_dir: str | Path) -> str:
+    """The artifact URI cfn_nag writes for an input path, run in ``run_dir``.
+
+    cfn_nag's SARIF view (``result_view/sarif_results.rb``, ``relative_path``) keeps a
+    relative path as given and renders an absolute one relative to ``Pathname.pwd``,
+    which is the working directory's real path.
+    """
+    if not Path(path).is_absolute():
+        return Path(path).as_posix()
+    try:
+        return Path(os.path.relpath(path, os.path.realpath(run_dir))).as_posix()
+    except ValueError:  # another drive, on Windows
+        return Path(path).as_posix()
+
+
+def _restore_cfn_nag_uris(
+    report: SarifReport, staged: Path, cfn_file: str, run_dir: str | Path
+) -> None:
+    """Point findings on the staged copy back at the template they came from.
+
+    Matched on the copy's directory and file name, which nothing else in a cfn_nag
+    report carries. The replacement is the URI cfn_nag gives the template when it
+    reads it in place, so the findings are what they were without the copy.
+    """
+    staged_tail = f"{_CFN_NAG_INPUT_DIR}/{staged.name}"
+    original = _as_cfn_nag_renders(cfn_file, run_dir)
+    for run in report.runs or []:
+        for result in run.results or []:
+            for location in result.locations or []:
+                physical = location.physicalLocation
+                artifact = physical.root.artifactLocation if physical else None
+                uri = getattr(artifact, "uri", None)
+                if artifact is not None and uri:
+                    if uri.replace("\\", "/").endswith(staged_tail):
+                        artifact.uri = original
 
 
 class CfnNagScannerConfigOptions(ScannerOptionsBase):
@@ -489,6 +551,14 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # named, and the partial report still reaches disk; the raise happens once,
             # below, after the report is written.
             unrendered: List[str] = []
+            # The tree the candidates came from. A template is read under the
+            # scanned-tree rule against it, so a symlink or a file outside it is
+            # refused before ASH parses it or hands it to cfn_nag_scan.
+            scan_root = (
+                self.context.work_dir
+                if target_type == "converted"
+                else self.context.source_dir
+            )
             for cfn_file in scannable:
                 try:
                     self._plugin_log(
@@ -496,7 +566,13 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         target_type=target_type,
                         level=logging.DEBUG,
                     )
-                    cfn_model = get_model_from_template(template_path=Path(cfn_file))
+                    # Read once, under the scanned-tree rule. The model is built from
+                    # this text and cfn_nag_scan is given a copy of it, so both see
+                    # the file that was checked.
+                    template_text = read_template_text(cfn_file, scan_root)
+                    cfn_model = get_model_from_template_text(
+                        template_text, Path(cfn_file)
+                    )
                     if cfn_model:
                         self._plugin_log(
                             f"File *is* CloudFormation: {cfn_file}",
@@ -509,6 +585,18 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                             target_type=target_type,
                             level=logging.DEBUG,
                         )
+                except TreeInputRefused as refused:
+                    # Not read, so not known to be CloudFormation: an expected skip like
+                    # the not-CloudFormation case below, and counted the same way. It is
+                    # a warning, and kept in the scanner's error stream, so the skip is
+                    # in the results rather than only in a TRACE line.
+                    self._plugin_log(
+                        f"Skipped {refused.path}: {refused.reason}",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                        append_to_stream="stderr",
+                    )
+                    continue
                 except CloudFormationTemplateModelError as e:
                     # A document carrying a Resources mapping is CloudFormation, so
                     # failing to model it is an ASH-side limitation rather than a
@@ -535,8 +623,12 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 except Exception as e:
                     # Everything else here comes out of load_yaml, i.e. the file is not
                     # parseable as YAML or JSON and so was never a candidate template.
+                    #
+                    # The exception is named by type and line only. Its text quotes the
+                    # file -- PyYAML prints the offending line -- and this is logged.
                     self._plugin_log(
-                        f"Not a CloudFormation file: {cfn_file}. Exception: {e}",
+                        f"Not a CloudFormation file: {cfn_file}. "
+                        f"Exception: {describe_parse_error(e)}",
                         target_type=target_type,
                         level=logging.TRACE,
                     )
@@ -555,16 +647,24 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 normalized_filename = get_normalized_filename(str_to_normalize=cfn_file)
                 results_file_dir = target_results_dir.joinpath(normalized_filename)
                 results_file_dir.mkdir(exist_ok=True, parents=True)
-                final_args = self._resolve_arguments(
-                    target=cfn_file, results_file=results_file_dir
+                staged_input = _stage_cfn_nag_input(
+                    results_file_dir, cfn_file, template_text
                 )
-                proc_resp = self._run_subprocess(
-                    command=final_args,
-                    results_dir=results_file_dir,
-                    stdout_preference="both",
-                    stderr_preference="both",
-                    timeout=self._effective_scan_timeout(),
-                )
+                try:
+                    final_args = self._resolve_arguments(
+                        target=staged_input, results_file=results_file_dir
+                    )
+                    proc_resp = self._run_subprocess(
+                        command=final_args,
+                        results_dir=results_file_dir,
+                        stdout_preference="both",
+                        stderr_preference="both",
+                        timeout=self._effective_scan_timeout(),
+                    )
+                finally:
+                    staged_input.unlink(missing_ok=True)
+                    with contextlib.suppress(OSError):
+                        staged_input.parent.rmdir()
                 try:
                     stdout = proc_resp.get("stdout", "")
                     if not stdout or not stdout.strip():
@@ -580,6 +680,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         unrendered.append(cfn_file)
                         continue
                     file_sarif = SarifReport.model_validate_json(json_data=stdout)
+                    _restore_cfn_nag_uris(
+                        file_sarif, staged_input, cfn_file, self.context.source_dir
+                    )
                     if self._evaluated_no_rule(file_sarif, proc_resp.get("returncode")):
                         reason = (
                             "cfn_nag reported a failure it could not render "

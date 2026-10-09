@@ -153,7 +153,10 @@ class TestGetModelFromTemplate:
 
         messages = [record.message for record in caplog.records]
         assert any("unmodelable.yaml" in message for message in messages), messages
-        assert any("Type" in message for message in messages), messages
+        assert any("ValidationError" in message for message in messages), messages
+        # Named by file and error type only: the error's own text quotes the
+        # rejected value out of the template, and this line reaches ash.log.
+        assert not any("has spaces" in message for message in messages), messages
 
     @pytest.mark.parametrize("resource_type", DOCUMENTED_CUSTOM_RESOURCE_TYPES)
     def test_documented_custom_resource_charset_is_modeled(
