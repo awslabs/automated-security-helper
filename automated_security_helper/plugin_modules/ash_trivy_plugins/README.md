@@ -91,7 +91,12 @@ scanners:
       license_full: true          # Deep license scanning (default: true)
       ignore_unfixed: true        # Only show fixed vulnerabilities (default: true)
       disable_telemetry: true     # Disable usage analytics (default: true)
+      ignore_file: /etc/ash/trivyignore  # Passed as --ignorefile; must be outside the scanned tree
 ```
+
+trivy-repo always passes `--ignorefile`, so a `.trivyignore` committed to the scanned
+repository is not read. Without `ignore_file` (or `TRIVY_IGNOREFILE`), trivy gets an
+empty ignore file.
 
 ## Usage Examples
 

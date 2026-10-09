@@ -108,6 +108,11 @@
     checkov and ferret-scan now run from the filesystem root, because each reads
     its config file from its working directory itself, and ferret-scan always
     gets a `--config`; the paths in their findings are unchanged.
+  - trivy-repo no longer reads a `.trivyignore` from the scanned repository, which
+    could remove findings from the report. It gets an explicit `--ignorefile`:
+    `scanners.trivy-repo.options.ignore_file` or `TRIVY_IGNOREFILE` when that file is
+    outside the scanned tree, otherwise an empty one. A repository that relied on
+    its `.trivyignore` now sees those findings, with a warning naming the file.
   - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
     write `==1.2.3`, or leave it unset for the supported range.
 

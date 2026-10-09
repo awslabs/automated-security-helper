@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import os
 import shlex
 import logging
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, List
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -36,7 +37,9 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -79,6 +82,18 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
             default=False,
         ),
     ]
+    ignore_file: Annotated[
+        str | None,
+        Field(
+            description=(
+                "A trivy ignore file, passed as --ignorefile. Used only when it is "
+                "outside the scanned tree; a relative path is taken from the source "
+                "directory. Unset, TRIVY_IGNOREFILE is used the same way, and "
+                "otherwise trivy gets an empty one, so a .trivyignore in the scanned "
+                "repository does not remove findings."
+            ),
+        ),
+    ] = None
 
 
 class TrivyRepoScannerConfig(ScannerPluginConfigBase):
@@ -108,6 +123,9 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
     # when offline mode is active. Kept on the instance so concurrent scanners
     # do not race on os.environ.
     extra_env: Annotated[dict, Field(default_factory=dict)]
+
+    # Whether the warning about a .trivyignore in the scanned tree was logged.
+    _warned_trivyignore: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context):
         if self.config is None:
@@ -217,6 +235,54 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
 
         return super()._process_config_options()
+
+    def _ignore_file(self) -> str:
+        """The file trivy reads finding IDs to ignore from, as an absolute path.
+
+        Without --ignorefile, trivy reads .trivyignore from its working directory,
+        the source directory, so the scanned repository could remove findings from
+        its own report (measured with trivy 0.75.0). The operator's file, from
+        ``ignore_file`` or ``TRIVY_IGNOREFILE``, is used when it is outside the
+        scanned tree (config/path_trust.py); otherwise trivy gets an empty file
+        ASH writes into the results directory.
+        """
+        context_config = getattr(self.context, "config", None)
+        source_dir = Path(self.context.source_dir)
+        for key, value in (
+            (
+                "scanners.trivy-repo.options.ignore_file",
+                self.config.options.ignore_file,
+            ),
+            ("TRIVY_IGNOREFILE", os.environ.get("TRIVY_IGNOREFILE")),
+        ):
+            if not value:
+                continue
+            path = honored_path(
+                value, source_dir=source_dir, key=key, config=context_config
+            )
+            if path is None:
+                break
+            if not path.is_file():
+                raise ScannerError(
+                    f"{key} is {value!r}, which is not a file (resolved to "
+                    f"{path.as_posix()}). Fix the path or unset it; trivy is not run "
+                    "without it."
+                )
+            return path.as_posix()
+        in_tree = source_dir / ".trivyignore"
+        if in_tree.is_file() and not self._warned_trivyignore:
+            self._warned_trivyignore = True
+            self._plugin_log(
+                f"Ignoring {in_tree.as_posix()}: it is inside the scanned tree. Set "
+                "scanners.trivy-repo.options.ignore_file to a file outside the tree "
+                "to ignore findings.",
+                level=logging.WARNING,
+            )
+        empty = Path(os.path.abspath(self.results_dir)) / "trivyignore-empty"
+        empty.parent.mkdir(parents=True, exist_ok=True)
+        with open_for_write(empty) as handle:
+            handle.write("")
+        return empty.as_posix()
 
     @staticmethod
     def _package_from_message(message: str | None) -> tuple[str | None, str | None]:
@@ -375,6 +441,11 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 target=target,
                 results_file=results_file,
             )
+            # Before the target, which _resolve_arguments places after the options.
+            target_index = final_args.index(Path(target).as_posix())
+            final_args[target_index:target_index] = [
+                f"--ignorefile={self._ignore_file()}"
+            ]
 
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",
