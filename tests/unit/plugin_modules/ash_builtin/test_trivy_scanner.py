@@ -1223,6 +1223,41 @@ def test_only_the_hosts_environment_chooses_the_updates_cache(tmp_path, monkeypa
     assert Path(_value(update, "--cache-dir")) == (tmp_path / "trivy-cache").absolute()
 
 
+@pytest.mark.parametrize("platform", ["linux", "darwin", "win32"])
+@pytest.mark.parametrize("kind", ["trivy", "trivy-repo"])
+def test_the_staleness_probe_reads_the_cache_the_scan_was_given(
+    tmp_path, monkeypatch, platform, kind
+):
+    """trivy's own default is %LocalAppData%\\trivy on Windows, which is not the
+    --cache-dir the scan gets; the post-scan probe must read the scan's cache."""
+    fake = _FakeTrivy()
+    _update_env(tmp_path, monkeypatch, fake)
+    monkeypatch.delenv("TRIVY_CACHE_DIR")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setattr(refresh.sys, "platform", platform)
+    scanner = _scanner(tmp_path) if kind == "trivy" else _repo_scanner(tmp_path)
+    command = ["trivy", "fs" if kind == "trivy" else "repository", "/t"]
+
+    scanner._run_subprocess(command=command, results_dir=tmp_path / "results")
+
+    (given,) = [a.split("=", 1)[1] for a in command if a.startswith("--cache-dir=")]
+    probe = scanner.content_database_probe_context()
+    assert probe.env["TRIVY_CACHE_DIR"] == given
+    assert probe.cache_dir == given
+
+
+def test_an_offline_probe_reads_trivys_own_default(tmp_path, monkeypatch):
+    """Offline nothing is updated or pinned, so the probe is left to trivy."""
+    _update_env(tmp_path, monkeypatch, _FakeTrivy())
+    monkeypatch.delenv("TRIVY_CACHE_DIR")
+    scanner = _scanner(tmp_path, offline=True)
+    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
+    probe = scanner.content_database_probe_context()
+    assert "TRIVY_CACHE_DIR" not in probe.env
+    assert probe.cache_dir is None
+
+
 def test_two_concurrent_scanners_never_update_at_the_same_time(tmp_path, monkeypatch):
     fake = _FakeTrivy(hold=0.2)
     _update_env(tmp_path, monkeypatch, fake)
