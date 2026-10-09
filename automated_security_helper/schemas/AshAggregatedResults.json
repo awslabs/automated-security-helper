@@ -22923,7 +22923,7 @@
         },
         "online_audits": {
           "default": false,
-          "description": "Allow zizmor's online audits. Off by default: zizmor runs with `--offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, `--offline` is not passed, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Ignored, with a warning, when ASH runs in offline mode.",
+          "description": "Allow zizmor's online audits. Off by default: zizmor runs with `--offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, `--offline` is not passed, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Honored only when set by --config-overrides or a config file outside the scanned tree, and ignored, with a warning, when ASH runs in offline mode.",
           "title": "Online Audits",
           "type": "boolean"
         },

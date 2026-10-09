@@ -309,6 +309,54 @@ def test_global_ignore_paths_remove_inputs(repo):
     ]
 
 
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+
+@pytest.mark.parametrize(
+    "link, points_at",
+    [
+        (".github/workflows/leak.yml", "leak.yml"),
+        ("actions/linked", "greet"),
+    ],
+    ids=["workflow-file", "action-directory"],
+)
+def test_an_input_that_resolves_outside_the_target_is_not_passed(
+    repo, tmp_path, caplog, link, points_at
+):
+    """zizmor reads a symlinked input where it points; one outside is skipped."""
+    outside = tmp_path / "outside"
+    (outside / "greet").mkdir(parents=True)
+    (outside / "leak.yml").write_text(
+        (repo / ".github" / "workflows" / "clean.yml").read_text()
+    )
+    (outside / "greet" / "action.yml").write_text(
+        (repo / "actions" / "greet" / "action.yml").read_text()
+    )
+    _symlink_or_skip(repo / link, outside / points_at)
+    scanner = _scanner(repo)
+    with caplog.at_level("WARNING"):
+        inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+    assert inputs == EXPECTED_INPUTS
+    if link.endswith(".yml"):
+        assert "resolves outside the scan root" in caplog.text
+    # A symlinked directory is not descended into by the scan set, so its action
+    # never becomes a candidate; held here so a change there cannot let it through.
+
+
+def test_a_symlink_inside_the_target_is_still_an_input(repo):
+    """Only where a link points matters: one into the tree stays an input."""
+    real = repo / ".github" / "workflows"
+    target = next(p for p in sorted(real.iterdir()) if p.suffix in (".yml", ".yaml"))
+    link = real / f"linked-{target.name}"
+    _symlink_or_skip(link, target)
+    inputs = _relative(_scanner(repo)._collect_inputs(repo, "source", []), repo)
+    assert link.relative_to(repo).as_posix() in inputs
+
+
 def test_gitignored_and_output_dir_files_are_not_inputs(repo):
     (repo / ".gitignore").write_text("other/\n")
     copy_in_output = repo / ".ash" / "ash_output" / "x" / "action.yml"
@@ -370,7 +418,9 @@ def test_online_audits_drops_offline_and_passes_the_token_through(repo, monkeypa
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.setenv("GH_TOKEN", "token-value")
     monkeypatch.setenv("ZIZMOR_CONFIG", "/elsewhere.yml")
-    final_args, _, env = _argv_and_env(_scanner(repo, online_audits=True), repo)
+    final_args, _, env = _argv_and_env(
+        _scanner(repo, operator=True, online_audits=True), repo
+    )
     assert "--offline" not in final_args
     assert env["GH_TOKEN"] == "token-value"
     # Never on the command line, where it would be logged.
@@ -378,10 +428,34 @@ def test_online_audits_drops_offline_and_passes_the_token_through(repo, monkeypa
     assert "ZIZMOR_CONFIG" not in env
 
 
+@pytest.mark.parametrize("operator", [False, None])
+def test_online_audits_from_the_scanned_tree_stay_offline_without_a_token(
+    repo, monkeypatch, caplog, operator
+):
+    """A repository's own config cannot turn on the network or hand zizmor a token.
+
+    ``operator=None`` is a config with no recorded provenance, counted as the
+    tree's.
+    """
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    for name in GITHUB_TOKEN_ENV_VARS:
+        monkeypatch.setenv(name, "token-value")
+    with caplog.at_level("WARNING"):
+        final_args, _, env = _argv_and_env(
+            _scanner(repo, operator=operator, online_audits=True), repo
+        )
+    assert "--offline" in final_args
+    for name in GITHUB_TOKEN_ENV_VARS:
+        assert name not in env
+    assert "scanners.zizmor.options.online_audits" in caplog.text
+
+
 def test_ash_offline_mode_overrides_online_audits(repo, monkeypatch):
     monkeypatch.setenv("ASH_OFFLINE", "true")
     monkeypatch.setenv("GITHUB_TOKEN", "token-value")
-    final_args, _, env = _argv_and_env(_scanner(repo, online_audits=True), repo)
+    final_args, _, env = _argv_and_env(
+        _scanner(repo, operator=True, online_audits=True), repo
+    )
     assert "--offline" in final_args
     assert "GITHUB_TOKEN" not in env
 

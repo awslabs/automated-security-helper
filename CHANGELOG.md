@@ -118,8 +118,9 @@
     which stays on and unchanged. Inline `gitleaks:allow` comments apply, and so
     do an operator's `options.config_file` and `options.baseline_path`.
   - zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
-    actions, run with `--offline`; GitHub tokens are withheld unless
-    `options.online_audits` is true.
+    actions, run with `--offline`; GitHub tokens are withheld unless the operator
+    sets `options.online_audits` (a config in the scanned tree cannot). A workflow
+    or action that resolves outside the scan root is skipped with a warning.
   - trivy: `trivy fs` (0.75.0), `vuln` only by default, held to
     the trivy database's 24h bound; offline with no database it is MISSING with the
     reason. trivy and trivy-repo share trivy's cache and run at the same time, so
