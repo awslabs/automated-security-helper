@@ -1131,6 +1131,10 @@ class TestScriptInterpreter:
         policy = _policy(layout, argv0=str(script))
         assert Path(os.path.realpath(prefix)) in _resolved(policy.read_only)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="PATH lookup on Windows needs an extension, and #! is a POSIX launch",
+    )
     def test_an_env_shebang_is_resolved_through_path(
         self, layout, monkeypatch, tmp_path
     ):
