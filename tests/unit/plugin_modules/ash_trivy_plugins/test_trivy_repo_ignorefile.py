@@ -21,6 +21,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
 )
+from automated_security_helper.utils.config_trust import record_provenance
 
 PluginContext.model_rebuild()
 
@@ -45,8 +46,13 @@ def _tree(tmp_path: Path) -> Path:
 def _argv(tmp_path: Path, source: Path, options=None) -> list:
     output = tmp_path / "out"
     output.mkdir(exist_ok=True)
+    # Built from no config file in the tree: the options here are the operator's.
+    # tests/unit/plugin_modules/ash_builtin/test_trivy_input_provenance.py covers
+    # options the scanned tree or an MCP client set.
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
     scanner = TrivyRepoScanner(
-        context=PluginContext(source_dir=source, output_dir=output, config=AshConfig()),
+        context=PluginContext(source_dir=source, output_dir=output, config=config),
         config=TrivyRepoScannerConfig(options=options or {}),
     )
     scanner.dependencies_satisfied = True

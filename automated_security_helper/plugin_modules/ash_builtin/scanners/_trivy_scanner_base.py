@@ -113,6 +113,13 @@ UPDATE_LOCK_NAME = ".ash-trivy-update.lock"
 #: How long one update command (database or checks bundle) may take.
 UPDATE_TIMEOUT_SECONDS = 900
 
+#: Why an option naming a trivy input file was not used, when the operator did
+#: not set it (utils/config_trust.set_by_operator).
+_NOT_THE_OPERATORS = (
+    "it came from a config file in the scanned tree or from an MCP client; set it "
+    "with --config-overrides or a config file outside the tree"
+)
+
 
 class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     """Shared trivy behaviour. Not registered: only its subclasses are scanners."""
@@ -177,11 +184,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         Without the flag, trivy reads ``default_name`` (``.trivyignore``,
         ``trivy-secret.yaml``) from its working directory, the source directory,
         so the scanned repository could remove findings from its own report
-        (measured with trivy 0.75.0). The operator's file, from the option or the
-        environment variable, is used when it is outside the scanned tree
-        (config/path_trust.py); a refused option falls through to the variable.
-        Otherwise trivy gets a file ASH writes into the results directory, which
-        sets nothing.
+        (measured with trivy 0.75.0). The operator's file is used when it is
+        outside the scanned tree (config/path_trust.py): the option when the
+        operator set it (``set_by_operator``), else the environment variable. A
+        refused option falls through to the variable. Otherwise trivy gets a file
+        ASH writes into the results directory, which sets nothing.
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
@@ -189,11 +196,21 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         source_dir = Path(self.context.source_dir)
         name = self.config.name if self.config is not None else "trivy"
         options: Any = self.config.options  # type: ignore[union-attr]
+        option_key = f"scanners.{name}.options.{option}"
         for key, value in (
-            (f"scanners.{name}.options.{option}", getattr(options, option)),
+            (option_key, getattr(options, option)),
             (env, os.environ.get(env)),
         ):
             if not value:
+                continue
+            if key == option_key and not set_by_operator(context_config, key, value):
+                refusal = f"{key}={value}"
+                if refusal not in self._warned_inputs:
+                    self._warned_inputs.add(refusal)
+                    self._plugin_log(
+                        f"Ignoring {key} ({str(value)!r}): {_NOT_THE_OPERATORS}.",
+                        level=logging.WARNING,
+                    )
                 continue
             path = honored_path(
                 value, source_dir=source_dir, key=key, config=context_config
@@ -388,10 +405,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         name = self.config.name if self.config is not None else "trivy"
         key = f"scanners.{name}.options.{option}"
         if not set_by_operator(self.context.config, key, value):
-            reason = (
-                "it came from a config file in the scanned tree; set it with "
-                "--config-overrides or a config file outside the tree"
-            )
+            reason = _NOT_THE_OPERATORS
         elif in_scanned_tree(candidate, scan_root(self.context.config, source_dir)):
             reason = "it is inside the scanned tree"
         else:

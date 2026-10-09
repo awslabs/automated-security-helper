@@ -325,16 +325,21 @@ def test_an_ignore_or_secret_file_inside_the_tree_is_never_passed(
 
 
 @pytest.mark.parametrize("option, flag, name, env", _INPUT_FILES)
-def test_an_ignore_or_secret_file_outside_the_tree_is_passed_from_option_or_env(
+def test_an_operator_ignore_or_secret_file_outside_the_tree_is_passed(
     tmp_path, monkeypatch, option, flag, name, env
 ):
     chosen = tmp_path / "outside" / name
     chosen.parent.mkdir()
     chosen.write_text("", encoding="utf-8")
     monkeypatch.delenv(env, raising=False)
-    from_option = _scanner(tmp_path, **{option: str(chosen)})
+    from_option = _scanner(tmp_path, operator=True, **{option: str(chosen)})
     assert f"{flag}={chosen.resolve().as_posix()}" in _argv(
         from_option, from_option.context.source_dir
+    )
+    # The same value from the scanned tree's config is not the operator's.
+    from_tree = _scanner(tmp_path, **{option: str(chosen)})
+    assert f"{flag}={chosen.resolve().as_posix()}" not in _argv(
+        from_tree, from_tree.context.source_dir
     )
     monkeypatch.setenv(env, str(chosen))
     from_env = _scanner(tmp_path)

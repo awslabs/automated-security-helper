@@ -212,11 +212,13 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy ignore file, passed as --ignorefile. Used only when it is "
-                "outside the scanned tree; a relative path is taken from the source "
-                "directory. Unset, TRIVY_IGNOREFILE is used the same way, and "
-                "otherwise trivy gets an empty one, so a .trivyignore in the scanned "
-                "repository does not remove findings. As for trivy-repo."
+                "A trivy ignore file, passed as --ignorefile. Honored only when set "
+                "by --config-overrides or a config file outside the scanned tree, "
+                "for a file outside that tree; a relative path is taken from the "
+                "source directory. Otherwise TRIVY_IGNOREFILE is used, for a file "
+                "outside the tree, and failing that trivy gets an empty one, so a "
+                ".trivyignore in the scanned repository does not remove findings. "
+                "As for trivy-repo."
             ),
         ),
     ] = None
@@ -225,11 +227,11 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy secret scanning config (trivy-secret.yaml), passed as "
-                "--secret-config. Only read when scanners includes secret. Used only "
-                "when it is outside the scanned tree; a relative path is taken from "
-                "the source directory. Unset, TRIVY_SECRET_CONFIG is used the same "
-                "way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in "
-                "the scanned repository does not disable secret rules. As for "
+                "--secret-config. Only read when scanners includes secret. Honored "
+                "only under the same rule as ignore_file, and otherwise "
+                "TRIVY_SECRET_CONFIG is used, for a file outside the tree, and "
+                "failing that trivy gets an empty one, so a trivy-secret.yaml in the "
+                "scanned repository does not disable secret rules. As for "
                 "trivy-repo."
             ),
         ),
@@ -394,30 +396,26 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         scanned repository is read as trivy configuration.
         """
         value = getattr(self._options(), option)
-        if (
-            value
-            and self._operator_path(
+        # The path _operator_path checked, never one rebuilt from ``value``: the
+        # check expands ``~``, so a rebuilt ``~/trivy.yaml`` was <source>/~/trivy.yaml.
+        path = (
+            self._operator_path(
                 option,
                 value,
                 "A trivy.yaml can load WASM modules and drop findings, so trivy runs "
                 "with ASH's empty config instead.",
             )
-            is None
-        ):
-            value = None
-        if value:
-            candidate = Path(value)
-            if not candidate.is_absolute():
-                if self.context is None:
-                    raise ScannerError("TrivyScanner has no plugin context")
-                candidate = Path(self.context.source_dir) / candidate
-            if not candidate.is_file():
+            if value
+            else None
+        )
+        if path is not None:
+            if not path.is_file():
                 raise ScannerError(
                     f"scanners.trivy.options.{option} is {str(value)!r}, which is not "
-                    f"a file (resolved to {candidate.as_posix()}). Fix the path or "
+                    f"a file (resolved to {path.as_posix()}). Fix the path or "
                     "unset the option; trivy is not run without it."
                 )
-            return candidate.resolve().as_posix()
+            return path.as_posix()
         if self.results_dir is None:
             raise ScannerError("TrivyScanner has no results directory")
         empty = self.results_dir.joinpath(ash_name)

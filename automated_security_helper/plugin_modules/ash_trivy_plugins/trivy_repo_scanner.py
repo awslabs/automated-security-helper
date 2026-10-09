@@ -101,11 +101,12 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "A trivy ignore file, passed as --ignorefile. Used only when it is "
-                "outside the scanned tree; a relative path is taken from the source "
-                "directory. Unset, TRIVY_IGNOREFILE is used the same way, and "
-                "otherwise trivy gets an empty one, so a .trivyignore in the scanned "
-                "repository does not remove findings."
+                "A trivy ignore file, passed as --ignorefile. Honored only when set "
+                "by --config-overrides or a config file outside the scanned tree, "
+                "for a file outside that tree; a relative path is taken from the "
+                "source directory. Otherwise TRIVY_IGNOREFILE is used, for a file "
+                "outside the tree, and failing that trivy gets an empty one, so a "
+                ".trivyignore in the scanned repository does not remove findings."
             ),
         ),
     ] = None
@@ -114,11 +115,11 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy secret scanning config (trivy-secret.yaml), passed as "
-                "--secret-config. Used only when it is outside the scanned tree; a "
-                "relative path is taken from the source directory. Unset, "
-                "TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets "
-                "an empty one, so a trivy-secret.yaml in the scanned repository does "
-                "not disable secret rules."
+                "--secret-config. Honored only under the same rule as ignore_file, "
+                "and otherwise TRIVY_SECRET_CONFIG is used, for a file outside the "
+                "tree, and failing that trivy gets an empty one, so a "
+                "trivy-secret.yaml in the scanned repository does not disable secret "
+                "rules."
             ),
         ),
     ] = None
